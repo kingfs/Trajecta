@@ -170,7 +170,7 @@ func TestChat(t *testing.T) {
 
 | 协议族 | provider preset | 支持级别 |
 | --- | --- | --- |
-| OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`deepseek`、`groq`、`moonshot`、`cerebras`、`perplexity` | verified / compatible |
+| OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`groq`、`xai`、`github`、`deepseek`、`moonshot`、`cerebras`、`perplexity` 等 | verified / compatible |
 | OpenAI Responses | 原生 `/v1/responses` 上游直通，或由本地 runtime 翻译为 chat completions | verified |
 | Anthropic Messages | `anthropic` | verified |
 | Google GenAI | `google_genai`、`google`、`gemini` | verified |
@@ -178,7 +178,7 @@ func TestChat(t *testing.T) {
 | Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
 | vLLM | `vllm` | verified |
 
-preset 清单、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，不在转发热路径上做跨协议翻译；唯一的例外是 `/v1/responses` 可以由本地 runtime 承接。
+完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，不在转发热路径上做跨协议翻译；唯一的例外是 `/v1/responses` 可以由本地 runtime 承接。
 
 ## 架构一览
 

@@ -170,7 +170,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 
 | Protocol family | Provider presets | Support |
 | --- | --- | --- |
-| OpenAI-compatible | `openai`, `openrouter`, `fireworks`, `together`, `deepseek`, `groq`, `moonshot`, `cerebras`, `perplexity` | verified / compatible |
+| OpenAI-compatible | `openai`, `openrouter`, `fireworks`, `together`, `groq`, `xai`, `github`, `deepseek`, `moonshot`, `cerebras`, `perplexity` and more | verified / compatible |
 | OpenAI Responses | native `/v1/responses` pass-through, or translated to chat completions by the local runtime | verified |
 | Anthropic Messages | `anthropic` | verified |
 | Google GenAI | `google_genai`, `google`, `gemini` | verified |
@@ -178,7 +178,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 | Azure OpenAI | `azure` (v1 and deployment routing) | verified |
 | vLLM | `vllm` | verified |
 
-The full preset list, capability rules, routing-profile combinations and protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The proxy is **protocol-aware pass-through plus recording/parsing**; it does not translate between protocol families in the forwarding hot path. The single exception is `/v1/responses`, which the local runtime can serve.
+The complete preset list (25 registry keys, 20 distinct providers after alias deduplication), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The proxy is **protocol-aware pass-through plus recording/parsing**; it does not translate between protocol families in the forwarding hot path. The single exception is `/v1/responses`, which the local runtime can serve.
 
 ## Architecture
 
