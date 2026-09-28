@@ -1169,6 +1169,12 @@ type keyCheckResult struct {
 // regenerated: a running server can create the row first, and the merge then
 // skips the legacy row through ON CONFLICT DO NOTHING. This is the gate used
 // before the SQLite files are archived.
+//
+// The first pass streams only the primary key columns, so SQLite can serve it
+// from a covering index even when the table has further unique indexes. The
+// secondary keys are only consulted for the rows the primary key did not match,
+// which keeps a table with no drift (millions of rows) as cheap to verify as a
+// primary-key-only check.
 func verifySourceKeys(ctx context.Context, source, pg *sql.DB, table string) (keyCheckResult, error) {
 	var result keyCheckResult
 	sourceColumns, err := sourceTableColumns(ctx, source, table)
@@ -1204,20 +1210,10 @@ func verifySourceKeys(ctx context.Context, source, pg *sql.DB, table string) (ke
 	for _, set := range usable {
 		result.KeySets = append(result.KeySets, set.label())
 	}
+	primary := usable[0]
 
-	position := make(map[string]int)
-	projection := make([]string, 0, len(usable[0].Names))
-	for _, set := range usable {
-		for _, name := range set.Names {
-			if _, ok := position[name]; ok {
-				continue
-			}
-			position[name] = len(projection)
-			projection = append(projection, name)
-		}
-	}
-	quoted := make([]string, len(projection))
-	for i, name := range projection {
+	quoted := make([]string, len(primary.Names))
+	for i, name := range primary.Names {
 		quoted[i] = quoteIdent(name)
 	}
 	rows, err := source.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), quoteIdent(table)))
@@ -1226,98 +1222,221 @@ func verifySourceKeys(ctx context.Context, source, pg *sql.DB, table string) (ke
 	}
 	defer rows.Close()
 
-	project := func(row []any, set keySet) []any {
-		key := make([]any, len(set.Names))
-		for i, name := range set.Names {
-			key[i] = row[position[name]]
-		}
-		return key
-	}
-
 	const batchSize = 400
-	var batch [][]any
-	flush := func() error {
+	var pending [][]any
+	flush := func(batch [][]any) error {
 		if len(batch) == 0 {
 			return nil
 		}
-		matchedBy := make([]int, len(batch))
-		for i := range matchedBy {
-			matchedBy[i] = -1
+		found, queryErr := existingKeys(ctx, pg, table, primary.Names, batch)
+		if queryErr != nil {
+			return queryErr
 		}
-		for setIndex, set := range usable {
-			keys := make([][]any, 0, len(batch))
-			positions := make([]int, 0, len(batch))
-			for i, row := range batch {
-				if matchedBy[i] >= 0 {
-					continue
-				}
-				keys = append(keys, project(row, set))
-				positions = append(positions, i)
+		for _, key := range batch {
+			if found[renderKey(primary.Names, key)] {
+				continue
 			}
-			if len(keys) == 0 {
-				break
-			}
-			found, queryErr := existingKeys(ctx, pg, table, set.Names, keys)
-			if queryErr != nil {
-				return queryErr
-			}
-			for i, key := range keys {
-				if found[renderKey(set.Names, key)] {
-					matchedBy[positions[i]] = setIndex
-				}
-			}
-		}
-		for i := range batch {
-			switch {
-			case matchedBy[i] < 0:
+			if len(usable) == 1 {
 				result.Missing++
 				if len(result.Samples) < maxReportedFailures {
-					result.Samples = append(result.Samples, renderKey(projection, batch[i]))
+					result.Samples = append(result.Samples, renderKey(primary.Names, key))
 				}
-			case matchedBy[i] > 0:
-				result.AltMatched++
-				if len(result.AltSamples) < maxReportedFailures {
-					result.AltSamples = append(result.AltSamples, fmt.Sprintf("%s matched by %s",
-						renderKey(projection, batch[i]), usable[matchedBy[i]].label()))
-				}
+				continue
 			}
+			pending = append(pending, key)
 		}
-		batch = batch[:0]
 		return nil
 	}
 
+	var batch [][]any
 	for rows.Next() {
-		values := make([]any, len(projection))
-		pointers := make([]any, len(projection))
+		values := make([]any, len(primary.Names))
+		pointers := make([]any, len(primary.Names))
 		for i := range values {
 			pointers[i] = &values[i]
 		}
 		if err := rows.Scan(pointers...); err != nil {
 			return result, err
 		}
-		row := make([]any, len(projection))
+		key := make([]any, len(primary.Names))
 		for i, value := range values {
 			converted, convErr := convertKeyValue(value)
 			if convErr != nil {
-				row[i] = value
+				key[i] = value
 				continue
 			}
-			row[i] = converted
+			key[i] = converted
 		}
-		batch = append(batch, row)
+		batch = append(batch, key)
 		if len(batch) >= batchSize {
-			if err := flush(); err != nil {
+			if err := flush(batch); err != nil {
 				return result, err
 			}
+			batch = batch[:0]
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return result, err
 	}
-	if err := flush(); err != nil {
+	if err := flush(batch); err != nil {
 		return result, err
 	}
+	if len(pending) == 0 || len(usable) == 1 {
+		return result, nil
+	}
+
+	// Second pass: the primary key did not match these rows, so ask the source
+	// for their other key columns and try the remaining unique keys.
+	for _, set := range usable[1:] {
+		if len(pending) == 0 {
+			break
+		}
+		values, err := fetchSourceKeyColumns(ctx, source, table, primary.Names, set.Names, pending)
+		if err != nil {
+			return result, err
+		}
+		keys := make([][]any, 0, len(pending))
+		sources := make([][]any, 0, len(pending))
+		for _, row := range pending {
+			key, ok := values[renderKey(primary.Names, row)]
+			if !ok {
+				continue
+			}
+			keys = append(keys, key)
+			sources = append(sources, row)
+		}
+		if len(keys) == 0 {
+			continue
+		}
+		found, queryErr := existingKeys(ctx, pg, table, set.Names, keys)
+		if queryErr != nil {
+			return result, queryErr
+		}
+		remaining := make([][]any, 0, len(pending))
+		seen := make(map[string]bool, len(keys))
+		for i, key := range keys {
+			if !found[renderKey(set.Names, key)] {
+				continue
+			}
+			seen[renderKey(primary.Names, sources[i])] = true
+			result.AltMatched++
+			if len(result.AltSamples) < maxReportedFailures {
+				result.AltSamples = append(result.AltSamples, fmt.Sprintf("%s matched by %s",
+					renderKey(primary.Names, sources[i]), set.label()))
+			}
+		}
+		for _, row := range pending {
+			if seen[renderKey(primary.Names, row)] {
+				continue
+			}
+			remaining = append(remaining, row)
+		}
+		pending = remaining
+	}
+	for _, row := range pending {
+		result.Missing++
+		if len(result.Samples) < maxReportedFailures {
+			result.Samples = append(result.Samples, renderKey(primary.Names, row))
+		}
+	}
 	return result, nil
+}
+
+// fetchSourceKeyColumns looks the wanted columns up for rows identified by the
+// primary key columns. The returned map is keyed by the rendered primary key.
+func fetchSourceKeyColumns(ctx context.Context, source *sql.DB, table string, primary, wanted []string, keys [][]any) (map[string][]any, error) {
+	selected := make([]string, 0, len(primary)+len(wanted))
+	seen := make(map[string]bool, len(primary)+len(wanted))
+	for _, name := range append(append([]string{}, primary...), wanted...) {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		selected = append(selected, name)
+	}
+	quoted := make([]string, len(selected))
+	for i, name := range selected {
+		quoted[i] = quoteIdent(name)
+	}
+	primaryQuoted := make([]string, len(primary))
+	for i, name := range primary {
+		primaryQuoted[i] = quoteIdent(name)
+	}
+
+	out := make(map[string][]any, len(keys))
+	const batchSize = 400
+	for start := 0; start < len(keys); start += batchSize {
+		end := start + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[start:end]
+		placeholders := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk)*len(primary))
+		index := 1
+		for _, key := range chunk {
+			values := make([]string, len(key))
+			for i := range key {
+				values[i] = fmt.Sprintf("$%d", index)
+				index++
+			}
+			args = append(args, key...)
+			if len(key) == 1 {
+				placeholders = append(placeholders, values[0])
+			} else {
+				placeholders = append(placeholders, "("+strings.Join(values, ",")+")")
+			}
+		}
+		statement := fmt.Sprintf("SELECT %s FROM %s WHERE ", strings.Join(quoted, ", "), quoteIdent(table))
+		if len(primary) == 1 {
+			statement += fmt.Sprintf("%s IN (%s)", primaryQuoted[0], strings.Join(placeholders, ","))
+		} else {
+			statement += fmt.Sprintf("(%s) IN (%s)", strings.Join(primaryQuoted, ", "), strings.Join(placeholders, ","))
+		}
+		rows, err := source.QueryContext(ctx, statement, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			scanned := make([]any, len(selected))
+			pointers := make([]any, len(selected))
+			for i := range scanned {
+				pointers[i] = &scanned[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			converted := make([]any, len(selected))
+			for i, value := range scanned {
+				item, convErr := convertKeyValue(value)
+				if convErr != nil {
+					converted[i] = value
+					continue
+				}
+				converted[i] = item
+			}
+			byName := make(map[string]any, len(selected))
+			for i, name := range selected {
+				byName[name] = converted[i]
+			}
+			primaryValues := make([]any, len(primary))
+			wantedValues := make([]any, len(wanted))
+			for i, name := range primary {
+				primaryValues[i] = byName[name]
+			}
+			for i, name := range wanted {
+				wantedValues[i] = byName[name]
+			}
+			out[renderKey(primary, primaryValues)] = wantedValues
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 func existingKeys(ctx context.Context, pg *sql.DB, table string, keyNames []string, keys [][]any) (map[string]bool, error) {
