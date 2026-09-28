@@ -80,6 +80,10 @@ func TestReconcileDerivedTraceIDsIntegration(t *testing.T) {
 		fmt.Sprintf(`INSERT INTO node_cases (trace_id, node_id, payload) VALUES ('%s', 'node-1', 'legacy'), ('%s', 'node-2', 'legacy'), ('%s', 'node-3', 'legacy-only')`, legacyID, legacyID, legacyID),
 		// A trace whose legacy row is gone: this row is the only copy.
 		`INSERT INTO node_cases (trace_id, node_id, payload) VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'node-9', 'orphan')`,
+		// upstream_exchanges.trace_id is the recorder request id, a different id
+		// space: the repair must never touch it even when the value looks like a
+		// legacy trace id.
+		fmt.Sprintf(`INSERT INTO upstream_exchanges (id, trace_id, cassette_path) VALUES ('exchange-1', '%s', '%s')`, legacyID, cassette),
 	} {
 		if _, err := pg.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("setup %q: %v", statement, err)
@@ -175,6 +179,20 @@ func TestReconcileDerivedTraceIDsIntegration(t *testing.T) {
 	// The unmatched row is the only copy of its trace, so it must survive.
 	if got := countRows("ffffffff-ffff-ffff-ffff-ffffffffffff"); got != 1 {
 		t.Errorf("unmatched rows = %d, want 1 (the last copy is never discarded)", got)
+	}
+	// upstream_exchanges keeps the recorder request id, which shares neither the
+	// table nor the id space of logs.trace_id.
+	var exchangeTrace, exchangePath string
+	if err := pg.QueryRowContext(ctx, `SELECT trace_id, cassette_path FROM upstream_exchanges WHERE id = 'exchange-1'`).Scan(&exchangeTrace, &exchangePath); err != nil {
+		t.Fatalf("read upstream_exchanges row: %v", err)
+	}
+	if exchangeTrace != legacyID || exchangePath != cassette {
+		t.Errorf("upstream_exchanges row = (%q, %q), want (%q, %q)", exchangeTrace, exchangePath, legacyID, cassette)
+	}
+	for _, entry := range applied.Tables {
+		if entry.Table == "upstream_exchanges" || entry.Table == "logs" {
+			t.Errorf("report covers %s, which does not store a logs.trace_id", entry.Table)
+		}
 	}
 }
 

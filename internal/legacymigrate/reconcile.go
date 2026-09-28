@@ -196,8 +196,20 @@ func ReconcileDerivedTraceIDs(ctx context.Context, opts ReconcileOptions) (*Reco
 	return report, nil
 }
 
-// derivedTraceTables lists the tables that carry a trace id and are derived from
-// the recorded cassettes, excluding the index itself.
+// sharedTraceIDTables names the tables whose `trace_id` column does not hold a
+// `logs.trace_id`, so remapping it through the legacy trace index would corrupt
+// it:
+//
+//   - `logs` owns the id;
+//   - `upstream_exchanges.trace_id` holds the recorder prelude `meta.request_id`
+//     (docs/IMPLEMENTATION_STATUS.md:150), which is a different id space.
+var sharedTraceIDTables = map[string]bool{
+	"logs":               true,
+	"upstream_exchanges": true,
+}
+
+// derivedTraceTables lists the tables that carry a `logs.trace_id` and are
+// derived from the recorded cassettes.
 func derivedTraceTables(ctx context.Context, pg *sql.DB) ([]string, error) {
 	columns, err := targetTableColumns(ctx, pg)
 	if err != nil {
@@ -205,7 +217,7 @@ func derivedTraceTables(ctx context.Context, pg *sql.DB) ([]string, error) {
 	}
 	tables := make([]string, 0, len(columns))
 	for table, tableColumns := range columns {
-		if table == "logs" {
+		if sharedTraceIDTables[table] {
 			continue
 		}
 		for _, column := range tableColumns {
