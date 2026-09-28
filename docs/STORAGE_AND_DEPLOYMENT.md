@@ -1,6 +1,6 @@
 # 存储与部署
 
-本文说明 Trajecta 当前的存储层次与生产部署事实：raw `.http` cassette 是事实源，应用数据库是派生索引；生产使用 Postgres + 版本化迁移，SQLite 仅作本地/dev/test fallback。运维 SQL、备份与恢复细节交给 [Postgres 运维](./POSTGRES_OPERATIONS.md)，本文不重复。
+本文说明 Trajecta 当前的存储层次与生产部署事实：raw `.http` cassette 是事实源，应用数据库是派生索引；生产使用 Postgres + 版本化迁移；SQLite 不再被隐式选择，必须显式配置，只用于本地/dev/test 与旧库导入。运维 SQL、备份与恢复细节交给 [Postgres 运维](./POSTGRES_OPERATIONS.md)，本文不重复。
 
 ## 存储分层（raw .http cassette 是事实源；应用数据库是派生的索引）
 
@@ -33,7 +33,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
 - `trajecta layout plan` 只读地报告哪些 cassette 不在当前布局里、以及它们的目标路径（判定依据是每个文件 prelude 里的 `meta.model`）。搬迁本身不在 `serve` 里做，也不会由任何命令自动触发。
 
-## 应用数据库（生产 Postgres + 版本化迁移；SQLite 仅本地/dev/test fallback 及启动建表）
+## 应用数据库（生产 Postgres + 版本化迁移；SQLite 需显式选择，仅本地/dev/test 与旧库导入）
 
 生产存储是 Postgres（compose 使用 `postgres:17-alpine`）。`database.driver` 接受 `postgres` / `postgresql`，并且必须提供显式 `database.dsn`：对非 SQLite driver，DSN 为空时 `DatabaseDSN()` 返回空串，迁移会直接报 `postgres application database dsn is required`。
 
@@ -50,7 +50,7 @@ Raw cassette (.http, LLM_PROXY_V3)
   ```
 
   生成后必须复核 SQL，并同时提交迁移文件与 `atlas.sum`；已提交或在共享环境应用过的迁移文件不要手改。`task migrate:ent:postgres NAME=... DEV_URL=...` 是同一流程的封装。
-- SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库（`config.ResolveDefaultSQLitePath`）；需要把旧库文件批量改名到新名字时用 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh)（详见“从 `llm-tracelab` 升级已有部署”）。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
+- 未配置 `database.driver` 时驱动为 Postgres：缺 DSN 会直接报错，不会新建本地文件（`config.DatabaseDriver` 与 store/auth 的 `normalize*Driver` 都以 postgres 为默认）。只有显式写 `database.driver: "sqlite"` 才会打开 SQLite，它用于本地、dev、test 与旧库导入，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库（`config.ResolveDefaultSQLitePath`）；需要把旧库文件批量改名到新名字时用 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh)（详见“从 `llm-tracelab` 升级已有部署”）。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
 - SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库（`db migrate status --check-db` 的只读报告语义见[实现状态](./IMPLEMENTATION_STATUS.md)）。
 - `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
 
@@ -91,7 +91,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `trajecta`：gateway、Monitor、MCP、recorder、本地 Responses runtime。
 - `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`trajecta` 通过 `depends_on` 等待其 healthcheck 通过。
 - `searxng`：可选 hosted `web_search` provider 容器，只在 Compose `search` profile 下启动。
-- 卷：`trajecta-data` 挂到 `/app/data`（cassette 与 SQLite fallback 都在这里），另有 `postgres-data`、`searxng-data`。
+- 卷：`trajecta-data` 挂到 `/app/data`（cassette 与显式选择的 SQLite 库都在这里），另有 `postgres-data`、`searxng-data`。
 - 镜像自身声明 `VOLUME ["/app/config", "/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；宿主端口由 compose 的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 映射。
 
 compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
@@ -195,7 +195,7 @@ server db summary rebuild sessions [--session-id <id>]
 - raw body 不复制进 `semantic_nodes`：该表存 text preview、必要 JSON 与按文本记录的 `raw_ref`，没有独立的 blob 或 sidecar 存储；原始字节只保留在 cassette，多模态数据只索引 metadata。
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
-- SQLite fallback DB 默认位于输出目录内，备份时应把 SQLite DB 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
+- 显式选择的 SQLite DB 默认位于输出目录内，备份时应把 SQLite DB 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 - `db migrate status --check-db` 对 SQLite 是只读的：不会创建缺失文件、不会修复 drift、不会重写用户数据。手工修复前先备份 SQLite DB 与 `.http` 目录。
 
 ## 故障处理
@@ -212,7 +212,7 @@ server db summary rebuild sessions [--session-id <id>]
 - proxy 热路径的跨协议转换：不做；非 Responses 流量保持 protocol-aware pass-through + recording。
 - 对所有 upstream 的 native Responses 语义介入：未实现；当前本地 Responses runtime 以 OpenAI 兼容 Chat Completions 为后端。
 - 独立的 Postgres auth 迁移命名空间：未实现；auth 表仍共享应用迁移集，`auth migrate down` 被阻止。
-- SQLite 版本化应用迁移：未实现；SQLite 只作本地启动建表 fallback，生产唯一版本化路径是 Postgres。
+- SQLite 版本化应用迁移：未实现；SQLite 只在显式选择时作本地启动建表，生产唯一版本化路径是 Postgres。
 - `db migrate down` 与 `auth migrate down` 的回滚：`db migrate down` 非 dry-run 直接拒绝，生产为前向迁移。
 - SQLite → Postgres 的自动数据迁移：没有内置工具，必须由运维显式处理。
 - `file` / `code` / `computer-use` 的真实 hosted tool 执行生命周期：未实现（MCP hosted tool 执行已实现并接入）。

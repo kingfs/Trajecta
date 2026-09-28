@@ -93,10 +93,10 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	if !envelope.OK {
 		t.Fatalf("envelope.OK = false, output=%q", out.String())
 	}
-	if envelope.Result.Database.Driver != "sqlite" || envelope.Result.Database.DSN != "trajecta.sqlite3" || !envelope.Result.Database.AutoMigrate {
+	if envelope.Result.Database.Driver != "postgres" || envelope.Result.Database.DSN != "" || !envelope.Result.Database.AutoMigrate {
 		t.Fatalf("database result = %+v", envelope.Result.Database)
 	}
-	if envelope.Result.Database.MigrationMode != "schema-init" || envelope.Result.Database.ProductionStorageDriver != "postgres" || envelope.Result.Database.ProductionReady || envelope.Result.Database.StorageRole != "legacy_dev_test_compatibility" || envelope.Result.Database.StorageContract != "sqlite_startup_schema_fallback_for_legacy_dev_test_only" {
+	if envelope.Result.Database.MigrationMode != "versioned-sql" || envelope.Result.Database.ProductionStorageDriver != "postgres" || !envelope.Result.Database.ProductionReady || envelope.Result.Database.StorageRole != "production" || envelope.Result.Database.StorageContract != "postgres_versioned_migrations_are_the_production_storage_contract" {
 		t.Fatalf("database storage contract = %+v", envelope.Result.Database)
 	}
 	if envelope.Result.ResponsesServer.Path != "/v1/responses" {
@@ -115,7 +115,7 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	if sources.Server.Port != configSourceEmpty {
 		t.Fatalf("sources.server.port = %q", sources.Server.Port)
 	}
-	if sources.Database.Driver != configSourceDefault || sources.Database.DSN != configSourceDerived || sources.Database.AutoMigrate != configSourceDefault {
+	if sources.Database.Driver != configSourceDefault || sources.Database.DSN != configSourceEmpty || sources.Database.AutoMigrate != configSourceDefault {
 		t.Fatalf("sources.database = %+v", sources.Database)
 	}
 	if sources.ResponsesServer.Path != configSourceDefault {

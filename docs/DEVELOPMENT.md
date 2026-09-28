@@ -125,7 +125,7 @@ task auth:create-token USER=admin NAME=local
 - `task auth:init-user`：用 `USER`、`PASSWORD` 创建登录用户（底层 `auth init-user --username --password`）。
 - `task auth:create-token`：为 `USER` 创建名为 `NAME` 的 API token（底层 `auth create-token --username --name`，还支持 `--scope`、`--ttl`）。
 - Postgres 使用 `ent/postgres-migrations` 的版本化 SQL migration；在 `database.auto_migrate: false` 的生产路径下必须先执行 `db migrate up`，否则启动会报出缺失 migration / table 的错误。Postgres 下 auth 表由应用 migration 集合一并创建。
-- SQLite 是本地 / 开发 / 测试回退，schema 在启动时应用而非版本化迁移，默认文件为 `{{output_dir}}/trajecta.sqlite3`。
+- 驱动默认是 Postgres（未配置 `database.driver` 时不会隐式落到 SQLite）。SQLite 需显式配置，用于本地 / 开发 / 测试，schema 在启动时应用而非版本化迁移，默认文件为 `{{output_dir}}/trajecta.sqlite3`。
 
 本地开发只需要上面的 `task migrate:db:up` / `task auth:init-user` / `task auth:create-token`。Postgres 迁移状态核对、并发索引优化、exchange backfill、`session_summaries` 灰度读开关（`database.use_session_summary_read` / `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）与基线采集脚本等只读运维入口见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)；迁移命令归属、SQLite/Postgres schema 策略与派生数据重算入口见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
 

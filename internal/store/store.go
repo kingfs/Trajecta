@@ -2971,7 +2971,10 @@ func normalizeDatabaseDriver(driver string) string {
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	switch driver {
 	case "":
-		return "sqlite"
+		// The driver is never chosen implicitly as SQLite: an unset driver means
+		// Postgres, and a missing DSN then fails loudly instead of creating a
+		// local database file.
+		return "postgres"
 	case "postgresql":
 		return "postgres"
 	default:

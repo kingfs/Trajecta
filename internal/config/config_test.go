@@ -1409,3 +1409,19 @@ func TestResolveDefaultSQLitePathWithoutLegacyFile(t *testing.T) {
 		t.Fatalf("default sqlite file name = %q, want %q", got, want)
 	}
 }
+
+func TestDatabaseDriverDefaultsToPostgres(t *testing.T) {
+	t.Parallel()
+
+	// The application database is the shared source of truth: a configuration
+	// that does not name a driver must not silently fall back to a local SQLite
+	// file. SQLite has to be selected explicitly.
+	cfg := Config{}
+	if got := cfg.DatabaseDriver(); got != "postgres" {
+		t.Fatalf("DatabaseDriver() = %q, want postgres", got)
+	}
+	cfg.Database.Driver = " SQLite "
+	if got := cfg.DatabaseDriver(); got != "sqlite" {
+		t.Fatalf("DatabaseDriver() = %q, want sqlite when it is named explicitly", got)
+	}
+}

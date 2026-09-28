@@ -301,7 +301,8 @@ func normalizeAuthStoreDriver(driver string) string {
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	switch driver {
 	case "":
-		return "sqlite"
+		// See store.normalizeDatabaseDriver: an unset driver means Postgres.
+		return "postgres"
 	case "postgresql":
 		return "postgres"
 	default:

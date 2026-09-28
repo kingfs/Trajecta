@@ -119,7 +119,7 @@ application DB 是结构化查询源：
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）。
 
-生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。SQLite 仅作为本地/开发/测试 fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
+生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
 
 部署与迁移细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)，Postgres 长期运行优化见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 
@@ -150,7 +150,7 @@ application DB 是结构化查询源：
 - 新录制只写 V3；读取端继续支持 V2，cassette 保持人类可读。
 - `pkg/replay` 是硬性要求，且不能依赖网络或 Observation IR。
 - 存储 schema 只做 additive 演进；新列需通过启动时迁移兼容旧 DB（Postgres 走 `internal/appdbmigrate`，SQLite 走启动 schema）。
-- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认 `trajecta.sqlite3` 必须可原地升级；当默认文件不存在而改名前的默认 `llm_tracelab.sqlite3` 存在时，直接原地沿用该旧文件而不是新建空库。
+- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与显式选择时的默认文件 `trajecta.sqlite3` 必须可原地升级；当默认文件不存在而改名前的默认 `llm_tracelab.sqlite3` 存在时，直接原地沿用该旧文件而不是新建空库。
 - Observation parser 对 unknown fields 保持 tolerant；所有派生分析结果都必须能从 raw cassette 重算。
 
 ## 测试基线

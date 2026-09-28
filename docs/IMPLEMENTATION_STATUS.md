@@ -47,7 +47,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 生产环境的结构化状态主路径是 Postgres：checked-in SQL 位于 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 和 `golang-migrate` 应用，入口是 `db migrate up`。命令与 server 打开应用库时已拆分 migrate 与 open：`database.auto_migrate=true` 先执行应用迁移再以 no-auto-migrate 模式打开 store，`false` 只打开已存在的 schema。
 
-SQLite 仅作为本地开发、离线测试和既有本地 DB 兼容的 fallback（`{{output_dir}}/trajecta.sqlite3`），其 schema 由启动时的 raw DDL 应用，不走 versioned migration；它是 `startup_schema_fallback`，不是生产边界。
+驱动默认是 Postgres，SQLite 必须显式选择，仅作为本地开发、离线测试和既有本地 DB 兼容的库（`{{output_dir}}/trajecta.sqlite3`），其 schema 由启动时的 raw DDL 应用，不走 versioned migration；它是 `startup_schema_fallback`，不是生产边界。
 
 当前应用库中的主要表：
 

@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 
 - The server process is now built as `server` and the CLI as `trajecta`. `task build:go` produces both (there is no `trajecta-migrate` artifact any more) and `task clean` removes both. Operator-visible paths change with it: the container entrypoint is `/app/bin/server`, the CLI ships as `/app/bin/trajecta`, and `docker compose exec` / `--entrypoint` invocations must use the new names.
+- The application database driver is never chosen implicitly as SQLite any more. An unset `database.driver` now means Postgres everywhere (`config.DatabaseDriver`, the store and auth driver normalizers, and the auth store that `serve` opens), so a configuration that omits the driver fails loudly with a missing-DSN error instead of silently creating a local `trajecta.sqlite3` file next to the cassettes. SQLite stays fully supported for the local dev/test harness and for reading legacy databases during migration, but it must be selected explicitly with `database.driver: "sqlite"`; test configurations that relied on the old implicit default now name the driver.
 
 ### Fixed
 

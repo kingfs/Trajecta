@@ -383,7 +383,7 @@ func TestNormalizeDriver(t *testing.T) {
 		driver string
 		want   string
 	}{
-		{name: "empty defaults sqlite", driver: "", want: "sqlite"},
+		{name: "empty defaults postgres", driver: "", want: "postgres"},
 		{name: "trims lowercases", driver: " SQLite ", want: "sqlite"},
 		{name: "postgres", driver: "postgres", want: "postgres"},
 		{name: "postgresql alias", driver: " PostgreSQL ", want: "postgres"},

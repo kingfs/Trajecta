@@ -862,11 +862,17 @@ func (c Config) TraceOutputDir() string {
 	return c.Debug.OutputDir
 }
 
+// DatabaseDriver returns the configured application database driver. Postgres
+// is the default: the application database is the shared source of truth, so a
+// configuration that does not name a driver must not silently create a local
+// SQLite file. SQLite remains available for the local test harness and for
+// reading legacy databases during migration, but only when it is named
+// explicitly.
 func (c Config) DatabaseDriver() string {
 	if strings.TrimSpace(c.Database.Driver) != "" {
 		return strings.ToLower(strings.TrimSpace(c.Database.Driver))
 	}
-	return "sqlite"
+	return "postgres"
 }
 
 // DefaultSQLiteFileName is the local SQLite application database file used when

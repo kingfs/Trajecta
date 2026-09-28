@@ -3942,6 +3942,8 @@ func TestRunServeLogsActionableInvalidUpstreamConfig(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	configBody := []byte(strings.TrimSpace(`
+database:
+  driver: "sqlite"
 server:
   port: "8080"
 monitor:
@@ -4471,6 +4473,8 @@ func TestRunMigrateLogsSummary(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	configBody := []byte(strings.TrimSpace(`
+database:
+  driver: "sqlite"
 server:
   port: "8080"
 monitor:
@@ -4515,6 +4519,7 @@ server:
 monitor:
   port: ""
 database:
+  driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
 upstream:
   base_url: "https://api.openai.com/v1"
@@ -4733,6 +4738,7 @@ server:
 monitor:
   port: ""
 database:
+  driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
 upstream:
   base_url: "https://api.openai.com/v1"
@@ -4843,6 +4849,7 @@ server:
 monitor:
   port: ""
 database:
+  driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
 upstream:
   base_url: "https://api.openai.com/v1"
@@ -5123,6 +5130,8 @@ func TestRunAuthInitUserAndCreateToken(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	configBody := []byte(strings.TrimSpace(`
+database:
+  driver: "sqlite"
 server:
   port: "8080"
 monitor:
