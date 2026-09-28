@@ -257,6 +257,17 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 
 默认 dry-run，只统计 `duplicates`、`remapped`、`unresolved`；`--apply` 才写入。每批的删除与更新在同一个事务里，整批冲突时退化为逐个 id 处理，失败的 id 保留原值并继续。
 
+### 陈旧索引行（cassette 已经搬走）
+
+`layout apply` 之后如果索引行没有跟着更新，会出现「`logs.path` 指向的文件已经不在，但同一录制已经索引在新路径下」的行：Monitor 列表里同一录制出现两次，其中一条打不开。带 `--data-root`（默认取配置里的 trace 目录）运行 `upgrade db --reconcile-derived-trace-ids` 时，这类行会被当作**供体**处理：
+
+- 按文件名（basename）在「文件确实存在的行」里找候选；候选恰好一个才算供体，多个（歧义）或一个都没有（vault 里根本没有这个文件）只统计、不修改；
+- 先用同一套规则处理供体的派生行：重复的删除，仅剩的重指向存活的 trace id；
+- 确认没有任何派生行还引用该 trace id 之后，才删除这条 `logs` 行（需要 `--apply --prune-superseded-index-rows`，删除语句自带 `NOT EXISTS` 保护，永远不会带走派生数据）；
+- 找不到文件的元数据行一律保留（它可能是那次请求唯一的记录），只在报告与 warning 中列出。
+
+在容器里运行时数据库记录的路径就是容器路径，直接判断文件是否存在即可；在容器外运行时用 `--data-root <本地根>` 配合 `--recorded-prefix <数据库里记录的前缀>` 做前缀替换。
+
 ## 迁移之后
 
 - Postgres 是唯一事实源；`serve` 只连 Postgres，不再打开任何 SQLite 文件。

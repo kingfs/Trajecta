@@ -21,6 +21,9 @@ type dbFlags struct {
 	verifyOnly    bool
 	tolerateDrift bool
 	reconcile     bool
+	pruneStale    bool
+	dataRoot      string
+	recordedRoot  string
 }
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -51,6 +54,12 @@ being invented; pass --fill-missing-required to insert placeholders instead.`,
 		"excuse missing keys in runtime snapshot tables (upstream_targets, upstream_models) that the running server rewrites")
 	cmd.Flags().BoolVar(&flags.reconcile, "reconcile-derived-trace-ids", false,
 		"repair derived tables whose trace_id still carries the legacy value instead of merging rows")
+	cmd.Flags().BoolVar(&flags.pruneStale, "prune-superseded-index-rows", false,
+		"with --apply, also delete the trace index rows whose cassette moved away once nothing derives from them")
+	cmd.Flags().StringVar(&flags.dataRoot, "data-root", "",
+		"local root the recorded cassette paths live under (default: the configured trace directory)")
+	cmd.Flags().StringVar(&flags.recordedRoot, "recorded-prefix", "",
+		"prefix the database recorded, mapped onto --data-root (defaults to --data-root)")
 	return cmd
 }
 
@@ -107,16 +116,30 @@ func (r *cliRuntime) execReconcile(cmd *cobra.Command, cfg *config.Config, flags
 	if err != nil {
 		return err
 	}
-	if len(paths) == 0 {
+	if len(paths) == 0 && strings.TrimSpace(flags.dataRoot) == "" {
 		return fail("no legacy SQLite database was found; pass --sqlite <path> (the archived %s files are accepted)", "*.sqlite3.migrated")
 	}
+	dataRoot := strings.TrimSpace(flags.dataRoot)
+	if dataRoot == "" {
+		dirs, dirWarnings := r.resolveTraceDirs(cfg)
+		warnings = append(warnings, dirWarnings...)
+		if len(dirs) > 0 {
+			dataRoot = dirs[0]
+		}
+	}
+	if len(paths) == 0 {
+		warnings = append(warnings, "no legacy SQLite database was given, so the orphan trace ids cannot be mapped onto the current ones; only the superseded index rows are handled")
+	}
 	report, err := legacymigrate.ReconcileDerivedTraceIDs(cmd.Context(), legacymigrate.ReconcileOptions{
-		SQLitePaths: paths,
-		PostgresDSN: cfg.Database.DSN,
-		Apply:       r.opts.apply,
-		OpenMode:    r.opts.sqliteOpen,
-		BatchSize:   r.opts.batchSize,
-		Tables:      flags.tables,
+		SQLitePaths:              paths,
+		PostgresDSN:              cfg.Database.DSN,
+		Apply:                    r.opts.apply,
+		OpenMode:                 r.opts.sqliteOpen,
+		BatchSize:                r.opts.batchSize,
+		Tables:                   flags.tables,
+		DataRoot:                 dataRoot,
+		RecordedPrefix:           strings.TrimSpace(flags.recordedRoot),
+		PruneSupersededIndexRows: flags.pruneStale,
 	})
 	if err != nil {
 		return err
@@ -145,6 +168,9 @@ func reconcileErrors(report *legacymigrate.ReconcileReport) int {
 			failed++
 		}
 	}
+	if report.Superseded != nil && report.Superseded.Err != "" {
+		failed++
+	}
 	return failed
 }
 
@@ -166,6 +192,26 @@ func printReconcileReport(w io.Writer, report *legacymigrate.ReconcileReport) {
 	}
 	fmt.Fprintf(w, "totals            %d legacy ids, %d mapped to a current trace, %d duplicate rows, %d rows remapped, %d unresolved\n",
 		report.LegacyIDs, report.MappedIDs, report.Deleted(), report.Remapped(), report.Unresolved())
+	if stats := report.Superseded; stats != nil {
+		fmt.Fprintf(w, "superseded rows   %d index rows checked, %d missing at the recorded path, %d superseded, %d ambiguous, %d with no cassette anywhere\n",
+			stats.Checked, stats.MissingFiles, stats.Superseded, stats.Ambiguous, stats.OrphanFiles)
+		fmt.Fprintf(w, "  derived rows of the superseded ids: %d duplicate, %d remapped, %d unresolved\n",
+			stats.DerivedDuplicates, stats.DerivedRemapped, stats.DerivedUnresolved)
+		if report.DryRun {
+			fmt.Fprintf(w, "  index rows the prune targets once the derived rows above are reconciled: %d (needs --apply --prune-superseded-index-rows)\n", stats.PrunePending)
+		} else {
+			fmt.Fprintf(w, "  index rows pruned: %d\n", stats.Pruned)
+		}
+		for _, path := range stats.SampleOrphanPaths {
+			fmt.Fprintf(w, "      ? cassette missing everywhere: %s\n", path)
+		}
+		for _, path := range stats.SampleAmbiguous {
+			fmt.Fprintf(w, "      ? several indexed candidates: %s\n", path)
+		}
+		if stats.Err != "" {
+			fmt.Fprintf(w, "      error: %s\n", stats.Err)
+		}
+	}
 	if report.DryRun {
 		fmt.Fprintln(w, "note              dry run; pass --apply to delete the duplicates and rewrite the remaining rows")
 	}

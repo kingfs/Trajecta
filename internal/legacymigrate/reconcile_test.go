@@ -229,3 +229,155 @@ func TestDuplicateDeleteStatement(t *testing.T) {
 		t.Errorf("delete statement = %q, want a DELETE", withoutIdentity)
 	}
 }
+
+// TestReconcileSupersededIndexRowsIntegration proves the second repair a layout
+// move can need: a `logs` row whose cassette moved away while the same recording
+// stayed indexed at the path it moved to. The donor's derived rows belong to the
+// surviving trace id, and the donor row is removed only once nothing derives
+// from it any more. A row whose cassette exists nowhere is kept, because it may
+// be the only trace of that request.
+func TestReconcileSupersededIndexRowsIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to run the reconciliation integration test")
+	}
+	ctx := context.Background()
+
+	admin, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open admin connection: %v", err)
+	}
+	if err := admin.PingContext(ctx); err != nil {
+		t.Fatalf("connect to %s: %v", dsn, err)
+	}
+	name := fmt.Sprintf("trajecta_supersededtest_%d", os.Getpid())
+	if _, err := admin.ExecContext(ctx, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
+		t.Fatalf("drop scratch database: %v", err)
+	}
+	if _, err := admin.ExecContext(ctx, `CREATE DATABASE `+name); err != nil {
+		t.Fatalf("create scratch database: %v", err)
+	}
+	t.Cleanup(func() {
+		defer admin.Close()
+		if _, err := admin.ExecContext(context.Background(), `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
+			t.Logf("drop scratch database %s: %v", name, err)
+		}
+	})
+	scratchDSN, err := dsnWithDatabase(dsn, name)
+	if err != nil {
+		t.Fatalf("build scratch dsn: %v", err)
+	}
+	if err := appdbmigrate.MigrateUp("postgres", scratchDSN, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+	pg, err := sql.Open("postgres", scratchDSN)
+	if err != nil {
+		t.Fatalf("open scratch connection: %v", err)
+	}
+	defer pg.Close()
+
+	dir := t.TempDir()
+	const (
+		survivorID = "cd2b3137-0d42-4e26-b6bd-293dc7e9e670"
+		donorID    = "00000e77-2a48-4403-8cbc-2dd8bc235fd8"
+		orphanID   = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+	)
+	relDir := filepath.Join("unknown-site", "model-x", "2026", "01", "02")
+	if err := os.MkdirAll(filepath.Join(dir, relDir), 0o755); err != nil {
+		t.Fatalf("create cassette directory: %v", err)
+	}
+	cassette := filepath.Join(dir, relDir, "20260102_000000_1.http")
+	if err := os.WriteFile(cassette, []byte("# trajecta/v3\n# meta: {}\n"), 0o644); err != nil {
+		t.Fatalf("write cassette: %v", err)
+	}
+	// The donor kept the pre-move directory of the very same recording.
+	donorPath := filepath.Join(dir, "model-x", "2026", "01", "02", "20260102_000000_1.http")
+	orphanPath := filepath.Join(dir, "gone", "2026", "01", "02", "20260102_000000_2.http")
+
+	for _, statement := range []string{
+		`CREATE TABLE node_cases (id bigserial PRIMARY KEY, trace_id text NOT NULL, node_id text NOT NULL, payload text NOT NULL, UNIQUE (trace_id, node_id))`,
+		fmt.Sprintf(`INSERT INTO logs (path, trace_id, mod_time_ns, file_size, version, recorded_at) VALUES ('%s', '%s', 1, 1, 'llm-proxy-v3', now())`, cassette, survivorID),
+		fmt.Sprintf(`INSERT INTO logs (path, trace_id, mod_time_ns, file_size, version, recorded_at) VALUES ('%s', '%s', 1, 1, 'llm-proxy-v3', now())`, donorPath, donorID),
+		fmt.Sprintf(`INSERT INTO logs (path, trace_id, mod_time_ns, file_size, version, recorded_at) VALUES ('%s', '%s', 1, 1, 'llm-proxy-v3', now())`, orphanPath, orphanID),
+		fmt.Sprintf(`INSERT INTO node_cases (trace_id, node_id, payload) VALUES ('%s', 'node-1', 'survivor')`, survivorID),
+		fmt.Sprintf(`INSERT INTO node_cases (trace_id, node_id, payload) VALUES ('%s', 'node-1', 'donor duplicate'), ('%s', 'node-2', 'donor only')`, donorID, donorID),
+	} {
+		if _, err := pg.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("setup %q: %v", statement, err)
+		}
+	}
+
+	countRows := func(traceID string) int {
+		t.Helper()
+		var count int
+		if err := pg.QueryRowContext(ctx, `SELECT count(*) FROM node_cases WHERE trace_id = $1`, traceID).Scan(&count); err != nil {
+			t.Fatalf("count node_cases for %s: %v", traceID, err)
+		}
+		return count
+	}
+	rowExists := func(path string) bool {
+		t.Helper()
+		var count int
+		if err := pg.QueryRowContext(ctx, `SELECT count(*) FROM logs WHERE path = $1`, path).Scan(&count); err != nil {
+			t.Fatalf("count logs for %s: %v", path, err)
+		}
+		return count > 0
+	}
+
+	dry, err := ReconcileDerivedTraceIDs(ctx, ReconcileOptions{PostgresDSN: scratchDSN, DataRoot: dir})
+	if err != nil {
+		t.Fatalf("ReconcileDerivedTraceIDs(dry) error = %v", err)
+	}
+	if dry.Superseded == nil {
+		t.Fatal("report has no superseded index section although a data root was given")
+	}
+	if dry.Superseded.Checked != 3 || dry.Superseded.MissingFiles != 2 {
+		t.Errorf("checked/missing = %d/%d, want 3/2", dry.Superseded.Checked, dry.Superseded.MissingFiles)
+	}
+	if dry.Superseded.Superseded != 1 || dry.Superseded.DonorIDs != 1 {
+		t.Errorf("superseded/donors = %d/%d, want 1/1", dry.Superseded.Superseded, dry.Superseded.DonorIDs)
+	}
+	if dry.Superseded.OrphanFiles != 1 {
+		t.Errorf("orphan files = %d, want 1 (the row whose cassette exists nowhere)", dry.Superseded.OrphanFiles)
+	}
+	if dry.Superseded.DerivedDuplicates != 1 || dry.Superseded.DerivedRemapped != 1 {
+		t.Errorf("derived duplicate/remapped = %d/%d, want 1/1", dry.Superseded.DerivedDuplicates, dry.Superseded.DerivedRemapped)
+	}
+	if dry.Superseded.PrunePending != 1 {
+		t.Errorf("prune pending = %d, want 1", dry.Superseded.PrunePending)
+	}
+	if !rowExists(donorPath) || !rowExists(orphanPath) {
+		t.Error("the dry run deleted trace index rows")
+	}
+	if got := countRows(donorID); got != 2 {
+		t.Errorf("donor rows = %d, want 2 before the repair", got)
+	}
+
+	applied, err := ReconcileDerivedTraceIDs(ctx, ReconcileOptions{
+		PostgresDSN:              scratchDSN,
+		DataRoot:                 dir,
+		Apply:                    true,
+		PruneSupersededIndexRows: true,
+	})
+	if err != nil {
+		t.Fatalf("ReconcileDerivedTraceIDs(apply) error = %v", err)
+	}
+	if applied.Superseded == nil || applied.Superseded.Pruned != 1 {
+		t.Errorf("pruned = %v, want 1", applied.Superseded)
+	}
+	if rowExists(donorPath) {
+		t.Error("the superseded trace index row survived the prune")
+	}
+	if !rowExists(cassette) {
+		t.Error("the surviving trace index row was pruned")
+	}
+	if !rowExists(orphanPath) {
+		t.Error("a trace index row whose cassette exists nowhere must be kept")
+	}
+	if got := countRows(survivorID); got != 2 {
+		t.Errorf("survivor rows = %d, want 2 (its own node and the donor's unique node)", got)
+	}
+	if got := countRows(donorID); got != 0 {
+		t.Errorf("donor rows = %d, want 0 after the repair", got)
+	}
+}

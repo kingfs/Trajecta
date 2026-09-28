@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +38,18 @@ type ReconcileOptions struct {
 	OpenMode string
 	// BatchSize is the number of id pairs per statement. Defaults to 200.
 	BatchSize int
+	// DataRoot is the local root the recorded cassette paths live under. When it
+	// is set the run also repairs `logs` rows whose cassette moved away while the
+	// same recording stayed indexed at a path that exists.
+	DataRoot string
+	// RecordedPrefix is the prefix the database recorded. It is replaced by
+	// DataRoot, which is what a run outside the deployment container needs;
+	// inside the container both are the same and RecordedPrefix defaults to
+	// DataRoot.
+	RecordedPrefix string
+	// PruneSupersededIndexRows deletes a superseded `logs` row once no derived
+	// row references its trace id any more. It only has an effect with Apply.
+	PruneSupersededIndexRows bool
 }
 
 // DerivedTableResult reports the reconciliation of one derived table.
@@ -52,14 +66,34 @@ type DerivedTableResult struct {
 	Err            string   `json:"error,omitempty"`
 }
 
+// SupersededIndexResult reports the `logs` rows whose cassette moved away while
+// the same recording stayed indexed at a path that exists.
+type SupersededIndexResult struct {
+	Checked           int64    `json:"checked"`
+	MissingFiles      int64    `json:"missing_files"`
+	Superseded        int64    `json:"superseded"`
+	Ambiguous         int64    `json:"ambiguous"`
+	OrphanFiles       int64    `json:"orphan_files"`
+	DonorIDs          int64    `json:"donor_ids"`
+	DerivedDuplicates int64    `json:"derived_duplicate_rows"`
+	DerivedRemapped   int64    `json:"derived_remapped_rows"`
+	DerivedUnresolved int64    `json:"derived_unresolved_rows"`
+	Pruned            int64    `json:"pruned_index_rows"`
+	PrunePending      int64    `json:"prune_pending_rows"`
+	Err               string   `json:"error,omitempty"`
+	SampleOrphanPaths []string `json:"sample_orphan_paths,omitempty"`
+	SampleAmbiguous   []string `json:"sample_ambiguous_paths,omitempty"`
+}
+
 // ReconcileReport aggregates a reconciliation run.
 type ReconcileReport struct {
-	DryRun     bool                 `json:"dry_run"`
-	LegacyIDs  int64                `json:"legacy_ids"`
-	MappedIDs  int64                `json:"mapped_ids"`
-	Tables     []DerivedTableResult `json:"tables"`
-	Warnings   []string             `json:"warnings,omitempty"`
-	DurationMS int64                `json:"duration_ms"`
+	DryRun     bool                   `json:"dry_run"`
+	LegacyIDs  int64                  `json:"legacy_ids"`
+	MappedIDs  int64                  `json:"mapped_ids"`
+	Tables     []DerivedTableResult   `json:"tables"`
+	Superseded *SupersededIndexResult `json:"superseded_index,omitempty"`
+	Warnings   []string               `json:"warnings,omitempty"`
+	DurationMS int64                  `json:"duration_ms"`
 }
 
 // Deleted returns the number of duplicate rows the run removed (or would).
@@ -113,8 +147,8 @@ func ReconcileDerivedTraceIDs(ctx context.Context, opts ReconcileOptions) (*Reco
 	if strings.TrimSpace(opts.PostgresDSN) == "" {
 		return nil, fmt.Errorf("postgres dsn must not be empty")
 	}
-	if len(opts.SQLitePaths) == 0 {
-		return nil, fmt.Errorf("at least one legacy sqlite path is required to map the old trace ids")
+	if len(opts.SQLitePaths) == 0 && strings.TrimSpace(opts.DataRoot) == "" {
+		return nil, fmt.Errorf("at least one legacy sqlite path or a data root is required")
 	}
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
@@ -185,6 +219,47 @@ func ReconcileDerivedTraceIDs(ctx context.Context, opts ReconcileOptions) (*Reco
 	}
 	report.MappedIDs = int64(len(mapping))
 
+	// A `logs` row whose cassette moved away is a donor: the recording stayed
+	// indexed at the path it moved to, so the donor's derived rows belong to the
+	// surviving trace id and the donor row itself becomes garbage.
+	if strings.TrimSpace(opts.DataRoot) != "" {
+		superseded, stats, discoverErr := discoverSupersededIndexRows(ctx, pg, opts)
+		if discoverErr != nil {
+			return nil, discoverErr
+		}
+		report.Superseded = stats
+		if len(superseded) > 0 {
+			donors := make([]string, 0, len(superseded))
+			for _, row := range superseded {
+				mapping[row.TraceID] = row.SurvivorID
+				donors = append(donors, row.TraceID)
+			}
+			sort.Strings(donors)
+			stats.DonorIDs = int64(len(donors))
+			for _, table := range tables {
+				result := reconcileTable(ctx, pg, table, donors, mapping, batchSize, opts.Apply)
+				if result.Err != "" && stats.Err == "" {
+					stats.Err = result.Err
+				}
+				stats.DerivedDuplicates += result.DuplicateRows
+				stats.DerivedRemapped += result.RemappedRows
+				stats.DerivedUnresolved += result.UnresolvedRows
+			}
+			if opts.Apply && opts.PruneSupersededIndexRows {
+				pruned, pruneErr := pruneSupersededIndexRows(ctx, pg, tables, donors, batchSize)
+				if pruneErr != nil {
+					return nil, pruneErr
+				}
+				stats.Pruned = pruned
+			} else {
+				// Every donor loses its derived rows (they are duplicates of the
+				// surviving id or move onto it), so the whole donor set is what a
+				// prune targets. The apply run reports what it really deleted.
+				stats.PrunePending = int64(len(donors))
+			}
+		}
+	}
+
 	for _, table := range tables {
 		result := reconcileTable(ctx, pg, table, orphans[table], mapping, batchSize, opts.Apply)
 		report.Tables = append(report.Tables, result)
@@ -192,6 +267,10 @@ func ReconcileDerivedTraceIDs(ctx context.Context, opts ReconcileOptions) (*Reco
 	if report.Unresolved() > 0 {
 		report.Warnings = append(report.Warnings, fmt.Sprintf(
 			"%d orphan rows reference no legacy trace and were left untouched; the rows below the missing ids are still readable through /api", report.Unresolved()))
+	}
+	if stats := report.Superseded; stats != nil && stats.OrphanFiles > 0 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf(
+			"%d indexed cassettes are missing at the recorded path and exist nowhere under the data root; those metadata rows are kept as they are", stats.OrphanFiles))
 	}
 	return report, nil
 }
@@ -258,7 +337,7 @@ func orphanTraceIDs(ctx context.Context, pg *sql.DB, table string) ([]string, er
 // the cassette path both indexes agree on.
 func mapLegacyTraceIDs(ctx context.Context, pg *sql.DB, paths []string, openMode string, ids []string) (map[string]string, error) {
 	mapping := map[string]string{}
-	if len(ids) == 0 {
+	if len(ids) == 0 || len(paths) == 0 {
 		return mapping, nil
 	}
 	legacyPath := map[string]string{} // old id -> cassette path
@@ -611,4 +690,133 @@ func countRowsByTraceIDs(ctx context.Context, pg *sql.DB, table string, ids []st
 		total += count
 	}
 	return total
+}
+
+// supersededIndexRow is a `logs` row whose cassette no longer exists at the
+// recorded path while the same recording is indexed at a path that does.
+type supersededIndexRow struct {
+	Path         string
+	TraceID      string
+	SurvivorPath string
+	SurvivorID   string
+}
+
+// discoverSupersededIndexRows classifies the `logs` rows whose cassette is
+// missing. A row whose recording is indexed exactly once at a path that exists
+// is superseded; a row with no candidate at all is counted and kept, because it
+// may be the only trace of that request.
+func discoverSupersededIndexRows(ctx context.Context, pg *sql.DB, opts ReconcileOptions) ([]supersededIndexRow, *SupersededIndexResult, error) {
+	stats := &SupersededIndexResult{}
+	rows, err := pg.QueryContext(ctx, `SELECT path, trace_id FROM logs ORDER BY path`)
+	if err != nil {
+		return nil, stats, fmt.Errorf("list the trace index: %w", err)
+	}
+	defer rows.Close()
+
+	recordedPrefix := opts.RecordedPrefix
+	if recordedPrefix == "" {
+		recordedPrefix = opts.DataRoot
+	}
+	survivors := map[string][]supersededIndexRow{}
+	type missingRow struct{ path, traceID string }
+	var missing []missingRow
+	for rows.Next() {
+		var path, traceID string
+		if err := rows.Scan(&path, &traceID); err != nil {
+			return nil, stats, err
+		}
+		stats.Checked++
+		if _, statErr := os.Stat(recordedToLocal(path, recordedPrefix, opts.DataRoot)); statErr == nil {
+			base := filepath.Base(path)
+			survivors[base] = append(survivors[base], supersededIndexRow{Path: path, TraceID: traceID})
+			continue
+		}
+		missing = append(missing, missingRow{path: path, traceID: traceID})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, stats, err
+	}
+	stats.MissingFiles = int64(len(missing))
+
+	var superseded []supersededIndexRow
+	for _, row := range missing {
+		hits := survivors[filepath.Base(row.path)]
+		switch len(hits) {
+		case 0:
+			stats.OrphanFiles++
+			if len(stats.SampleOrphanPaths) < 10 {
+				stats.SampleOrphanPaths = append(stats.SampleOrphanPaths, row.path)
+			}
+		case 1:
+			superseded = append(superseded, supersededIndexRow{
+				Path:         row.path,
+				TraceID:      row.traceID,
+				SurvivorPath: hits[0].Path,
+				SurvivorID:   hits[0].TraceID,
+			})
+		default:
+			stats.Ambiguous++
+			if len(stats.SampleAmbiguous) < 10 {
+				stats.SampleAmbiguous = append(stats.SampleAmbiguous, row.path)
+			}
+		}
+	}
+	stats.Superseded = int64(len(superseded))
+	return superseded, stats, nil
+}
+
+// recordedToLocal maps a path recorded in the application database onto the local
+// file system. Inside the deployment container the recorded prefix is the local
+// one, so both arguments are equal and the path is returned unchanged.
+func recordedToLocal(recorded, recordedPrefix, dataRoot string) string {
+	if recordedPrefix == "" || dataRoot == "" {
+		return recorded
+	}
+	tail, ok := strings.CutPrefix(recorded, recordedPrefix)
+	if !ok {
+		return recorded
+	}
+	return filepath.Join(dataRoot, tail)
+}
+
+// pruneSupersededIndexRows deletes the donor `logs` rows that no table derives
+// from any more and reports how many it removed.
+func pruneSupersededIndexRows(ctx context.Context, pg *sql.DB, tables, donors []string, batchSize int) (int64, error) {
+	if len(donors) == 0 {
+		return 0, nil
+	}
+	statement := supersededPruneStatement(tables)
+	var total int64
+	for start := 0; start < len(donors); start += batchSize {
+		end := start + batchSize
+		if end > len(donors) {
+			end = len(donors)
+		}
+		result, err := pg.ExecContext(ctx, statement, donors[start:end])
+		if err != nil {
+			return total, fmt.Errorf("prune superseded index rows: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return total, err
+		}
+		total += affected
+	}
+	return total, nil
+}
+
+// supersededPruneStatement removes a `logs` row only when every table that stores
+// a `logs.trace_id` stopped referencing it, so pruning a donor can never take
+// derived rows with it.
+func supersededPruneStatement(tables []string) string {
+	conditions := make([]string, 0, len(tables))
+	for _, table := range tables {
+		conditions = append(conditions, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM %s d WHERE d.trace_id = l.trace_id)", quoteIdent(table)))
+	}
+	where := "l.trace_id = ANY($1)"
+	if len(conditions) > 0 {
+		where += " AND " + strings.Join(conditions, " AND ")
+	}
+	return "DELETE FROM logs l WHERE " + where
 }
