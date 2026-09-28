@@ -46,7 +46,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
 
 脚本读取 `TRAJECTA_DATABASE_DSN`，回退 `DATABASE_URL` 或 libpq `PG*` 变量；`BASELINE_WINDOW` 默认 `7 days`。除下面明确标注的 reset 外，所有语句都只读。
 
-本节按脚本的覆盖范围贴出基线语句：表大小与 vacuum 各覆盖 12 张表，索引使用覆盖到 `trace_findings` 为止的 9 张表。脚本不包含的其它表见本节末尾的“扩展手查（脚本不覆盖的表）”，那部分需要手工执行。
+本节按脚本的覆盖范围贴出基线语句：表大小与 vacuum 各覆盖 12 张表，索引使用覆盖到 `trace_findings` 为止的 9 张表。为便于手工执行，脚本里由 psql 变量注入的占位符在这里展开为默认值：`BASELINE_WINDOW` 写作 `interval '7 days'`，keyset EXPLAIN 的游标写作 `TIMESTAMPTZ 'REPLACE_WITH_CURSOR_AT'` 与 `'REPLACE_WITH_LAST_ID'`（脚本对应默认值为 `1970-01-01T00:00:00Z` 与空字符串）。脚本不包含的其它表见本节末尾的“扩展手查（脚本不覆盖的表）”，那部分需要手工执行。
 
 环境与扩展状态：
 
