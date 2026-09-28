@@ -162,16 +162,29 @@ func printCopyReport(w io.Writer, report *legacymigrate.CopyReport, applied bool
 				for _, missing := range table.SampleMissingKeys {
 					fmt.Fprintf(w, "      ? not found in Postgres: %s\n", missing)
 				}
+				if table.AltKeyMatched > 0 {
+					keys := ""
+					if len(table.UniqueKeys) > 1 {
+						keys = " under " + strings.Join(table.UniqueKeys[1:], ", ")
+					}
+					fmt.Fprintf(w, "      ~ %d rows matched a secondary unique key%s\n", table.AltKeyMatched, keys)
+					for _, match := range table.SampleAltKeyMatches {
+						fmt.Fprintf(w, "        %s\n", match)
+					}
+				}
 				if table.ToleratedKeys > 0 {
 					fmt.Fprintf(w, "      ~ tolerated %d missing snapshot keys (%s)\n", table.ToleratedKeys, legacymigrate.SnapshotDriftReason(table.Table))
 				}
 			}
 		}
 	}
-	fmt.Fprintf(w, "totals            %d copied, %d already present, %d failed rows, %d missing keys, %d tolerated snapshot keys, %d tables\n",
-		report.Copied, report.Duplicate, report.Failed, report.Missing, report.Tolerated, report.TablesDone)
+	fmt.Fprintf(w, "totals            %d copied, %d already present, %d failed rows, %d missing keys, %d matched by a secondary unique key, %d tolerated snapshot keys, %d tables\n",
+		report.Copied, report.Duplicate, report.Failed, report.Missing, report.AltKeyMatched, report.Tolerated, report.TablesDone)
 	if report.DryRun && !applied {
 		fmt.Fprintln(w, "note              dry run; pass --apply to write the rows into Postgres")
+	}
+	if report.AltKeyMatched > 0 && report.Missing == 0 && report.Failed == 0 {
+		fmt.Fprintln(w, "note              every row the primary key did not match exists under another unique key")
 	}
 	if report.Tolerated > 0 && report.Missing == 0 && report.Failed == 0 {
 		fmt.Fprintln(w, "note              every missing key belongs to a runtime snapshot table (upstream_targets, upstream_models)")

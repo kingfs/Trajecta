@@ -124,6 +124,12 @@ type TableResult struct {
 	SampleFailures    []string `json:"sample_failures,omitempty"`
 	MissingKeys       int64    `json:"missing_keys,omitempty"`
 	SampleMissingKeys []string `json:"sample_missing_keys,omitempty"`
+	// AltKeyMatched counts source rows that are absent under the Postgres
+	// primary key but present under another unique key: the merge skipped them
+	// because the running server had already created the row.
+	AltKeyMatched       int64    `json:"alt_key_matched,omitempty"`
+	SampleAltKeyMatches []string `json:"sample_alt_key_matches,omitempty"`
+	UniqueKeys          []string `json:"unique_keys,omitempty"`
 	// ToleratedKeys counts keys that are missing in Postgres but belong to a
 	// snapshot table the operator explicitly excused with
 	// TolerateSnapshotDrift. They never block an archive and are reported apart
@@ -155,10 +161,12 @@ type CopyReport struct {
 	Missing   int64            `json:"missing_keys"`
 	// Tolerated sums the missing keys that TolerateSnapshotDrift excused. It is
 	// reported so an operator can see exactly how much drift was accepted.
-	Tolerated  int64 `json:"tolerated_keys,omitempty"`
-	TablesDone int   `json:"tables_completed"`
-	TablesSkip int   `json:"tables_skipped"`
-	DurationMS int64 `json:"duration_ms"`
+	Tolerated int64 `json:"tolerated_keys,omitempty"`
+	// AltKeyMatched sums the rows that only matched a non-primary unique key.
+	AltKeyMatched int64 `json:"alt_key_matched,omitempty"`
+	TablesDone    int   `json:"tables_completed"`
+	TablesSkip    int   `json:"tables_skipped"`
+	DurationMS    int64 `json:"duration_ms"`
 }
 
 // OK reports whether every table was merged and verified without problems.
@@ -283,6 +291,7 @@ func MergeSQLiteIntoPostgres(ctx context.Context, opts CopyOptions) (*CopyReport
 			report.Failed += table.Failed
 			report.Missing += table.MissingKeys
 			report.Tolerated += table.ToleratedKeys
+			report.AltKeyMatched += table.AltKeyMatched
 			switch table.Status {
 			case "copied", "verified", "planned", "empty", "skipped":
 				report.TablesDone++
@@ -593,21 +602,24 @@ func copyTable(ctx context.Context, source, pg *sql.DB, table string, target []C
 		return result
 	}
 	if opts.VerifyOnly {
-		missing, samples, verifyErr := verifySourceKeys(ctx, source, pg, table, target)
+		check, verifyErr := verifySourceKeys(ctx, source, pg, table)
 		result.SourceRows = sourceRows
 		if verifyErr != nil {
 			result.Status = "failed"
 			result.Reason = verifyErr.Error()
 		} else {
-			result.MissingKeys = missing
-			result.SampleMissingKeys = samples
+			result.MissingKeys = check.Missing
+			result.SampleMissingKeys = check.Samples
+			result.AltKeyMatched = check.AltMatched
+			result.SampleAltKeyMatches = check.AltSamples
+			result.UniqueKeys = check.KeySets
 			result.Status = "verified"
-			if missing > 0 {
+			if check.Missing > 0 {
 				if opts.toleratesMissingKeys(table) {
 					// The rows were replaced by the running server rather than
 					// lost; keep the samples for the report but do not let the
 					// table block the archive.
-					result.ToleratedKeys = missing
+					result.ToleratedKeys = check.Missing
 					result.MissingKeys = 0
 					result.Reason = snapshotSourceTables[table]
 				} else {
@@ -652,14 +664,17 @@ func copyTable(ctx context.Context, source, pg *sql.DB, table string, target []C
 	}
 
 	if opts.VerifyKeys {
-		missing, samples, verifyErr := verifySourceKeys(ctx, source, pg, table, target)
+		check, verifyErr := verifySourceKeys(ctx, source, pg, table)
 		if verifyErr != nil {
 			result.Status = "partial"
 			result.SampleFailures = append(result.SampleFailures, "verify: "+verifyErr.Error())
 		} else {
-			result.MissingKeys = missing
-			result.SampleMissingKeys = samples
-			if missing > 0 {
+			result.MissingKeys = check.Missing
+			result.SampleMissingKeys = check.Samples
+			result.AltKeyMatched = check.AltMatched
+			result.SampleAltKeyMatches = check.AltSamples
+			result.UniqueKeys = check.KeySets
+			if check.Missing > 0 {
 				result.Status = "partial"
 			}
 		}
@@ -1062,99 +1077,247 @@ func fixSequences(ctx context.Context, pg *sql.DB, table string, columns []strin
 	return actions, nil
 }
 
-// verifySourceKeys checks that every primary key of the legacy table exists in
-// the target table. This is the gate used before the SQLite files are archived.
-func verifySourceKeys(ctx context.Context, source, pg *sql.DB, table string, target []Column) (int64, []string, error) {
-	targetByName := make(map[string]Column, len(target))
-	for _, column := range target {
-		targetByName[column.Name] = column
-	}
-	sourceColumns, err := sourceTableColumns(ctx, source, table)
-	if err != nil {
-		return 0, nil, err
-	}
-	var keyNames []string
-	for _, column := range sourceColumns {
-		if _, ok := targetByName[column.Name]; !ok {
-			continue
-		}
-		if isTargetPrimaryKey(ctx, pg, table, column.Name) {
-			keyNames = append(keyNames, column.Name)
-		}
-	}
-	if len(keyNames) == 0 {
-		// No usable key: the row accounting of the copy itself is the gate.
-		return 0, nil, nil
-	}
+// keySet is one unique key of a Postgres table.
+type keySet struct {
+	Names   []string
+	Primary bool
+}
 
-	selectKey := make([]string, len(keyNames))
-	for i, name := range keyNames {
-		selectKey[i] = quoteIdent(name)
+func (k keySet) label() string {
+	kind := "unique"
+	if k.Primary {
+		kind = "primary key"
 	}
-	rows, err := source.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectKey, ", "), quoteIdent(table)))
+	return kind + " (" + strings.Join(k.Names, ", ") + ")"
+}
+
+// uniqueKeySets returns every full, non-partial unique key of the Postgres
+// table with the primary key first. Expression and partial indexes are skipped
+// because they cannot serve as a general existence key.
+func uniqueKeySets(ctx context.Context, pg *sql.DB, table string) ([]keySet, error) {
+	rows, err := pg.QueryContext(ctx, `
+		SELECT i.indexrelid::bigint, i.indisprimary, i.indnatts, s.ord, a.attname
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		CROSS JOIN LATERAL generate_subscripts(i.indkey, 1) AS s(ord)
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = i.indkey[s.ord]
+		WHERE n.nspname = current_schema()
+		  AND c.relname = $1
+		  AND i.indisunique
+		  AND i.indisvalid
+		  AND i.indpred IS NULL
+		ORDER BY i.indisprimary DESC, i.indexrelid, s.ord`, table)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	const batchSize = 400
 	var (
-		missing int64
-		samples []string
-		batch   [][]any
+		sets  []keySet
+		oids  []int64
+		natts []int
 	)
+	for rows.Next() {
+		var (
+			oid     int64
+			primary bool
+			columns int
+			ordinal int
+			name    string
+		)
+		if err := rows.Scan(&oid, &primary, &columns, &ordinal, &name); err != nil {
+			return nil, err
+		}
+		if len(oids) == 0 || oids[len(oids)-1] != oid {
+			oids = append(oids, oid)
+			natts = append(natts, columns)
+			sets = append(sets, keySet{Primary: primary})
+		}
+		sets[len(sets)-1].Names = append(sets[len(sets)-1].Names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	complete := make([]keySet, 0, len(sets))
+	for i, set := range sets {
+		// An expression index contributes fewer names than its attribute count,
+		// so it can never match a full source key set and is dropped.
+		if len(set.Names) == natts[i] {
+			complete = append(complete, set)
+		}
+	}
+	return complete, nil
+}
+
+// keyCheckResult reports the outcome of verifying one table's source keys.
+type keyCheckResult struct {
+	Missing int64
+	// AltMatched counts rows that are absent under the primary key but present
+	// under another unique key. The copy skips a row as soon as any unique key
+	// matches (its inserts rely on ON CONFLICT DO NOTHING), so these rows did
+	// reach Postgres; they are reported apart instead of being counted missing.
+	AltMatched int64
+	Samples    []string
+	AltSamples []string
+	// KeySets lists the usable unique keys, primary key first.
+	KeySets []string
+}
+
+// verifySourceKeys checks that every source row exists in Postgres under the
+// primary key, or under another unique key when the surrogate primary key was
+// regenerated: a running server can create the row first, and the merge then
+// skips the legacy row through ON CONFLICT DO NOTHING. This is the gate used
+// before the SQLite files are archived.
+func verifySourceKeys(ctx context.Context, source, pg *sql.DB, table string) (keyCheckResult, error) {
+	var result keyCheckResult
+	sourceColumns, err := sourceTableColumns(ctx, source, table)
+	if err != nil {
+		return result, err
+	}
+	present := make(map[string]bool, len(sourceColumns))
+	for _, column := range sourceColumns {
+		present[column.Name] = true
+	}
+
+	all, err := uniqueKeySets(ctx, pg, table)
+	if err != nil {
+		return result, err
+	}
+	usable := make([]keySet, 0, len(all))
+	for _, set := range all {
+		known := len(set.Names) > 0
+		for _, name := range set.Names {
+			if !present[name] {
+				known = false
+				break
+			}
+		}
+		if known {
+			usable = append(usable, set)
+		}
+	}
+	if len(usable) == 0 {
+		// No usable key: the row accounting of the copy itself is the gate.
+		return result, nil
+	}
+	for _, set := range usable {
+		result.KeySets = append(result.KeySets, set.label())
+	}
+
+	position := make(map[string]int)
+	projection := make([]string, 0, len(usable[0].Names))
+	for _, set := range usable {
+		for _, name := range set.Names {
+			if _, ok := position[name]; ok {
+				continue
+			}
+			position[name] = len(projection)
+			projection = append(projection, name)
+		}
+	}
+	quoted := make([]string, len(projection))
+	for i, name := range projection {
+		quoted[i] = quoteIdent(name)
+	}
+	rows, err := source.QueryContext(ctx, fmt.Sprintf("SELECT %s FROM %s", strings.Join(quoted, ", "), quoteIdent(table)))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+
+	project := func(row []any, set keySet) []any {
+		key := make([]any, len(set.Names))
+		for i, name := range set.Names {
+			key[i] = row[position[name]]
+		}
+		return key
+	}
+
+	const batchSize = 400
+	var batch [][]any
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
 		}
-		found, queryErr := existingKeys(ctx, pg, table, keyNames, batch)
-		if queryErr != nil {
-			return queryErr
+		matchedBy := make([]int, len(batch))
+		for i := range matchedBy {
+			matchedBy[i] = -1
 		}
-		for _, key := range batch {
-			rendered := renderKey(keyNames, key)
-			if !found[rendered] {
-				missing++
-				if len(samples) < maxReportedFailures {
-					samples = append(samples, rendered)
+		for setIndex, set := range usable {
+			keys := make([][]any, 0, len(batch))
+			positions := make([]int, 0, len(batch))
+			for i, row := range batch {
+				if matchedBy[i] >= 0 {
+					continue
+				}
+				keys = append(keys, project(row, set))
+				positions = append(positions, i)
+			}
+			if len(keys) == 0 {
+				break
+			}
+			found, queryErr := existingKeys(ctx, pg, table, set.Names, keys)
+			if queryErr != nil {
+				return queryErr
+			}
+			for i, key := range keys {
+				if found[renderKey(set.Names, key)] {
+					matchedBy[positions[i]] = setIndex
+				}
+			}
+		}
+		for i := range batch {
+			switch {
+			case matchedBy[i] < 0:
+				result.Missing++
+				if len(result.Samples) < maxReportedFailures {
+					result.Samples = append(result.Samples, renderKey(projection, batch[i]))
+				}
+			case matchedBy[i] > 0:
+				result.AltMatched++
+				if len(result.AltSamples) < maxReportedFailures {
+					result.AltSamples = append(result.AltSamples, fmt.Sprintf("%s matched by %s",
+						renderKey(projection, batch[i]), usable[matchedBy[i]].label()))
 				}
 			}
 		}
 		batch = batch[:0]
 		return nil
 	}
+
 	for rows.Next() {
-		values := make([]any, len(keyNames))
-		pointers := make([]any, len(keyNames))
+		values := make([]any, len(projection))
+		pointers := make([]any, len(projection))
 		for i := range values {
 			pointers[i] = &values[i]
 		}
 		if err := rows.Scan(pointers...); err != nil {
-			return missing, samples, err
+			return result, err
 		}
-		key := make([]any, 0, len(keyNames))
-		for _, value := range values {
+		row := make([]any, len(projection))
+		for i, value := range values {
 			converted, convErr := convertKeyValue(value)
 			if convErr != nil {
-				key = append(key, value)
+				row[i] = value
 				continue
 			}
-			key = append(key, converted)
+			row[i] = converted
 		}
-		batch = append(batch, key)
+		batch = append(batch, row)
 		if len(batch) >= batchSize {
 			if err := flush(); err != nil {
-				return missing, samples, err
+				return result, err
 			}
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return missing, samples, err
+		return result, err
 	}
 	if err := flush(); err != nil {
-		return missing, samples, err
+		return result, err
 	}
-	return missing, samples, nil
+	return result, nil
 }
 
 func existingKeys(ctx context.Context, pg *sql.DB, table string, keyNames []string, keys [][]any) (map[string]bool, error) {
@@ -1259,25 +1422,6 @@ func renderKey(names []string, values []any) string {
 		parts = append(parts, fmt.Sprintf("%s=%v", name, normalizeKeyValue(value)))
 	}
 	return strings.Join(parts, "|")
-}
-
-func isTargetPrimaryKey(ctx context.Context, pg *sql.DB, table, column string) bool {
-	var exists bool
-	err := pg.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu
-			  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-			WHERE tc.table_schema = current_schema()
-			  AND tc.table_name = $1
-			  AND tc.constraint_type = 'PRIMARY KEY'
-			  AND kcu.column_name = $2
-		)`, table, column).Scan(&exists)
-	if err != nil {
-		return false
-	}
-	return exists
 }
 
 // ---- identifiers ---------------------------------------------------------
