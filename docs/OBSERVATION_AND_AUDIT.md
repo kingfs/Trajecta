@@ -294,7 +294,7 @@ CLI 入口（`cmd/server/analyze.go`）：`analyze reparse`、`analyze scan`、`
 - 没有性能检测器；TTFT、tokens/s、cache hit、错误率等指标不产生 finding。
 - 没有 LLM 语义总结层，`session_summary` 之外的模型化分析未实现。
 - 敏感信息只有 observe 模式，`redact_at_rest` 与 `inline_redact` 未实现。
-- 通用 `exchanges` 图表现未引入，exchange 关系仍由现有索引表的 nullable 字段表达。
+- 通用 `exchanges` 图表现未引入，exchange 关系仍由现有索引表的同名字段表达：`logs` 与 `trace_observations` 用 `NOT NULL DEFAULT ''`（`sequence_index` 为 `NOT NULL DEFAULT 0`），`upstream_exchanges` 用 nullable 列。
 - `pkg/replay` 只回放单个 `.http`，不读取数据库，也不编排 entry 与多个 model cassette。
 - 旧 V2 cassette 不被重写；V3 cassette 只在 `analyze repair-usage --rewrite-cassette`（或 `analyze batch --repair-usage --rewrite-cassette`）下重写 prelude 的 usage，raw payload 不变。缺失 taxonomy 只在读取与查询时推断。
 - auth 失败发生在入口 handler 外层时不产生 entry cassette。

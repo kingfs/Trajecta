@@ -35,7 +35,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 | --- | --- |
 | Transparent proxy | Records and forwards OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Google GenAI, Vertex and other protocol families |
 | Offline replay | `pkg/replay` implements `http.RoundTripper`; tests need no network and no API key |
-| Stream fidelity | SSE data is stored chunk by chunk and replayed in its original order |
+| Stream fidelity | SSE data is stored chunk by chunk and replayed in its original chunk order, with no artificial pacing or timing simulation |
 | Record format | `LLM_PROXY_V3` compact prelude plus raw HTTP bytes; legacy V2 recordings stay readable |
 | Monitor UI | Go-embedded React interface: request list, session grouping, trace detail, routing decisions, audit, model and provider management |
 | Trajectory parsing | Cassettes are parsed into an Observation IR that yields findings such as dangerous tool calls and sensitive data |

@@ -82,7 +82,7 @@ These are enforced by review, and several of them are asserted by tests:
 ## Commit and pull request conventions
 
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `clean:`. Use `!` and a `BREAKING CHANGE:` footer for incompatible changes.
-- Keep a pull request to one logical change; fill in the template, including how you verified it.
+- Keep a pull request to one logical change; fill in the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md), including how you verified it.
 - Reference the issue it closes.
 
 ## License

@@ -18,16 +18,14 @@ Trajecta 当前是一个协议族感知的透传录制器，代理热路径不�
 
 当前快照日期：2026-06-02。
 
-上游材料存放在 [`upstream/`](./upstream/) 下。上游 API 变化时，**新增**一个带日期的快照，而不是覆盖旧文件。
+| 协议族 | 快照索引 | 主要材料 |
+| --- | --- | --- |
+| OpenAI | [schema-index-2026-06-02.md](./upstream/openai/schema-index-2026-06-02.md) | 官方 OpenAPI 快照，以及 `/chat/completions`、`/responses`、`/models`、`/embeddings` 的 path item 抽取 |
+| Anthropic Messages | [schema-index-2026-06-02.md](./upstream/anthropic/schema-index-2026-06-02.md) | Messages API 参考与流式 Messages 文档的 HTML 快照 |
+| Google Gemini | [schema-index-2026-06-02.md](./upstream/google-gemini/schema-index-2026-06-02.md) | v1beta discovery 文档与 GenerateContent 核心 schema 抽取 |
+| Google Vertex AI | [schema-index-2026-06-02.md](./upstream/google-vertex/schema-index-2026-06-02.md) | v1 AI Platform discovery 文档与 Vertex GenerateContent schema 抽取 |
 
-```text
-protocol-reference/
-  upstream/
-    openai/
-    anthropic/
-    google-gemini/
-    google-vertex/
-```
+每个索引都记录官方来源、快照文件与 Trajecta 当前的 parser 覆盖范围。上游材料存放在 [`upstream/`](./upstream/) 下；上游 API 变化时，**新增**一个带日期的快照，而不是覆盖旧文件。
 
 ## 取材原则
 

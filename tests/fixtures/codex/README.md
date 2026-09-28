@@ -1,7 +1,7 @@
 # Codex Responses fixtures
 
-These fixtures document the first offline Codex/OpenAI SDK compatibility
-profile for trajecta Responses server-mode.
+These fixtures document the offline Codex/OpenAI SDK compatibility profile for
+Trajecta Responses server-mode.
 
 They are wired into a focused offline fixture runner under
 `internal/responses/httpapi` and runtime alignment tests under

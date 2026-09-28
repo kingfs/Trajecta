@@ -4,8 +4,10 @@ Control-plane database schema is defined in `ent/schema`.
 
 ## SQLite Workflow
 
-The default workflow remains SQLite-oriented and writes to `ent/migrations`.
-The legacy command is still supported:
+SQLite is the local/dev/test fallback, and its generated migrations live in
+`ent/migrations` (the same directory backs the embedded-SQL auth namespace).
+Postgres is the production and tracked default; its migrations live in
+`ent/postgres-migrations` (see below). The legacy command is still supported:
 
 1. Update `ent/schema/**`.
 2. Run `go generate ./ent/...`.

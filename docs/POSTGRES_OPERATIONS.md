@@ -53,9 +53,12 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
 ```sql
 SELECT version();
 
+SELECT current_database() AS database, current_schema() AS schema, current_user AS user;
+
 SELECT extname, extversion
 FROM pg_extension
-WHERE extname IN ('pg_stat_statements', 'pgstattuple');
+WHERE extname IN ('pg_stat_statements', 'pgstattuple')
+ORDER BY extname;
 
 SELECT name, setting, unit, source
 FROM pg_settings

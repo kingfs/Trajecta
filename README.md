@@ -35,7 +35,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 | --- | --- |
 | 透明代理 | 记录并转发 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google GenAI、Vertex 等协议族的请求 |
 | 离线回放 | `pkg/replay` 实现 `http.RoundTripper`，单元测试无需网络与 API key |
-| 流式保真 | 逐片保存 SSE 数据流，回放时按原始时序还原 |
+| 流式保真 | 逐片保存 SSE 数据流；回放按原始分片顺序交付字节，不做限速或时序重放 |
 | 录制格式 | `LLM_PROXY_V3` 紧凑 prelude + 原始 HTTP 字节；继续兼容读取 V2 记录 |
 | Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、模型与服务商管理 |
 | 轨迹解析 | 把 cassette 解析成 Observation IR，产出危险工具调用、敏感数据等 findings |

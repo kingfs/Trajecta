@@ -37,7 +37,7 @@
 | `task auth:init-user` | `go run ./cmd/server auth init-user -c {{.CONFIG}} --username "$USER" --password "$PASSWORD"` |
 | `task auth:create-token` | `go run ./cmd/server auth create-token -c {{.CONFIG}} --username "$USER" --name "$NAME"` |
 | `task generate:ent` | `go generate ./ent/...` |
-| `task migrate:ent:sqlite NAME=x` | `ent/migrate/main.go --dialect sqlite --dir ent/migrations` + `update_hash.go`；Postgres 版为 `migrate:ent:postgres NAME=x DEV_URL=...`，写 `ent/postgres-migrations` |
+| `task migrate:ent:sqlite NAME=x` | `ent/migrate/main.go --dialect sqlite --dir ent/migrations` + `update_hash.go`；Postgres 版为 `migrate:ent:postgres NAME=x DEV_URL=...`，写 `ent/postgres-migrations`；两个方向的完整生成流程与提交要求见 [Ent Migration Workflow](../ent/migrate/README.md) |
 | `task docker:build` / `docker:up` | `scripts/docker-build-env.sh` + `docker build -t trajecta:local .`；`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d` |
 | `task clean` | `rm -f trajecta` |
 
@@ -68,7 +68,7 @@ task run
 - `task test:cover`：写 `coverage.out`。
 - `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`）。
 - `task lint:vet`：单独跑 `go vet ./...`，与 golangci-lint 互补。
-- `task test:codex-fixtures`：离线 Codex Responses fixture runner。
+- `task test:codex-fixtures`：离线 Codex Responses fixture runner；fixture 清单、覆盖范围与 runner 契约见 [Codex Responses fixtures](../tests/fixtures/codex/README.md)。
 
 所有测试都不应依赖真实 provider 网络或真实 API key。
 
