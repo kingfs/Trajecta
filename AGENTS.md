@@ -24,6 +24,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses` (subpackages `runtime`, `httpapi`, `chatclient`, `audit`, `functionexec`, `tools`, `protocol`, `codexfixtures`)
 - Postgres application migrations: `internal/appdbmigrate`
 - Monitor UI: `internal/monitor`
+- Session trajectory rebuild (ATIF-v1.8) from client-visible Responses cassettes, plus the offline official-model validator under `scripts/atif_*`: `internal/trajectory`
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
@@ -35,8 +36,10 @@ Structured state (trace index, sessions, channel/provider config, upstream targe
 - Production and the tracked default config use Postgres; the checked-in SQL migrations live in `ent/postgres-migrations/`.
 - SQLite is a local/dev/test fallback only, with default file `{{output_dir}}/trajecta.sqlite3`; SQLite schema is applied at startup rather than by versioned migrations.
 - Raw `.http` cassettes remain the source of truth for replay and detail views; the database is a derived index for lists, filters, and aggregates.
-- YAML channel configuration is a first-bootstrap input only. The first database write stores the application-database `app_settings` key `channels.initialized`; afterwards the database owns routing configuration even when every channel was disabled or deleted. `GET /api/settings/channels` reports the marker and `DELETE /api/settings/channels` clears it, which only re-opens the YAML bootstrap while the database still has no channels. A YAML config with an explicit `credentials` list stays YAML-managed and rejects Monitor channel/model/alias writes with 409.
-- All management writes (channels, models, aliases, provider setup and probe apply) run in one `store.ConfigurationTransaction`, which holds the process-wide configuration lock, the upstream write lock, and one SQL transaction; runtime routing is published only after the commit succeeds. Background upstream refresh persists through the same upstream write lock on a best-effort basis.
+- YAML channel configuration is a first-bootstrap input only. The first database write stores the application-database `app_settings` key `channels.initialized`; afterwards the database owns routing configuration even when every channel was disabled or deleted, and `GET /api/settings/channels` reports `channel.Service.HasConfiguration()` — the marker or any stored channel row. A YAML config with an explicit `credentials` list stays YAML-managed and rejects Monitor channel/model/alias writes with 409.
+- Management writes (channels, models, aliases, provider setup, probe apply) must go through one `store.ConfigurationTransaction`; runtime routing is published only after the commit succeeds, and background upstream refresh persists best-effort through the same upstream write lock.
+
+Lock ordering, transaction scope, and marker reset semantics are owned by `docs/ARCHITECTURE.md:108-137` (sections `## 存储边界`, `## 并发与一致性`).
 
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing; it does not currently translate requests between OpenAI, Anthropic, Gemini, and Vertex protocol families in the forwarding hot path.
@@ -44,22 +47,12 @@ The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions
 
 ## Record File Format
 
-New recordings use `LLM_PROXY_V3`:
+The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格式`). Binding invariants:
 
-1. a short prelude starting with `# trajecta/v3`
-2. one `# meta: {...}` JSON line
-3. zero or more `# event: {...}` JSON lines
-4. one blank line
-5. raw HTTP request bytes
-6. one separator newline
-7. raw HTTP response bytes
-
-Compatibility note:
-
+- writers emit V3 only, unless a migration task explicitly says otherwise
 - readers must continue to support legacy `LLM_PROXY_V2` files with a fixed 2KB JSON header block
 - readers must also treat the pre-rename prelude magic `# llm-tracelab/v3` as V3; writers only emit `# trajecta/v3`
-- the `LLM_PROXY_V3` meta-header `version` value is a stable format identifier and is deliberately not renamed
-- writers should only emit V3 unless a migration task explicitly says otherwise
+- `LLM_PROXY_V3` stays the stable format identifier for the meta-header `version` value and is deliberately not renamed
 
 ## Engineering Constraints
 
@@ -78,6 +71,8 @@ Compatibility note:
 - Short check: `task check:quick`
 - Full check: `task check:full`
 - Race tests: `task test:race`
+- ATIF-v1.8 export and offline official-model validator: `task test:atif`
+- ATIF-v1.8 JSONL validation with the pinned Harbor models (install `scripts/atif-requirements.txt` first): `task atif:validate`
 - Benchmarks: `task bench:core`
 - Build backend only: `task build:go`
 - Build everything: `task build`
@@ -93,10 +88,13 @@ Compatibility note:
 
 ## Documentation Targets
 
-All documentation under `docs/` is written in Chinese and describes current code facts only. Plans, roadmaps, phase designs, and archives are not kept in this repository.
+All files under `docs/` are written in Chinese and describe current code facts only; the sole exception is the upstream schema snapshots `docs/protocol-reference/upstream/*/schema-index-*.md`, which are English. The repository-level process documents `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md` are English, and `README.md` (Chinese) must stay in sync with `README_EN.md`. Plans, roadmaps, phase designs, and archives are not kept in this repository.
 
-- `README.md` and `README_EN.md`: human-facing overview and quick start
+- `README.md` and `README_EN.md`: human-facing overview, quick start and capability table; keep them short landing pages and link out to `docs/` for detail
 - `AGENTS.md`: AI-oriented project map and invariants
+- `CHANGELOG.md`: release history in Keep a Changelog format, newest release first
+- `CONTRIBUTING.md`: contribution workflow, verification commands to run before a pull request, and the hard engineering constraints
+- `SECURITY.md`: how to report a vulnerability, plus the operator notes about cassettes, secrets and exposed ports
 - `docs/README.md`: 中文文档总入口，列出事实源文档、操作指南、开发文档与协议参考
 - `docs/IMPLEMENTATION_STATUS.md`: 当前已实现与未实现能力的事实基线
 - `docs/ARCHITECTURE.md`: 代码地图、数据流、存储边界、并发一致性与测试基线

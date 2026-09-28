@@ -34,8 +34,8 @@ Raw cassette (.http, LLM_PROXY_V3)
   ```
 
   生成后必须复核 SQL，并同时提交迁移文件与 `atlas.sum`；已提交或在共享环境应用过的迁移文件不要手改。`task migrate:ent:postgres NAME=... DEV_URL=...` 是同一流程的封装。
-- SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
-- SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库。
+- SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库（`config.ResolveDefaultSQLitePath`）；需要把旧库文件批量改名到新名字时用 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh)（详见“从 `llm-tracelab` 升级已有部署”）。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
+- SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库（`db migrate status --check-db` 的只读报告语义见[实现状态](./IMPLEMENTATION_STATUS.md)）。
 - `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
 
 ## 命令归属（哪个命令负责迁移、哪个负责 serve、auto_migrate 语义）
@@ -66,6 +66,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `auth migrate down` 在 Postgres 下被阻止（`ErrPostgresAuthRollbackUnsupported`），以 usage 错误码退出（CLI 退出码 `3`）：auth 命令不能回滚应用表。生产回滚同样依赖备份或经过评审的应用迁移方案。
 - `auth migrate status --check-db` 是只读检查：Postgres 读共享 `schema_migrations` 并检查 `users`、`api_tokens` 是否存在；SQLite 读配置的 auth 迁移表并检查同样两张表。不带 `--check-db` 时只报告配置。
 - 用户与令牌运维命令：`auth init-user --username <u> --password <p>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 默认 `auth.DefaultTokenScope`，`--ttl 0` 表示不过期）。
+- 预览类 flag：`auth migrate up` / `auth migrate down` 支持 `--step N` 与 `--dry-run`，其中 `--all` 只属于 `auth migrate down`（回滚全部迁移）；`auth init-user`、`auth reset-password`、`auth create-token` 都支持 `--dry-run`，只报告将要执行的操作而不写库。
 
 ## 生产部署（默认拓扑、必需环境变量、迁移与首个用户创建）
 
@@ -75,6 +76,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`trajecta` 通过 `depends_on` 等待其 healthcheck 通过。
 - `searxng`：可选 hosted `web_search` provider 容器，只在 Compose `search` profile 下启动。
 - 卷：`trajecta-data` 挂到 `/app/data`（cassette 与 SQLite fallback 都在这里），另有 `postgres-data`、`searxng-data`。
+- 镜像自身声明 `VOLUME ["/app/config", "/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；宿主端口由 compose 的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 映射。
 
 compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
 
@@ -91,6 +93,8 @@ docker compose up -d
 - `TRAJECTA_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，本地默认值由 compose 注入。
 - Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；宿主端口由 `TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`、`TRAJECTA_POSTGRES_PORT` 控制。
 - 首个 provider 可选：设置 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL` 与 `TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY` 可导入一个 OpenAI 兼容 provider；两者留空也合法，登录后在 Monitor Web 配置 provider、凭据与模型。legacy `TRAJECTA_UPSTREAM_*` 仍支持单 upstream 迁移，新部署应使用 Web 管理的 provider 数据库。
+- 配置文件路径由 `TRAJECTA_CONFIG` 决定（CLI 的 viper 实例使用 `TRAJECTA` 前缀并开启 `AutomaticEnv`，`cmd/server/root.go`）；镜像 `Dockerfile` 与 compose 都把它设为 `/app/config/config.yaml`，未设置且未传 `-c` 时回退到 `config.yaml`。
+- 输出目录：`TRAJECTA_OUTPUT_DIR` 同时覆盖 `debug.output_dir` 与 `trace.output_dir`，`TRAJECTA_TRACE_OUTPUT_DIR` 只覆盖 `trace.output_dir` 且在两者都设置时后者生效（`internal/config/config.go`）；镜像把两者都设为 `/app/data/traces`，compose 同样注入。
 
 迁移与首个用户（手动等价路径）：
 
@@ -120,6 +124,7 @@ docker compose --profile search up -d
 
 - hosted `web_search` 工具默认启用（compose 中 `TRAJECTA_TOOLS_WEB_SEARCH_ENABLED` 默认 `true`，`config/config.yaml` 中 `tools.web_search.enabled: true`）；`search` profile 只决定 searxng 容器是否运行。
 - 应用读取 `tools.web_search.provider=searxng` 与 `tools.web_search.base_url=http://searxng:8080`。`web_search` 与 `web_search_preview` 只有在 provider 已启用且就绪时才在服务端执行；不支持的 hosted tool 会被拒绝并写入审计。
+- SearXNG 容器自身读取 `SEARXNG_BASE_URL`（compose 默认 `http://localhost:8088/`，注入容器的 `BASE_URL`）与 `SEARXNG_INSTANCE_NAME`（默认 `trajecta-searxng`，注入 `INSTANCE_NAME`），其宿主端口由 `SEARXNG_PORT`（默认 `8088`，映射容器 `8080`）控制；三个变量都在 `.env.example` 中列出。
 - MCP server 通过 `tools.mcp` 配置；工具面见 [MCP 指南](./MCP_GUIDE.md)。
 
 ## 派生数据与重算（哪些从 cassette 重算，哪些是持久化状态）
@@ -164,7 +169,7 @@ trajecta db summary rebuild sessions [--session-id <id>]
 
 ## 数据体积与归档策略
 
-- raw body 不复制进 `semantic_nodes`：该表存 text preview、必要 JSON 与 `raw_ref`；大 blob 留在 cassette 或 sidecar，多模态数据只索引 metadata。
+- raw body 不复制进 `semantic_nodes`：该表存 text preview、必要 JSON 与按文本记录的 `raw_ref`，没有独立的 blob 或 sidecar 存储；原始字节只保留在 cassette，多模态数据只索引 metadata。
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
 - SQLite fallback DB 默认位于输出目录内，备份时应把 SQLite DB 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
@@ -193,14 +198,15 @@ trajecta db summary rebuild sessions [--session-id <id>]
 
 ## 运维检查清单
 
+部署自检只列容器内的部署特定入口：
+
 ```bash
 docker compose run --rm trajecta -c /app/config/config.yaml config inspect
-docker compose run --rm trajecta -c /app/config/config.yaml db migrate status --check-db
-docker compose run --rm trajecta -c /app/config/config.yaml auth migrate status --check-db
 docker compose run --rm trajecta -c /app/config/config.yaml doctor --check-db
 ```
 
 - `doctor --probe-providers` 会显式发起网络探测；默认检查保持保守，不应静默访问 upstream provider。
+- `db migrate status --check-db`、`auth migrate status --check-db`、`db migrate optimize-indexes`、`analyze backfill-exchanges` 与基线采集脚本等 Postgres 只读运维入口由 [Postgres 运维](./POSTGRES_OPERATIONS.md) 维护，本文不重复。
 - 升级流程：先对目标库执行 `db migrate up`，记录 build 与迁移版本，再 `serve`；不要用 `client.Schema.Create` 作为生产发布手段（没有版本历史与回滚路径）。
-- 生产运维应把 Postgres auth 命名空间视作与应用共享；需要核对时只用 `auth migrate status --check-db` 做只读检查。
+- 生产运维应把 Postgres auth 命名空间视作与应用共享；只读核对入口同样见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 - 相关文档：[架构总览](./ARCHITECTURE.md)、[观测与审计](./OBSERVATION_AND_AUDIT.md)、[Responses 运行时](./RESPONSES_RUNTIME.md)、[Monitor 指南](./MONITOR_GUIDE.md)、[MCP 指南](./MCP_GUIDE.md)、[代理使用示例](./PROXY_USAGE_EXAMPLES.md)、[开发指南](./DEVELOPMENT.md)、[实现状态](./IMPLEMENTATION_STATUS.md)、[协议参考](./protocol-reference/README.md)。

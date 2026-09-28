@@ -63,7 +63,7 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 
 ## 工具概览
 
-`internal/mcpserver/server.go` 当前通过 `mcp.AddTool` 注册 **21** 个工具。按用途分组如下。
+`internal/mcpserver/server.go` 当前通过 `mcp.AddTool` 注册 **21** 个工具，本文档是这份工具面的权威清单。按用途分组如下。
 
 ### Trace、Session 与 Upstream
 
@@ -74,7 +74,7 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 
 ### 路由与失败
 
-- `query_routing_decisions`：返回单条 trace 的路由决策事件，含 candidates、selected upstream、outcome 与 failure reason。
+- `query_routing_decisions`：单条 trace 的路由决策事件；路由语义与候选过滤规则见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)。
 - `query_sticky_routing`：查带 `routing.sticky.*` cassette 事件的 trace；支持 `status`（`hit`、`miss`、`bind`、`break`）、`upstream_id`、`previous_upstream_id`、`sticky_key_fingerprint`。
 - `query_failures`：从分页 trace 扫描中返回失败请求；过滤项是 `page`、`page_size`、`provider`、`model`、`q`。
 - `summarize_failure_clusters`：按 reason、status、model、provider、endpoint、upstream、route target 聚类失败，并给出 top failures；`limit` 控制每组条数（默认 10）。
@@ -99,14 +99,27 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 - `responses_audit_trace`：按 `response_id` 或 `request_audit_id` 返回 Responses request audit、execution events 与 upstream exchange 摘要。
 - `responses_audit_tool_calls`：列出持久化的 Responses tool-call audit 记录；支持 `response_id`、`request_audit_id`、`conversation_id`、`call_id`、`tool_name`、`status`、`limit`（默认 100，上限 500）。仅当 `include_payloads=true` 时返回 raw `input_json`、`output_json`、`metadata_json`。
 
+audit 表与查询语义（`internal/responses/audit.QueryService`）见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
+
 ### 重分析
 
 - `reanalyze_trace`：对单条 trace 运行或入队受控重分析；`reparse`、`scan` 默认 true，`repair_usage` 可先修 indexed usage，`async` 决定是否立即执行。
-- `reanalyze_session`：对 session 内 traces 运行或入队重分析；`async` 默认 true。
+- `reanalyze_session`：对 session 内 traces 运行重分析；`async` 的 Go 字段是布尔零值 `false`，所以不传时同步执行并返回重分析结果，只有显式传 `async: true` 才入队并返回 job。
 - `list_analysis_jobs`：列出重分析 job；支持 `status`、`target_type`（`trace`、`session`、`batch`）、`target_id`、`limit`（默认 50）。
 - `get_analysis_job`：按 `job_id` 取单个重分析 job。
 
 重分析只读本地 cassette 并写 application DB 派生状态（生产为 Postgres，本地 fallback 为 SQLite），生成可审计的 `analysis_jobs`，不访问上游模型。
+
+常用参数与默认值（以 `internal/mcpserver/server.go` 为准）：
+
+| 工具 | 参数与默认值 |
+| --- | --- |
+| `list_traces`、`list_sessions` | `page` 默认 1；`page_size` 默认 50，上限 200。 |
+| `query_sticky_routing`、`list_system_events`、`summarize_failure_clusters` | 接受 `page` / `page_size`（`page_size` 默认 50，上限 200）。 |
+| `summarize_failure_clusters` | `limit` 默认 10；除 reason、status、model、provider、endpoint、upstream 与 route target 外，也按 channel 和 credential 分组。 |
+| `summarize_system_events` | `status` 默认 `unread`，并返回最新 5 条事件。 |
+| `query_unread_system_events` | `limit` 默认 20、上限 200；`min_severity` 默认 `warning`。 |
+| `reanalyze_session` | `reparse`、`scan` 默认 true；`async` 默认 false（同步执行）。 |
 
 ## Codex 本地配置示例
 
@@ -157,7 +170,7 @@ CODEX_HOME="$PWD/.codex" codex mcp add trajecta-remote \
 
 ## 设计约束
 
-- MCP handler 在进程内复用 Monitor HTTP API（通过 `httptest` 直接调用同一个 mux），不为 MCP 建立第二套查询语义。
+- MCP handler 在进程内复用 Monitor HTTP API 的 handler 语义：`mcpserver.New` 自己新建 `http.NewServeMux()`，并用 `monitor.RegisterRoutes(..., monitor.RouteOptions{Router: opts.Router})` 注册一套只带 Router 的路由，工具查询经进程内 `httptest.NewRequest` + `NewRecorder` 打到这套路由。它不是 management mux，注册时也没有 auth/channel service，但不为 MCP 建立第二套查询语义。
 - 只读工具不改变 replay 行为或 raw cassette。
 - 重分析工具必须生成可审计的 `analysis_jobs`。
 - 不通过 MCP 暴露 raw secret；`responses_audit_tool_calls` 的 payload 也默认不返回。

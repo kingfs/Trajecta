@@ -44,6 +44,13 @@ tasks:
       - bun install --frozen-lockfile
       - bun run test:ui:real
 
+  ui:screenshots:
+    desc: Regenerate the README screenshots (images/ and images/en/) from the fixture server
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bunx playwright test --config playwright.screenshots.config.js
+
   generate:ent:
     desc: Generate ent control-plane DAO code
     cmds:

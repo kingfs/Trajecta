@@ -19,6 +19,8 @@
 | `task test:race` | `go test -race ./...` |
 | `task test:cover` | `go test -coverprofile=coverage.out ./...` |
 | `task test:e2e` | `go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest` |
+| `task atif:validate` | `python3 scripts/validate_atif.py {{.CLI_ARGS}}`（需先安装 `scripts/atif-requirements.txt`） |
+| `task test:atif` | `go test ./internal/trajectory ./internal/monitor` + `python3 -m unittest discover -s scripts/atif_tests` |
 | `task test:codex-fixtures` | `env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1` |
 | `task bench` | `go test -bench=. -benchmem ./...` |
 | `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay` |
@@ -123,23 +125,8 @@ task auth:create-token USER=admin NAME=local
 - `task auth:create-token`：为 `USER` 创建名为 `NAME` 的 API token（底层 `auth create-token --username --name`，还支持 `--scope`、`--ttl`）。
 - Postgres 使用 `ent/postgres-migrations` 的版本化 SQL migration；在 `database.auto_migrate: false` 的生产路径下必须先执行 `db migrate up`，否则启动会报出缺失 migration / table 的错误。Postgres 下 auth 表由应用 migration 集合一并创建。
 - SQLite 是本地 / 开发 / 测试回退，schema 在启动时应用而非版本化迁移，默认文件为 `{{output_dir}}/trajecta.sqlite3`。
-运维与只读检查入口如下（详见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)）：
 
-```bash
-trajecta -c config/config.yaml db migrate status --check-db
-trajecta -c config/config.yaml db migrate optimize-indexes --dry-run
-trajecta -c config/config.yaml db summary rebuild sessions --dry-run
-trajecta -c config/config.yaml db summary rebuild sessions --session-id <session_id>
-trajecta -c config/config.yaml auth migrate status --check-db
-trajecta -c config/config.yaml analyze backfill-exchanges --dry-run
-TRAJECTA_DATABASE_DSN='postgres://...' scripts/postgres-baseline.sh /tmp/trajecta-postgres-baseline.txt
-```
-
-- `db migrate status --check-db` 与 `auth migrate status --check-db` 从数据库读取状态；不带 `--check-db` 时只看配置。
-- `db migrate optimize-indexes --dry-run` 预览非事务 PostgreSQL concurrent index 优化语句，确认后去掉 `--dry-run` 执行。
-- `db summary rebuild sessions` 不带 `--session-id` 时重建全部 `session_summaries`，`--dry-run` 只统计不写库。
-- `analyze backfill-exchanges --dry-run` 只报告 exchange metadata 回填情况，不改 DB、不重写 `.http` cassette。
-- `database.use_session_summary_read: true` 或 `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true` 才让服务读取 `session_summaries`，默认关闭。
+本地开发只需要上面的 `task migrate:db:up` / `task auth:init-user` / `task auth:create-token`。Postgres 迁移状态核对、并发索引优化、exchange backfill、`session_summaries` 灰度读开关（`database.use_session_summary_read` / `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）与基线采集脚本等只读运维入口见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)；迁移命令归属、SQLite/Postgres schema 策略与派生数据重算入口见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
 
 ## 本地密钥命令
 
@@ -222,19 +209,27 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 
 `.github/workflows/ci.yml` 的 `build` job（push 到 `main`、`v*` tag、以及指向 `main` 的 PR）在 `ubuntu-latest` 上依次执行：
 
-1. checkout，`oven-sh/setup-bun@v2`（bun `1.3.11`），`actions/setup-go@v5`（Go `1.25.x`，开启 module cache），`go mod download`。
-2. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`，再执行 `bun run build` 构建 Monitor UI。
-3. `go build -v -o trajecta ./cmd/server`。
-4. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
-5. `go vet ./...`。
-6. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.11.4`。
-7. `go test -v ./...`。
-8. 在 `web/monitor-ui` 依次执行 `bunx playwright install --with-deps chromium`、`bun run test:ui`（mock 套件）、`bun run test:ui:real`（真实 Go Monitor fixture 套件）。
-9. 上传构建产物 `trajecta-linux-amd64`。
+1. `actions/checkout@v4`。
+2. `oven-sh/setup-bun@v2`（bun `1.3.11`）。
+3. `actions/setup-go@v5`（Go `1.25.x`，开启 module cache）。
+4. `go mod download`。
+5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
+6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
+7. `go build -v -o trajecta ./cmd/server`。
+8. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
+9. `go vet ./...`。
+10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.11.4`。
+11. `go test -v ./...`。
+12. `actions/setup-python@v5`（Python `3.12`）。
+13. ATIF v1.8 校验：`python -m pip install -r scripts/atif-requirements.txt`、`python -m unittest discover -s scripts/atif_tests`、`ATIF_TEST_OUTPUT_DIR="$RUNNER_TEMP" go test ./internal/trajectory -run TestBuildCumulativeHistoryAndHumanCorrection -count=1`、`python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"`。
+14. 在 `web/monitor-ui` 执行 `bunx playwright install --with-deps chromium`。
+15. 在 `web/monitor-ui` 执行 `bun run test:ui`（mock 套件）。
+16. 在 `web/monitor-ui` 执行 `bun run test:ui:real`（真实 Go Monitor fixture 套件）。
+17. `actions/upload-artifact@v4` 上传构建产物 `trajecta-linux-amd64`。
 
 另有 `docker` job，仅在 push 事件运行、依赖 `build` job：登录 Docker Hub 后构建并推送 `linux/amd64` 与 `linux/arm64` 多架构镜像，tag 由 `docker/metadata-action` 生成（`latest`、`sha`、版本 tag），并启用 gha 构建缓存。
 
-CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，而 `task fmt:check` 只覆盖 `./cmd ./internal ./pkg ./unittest`；CI 跑 `go test -v ./...` 而不跑 `test:race`、`test:e2e` 和 `bench`。
+CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，而 `task fmt:check` 只覆盖 `./cmd ./internal ./pkg ./unittest`；CI 跑 `go test -v ./...` 而不跑 `test:race`、`test:e2e` 和 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
 
 ## 给 AI Agent 的默认选择
 
@@ -251,13 +246,23 @@ CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/
 
 ## ATIF v1.8 校验
 
-会话导出使用 ATIF-v1.8。仓库提供固定版本 Harbor 官方模型及离线校验入口，安装依赖后执行：
+会话导出使用 ATIF-v1.8。仓库提供固定版本 Harbor 官方模型及离线校验入口，先安装依赖：
 
 ```sh
 python3 -m venv .venv-atif
 .venv-atif/bin/python -m pip install -r scripts/atif-requirements.txt
+```
+
+依赖安装后校验完全离线，两个 task 覆盖入口：
+
+- `task atif:validate -- <session.jsonl>`：调用 `python3 scripts/validate_atif.py`；支持多个 JSONL 文件，任一记录不符合模型约束或不是 v1.8 时返回非零状态。
+- `task test:atif`：`go test ./internal/trajectory ./internal/monitor` 加 `python3 -m unittest discover -s scripts/atif_tests`，覆盖 Go 侧会话重建与官方模型校验器两半。
+
+也可以直接调用虚拟环境里的脚本：
+
+```sh
 .venv-atif/bin/python scripts/validate_atif.py /tmp/session.jsonl
 .venv-atif/bin/python -m unittest discover -s scripts/atif_tests
 ```
 
-支持多个 JSONL 文件；任一记录不符合模型约束或不是 v1.8 时返回非零状态。模型来源、schema 生成与真实 cassette 回归方式见 [trajectory 包说明](../internal/trajectory/README.md)。校验只证明格式与模型约束，不证明 HTTP 录制涵盖全部执行过程。
+模型来源、schema 生成与真实 cassette 回归方式见 [trajectory 包说明](../internal/trajectory/README.md)。校验只证明格式与模型约束，不证明 HTTP 录制涵盖全部执行过程。

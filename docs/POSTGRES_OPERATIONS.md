@@ -46,6 +46,8 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
 
 脚本读取 `TRAJECTA_DATABASE_DSN`，回退 `DATABASE_URL` 或 libpq `PG*` 变量；`BASELINE_WINDOW` 默认 `7 days`。除下面明确标注的 reset 外，所有语句都只读。
 
+本节按脚本的覆盖范围贴出基线语句：表大小与 vacuum 各覆盖 12 张表，索引使用覆盖到 `trace_findings` 为止的 9 张表。脚本不包含的其它表见本节末尾的“扩展手查（脚本不覆盖的表）”，那部分需要手工执行。
+
 环境与扩展状态：
 
 ```sql
@@ -69,7 +71,7 @@ WHERE name IN (
 ORDER BY name;
 ```
 
-表大小：
+表大小（脚本覆盖 `logs`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings`、`request_audits`、`execution_events`、`upstream_exchanges` 共 12 张表）：
 
 ```sql
 SELECT
@@ -95,19 +97,12 @@ WHERE c.relkind = 'r'
     'trace_findings',
     'request_audits',
     'execution_events',
-    'upstream_exchanges',
-    'tool_call_audits',
-    'analysis_jobs',
-    'app_settings',
-    'channel_configs',
-    'channel_models',
-    'model_catalog',
-    'model_aliases'
+    'upstream_exchanges'
   )
 ORDER BY pg_total_relation_size(c.oid) DESC;
 ```
 
-vacuum 与 dead tuples：
+vacuum 与 dead tuples（与表大小相同的 12 张表）：
 
 ```sql
 SELECT
@@ -136,19 +131,12 @@ WHERE relname IN (
   'trace_findings',
   'request_audits',
   'execution_events',
-  'upstream_exchanges',
-  'tool_call_audits',
-  'analysis_jobs',
-  'app_settings',
-  'channel_configs',
-  'channel_models',
-  'model_catalog',
-  'model_aliases'
+  'upstream_exchanges'
 )
 ORDER BY n_dead_tup DESC;
 ```
 
-索引使用（`idx_scan` 长期为 0 且体积大的索引是候选清理对象）：
+索引使用（脚本覆盖 `logs`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings` 共 9 张表；`idx_scan` 长期为 0 且体积大的索引是候选清理对象）：
 
 ```sql
 SELECT
@@ -170,17 +158,7 @@ WHERE s.relname IN (
   'parse_jobs',
   'system_events',
   'analysis_runs',
-  'trace_findings',
-  'request_audits',
-  'execution_events',
-  'upstream_exchanges',
-  'tool_call_audits',
-  'analysis_jobs',
-  'app_settings',
-  'channel_configs',
-  'channel_models',
-  'model_catalog',
-  'model_aliases'
+  'trace_findings'
 )
 ORDER BY pg_relation_size(i.indexrelid) DESC, s.idx_scan ASC;
 ```
@@ -212,8 +190,8 @@ SELECT
   COUNT(*) AS total_logs,
   COUNT(*) FILTER (WHERE COALESCE(exchange_kind, '') IN ('', 'entry', 'proxy')) AS client_visible_logs,
   COUNT(DISTINCT session_id) FILTER (WHERE session_id <> '') AS sessions,
-  MIN(recorded_at) AS first_log_recorded_at,
-  MAX(recorded_at) AS last_log_recorded_at
+  MIN(recorded_at) AS first_recorded_at,
+  MAX(recorded_at) AS last_recorded_at
 FROM logs;
 ```
 
@@ -299,6 +277,93 @@ ORDER BY count DESC, newest DESC
 LIMIT 50;
 ```
 
+### 扩展手查（脚本不覆盖的表）
+
+`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句：
+
+表大小（脚本外）：
+
+```sql
+SELECT
+  n.nspname AS schema_name,
+  c.relname AS table_name,
+  c.reltuples::bigint AS estimated_rows,
+  pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+  pg_size_pretty(pg_relation_size(c.oid)) AS table_size,
+  pg_size_pretty(pg_indexes_size(c.oid)) AS indexes_size
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname = current_schema()
+  AND c.relname IN (
+    'tool_call_audits',
+    'analysis_jobs',
+    'app_settings',
+    'channel_configs',
+    'channel_models',
+    'model_catalog',
+    'model_aliases'
+  )
+ORDER BY pg_total_relation_size(c.oid) DESC;
+```
+
+vacuum 与 dead tuples（脚本外，表集合同上）：
+
+```sql
+SELECT
+  relname,
+  n_live_tup,
+  n_dead_tup,
+  ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2) AS dead_pct,
+  last_vacuum,
+  last_autovacuum,
+  last_analyze,
+  last_autoanalyze,
+  vacuum_count,
+  autovacuum_count,
+  analyze_count,
+  autoanalyze_count
+FROM pg_stat_user_tables
+WHERE relname IN (
+  'tool_call_audits',
+  'analysis_jobs',
+  'app_settings',
+  'channel_configs',
+  'channel_models',
+  'model_catalog',
+  'model_aliases'
+)
+ORDER BY n_dead_tup DESC;
+```
+
+索引使用（脚本外）：
+
+```sql
+SELECT
+  s.relname AS table_name,
+  s.indexrelname AS index_name,
+  s.idx_scan,
+  s.idx_tup_read,
+  s.idx_tup_fetch,
+  pg_size_pretty(pg_relation_size(i.indexrelid)) AS index_size,
+  pg_get_indexdef(i.indexrelid) AS index_def
+FROM pg_stat_user_indexes s
+JOIN pg_index i ON i.indexrelid = s.indexrelid
+WHERE s.relname IN (
+  'request_audits',
+  'execution_events',
+  'upstream_exchanges',
+  'tool_call_audits',
+  'analysis_jobs',
+  'app_settings',
+  'channel_configs',
+  'channel_models',
+  'model_catalog',
+  'model_aliases'
+)
+ORDER BY pg_relation_size(i.indexrelid) DESC, s.idx_scan ASC;
+```
+
 ## pg_stat_statements 基线与热点查询
 
 启用要求：实例需加载扩展；托管数据库若要求在参数组配置 `shared_preload_libraries = 'pg_stat_statements'`，需按平台流程滚动重启，不要在没有变更窗口时临时重启生产库。
@@ -381,14 +446,7 @@ Trajecta 热表优先级：
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。
 
-内置的安全入口是：
-
-```bash
-trajecta -c config/config.yaml db migrate optimize-indexes --dry-run
-trajecta -c config/config.yaml db migrate optimize-indexes
-```
-
-该命令逐条执行非事务的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，当前只覆盖 `logs` 热点查询，创建以下 5 个索引：
+内置的安全入口是 `db migrate optimize-indexes`（`--dry-run` 只预览不执行），命令归属与通用行为见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。该命令要求非空 Postgres DSN，逐条执行非事务的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`；SQLite 不适用，此时返回 `ErrSQLiteUsesStoreInit`（`internal/appdbmigrate/migrate.go` 的 `OptimizeIndexes`）。当前它只覆盖 `logs` 热点查询，创建以下 5 个索引：
 
 ```text
 tracelog_recent_client_visible_idx              最新 logs 与分页 trace list（recorded_at DESC, trace_id DESC）
@@ -490,10 +548,19 @@ ORDER BY MAX(s.recorded_at) DESC
 LIMIT 50 OFFSET 0;
 ```
 
-Session 当前页聚合阶段（把 `VALUES` 中的 session id 替换成上一条返回值）：
+Session 当前页聚合阶段（与脚本一致：用 `page_sessions` CTE 复用上一条的 session id 阶段；手工排障时可把 CTE 换成 `VALUES` 列表）：
 
 ```sql
 EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
+WITH page_sessions AS (
+  SELECT s.session_id
+  FROM logs s
+  WHERE s.session_id <> ''
+    AND COALESCE(s.exchange_kind, '') IN ('', 'entry', 'proxy')
+  GROUP BY s.session_id
+  ORDER BY MAX(s.recorded_at) DESC
+  LIMIT 50 OFFSET 0
+)
 SELECT
   s.session_id,
   COUNT(*) AS request_count,
@@ -504,11 +571,8 @@ SELECT
   SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END) AS total_tokens,
   AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END) AS avg_ttft
 FROM logs s
-WHERE s.session_id IN (
-  SELECT session_id
-  FROM (VALUES ('REPLACE_WITH_SESSION_ID_1'), ('REPLACE_WITH_SESSION_ID_2')) AS v(session_id)
-)
-  AND s.session_id <> ''
+JOIN page_sessions p ON p.session_id = s.session_id
+WHERE s.session_id <> ''
   AND COALESCE(s.exchange_kind, '') IN ('', 'entry', 'proxy')
 GROUP BY s.session_id;
 ```
@@ -591,15 +655,7 @@ session_summaries
 
 索引为 `session_summaries_last_seen (last_seen DESC, session_id DESC)` 与 `session_summaries_last_model (last_model)`。
 
-重建入口：
-
-```bash
-trajecta -c config/config.yaml db summary rebuild sessions --dry-run
-trajecta -c config/config.yaml db summary rebuild sessions
-trajecta -c config/config.yaml db summary rebuild sessions --session-id <session_id>
-```
-
-`--dry-run` 只读统计将重建的 session 数量，不更新表；不带 `--session-id` 会全量删除并重建 `session_summaries`。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护，当前没有等价的 CLI 重建入口。
+重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/store.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
 
 语义要点（用于一致性对比）：
 
@@ -636,14 +692,9 @@ LIMIT 20;
 
 ## Backfill 与灰度读
 
-现有回填入口只补齐 `upstream_exchanges` 的 exchange metadata 索引。实际写入的列是 `response_id`、`request_audit_id`、`trace_id`、`exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；`cassette_path`、`model`、`endpoint` 只是定位并读取对应 raw `.http` cassette 的输入，不会被回写。回填绝不重写 cassette：
+现有回填入口只有 `analyze backfill-exchanges`（`--dry-run` 只报告 scanned、冲突和分类计数，不更新 DB），命令语义与完整命令清单见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。它只补齐 `upstream_exchanges` 的 exchange metadata 索引：实际写入的列是 `response_id`、`request_audit_id`、`trace_id`、`exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；`cassette_path`、`model`、`endpoint` 只是定位并读取对应 raw `.http` cassette 的输入，不会被回写。回填绝不重写 cassette。
 
-```bash
-trajecta -c config/config.yaml analyze backfill-exchanges --dry-run
-trajecta -c config/config.yaml analyze backfill-exchanges
-```
-
-`--dry-run` 只报告 scanned、冲突和分类计数，不更新 DB。运行时建议限制锁等待与语句时间：
+运行时建议限制锁等待与语句时间：
 
 ```sql
 SET lock_timeout = '2s';
@@ -675,32 +726,16 @@ LIMIT 1000;
 
 ## 分区与归档
 
-只有出现以下长期信号时才启动分区/归档：`logs`、`execution_events`、`upstream_exchanges`、`tool_call_audits` 等 append-heavy 表持续增长，单表和索引膨胀影响 vacuum 或备份窗口；热查询几乎都按时间窗口读取；删除或搬迁历史数据造成长事务、锁等待或大量 dead tuples；备份恢复时间目标要求缩小热数据集。
+当前事实：`ent/postgres-migrations/*.up.sql` 里没有任何 `PARTITION` 语句，`logs`、`trace_observations`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`system_events` 等都是普通表；`internal/appdbmigrate` 只实现迁移（up/status，`db migrate down` 明确不支持）与并发索引优化，不包含分区或归档逻辑。
 
-候选表与分区键：
+代码里也没有按时间删除、搬迁或导出历史行的 retention/archive job。`internal/store` 中可验证的删除路径全部是派生数据重建，不删除 raw `.http` cassette：
 
-- `logs`：按 `recorded_at` 月/周分区。
-- `request_audits`：按 `created_at` 月/周分区。
-- `execution_events`：按 `occurred_at` 月/周分区。
-- `upstream_exchanges`：按 `started_at` 月/周分区。
-- `tool_call_audits`：按 `created_at` 月/周分区。
-- `system_events` 按 fingerprint 合并更新，不是纯 append-only，通常不优先分区。
+- `RebuildSessionSummaries` / `RebuildSessionSummary`：删除并按 `logs` 重建 `session_summaries`。
+- `RebuildOverviewMetricBuckets`：删除并按 `logs` 重建 `overview_metric_buckets` / `overview_metric_bucket_members`（当前无 CLI 调用者）。
+- `SaveObservation`：按 `trace_id` 删除并重写 `semantic_nodes`；`SaveFindings`：按 `trace_id` 删除并重写 `trace_findings`。
+- `Store.Reset` + `Store.Rebuild`（顶层 `migrate --rebuild-index`）：清空并重新扫描重建 `logs` 索引。
 
-设计要求：
-
-- 分区键必须出现在热查询过滤条件中。
-- 唯一约束需满足 Postgres 分区规则，不能破坏现有 primary key 和 replay 查找。
-- 应用查询必须继续支持跨分区读取。
-- 归档不能删除 raw `.http` cassette，除非另有明确的数据保留策略和 replay 兼容方案。
-- 分区迁移单独设计，不夹在普通 schema migration 里顺手完成。
-
-归档分层：
-
-- Hot：最近 30 到 90 天，完整索引，支持 Monitor 高频查询。
-- Warm：保留 Postgres 分区，降低索引数量，只支持低频查询。
-- Cold：导出到对象存储或归档库，Postgres 仅保留最小定位 metadata。
-
-归档前必须明确：用户是否还能在 Monitor 查询历史 trace；replay 是否仍可从 `.http` cassette 工作；MCP 是否需要访问历史 metadata；恢复一个归档窗口需要多久。
+因此表分区与归档 job 在本仓库代码中未实现。若确需分区，属于 DBA 侧手工操作（自行建分区表、迁移数据并调整查询），应用侧没有配套的分区维护或归档代码；任何此类操作都必须自行保证 `.http` cassette 仍是 replay 的事实源。
 
 ## 锁与长事务排查
 

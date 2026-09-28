@@ -155,7 +155,7 @@ Registry 默认顺序是 entry → openai → anthropic → gemini，取第一�
 
 ### Entry / 客户端可见交换
 
-`NewEntryParser` 只在 `ExchangeKind == "entry"` 时命中。它记录入口侧原始节点（`client_request`、`client_response`、`client_response_stream`，`NormalizedType=unknown`）；Responses SSE 走 Responses 流式解析。模型、operation、status、usage 与 exchange 元数据来自 cassette prelude 和请求体。
+`NewEntryParser` 在 `input.ExchangeKind == "entry"` 或 prelude `input.Header.Meta.ExchangeKind == "entry"` 时命中。它记录入口侧原始节点（`client_request`、`client_response`、`client_response_stream`，`NormalizedType=unknown`）；Responses SSE 走 Responses 流式解析。模型、operation、status、usage 与 exchange 元数据来自 cassette prelude 和请求体。
 
 ### OpenAI Chat Completions / Responses / Models
 
@@ -164,7 +164,7 @@ Registry 默认顺序是 entry → openai → anthropic → gemini，取第一�
 - Chat：请求 `messages[]`、`tools[]` 等；响应 `choices[].message`、`tool_calls`、`finish_reason`；流式处理 `delta.content`、`delta.reasoning_content`/`delta.reasoning`、`delta.tool_calls` 与最终 usage chunk。
 - Responses：请求 `input`/`instructions`；响应与流式事件覆盖 `message`、`reasoning`、`function_call`、`custom_tool_call`、`local_shell_call`、`apply_patch`、`web_search_call`、`file_search_call`、`computer_call`、`code_interpreter_call`、`mcp_call`，以及 `function_call_output`、`custom_tool_call_output`、`mcp_call_output`、`web_search_call_output`、`file_search_call_output`、`computer_call_output`、`code_interpreter_call_output`；`refusal` 与 `error` 也单独归一。`local_shell_call` 与 `apply_patch` 目前没有对应的 `*_output` 映射，未知 item 保留为 `unknown`。
 - 归一映射见 `normalizedResponsesType` 与 `normalizedContentType`：`input_text`/`output_text`/`text`→`text`，`input_image`/`image_url`→`image`，`input_file`/`file`→`file`，`reasoning`/`summary_text`/`reasoning_text`→`reasoning`，`refusal`→`refusal`。
-- Chat `finish_reason` 作为 `finish_reason` 节点承载并归一为 `safety`。
+- Chat `finish_reason` 只在取值 `content_filter` 时才额外生成一个 `ProviderType=finish_reason`、`NormalizedType=safety` 的节点并置 `Safety.Blocked`（流式与非流式各一处分支，见 `pkg/observe/openai.go`）；其它取值不生成 safety 节点：非流式写进 choice 节点的 `Metadata["finish_reason"]`，流式只用于判定流终止。
 
 ### Anthropic Messages
 
@@ -172,7 +172,7 @@ Registry 默认顺序是 entry → openai → anthropic → gemini，取第一�
 
 - 顶层 `system` 映射为 `instruction`；`messages[].content` 同时支持 string 与 content block array。
 - Content block 归一（`normalizedAnthropicType`）：`text`→`text`，`thinking`/`redacted_thinking`→`reasoning`，`tool_use`→`tool_call`，`tool_result`→`tool_result`，`server_tool_use`→`server_tool_call`，`web_search_tool_result`/`web_fetch_tool_result`/`code_execution_tool_result`/`bash_code_execution_tool_result`/`text_editor_code_execution_tool_result`/`tool_search_tool_result`→`server_tool_result`，`image`→`image`，`document`→`file`，`web_search_result`/`citation`→`citation`，`*_error`/`error`→`error`。
-- 流式事件：`message_start`、`content_block_start/delta/stop`、`message_delta`、`message_stop`、`error`；`content_block_delta` 识别 `text_delta`→`text`、`thinking_delta`→`reasoning`、`input_json_delta`→`tool_call_delta`，其它 delta 类型落入 `unknown`。
+- 流式事件：只有 `content_block_start`、`content_block_delta`、`message_delta`、`error` 有处理分支；`message_start`、`content_block_stop`、`message_stop` 等其它事件仍会作为 `StreamEvent` 追加，但归一类型为 `unknown`。`content_block_delta` 识别 `text_delta`→`text`、`thinking_delta`→`reasoning`、`input_json_delta`→`tool_call_delta`，其它 delta 类型落入 `unknown`。
 
 ### Google Gemini / Vertex
 
@@ -212,12 +212,13 @@ TraceID          string `json:"trace_id,omitempty"`
 
 索引落点（应用数据库）：
 
-- `logs` 与 `trace_observations`：cassette trace 索引与观测，均带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`。
-- `upstream_exchanges`：Responses server-mode 的 model exchange 明细，带同名 nullable 列。
+- `logs`：cassette trace 索引，带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`（`ent/schema/trace_log.go`，字符串列 `NOT NULL DEFAULT ''`，`sequence_index` 为 `NOT NULL DEFAULT 0`）。
+- `trace_observations`：观测 IR 索引，带 `exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；**没有** `exchange_id` 列（`ent/schema/trace_observation.go`、`ent/postgres-migrations/20260625123000_add_trace_observation_exchange_fields.up.sql`）。
+- `upstream_exchanges`：Responses server-mode 的 model exchange 明细，带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index` 这些同名 nullable 列（`ent/schema/upstream_exchange.go`）。
 - `request_audits`：entry/client_request 的根；读模型用 `syntheticEntryExchange` 合成 `exchange_id="entry:"+request_audit_id`、`exchange_kind=entry`、`exchange_role=client_request`、`sequence_index=0`。
 - `execution_events` 与 `tool_call_audits`：生命周期事件与工具调用审计。
 
-读取回退（`normalizeExchangeView`、`observeworker.applyExchangeFallbacks`）：缺失 kind 时按元数据与路径推断，仍无法判定时为 `model`；缺失 role 时 entry→`client_request`、model→`primary_model_call`；缺失 trace_id 时用 V3 `meta.request_id`。
+读取回退分布在两处，职责不同：`normalizeExchangeView`（`internal/responses/audit/query.go`）与 `observeworker.applyExchangeFallbacks`（`internal/observeworker/worker.go`）只处理 kind 与 role——缺失 kind 时按元数据与路径推断、仍无法判定时为 `model`；缺失 role 时 entry→`client_request`、model→`primary_model_call`。两者都不碰 `trace_id`；缺失 `trace_id` 时回退到 V3 `meta.request_id` 的行为在 Monitor 与 MCP 的 cassette loader 里（`internal/monitor/server.go` 的 `responsesEntryExchangeFromAudit`、`internal/mcpserver/responses_audit.go` 的 `responsesModelExchangeFromAudit`）。
 
 读模型 `internal/responses/audit.RequestAuditTrace` 返回 `EntryExchange`、`ModelExchanges`（`[]UpstreamExchangeView`，字段含 `exchange_id`/`exchange_kind`/`exchange_role`/`parent_exchange_id`/`sequence_index`/`trace_id`/`cassette_path`）、`UpstreamExchanges` 别名、`RawCassettes` 与 `Diagnostics`。MCP `responses_audit_trace` 输出 `entry_exchange`、`model_exchanges` 与带 kind 的 `raw_cassettes`，并保留 `upstream_exchanges` alias。详见 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md) 与 [MCP_GUIDE.md](./MCP_GUIDE.md)。
 
@@ -251,7 +252,7 @@ type Finding struct {
 - `provider_safety`：`provider_safety_block`（medium）、`model_refusal`（low）。
 - `tool_error`：`tool_result_error`（medium）。
 
-Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。检测按 exchange scope 过滤：entry observation 只跑 `credential`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind`、`exchange_role` 与 `exchange_scope`。
+Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。检测按 exchange scope 过滤：entry observation 只跑 `credential`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
 
 ## 检测器
 
@@ -280,7 +281,7 @@ type Detector interface {
 - `ReparseTrace` 重建 Observation IR 并保存；`RescanTrace` 只读已存观测重跑检测器；`RepairTraceUsage` 用 `llm.ResponsePipeline` 从响应体重抽 usage 并更新索引（仅 `RewriteCassette` 时重写 V3 prelude，不改变 raw payload）。
 - 结果携带 `RequestNodes`、`ResponseNodes`、`StreamEvents`、`FindingCount`、`CriticalFindings`、`HighFindings`，并写入 `analysis_jobs`。
 
-CLI（`cmd/server/analyze.go`、`cmd/server/audit.go`）：`analyze reparse`、`analyze scan`、`analyze repair-usage`、`analyze reanalyze`、`analyze batch`、`analyze refresh`、`analyze session`、`analyze backfill-exchanges`、`audit query`、`audit tool-calls`。
+CLI 入口（`cmd/server/analyze.go`）：`analyze reparse`、`analyze scan`、`analyze repair-usage`、`analyze reanalyze`、`analyze batch` 是 `Hidden: true` 的隐藏内部子命令（`analyze refresh`、`analyze session`、`analyze backfill-exchanges` 与 `audit query`、`audit tool-calls` 不隐藏）。完整命令清单由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 维护，这里只保留重分析相关入口。
 
 `analyze backfill-exchanges` 调用 `store.BackfillExchangeMetadata`，只更新 DB 索引、不重写 cassette，返回 `scanned`、`updated_model`、`updated_entry`、`legacy_or_unknown`、`missing_cassette`、`conflicts`、`dry_run`，并支持 `--dry-run`。
 
@@ -295,5 +296,5 @@ CLI（`cmd/server/analyze.go`、`cmd/server/audit.go`）：`analyze reparse`、`
 - 敏感信息只有 observe 模式，`redact_at_rest` 与 `inline_redact` 未实现。
 - 通用 `exchanges` 图表现未引入，exchange 关系仍由现有索引表的 nullable 字段表达。
 - `pkg/replay` 只回放单个 `.http`，不读取数据库，也不编排 entry 与多个 model cassette。
-- 旧 V2/V3 cassette 不被重写；缺失 taxonomy 只在读取与查询时推断。
+- 旧 V2 cassette 不被重写；V3 cassette 只在 `analyze repair-usage --rewrite-cassette`（或 `analyze batch --repair-usage --rewrite-cassette`）下重写 prelude 的 usage，raw payload 不变。缺失 taxonomy 只在读取与查询时推断。
 - auth 失败发生在入口 handler 外层时不产生 entry cassette。

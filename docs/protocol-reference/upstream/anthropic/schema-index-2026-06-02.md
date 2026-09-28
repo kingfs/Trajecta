@@ -15,6 +15,7 @@
 Current Trajecta parser coverage targets:
 
 - `/v1/messages` request bodies
+- `/v1/messages/count_tokens` request bodies
 - non-streaming Messages responses
 - streaming Messages events
 - content blocks including text, thinking/redacted thinking, tool use, and tool results

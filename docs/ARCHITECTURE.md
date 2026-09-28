@@ -39,6 +39,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/observeworker`：从 cassette 解析 Observation IR 并落库的后台 worker。
 - `internal/reanalysis`：trace/session/batch 重分析任务（service 与 worker）。
 - `internal/sessionanalysis`：session 级聚合分析。
+- `internal/trajectory`：从客户端可见的 Responses cassette 重建 ATIF-v1.8 会话轨迹（不调用模型、不修改 cassette）；`scripts/validate_atif.py` 与 `scripts/atif_tests` 用固定版本官方模型做离线格式校验。
 - `internal/providerprobe`：provider 能力探测。
 - `internal/evals`：基于 replay 的确定性 eval 基线执行（HTTP 状态、TTFT/token 预算、tool-call 校验等）。
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
@@ -68,7 +69,8 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 8. application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。
 9. observeworker 与 reanalysis 从 raw cassette 解析 Observation IR、findings 和分析任务结果。
 10. Monitor 与 MCP 从 application DB 查询列表/聚合，从 cassette 读取详情。
-11. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
+11. Monitor 的会话轨迹导出用 `internal/trajectory` 从该会话的客户端可见 cassette 重建 ATIF-v1.8 JSONL（不调用模型、不修改 cassette）。
+12. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
 
 Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`、`routing.selection`、`routing.filtered`、`routing.retry_candidate`、`routing.failure`）写入 cassette prelude，并被 Monitor/MCP 用于 trace 详情、路由排障和失败聚类。
 
@@ -130,9 +132,9 @@ application DB 是结构化查询源：
 - 只有 commit 成功后才发布新路由快照，运行中的快照绝不描述数据库拒绝的配置。
 - 事务内不得再开事务（会返回 `store.ErrNestedTransaction`），也不得新增 `reloadMu` -> `upstreamMu` 的反向获取。
 
-`ConfigurationTransaction` 是 `upstream_targets`/`upstream_models` 的唯一写入方，因此全程持有 upstream 写锁。后台刷新与代理侧 `RefreshNow` 只以 best-effort 方式获取该锁：配置变更持锁时跳过落库但仍更新内存，并在获锁后按当前 live target 集合过滤，避免为已删除的 target 复活行。
+`ConfigurationTransaction` 串行化 `upstream_targets`/`upstream_models` 的管理写入，这类写入全程持有进程级配置锁、upstream 写锁与单个 SQL 事务；后台 upstream refresh 与代理侧 `RefreshNow` 也会写入这两张表，但以 best-effort 方式通过同一 upstream 写锁落库：配置变更持锁时跳过落库但仍更新内存，并在获锁后按当前 live target 集合过滤，避免为已删除的 target 复活行。
 
-渠道配置的 DB 优先规则：YAML `upstream`/`upstreams` 只是首次 bootstrap 输入；首次数据库写入记录 `app_settings` 键 `channels.initialized`，此后 DB 是路由配置来源，即使全部渠道停用或删除也不回退 YAML。`GET /api/settings/channels` 报告该标记，`DELETE /api/settings/channels` 仅清除标记（只有在 DB 中确实没有渠道时，下次启动才会重新导入）。带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，并拒绝 Monitor 的渠道/模型/别名写入（返回 409）。
+渠道配置的 DB 优先规则：YAML `upstream`/`upstreams` 只是首次 bootstrap 输入；首次数据库写入记录 `app_settings` 键 `channels.initialized`，此后 DB 是路由配置来源，即使全部渠道停用或删除也不回退 YAML。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 仅清除标记（只有在 DB 中确实没有渠道时，下次启动才会重新导入）。带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，并拒绝 Monitor 的渠道/模型/别名写入（返回 409）。
 
 ## 事实源边界
 
@@ -148,7 +150,7 @@ application DB 是结构化查询源：
 - 新录制只写 V3；读取端继续支持 V2，cassette 保持人类可读。
 - `pkg/replay` 是硬性要求，且不能依赖网络或 Observation IR。
 - 存储 schema 只做 additive 演进；新列需通过启动时迁移兼容旧 DB（Postgres 走 `internal/appdbmigrate`，SQLite 走启动 schema）。
-- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认 `trajecta.sqlite3` 必须可原地升级。
+- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认 `trajecta.sqlite3` 必须可原地升级；当默认文件不存在而改名前的默认 `llm_tracelab.sqlite3` 存在时，直接原地沿用该旧文件而不是新建空库。
 - Observation parser 对 unknown fields 保持 tolerant；所有派生分析结果都必须能从 raw cassette 重算。
 
 ## 测试基线

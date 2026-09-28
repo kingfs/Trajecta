@@ -40,11 +40,19 @@ export TRAJECTA_TOKEN=llmtl_xxx
 | `/v1/chat/completions` | `/v1/chat/completions` | OpenAI-compatible Chat Completions |
 | `/v1/responses`、`/responses` | `/v1/responses` | OpenAI Responses / Codex |
 | `/v1/messages`、`/anthropic/messages`、`/anthropic/v1/messages` | `/v1/messages` | Anthropic Messages / Claude Code |
+| `/anthropic/messages/count_tokens`、`/anthropic/v1/messages/count_tokens` | `/v1/messages/count_tokens` | Anthropic token 计数 |
+| `/v1/tokenize` | `/tokenize` | vLLM 分词 |
+| `/v1/detokenize` | `/detokenize` | vLLM 反分词 |
 | `/v1/models` | `/v1/models` | 聚合的 OpenAI-compatible 模型列表 |
+| `/v1/models/{id}` | `/v1/models/{id}` | 单模型详情（从聚合列表合成，不转发上游） |
+| `/api/show`（Ollama） | `/api/show` | Ollama 模型详情（从聚合列表合成，不转发上游） |
+| `/v1/embeddings` | `/v1/embeddings` | 只被分类，不可路由：`pkg/llm.AdapterFor` 没有 embeddings adapter，路由判定的 `supportsPath` 因此永远返回 false |
 
-除 `/v1/responses`（见下文）以外，代理是协议感知的透传与录制，不在 OpenAI、Anthropic、Gemini、Vertex 之间做 schema 翻译：`/v1/messages` 只会路由到 Anthropic Messages 上游，不会退化成 `/v1/chat/completions`。
+入口归一化、各协议族的 endpoint 覆盖与 provider 能力要求的完整矩阵见 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md) 与 [协议参考](./protocol-reference/implemented-protocols.md)。
 
-请求里的 `model` 必须由至少一个已启用渠道提供，否则按 `router.fallback.on_missing_model`（默认 `reject`）被拒绝。
+代理是协议感知的透传与录制，`/v1/messages` 只会路由到 Anthropic Messages 上游，不会退化成 `/v1/chat/completions`；跨协议翻译的边界与非目标见 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md)。除 `/v1/responses` 的本地 Responses runtime 外没有其他特例，见下文。
+
+请求里的 `model` 必须由至少一个已启用渠道提供，否则请求被拒绝；缺失模型回退策略见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)。
 
 ## 查询模型
 
@@ -109,11 +117,9 @@ curl "${TRAJECTA_URL}/v1/responses" \
 同一个 endpoint 按**模型**在两个执行方式之间二选一，没有 YAML 开关：
 
 1. 原生 Responses 上游：模型声明了 Responses 能力时，请求透传给该上游的 `/v1/responses`。
-2. 本地 Responses runtime：模型只声明 chat completions 能力时，由本地 runtime 把请求编排成对上游 `/v1/chat/completions` 的调用。该执行方式始终可用；旧的 `responses_server.enabled` 字段和 `TRAJECTA_RESPONSES_ENABLED` 变量已被移除。
+2. 本地 Responses runtime：模型只声明 chat completions 能力时，由本地 runtime 把请求编排成对上游 `/v1/chat/completions` 的调用；该执行方式始终可用。
 
-判定按模型而不是按渠道：`channel_models.supports_responses` / `supports_chat_completions`（可在 Monitor 编辑）优先于渠道级 `api_type` / `capabilities`，未声明的模型回落到渠道级配置；YAML 中用 `upstream.model_capabilities` 表达同样的覆盖。
-
-默认策略 `auto`（与 `prefer_native` 行为相同）优先原生上游，没有原生路由时才回落到本地 runtime。要整体关闭本地翻译，在 Monitor 的 Routing 设置里把 `responses_strategy` 设为 `native_only`（可选值还有 `prefer_local_server`、`local_server_only`）；该值存在应用数据库的 `app_settings` 键 `routing.settings`，不是 YAML 键。更多执行细节见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
+要整体关闭本地翻译，在 Monitor 的 Routing 设置里把 `responses_strategy` 设为 `native_only`。按模型的能力判定、`responses_strategy` 的完整取值与配置来源见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md) 与 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)。
 
 ## Claude Code / Anthropic Messages
 

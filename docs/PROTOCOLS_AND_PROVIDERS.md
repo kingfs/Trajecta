@@ -23,8 +23,9 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 | `/v1/chat/completions` | `/v1/chat/completions` | OpenAI 兼容 SDK 与旧集成 | `openai_compatible` Chat Completions |
 | `/responses`、`/v1/responses` | `/v1/responses` | Codex 与 OpenAI Responses 客户端 | 匹配的原生 Responses 上游，或可承接本地 Responses runtime 的 Chat Completions 上游 |
 | `/anthropic/messages`、`/anthropic/v1/messages`、`/v1/messages` | `/v1/messages` | Claude Code 与 Anthropic SDK | `anthropic_messages` |
-| `/anthropic/messages/count_tokens`、`/anthropic/v1/messages/count_tokens` | `/v1/messages/count_tokens` | Anthropic token 计数客户端 | `anthropic_messages` |
-| `/v1/tokenize`、`/v1/detokenize` | `/tokenize`、`/detokenize` | vLLM 分词客户端 | `openai_compatible`（`vllm_openai`） |
+| `/anthropic/messages/count_tokens`、`/anthropic/v1/messages/count_tokens`、`/v1/messages/count_tokens` | `/v1/messages/count_tokens` | Anthropic token 计数客户端 | `anthropic_messages` |
+| `/v1/tokenize`、`/v1/detokenize` | `/tokenize`、`/detokenize` | vLLM 分词客户端 | `openai_compatible`（整个协议族） |
+| `/v1/models/{model}`、`/api/show` | 路径保持原样；由代理在路由前本地合成模型详情 | OpenAI 模型详情与 Ollama show 客户端 | 无（不选择上游） |
 
 `/v1/models` 是跨上游聚合的 OpenAI 兼容模型列表 endpoint，不是单上游透传。
 
@@ -32,7 +33,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 | 协议族 | provider 标签 | 路由 profile | 当前 endpoint 覆盖 | parser 覆盖 |
 | --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Embeddings 与 Tokenization 只被分类、路由与录制 |
+| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Tokenization 只被分类、路由与录制；Embeddings 只被分类与追踪，没有 adapter 因此不可路由 |
 | `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`、`/v1/messages/count_tokens`；连通性与模型发现使用 `/v1/models` | Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`、`/v1beta/models` | GenerateContent、streamGenerateContent |
 | `vertex_native` | `vertex_native` | `vertex_express`、`vertex_project_location` | Vertex Gemini `generateContent`、`streamGenerateContent`、模型列表路径 | GenerateContent、streamGenerateContent |
@@ -40,8 +41,8 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 `openai_compatible` 要点：
 
 - `upstream.base_url` 必须包含上游 API prefix，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`；唯一例外是 `provider_preset: deepseek`，它以 origin 作为 base URL，endpoint 位于 `/responses`、`/models`。
-- `vllm_openai` profile 下，客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 路由到 vLLM 根分词 endpoint。
-- Embeddings 与 vLLM 分词请求会被分类、路由与录制，但没有对应的 Observation IR parser，因此不是深度解析目标。
+- 客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 的根路径映射在 `openai_compatible` 协议族层面完成（不区分 routing profile），统一路由到上游根路径的 tokenization endpoint；`vllm_openai` profile 下的同类分支代码不可达。
+- Embeddings 请求只被分类与追踪。`pkg/llm.AdapterFor` 没有 embeddings 分支，因此该请求在路由选择阶段得到零个候选并失败，`capabilities.embeddings` 也不会被查询；它同样没有 Observation IR parser，不是深度解析目标。
 - Responses 与 Chat Completions 是 OpenAI 的两个不同 surface；Codex 流量通常走 `/v1/responses`。
 
 `anthropic_messages` 要点：
@@ -53,19 +54,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 ## 协议差异要点
 
-各主流 API 在概念层高度重叠（model、instructions、用户输入、工具定义、生成内容、tool calls、usage、streaming），但差异足以让 Trajecta 把它们当作独立协议族。
-
-| API surface | 请求核心 | 响应核心 | streaming 形态 | tool 形态 | usage 形态 |
-| --- | --- | --- | --- | --- | --- |
-| OpenAI Chat Completions | 带 role 的 `messages[]`，可选 `tools[]` | `choices[].message` | SSE chunk 中的 `choices[].delta` | `tools[].function`、`tool_calls[]` | `usage.prompt_tokens`、`completion_tokens`、`total_tokens` |
-| OpenAI Responses | `input`、`instructions`、`tools`、reasoning/text 配置 | `output[]` 类型化条目 | 名为 `response.*` 的事件与 item/content delta | 类型化输出条目，如 function call 与 tool call output | response `usage` 的 input/output token 字段 |
-| Anthropic Messages | `system`、`messages[]`、`tools[]`、`max_tokens` | 顶层 assistant message 加 `content[]` block | message/content block 生命周期事件与 delta | `tool_use`、`tool_result` 等 content block | `usage.input_tokens`、`output_tokens`、cache read/create 字段 |
-| Google Gemini GenerateContent | `contents[]`、`systemInstruction`、`tools[]`、生成与安全配置 | 含 `content.parts[]` 的 `candidates[]` | 返回 GenerateContentResponse chunk | parts 中的 function declaration 与 function call/response | `usageMetadata` token 字段 |
-| Vertex Native GenerateContent | 与 Gemini 类似，但使用 Vertex 资源路径与鉴权 | 与 Gemini 类似的响应 schema | Vertex streaming 变体 | Vertex/Google tool schema | Vertex usage metadata |
-
-识别不等于转换。Trajecta 能识别并解析 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions 与 Gemini GenerateContent，含义是：归类 endpoint、抽取 model 与 usage 元数据、记录 provider 特有 streaming 事件、把 provider payload 解析为 Observation IR、保留原始字节用于 replay。转换则需要改写请求 schema、转换 tool 声明与 tool call/result 连接、按 provider 隐私规则映射 reasoning/thinking 字段、映射 cache 控制与计费、在不丢失部分 tool-call 状态的前提下转换 streaming 事件生命周期，并保留 provider 特有错误与安全语义；这些都不在当前代理转发路径中。
-
-路由后果：客户端发 `/v1/messages`，被选中的上游必须支持 Anthropic Messages 语义，OpenAI 兼容上游上的某个模型不会因为名字相同就能通过 `/v1/messages` 使用；客户端发 `/v1/responses`，被选中的上游或模型必须支持 Responses surface，许多 OpenAI 兼容网关只支持 Chat Completions 而不支持 Responses，因此兼容性要按 endpoint 判断而不是只看模型名。
+各协议族在概念层的重叠（model、instructions、用户输入、工具定义、生成内容、tool calls、usage、streaming）与逐项差异（请求核心、响应核心、streaming 形态、tool 形态、usage 形态）、"识别不等于转换"的边界，以及由此产生的路由后果，见 [协议差异](./protocol-reference/protocol-differences.md)。
 
 ## Provider Preset 清单
 
@@ -105,12 +94,7 @@ host 推断的当前规则（按顺序匹配）：`api.deepseek.com` 且未指�
 
 ## Provider 配置来源
 
-- YAML `upstream` / `upstreams`（含 `credentials`）只作为启动与首次 bootstrap 输入。
-- 应用数据库（生产为 Postgres，本地/开发 fallback 为 SQLite）的 `channel_configs` / `channel_models` 是长期配置事实源。
-- 首次数据库写入会记录 `app_settings` 键 `channels.initialized`。此后数据库接管路由配置，即使所有 channel 都被禁用或删除；`GET /api/settings/channels` 报告该标记，`DELETE /api/settings/channels` 清除它，仅在数据库仍无 channel 时重新打开 YAML bootstrap。
-- 带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，Monitor 对 channel/model/alias 的写入会以 409 拒绝。
-- 所有管理写入（channels、models、aliases、provider setup 与 probe apply）都在一个 `store.ConfigurationTransaction` 中完成，持有进程级配置锁、上游写锁与一个 SQL 事务；运行时路由只在提交成功后发布。
-- Responses 的本地执行模式没有配置开关，按模型可用；要退出本地翻译，可把数据库 `app_settings` 键 `routing.settings` 设为 `{"responses_strategy":"native_only"}`（不是 YAML 键）。路由与凭据细节见 [路由与凭据](./ROUTING_AND_CREDENTIALS.md)，Responses runtime 见 [Responses 运行时](./RESPONSES_RUNTIME.md)。
+YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 语义、显式 `credentials` 的 YAML 管理模式、`store.ConfigurationTransaction` 的写入边界与 `routing.settings` 策略位置，见 [路由与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [Responses 运行时](./RESPONSES_RUNTIME.md)。
 
 ## 能力声明与 protocol_family 映射
 
@@ -143,6 +127,8 @@ trajecta --config config.yaml provider probe-apply --id openai-local --format js
 ```
 
 `provider probe-apply` 只填补空白的 `api_type`、`protocol_family` 和未设置的能力布尔；不写入 API key 或 header secret，也不覆盖显式 `api_type`、`protocol_family` 或显式 `false` 能力。省略 `--id` 时处理所有启用且有 `base_url` 的 channel。
+
+capability registry 中没有 `vertex_native` 的 probe spec，因此 provider probe 与 `provider probe-apply` 不会给出 `vertex_native` 建议，也不会为 Vertex 上游建议或填补 Vertex 相关字段。
 
 默认启动不执行 provider probe，也不依赖网络。需要明确 opt-in 时配置：
 

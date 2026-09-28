@@ -4,9 +4,9 @@
 
 ## 定位与开关
 
-- `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 三个下游入口被无条件受理。`/v1/responses` 在每次请求的选路阶段按模型二选一：命中 native Responses upstream 时走普通代理直通并录制；否则由本地 Responses runtime 接管，把请求编排为一次或多次内部上游 `POST /v1/chat/completions` 调用。
+- `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 三个下游入口被无条件受理；`/v1/responses` 在 native Responses upstream 与本地 runtime 之间的二选一由 [ARCHITECTURE.md](./ARCHITECTURE.md) 与 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md) 拥有。本节只记录本地 runtime 侧的职责：本地执行时把请求编排为一次或多次内部上游 `POST /v1/chat/completions` 调用。
 - 本地执行模式**没有开关**。`responses_server.enabled` 字段与 `TRAJECTA_RESPONSES_ENABLED` 环境变量已被彻底删除，`internal/config` 的 `ResponsesServerConfig` 不含 `enabled` 字段；YAML 里写该键不会生效（仅触发未知键告警）。本地 runtime 始终参与 `/v1/responses` 选路。
-- 要禁用本地翻译，把应用数据库 `app_settings` 键 `routing.settings` 设为 `{"responses_strategy":"native_only"}`（Monitor 的 Routing 设置，`PATCH /api/settings/routing`）。正确拼写是 **`responses_strategy`**；它是 app_settings 键，**不是** `config.yaml` 键，`config.yaml` 中没有 `routing:` 配置段。
+- 要禁用本地翻译，把应用数据库 `app_settings` 键 `routing.settings` 设为 `{"responses_strategy":"native_only"}`（`responses_strategy` 不是 `config.yaml` 键）；该键的归属与 Monitor 入口见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md) 与 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 - 本地 runtime 惰性构建：`tools.web_search`、function executor、model profile、tokenize counter 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上返回 502。构建失败不被缓存，瞬时原因可在后续请求恢复。
 - 非 Responses 路径不受影响，继续走既有 protocol-aware 代理、录制与 replay 热路径。`/v1/responses` 命中 native upstream 的直通同样只是普通代理，不做 semantic interposition。
 
@@ -21,7 +21,7 @@
 
 ## 路由决策
 
-代码位置：选路策略与约束在 `internal/routeplan`，请求侧决策在 `internal/proxy/handler.go` 的 `responsesRoutingDecision` / `responsesStrategy`，本地 runtime 在 `internal/responses/runtime`，HTTP 面在 `internal/responses/httpapi`，上游调用与录制在 `internal/proxy/responses_server.go`。
+代码位置：选路策略与候选约束在 `internal/routeplan`，请求侧决策在 `internal/proxy/handler.go` 的 `responsesRoutingDecision` / `responsesStrategy`，本地 runtime 在 `internal/responses/runtime`，HTTP 面在 `internal/responses/httpapi`，上游调用与录制在 `internal/proxy/responses_server.go`。候选过滤顺序与 native/local 的按模型解析由 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md) 拥有，本节只记录本地 runtime 侧的策略语义。
 
 `responses_strategy` 由 `internal/routeplan` 定义并校验，合法值五档：
 
@@ -34,10 +34,10 @@
 | `local_server_only` | 只用本地 runtime；没有 Chat Completions backend 时拒绝 native 直通。 |
 
 - 策略来源是应用库 `routing.settings`；代理侧读不到或值不在合法集合内时回落为 `auto`，Monitor 的 `PATCH /api/settings/routing` 会直接拒绝非法值（`unsupported responses_strategy %q`）。
-- native-vs-local **按模型**解析，不按渠道：显式 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 模型详情页可编辑，YAML 等价项 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`；未声明的模型回退到渠道级行为。
+- native-vs-local **按模型**解析，不按渠道：显式 `channel_models.supports_responses` / `supports_chat_completions`（YAML 等价项 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`；未声明的模型回退到渠道级行为。该覆盖的完整规则见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。
 - 渠道 `mode`（`proxy` / `record_only` / `server` / `responses_server`）只被解析、校验和记录日志，**不参与路由**。
 - 本地 runtime 通过内部 `/v1/chat/completions` 调用上游，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 可以服务 native 直通，但不会被本地 runtime 选中。
-- 请求体带 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，候选会标记 `requires_tool_calling`。
+- 请求体带 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，候选会标记 `requires_tool_calling`；该过滤属于通用路由规则，详见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。
 
 ## 请求处理流程
 
@@ -55,7 +55,7 @@ create 流程：
 1. 鉴权与 body limit 之后，写最小 `request_audits` 入站记录。
 2. 选路（见上一节）。命中本地时由 runtime 读取 `previous_response_id`、历史 items 与本次 `input`，构造当前 turn 的上下文。
 3. 把 `instructions` 映射为内部 Chat Completions system message，把 `input` 映射为 user message / input item，把 `tools`、`tool_choice`、reasoning/metadata 等映射到 Chat Completions 请求。
-4. 调用内部上游 `POST /v1/chat/completions`；该外部 exchange 经现有 recorder 写为 `.http` V3 cassette，并在有 ent audit store 时写一条 `upstream_exchanges` 关联（response id、request audit id、recorder request id、cassette path、route target、model、endpoint、status、时间戳）。本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
+4. 调用内部上游 `POST /v1/chat/completions`；该 external exchange 经现有 recorder 写为一条 `.http` V3 cassette（`exchange_kind=model`，`exchange_role` 为 `primary_model_call` / `tool_followup_model_call` / `compact_model_call` 之一，`parent_exchange_id=entry:<response_id>`），并在有 ent audit store 时写一条 `upstream_exchanges` 关联（response id、request audit id、recorder request id、cassette path、route target、model、endpoint、status、时间戳）。本地 `/v1/responses` 入站请求本身同样录制为一条独立的 `.http` V3 cassette：`exchange_kind=entry`、`exchange_role=client_request`，在请求结束时经 `UpdateLogFile` 落盘，能从响应中解析出 response id 时其 `exchange_id` 记为 `entry:<response_id>`。因此一次本地执行产生「入站 entry cassette + 内部上游 model cassette」两条 cassette，后者以 `parent_exchange_id=entry:<response_id>` 指向前者。
 5. 返回 OpenAI Responses 风格 response object，并写入 `responses` / `response_items` semantic state、`execution_events` 和 tool call 相关审计。
 
 continuation 与 input items：
@@ -118,7 +118,7 @@ Tool Matrix（仅当前为真的部分）：
 | `code_interpreter` | 无执行器：同上。 |
 | `computer_use_preview` | 无执行器：同上。 |
 
-所有工具的配置默认关闭；仓库自带 `config/config.yaml` 是集成测试模板，显式打开了 `codex_compat`、`tools.web_search`、`tools.mcp` 与 `mcp`，生产部署应按需显式关闭或收紧。
+所有工具的配置默认关闭；仓库自带 `config/config.yaml` 是集成测试模板，显式打开了 `codex_compat` 与 `tools.web_search`，并把 `tools.mcp.enabled` 设为 `true`，但 `servers: []`——hosted `mcp` executor 只在 `cfg.Enabled && enabledServers > 0` 时注册，因此该模板下 hosted `mcp` 实际不可用。生产部署应按需显式关闭或收紧。
 
 ## Compact 与上下文优化
 
@@ -134,8 +134,7 @@ Tool Matrix（仅当前为真的部分）：
 
 - runtime store：serve 装配时若 trace store 提供 ent client，使用 `runtime.NewEntStore`（表 `responses`、`response_items`）；否则退回 memory store。语义状态包括 response checkpoint、input/output item 与 `previous_response_id` 链，是 `/v1/responses/{id}/input_items` 的数据来源。
 - `force_store=true` 时所有 response 都落库；否则遵循请求的 `store` 字段（未传视为落库）。
-- 审计表：`request_audits`（入站 envelope，含 accepted/completed/failed/rejected/cancelled 状态）、`execution_events`（runtime plan、model call、tool/stream lifecycle、compact、cancel/error）、`upstream_exchanges`（semantic response 与 `.http` cassette / trace id / route target 的关联）、`tool_call_audits`（hosted/server-side tool 的持久 read model）。`routing.settings` 存于 `app_settings`。
-- 事实源边界：Postgres 是生产与长会话的 application DB 主路径，SQLite 只是本地开发/测试与既有本地库的 `startup_schema_fallback`（SQLite 无版本化迁移）。raw `.http` V3 cassette 仍是 replay 与 trace detail 的事实源，数据库只是派生索引；旧 V2 cassette 读取兼容保留，`pkg/replay` 不依赖数据库或 runtime。
+- 审计写入语义：`request_audits`（入站 envelope，含 accepted/completed/failed/rejected/cancelled 状态）、`execution_events`（runtime plan、model call、tool/stream lifecycle、compact、cancel/error）、`upstream_exchanges`（semantic response 与 `.http` cassette / trace id / route target 的关联）、`tool_call_audits`（hosted/server-side tool 的持久 read model）；`routing.settings` 存于 `app_settings`。本地执行时入站 exchange 记为 `exchange_kind=entry` / `exchange_role=client_request`，内部上游 chat exchange 的 `parent_exchange_id=entry:<response_id>`。表清单、存储分层与事实源边界由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 拥有。
 - 代码中没有针对 Responses semantic/audit 表的 TTL 或定期清理逻辑，保留策略由底层数据库与部署决定。运维细节见 `./STORAGE_AND_DEPLOYMENT.md` 与 `./POSTGRES_OPERATIONS.md`。
 
 审计查询面（都复用同一个 `internal/responses/audit.QueryService`）：
@@ -151,18 +150,18 @@ Tool Matrix（仅当前为真的部分）：
 | 字段 | 类型 | 说明与默认值 |
 | --- | --- | --- |
 | `default_model` | string | 请求未带 `model` 时使用；配置与请求都为空则无法解析模型。 |
-| `force_store` | bool | 默认 `false`；为 `true` 时忽略请求的 `store:false`。 |
+| `force_store` | bool | 默认 `false`；为 `true` 时忽略请求的 `store:false`；仓库模板设为 `true`。 |
 | `max_request_body_bytes` | int64 | `<=0` 时用内置默认 64 MiB（`64<<20`）；仓库模板设为 67108864。 |
 | `path` | string | 默认 `/v1/responses`。 |
 | `auto_compact` | bool | 默认 `false`；仓库模板设为 `true`。 |
 | `compact_history_item_threshold` | int | `<=0` 表示不按 item 数触发；仓库模板设为 80。 |
 | `model_profiles[]` | list | 每项：`name`、`pattern`、`context_window_tokens`、`max_output_tokens`、`tool_output_token_limit`、`model_reasoning_effort`、`compact_history_item_threshold`、`upstream_model`、`tokenize_counter{enabled,upstream_id,timeout}`。 |
-| `adopt_channel_model_profiles` | bool | 默认 `false`；开启后允许 channel model profile 作为 runtime profile 补充源。 |
+| `adopt_channel_model_profiles` | bool | 默认 `false`；开启后允许 channel model profile 作为 runtime profile 补充源；仓库模板设为 `true`。 |
 | `function_executors` | object | `enabled`（默认 `false`）、`timeout`（默认 `5s`）、`max_result_bytes`（默认 64 KiB）、`redaction.arguments`、`redaction.output`、`executors[]`。 |
 | `function_executors.executors[]` | list | 每项：`name`、`type`（`static_response` \| `external_command`）、`enabled`、`output`、`command`、`args`、`timeout`、`env`、`env_allowlist`、`process{working_dir,require_absolute_command,allowed_command_dirs,reject_root}`。 |
 | `codex_compat` | object | `enabled`、`auto_inject_hosted_tools`、`inject_when_tools_absent`（默认 `true`）、`preserve_client_tools`（默认 `true`）、`default_tool_choice`（默认 `"auto"`）。 |
 
-相关但不在 `responses_server` 下的配置：`tools.web_search`（`enabled`、`provider`、`max_results`、`base_url`、`timeout_ms`、`user_agent`）、`tools.mcp`（`enabled`、`default_timeout_ms`、`max_result_bytes`、`servers[].{id,label,url,bearer_token_env,enabled_tools,disabled_tools,enabled}`）。可选字段均有对应 `TRAJECTA_RESPONSES_*` 环境变量覆盖（例如 `..._DEFAULT_MODEL`、`..._FORCE_STORE`、`..._MAX_REQUEST_BODY_BYTES`、`..._PATH`、`..._AUTO_COMPACT`、`..._COMPACT_HISTORY_ITEM_THRESHOLD`、`..._FUNCTION_EXECUTORS_*`、`..._CODEX_COMPAT_*`），没有 `TRAJECTA_RESPONSES_ENABLED`。完整配置与部署方式见 `./README.md`、`./PROXY_USAGE_EXAMPLES.md` 与 `./DEVELOPMENT.md`。
+相关但不在 `responses_server` 下的配置：`tools.web_search`（`enabled`、`provider`、`max_results`、`base_url`、`timeout_ms`、`user_agent`）、`tools.mcp`（`enabled`、`default_timeout_ms`、`max_result_bytes`、`servers[].{id,label,url,bearer_token_env,enabled_tools,disabled_tools,enabled}`）。大部分可选字段有对应 `TRAJECTA_RESPONSES_*` 环境变量覆盖（例如 `..._DEFAULT_MODEL`、`..._FORCE_STORE`、`..._MAX_REQUEST_BODY_BYTES`、`..._PATH`、`..._AUTO_COMPACT`、`..._COMPACT_HISTORY_ITEM_THRESHOLD`、`..._FUNCTION_EXECUTORS_*`、`..._CODEX_COMPAT_*`），没有 `TRAJECTA_RESPONSES_ENABLED`；`adopt_channel_model_profiles` 与 `model_profiles[]`（含 `tokenize_counter.*`）没有环境变量覆盖，只能通过配置文件设置。完整配置与部署方式见 `./README.md`、`./PROXY_USAGE_EXAMPLES.md` 与 `./DEVELOPMENT.md`。
 
 ## 非目标与未实现
 
@@ -177,6 +176,6 @@ Tool Matrix（仅当前为真的部分）：
 - Provider auto-detect 未完成：capability 需显式配置或由渠道/模型数据表达，`provider probe` 只是诊断与保守补全。
 - `external_command` 只有轻量 process policy（`working_dir`、`require_absolute_command`、`allowed_command_dirs`、`reject_root`），没有 root/container 级沙箱。
 - SQLite 版本化迁移与独立 auth migration namespace 未实现：Postgres auth 与 application schema 共享同一 namespace。
-- 本地 `/v1/responses` 入站请求不作为外部 upstream cassette 录制；只有内部上游调用会被录制。
+- 本地 `/v1/responses` 入站请求**会**录制为 `exchange_kind=entry` / `exchange_role=client_request` 的 V3 cassette，但它不是 external upstream exchange：`upstream_exchanges` 只关联内部上游 Chat Completions 调用（其 `parent_exchange_id=entry:<response_id>` 指回该入站 cassette）。
 - 本地 runtime 不做 OpenAI、Anthropic、Gemini、Vertex 之间的跨协议转换：普通代理热路径是 protocol-aware pass-through，跨协议翻译只在 `/v1/responses` 的本地执行模式内发生。
 - 渠道 `mode: responses_server` 不会被当作行为开关：它只是描述性/校验元数据，native 与本地由按模型的 capability 决定。

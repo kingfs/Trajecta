@@ -13,6 +13,7 @@
 - 要参与开发：读 [开发与测试](./DEVELOPMENT.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 - 要部署与运维：读 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 与 [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md)。
 - 要看协议矩阵与协议原文：读 [协议参考](./protocol-reference/README.md)。
+- 要提交改动或报告安全问题：读 [CONTRIBUTING](../CONTRIBUTING.md) 与 [SECURITY](../SECURITY.md)；每个版本改了什么见 [CHANGELOG](../CHANGELOG.md)。
 
 ## 事实源文档
 
@@ -32,10 +33,13 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Monitor 使用指南](./MONITOR_GUIDE.md) | 界面有哪些页面、每个页面怎么用 |
+| [Monitor 使用指南](./MONITOR_GUIDE.md) | 界面有哪些页面、每个页面怎么用、怎么导出会话轨迹（ATIF v1.8） |
 | [MCP 使用指南](./MCP_GUIDE.md) | MCP 怎么启动、认证怎么做、有哪些工具 |
 | [代理使用示例](./PROXY_USAGE_EXAMPLES.md) | 怎么把 SDK 或 CLI 接到代理上 |
 | [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md) | 长期运行的基线采集、索引、调优与排障 |
+| [CONTRIBUTING](../CONTRIBUTING.md) | 怎么贡献、提交前要跑哪些验证、有哪些硬性约束 |
+| [SECURITY](../SECURITY.md) | 怎么报告漏洞、部署时需要额外注意什么 |
+| [CHANGELOG](../CHANGELOG.md) | 每个版本新增、变更、修复与破坏性改动 |
 
 ## 开发文档
 

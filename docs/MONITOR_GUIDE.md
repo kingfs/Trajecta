@@ -23,7 +23,7 @@ Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签�
 
 ## 个人 API token
 
-「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除，并显示前缀、TTL、过期时间和最后使用时间。token 只在创建时显示一次，之后只保留 prefix。
+「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、scope、status、created、expires、last_used；TTL 只是创建表单的输入项（`ttl`），列表与 API 都不返回、也不显示 TTL。token 只在创建时显示一次，之后只保留 prefix。
 
 个人 token 的用途：
 
@@ -53,7 +53,7 @@ Monitor 同时使用两类数据：
 
 Trajecta 自身的事件收件箱：
 
-- 来源：`parser`、`analyzer`、`router`、`upstream`。
+- 来源：代码当前只发出 `parser`、`analyzer`、`router`、`upstream` 四种来源；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
 - 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
@@ -95,17 +95,19 @@ Trajecta 自身的事件收件箱：
 审计页面有两个面板：
 
 - 最近发现项（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。
-- 请求链路：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）；`GET /api/responses/audit/tool-calls` 提供工具调用审计。
+- 请求链路：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
+
+页面调用的接口只有 `GET /api/findings`、`GET /api/responses/audit/trace` 和 `GET /api/responses/function-executors`；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。
 
 页面同时展示当前进程的 server-side function executor 状态面板（见下文）。
 
 ### 模型 `/models`
 
-按模型查看时间窗口内的流量：模型覆盖哪些模型服务商，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`。
+按模型查看时间窗口内的流量：模型覆盖哪些模型服务商，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
 
 ### 模型服务商 `/providers`
 
-管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability，以及模型级 `supports_responses` / `supports_chat_completions` 覆盖（模型级声明优先于 provider 级配置）。
+管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability。模型级的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 覆盖不在这里编辑，见上面的模型页。
 
 创建前可以先做探测：
 
@@ -116,7 +118,7 @@ Trajecta 自身的事件收件箱：
 
 还可以启停模型服务商、启停单个模型、探测模型、查看用量/Token/失败与 probe 结果。
 
-配置归属：长期配置保存在 application store。YAML 只作为首次 bootstrap 输入，第一次数据库写入会记录 `app_settings` 的 `channels.initialized` 标记（`GET /api/settings/channels` 读取，`DELETE /api/settings/channels` 清除）；此后即使删光所有模型服务商，重启也不会重新导入 YAML。使用显式 `credentials` 列表的 YAML 配置仍由 YAML 管理，此时 Monitor 的模型服务商、模型和别名写操作返回 409。
+配置归属：模型服务商、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 
 ### 连接 `/connect`
 
@@ -130,7 +132,7 @@ Trajecta 自身的事件收件箱：
 
 工作区包含四个标签页：
 
-- Decisions：最近选中的路由，可按模型、通道/上游、状态、耗时、TTFT、Token 过滤。
+- Decisions：最近选中的路由（数据来自 `GET /api/routing/exchanges`），可按模型、通道/上游、状态、耗时、TTFT、Token 过滤。
 - Settings：编辑路由设置（`PATCH /api/settings/routing`），包括 `responses_strategy`、`selection_policy`、`missing_model_policy`。
 - Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
 - Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。
@@ -176,9 +178,9 @@ Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `re
 
 ## Responses function executors
 
-`GET /api/responses/function-executors` 返回当前进程的 server-side function executor 摘要：`enabled`、`timeout`、`max_result_bytes`、`redaction.arguments`、`redaction.output`、`supported_types`（当前为 `static_response` 和 `external_command`），以及每个 executor 的 `name`、`type`、`enabled`、`available`、`process`、`output_configured`、`command_configured` 和 `warnings`。接口不返回 `static_response` 的 output，也不返回 `external_command` 的 command。
+`GET /api/responses/function-executors` 返回当前进程的 server-side function executor 摘要，供 Audit 页面的状态面板使用；响应不返回 `static_response` 的 output 或 `external_command` 的 command 等敏感内容。
 
-`POST /api/responses/function-executors` 是 Monitor 的写入口：默认 `validate_only=true`，只返回归一化摘要和 warnings；`validate_only=false` 时把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 executor registry，后续新请求生效。payload 只接受 `enabled`、`timeout`、`max_result_bytes`、`redaction.arguments`、`redaction.output`、executor 的 `name`/`type`/`enabled`，以及 `external_command` 的进程隔离字段（`process.working_dir`、`process.require_absolute_command`、`process.allowed_command_dirs`、`process.reject_root`）；`output`、`command`、`args`、`env` 等敏感可执行字段不被接受，也不会出现在响应或持久化 snapshot 中。
+`POST /api/responses/function-executors` 是 Monitor 的写入口：默认 `validate_only=true`，只返回归一化摘要和 warnings；`validate_only=false` 时把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 executor registry，后续新请求生效。字段、redaction 与进程约束语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 
 ## 排障建议
 
@@ -192,11 +194,11 @@ Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `re
 
 ## 非目标与未实现
 
-- 代理不做协议族之间的转换：转发路径是协议感知透传，唯一的例外是 `/v1/responses` 由本地 Responses runtime 编排为内部 `/v1/chat/completions` 调用。
+- 代理不做协议族之间的转换，唯一例外是 `/v1/responses` 的本地 Responses runtime；边界见 [架构与代码地图](./ARCHITECTURE.md) 与 [实现状态](./IMPLEMENTATION_STATUS.md)。
 - Monitor 没有用户管理界面：用户由 `auth init-user`、`auth reset-password`、`auth create-token` 等 CLI 命令创建和维护，界面只支持修改自己的密码。
 - Monitor API 不接受个人 API token；个人 token 面向 proxy 与 MCP。
 - Monitor 不能修改由 YAML 显式 `credentials` 管理的模型服务商、模型和别名，这类写操作返回 409。
-- 写接口不接受 `output`、`command`、`args`、`env` 等敏感可执行字段，Monitor overlay 不能创建新的可执行 command。
+- 写接口不接受 `output`、`command`、`args`、`env` 等敏感可执行字段，Monitor overlay 不能创建新的可执行 command；字段语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 - `external_command` 只有轻量进程约束（工作目录、绝对 command、允许目录、拒绝 root），不等同于容器或 namespace 沙箱。
 
 ## 相关文档

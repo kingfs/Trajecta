@@ -1,594 +1,278 @@
+<div align="center">
+
 # Trajecta
 
-[![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+**The Agent Trajectory & Traffic Engine**
 
-**中文说明** | [English](./README_EN.md)
+把真实的 LLM API 流量，变成可回放、可审计、可 review 的测试资产。
 
-Trajecta 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、本地 Responses runtime、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
+[![Go CI](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml/badge.svg)](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kingfs/Trajecta?color=blue)](https://github.com/kingfs/Trajecta/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/kingfs/Trajecta)](./go.mod)
 
-- 生产或准生产环境用 Postgres 保存用户、token、trace index、渠道/模型、Responses state 和 audit 数据
-- 对 OpenAI-compatible / vLLM 上游提供可选 `/v1/responses` semantic server
-- 开发和测试时把真实大模型 HTTP exchange 录为 `.http` cassette，并可离线回放
+[English](./README_EN.md) | 简体中文
 
-raw `.http` cassette 仍是 replay 和详情页的事实来源；Postgres 是生产结构化状态与索引主路径，SQLite 只保留为本地 fallback 和离线测试路径。
+<img src="./images/monitor-overview.png" alt="Trajecta Monitor 概览" width="900">
 
-## 当前版本发布说明
+</div>
 
-`v2.0.0` 是改名版本，唯一的破坏性变化是命名：
+## 为什么需要 Trajecta
 
-- 项目由 `llm-tracelab` 改名为 `trajecta`：Go module path、CLI 二进制、Docker 镜像 / Compose service 与 volume、环境变量前缀、Monitor `localStorage` key 全部统一到新名字
-- cassette 写入 `# trajecta/v3`，读取端继续接受 `# llm-tracelab/v3` 与更早的 `LLM_PROXY_V2`；已有 cassette 不需要重写
-- 本地 SQLite 默认文件变为 `trajecta.sqlite3`，旧的 `llm_tracelab.sqlite3` 仍会被原地沿用
-- 转发、录制、回放、Responses runtime、Monitor 与 audit 行为都没有变化
+给 LLM 应用写测试很难：真实调用慢、要花钱、结果不稳定；手写 mock 会随上游演进而漂移，而且恰好丢掉真正会出问题的部分——流式分片、工具调用、token usage、状态码和耗时。
 
-此前版本已具备的能力保持不变：`pkg/llm` 的 provider/endpoint adapter 层、Go embed 的 Monitor UI（`Sessions / Requests` 双视角）、checked-in Postgres 迁移路径，以及 `LLM_PROXY_V3` 的 `llm.*` provider timeline。
+Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK 或 CLI 的流量指向它，请求照常转发到真实上游，同时把完整 HTTP 交换原样落盘为 `.http` cassette；之后在单元测试里挂上 `pkg/replay` 离线回放，测试不再触网、不再计费、结果确定。
 
-## 从 llm-tracelab 改名（升级说明）
-
-项目已由 `llm-tracelab` 改名为 `trajecta`。大多数改动只是命名，但下面这些会影响已有部署和本地数据：
-
-- 环境变量前缀从 `LLM_TRACELAB_*` 变为 `TRAJECTA_*`，旧前缀不再读取，部署脚本、`.env` 与 CI secret 需要同步改名
-- Go module path 变为 `github.com/kingfs/Trajecta`，二进制为 `trajecta`，Docker 镜像与 Compose service 变为 `kingfs/trajecta` 与 `trajecta`
-- cassette 写入的 prelude magic 变为 `# trajecta/v3`；读取端同时接受改名前的 `# llm-tracelab/v3` 和更早的 `LLM_PROXY_V2`，已有 cassette 不需要重写
-- 本地 SQLite 默认文件变为 `{{output_dir}}/trajecta.sqlite3`；若只有旧的 `llm_tracelab.sqlite3`，会直接沿用该文件，而不是静默新建空库
-- Compose 的 Postgres 默认库名、用户与口令都变为 `trajecta`，数据卷变为 `trajecta-data`；已有 Postgres volume 需要重新初始化或手动迁移
-- Monitor 前端的 `localStorage` key 变为 `trajecta.monitor.*`，浏览器里已保存的语言/主题/monitor token 需要重新设置
-- `LLM_PROXY_V3` 是稳定的格式标识，刻意不随改名变化
-
-升级已有部署时先跑迁移脚本（默认 dry-run，只报告不写入）：
-
-```bash
-scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces            # 只报告
-scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces    # 写入
-```
-
-它改写 `.env` 里的 `LLM_TRACELAB_*` key、重命名本地 SQLite（含 `-wal`/`-shm`）、统计 cassette 魔数，并列出 Postgres 库名、Docker 镜像/卷、CI secret 与浏览器 `localStorage` 这些必须人工确认的项。脚本可重复执行；cassette 默认不重写（读取端已兼容旧魔数）。
-
-## 适合什么场景
-
-- 给 SDK 或业务代码做高可靠单元测试
-- 复现线上 prompt / tool call / stream 问题
-- 统计模型调用耗时、TTFT、Token 消耗
-- 在本地做 LLM API 代理调试和混沌测试
+- **录制真实字节**：请求 / 响应原文、SSE 分片、状态码、耗时，一字不改地保存
+- **回放零成本**：`replay.NewTransport()` 直接挂到任意 SDK 的 `http.Client` 上
+- **文件可读可 diff**：cassette 是文本，可以 code review、可以手工修、可以随 PR 一起提交
+- **看得见的轨迹**：Monitor 把每条 trace 解析成统一 timeline——消息、工具调用、token、路由决策
+- **事实源清晰**：cassette 永远是事实源，应用数据库（生产 Postgres / 本地 SQLite）只是派生索引
 
 ## 核心能力
 
-- 透明代理 OpenAI compatible 请求
-- 将一次请求/响应保存为本地 `.http` cassette
-- 使用 `pkg/replay.Transport` 在测试中直接回放
-- Monitor 页面查看请求详情、统一 timeline、原始协议和 Token 消耗
-- Trace Monitor 支持按单请求查看，也支持按 session 聚合查看相关请求
-- 使用 Postgres 维护生产 metadata / audit / Responses state；SQLite 可作为本地 fallback
-- 默认生产 Compose 包含 app + Postgres，并可通过 profile 启用 SearXNG hosted `web_search`
-- 支持对旧版 V2 记录文件兼容读取
-
-## 项目结构
-
-```text
-cmd/server            服务入口
-internal/proxy        代理转发、stream 注入、响应拦截
-internal/recorder     .http 录制与落盘
-internal/store        Postgres/SQLite 应用数据与 metadata 索引
-internal/monitor      Monitor UI 与详情解析
-pkg/recordfile        录制文件格式 V2/V3 解析与 V3 写入
-pkg/replay            单元测试回放 Transport
-pkg/llm               多厂商请求/响应归一化
-```
-
-文档入口见 [docs/README.md](./docs/README.md)。常用几篇：当前实现状态见 [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md)，架构与代码地图见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，存储与部署见 [docs/STORAGE_AND_DEPLOYMENT.md](./docs/STORAGE_AND_DEPLOYMENT.md)，路由与凭据见 [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md)，协议族与上游见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)，本地 Responses runtime 见 [docs/RESPONSES_RUNTIME.md](./docs/RESPONSES_RUNTIME.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，开发与测试见 [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)。面向 AI agent 的项目约定见 [AGENTS.md](./AGENTS.md)。
-
-## 录制文件与索引
-
-当前写入格式是 `LLM_PROXY_V3`：
-
-1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
-2. 原始 HTTP request/response 仍然完整保留，方便人工排查
-3. `# event:` 会记录统一 timeline，例如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`
-4. 请求摘要、耗时、Token、trace id、`session_id`、Responses audit 等结构化数据会同步索引到应用数据库；生产默认使用 Postgres
-
-生产默认存储布局：
-
-```text
-Postgres:
-  users / api_tokens / channel_configs / channel_models
-  logs / sessions / responses / response_items
-  request_audits / execution_events / upstream_exchanges / tool_call_audits
-
-data/traces/
-  <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
-```
+| 能力 | 说明 |
+| --- | --- |
+| 透明代理 | 记录并转发 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google GenAI、Vertex 等协议族的请求 |
+| 离线回放 | `pkg/replay` 实现 `http.RoundTripper`，单元测试无需网络与 API key |
+| 流式保真 | 逐片保存 SSE 数据流，回放时按原始时序还原 |
+| 录制格式 | `LLM_PROXY_V3` 紧凑 prelude + 原始 HTTP 字节；继续兼容读取 V2 记录 |
+| Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、模型与服务商管理 |
+| 轨迹解析 | 把 cassette 解析成 Observation IR，产出危险工具调用、敏感数据等 findings |
+| 会话轨迹导出 | 把一次 session 的累积历史导出为 ATIF v1.8 JSONL |
+| Agent 接口 | MCP server 暴露 21 个查询 / 重分析工具，让 agent 直接读轨迹而不是抓 HTML |
+| 多上游路由 | 按渠道、权重、p2c 策略与粘性路由选上游，支持模型别名与 per-model 能力覆盖 |
+| 存储分层 | 生产用 Postgres（含 checked-in SQL 迁移），本地用 SQLite，cassette 始终是事实源 |
 
 ## 快速开始
 
-### 1. 配置服务启动参数
+### 方式一：Docker Compose（推荐）
 
-v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略、Responses server 和工具开关。模型渠道、provider 地址、API key、模型启停和模型 profile 应通过 Monitor Web 管理，并持久化到应用数据库。
-
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认 Postgres-first 启动配置，不放真实密钥，也不内置 provider。没有任何上游配置时，服务仍应能启动，Monitor Web 可用于后续配置 providers。生产部署只需要通过环境变量注入部署现场值：Postgres DSN/密码、对外端口，以及可选的单个 bootstrap upstream 地址和 API key。本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
-
-推荐的基础配置结构如下：
-
-```yaml
-server:
-  port: "8080"
-
-monitor:
-  port: "8081"
-
-mcp:
-  enabled: true
-  path: "/mcp"
-
-database:
-  driver: "postgres"
-  dsn: ""
-  max_open_conns: 16
-  max_idle_conns: 8
-  auto_migrate: true
-
-auth:
-  session_ttl: 24h
-
-trace:
-  output_dir: "./data/traces"
-
-responses_server:
-  default_model: ""
-  force_store: true
-  # Image inputs may be base64 encoded and substantially larger than text requests.
-  max_request_body_bytes: 67108864
-  path: "/v1/responses"
-  auto_compact: true
-
-router:
-  model_discovery:
-    enabled: true
-    refresh_interval: 10m
-  selection:
-    policy: "p2c"
-    epsilon: 0.02
-    open_window: 15s
-    failure_threshold: 3
-  fallback:
-    on_missing_model: "reject"
-
-debug:
-  output_dir: "./data/traces"
-  mask_key: true
-```
-
-历史 `upstream` / `upstreams` YAML 仍然兼容，但不再作为长期生产配置入口。首次启动时，如果设置了 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL`，系统会导入一个 OpenAI-compatible bootstrap provider；如果未设置，服务仅启动 Web 和管理面。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
-
-同一个 upstream 下配置多个 explicit credentials 的示例和 sticky route target、credential-safe metadata、limit scope 说明见 [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md)。文档示例只使用 `$env:...` 占位符，不应在 YAML 中提交真实 provider secret。
-
-如果你不想从零开始写 bootstrap 配置，可参考这些现成样例；长期配置仍建议在 Monitor Web 中完成：
-
-- [config/examples/openai.yaml](./config/examples/openai.yaml)
-- [config/examples/openai-compatible-vllm-postgres.yaml](./config/examples/openai-compatible-vllm-postgres.yaml)
-- [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)
-- [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
-- [config/examples/google_genai.yaml](./config/examples/google_genai.yaml)
-- [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
-- [config/examples/vertex.yaml](./config/examples/vertex.yaml)
-
-生产建议通过环境变量注入的值保持最小：`TRAJECTA_DATABASE_DSN`、`POSTGRES_PASSWORD`、`TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`，以及可选的 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL`、`TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY`、`TRAJECTA_TOOLS_WEB_SEARCH_ENABLED`。其余服务行为默认保留在 `config/config.yaml`。兼容旧命名的 `TRAJECTA_UPSTREAM_*` 仍可用于老单上游迁移，但新部署应优先通过 Monitor Web 管理 providers。
-
-访问控制说明：
-
-- `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset、eval、Responses state 和 audit 元数据；生产默认使用 Postgres。
-- 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
-- Monitor UI 使用用户名密码登录；网页登录态使用 monitor-only JWT，不复用个人 API token。
-- 登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
-- 个人 API token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
-- Providers / Models 通过 Monitor Web 管理并写入应用数据库；YAML 不再作为长期渠道配置入口。
-
-### MCP Server
-
-如果你希望 AI agent 直接查询本地 traces / sessions / upstreams，而不是抓取 Monitor HTML，可以在主服务里启用 MCP streamable HTTP 端点：
+需要 Docker 与 Docker Compose。
 
 ```bash
-go run ./cmd/server serve -c config/config.yaml
+git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
+cp .env.example .env          # 修改 POSTGRES_PASSWORD
+docker compose up -d
+docker compose exec trajecta /app/bin/trajecta \
+  -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
-当前 MCP server 基于官方 `github.com/modelcontextprotocol/go-sdk`，支持 MCP `2026-07-28`
-stateless Streamable HTTP，并兼容协商较早协议版本。它挂在 `monitor.port` 对应的 HTTP
-服务下，默认路径是 `/mcp`，例如 `http://localhost:8081/mcp`。工具面包括：
+- Monitor：<http://localhost:8081>，用上面的用户名密码登录
+- Proxy：<http://localhost:8080/v1>，把 SDK 的 `base_url` 指向它
 
-- Trace 查询：`list_traces`、`get_trace`、`list_trace_findings`
-- 路由与故障：`query_routing_decisions`、`query_sticky_routing`、`query_failures`、`summarize_failure_clusters`、`query_dangerous_tool_calls`、`query_sensitive_data_findings`
-- Session / Upstream：`list_sessions`、`list_upstreams`
-- 系统事件：`list_system_events`、`get_system_event`、`summarize_system_events`、`query_unread_system_events`
-- Responses 审计：`responses_audit_trace`、`responses_audit_tool_calls`
-- 重分析：`reanalyze_trace`、`reanalyze_session`、`list_analysis_jobs`、`get_analysis_job`
+登录后在 `Providers` 页面配置上游地址与 API key，在 `Tokens` 页面生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
 
-MCP 与 proxy 复用同一套个人 token，客户端需要携带 `Authorization: Bearer <token>`。
+### 方式二：从源码运行
 
-详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
-
-推荐的兼容配置思路：
-
-- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq 等 OpenAI-compatible 服务：只设置 `provider_preset` 和 `base_url`，并确保 `base_url` 已包含上游 API 前缀，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`
-- Azure OpenAI `/openai/v1/...`：设置 `provider_preset: azure`，可选 `api_version`
-- Azure deployment 路由：设置 `provider_preset: azure`，并补 `deployment`
-- vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
-- Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
-- Google GenAI API：设置 `provider_preset: google_genai`，当前支持 `generateContent` 和 `streamGenerateContent` 基础闭环
-- Vertex AI native API：优先使用 `provider_preset: vertex`；它会根据 `base_url` 推断 `vertex_express` 或 `vertex_project_location`
-
-支持级别说明：
-
-- `verified`：已有行为测试或 cassette 级回归覆盖
-- `compatible`：按现有协议族抽象应当可工作，但直接验证较少
-- `planned`：尚未接入 preset 或尚未实现
-
-配置校验规则：
-
-- `provider_preset`、`protocol_family`、`routing_profile` 不再是松散字段
-- 无效组合会在启动时直接报错，而不是等到请求阶段才失败
-- 例如 `provider_preset: anthropic` 搭配 `protocol_family: google_genai` 会直接失败
-- 例如 `provider_preset: openrouter` 搭配 `routing_profile: azure_openai_v1` 也会直接失败
-
-当前推荐支持矩阵：
-
-- `provider_preset: openai`
-  `support: verified`
-  `protocol_family: openai_compatible`
-  `routing_profile: openai_default`
-- `provider_preset: openrouter | fireworks | together | deepseek | groq | moonshot | cerebras | perplexity`
-  `support: openrouter/fireworks/together/groq=verified; deepseek/moonshot/cerebras/perplexity=compatible`
-  `protocol_family: openai_compatible`
-  `routing_profile: openai_default`
-- `provider_preset: azure`
-  `support: verified`
-  `protocol_family: openai_compatible`
-  `routing_profile: azure_openai_v1` 或 `azure_openai_deployment`
-- `provider_preset: vllm`
-  `support: verified`
-  `protocol_family: openai_compatible`
-  `routing_profile: vllm_openai`
-- `provider_preset: anthropic`
-  `support: verified`
-  `protocol_family: anthropic_messages`
-  `routing_profile: anthropic_default`
-- `provider_preset: google_genai | google | gemini`
-  `support: verified`
-  `protocol_family: google_genai`
-  `routing_profile: google_ai_studio`
-- `provider_preset: vertex`
-  `support: verified`
-  `protocol_family: vertex_native`
-  `routing_profile: vertex_express | vertex_project_location`
-  `notes: 受控 preset；已覆盖 adapter / proxy / cassette regression`
-
-Anthropic 示例：
-
-下面仍用 YAML 展示字段含义，主要用于历史配置兼容和首次 bootstrap 参考；新建和长期维护渠道请在 Monitor Web 的 Channels 表单中配置同名字段。
-
-```yaml
-upstream:
-  base_url: "https://api.anthropic.com"
-  api_key: "sk-ant-xxx"
-  provider_preset: "anthropic"
-  api_version: "2023-06-01"
-  headers:
-    anthropic-beta: "tools-2024-04-04"
-```
-
-Google GenAI 示例：
-
-```yaml
-upstream:
-  base_url: "https://generativelanguage.googleapis.com"
-  api_key: "AIza..."
-  provider_preset: "google_genai"
-```
-
-Vertex express 示例：
-
-```yaml
-upstream:
-  base_url: "https://aiplatform.googleapis.com"
-  api_key: "ya29..."
-  provider_preset: "vertex"
-  model_resource: "publishers/google/models/gemini-2.5-flash"
-```
-
-Vertex project/location 示例：
-
-```yaml
-upstream:
-  base_url: "https://us-central1-aiplatform.googleapis.com"
-  api_key: "ya29..."
-  provider_preset: "vertex"
-  project: "demo-project"
-  location: "us-central1"
-  model_resource: "publishers/google/models/gemini-2.5-flash"
-```
-
-如果你想完全避免 preset，也仍然可以继续显式填写：
-
-- `protocol_family: vertex_native`
-- `routing_profile: vertex_express | vertex_project_location`
-
-Azure deployment 示例：
-
-```yaml
-upstream:
-  base_url: "https://demo-resource.openai.azure.com"
-  api_key: "azure-key"
-  provider_preset: "azure"
-  deployment: "gpt-4o-mini"
-  api_version: "2025-03-01-preview"
-```
-
-### 2. 构建和运行
-
-推荐使用 `go-task`：
+需要 Go 1.25+，[Task](https://taskfile.dev) 可选但推荐。
 
 ```bash
-task build
-task run
-task migrate
+task build && task run                  # 默认 Postgres-first 配置：config/config.yaml
+CONFIG=config/examples/local-sqlite.yaml task run   # 只想用本地 SQLite
 ```
 
-默认读取 Postgres-first 样例 `config/config.yaml`；本地 `config inspect` / `doctor` 可直接运行，真实启动前应配置可用 Postgres 和 upstream。SQLite 本地开发可以显式指定：
-
-```bash
-CONFIG=config/examples/local-sqlite.yaml task run
-```
-
-如果只想直接运行：
+不想用 Task 也可以直接跑：
 
 ```bash
 export TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@localhost:5432/trajecta?sslmode=disable'
-export TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
-export TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
 go run ./cmd/server -c config/config.yaml
 ```
 
-把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。
-Proxy API 要求携带个人 token；OpenAI-compatible SDK 通常会把 `api_key` 发送为 `Authorization: Bearer <api_key>`，因此 SDK 的 `api_key` 应填写 Monitor `Tokens` 页面生成的 Trajecta token。
+### 方式三：从 llm-tracelab 升级
 
-curl 调用示例：
+项目已改名为 Trajecta（`v2.0.0`）。已有部署运行迁移脚本即可（默认 dry-run，只报告不写入）：
+
+```bash
+scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces
+scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces
+```
+
+脚本会改写 `.env` 中的 `LLM_TRACELAB_*` key、重命名本地 SQLite 及其 `-wal`/`-shm`、统计 cassette 魔数版本，并列出需要人工确认的项。破坏性变化与兼容策略见 [CHANGELOG](./CHANGELOG.md)。
+
+## 5 分钟：录制一次调用，然后在测试里回放
+
+**1. 让一次真实调用经过代理**（token 来自 Monitor 的 `Tokens` 页面）：
 
 ```bash
 export TRAJECTA_TOKEN=llmtl_xxx
-curl -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
-  http://localhost:8080/v1/models | jq
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
-更多非流式、流式和 SDK 示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)。
+**2. 代理把这次交换写成 cassette**，路径是 `<output_dir>/<上游 host>/<model>/<yyyy>/<mm>/<dd>/<timestamp>.http`：
 
-### 3. 打开 Monitor
+```text
+# trajecta/v3
+# meta: {"version":"LLM_PROXY_V3","meta":{"request_id":"…","time":"…","model":"gpt-4o-mini",
+#        "provider":"openai","operation":"chat.completions","endpoint":"/v1/chat/completions",
+#        "method":"POST","status_code":200,"duration_ms":842,"ttft_ms":210,"routing_policy":"p2c"},
+#        "layout":{"req_header_len":231,"req_body_len":96,"res_header_len":120,
+#        "res_body_len":512,"is_stream":true},
+#        "usage":{"prompt_tokens":18,"completion_tokens":42,"total_tokens":60}}
+# event: {"type":"request","time":"…","method":"POST","url":"/v1/chat/completions","body_bytes":96}
+# event: {"type":"response","time":"…","status_code":200,"is_stream":true,"body_bytes":512}
+# event: {"type":"llm.output_text.delta","time":"…","is_stream":true,"message":"Hello"}
+# event: {"type":"llm.usage","time":"…","attributes":{"total_tokens":60}}
 
-访问 `http://localhost:8081`，使用初始化的用户名密码登录。请求列表、session 聚合和 trace 详情都需要登录后访问，避免未授权用户看到录制的 LLM 请求内容。
+POST /v1/chat/completions HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer sk-***
 
-详情页现在包含三个主视图：
+{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}
 
-- `Timeline`：消费 cassette 中的统一 `llm.*` 事件
-- `Summary`：按对话、工具、输出块聚合展示
-- `Raw Protocol`：左右分栏查看原始 request/response
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
 
-## 老日志迁移与索引重建
-
-显式迁移命令：
-
-```bash
-go run ./cmd/server migrate -c config/config.yaml
+data: {"choices":[{"delta":{"content":"Hello"}}]}
+…
+data: [DONE]
 ```
 
-这个命令默认会做两件事：
+（示例为节选，`…` 表示省略。默认 `debug.mask_key: true` 会在落盘前把请求头中的 `Authorization` / `api-key` / `x-api-key` / `x-goog-api-key` 值替换成 `fake-key-logging`；其余请求头与请求、响应正文原样保存，这正是回放能够保真的原因。）
 
-- 将旧的 `LLM_PROXY_V2` `.http` 文件原地改写成 `LLM_PROXY_V3`
-- 清空并重建应用数据库中的 trace 索引数据，不会删除用户和 token
-
-如果只想做其中一部分：
-
-```bash
-go run ./cmd/server migrate -c config/config.yaml -rewrite-v2=false
-go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
-```
-
-适合老日志目录批量升级，或者结构化 trace index 损坏/丢失后的全量恢复。`.http` cassette 仍是 replay 和 detail 的事实源。
-
-## Docker / Compose
-
-容器内约定的标准路径：
-
-- 可执行文件：`/app/bin/trajecta`
-- 配置文件：`/app/config/config.yaml`
-- 数据目录：`/app/data/traces`
-- 数据库：Postgres service，DSN 由 `TRAJECTA_DATABASE_DSN` 提供
-
-默认提供：
-
-- [Dockerfile](./Dockerfile)
-- [docker-compose.yml](./docker-compose.yml)
-- [config/config.yaml](./config/config.yaml)
-
-启动方式：
-
-```bash
-cp .env.example .env
-docker compose up -d
-docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
-```
-
-然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Providers` 页面配置上游地址、API key 和模型；在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
-SDK 调用 proxy 时把这个 token 作为 SDK API key；直接 curl 时使用 `Authorization: Bearer <token>`。
-
-可选 SearXNG hosted `web_search`：
-
-```bash
-export TRAJECTA_TOOLS_WEB_SEARCH_ENABLED=true
-docker compose --profile search up -d
-```
-
-本地开发需要从源码构建镜像时使用 dev override：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
-
-如果只想直接使用已经发布到 Docker Hub 的镜像，需要同时提供外部 Postgres：
-
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -p 8081:8081 \
-  -e TRAJECTA_DATABASE_DRIVER=postgres \
-  -e TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@host.docker.internal:5432/trajecta?sslmode=disable' \
-  -e TRAJECTA_RESPONSES_FORCE_STORE=true \
-  -e TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
-  -e TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
-  -e TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
-  -e TRAJECTA_OUTPUT_DIR=/app/data/traces \
-  -e TRAJECTA_TRACE_OUTPUT_DIR=/app/data/traces \
-  -e TRAJECTA_SERVER_PORT=8080 \
-  -e TRAJECTA_MONITOR_PORT=8081 \
-  -v "$(pwd)/docker-data:/app/data" \
-  kingfs/trajecta:latest serve -c /app/config/config.yaml
-```
-
-如果你更习惯 `docker compose`，也可以直接引用 Docker Hub 镜像：
-
-```yaml
-services:
-  trajecta:
-    image: kingfs/trajecta:latest
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-      - "8081:8081"
-    environment:
-      TRAJECTA_DATABASE_DRIVER: postgres
-      TRAJECTA_DATABASE_DSN: postgres://trajecta:trajecta@postgres:5432/trajecta?sslmode=disable
-      TRAJECTA_RESPONSES_FORCE_STORE: "true"
-      TRAJECTA_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
-      TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
-      TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
-      TRAJECTA_OUTPUT_DIR: /app/data/traces
-      TRAJECTA_TRACE_OUTPUT_DIR: /app/data/traces
-      TRAJECTA_SERVER_PORT: "8080"
-      TRAJECTA_MONITOR_PORT: "8081"
-    volumes:
-      - ./config/config.yaml:/app/config/config.yaml:ro
-      - ./docker-data:/app/data
-    command: ["serve", "-c", "/app/config/config.yaml"]
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: trajecta
-      POSTGRES_USER: trajecta
-      POSTGRES_PASSWORD: trajecta
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-```
-
-如果本机访问 Go 官方模块代理较慢，可以在构建时直接传入 `GOPROXY`：
-
-```bash
-GOPROXY=https://goproxy.cn,direct docker compose build
-```
-
-`task docker:build` 和 `task docker:up` 使用同一套构建变量约定。优先读取 `DOCKER_BUILD_*`，其次读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）；如果 shell 没有导出 `GOPROXY` / `GOSUMDB`，会回落到 `go env GOPROXY` / `go env GOSUMDB`。当 HTTP(S) proxy 指向宿主机 `127.0.0.1` 或 `localhost` 时，任务会自动转换为 Docker build 容器可访问的 `host.docker.internal`。
-
-```bash
-GOPROXY=https://goproxy.cn,direct task docker:build
-GOPROXY=https://goproxy.cn,direct task docker:up
-```
-
-如果只希望覆盖 Docker 构建阶段而不影响当前 shell，统一使用 `DOCKER_BUILD_*` 变量：
-
-```bash
-DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
-DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
-```
-
-直接执行 `docker compose build` / `docker compose up --build` 时，Compose 只能读取已导出的环境变量；需要自动读取 `go env` 和转换本机回环代理时，请使用 `task docker:build` 或 `task docker:up`。
-
-推荐约定：
-
-- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果只配置了 `go env GOPROXY`，任务也会自动兼容
-- CI / GitHub Actions：默认不设置，直接使用公开默认值 `https://proxy.golang.org,direct`
-- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`，并自动处理宿主机回环地址
-
-默认挂载：
-
-- `./config/config.yaml -> /app/config/config.yaml:ro`
-- `trajecta-data -> /app/data`
-- `postgres-data -> /var/lib/postgresql/data`
-
-运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。
-
-如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖端口、数据库、输出目录等服务启动参数；渠道和模型配置请在 Monitor Web 中维护并写入应用数据库。`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
-
-## 开发命令
-
-```bash
-task fmt
-task lint
-task test
-task build
-task run
-task migrate
-task check
-task docker:build
-task docker:up
-```
-
-## 在单元测试中回放
+**3. 在单元测试里回放这个文件**，不需要网络，也不需要 API key：
 
 ```go
+import (
+    "context"
+    "net/http"
+    "testing"
+
+    "github.com/kingfs/Trajecta/pkg/replay"
+    "github.com/sashabaranov/go-openai"
+)
+
 func TestChat(t *testing.T) {
-    tr := replay.NewTransport("testdata/chat.http")
-
     cfg := openai.DefaultConfig("fake-key")
-    cfg.BaseURL = "http://localhost/v1"
-    cfg.HTTPClient = &http.Client{Transport: tr}
-
+    cfg.BaseURL = "http://localhost/v1" // URL 不重要，Transport 会拦截
+    cfg.HTTPClient = &http.Client{
+        Transport: replay.NewTransport("testdata/chat.http"),
+    }
     client := openai.NewClientWithConfig(cfg)
-    resp, err := client.CreateChatCompletion(context.Background(), req)
+
+    resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+        Model:    "gpt-4o-mini",
+        Messages: []openai.ChatCompletionMessage{{Role: "user", Content: "Hello"}},
+    })
+    if err != nil {
+        t.Fatal(err)
+    }
     _ = resp
-    _ = err
 }
 ```
 
-## 当前设计原则
+任何走 `http.Client` 的 SDK 都能这样接：把 `Transport` 换掉即可，业务代码一行不用改。
 
-- `.http` cassette 是回放的事实来源
-- Postgres 是生产结构化状态主路径，SQLite 是本地 fallback，不替代原始文件
-- 新文件写 V3，旧文件继续兼容读取
-- 尽量保持文件可读、测试离线、生产部署可迁移
-- provider 语义、stream transcript、usage 和 event timeline 尽量收敛在 `pkg/llm`
+## 支持的上游
 
-未实现能力边界：
+| 协议族 | provider preset | 支持级别 |
+| --- | --- | --- |
+| OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`deepseek`、`groq`、`moonshot`、`cerebras`、`perplexity` | verified / compatible |
+| OpenAI Responses | 原生 `/v1/responses` 上游直通，或由本地 runtime 翻译为 chat completions | verified |
+| Anthropic Messages | `anthropic` | verified |
+| Google GenAI | `google_genai`、`google`、`gemini` | verified |
+| Vertex AI | `vertex`（`vertex_express` / `vertex_project_location`） | verified |
+| Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
+| vLLM | `vllm` | verified |
 
-- 公网多租户中转、计费/充值/订阅分发：rejected。
-- 代理热路径跨协议转换：rejected。
-- 独立 Postgres auth migration namespace：audited gap，当前共享 application `schema_migrations`。
-- SQLite versioned application migration：audited fallback，当前为 startup-schema fallback。
-- file_search/code_interpreter/computer_use 等 hosted 工具真实执行 lifecycle 与 root/container 级 executor 沙箱：future secure executor（MCP hosted tool executor 已实现并接线）。
+preset 清单、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，不在转发热路径上做跨协议翻译；唯一的例外是 `/v1/responses` 可以由本地 runtime 承接。
 
-## 截图
+## 架构一览
 
-以下截图记录的是较早版本的 Monitor 界面，页面命名（Traces / Providers / Connect 等）与当前导航已有所不同；当前页面与工作流请以 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md) 为准。
+```text
+   SDK / CLI / Codex / Claude Code
+                │  OpenAI · Anthropic · Google · Vertex
+                ▼
+┌──────────────────────────────────────────────────────────┐
+│ trajecta serve                                           │
+│                                                          │
+│   proxy ──▶ router ──▶ 上游 provider（渠道 / 凭据 / 限流）  │
+│     │         │                                          │
+│     │         └──▶ 路由决策、粘性路由、失败转移             │
+│     ▼                                                    │
+│   recorder ──▶ .http cassette  ← 回放与详情的事实源        │
+│     │                                                    │
+│     ├──▶ 语义解析 ──▶ Observation IR ──▶ findings        │
+│     └──▶ 索引 ──▶ 应用数据库（生产 Postgres / 本地 SQLite）│
+└──────────────────────────────────────────────────────────┘
+       │                                   │
+       ▼                                   ▼
+  Monitor UI（go:embed）              MCP server
+                                           │
+                                           ▼
+                              pkg/replay ──▶ 单元测试离线回放
+```
 
-- Monitor 总览
-  ![](./images/traffic_monitor.png)
-- 对话详情
-  ![](./images/message_detail.png)
-- SSE 原始流
-  ![](./images/sse_message_raw.png)
-- 非流式响应
-  ![](./images/message_raw.png)
+| 目录 | 职责 |
+| --- | --- |
+| `cmd/server` | CLI 入口与全部子命令（serve、db、auth、provider、models、audit、analyze、doctor…） |
+| `internal/proxy` | 反向代理、协议入口归一化、流式响应拦截 |
+| `internal/recorder` | cassette 录制与落盘 |
+| `pkg/recordfile` | 录制格式解析与写入（V3 写入，V2 / 旧 magic 兼容读取） |
+| `pkg/replay` | 单元测试用的回放 `http.RoundTripper` |
+| `pkg/llm` | 跨厂商请求 / 响应 / stream transcript / usage 归一化 |
+| `internal/store` | 应用数据库与 metadata 索引 |
+| `internal/upstream`、`internal/channel` | 上游解析、渠道配置、能力与探测 |
+| `internal/responses` | 本地 Responses runtime、hosted tools、审计查询 |
+| `internal/observe`、`internal/analyzer` | 语义解析管道与审计 findings |
+| `internal/monitor` | Monitor HTTP API 与内嵌 UI |
+| `internal/mcpserver` | MCP 工具面 |
+| `internal/trajectory` | ATIF v1.8 会话轨迹重建与导出 |
+
+数据流、并发一致性与事实源边界的完整说明见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)。
+
+## 文档
+
+| 我想…… | 看这里 |
+| --- | --- |
+| 了解现在实现了什么、没实现什么 | [当前实现状态](./docs/IMPLEMENTATION_STATUS.md) |
+| 理解代码组织与数据流 | [架构与代码地图](./docs/ARCHITECTURE.md) |
+| 把 SDK / CLI 接到代理上 | [代理使用示例](./docs/PROXY_USAGE_EXAMPLES.md) |
+| 接入上游 provider、看协议矩阵 | [协议族与上游 Provider](./docs/PROTOCOLS_AND_PROVIDERS.md)、[协议参考](./docs/protocol-reference/README.md) |
+| 管理渠道、模型、凭据与限流 | [路由、渠道与凭据](./docs/ROUTING_AND_CREDENTIALS.md) |
+| 用 Codex 或本地 Responses runtime | [本地 Responses Runtime](./docs/RESPONSES_RUNTIME.md) |
+| 使用 Monitor 界面 | [Monitor 使用指南](./docs/MONITOR_GUIDE.md) |
+| 让 agent 通过 MCP 查询轨迹 | [MCP 使用指南](./docs/MCP_GUIDE.md) |
+| 部署、迁移与数据保留 | [存储与部署](./docs/STORAGE_AND_DEPLOYMENT.md) |
+| 长期运行 Postgres 的调优与排障 | [PostgreSQL 运维手册](./docs/POSTGRES_OPERATIONS.md) |
+| 参与开发、跑测试与 CI | [开发与测试](./docs/DEVELOPMENT.md)、[CONTRIBUTING](./CONTRIBUTING.md) |
+| 看每个版本改了什么 | [CHANGELOG](./CHANGELOG.md) |
+| 面向 AI agent 的项目约定 | [AGENTS.md](./AGENTS.md) |
+
+完整文档索引见 [docs/README.md](./docs/README.md)。
+
+## 界面
+
+<div align="center">
+<img src="./images/monitor-traces.png" alt="请求列表" width="46%">
+<img src="./images/monitor-trace-detail.png" alt="trace 详情：timeline、协议、审计与性能" width="46%">
+<br>
+<img src="./images/monitor-providers.png" alt="服务商与渠道管理" width="70%">
+</div>
+
+trace 详情把一次交换拆成 Routing & Conversation、Protocol、Audit、Performance、Raw 五个视图；审计 findings、路由决策与原始协议都在同一页。
+
+## 项目状态与边界
+
+当前版本 `v2.0.0`，MIT 许可。明确不做的事：
+
+- 公网多租户中转、计费 / 充值 / 订阅分发
+- 转发热路径上的跨协议转换（`/v1/responses` 的本地 runtime 是唯一例外）
+- hosted `file_search` / `code_interpreter` / `computer_use` 的真实执行 lifecycle 与容器级沙箱
+
+这些边界与当前实现的完整对照见 [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md)。
+
+## 参与贡献
+
+欢迎 issue 与 PR。开始之前请读 [CONTRIBUTING.md](./CONTRIBUTING.md)：它说明了提交前要跑的验证命令、录制格式的兼容性要求，以及文档约定（`docs/` 只描述当前代码事实）。
+
+```bash
+task check:quick     # 格式检查、lint 与短测试
+task check:full      # 追加全量测试、e2e、race 与完整构建
+```
 
 ## License
 

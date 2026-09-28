@@ -14,12 +14,7 @@ Trajecta 目前做三件协议感知的事情：
 
 ## 协议族
 
-| 协议族 | provider 标签 | 路由 profile | 当前 endpoint 覆盖 | Parser 覆盖 |
-| --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Embeddings 与 Tokenization 只被分类、路由与录制 |
-| `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`；连通性与模型发现使用 `/v1/models` | Messages |
-| `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`、`/v1beta/models` | GenerateContent、streamGenerateContent |
-| `vertex_native` | `vertex_native` | `vertex_express`、`vertex_project_location` | Vertex Gemini `generateContent`、`streamGenerateContent`、模型列表路径 | GenerateContent、streamGenerateContent |
+协议族、provider 标签、routing profile 与客户端入口归一化的完整矩阵由 [协议族与上游 Provider](../PROTOCOLS_AND_PROVIDERS.md) 的"协议族与请求入口"一节维护，本文不重复；各协议族的官方上游 schema 快照索引见 [协议参考](./README.md) 的"上游快照"一节。下文只记录各协议族当前实现的请求/响应处理面。
 
 ## OpenAI-Compatible
 
@@ -36,23 +31,22 @@ OpenAI-compatible 用于 API 形态遵循 OpenAI 风格请求／响应语义的 
 
 要点：
 
-- 客户端 `/responses` 被接受为 Trajecta 入口别名，并归一化为 `/v1/responses`
-- 对 `vllm_openai` 路由 profile，客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 会被路由到 vLLM 根路径的 tokenization endpoint
+- `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 的根路径映射对整个 `openai_compatible` 协议族生效，不区分 routing profile，统一映射到上游根路径的 tokenization endpoint；`vllm_openai` profile 的分支因此不可达
 - `upstream.base_url` 应包含 provider 的 API 前缀，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`
-- 代理会录制并解析 Chat Completions、Responses 与 Models。Embeddings 与 vLLM 分词请求会被分类、路由与录制，但不是当前 Observation IR 的深度解析目标
+- 代理会录制并解析 Chat Completions、Responses 与 Models。Embeddings 请求只被分类与追踪，`pkg/llm.AdapterFor` 没有 embeddings 分支，因此它不参与路由（选择阶段得到零个候选并失败），也不是当前 Observation IR 的深度解析目标；vLLM 分词请求会被分类、路由与录制，但不是 Observation IR 的深度解析目标
 - Responses 与 Chat Completions 是 OpenAI 的两个不同接口面。Codex 流量通常使用 `/v1/responses`
 
 ## Anthropic Messages
 
-Anthropic Messages 用于 Claude 风格的 `/v1/messages` 流量。
+Anthropic Messages 用于 Claude 风格的 `/v1/messages` 流量。客户端入口（`/anthropic/messages`、`/anthropic/v1/messages`、`/v1/messages` 以及 `/v1/messages/count_tokens` 及其别名）由 [协议族与上游 Provider](../PROTOCOLS_AND_PROVIDERS.md) 的"协议族与请求入口"一节维护。
 
 当前行为：
 
-- 客户端 `/anthropic/messages`、`/anthropic/v1/messages` 被接受为 Trajecta 入口别名，并归一化为 `/v1/messages`
 - 请求与响应 body 原样透传
 - 认证 header 被重写为 Anthropic 风格的 `x-api-key`
-- 上游配置了 `anthropic-version` 且请求缺失时，由代理注入
+- `api_version` 默认为 `2023-06-01`：只要上游存在 API key，请求缺失 `anthropic-version` 时就会被注入该默认值，不要求显式配置
 - 请求／响应 body 与流式事件会被解析为 Observation IR
+- `/v1/messages/count_tokens` 与 `/v1/messages` 共用同一 operation 与 parser，因此同样被追踪与解析
 
 因此，把 Claude Code 指向一个不重复 `/v1` 的 Trajecta base URL，并配置好兼容 Anthropic Messages 的上游（或所选网关确实支持该 endpoint）时，它就能正常工作。
 

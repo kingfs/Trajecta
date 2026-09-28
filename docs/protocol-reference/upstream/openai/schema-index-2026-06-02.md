@@ -20,4 +20,4 @@ Current Trajecta parser coverage targets:
 - Responses request, response, and stream events
 - Models list response
 
-Embeddings are currently part of the routed OpenAI-compatible endpoint set, but not a deep Observation IR parser target.
+Embeddings are classified and traced, but not routable: `llm.AdapterFor` has no embeddings case, so an `/v1/embeddings` request yields zero candidates during selection and fails, and `capabilities.embeddings` is never consulted. Embeddings is also not a deep Observation IR parser target.

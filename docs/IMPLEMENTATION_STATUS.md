@@ -14,7 +14,7 @@ Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用�
 6. MCP 工具向 AI agent 暴露只读排障、trace 查询、失败聚类、系统事件与受控重分析。
 7. `pkg/replay` 在测试中基于 cassette 回放响应，不访问上游网络。
 
-下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages`。除 `/v1/responses` 的本地 runtime 外，转发热路径不做跨协议请求转换。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
+下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages` 与 `/v1/messages/count_tokens`。其中 `/v1/embeddings` 只被分类与追踪，不参与路由：`pkg/llm.AdapterFor` 没有 embeddings 分支，选路因此得到零个候选并报选路失败，`capabilities.embeddings` 也不会被查询；`/v1/messages/count_tokens` 在无匹配上游或上游返回 404 时由代理返回合成计数响应并照常录制。除 `/v1/responses` 的本地 runtime 外，转发热路径不做跨协议请求转换。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
 
 详见 [./README.md](./README.md)、[./ARCHITECTURE.md](./ARCHITECTURE.md)、[./PROTOCOLS_AND_PROVIDERS.md](./PROTOCOLS_AND_PROVIDERS.md)、[./PROXY_USAGE_EXAMPLES.md](./PROXY_USAGE_EXAMPLES.md)。
 
@@ -22,7 +22,7 @@ Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用�
 
 已实现的协议族（`internal/upstream/resolved.go`）：
 
-- `openai_compatible`：Chat Completions、Responses、Embeddings、Models，以及 `/tokenize`、`/detokenize`。
+- `openai_compatible`：Chat Completions、Responses、Embeddings（只被分类与追踪，不可路由）、Models，以及 `/tokenize`、`/detokenize`。
 - `anthropic_messages`：Claude `/v1/messages`。
 - `google_genai`：Gemini `generateContent`、`streamGenerateContent`、模型列表。
 - `vertex_native`：Vertex Gemini 的 `generateContent`、`streamGenerateContent` 与模型发现路径。
@@ -37,17 +37,9 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 ## 录制与回放
 
-录制写入格式是 V3（`pkg/recordfile`，前导 `# trajecta/v3`），结构固定为：
+录制写入已实现 V3（`pkg/recordfile`，前导 `# trajecta/v3`）：读取端必须继续兼容旧 `LLM_PROXY_V2` 的固定 2KB JSON header block，并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`，`LLM_PROXY_V3` 是稳定的格式标识，刻意不随项目改名。
 
-1. 以 `# trajecta/v3` 开头的 prelude。
-2. 一行 `# meta: {...}` JSON。
-3. 零到多行 `# event: {...}` JSON。
-4. 一个空行。
-5. 原始 HTTP 请求字节。
-6. 一个分隔换行。
-7. 原始 HTTP 响应字节。
-
-读取端必须继续兼容旧 `LLM_PROXY_V2` 的固定 2KB JSON header block，并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`。`LLM_PROXY_V3` 是稳定的格式标识，刻意不随项目改名。`.http` cassette 是 replay 和详情页的事实源，保持人类可读，并优先做增量演进而不是破坏性迁移。
+七步逐字节布局见 [架构与代码地图](./ARCHITECTURE.md)。`.http` cassette 是 replay 和详情页的事实源，保持人类可读，并优先做增量演进而不是破坏性迁移。
 
 本地 Responses runtime 调用内部上游 `/v1/chat/completions` 时，该上游 HTTP exchange 也按同一 recorder 写入 `.http` cassette；Responses semantic state 不替代 raw cassette。回放由 `pkg/replay` 提供硬性保证，测试回放不访问上游网络。相关背景见 [./ARCHITECTURE.md](./ARCHITECTURE.md)。
 
@@ -73,17 +65,9 @@ Postgres 的 auth 表由 application migration set 拥有：`auth migrate up` �
 
 ## 本地 Responses runtime
 
-本地 Responses execution mode 始终可用，没有配置开关。历史上用于控制它的 `responses_server.enabled` 字段和 `TRAJECTA_RESPONSES_ENABLED` 环境变量已被删除；`ResponsesServerConfig` 中不存在 `enabled` 字段。本地 runtime 采用惰性构建：`tools.web_search`、function executor、model profile 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上以 502 报错。
+本地 Responses execution mode 已实现且始终可用，没有配置开关：`responses_server.enabled` 字段与 `TRAJECTA_RESPONSES_ENABLED` 环境变量已被删除，`ResponsesServerConfig` 中不存在 `enabled` 字段；本地 runtime 采用惰性构建，`tools.web_search`、function executor、model profile 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上以 502 报错。
 
-`/v1/responses` 在选路时按模型在上游能力之间二选一：命中 native Responses upstream 时直接代理透传（native Responses target 原样转发并录制为 `/v1/responses` cassette）；否则由本地 runtime 接管，把请求编排为内部上游 `/v1/chat/completions` 调用。选路策略来自应用库 `app_settings` 键 `routing.settings`（不是 YAML 键），由 `PATCH /api/settings/routing` / `GET /api/settings/routing` 管理，`responses_strategy` 有五个取值：
-
-- `auto`（默认）
-- `prefer_native`
-- `prefer_local_server`
-- `native_only`（不做本地翻译）
-- `local_server_only`
-
-native/local 判定按模型而非按渠道：显式的 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 模型详情页可编辑）优先于渠道级 `api_type` / `capabilities`，未声明的模型沿用渠道级行为；YAML 部署可用 upstream 的 `model_capabilities` 表达同一覆盖。Monitor 的 routing inspect 模拟器使用同一份按模型能力数据。同一渠道因此可以让部分模型走 native 直通、其余走本地 runtime。
+`/v1/responses` 已实现按模型的 native／本地 runtime 二选一，`responses_strategy` 取值为 `auto`、`prefer_native`、`prefer_local_server`、`native_only`、`local_server_only`。执行模式、策略来源（应用库 `app_settings` 键 `routing.settings`）与按模型 capability 覆盖的完整机制见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 
 已实现的下游与 runtime 能力：
 
@@ -107,11 +91,13 @@ Codex 兼容性：`tests/fixtures/codex/` 存放离线 fixture，`task test:code
 
 ## 渠道与模型管理
 
-YAML 的 `upstream` / `upstreams` 只是首次 bootstrap 输入。第一次写库会写入应用库 `app_settings` 键 `channels.initialized`；此后数据库拥有路由配置，即使渠道被全部禁用或删除也仍然如此。`GET /api/settings/channels` 返回该 marker（`{"initialized": bool}`），`DELETE /api/settings/channels` 清除 marker 以重新打开 YAML bootstrap，但在数据库仍存有渠道时数据库继续优先。
+YAML 的 `upstream` / `upstreams` 只是首次 bootstrap 输入。第一次写库会写入应用库 `app_settings` 键 `channels.initialized`；此后数据库拥有路由配置，即使渠道被全部禁用或删除也仍然如此。`GET /api/settings/channels` 返回 `{"initialized": bool}`，其值是 `channel.Service.HasConfiguration()`——`channels.initialized` 标记为真时为 true，标记被 `DELETE /api/settings/channels` 清除后只要数据库中仍存有任意渠道行也仍为 true，因此清除标记后该接口会继续保持 `{"initialized": true}`。
 
-YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理：Monitor 的渠道、模型和 alias 写操作返回 409（`upstreams are managed by YAML credentials; edit YAML and restart instead`）。
+YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Monitor 的渠道、模型和 alias 写操作返回 409。
 
-所有管理写操作（渠道、模型、alias、provider setup 与 probe apply）都在一个 `store.ConfigurationTransaction` 内执行：持有进程级配置锁、upstream 写锁和单个 SQL 事务，runtime 路由只在提交成功后才发布；后台 upstream refresh 通过同一 upstream 写锁做 best-effort 持久化。
+所有管理写操作（渠道、模型、alias、provider setup 与 probe apply）都在一个 `store.ConfigurationTransaction` 内执行，runtime 路由只在提交成功后才发布。
+
+配置来源与所有权（YAML bootstrap、`channels.initialized` 标记与 409 规则）见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，`ConfigurationTransaction` 的锁顺序、事务范围与后台 refresh 的 best-effort 语义见 [架构与代码地图](./ARCHITECTURE.md)。
 
 已实现的配置能力：
 
@@ -128,7 +114,9 @@ YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理：Mon
 
 Monitor 是 Go embed 的 React/Vite 前端，当前页面/视角包括：Overview、Events、Sessions、Traces（旧的 `/requests` 入口仍可用）、Audit、Models、Providers（旧的 `/channels` 入口重定向到 `/providers`）、Connect、Routing、Analysis、Tokens，以及 trace／session／provider／model 详情页。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
 
-主要 HTTP API：`/api/overview`、`/api/traces`、`/api/sessions`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/analysis`、`/api/upstreams`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
+Session 详情页提供「导出会话轨迹（ATIF）」动作（UI 标签 `Export trajectory (ATIF)`），已实现从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`：格式固定为 ATIF-v1.8，不调用模型、不修改 cassette。
+
+主要 HTTP API：`/api/overview`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/analysis`、`/api/upstreams`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 
 使用说明见 [./MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 
@@ -171,6 +159,7 @@ Responses audit 属于部分实现，职责边界如下：
 - 跨协议请求转换网关：转发热路径不做 OpenAI、Anthropic、Gemini、Vertex 之间的请求互转，唯一例外是 `/v1/responses` 本地 runtime 把 Responses 编排为内部 Chat Completions。
 - 公网多租户 API 分发平台，以及计费、充值、订阅销售。
 - 对上游 Responses provider 的 native semantic interposition：native Responses 只做透传，不做语义改写。
+- ATIF 会话轨迹导出的语义重建范围：只重建 `/responses`（OpenAI Responses generation 及 SSE）的 exchange，其他 endpoint（含 compact）保留源 trace 引用并在 `extra.warnings` 报告 `unsupported_endpoint`，不做因果推断；导出在单次请求内同步生成，以一次查询得到的请求集合为快照，生成期间新增的请求不进入本次文件。
 - 用结构化数据库替代 raw cassette 作为 replay/详情事实源；也不让 replay 依赖网络访问，更不让测试依赖真实 provider。
 - 完整的 model profile / context optimization，以及复杂组合（未知或未实现 hosted 工具、非平凡 `tool_choice`）在 auto compact 后的真实增量本地 Responses streaming。
 - `external_command` executor 的 root/container 级沙箱：当前只有 opt-in 的 working directory、绝对 command、allowed_command_dirs、reject_root 轻量进程隔离。

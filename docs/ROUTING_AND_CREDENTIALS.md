@@ -20,11 +20,11 @@
 ## 数据模型
 
 - `channel_configs`（渠道主配置）：`id`、`name`、`description`、`source`、`base_url`、`provider_preset`、`api_type`、`mode`、`capabilities_json`、`protocol_family`、`routing_profile`、`api_version`、`deployment`、`project`、`location`、`model_resource`、`api_key_ciphertext`、`api_key_hint`、`headers_json`、`enabled`、`priority`、`weight`、`capacity_hint`、`model_discovery`、`allow_unknown_models`、`created_at`、`updated_at`、`last_probe_at`、`last_probe_status`、`last_probe_error`。
-- `channel_models`（渠道与模型的供应/启用关系）：唯一键 `(channel_id, model)`；字段包括 `display_name`、`source`（`discovered` / `static` / `manual` / `inferred` / `trace`）、`enabled`、`supports_responses` / `supports_chat_completions` / `supports_embeddings`（三态 `INTEGER NULL`，`NULL` 表示继承渠道级能力）、`context_window`、`max_output_tokens`、`compact_history_item_threshold`、`upstream_model`、`profile_source`、`profile_adoption_status`、输入/输出模态 JSON、`raw_model_json` 与 `first_seen_at` / `last_seen_at` / `last_probe_at`。
+- `channel_models`（渠道与模型的供应/启用关系）：唯一键 `(channel_id, model)`；字段包括 `display_name`、`source`（`static` / `discovered` / `manual` / `trace`）、`enabled`、`supports_responses` / `supports_chat_completions` / `supports_embeddings`（三态 `INTEGER NULL`，`NULL` 表示继承渠道级能力）、`context_window`、`max_output_tokens`、`compact_history_item_threshold`、`upstream_model`、`profile_source`、`profile_adoption_status`、输入/输出模态 JSON、`raw_model_json` 与 `first_seen_at` / `last_seen_at` / `last_probe_at`。
 - `model_aliases`：`id`、`alias`、`target_model`、`channel_id`（空表示全局别名）、`enabled`、`description`、`source`、时间戳。
   `channel_id` 非空时表示该别名只允许在该渠道展开；写入时校验禁止直接别名循环、禁止同一 `alias + channel` 重复激活目标，冲突返回 `model alias conflict`。
 - `model_catalog`：按模型保存展示元信息（`display_name`、`family`、`vendor`、`description`、标签、首末出现时间），它不是路由事实来源；可路由性由 `channel_models.enabled` 与 router 内存快照决定。
-- `channel_probe_runs`：探测历史（状态、耗时、发现/启用数量、endpoint、错误文本、`request_meta_json`）。
+- `channel_probe_runs`：探测历史（状态、耗时、发现/启用数量、endpoint、`status_code`、错误文本、`request_meta_json`、`response_sample_json`）。
 - `upstream_targets` / `upstream_models`：旧的运行时快照与兼容投影，由配置事务和后台 refresh 写入。
 - 凭据：YAML `credentials[]` 的字段是 `id`、`name`、`enabled`、`api_key`、`headers`、`concurrency_limit`。
   未配置显式 credentials 时，inline `upstream.api_key` 被视为一个隐式 credential（见下）。
@@ -87,7 +87,7 @@ Provider 与探测：
 - `GET /api/secrets/local-key`（`?export=1` 下载备份）、`POST /api/secrets/local-key?rotate=1`
 - 旧运行时诊断：`GET /api/upstreams`、`GET /api/upstreams/{id}`
 
-`PATCH /api/settings/routing` 接受 `responses_strategy`、`selection_policy`、`missing_model_policy`、`route_plan_log_level`；持久化到应用库 `app_settings` 键 `routing.settings`。
+`PATCH /api/settings/routing` 的字段、校验与持久化位置（应用库 `app_settings` 键 `routing.settings`）见 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md) 与 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)。
 `POST /api/routing/inspect` 接受 `endpoint`、`model`、`stream`、`tools`，返回 route plan 与候选排除原因。
 
 ## Provider 探测与模型写回
@@ -114,12 +114,8 @@ Provider 与探测：
 
 - Chat Completions 与 Anthropic Messages 只生成 `proxy_pass` 计划；候选过滤顺序为渠道启用 → 模型匹配 → endpoint 能力（`requires_chat_completions` / `requires_anthropic_messages`）→ `HasTools` 时的 tool calling 能力。
 - 模型匹配基于渠道的启用模型集合与别名；`UpstreamCandidate.ModelCapabilities` 支持按模型覆盖能力，键大小写不敏感。
-- `/v1/responses` 按 `responses_strategy` 生成计划（rank 越小越优先）：
-  - `auto`（默认）与 `prefer_native`：native Responses 直通 rank 0，Chat Completions 本地 runtime rank 1。
-  - `prefer_local_server`：本地 runtime rank 0，native 直通 rank 1。
-  - `native_only`：只保留 native，并把 chat 候选标记为 `strategy_disallows_chat_fallback`。
-  - `local_server_only`：只保留本地 runtime，并把 native 候选标记为 `strategy_disallows_native_responses`。
-  - 其它取值返回 `unsupported_responses_strategy`。
+- `/v1/responses` 由 `responses_strategy` 决定 native 直通与本地 runtime 的 rank 顺序：`auto`（默认）与 `prefer_native` 为 native rank 0 / 本地 rank 1，`prefer_local_server` 反过来，`native_only` 只保留 native（chat 候选标记 `strategy_disallows_chat_fallback`），`local_server_only` 只保留本地 runtime（native 候选标记 `strategy_disallows_native_responses`）；其它取值返回 `unsupported_responses_strategy`。
+- 各档策略的完整语义与本地 runtime 执行细节见 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)；本节只记录路由决策侧的事实。
 - 代理热路径上的 `responsesRoutingDecision` 与上述规则一致：native 可选中则直通；native 存在但本请求不可选时直接拒绝并说明原因；否则在有本地 runtime 且存在 Chat Completions backend 时走 `responses_server`。
 - 每个 plan candidate 都带过滤原因（`selected`、`channel_not_enabled`、`model_not_matched`、`requires_chat_completions`、`requires_responses`、`requires_anthropic_messages`、`requires_tool_calling`、`no_route_candidate` 等），route plan 会写入 V3 cassette event 并在 Monitor trace detail 展示。
 - native-vs-local 按模型解析：`channel_models.supports_responses` / `supports_chat_completions` 的显式值覆盖渠道级 `api_type` / `capabilities`，未声明则回退渠道级；YAML 等价项是 `upstream.model_capabilities`。
@@ -158,9 +154,9 @@ Provider 与探测：
 
 ## 安全 metadata 与脱敏
 
-V3 cassette routing event 会写入的安全字段包括：`route_target_id`、`channel_id`、`credential_id`、`credential_hint`、`sticky_key_fingerprint`、`credential_selectable`、`candidate` 列表中的 `base_url`（经过 `redaction.DisplayURL`）、`excluded` 与 `filter_reason`。
+V3 cassette routing event 实际会写入的安全字段包括：`route_target_id`、`channel_id`、`credential_id`、`credential_hint`、`sticky_key_fingerprint`、`candidate` 列表中的 `base_url`（经过 `redaction.DisplayURL`）、`excluded` 与 `filter_reason`。
 
-- `credential_health_state` 与 `credential_filter_reason` 在事件结构中存在，但当前代码没有为它们赋值，因此实际不会出现。
+- `credential_selectable`、`credential_health_state` 与 `credential_filter_reason` 在 `router.CandidateDecision` 结构与 `candidateEventAttributes` 读取路径中存在，但生产代码没有任何赋值点（只有测试会赋值），因此事件中不会出现；它们当前是只读字段。
 - 禁止写入 cassette、日志、Monitor JSON 或 MCP 输出：API key、bearer token、OAuth access/refresh token、service-account JSON、自定义 auth header 值、完整 raw sticky key。
 - `redaction.DisplayURL` 会把 URL userinfo 中的密码替换为 `REDACTED`，并把名字含 `key`、`token`、`secret`、`password`、`passwd`、`credential`、`signature`、`sig`、`access_token`、`api_key` 的 query 参数值替换为 `REDACTED`。
 - `redaction.SafeCredentialHint` 先做 metadata 脱敏再截断到 32 字符，值等于 `REDACTED` 时按空处理。
@@ -174,12 +170,13 @@ V3 cassette routing event 会写入的安全字段包括：`route_target_id`、`
 
 Monitor 侧是渠道/模型/别名配置的主入口：导航中的 `Providers` 页面（API 仍为 `/api/channels`）负责渠道创建、编辑、启停、探测与 headers/能力配置，`Models` 页面负责模型广场、模型详情、模型启停与别名相关操作，`Routing` 页面展示 selected route 记录，`Connect` 页面展示协议入口。
 
-MCP 侧只提供查询工具，没有渠道/模型/别名写入口：
+MCP 侧提供查询工具与受控重分析动作工具，但没有渠道/模型/别名写入口：
 
 - `list_upstreams`：上游分析列表。
 - `query_routing_decisions`：单条 trace 的路由决策事件、候选、选中上游与失败原因。
 - `query_sticky_routing`：按状态、上游、前一上游与 fingerprint 过滤 `routing.sticky.*` 事件。
 - `query_failures`、`summarize_failure_clusters`：失败 trace 与失败聚类。
+- `reanalyze_trace`、`reanalyze_session`：对单条 trace / 单个 session 运行或入队受控重分析（动作工具，不是只读查询）。
 
 CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe-apply`、`models codex-config`、`db secret status/export/rotate`。
 
