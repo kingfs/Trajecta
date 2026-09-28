@@ -8,6 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- Add entries here as changes land. -->
 
+## [2.0.1] - 2026-09-28
+
+Documentation-only release: no runtime, configuration, record-format or API
+behaviour changed. The docs tree was re-verified against the code and the
+READMEs were rewritten as project landing pages.
+
+### Added
+
+- `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md` at the repository root, covering the release history, the contribution workflow with the verification commands to run before a pull request, and vulnerability reporting plus the operator notes for cassettes, secrets and exposed ports.
+- `task ui:screenshots`, with a Playwright capture config and capture script that regenerate the README screenshots for the Chinese and English Monitor UIs from the offline fixture server.
+
+### Changed
+
+- `README.md` and `README_EN.md` were rewritten as landing pages and kept in sync: positioning, capability table, three quick-start paths (Docker Compose, source, upgrading from llm-tracelab), a five-minute record-and-replay walkthrough, the supported-upstream matrix, an architecture overview with a directory map, the documentation index, contributing and the license.
+- The README screenshots were replaced with captures of the current UI (`images/` for the Chinese UI, `images/en/` for English), and four stale screenshots were removed.
+- Every document under `docs/` was checked against the code and the claims that had drifted were corrected, including the scope of `debug.mask_key` on-disk redaction, the absence of timing simulation in the replay transport, the two-cassette shape of local Responses recording, the environment and table coverage of the Postgres baseline script, exchange-column nullability, the embeddings endpoint being classified but not routable, and the provider-preset matrix.
+- `ent/migrate/README.md` no longer describes SQLite as the default generation workflow; Postgres is the production and tracked default.
+- `docs/protocol-reference/README.md` links the four dated upstream schema snapshots directly, and `docs/DEVELOPMENT.md` links the ent migration workflow, the Codex fixture profile and the pull request template.
+
 ## [2.0.0] - 2026-09-28
 
 ### Added
@@ -404,7 +423,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - The project was named llm-tracelab.
 
-[Unreleased]: https://github.com/kingfs/Trajecta/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/kingfs/Trajecta/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/kingfs/Trajecta/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/kingfs/Trajecta/compare/v1.2.5...v2.0.0
 [1.2.5]: https://github.com/kingfs/Trajecta/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/kingfs/Trajecta/compare/v1.2.3...v1.2.4
