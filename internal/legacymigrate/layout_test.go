@@ -134,6 +134,50 @@ func TestPlanCassetteLayoutClassifiesRecordedVaultShapes(t *testing.T) {
 	}
 }
 
+// TestPlanCassetteLayoutReadsLongPreludes covers streaming recordings: the
+// recorder appends one "# event:" line per chunk, so a long stream produces a
+// prelude of several hundred kilobytes.
+func TestPlanCassetteLayoutReadsLongPreludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "site.example", "gpt-5.4", "2026", "01", "02", "long.http")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta:    recordfile.MetaData{RequestID: "req-long", Model: "gpt-5.4", URL: "/v1/responses"},
+	}
+	events := make([]recordfile.RecordEvent, 0, 4000)
+	for i := 0; i < 4000; i++ {
+		events = append(events, recordfile.RecordEvent{Type: "message", Message: strings.Repeat("chunk", 24)})
+	}
+	prelude, err := recordfile.MarshalPrelude(header, events)
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	if len(prelude) < 512<<10 {
+		t.Fatalf("prelude = %d bytes, want at least 512 KiB for this test", len(prelude))
+	}
+	content := append([]byte(recordfile.LegacyFileMagic+"\n"), prelude[strings.IndexByte(string(prelude), '\n')+1:]...)
+	content = append(content, []byte("POST /v1/responses HTTP/1.1\r\n\r\n")...)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	report, err := PlanCassetteLayout(context.Background(), LayoutOptions{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatalf("PlanCassetteLayout() error = %v", err)
+	}
+	if report.Unreadable != 0 {
+		t.Fatalf("Unreadable = %d (%+v), want 0 for a long but valid prelude", report.Unreadable, report.Failures)
+	}
+	if report.Canonical != 1 || report.Scanned != 1 {
+		t.Fatalf("Canonical = %d Scanned = %d, want 1 and 1", report.Canonical, report.Scanned)
+	}
+}
+
 func TestPlanCassetteLayoutHonoursUnknownSiteAndKeepMoves(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

@@ -22,19 +22,18 @@ import (
 // cannot be recovered from the file.
 const DefaultUnknownSite = "unknown-site"
 
-// layoutPrefixBytes bounds the prelude read used to recover the recorded model
-// name. A V3 prelude is a few kilobytes and a V2 header is a fixed 2 KB block,
-// so a larger cassette is never read in full.
-const layoutPrefixBytes = 256 << 10
-
 // layoutHeadBytes is the first read attempt per cassette. A prelude is normally
 // one or two kilobytes, and on a cold vault the bytes dominate the scan cost, so
 // the larger bounds are only used when the smaller one turns out to be truncated.
 const layoutHeadBytes = 4 << 10
 
-// layoutGrowBytes is the second read attempt for cassettes whose prelude is
-// larger than layoutHeadBytes.
-const layoutGrowBytes = 64 << 10
+// layoutGrowBytes and layoutMaxBytes are the follow-up read attempts. A streaming
+// recording appends one "# event:" line per chunk, so a long stream really does
+// produce a prelude of several hundred kilobytes.
+const (
+	layoutGrowBytes = 512 << 10
+	layoutMaxBytes  = 8 << 20
+)
 
 // Layout decisions for one cassette.
 const (
@@ -266,7 +265,7 @@ func inspectLayout(path string) (magic string, model string, size int64, err err
 		parsed   *recordfile.ParsedPrelude
 		parseErr error
 	)
-	for _, limit := range []int64{layoutHeadBytes, layoutGrowBytes, layoutPrefixBytes} {
+	for _, limit := range []int64{layoutHeadBytes, layoutGrowBytes, layoutMaxBytes} {
 		if limit > size {
 			limit = size
 		}
