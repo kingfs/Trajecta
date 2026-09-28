@@ -268,6 +268,8 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 
 在容器里运行时数据库记录的路径就是容器路径，直接判断文件是否存在即可；在容器外运行时用 `--data-root <本地根>` 配合 `--recorded-prefix <数据库里记录的前缀>` 做前缀替换。
 
+报告默认只列 10 条示例路径；把 `--max-samples` 调大（例如 `--max-samples 2000`）即可把「找不到 cassette」与「候选不唯一」的路径全部列出，用来逐条核对。
+
 ## 迁移之后
 
 - Postgres 是唯一事实源；`serve` 只连 Postgres，不再打开任何 SQLite 文件。

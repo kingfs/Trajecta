@@ -50,6 +50,10 @@ type ReconcileOptions struct {
 	// PruneSupersededIndexRows deletes a superseded `logs` row once no derived
 	// row references its trace id any more. It only has an effect with Apply.
 	PruneSupersededIndexRows bool
+	// MaxSamples caps how many example paths the superseded-row report lists.
+	// Zero or less means defaultMaxSamples, so an operator can raise it to
+	// enumerate every path the repair refused to touch.
+	MaxSamples int
 }
 
 // DerivedTableResult reports the reconciliation of one derived table.
@@ -739,7 +743,7 @@ func discoverSupersededIndexRows(ctx context.Context, pg *sql.DB, opts Reconcile
 		switch len(hits) {
 		case 0:
 			stats.OrphanFiles++
-			if len(stats.SampleOrphanPaths) < 10 {
+			if len(stats.SampleOrphanPaths) < sampleLimit(opts.MaxSamples) {
 				stats.SampleOrphanPaths = append(stats.SampleOrphanPaths, row.path)
 			}
 		case 1:
@@ -751,13 +755,25 @@ func discoverSupersededIndexRows(ctx context.Context, pg *sql.DB, opts Reconcile
 			})
 		default:
 			stats.Ambiguous++
-			if len(stats.SampleAmbiguous) < 10 {
+			if len(stats.SampleAmbiguous) < sampleLimit(opts.MaxSamples) {
 				stats.SampleAmbiguous = append(stats.SampleAmbiguous, row.path)
 			}
 		}
 	}
 	stats.Superseded = int64(len(superseded))
 	return superseded, stats, nil
+}
+
+// defaultMaxSamples is how many example paths a report lists unless the caller
+// asks for a different cap.
+const defaultMaxSamples = 10
+
+// sampleLimit resolves the per-list cap; a non-positive request means the default.
+func sampleLimit(maxSamples int) int {
+	if maxSamples <= 0 {
+		return defaultMaxSamples
+	}
+	return maxSamples
 }
 
 // recordedToLocal maps a path recorded in the application database onto the local

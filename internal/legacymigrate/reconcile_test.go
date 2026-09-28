@@ -228,6 +228,15 @@ func TestDuplicateDeleteStatement(t *testing.T) {
 	if !strings.HasPrefix(withoutIdentity, "DELETE FROM") {
 		t.Errorf("delete statement = %q, want a DELETE", withoutIdentity)
 	}
+	if got := sampleLimit(0); got != defaultMaxSamples {
+		t.Errorf("sampleLimit(0) = %d, want %d", got, defaultMaxSamples)
+	}
+	if got := sampleLimit(-3); got != defaultMaxSamples {
+		t.Errorf("sampleLimit(-3) = %d, want %d", got, defaultMaxSamples)
+	}
+	if got := sampleLimit(2500); got != 2500 {
+		t.Errorf("sampleLimit(2500) = %d, want 2500", got)
+	}
 	// Without any table to check, the statement must not delete anything.
 	unguarded := supersededPruneStatement(nil)
 	if !strings.Contains(unguarded, "AND FALSE") {

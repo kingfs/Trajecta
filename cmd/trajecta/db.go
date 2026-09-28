@@ -24,6 +24,7 @@ type dbFlags struct {
 	pruneStale    bool
 	dataRoot      string
 	recordedRoot  string
+	maxSamples    int
 }
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -60,6 +61,8 @@ being invented; pass --fill-missing-required to insert placeholders instead.`,
 		"local root the recorded cassette paths live under (default: the configured trace directory)")
 	cmd.Flags().StringVar(&flags.recordedRoot, "recorded-prefix", "",
 		"prefix the database recorded, mapped onto --data-root (defaults to --data-root)")
+	cmd.Flags().IntVar(&flags.maxSamples, "max-samples", 10,
+		"how many example paths the superseded-row report lists (0 restores the default)")
 	return cmd
 }
 
@@ -140,6 +143,7 @@ func (r *cliRuntime) execReconcile(cmd *cobra.Command, cfg *config.Config, flags
 		DataRoot:                 dataRoot,
 		RecordedPrefix:           strings.TrimSpace(flags.recordedRoot),
 		PruneSupersededIndexRows: flags.pruneStale,
+		MaxSamples:               flags.maxSamples,
 	})
 	if err != nil {
 		return err
@@ -202,12 +206,16 @@ func printReconcileReport(w io.Writer, report *legacymigrate.ReconcileReport) {
 		} else {
 			fmt.Fprintf(w, "  index rows pruned: %d\n", stats.Pruned)
 		}
-		for _, path := range stats.SampleOrphanPaths {
-			fmt.Fprintf(w, "      ? cassette missing everywhere: %s\n", path)
+		printSample := func(reason string, samples []string, total int64) {
+			for _, path := range samples {
+				fmt.Fprintf(w, "      ? %s: %s\n", reason, path)
+			}
+			if remaining := total - int64(len(samples)); remaining > 0 {
+				fmt.Fprintf(w, "      ... and %d more (raise --max-samples to list them)\n", remaining)
+			}
 		}
-		for _, path := range stats.SampleAmbiguous {
-			fmt.Fprintf(w, "      ? several indexed candidates: %s\n", path)
-		}
+		printSample("cassette missing everywhere", stats.SampleOrphanPaths, stats.OrphanFiles)
+		printSample("several indexed candidates", stats.SampleAmbiguous, stats.Ambiguous)
 		if stats.Err != "" {
 			fmt.Fprintf(w, "      error: %s\n", stats.Err)
 		}
