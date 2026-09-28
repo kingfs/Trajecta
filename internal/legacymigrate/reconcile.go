@@ -340,6 +340,13 @@ func mapLegacyTraceIDs(ctx context.Context, pg *sql.DB, paths []string, openMode
 	if len(ids) == 0 || len(paths) == 0 {
 		return mapping, nil
 	}
+	// One sequential pass over the legacy index beats a random indexed probe per
+	// orphan id: the real vault has ~2·10^5 orphan ids and the legacy database is
+	// tens of gigabytes, so probing them individually costs minutes of seeks.
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
 	legacyPath := map[string]string{} // old id -> cassette path
 	const lookupBatch = 400
 	for _, path := range paths {
@@ -369,40 +376,28 @@ func mapLegacyTraceIDs(ctx context.Context, pg *sql.DB, paths []string, openMode
 			source.Close()
 			continue
 		}
-		for start := 0; start < len(ids); start += lookupBatch {
-			end := start + lookupBatch
-			if end > len(ids) {
-				end = len(ids)
-			}
-			chunk := ids[start:end]
-			placeholders := make([]string, len(chunk))
-			args := make([]any, len(chunk))
-			for i, id := range chunk {
-				placeholders[i] = "?"
-				args[i] = id
-			}
-			statement := fmt.Sprintf(`SELECT trace_id, path FROM logs WHERE trace_id IN (%s)`, strings.Join(placeholders, ","))
-			rows, err := source.QueryContext(ctx, statement, args...)
-			if err != nil {
-				source.Close()
-				return nil, fmt.Errorf("look up legacy trace ids in %s (%s): %w", path, mode, err)
-			}
-			for rows.Next() {
-				var id, cassettePath string
-				if err := rows.Scan(&id, &cassettePath); err != nil {
-					rows.Close()
-					source.Close()
-					return nil, err
-				}
-				legacyPath[id] = cassettePath
-			}
-			if err := rows.Err(); err != nil {
+		rows, err := source.QueryContext(ctx, `SELECT trace_id, path FROM logs`)
+		if err != nil {
+			source.Close()
+			return nil, fmt.Errorf("read the legacy trace index of %s (%s): %w", path, mode, err)
+		}
+		for rows.Next() {
+			var id, cassettePath string
+			if err := rows.Scan(&id, &cassettePath); err != nil {
 				rows.Close()
 				source.Close()
 				return nil, err
 			}
-			rows.Close()
+			if wanted[id] {
+				legacyPath[id] = cassettePath
+			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			source.Close()
+			return nil, err
+		}
+		rows.Close()
 		source.Close()
 	}
 	if len(legacyPath) == 0 {
