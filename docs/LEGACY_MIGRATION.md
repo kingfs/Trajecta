@@ -148,6 +148,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | `trajecta upgrade sqlite list` | 列出旧库文件 | 否 |
 | `trajecta upgrade sqlite archive` | 归档旧库文件 | 需 `--apply` |
 | `trajecta upgrade` | 上述流程串联 | 需 `--apply` |
+| `trajecta layout plan` | 只读地报告 cassette 目录布局的搬迁计划 | 否 |
 | `trajecta version` | 打印构建信息 | 否 |
 
 退出码：`0` 成功；`1` 命令已执行但发现问题（失败行、缺失主键、结构错误、需要人工处理的表）；`3` 用法或前置条件错误（例如目标数据库不是 Postgres）。
@@ -185,6 +186,23 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 `scripts/migrate-to-trajecta.sh` 仍然可用，适合只做「`.env` 前缀改写 + SQLite 文件改名 + 人工确认清单」的轻量场景（它默认 dry-run，并在写入前备份 `.env`）。它不适合大库：cassette 阶段为每个文件起一个 `head` 进程，数十万文件会非常慢。
 
 CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发处理 cassette、把 SQLite 条目真正合并进 Postgres，并在验证通过后归档文件。
+
+## 整理 cassette 目录布局（可选）
+
+录制端一直按 `<upstream site host>/<model>/<YYYY>/<MM>/<DD>/<name>.http` 写文件，但两类历史数据会偏离这个形状：模型名本身含 `/`（例如 `feature/gpt-5.6-sol`），以及当时没有解析出 upstream 的录制（只有 `<model>/<YYYY>/<MM>/<DD>`，prelude 里的 `meta.url` 是相对的 `/v1/responses`，真实 site 已经无法恢复）。
+
+`layout plan` 只读地给出搬迁计划，不会创建、移动、改名或删除任何文件：
+
+```bash
+./trajecta layout plan                                  # 读取 cassette root 下每个文件的 prelude
+./trajecta layout plan --out plan.json                  # 保留完整计划（.json 全量，.csv 只含 move 列表）
+./trajecta layout plan --unknown-site _no-site          # 缺 site 段的文件默认落到 unknown-site/
+./trajecta layout plan --sample 0 --format json         # 只看计数
+```
+
+输出把每个文件分到 `canonical`（已在目标形状）、`site missing`、`model truncated`、`ambiguous`（路径与 prelude 里的 model 对不上，例如 `<site>/<date>` 这种缺 model 段的历史形态，需要人工决定）与 `unreadable`；`ambiguous` 与 `unreadable` 都不会被规划搬迁。判定依据是每个文件 prelude 里的 `meta.model`——这是区分「site 段」与「含 `/` 的模型名」的唯一可靠信息。为了让计划自洽，目标路径里的模型名会去掉首尾 `/`，模型名含 `.`/`..`/空段时该文件按 `unreadable` 报告。
+
+搬迁没有单独的实现：`canonical` 之外的迁移必须和数据库索引一起做，否则 `logs.path`（主键，也是 `logs` 的唯一路径来源）与 `upstream_exchanges.cassette_path` 会指向不存在的文件。移动文件用 `os.Rename`（同文件系统元数据操作），随后更新这两列并保留 `logs.trace_id`；不要用 `serve migrate --rebuild-index` 代替，它会清空并重建 `logs`，从而给每个路径重新生成 `trace_id`，使 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 全部失联。见[存储与部署](./STORAGE_AND_DEPLOYMENT.md)的「cassette 目录布局」。
 
 ## 迁移之后
 

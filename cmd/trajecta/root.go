@@ -153,6 +153,7 @@ Nothing is written unless --apply is passed.`,
 	flags.IntVar(&opts.batchSize, "batch-size", 500, "rows per Postgres insert batch")
 
 	root.AddCommand(newUpgradeCommand(runtime))
+	root.AddCommand(newLayoutCommand(runtime))
 	root.AddCommand(newVersionCommand(runtime))
 	return root
 }
