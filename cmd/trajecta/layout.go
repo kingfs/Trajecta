@@ -37,6 +37,7 @@ segment and a model path.`,
 	}
 	cmd.PersistentFlags().StringVar(&root, "root", "", "cassette root directory (default: the configured trace output directory)")
 	cmd.AddCommand(newLayoutPlanCommand(runtime, &root))
+	cmd.AddCommand(newLayoutApplyCommand(runtime, &root))
 	return cmd
 }
 

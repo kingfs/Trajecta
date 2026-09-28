@@ -149,6 +149,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | `trajecta upgrade sqlite archive` | 归档旧库文件 | 需 `--apply` |
 | `trajecta upgrade` | 上述流程串联 | 需 `--apply` |
 | `trajecta layout plan` | 只读地报告 cassette 目录布局的搬迁计划 | 否 |
+| `trajecta layout apply` | 执行搬迁计划：重命名 cassette 并同步索引路径 | 需 `--apply` |
 | `trajecta version` | 打印构建信息 | 否 |
 
 退出码：`0` 成功；`1` 命令已执行但发现问题（失败行、缺失主键、结构错误、需要人工处理的表）；`3` 用法或前置条件错误（例如目标数据库不是 Postgres）。
@@ -202,7 +203,35 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 
 输出把每个文件分到 `canonical`（已在目标形状）、`site missing`、`model truncated`、`ambiguous`（路径与 prelude 里的 model 对不上，例如 `<site>/<date>` 这种缺 model 段的历史形态，需要人工决定）与 `unreadable`；`ambiguous` 与 `unreadable` 都不会被规划搬迁。判定依据是每个文件 prelude 里的 `meta.model`——这是区分「site 段」与「含 `/` 的模型名」的唯一可靠信息。为了让计划自洽，目标路径里的模型名会去掉首尾 `/`，模型名含 `.`/`..`/空段时该文件按 `unreadable` 报告。
 
-搬迁没有单独的实现：`canonical` 之外的迁移必须和数据库索引一起做，否则 `logs.path`（主键，也是 `logs` 的唯一路径来源）与 `upstream_exchanges.cassette_path` 会指向不存在的文件。移动文件用 `os.Rename`（同文件系统元数据操作），随后更新这两列并保留 `logs.trace_id`；不要用 `serve migrate --rebuild-index` 代替，它会清空并重建 `logs`，从而给每个路径重新生成 `trace_id`，使 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 全部失联。见[存储与部署](./STORAGE_AND_DEPLOYMENT.md)的「cassette 目录布局」。
+`layout apply` 执行这份计划。默认是 dry run，只有显式 `--apply` 才会动文件：
+
+```bash
+./trajecta layout apply --plan plan.json                       # dry run：报告会搬多少、索引会有多少行变化
+./trajecta layout apply --plan plan.json --limit 20 --sample 20 # 先试跑 20 个
+./trajecta layout apply --plan plan.json --apply                # 真正执行
+./trajecta layout apply --plan plan.json --apply --only-model deepseek-flash
+```
+
+每个 move 都是「重命名文件 + 在同一个事务里改写索引中指向它的每一行」，索引行只有三列存 cassette 路径：
+
+| 列 | 说明 |
+| --- | --- |
+| `logs.path` | trace 索引主键，也是 `logs` 的唯一路径来源 |
+| `upstream_exchanges.cassette_path` | 可选副本（可空） |
+| `overview_metric_bucket_members.path` | 概览指标的成员主键（按 path 增量维护，没有重建入口） |
+
+`logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 与 trace 的关联保持不变；`request_audits.path`（HTTP 路径）、`semantic_nodes.path`（JSONPath）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
+
+安全语义：
+
+- **先校验整份计划再动手**：路径必须是相对 root 且不能越出 root，`from == to`、格式非法的计划在任何重命名之前就报错退出。
+- **只搬「源存在且目标不存在」的文件**；两端都存在按 `target-exists` 报告，绝不覆盖。
+- **索引更新失败就把文件移回**（唯一冲突意味着另一个 trace 已占用目标路径），报告里的 `failed` 条目会写明原因。
+- **可重入**：重复执行同一份计划时，已在目标位置的文件报 `already-applied`；如果文件已经搬走但索引还指向旧路径（rename 与提交之间中断），会报 `resumed` 并把索引补齐。
+- `--verify-model`（默认开）会重新读一遍 prelude，模型名与计划不一致就拒绝搬迁（防止用过期计划归档）。
+- `--db-prefix` 用于数据库里存的前缀与本地路径不同的场景，例如服务跑在容器里、索引里是 `/app/data/traces/...` 而宿主机上是 `/data/gateway/data/traces`：`--root /data/gateway/data/traces --db-prefix /app/data/traces`。
+- `--no-db` 只搬文件不动索引，会给出一条告警；不带它时若配置解析不到 Postgres，命令直接拒绝执行（宁可不搬，也不留下索引与文件不一致的状态）。
+- 搬迁不改变 mtime 与 size，因此索引的 freshness 字段仍然有效，下一次增量 `Sync()` 会跳过这些文件。
 
 ## 迁移之后
 

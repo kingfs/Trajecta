@@ -29,7 +29,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `<model>` 直接来自请求/响应里的 model 名，**可以含 `/`**（例如 `feature/gpt-5.6-sol`、`dev/gpt-5.5`），此时目录会多一层；不要把中间那层当成固定的“环境/分组”维度。
 - 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
 - 文件名用录制时刻（UTC）与纳秒，不保证与同目录内其它文件单调可比。
-- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）与 `upstream_exchanges.cassette_path`：移动文件后必须同步这两列，`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 都按 trace_id 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
+- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）、`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`：移动文件后必须同步这三列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 都按 trace_id 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
 - 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
 - `trajecta layout plan` 只读地报告哪些 cassette 不在当前布局里、以及它们的目标路径（判定依据是每个文件 prelude 里的 `meta.model`）。搬迁本身不在 `serve` 里做，也不会由任何命令自动触发。
 
