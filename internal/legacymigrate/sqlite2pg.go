@@ -257,7 +257,7 @@ func requireApplicationSchema(ctx context.Context, pg *sql.DB) error {
 		return fmt.Errorf("inspect postgres schema: %w", err)
 	}
 	if !exists {
-		return errors.New("the Postgres database has no Trajecta application schema; run `trajecta db migrate up` first")
+		return errors.New("the Postgres database has no Trajecta application schema; run `server db migrate up` first")
 	}
 	return nil
 }

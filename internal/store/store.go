@@ -2941,7 +2941,7 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 		return fmt.Errorf("check postgres application migrations: %w", err)
 	}
 	if !migrationTableExists {
-		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `trajecta db migrate up` with the same config before starting with database.auto_migrate=false")
+		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `server db migrate up` with the same config before starting with database.auto_migrate=false")
 	}
 	for _, table := range []string{"session_summaries", "overview_metric_buckets", "overview_metric_bucket_members"} {
 		var exists bool
@@ -2953,7 +2953,7 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 			return fmt.Errorf("check postgres %s migration: %w", table, err)
 		}
 		if !exists {
-			return fmt.Errorf("postgres application schema is missing %s; run `trajecta db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
+			return fmt.Errorf("postgres application schema is missing %s; run `server db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
 		}
 	}
 	return nil
