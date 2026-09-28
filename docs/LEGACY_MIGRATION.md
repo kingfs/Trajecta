@@ -244,6 +244,19 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 - `--no-db` 只搬文件不动索引，会给出一条告警；不带它时若配置解析不到 Postgres，命令直接拒绝执行（宁可不搬，也不留下索引与文件不一致的状态）。
 - 搬迁不改变 mtime 与 size，因此索引的 freshness 字段仍然有效，下一次增量 `Sync()` 会跳过这些文件。
 
+## 派生表的 trace id 修复
+
+合并之前如果已经用新版本服务跑过一轮索引，`logs.trace_id` 会按 cassette 重算，而旧库的派生表（`trace_observations`、`parse_jobs`、`semantic_nodes` 等）仍然带着旧索引记录的 recorder id。插入用的是 `ON CONFLICT DO NOTHING`，所以同 path 的旧 `logs` 行会被跳过 —— 旧行本身没有丢，但派生表里的 id 与 `logs.trace_id` 不再相等，按 id 关联的过滤（例如 Monitor 的 observation status）只会看到服务重算出来的那一份，旧的那一份既不展示也不再参与统计。
+
+`trajecta upgrade db --reconcile-derived-trace-ids` 修复这种状态。它需要旧库来还原 id → path 的映射，归档后的 `*.sqlite3.migrated` 也可以直接传给 `--sqlite`：
+
+- 对每张带 `trace_id` 的派生表，先列出 `logs` 中不存在的孤儿 id；
+- 用旧库的 `logs`（旧 id → cassette path）与当前索引（path → 当前 id）把孤儿 id 映射到当前 id；
+- **删除**身份（该表唯一键去掉 `trace_id` 后剩下的列）在当前 id 下已经存在的重复行；
+- 把剩下的孤儿行 **UPDATE** 到当前 id；旧库查不到对应 trace 的行原样保留并计入 `unresolved`，所以任何一份"唯一副本"都不会被删掉。
+
+默认 dry-run，只统计 `duplicates`、`remapped`、`unresolved`；`--apply` 才写入。每批的删除与更新在同一个事务里，整批冲突时退化为逐个 id 处理，失败的 id 保留原值并继续。
+
 ## 迁移之后
 
 - Postgres 是唯一事实源；`serve` 只连 Postgres，不再打开任何 SQLite 文件。
