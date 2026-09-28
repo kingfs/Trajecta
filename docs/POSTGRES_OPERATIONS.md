@@ -1,6 +1,6 @@
 # PostgreSQL 运维手册
 
-本文档面向 llm-tracelab application database 的 PostgreSQL 生产/准生产运维：只读基线采集、pg_stat_statements 基线、并发索引变更、查询调优、派生 summary 维护、回填与灰度读、分区归档和锁排查。
+本文档面向 Trajecta application database 的 PostgreSQL 生产/准生产运维：只读基线采集、pg_stat_statements 基线、并发索引变更、查询调优、派生 summary 维护、回填与灰度读、分区归档和锁排查。
 
 storage model、driver 选择和部署拓扑见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)；稳定 CLI 入口见 [开发指南](./DEVELOPMENT.md)；Monitor 读路径和页面语义见 [Monitor 指南](./MONITOR_GUIDE.md)；audit/observation 表语义见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。
 
@@ -21,15 +21,15 @@ storage model、driver 选择和部署拓扑见 [存储与部署](./STORAGE_AND_
 建议把只读诊断连接与受控 DDL 连接分离，并显式设置 DSN：
 
 ```bash
-export LLM_TRACELAB_DATABASE_DSN='postgres://...'
-psql "$LLM_TRACELAB_DATABASE_DSN" -v ON_ERROR_STOP=1
+export TRAJECTA_DATABASE_DSN='postgres://...'
+psql "$TRAJECTA_DATABASE_DSN" -v ON_ERROR_STOP=1
 ```
 
 改动前先确认迁移状态（Postgres 下两个命令都读取共享的 application `schema_migrations` namespace）：
 
 ```bash
-llm-tracelab -c config/config.yaml db migrate status --check-db
-llm-tracelab -c config/config.yaml auth migrate status --check-db
+trajecta -c config/config.yaml db migrate status --check-db
+trajecta -c config/config.yaml auth migrate status --check-db
 ```
 
 两者应报告 schema 健康且 non-dirty。若处于 dirty 状态，先处理迁移一致性，不进入优化流程。
@@ -39,12 +39,12 @@ llm-tracelab -c config/config.yaml auth migrate status --check-db
 仓库自带基线采集脚本，可把全部输出写入一个文件：
 
 ```bash
-LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
+TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
   BASELINE_WINDOW='7 days' \
-  scripts/postgres-baseline.sh /tmp/tracelab-postgres-baseline.txt
+  scripts/postgres-baseline.sh /tmp/trajecta-postgres-baseline.txt
 ```
 
-脚本读取 `LLM_TRACELAB_DATABASE_DSN`，回退 `DATABASE_URL` 或 libpq `PG*` 变量；`BASELINE_WINDOW` 默认 `7 days`。除下面明确标注的 reset 外，所有语句都只读。
+脚本读取 `TRAJECTA_DATABASE_DSN`，回退 `DATABASE_URL` 或 libpq `PG*` 变量；`BASELINE_WINDOW` 默认 `7 days`。除下面明确标注的 reset 外，所有语句都只读。
 
 环境与扩展状态：
 
@@ -370,7 +370,7 @@ LIMIT 30;
 - `temp_blks_written` 高：排序/聚合/hash 溢出，检查 `work_mem`、索引顺序或 summary 设计。
 - `rows/calls` 远高于页面大小：过滤条件或分页策略有问题。
 
-TraceLab 热表优先级：
+Trajecta 热表优先级：
 
 - `logs`：trace list、session list、overview、model/provider/time filters。
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`：Responses audit 与 exchange correlation。
@@ -384,8 +384,8 @@ TraceLab 热表优先级：
 内置的安全入口是：
 
 ```bash
-llm-tracelab -c config/config.yaml db migrate optimize-indexes --dry-run
-llm-tracelab -c config/config.yaml db migrate optimize-indexes
+trajecta -c config/config.yaml db migrate optimize-indexes --dry-run
+trajecta -c config/config.yaml db migrate optimize-indexes
 ```
 
 该命令逐条执行非事务的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，当前只覆盖 `logs` 热点查询，创建以下 5 个索引：
@@ -455,7 +455,7 @@ ORDER BY tablename, indexname;
 3. 判断慢点是 filter、sort、join、aggregate、offset pagination、JSON 解析还是数据倾斜。
 4. 先优化查询形态，再决定是否加索引或派生 summary。
 
-TraceLab 常见优化方向：
+Trajecta 常见优化方向：
 
 - Trace list：避免深 `OFFSET`，优先 `(recorded_at, trace_id/path)` seek pagination。
 - Session list：避免每次从 `logs` 全量 group by；session 数量大时改用 `session_summaries`。
@@ -594,9 +594,9 @@ session_summaries
 重建入口：
 
 ```bash
-llm-tracelab -c config/config.yaml db summary rebuild sessions --dry-run
-llm-tracelab -c config/config.yaml db summary rebuild sessions
-llm-tracelab -c config/config.yaml db summary rebuild sessions --session-id <session_id>
+trajecta -c config/config.yaml db summary rebuild sessions --dry-run
+trajecta -c config/config.yaml db summary rebuild sessions
+trajecta -c config/config.yaml db summary rebuild sessions --session-id <session_id>
 ```
 
 `--dry-run` 只读统计将重建的 session 数量，不更新表；不带 `--session-id` 会全量删除并重建 `session_summaries`。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护，当前没有等价的 CLI 重建入口。
@@ -632,15 +632,15 @@ ORDER BY max(recorded_at) DESC
 LIMIT 20;
 ```
 
-对每个抽样 session 比较 `request_count`、`first_seen`、`last_seen`、`total_tokens`、`last_model`、`failed_request`；一致后再让 session list 读 summary。实现侧开关为 `database.use_session_summary_read: true` 或环境变量 `LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ=true`，默认关闭。
+对每个抽样 session 比较 `request_count`、`first_seen`、`last_seen`、`total_tokens`、`last_model`、`failed_request`；一致后再让 session list 读 summary。实现侧开关为 `database.use_session_summary_read: true` 或环境变量 `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true`，默认关闭。
 
 ## Backfill 与灰度读
 
 现有回填入口只补齐 `upstream_exchanges` 的 exchange metadata 索引。实际写入的列是 `response_id`、`request_audit_id`、`trace_id`、`exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；`cassette_path`、`model`、`endpoint` 只是定位并读取对应 raw `.http` cassette 的输入，不会被回写。回填绝不重写 cassette：
 
 ```bash
-llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run
-llm-tracelab -c config/config.yaml analyze backfill-exchanges
+trajecta -c config/config.yaml analyze backfill-exchanges --dry-run
+trajecta -c config/config.yaml analyze backfill-exchanges
 ```
 
 `--dry-run` 只报告 scanned、冲突和分类计数，不更新 DB。运行时建议限制锁等待与语句时间：

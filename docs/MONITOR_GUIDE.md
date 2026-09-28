@@ -1,6 +1,6 @@
 # Monitor 使用指南
 
-Monitor 是 TraceLab 的本地 Web 工作台，由 `internal/monitor` 提供 API 与前端静态资源，和代理运行在同一个进程里（`monitor.port`）。它面向三个场景：
+Monitor 是 Trajecta 的本地 Web 工作台，由 `internal/monitor` 提供 API 与前端静态资源，和代理运行在同一个进程里（`monitor.port`）。它面向三个场景：
 
 - 查看真实 LLM HTTP 请求与原始协议。
 - 分析 session、模型、模型服务商、路由和失败。
@@ -10,14 +10,14 @@ Monitor 是 TraceLab 的本地 Web 工作台，由 `internal/monitor` 提供 API
 
 配置 `monitor.port` 后，`serve` 启动时会同时挂载管理端口，浏览器打开 `http://localhost:<monitor.port>` 即可进入 Monitor。
 
-首次部署需要创建用户。tracked 默认配置 `config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `LLM_TRACELAB_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
+首次部署需要创建用户。tracked 默认配置 `config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `TRAJECTA_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
 
 ```bash
-export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=disable'
 go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
-Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `llm-tracelab-monitor`，audience 为 `llm-tracelab-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
+Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
 右上角账号菜单提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
@@ -36,7 +36,7 @@ Monitor API 本身只接受登录 JWT，不使用个人 token。
 
 Monitor 同时使用两类数据：
 
-- application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/llm_tracelab.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、模型服务商与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
+- application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/trajecta.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、模型服务商与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
 - raw `.http` cassette：trace 详情、raw protocol、路由事件和 replay-safe 检查的事实来源。
 
 因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。`GET /api/routing/summary` 是二者的组合：按数据库索引顺序扫描 trace，再读取每个 cassette prelude 中的路由事件做聚合（旧数据或缺少事件的文件单独计数）。
@@ -51,7 +51,7 @@ Monitor 同时使用两类数据：
 
 ### 事件 `/events`
 
-TraceLab 自身的事件收件箱：
+Trajecta 自身的事件收件箱：
 
 - 来源：`parser`、`analyzer`、`router`、`upstream`。
 - 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`。

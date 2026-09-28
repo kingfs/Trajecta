@@ -71,7 +71,7 @@
     }
   },
   "notes": [
-    "llm-tracelab must not execute mcp, file_search, code_interpreter, or computer_use_preview until an explicit runtime exists.",
+    "trajecta must not execute mcp, file_search, code_interpreter, or computer_use_preview until an explicit runtime exists.",
     "The stable target is a machine-readable OpenAI-style error before tool execution or fabricated tool output.",
     "This fixture is a compatibility target for a future runner; current runtime code only has explicit hosted execution for web_search/web_search_preview."
   ]

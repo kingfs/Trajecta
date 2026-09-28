@@ -11,7 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/parsejob"
+	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 )
 
 // ParseJobCreate is the builder for creating a ParseJob entity.

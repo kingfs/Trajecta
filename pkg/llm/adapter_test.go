@@ -182,7 +182,7 @@ func TestOpenAIResponsesRoundTripMarshal(t *testing.T) {
 			{
 				Role: "assistant",
 				Content: []LLMContent{
-					{Type: "tool_use", ToolCallID: "call_1", ToolName: "search", ToolArgs: map[string]any{"q": "llm-tracelab"}},
+					{Type: "tool_use", ToolCallID: "call_1", ToolName: "search", ToolArgs: map[string]any{"q": "trajecta"}},
 				},
 			},
 		},

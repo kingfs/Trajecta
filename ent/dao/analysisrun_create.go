@@ -11,7 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/analysisrun"
+	"github.com/kingfs/Trajecta/ent/dao/analysisrun"
 )
 
 // AnalysisRunCreate is the builder for creating a AnalysisRun entity.

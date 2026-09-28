@@ -8,9 +8,9 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/internal"
-	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/internal"
+	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
 )
 
 // ModelCatalogDelete is the builder for deleting a ModelCatalog entity.

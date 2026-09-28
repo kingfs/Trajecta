@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/recorder"
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/chatclient"
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/internal/recorder"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/chatclient"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 const (
@@ -60,7 +60,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("marshal chat completion request: %w", err)
 	}
-	routeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://llm-tracelab.local"+responsesServerChatCompletionsPath, bytes.NewReader(body))
+	routeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://trajecta.local"+responsesServerChatCompletionsPath, bytes.NewReader(body))
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("create chat completion routing request: %w", err)
 	}
@@ -424,7 +424,7 @@ func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []by
 
 	startedAt := time.Now()
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
-		SiteURL:      "http://llm-tracelab.local",
+		SiteURL:      "http://trajecta.local",
 		ExchangeKind: "entry",
 		ExchangeRole: "client_request",
 	}, body)

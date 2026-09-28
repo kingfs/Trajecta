@@ -8,9 +8,9 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/analysisrun"
-	"github.com/kingfs/llm-tracelab/ent/dao/internal"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/analysisrun"
+	"github.com/kingfs/Trajecta/ent/dao/internal"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
 )
 
 // AnalysisRunDelete is the builder for deleting a AnalysisRun entity.

@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 )
 
 // ChannelConfig is the model entity for the ChannelConfig schema.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
 func TestDefaultDetectorsFindAuditSignals(t *testing.T) {

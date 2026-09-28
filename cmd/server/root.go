@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const cliName = "llm-tracelab"
+const cliName = "trajecta"
 
 func run(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -94,7 +94,7 @@ type cliRuntime struct {
 
 func newCLIRuntime() *cliRuntime {
 	settings := viper.New()
-	settings.SetEnvPrefix("LLM_TRACELAB")
+	settings.SetEnvPrefix("TRAJECTA")
 	settings.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	settings.AutomaticEnv()
 	return &cliRuntime{settings: settings}

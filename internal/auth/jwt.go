@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	MonitorJWTIssuer   = "llm-tracelab-monitor"
-	MonitorJWTAudience = "llm-tracelab-monitor-ui"
+	MonitorJWTIssuer   = "trajecta-monitor"
+	MonitorJWTAudience = "trajecta-monitor-ui"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/Trajecta/ent/dao/score"
 )
 
 // Score is the model entity for the Score schema.

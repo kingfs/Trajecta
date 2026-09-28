@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
 )
 
 // ModelCatalog is the model entity for the ModelCatalog schema.

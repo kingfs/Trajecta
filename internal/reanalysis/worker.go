@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/Trajecta/internal/store"
 )
 
 type Worker struct {

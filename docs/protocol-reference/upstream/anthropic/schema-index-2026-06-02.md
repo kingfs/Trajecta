@@ -10,9 +10,9 @@
 
 - [`messages-api-2026-06-02.html`](./messages-api-2026-06-02.html): raw Messages API reference HTML snapshot.
 
-## TraceLab Coverage
+## Trajecta Coverage
 
-Current TraceLab parser coverage targets:
+Current Trajecta parser coverage targets:
 
 - `/v1/messages` request bodies
 - non-streaming Messages responses

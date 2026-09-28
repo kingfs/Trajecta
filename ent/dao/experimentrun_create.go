@@ -12,7 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 )
 
 // ExperimentRunCreate is the builder for creating a ExperimentRun entity.

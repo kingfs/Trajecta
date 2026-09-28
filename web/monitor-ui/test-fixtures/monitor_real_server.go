@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/channel"
-	"github.com/kingfs/llm-tracelab/internal/monitor"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/monitor"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 }
 
 func run() error {
-	outputDir, err := os.MkdirTemp("", "llm-tracelab-monitor-e2e-*")
+	outputDir, err := os.MkdirTemp("", "trajecta-monitor-e2e-*")
 	if err != nil {
 		return err
 	}

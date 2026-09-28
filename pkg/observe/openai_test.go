@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestOpenAIParserParsesChatCompletion(t *testing.T) {
@@ -90,8 +90,8 @@ func TestOpenAIParserParsesModelList(t *testing.T) {
 		ResponseBody: []byte(`{
 			"object":"list",
 			"data":[
-				{"id":"gpt-5","object":"model","owned_by":"llm-tracelab"},
-				{"id":"qwen-plus","object":"model","owned_by":"llm-tracelab"}
+				{"id":"gpt-5","object":"model","owned_by":"trajecta"},
+				{"id":"qwen-plus","object":"model","owned_by":"trajecta"}
 			]
 		}`),
 	}

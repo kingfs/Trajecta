@@ -62,7 +62,7 @@ func Middleware(next http.Handler, realm string, verifier TokenVerifier) http.Ha
 		return next
 	}
 	if strings.TrimSpace(realm) == "" {
-		realm = "llm-tracelab"
+		realm = "trajecta"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := VerifyRequest(r, verifier)

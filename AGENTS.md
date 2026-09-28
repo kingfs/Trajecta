@@ -2,7 +2,7 @@
 
 ## Project Intent
 
-`llm-tracelab` is a local-first LLM API record/replay proxy for OpenAI-compatible and other mainstream LLM APIs.
+Trajecta is a local-first LLM API record/replay proxy for OpenAI-compatible and other mainstream LLM APIs.
 Its main use case is:
 
 1. route SDK traffic through a proxy during development
@@ -33,20 +33,20 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 Structured state (trace index, sessions, channel/provider config, upstream targets, observations, findings, analysis jobs, Responses state, and audit tables) lives in the application database.
 
 - Production and the tracked default config use Postgres; the checked-in SQL migrations live in `ent/postgres-migrations/`.
-- SQLite is a local/dev/test fallback only, with default file `{{output_dir}}/llm_tracelab.sqlite3`; SQLite schema is applied at startup rather than by versioned migrations.
+- SQLite is a local/dev/test fallback only, with default file `{{output_dir}}/trajecta.sqlite3`; SQLite schema is applied at startup rather than by versioned migrations.
 - Raw `.http` cassettes remain the source of truth for replay and detail views; the database is a derived index for lists, filters, and aggregates.
 - YAML channel configuration is a first-bootstrap input only. The first database write stores the application-database `app_settings` key `channels.initialized`; afterwards the database owns routing configuration even when every channel was disabled or deleted. `GET /api/settings/channels` reports the marker and `DELETE /api/settings/channels` clears it, which only re-opens the YAML bootstrap while the database still has no channels. A YAML config with an explicit `credentials` list stays YAML-managed and rejects Monitor channel/model/alias writes with 409.
 - All management writes (channels, models, aliases, provider setup and probe apply) run in one `store.ConfigurationTransaction`, which holds the process-wide configuration lock, the upstream write lock, and one SQL transaction; runtime routing is published only after the commit succeeds. Background upstream refresh persists through the same upstream write lock on a best-effort basis.
 
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing; it does not currently translate requests between OpenAI, Anthropic, Gemini, and Vertex protocol families in the forwarding hot path.
-The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions`, `/v1/responses` and `/v1/messages` unconditionally, and per-request routing prefers a matching native Responses upstream (pass-through) before falling back to the local Responses runtime, which orchestrates the request as an internal upstream `/v1/chat/completions` call. That local execution mode is always available and has no configuration switch; the legacy `responses_server.enabled` field and `LLM_TRACELAB_RESPONSES_ENABLED` variable were removed. To opt out of local translation, set the application-database `app_settings` key `routing.settings` to `{"responses_strategy":"native_only"}` from the Monitor Routing settings (`PATCH /api/settings/routing`); this is not a YAML key. The local Responses runtime is built lazily, so optional provider configuration must never block startup. The native-vs-local choice is resolved per model, not per channel: an explicit `channel_models.supports_responses` / `supports_chat_completions` value (editable in the monitor UI) overrides the channel-level `api_type`/`capabilities`, and models without a declared value fall back to the channel-level behaviour. `upstream.model_capabilities` expresses the same override in YAML.
+The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions`, `/v1/responses` and `/v1/messages` unconditionally, and per-request routing prefers a matching native Responses upstream (pass-through) before falling back to the local Responses runtime, which orchestrates the request as an internal upstream `/v1/chat/completions` call. That local execution mode is always available and has no configuration switch; the legacy `responses_server.enabled` field and `TRAJECTA_RESPONSES_ENABLED` variable were removed. To opt out of local translation, set the application-database `app_settings` key `routing.settings` to `{"responses_strategy":"native_only"}` from the Monitor Routing settings (`PATCH /api/settings/routing`); this is not a YAML key. The local Responses runtime is built lazily, so optional provider configuration must never block startup. The native-vs-local choice is resolved per model, not per channel: an explicit `channel_models.supports_responses` / `supports_chat_completions` value (editable in the monitor UI) overrides the channel-level `api_type`/`capabilities`, and models without a declared value fall back to the channel-level behaviour. `upstream.model_capabilities` expresses the same override in YAML.
 
 ## Record File Format
 
 New recordings use `LLM_PROXY_V3`:
 
-1. a short prelude starting with `# llm-tracelab/v3`
+1. a short prelude starting with `# trajecta/v3`
 2. one `# meta: {...}` JSON line
 3. zero or more `# event: {...}` JSON lines
 4. one blank line
@@ -57,6 +57,8 @@ New recordings use `LLM_PROXY_V3`:
 Compatibility note:
 
 - readers must continue to support legacy `LLM_PROXY_V2` files with a fixed 2KB JSON header block
+- readers must also treat the pre-rename prelude magic `# llm-tracelab/v3` as V3; writers only emit `# trajecta/v3`
+- the `LLM_PROXY_V3` meta-header `version` value is a stable format identifier and is deliberately not renamed
 - writers should only emit V3 unless a migration task explicitly says otherwise
 
 ## Engineering Constraints

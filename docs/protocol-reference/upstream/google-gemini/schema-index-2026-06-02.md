@@ -8,11 +8,11 @@
 ## Files
 
 - [`generative-language-discovery-v1beta-2026-06-02.json`](./generative-language-discovery-v1beta-2026-06-02.json): raw official discovery document.
-- [`generate-content-core-schemas-2026-06-02.json`](./generate-content-core-schemas-2026-06-02.json): extracted GenerateContent schemas and methods used by TraceLab.
+- [`generate-content-core-schemas-2026-06-02.json`](./generate-content-core-schemas-2026-06-02.json): extracted GenerateContent schemas and methods used by Trajecta.
 
-## TraceLab Coverage
+## Trajecta Coverage
 
-Current TraceLab parser coverage targets:
+Current Trajecta parser coverage targets:
 
 - `models/{model}:generateContent`
 - `models/{model}:streamGenerateContent`

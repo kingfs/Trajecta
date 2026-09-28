@@ -1,6 +1,6 @@
 # 存储与部署
 
-本文说明 llm-tracelab 当前的存储层次与生产部署事实：raw `.http` cassette 是事实源，应用数据库是派生索引；生产使用 Postgres + 版本化迁移，SQLite 仅作本地/dev/test fallback。运维 SQL、备份与恢复细节交给 [Postgres 运维](./POSTGRES_OPERATIONS.md)，本文不重复。
+本文说明 Trajecta 当前的存储层次与生产部署事实：raw `.http` cassette 是事实源，应用数据库是派生索引；生产使用 Postgres + 版本化迁移，SQLite 仅作本地/dev/test fallback。运维 SQL、备份与恢复细节交给 [Postgres 运维](./POSTGRES_OPERATIONS.md)，本文不重复。
 
 ## 存储分层（raw .http cassette 是事实源；应用数据库是派生的索引）
 
@@ -28,13 +28,13 @@ Raw cassette (.http, LLM_PROXY_V3)
   go run -mod=mod ent/migrate/main.go \
     --dialect postgres \
     --dir ent/postgres-migrations \
-    --dev-url 'postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable' \
+    --dev-url 'postgres://user:pass@localhost:5432/trajecta_migrate_dev?sslmode=disable' \
     <migration_name>
   go run -mod=mod ent/migrate/update_hash.go ent/postgres-migrations
   ```
 
   生成后必须复核 SQL，并同时提交迁移文件与 `atlas.sum`；已提交或在共享环境应用过的迁移文件不要手改。`task migrate:ent:postgres NAME=... DEV_URL=...` 是同一流程的封装。
-- SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/llm_tracelab.sqlite3`。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
+- SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
 - SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库。
 - `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
 
@@ -53,7 +53,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 | `migrate`（顶层） | cassette 重写与索引重建 | 默认 `--rewrite-v2 --rebuild-index`，支持 `--dry-run`；打开应用库时同样受 `auto_migrate` 影响，不会运行 auth migrator |
 | `analyze ...` | 派生数据重算 | 见“派生数据与重算” |
 
-`auto_migrate` 语义（配置项 `database.auto_migrate`，环境变量 `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`；未设置时默认 `true`）：
+`auto_migrate` 语义（配置项 `database.auto_migrate`，环境变量 `TRAJECTA_DATABASE_AUTO_MIGRATE`；未设置时默认 `true`）：
 
 - `true`：`serve` 与打开应用库的命令在打开 store 之前先跑应用迁移（Postgres 为签入 SQL，SQLite 为启动建表）。Postgres 的 auth 表由同一迁移集拥有，因此 startup 不再单独运行 auth migrator；SQLite 的 auth startup 仍走内嵌 SQLite auth 迁移。
 - `false`：schema 必须已经存在。Postgres 下以 `AutoMigrate:false` 打开 store 时会校验应用迁移是否已应用，否则启动失败；`auth init-user` 等命令也要求 auth 表已存在。
@@ -71,12 +71,12 @@ Raw cassette (.http, LLM_PROXY_V3)
 
 默认拓扑（`docker-compose.yml`）：
 
-- `llm-tracelab`：gateway、Monitor、MCP、recorder、本地 Responses runtime。
-- `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`llm-tracelab` 通过 `depends_on` 等待其 healthcheck 通过。
+- `trajecta`：gateway、Monitor、MCP、recorder、本地 Responses runtime。
+- `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`trajecta` 通过 `depends_on` 等待其 healthcheck 通过。
 - `searxng`：可选 hosted `web_search` provider 容器，只在 Compose `search` profile 下启动。
-- 卷：`llm-tracelab-data` 挂到 `/app/data`（cassette 与 SQLite fallback 都在这里），另有 `postgres-data`、`searxng-data`。
+- 卷：`trajecta-data` 挂到 `/app/data`（cassette 与 SQLite fallback 都在这里），另有 `postgres-data`、`searxng-data`。
 
-compose 中 `llm-tracelab` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
+compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
 
 必需的环境变量：
 
@@ -84,30 +84,41 @@ compose 中 `llm-tracelab` 的启动命令只有 `serve -c /app/config/config.ya
 cp .env.example .env
 # 至少覆盖数据库口令/DSN
 export POSTGRES_PASSWORD='<strong-password>'
-export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:<strong-password>@postgres:5432/llm_tracelab?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://trajecta:<strong-password>@postgres:5432/trajecta?sslmode=disable'
 docker compose up -d
 ```
 
-- `LLM_TRACELAB_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，本地默认值由 compose 注入。
-- Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；宿主端口由 `LLM_TRACELAB_HOST_SERVER_PORT`、`LLM_TRACELAB_HOST_MONITOR_PORT`、`LLM_TRACELAB_POSTGRES_PORT` 控制。
-- 首个 provider 可选：设置 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` 与 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY` 可导入一个 OpenAI 兼容 provider；两者留空也合法，登录后在 Monitor Web 配置 provider、凭据与模型。legacy `LLM_TRACELAB_UPSTREAM_*` 仍支持单 upstream 迁移，新部署应使用 Web 管理的 provider 数据库。
+- `TRAJECTA_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，本地默认值由 compose 注入。
+- Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；宿主端口由 `TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`、`TRAJECTA_POSTGRES_PORT` 控制。
+- 首个 provider 可选：设置 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL` 与 `TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY` 可导入一个 OpenAI 兼容 provider；两者留空也合法，登录后在 Monitor Web 配置 provider、凭据与模型。legacy `TRAJECTA_UPSTREAM_*` 仍支持单 upstream 迁移，新部署应使用 Web 管理的 provider 数据库。
 
 迁移与首个用户（手动等价路径）：
 
 ```bash
-docker compose run --rm llm-tracelab -c /app/config/config.yaml db migrate up
+docker compose run --rm trajecta -c /app/config/config.yaml db migrate up
 docker compose up -d
-docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
+
+从 `llm-tracelab` 升级已有部署：
+
+```bash
+scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces            # 默认 dry-run
+scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces
+```
+
+- 脚本改写 `.env` 中的 `LLM_TRACELAB_*` key（同名冲突会注释掉旧行并在 `.env.trajecta-migration.bak` 留备份）、重命名 `{{output_dir}}/llm_tracelab.sqlite3` 及其 `-wal`/`-shm`、统计 `.http` cassette 的 prelude magic 版本；可重复执行。
+- 脚本只报告不执行的部分：Postgres 库名/角色名（`ALTER DATABASE` 需连到其它库执行；保留旧库名、只更新 `TRAJECTA_DATABASE_DSN` 同样可行，schema 内不含旧品牌词）、Docker 镜像 `kingfs/trajecta` 与卷 `trajecta-data`、CI secret、Monitor `localStorage`。
+- cassette 默认不重写：读取端同时接受 `# llm-tracelab/v3` 与 `# trajecta/v3`，`.http` 保持 replay 事实源不被改名改动；`--rewrite-cassette-magic` 才做只替换首行、其余字节不变的归一化。
 
 ## 可选组件（SearXNG 等）
 
 ```bash
-export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
+export TRAJECTA_TOOLS_WEB_SEARCH_ENABLED=true
 docker compose --profile search up -d
 ```
 
-- hosted `web_search` 工具默认启用（compose 中 `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED` 默认 `true`，`config/config.yaml` 中 `tools.web_search.enabled: true`）；`search` profile 只决定 searxng 容器是否运行。
+- hosted `web_search` 工具默认启用（compose 中 `TRAJECTA_TOOLS_WEB_SEARCH_ENABLED` 默认 `true`，`config/config.yaml` 中 `tools.web_search.enabled: true`）；`search` profile 只决定 searxng 容器是否运行。
 - 应用读取 `tools.web_search.provider=searxng` 与 `tools.web_search.base_url=http://searxng:8080`。`web_search` 与 `web_search_preview` 只有在 provider 已启用且就绪时才在服务端执行；不支持的 hosted tool 会被拒绝并写入审计。
 - MCP server 通过 `tools.mcp` 配置；工具面见 [MCP 指南](./MCP_GUIDE.md)。
 
@@ -138,15 +149,15 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 重算命令（均为当前可用子命令）：
 
 ```bash
-llm-tracelab analyze reparse --trace-id <id>
-llm-tracelab analyze scan --trace-id <id>
-llm-tracelab analyze reanalyze --trace-id <id>   # 或 --session-id <id>
-llm-tracelab analyze repair-usage --trace-id <id> [--rewrite-cassette]
-llm-tracelab analyze backfill-exchanges [--dry-run]
-llm-tracelab analyze session --session-id <id>
-llm-tracelab analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
-llm-tracelab analyze refresh --all
-llm-tracelab db summary rebuild sessions [--session-id <id>]
+trajecta analyze reparse --trace-id <id>
+trajecta analyze scan --trace-id <id>
+trajecta analyze reanalyze --trace-id <id>   # 或 --session-id <id>
+trajecta analyze repair-usage --trace-id <id> [--rewrite-cassette]
+trajecta analyze backfill-exchanges [--dry-run]
+trajecta analyze session --session-id <id>
+trajecta analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
+trajecta analyze refresh --all
+trajecta db summary rebuild sessions [--session-id <id>]
 ```
 
 `analyze batch` 与 `analyze refresh` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
@@ -183,10 +194,10 @@ llm-tracelab db summary rebuild sessions [--session-id <id>]
 ## 运维检查清单
 
 ```bash
-docker compose run --rm llm-tracelab -c /app/config/config.yaml config inspect
-docker compose run --rm llm-tracelab -c /app/config/config.yaml db migrate status --check-db
-docker compose run --rm llm-tracelab -c /app/config/config.yaml auth migrate status --check-db
-docker compose run --rm llm-tracelab -c /app/config/config.yaml doctor --check-db
+docker compose run --rm trajecta -c /app/config/config.yaml config inspect
+docker compose run --rm trajecta -c /app/config/config.yaml db migrate status --check-db
+docker compose run --rm trajecta -c /app/config/config.yaml auth migrate status --check-db
+docker compose run --rm trajecta -c /app/config/config.yaml doctor --check-db
 ```
 
 - `doctor --probe-providers` 会显式发起网络探测；默认检查保持保守，不应静默访问 upstream provider。

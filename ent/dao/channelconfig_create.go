@@ -12,7 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 )
 
 // ChannelConfigCreate is the builder for creating a ChannelConfig entity.

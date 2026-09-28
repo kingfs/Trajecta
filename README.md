@@ -1,11 +1,11 @@
-# llm-tracelab
+# Trajecta
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 **中文说明** | [English](./README_EN.md)
 
-`llm-tracelab` 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、本地 Responses runtime、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
+Trajecta 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、本地 Responses runtime、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
 
 - 生产或准生产环境用 Postgres 保存用户、token、trace index、渠道/模型、Responses state 和 audit 数据
 - 对 OpenAI-compatible / vLLM 上游提供可选 `/v1/responses` semantic server
@@ -15,13 +15,35 @@ raw `.http` cassette 仍是 replay 和详情页的事实来源；Postgres 是生
 
 ## 当前版本发布说明
 
-这次重构后的版本重点有四个：
+`v2.0.0` 是改名版本，唯一的破坏性变化是命名：
 
-- `pkg/llm` 升级为按 provider/endpoint 工作的 adapter 层，统一处理 request、response、stream transcript 和 usage pipeline
-- Monitor 改成 Go embed 的 React UI，列表页异步分页，详情页支持 timeline / summary / raw protocol
-- Monitor 首页支持 `Sessions / Requests` 双视角，可按 `session_id` 等线索聚合相关请求
-- Postgres 应用库迁移已通过 checked-in SQL 路径接入，SQLite 明确降级为 startup-schema fallback
-- `LLM_PROXY_V3` 的 `# event:` 现在不仅有 request/response 基础事件，还会落 `llm.*` provider timeline
+- 项目由 `llm-tracelab` 改名为 `trajecta`：Go module path、CLI 二进制、Docker 镜像 / Compose service 与 volume、环境变量前缀、Monitor `localStorage` key 全部统一到新名字
+- cassette 写入 `# trajecta/v3`，读取端继续接受 `# llm-tracelab/v3` 与更早的 `LLM_PROXY_V2`；已有 cassette 不需要重写
+- 本地 SQLite 默认文件变为 `trajecta.sqlite3`，旧的 `llm_tracelab.sqlite3` 仍会被原地沿用
+- 转发、录制、回放、Responses runtime、Monitor 与 audit 行为都没有变化
+
+此前版本已具备的能力保持不变：`pkg/llm` 的 provider/endpoint adapter 层、Go embed 的 Monitor UI（`Sessions / Requests` 双视角）、checked-in Postgres 迁移路径，以及 `LLM_PROXY_V3` 的 `llm.*` provider timeline。
+
+## 从 llm-tracelab 改名（升级说明）
+
+项目已由 `llm-tracelab` 改名为 `trajecta`。大多数改动只是命名，但下面这些会影响已有部署和本地数据：
+
+- 环境变量前缀从 `LLM_TRACELAB_*` 变为 `TRAJECTA_*`，旧前缀不再读取，部署脚本、`.env` 与 CI secret 需要同步改名
+- Go module path 变为 `github.com/kingfs/Trajecta`，二进制为 `trajecta`，Docker 镜像与 Compose service 变为 `kingfs/trajecta` 与 `trajecta`
+- cassette 写入的 prelude magic 变为 `# trajecta/v3`；读取端同时接受改名前的 `# llm-tracelab/v3` 和更早的 `LLM_PROXY_V2`，已有 cassette 不需要重写
+- 本地 SQLite 默认文件变为 `{{output_dir}}/trajecta.sqlite3`；若只有旧的 `llm_tracelab.sqlite3`，会直接沿用该文件，而不是静默新建空库
+- Compose 的 Postgres 默认库名、用户与口令都变为 `trajecta`，数据卷变为 `trajecta-data`；已有 Postgres volume 需要重新初始化或手动迁移
+- Monitor 前端的 `localStorage` key 变为 `trajecta.monitor.*`，浏览器里已保存的语言/主题/monitor token 需要重新设置
+- `LLM_PROXY_V3` 是稳定的格式标识，刻意不随改名变化
+
+升级已有部署时先跑迁移脚本（默认 dry-run，只报告不写入）：
+
+```bash
+scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces            # 只报告
+scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces    # 写入
+```
+
+它改写 `.env` 里的 `LLM_TRACELAB_*` key、重命名本地 SQLite（含 `-wal`/`-shm`）、统计 cassette 魔数，并列出 Postgres 库名、Docker 镜像/卷、CI secret 与浏览器 `localStorage` 这些必须人工确认的项。脚本可重复执行；cassette 默认不重写（读取端已兼容旧魔数）。
 
 ## 适合什么场景
 
@@ -136,7 +158,7 @@ debug:
   mask_key: true
 ```
 
-历史 `upstream` / `upstreams` YAML 仍然兼容，但不再作为长期生产配置入口。首次启动时，如果设置了 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`，系统会导入一个 OpenAI-compatible bootstrap provider；如果未设置，服务仅启动 Web 和管理面。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
+历史 `upstream` / `upstreams` YAML 仍然兼容，但不再作为长期生产配置入口。首次启动时，如果设置了 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL`，系统会导入一个 OpenAI-compatible bootstrap provider；如果未设置，服务仅启动 Web 和管理面。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
 
 同一个 upstream 下配置多个 explicit credentials 的示例和 sticky route target、credential-safe metadata、limit scope 说明见 [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md)。文档示例只使用 `$env:...` 占位符，不应在 YAML 中提交真实 provider secret。
 
@@ -150,7 +172,7 @@ debug:
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-生产建议通过环境变量注入的值保持最小：`LLM_TRACELAB_DATABASE_DSN`、`POSTGRES_PASSWORD`、`LLM_TRACELAB_HOST_SERVER_PORT`、`LLM_TRACELAB_HOST_MONITOR_PORT`，以及可选的 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`、`LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`、`LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`。其余服务行为默认保留在 `config/config.yaml`。兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍可用于老单上游迁移，但新部署应优先通过 Monitor Web 管理 providers。
+生产建议通过环境变量注入的值保持最小：`TRAJECTA_DATABASE_DSN`、`POSTGRES_PASSWORD`、`TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`，以及可选的 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL`、`TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY`、`TRAJECTA_TOOLS_WEB_SEARCH_ENABLED`。其余服务行为默认保留在 `config/config.yaml`。兼容旧命名的 `TRAJECTA_UPSTREAM_*` 仍可用于老单上游迁移，但新部署应优先通过 Monitor Web 管理 providers。
 
 访问控制说明：
 
@@ -319,21 +341,21 @@ CONFIG=config/examples/local-sqlite.yaml task run
 如果只想直接运行：
 
 ```bash
-export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@localhost:5432/llm_tracelab?sslmode=disable'
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
+export TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@localhost:5432/trajecta?sslmode=disable'
+export TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
+export TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
+export TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
 go run ./cmd/server -c config/config.yaml
 ```
 
 把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。
-Proxy API 要求携带个人 token；OpenAI-compatible SDK 通常会把 `api_key` 发送为 `Authorization: Bearer <api_key>`，因此 SDK 的 `api_key` 应填写 Monitor `Tokens` 页面生成的 llm-tracelab token。
+Proxy API 要求携带个人 token；OpenAI-compatible SDK 通常会把 `api_key` 发送为 `Authorization: Bearer <api_key>`，因此 SDK 的 `api_key` 应填写 Monitor `Tokens` 页面生成的 Trajecta token。
 
 curl 调用示例：
 
 ```bash
-export LLM_TRACELAB_TOKEN=llmtl_xxx
-curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+export TRAJECTA_TOKEN=llmtl_xxx
+curl -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   http://localhost:8080/v1/models | jq
 ```
 
@@ -375,10 +397,10 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 
 容器内约定的标准路径：
 
-- 可执行文件：`/app/bin/llm-tracelab`
+- 可执行文件：`/app/bin/trajecta`
 - 配置文件：`/app/config/config.yaml`
 - 数据目录：`/app/data/traces`
-- 数据库：Postgres service，DSN 由 `LLM_TRACELAB_DATABASE_DSN` 提供
+- 数据库：Postgres service，DSN 由 `TRAJECTA_DATABASE_DSN` 提供
 
 默认提供：
 
@@ -391,7 +413,7 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 ```bash
 cp .env.example .env
 docker compose up -d
-docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
 然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Providers` 页面配置上游地址、API key 和模型；在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
@@ -400,7 +422,7 @@ SDK 调用 proxy 时把这个 token 作为 SDK API key；直接 curl 时使用 `
 可选 SearXNG hosted `web_search`：
 
 ```bash
-export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
+export TRAJECTA_TOOLS_WEB_SEARCH_ENABLED=true
 docker compose --profile search up -d
 ```
 
@@ -416,26 +438,26 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_DATABASE_DRIVER=postgres \
-  -e LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@host.docker.internal:5432/llm_tracelab?sslmode=disable' \
-  -e LLM_TRACELAB_RESPONSES_FORCE_STORE=true \
-  -e LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
-  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
-  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
-  -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
-  -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
-  -e LLM_TRACELAB_SERVER_PORT=8080 \
-  -e LLM_TRACELAB_MONITOR_PORT=8081 \
+  -e TRAJECTA_DATABASE_DRIVER=postgres \
+  -e TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@host.docker.internal:5432/trajecta?sslmode=disable' \
+  -e TRAJECTA_RESPONSES_FORCE_STORE=true \
+  -e TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
+  -e TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
+  -e TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
+  -e TRAJECTA_OUTPUT_DIR=/app/data/traces \
+  -e TRAJECTA_TRACE_OUTPUT_DIR=/app/data/traces \
+  -e TRAJECTA_SERVER_PORT=8080 \
+  -e TRAJECTA_MONITOR_PORT=8081 \
   -v "$(pwd)/docker-data:/app/data" \
-  kingfs/llm-tracelab:latest serve -c /app/config/config.yaml
+  kingfs/trajecta:latest serve -c /app/config/config.yaml
 ```
 
 如果你更习惯 `docker compose`，也可以直接引用 Docker Hub 镜像：
 
 ```yaml
 services:
-  llm-tracelab:
-    image: kingfs/llm-tracelab:latest
+  trajecta:
+    image: kingfs/trajecta:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -443,16 +465,16 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_DATABASE_DRIVER: postgres
-      LLM_TRACELAB_DATABASE_DSN: postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable
-      LLM_TRACELAB_RESPONSES_FORCE_STORE: "true"
-      LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
-      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
-      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
-      LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_SERVER_PORT: "8080"
-      LLM_TRACELAB_MONITOR_PORT: "8081"
+      TRAJECTA_DATABASE_DRIVER: postgres
+      TRAJECTA_DATABASE_DSN: postgres://trajecta:trajecta@postgres:5432/trajecta?sslmode=disable
+      TRAJECTA_RESPONSES_FORCE_STORE: "true"
+      TRAJECTA_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
+      TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
+      TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
+      TRAJECTA_OUTPUT_DIR: /app/data/traces
+      TRAJECTA_TRACE_OUTPUT_DIR: /app/data/traces
+      TRAJECTA_SERVER_PORT: "8080"
+      TRAJECTA_MONITOR_PORT: "8081"
     volumes:
       - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
@@ -460,9 +482,9 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: llm_tracelab
-      POSTGRES_USER: llm_tracelab
-      POSTGRES_PASSWORD: llm_tracelab
+      POSTGRES_DB: trajecta
+      POSTGRES_USER: trajecta
+      POSTGRES_PASSWORD: trajecta
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -501,7 +523,7 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 默认挂载：
 
 - `./config/config.yaml -> /app/config/config.yaml:ro`
-- `llm-tracelab-data -> /app/data`
+- `trajecta-data -> /app/data`
 - `postgres-data -> /var/lib/postgresql/data`
 
 运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。

@@ -10,7 +10,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
+	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 )
 
 // ResponseItem is the model entity for the ResponseItem schema.

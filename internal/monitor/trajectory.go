@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/trajectory"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/trajectory"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func handleSessionTrajectory(w http.ResponseWriter, r *http.Request, st *store.Store, sessionID string) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 func TestChatCompletionSuccessSendsRequestAndDecodesResponse(t *testing.T) {
@@ -20,7 +20,7 @@ func TestChatCompletionSuccessSendsRequestAndDecodesResponse(t *testing.T) {
 		gotMethod = r.Method
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
-		gotExtraHeader = r.Header.Get("X-TraceLab-Test")
+		gotExtraHeader = r.Header.Get("X-Trajecta-Test")
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
@@ -37,7 +37,7 @@ func TestChatCompletionSuccessSendsRequestAndDecodesResponse(t *testing.T) {
 	client, err := New(Options{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
-		Headers: http.Header{"X-TraceLab-Test": []string{"extra"}},
+		Headers: http.Header{"X-Trajecta-Test": []string{"extra"}},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 type cassetteSpec struct {

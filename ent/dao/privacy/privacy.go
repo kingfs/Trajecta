@@ -5,7 +5,7 @@ package privacy
 import (
 	"context"
 
-	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao"
 
 	"entgo.io/ent/entql"
 	"entgo.io/ent/privacy"

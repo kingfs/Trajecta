@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestPrepareLogFileUsesAdapterModelExtraction(t *testing.T) {

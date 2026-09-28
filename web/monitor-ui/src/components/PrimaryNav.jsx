@@ -55,7 +55,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
     };
     refresh();
     const onRefresh = () => refresh();
-    window.addEventListener("llm-tracelab:events-refresh", onRefresh);
+    window.addEventListener("trajecta:events-refresh", onRefresh);
     if (typeof window.EventSource !== "undefined") {
       const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
       const streamURL = token ? `${apiPaths.eventsStream}?access_token=${encodeURIComponent(token)}` : apiPaths.eventsStream;
@@ -78,7 +78,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
     timer = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
-      window.removeEventListener("llm-tracelab:events-refresh", onRefresh);
+      window.removeEventListener("trajecta:events-refresh", onRefresh);
       if (source) {
         source.close();
       }
@@ -91,7 +91,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
       <div className="nav-top">
         <div className="nav-brand">
           <div className="nav-brand-copy">
-            <strong>TraceLab</strong>
+            <strong>Trajecta</strong>
           </div>
           <button className="sidebar-toggle" type="button" onClick={onToggleCollapsed} aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")} title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}>
             <NavIcon name="sidebar" />

@@ -3,7 +3,7 @@ __debug*
 .env.*
 !.env.example
 logs/
-llm-tracelab
+trajecta
 data/
 node_modules/
 /server

@@ -37,8 +37,8 @@ func TestRedactDSN(t *testing.T) {
 		},
 		{
 			name: "sqlite path",
-			dsn:  "./logs/llm_tracelab.sqlite3",
-			want: "./logs/llm_tracelab.sqlite3",
+			dsn:  "./logs/trajecta.sqlite3",
+			want: "./logs/trajecta.sqlite3",
 		},
 	}
 	for _, tt := range tests {
@@ -72,8 +72,8 @@ func TestSQLitePathFromDSN(t *testing.T) {
 }
 
 func TestLegacyOutputDirEnvOverridesTraceAndDebugOutput(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_OUTPUT_DIR", "/app/data/traces")
-	t.Setenv("LLM_TRACELAB_TRACE_OUTPUT_DIR", "")
+	t.Setenv("TRAJECTA_OUTPUT_DIR", "/app/data/traces")
+	t.Setenv("TRAJECTA_TRACE_OUTPUT_DIR", "")
 
 	cfg := Config{}
 	cfg.Trace.OutputDir = "./logs"
@@ -89,8 +89,8 @@ func TestLegacyOutputDirEnvOverridesTraceAndDebugOutput(t *testing.T) {
 }
 
 func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_OUTPUT_DIR", "/app/data/legacy")
-	t.Setenv("LLM_TRACELAB_TRACE_OUTPUT_DIR", "/app/data/traces")
+	t.Setenv("TRAJECTA_OUTPUT_DIR", "/app/data/legacy")
+	t.Setenv("TRAJECTA_TRACE_OUTPUT_DIR", "/app/data/traces")
 
 	cfg := Config{}
 	cfg.Trace.OutputDir = "./logs"
@@ -151,7 +151,7 @@ database:
 }
 
 func TestDatabaseUseSessionSummaryReadEnvOverride(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ", "true")
+	t.Setenv("TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ", "true")
 
 	cfg := Config{}
 	applyEnvOverrides(&cfg)
@@ -161,8 +161,8 @@ func TestDatabaseUseSessionSummaryReadEnvOverride(t *testing.T) {
 }
 
 func TestProviderProbeConfigEnvOverrides(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL", "true")
-	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_TIMEOUT", "3s")
+	t.Setenv("TRAJECTA_PROVIDER_PROBE_STARTUP_FILL", "true")
+	t.Setenv("TRAJECTA_PROVIDER_PROBE_TIMEOUT", "3s")
 
 	cfg := Config{}
 	applyEnvOverrides(&cfg)
@@ -176,11 +176,11 @@ func TestProviderProbeConfigEnvOverrides(t *testing.T) {
 }
 
 func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
-	t.Setenv("LLM_TRACELAB_UPSTREAM_API_KEY", "env-placeholder-key")
-	t.Setenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET", "openrouter")
-	t.Setenv("LLM_TRACELAB_UPSTREAM_API_TYPE", "responses")
-	t.Setenv("LLM_TRACELAB_UPSTREAM_MODE", "server")
+	t.Setenv("TRAJECTA_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
+	t.Setenv("TRAJECTA_UPSTREAM_API_KEY", "env-placeholder-key")
+	t.Setenv("TRAJECTA_UPSTREAM_PROVIDER_PRESET", "openrouter")
+	t.Setenv("TRAJECTA_UPSTREAM_API_TYPE", "responses")
+	t.Setenv("TRAJECTA_UPSTREAM_MODE", "server")
 
 	cfg := Config{
 		Upstreams: []UpstreamTargetConfig{
@@ -232,8 +232,8 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 }
 
 func TestBootstrapUpstreamEnvOverridesOnlyFirstConfiguredUpstream(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
 
 	cfg := Config{
 		Upstream: UpstreamConfig{
@@ -274,8 +274,8 @@ func TestBootstrapUpstreamEnvOverridesOnlyFirstConfiguredUpstream(t *testing.T) 
 }
 
 func TestBootstrapUpstreamEnvCreatesSingleDefaultUpstream(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
 
 	cfg := Config{}
 	applyEnvOverrides(&cfg)
@@ -504,7 +504,7 @@ limits:
   scope: "header"
   max_concurrent: 1
   max_queued: 2
-  channel_key_header: "X-TraceLab-Channel"
+  channel_key_header: "X-Trajecta-Channel"
 `)
 
 	cfg, err := Load(path)
@@ -514,7 +514,7 @@ limits:
 	if !cfg.Limits.LocalConcurrencyEnabled() {
 		t.Fatalf("LocalConcurrencyEnabled() = false, want true")
 	}
-	if cfg.Limits.MaxConcurrent != 1 || cfg.Limits.MaxQueued != 2 || cfg.Limits.ChannelKeyHeader != "X-TraceLab-Channel" || cfg.Limits.ScopeOrDefault() != "header" {
+	if cfg.Limits.MaxConcurrent != 1 || cfg.Limits.MaxQueued != 2 || cfg.Limits.ChannelKeyHeader != "X-Trajecta-Channel" || cfg.Limits.ScopeOrDefault() != "header" {
 		t.Fatalf("Limits = %+v", cfg.Limits)
 	}
 }
@@ -935,25 +935,25 @@ func TestResponsesFunctionExecutorsConfigValidatesAllowedCommandDirs(t *testing.
 }
 
 func TestResponsesServerEnvOverrides(t *testing.T) {
-	// LLM_TRACELAB_RESPONSES_ENABLED no longer exists: the local Responses
+	// TRAJECTA_RESPONSES_ENABLED no longer exists: the local Responses
 	// execution mode is always available, so the legacy variable is ignored.
-	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "false")
-	t.Setenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL", "env-model")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FORCE_STORE", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
-	t.Setenv("LLM_TRACELAB_RESPONSES_PATH", "/custom/responses")
-	t.Setenv("LLM_TRACELAB_RESPONSES_AUTO_COMPACT", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD", "7")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_ENABLED", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT", "3s")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES", "256")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED", "true")
-	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS", " web_search, mcp ,,")
-	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT", "false")
-	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS", "false")
-	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE", "required")
+	t.Setenv("TRAJECTA_RESPONSES_ENABLED", "false")
+	t.Setenv("TRAJECTA_RESPONSES_DEFAULT_MODEL", "env-model")
+	t.Setenv("TRAJECTA_RESPONSES_FORCE_STORE", "true")
+	t.Setenv("TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
+	t.Setenv("TRAJECTA_RESPONSES_PATH", "/custom/responses")
+	t.Setenv("TRAJECTA_RESPONSES_AUTO_COMPACT", "true")
+	t.Setenv("TRAJECTA_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD", "7")
+	t.Setenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_ENABLED", "true")
+	t.Setenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT", "3s")
+	t.Setenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES", "256")
+	t.Setenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS", "true")
+	t.Setenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT", "true")
+	t.Setenv("TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED", "true")
+	t.Setenv("TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS", " web_search, mcp ,,")
+	t.Setenv("TRAJECTA_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT", "false")
+	t.Setenv("TRAJECTA_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS", "false")
+	t.Setenv("TRAJECTA_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE", "required")
 
 	cfg := Config{}
 	cfg.ResponsesServer.DefaultModel = "yaml-model"
@@ -1010,18 +1010,18 @@ func TestWebSearchConfigDisabledByDefault(t *testing.T) {
 	if webSearch.TimeoutMS != 5000 {
 		t.Fatalf("WebSearchConfig().TimeoutMS = %d, want 5000", webSearch.TimeoutMS)
 	}
-	if webSearch.UserAgent != "llm-tracelab web_search" {
+	if webSearch.UserAgent != "trajecta web_search" {
 		t.Fatalf("WebSearchConfig().UserAgent = %q, want default", webSearch.UserAgent)
 	}
 }
 
 func TestWebSearchEnvOverrides(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED", "true")
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER", "searxng")
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS", "3")
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL", "http://127.0.0.1:8888")
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS", "2500")
-	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT", "llm-tracelab-test")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_ENABLED", "true")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER", "searxng")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_MAX_RESULTS", "3")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL", "http://127.0.0.1:8888")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_TIMEOUT_MS", "2500")
+	t.Setenv("TRAJECTA_TOOLS_WEB_SEARCH_USER_AGENT", "trajecta-test")
 
 	cfg := Config{}
 	cfg.Tools.WebSearch.Provider = "mock"
@@ -1045,7 +1045,7 @@ func TestWebSearchEnvOverrides(t *testing.T) {
 	if webSearch.TimeoutMS != 2500 {
 		t.Fatalf("WebSearchConfig().TimeoutMS = %d, want 2500", webSearch.TimeoutMS)
 	}
-	if webSearch.UserAgent != "llm-tracelab-test" {
+	if webSearch.UserAgent != "trajecta-test" {
 		t.Fatalf("WebSearchConfig().UserAgent = %q", webSearch.UserAgent)
 	}
 }
@@ -1111,9 +1111,9 @@ func TestMCPToolsConfigDisabledByDefault(t *testing.T) {
 }
 
 func TestMCPToolsEnvOverrides(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_TOOLS_MCP_ENABLED", "true")
-	t.Setenv("LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS", "2500")
-	t.Setenv("LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES", "4096")
+	t.Setenv("TRAJECTA_TOOLS_MCP_ENABLED", "true")
+	t.Setenv("TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS", "2500")
+	t.Setenv("TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES", "4096")
 
 	cfg := Config{}
 	cfg.Tools.MCP.DefaultTimeoutMS = 1000
@@ -1182,10 +1182,10 @@ func TestLimitScopeDefaults(t *testing.T) {
 	if got := (LimitConfig{}).ScopeOrDefault(); got != "global" {
 		t.Fatalf("ScopeOrDefault() = %q, want global", got)
 	}
-	if got := (LimitConfig{ChannelKeyHeader: "X-TraceLab-Channel"}).ScopeOrDefault(); got != "header" {
+	if got := (LimitConfig{ChannelKeyHeader: "X-Trajecta-Channel"}).ScopeOrDefault(); got != "header" {
 		t.Fatalf("ScopeOrDefault() = %q, want header", got)
 	}
-	if got := (LimitConfig{Scope: " Credential ", ChannelKeyHeader: "X-TraceLab-Channel"}).ScopeOrDefault(); got != "credential" {
+	if got := (LimitConfig{Scope: " Credential ", ChannelKeyHeader: "X-Trajecta-Channel"}).ScopeOrDefault(); got != "credential" {
 		t.Fatalf("ScopeOrDefault() = %q, want credential", got)
 	}
 }
@@ -1217,12 +1217,12 @@ func writeTempConfig(t *testing.T, content string) string {
 func clearWebSearchEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED",
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER",
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS",
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL",
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS",
-		"LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT",
+		"TRAJECTA_TOOLS_WEB_SEARCH_ENABLED",
+		"TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER",
+		"TRAJECTA_TOOLS_WEB_SEARCH_MAX_RESULTS",
+		"TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL",
+		"TRAJECTA_TOOLS_WEB_SEARCH_TIMEOUT_MS",
+		"TRAJECTA_TOOLS_WEB_SEARCH_USER_AGENT",
 	} {
 		t.Setenv(name, "")
 	}
@@ -1231,9 +1231,9 @@ func clearWebSearchEnv(t *testing.T) {
 func clearMCPToolsEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"LLM_TRACELAB_TOOLS_MCP_ENABLED",
-		"LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS",
-		"LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES",
+		"TRAJECTA_TOOLS_MCP_ENABLED",
+		"TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS",
+		"TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES",
 	} {
 		t.Setenv(name, "")
 	}
@@ -1370,5 +1370,42 @@ func TestShippedConfigsHaveNoUnknownKeys(t *testing.T) {
 		if got := unknownConfigKeys(data); len(got) != 0 {
 			t.Errorf("%s declares config keys this build ignores: %v", path, got)
 		}
+	}
+}
+
+func TestResolveDefaultSQLitePathPrefersLegacyFileInPlace(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, LegacySQLiteFileName)
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Only the pre-rename file exists: it must be reused instead of silently
+	// starting a new empty database under the new default name.
+	if got := ResolveDefaultSQLitePath(dir); got != legacy {
+		t.Fatalf("ResolveDefaultSQLitePath() = %q, want legacy %q", got, legacy)
+	}
+
+	// Once the new default exists it wins.
+	current := DefaultSQLitePath(dir)
+	if err := os.WriteFile(current, []byte("current"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if got := ResolveDefaultSQLitePath(dir); got != current {
+		t.Fatalf("ResolveDefaultSQLitePath() = %q, want current %q", got, current)
+	}
+}
+
+func TestResolveDefaultSQLitePathWithoutLegacyFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if got, want := ResolveDefaultSQLitePath(dir), DefaultSQLitePath(dir); got != want {
+		t.Fatalf("ResolveDefaultSQLitePath() = %q, want %q", got, want)
+	}
+	if got, want := filepath.Base(DefaultSQLitePath(dir)), "trajecta.sqlite3"; got != want {
+		t.Fatalf("default sqlite file name = %q, want %q", got, want)
 	}
 }

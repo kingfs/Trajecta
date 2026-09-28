@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/upstream"
 )
 
 func boolPtr(v bool) *bool { return &v }

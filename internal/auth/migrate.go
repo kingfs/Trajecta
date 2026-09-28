@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 
-	entmigrations "github.com/kingfs/llm-tracelab/ent"
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/store"
+	entmigrations "github.com/kingfs/Trajecta/ent"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/store"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"

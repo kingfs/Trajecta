@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestBuildSessionAnalysis(t *testing.T) {

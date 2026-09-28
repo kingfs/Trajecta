@@ -10,7 +10,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/Trajecta/ent/dao/response"
 )
 
 // Response is the model entity for the Response schema.

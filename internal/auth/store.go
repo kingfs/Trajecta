@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
-	"github.com/kingfs/llm-tracelab/ent/dao/user"
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao/apitoken"
+	"github.com/kingfs/Trajecta/ent/dao/user"
+	"github.com/kingfs/Trajecta/internal/config"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 type Store interface {

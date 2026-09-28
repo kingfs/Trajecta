@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/config"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/spf13/cobra"
 )
 

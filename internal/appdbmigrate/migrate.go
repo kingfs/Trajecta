@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	entmigrations "github.com/kingfs/llm-tracelab/ent"
-	"github.com/kingfs/llm-tracelab/internal/config"
+	entmigrations "github.com/kingfs/Trajecta/ent"
+	"github.com/kingfs/Trajecta/internal/config"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"

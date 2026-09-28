@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 const anthropicParserVersion = "0.1.0"

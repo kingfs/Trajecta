@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-export const LANGUAGE_KEY = "llm-tracelab.monitor.language";
+export const LANGUAGE_KEY = "trajecta.monitor.language";
 
 export const languageOptions = [
   { value: "zh-CN", label: "中文", short: "中" },
@@ -100,7 +100,7 @@ const dictionaries = {
     "overview.disabled": "停用",
     "overview.models": "模型",
     "overview.noProviders": "尚未配置模型服务商",
-    "overview.noProvidersDetail": "添加模型服务商后再通过 TraceLab 路由客户端流量。",
+    "overview.noProvidersDetail": "添加模型服务商后再通过 Trajecta 路由客户端流量。",
     "overview.trend": "趋势",
     "overview.workspaceActivity": "工作区活动",
     "overview.requestsFailures": "请求与失败",
@@ -254,7 +254,7 @@ const dictionaries = {
     "events.markAllRead": "全部标为已读",
     "events.loadError": "无法加载事件",
     "events.loading": "正在加载事件",
-    "events.loadingDetail": "正在获取 TraceLab 运行时和分析异常。",
+    "events.loadingDetail": "正在获取 Trajecta 运行时和分析异常。",
     "events.unread": "未读",
     "events.totalEvents": "{count} 个事件",
     "events.critical": "严重",
@@ -594,7 +594,7 @@ dictionaries.en = {
   "overview.disabled": "disabled",
   "overview.models": "models",
   "overview.noProviders": "No providers configured",
-  "overview.noProvidersDetail": "Add a provider before routing client traffic through TraceLab.",
+  "overview.noProvidersDetail": "Add a provider before routing client traffic through Trajecta.",
   "overview.trend": "Trend",
   "overview.workspaceActivity": "Workspace activity",
   "overview.requestsFailures": "Requests and failures",
@@ -762,7 +762,7 @@ Object.assign(dictionaries.en, {
   "events.markAllRead": "Mark all read",
   "events.loadError": "Unable to load events",
   "events.loading": "Loading events",
-  "events.loadingDetail": "Fetching TraceLab runtime and analysis exceptions.",
+  "events.loadingDetail": "Fetching Trajecta runtime and analysis exceptions.",
   "events.unread": "Unread",
   "events.totalEvents": "{count} total events",
   "events.critical": "Critical",

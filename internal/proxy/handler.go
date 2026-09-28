@@ -21,23 +21,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/auth"
-	"github.com/kingfs/llm-tracelab/internal/chaos"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/limit"
-	"github.com/kingfs/llm-tracelab/internal/recorder"
-	"github.com/kingfs/llm-tracelab/internal/redaction"
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
-	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
-	mcptools "github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
-	"github.com/kingfs/llm-tracelab/internal/routeplan"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/chaos"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/limit"
+	"github.com/kingfs/Trajecta/internal/recorder"
+	"github.com/kingfs/Trajecta/internal/redaction"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/functionexec"
+	"github.com/kingfs/Trajecta/internal/responses/httpapi"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
+	mcptools "github.com/kingfs/Trajecta/internal/responses/tools/mcp"
+	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
+	"github.com/kingfs/Trajecta/internal/routeplan"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 type aggregatedModelListResponse struct {
@@ -747,7 +747,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	normalizeClientEntrypoint(r)
 
 	if !auth.RequestAuthorized(r, h.authVerifier) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-proxy"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}

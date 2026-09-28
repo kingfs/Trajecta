@@ -11,7 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 )
 
 // ChannelModelCreate is the builder for creating a ChannelModel entity.

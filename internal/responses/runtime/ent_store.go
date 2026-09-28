@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	entresponse "github.com/kingfs/llm-tracelab/ent/dao/response"
-	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/ent/dao"
+	entresponse "github.com/kingfs/Trajecta/ent/dao/response"
+	"github.com/kingfs/Trajecta/ent/dao/responseitem"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 type EntStore struct {

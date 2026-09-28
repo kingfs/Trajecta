@@ -10,7 +10,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
+	"github.com/kingfs/Trajecta/ent/dao/executionevent"
 )
 
 // ExecutionEvent is the model entity for the ExecutionEvent schema.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestGeminiParserParsesGenerateContent(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/Trajecta/ent/dao/score"
 )
 
 // ScoreCreate is the builder for creating a Score entity.

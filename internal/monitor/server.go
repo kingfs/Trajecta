@@ -19,20 +19,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/providerprobe"
+	"github.com/kingfs/Trajecta/internal/reanalysis"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/functionexec"
+	"github.com/kingfs/Trajecta/internal/routeplan"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	llmspecs "github.com/kingfs/go-llm-specs"
-	"github.com/kingfs/llm-tracelab/internal/auth"
-	"github.com/kingfs/llm-tracelab/internal/channel"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/providerprobe"
-	"github.com/kingfs/llm-tracelab/internal/reanalysis"
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
-	"github.com/kingfs/llm-tracelab/internal/routeplan"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
 //go:embed ui/dist/*
@@ -2860,7 +2860,7 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		}
 		principal, ok := auth.VerifyRequest(authReq, verifier)
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-monitor"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-monitor"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}

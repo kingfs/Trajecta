@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/codexfixtures"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/codexfixtures"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 func loadCodexFixture(t *testing.T, name string) []byte {

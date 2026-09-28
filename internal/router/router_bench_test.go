@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 func BenchmarkRouterSelectStaticCatalog(b *testing.B) {

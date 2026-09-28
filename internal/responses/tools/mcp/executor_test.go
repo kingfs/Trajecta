@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/tools/hosted"
 )
 
 func TestExecutorHappyPath(t *testing.T) {

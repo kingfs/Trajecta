@@ -8,9 +8,9 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/internal"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
-	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/Trajecta/ent/dao/internal"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 )
 
 // SystemEventDelete is the builder for deleting a SystemEvent entity.

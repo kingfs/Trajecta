@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
 )
 
 // UpstreamExchange is the model entity for the UpstreamExchange schema.

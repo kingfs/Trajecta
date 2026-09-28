@@ -12,9 +12,9 @@
 - [`models-path-2026-06-02.json`](./models-path-2026-06-02.json): extracted `/models` path item.
 - [`embeddings-path-2026-06-02.json`](./embeddings-path-2026-06-02.json): extracted `/embeddings` path item.
 
-## TraceLab Coverage
+## Trajecta Coverage
 
-Current TraceLab parser coverage targets:
+Current Trajecta parser coverage targets:
 
 - Chat Completions request, response, and stream chunks
 - Responses request, response, and stream events

@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 const (

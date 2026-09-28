@@ -23,7 +23,7 @@ func TestParseConfigDefaultsSQLite(t *testing.T) {
 	if cfg.Name != "add_responses_tables" {
 		t.Fatalf("Name = %q, want add_responses_tables", cfg.Name)
 	}
-	if !strings.HasPrefix(cfg.DevURL, "sqlite://") || !strings.Contains(cfg.DevURL, "llm-tracelab-ent-migrate-dev.sqlite3") {
+	if !strings.HasPrefix(cfg.DevURL, "sqlite://") || !strings.Contains(cfg.DevURL, "trajecta-ent-migrate-dev.sqlite3") {
 		t.Fatalf("DevURL = %q, want temp sqlite dev url", cfg.DevURL)
 	}
 }

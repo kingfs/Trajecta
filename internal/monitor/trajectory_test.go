@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/trajectory"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/trajectory"
 )
 
 func TestSessionTrajectoryDownload(t *testing.T) {

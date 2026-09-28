@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 )
 
 // SystemEvent is the model entity for the SystemEvent schema.

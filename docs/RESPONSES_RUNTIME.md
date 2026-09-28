@@ -1,11 +1,11 @@
 # 本地 Responses Runtime
 
-本文只记录当前代码事实：`/v1/responses` 落在 TraceLab 本地 Responses runtime 时的选路、请求处理、Codex 兼容、hosted tools、compact 与配置面。仓库级不变量见 `./ARCHITECTURE.md`，路由与凭据模型见 `./ROUTING_AND_CREDENTIALS.md`，审计查询面见 `./OBSERVATION_AND_AUDIT.md`，协议矩阵见 `./protocol-reference/README.md`。字段与行为以 `internal/responses/**`、`internal/proxy/**`、`internal/config/config.go`、`internal/routeplan` 为准。
+本文只记录当前代码事实：`/v1/responses` 落在 Trajecta 本地 Responses runtime 时的选路、请求处理、Codex 兼容、hosted tools、compact 与配置面。仓库级不变量见 `./ARCHITECTURE.md`，路由与凭据模型见 `./ROUTING_AND_CREDENTIALS.md`，审计查询面见 `./OBSERVATION_AND_AUDIT.md`，协议矩阵见 `./protocol-reference/README.md`。字段与行为以 `internal/responses/**`、`internal/proxy/**`、`internal/config/config.go`、`internal/routeplan` 为准。
 
 ## 定位与开关
 
 - `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 三个下游入口被无条件受理。`/v1/responses` 在每次请求的选路阶段按模型二选一：命中 native Responses upstream 时走普通代理直通并录制；否则由本地 Responses runtime 接管，把请求编排为一次或多次内部上游 `POST /v1/chat/completions` 调用。
-- 本地执行模式**没有开关**。`responses_server.enabled` 字段与 `LLM_TRACELAB_RESPONSES_ENABLED` 环境变量已被彻底删除，`internal/config` 的 `ResponsesServerConfig` 不含 `enabled` 字段；YAML 里写该键不会生效（仅触发未知键告警）。本地 runtime 始终参与 `/v1/responses` 选路。
+- 本地执行模式**没有开关**。`responses_server.enabled` 字段与 `TRAJECTA_RESPONSES_ENABLED` 环境变量已被彻底删除，`internal/config` 的 `ResponsesServerConfig` 不含 `enabled` 字段；YAML 里写该键不会生效（仅触发未知键告警）。本地 runtime 始终参与 `/v1/responses` 选路。
 - 要禁用本地翻译，把应用数据库 `app_settings` 键 `routing.settings` 设为 `{"responses_strategy":"native_only"}`（Monitor 的 Routing 设置，`PATCH /api/settings/routing`）。正确拼写是 **`responses_strategy`**；它是 app_settings 键，**不是** `config.yaml` 键，`config.yaml` 中没有 `routing:` 配置段。
 - 本地 runtime 惰性构建：`tools.web_search`、function executor、model profile、tokenize counter 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上返回 502。构建失败不被缓存，瞬时原因可在后续请求恢复。
 - 非 Responses 路径不受影响，继续走既有 protocol-aware 代理、录制与 replay 热路径。`/v1/responses` 命中 native upstream 的直通同样只是普通代理，不做 semantic interposition。
@@ -84,14 +84,14 @@ continuation 与 input items：
 - Ordinary hosted `web_search` descriptor：`{"type":"web_search"}` / `{"type":"web_search_preview"}` 可被解析和审计；provider 未启用时普通 descriptor 不阻断 text create/stream，也不会暴露给上游；provider 就绪时映射为内部 function tool，由模型显式 tool call 后执行。
 - Unsupported hosted tools：强制 `tool_choice` 为 `file_search` / `code_interpreter` / `computer_use_preview`（以及未就绪的 `mcp` / `web_search`）时返回稳定 OpenAI-style error envelope，`code` 为 `unsupported_tool`，message 含 `unsupported hosted tool "<tool>"`，并写不含 raw descriptor/payload 的 `tool_call_audits` rejected 记录。
 
-Codex TOML 生成命令 `llm-tracelab models codex-config <model>`：
+Codex TOML 生成命令 `trajecta models codex-config <model>`：
 
 - 离线运行，不探测上游、不运行真实 Codex、不读取真实 API key；支持全局 `--format text|json` 与可选 `--codex-config <path>`。
 - JSON envelope 的 `command` 为 `models.codex_config`；`result.profile` 含 `model_provider`、`model`、`model_context_window`、`model_auto_compact_token_limit`。
 - `result.provider.base_url` 由 `server.port` 与 `responses_server.path` 推导，`wire_api` 固定为 `responses`。
 - profile 匹配顺序固定：先 `responses_server.model_profiles[].name` 精确匹配，再 `pattern` 通配匹配。未匹配时命令仍成功，context window 与 compact token limit 输出 `0` 并给出 warning；`model_auto_compact_token_limit` 在有 context window 时保守回退为 `context_window_tokens` 的 80%。
 - `result.diagnostics` 输出 matched profile、`runtime_profile_source` / `profile_precedence`、context/compact/output/reasoning 各 limit 的 `*_source`、`capability_source`，以及 `model_catalog` / `channel_models` drift。drift 读取应用库的策略随 driver 不同：SQLite 在库文件存在时直接读取；非 SQLite（含 Postgres）默认不连库，需要额外传 `--check-db`，否则输出 `unavailable`。
-- 传入 `--codex-config <path>` 时只读解析该 TOML，检查 `[profiles.<model>]`、`[model_providers.llm-tracelab]` 及关键字段漂移；文件缺失/不可读/解析失败只产生 diagnostics 与 warnings。
+- 传入 `--codex-config <path>` 时只读解析该 TOML，检查 `[profiles.<model>]`、`[model_providers.trajecta]` 及关键字段漂移；文件缺失/不可读/解析失败只产生 diagnostics 与 warnings。
 
 排障入口：`config inspect --format json` 看脱敏 effective config；`audit query --response-id ... --include-events --include-exchanges` 看 trace；Monitor Audit 页面与 MCP `responses_audit_trace` 复用同一事实源；`provider probe` / `provider probe-report` / `provider probe-apply` 检查与保守补全上游 API surface。离线 fixture 位于 `tests/fixtures/codex/`，`task test:codex-fixtures` 是 focused 离线 gate（校验 fixture inventory、JSON/NDJSON 结构、handler reachability 与最小 runtime/parser 对齐），不是真实 Codex e2e runner。
 
@@ -105,7 +105,7 @@ Codex TOML 生成命令 `llm-tracelab models codex-config <model>`：
 - `mcp`：由 `internal/responses/tools/mcp/executor.go` 提供，`tools.mcp.enabled=true` 且存在 enabled server 时经 runtime 的 `executeMCPToolCall` 执行（Streamable HTTP `tools/call`）。支持 `bearer_token_env`、`enabled_tools` / `disabled_tools`、`default_timeout_ms`、`max_result_bytes`、安全错误与 redaction；映射给上游模型的 Chat tool 名为 `mcp_call`。执行结果与 lifecycle 写入 `tool_call_audits`。
 - Server-side function executor：`internal/responses/functionexec` 的默认空 registry，YAML opt-in `responses_server.function_executors`；只对已注册的同名普通 `function` 做 server-owned 执行。类型为 `static_response` 与受限 `external_command`（不用 shell，默认不继承环境变量，stdin JSON 传入 tool call，stdout 作为 tool output，stderr 只进失败摘要并受截断上限保护）。
 
-职责边界：TraceLab 服务端负责解析 `tools` / `tool_choice`、执行受控工具、timeout / result 上限 / redaction / safe error、写 `execution_events` 与 `tool_call_audits`，并对未启用或不支持的工具返回稳定 rejected/unsupported 错误而不是静默忽略。客户端（Codex / OpenAI SDK / Monitor）负责决定是否传 `tools`、配置 provider/base_url/wire_api/API key、展示 tool item 与引用/错误，以及任何人工确认交互。
+职责边界：Trajecta 服务端负责解析 `tools` / `tool_choice`、执行受控工具、timeout / result 上限 / redaction / safe error、写 `execution_events` 与 `tool_call_audits`，并对未启用或不支持的工具返回稳定 rejected/unsupported 错误而不是静默忽略。客户端（Codex / OpenAI SDK / Monitor）负责决定是否传 `tools`、配置 provider/base_url/wire_api/API key、展示 tool item 与引用/错误，以及任何人工确认交互。
 
 Tool Matrix（仅当前为真的部分）：
 
@@ -162,7 +162,7 @@ Tool Matrix（仅当前为真的部分）：
 | `function_executors.executors[]` | list | 每项：`name`、`type`（`static_response` \| `external_command`）、`enabled`、`output`、`command`、`args`、`timeout`、`env`、`env_allowlist`、`process{working_dir,require_absolute_command,allowed_command_dirs,reject_root}`。 |
 | `codex_compat` | object | `enabled`、`auto_inject_hosted_tools`、`inject_when_tools_absent`（默认 `true`）、`preserve_client_tools`（默认 `true`）、`default_tool_choice`（默认 `"auto"`）。 |
 
-相关但不在 `responses_server` 下的配置：`tools.web_search`（`enabled`、`provider`、`max_results`、`base_url`、`timeout_ms`、`user_agent`）、`tools.mcp`（`enabled`、`default_timeout_ms`、`max_result_bytes`、`servers[].{id,label,url,bearer_token_env,enabled_tools,disabled_tools,enabled}`）。可选字段均有对应 `LLM_TRACELAB_RESPONSES_*` 环境变量覆盖（例如 `..._DEFAULT_MODEL`、`..._FORCE_STORE`、`..._MAX_REQUEST_BODY_BYTES`、`..._PATH`、`..._AUTO_COMPACT`、`..._COMPACT_HISTORY_ITEM_THRESHOLD`、`..._FUNCTION_EXECUTORS_*`、`..._CODEX_COMPAT_*`），没有 `LLM_TRACELAB_RESPONSES_ENABLED`。完整配置与部署方式见 `./README.md`、`./PROXY_USAGE_EXAMPLES.md` 与 `./DEVELOPMENT.md`。
+相关但不在 `responses_server` 下的配置：`tools.web_search`（`enabled`、`provider`、`max_results`、`base_url`、`timeout_ms`、`user_agent`）、`tools.mcp`（`enabled`、`default_timeout_ms`、`max_result_bytes`、`servers[].{id,label,url,bearer_token_env,enabled_tools,disabled_tools,enabled}`）。可选字段均有对应 `TRAJECTA_RESPONSES_*` 环境变量覆盖（例如 `..._DEFAULT_MODEL`、`..._FORCE_STORE`、`..._MAX_REQUEST_BODY_BYTES`、`..._PATH`、`..._AUTO_COMPACT`、`..._COMPACT_HISTORY_ITEM_THRESHOLD`、`..._FUNCTION_EXECUTORS_*`、`..._CODEX_COMPAT_*`），没有 `TRAJECTA_RESPONSES_ENABLED`。完整配置与部署方式见 `./README.md`、`./PROXY_USAGE_EXAMPLES.md` 与 `./DEVELOPMENT.md`。
 
 ## 非目标与未实现
 

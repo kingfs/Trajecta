@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
 const (

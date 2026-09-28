@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 type recordingChatPromptTokenCounter struct {

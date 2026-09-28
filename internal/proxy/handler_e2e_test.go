@@ -16,23 +16,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
-	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao/executionevent"
+	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func boolPtr(v bool) *bool { return &v }
 
 func TestProxyExternalCommandExecutorHelper(t *testing.T) {
-	if os.Getenv("LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER") != "1" {
+	if os.Getenv("TRAJECTA_PROXY_EXTERNAL_EXECUTOR_HELPER") != "1" {
 		return
 	}
 	args := os.Args
@@ -2022,7 +2022,7 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 		case 1:
 			_, _ = io.WriteString(w, `{"id":"chatcmpl_first","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Use cassettes for deterministic replay."},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`)
 		case 2:
-			_, _ = io.WriteString(w, `{"id":"chatcmpl_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"The user is working on llm-tracelab Responses server mode and must preserve cassette replay."},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28}}`)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"The user is working on trajecta Responses server mode and must preserve cassette replay."},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28}}`)
 		default:
 			t.Fatalf("unexpected upstream call %d", callCount)
 		}
@@ -2268,7 +2268,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 		case 1:
 			firstChatBody = chatBody
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"llm-tracelab replay\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"trajecta replay\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
 		case 2:
 			secondChatBody = chatBody
 			w.Header().Set("Content-Type", "application/json")
@@ -2362,7 +2362,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 		t.Fatalf("second chat tool message = %#v", messages[2])
 	}
 	toolContent, _ := toolMessage["content"].(string)
-	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "llm-tracelab replay") {
+	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "trajecta replay") {
 		t.Fatalf("second chat tool content missing mock result: %q", toolContent)
 	}
 
@@ -2408,7 +2408,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	if toolEvents[0].Status != "started" || toolEvents[1].Status != "completed" {
 		t.Fatalf("tool execution event statuses = %q/%q, want started/completed", toolEvents[0].Status, toolEvents[1].Status)
 	}
-	if toolEvents[1].DetailsJSON["tool_name"] != "web_search" || toolEvents[1].DetailsJSON["call_id"] != "call_search" || toolEvents[1].DetailsJSON["query"] != "llm-tracelab replay" {
+	if toolEvents[1].DetailsJSON["tool_name"] != "web_search" || toolEvents[1].DetailsJSON["call_id"] != "call_search" || toolEvents[1].DetailsJSON["query"] != "trajecta replay" {
 		t.Fatalf("completed tool event details = %#v", toolEvents[1].DetailsJSON)
 	}
 }
@@ -2579,7 +2579,7 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 						Type:    "external_command",
 						Command: os.Args[0],
 						Args:    []string{"-test.run=TestProxyExternalCommandExecutorHelper", "--", "responses-e2e"},
-						Env:     map[string]string{"LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
+						Env:     map[string]string{"TRAJECTA_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
 					},
 				},
 			},
@@ -2952,7 +2952,7 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 						Type:    "external_command",
 						Command: os.Args[0],
 						Args:    []string{"-test.run=TestProxyExternalCommandExecutorHelper", "--", "responses-e2e-fail"},
-						Env:     map[string]string{"LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
+						Env:     map[string]string{"TRAJECTA_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
 					},
 				},
 			},
@@ -3134,7 +3134,7 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 			_, _ = io.WriteString(w, `{"id":"chatcmpl_auto_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Search compact summary."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
 		case 3:
 			searchChatBody = chatBody
-			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search_forced","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"llm tracelab\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":6,"completion_tokens":3,"total_tokens":9}}`)
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search_forced","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"llm trajecta\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":6,"completion_tokens":3,"total_tokens":9}}`)
 		case 4:
 			finalChatBody = chatBody
 			_, _ = io.WriteString(w, `{"id":"chatcmpl_final","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Forced search completed after deferred fallback."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}`)
@@ -3258,7 +3258,7 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 		t.Fatalf("final tool message mismatch: %#v", finalMessages[len(finalMessages)-1])
 	}
 	toolContent, _ := toolMessage["content"].(string)
-	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "llm tracelab") {
+	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "llm trajecta") {
 		t.Fatalf("final tool content missing mock result: %q", toolContent)
 	}
 

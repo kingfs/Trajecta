@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/Trajecta/internal/store"
 )
 
 type doctorEnvelopeForTest struct {
@@ -255,15 +255,15 @@ upstream:
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
 [profiles.gpt-5]
-model_provider = "llm-tracelab"
+model_provider = "trajecta"
 model = "gpt-5"
 model_context_window = 200
 model_auto_compact_token_limit = 160
 
-[model_providers.llm-tracelab]
-name = "llm-tracelab"
+[model_providers.trajecta]
+name = "trajecta"
 base_url = "http://127.0.0.1:8080/v1"
-env_key = "LLM_TRACELAB_API_KEY"
+env_key = "TRAJECTA_API_KEY"
 wire_api = "responses"
 request_max_retries = 2
 stream_max_retries = 2
@@ -335,7 +335,7 @@ wire_api = "chat"
 	if check.Status != doctorStatusWarn || envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Fail != 0 {
 		t.Fatalf("doctor result = %+v check = %+v, want drift warning without failure", envelope.Result.Summary, check)
 	}
-	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"llm-tracelab\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
+	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"trajecta\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
 		if !doctorDetailStringSliceContains(check.Detail, "drift_warnings", want) {
 			t.Fatalf("drift_warnings missing %q: %#v", want, check.Detail["drift_warnings"])
 		}
@@ -367,14 +367,14 @@ upstream:
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
 [profiles.gpt-5]
-model_provider = "llm-tracelab"
+model_provider = "trajecta"
 model = "gpt-5"
 model_context_window = 100
 model_auto_compact_token_limit = 80
 
-[model_providers.llm-tracelab]
+[model_providers.trajecta]
 base_url = "https://user:doctor-codex-url-secret@example.com/v1?token=doctor-codex-query-secret"
-env_key = "LLM_TRACELAB_API_KEY"
+env_key = "TRAJECTA_API_KEY"
 wire_api = "chat"
 api_key = "doctor-codex-api-secret"
 `

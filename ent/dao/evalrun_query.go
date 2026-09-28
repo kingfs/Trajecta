@@ -12,9 +12,9 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
-	"github.com/kingfs/llm-tracelab/ent/dao/internal"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/evalrun"
+	"github.com/kingfs/Trajecta/ent/dao/internal"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
 )
 
 // EvalRunQuery is the builder for querying EvalRun entities.

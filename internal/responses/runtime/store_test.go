@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	tracestore "github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/Trajecta/ent/dao/responseitem"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	tracestore "github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestMemoryStoreContinuationItemsWalksPreviousResponses(t *testing.T) {
@@ -342,9 +342,9 @@ func TestEntStoreLatestResponseIDByConversation(t *testing.T) {
 }
 
 func TestEntStorePostgresPersistenceRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)

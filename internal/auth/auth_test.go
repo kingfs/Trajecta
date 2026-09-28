@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
-	"github.com/kingfs/llm-tracelab/ent/dao/user"
+	"github.com/kingfs/Trajecta/ent/dao/apitoken"
+	"github.com/kingfs/Trajecta/ent/dao/user"
 )
 
 type verifierFunc func(context.Context, string) (Principal, bool, error)
@@ -442,9 +442,9 @@ func TestMigrateDatabaseDownPostgresRollbackUnsupported(t *testing.T) {
 }
 
 func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := MigrateDatabaseUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateDatabaseUp(postgres) error = %v", err)

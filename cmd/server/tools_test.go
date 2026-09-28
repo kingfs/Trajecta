@@ -20,7 +20,7 @@ func TestRootCommandRegistersToolsStatus(t *testing.T) {
 
 	cmd := newRootCommand()
 	found, _, err := cmd.Find([]string{"tools", "status"})
-	if err != nil || found.CommandPath() != "llm-tracelab tools status" {
+	if err != nil || found.CommandPath() != "trajecta tools status" {
 		t.Fatalf("found command path = %q err=%v", found.CommandPath(), err)
 	}
 }

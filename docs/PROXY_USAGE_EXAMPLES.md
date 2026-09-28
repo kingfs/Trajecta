@@ -1,6 +1,6 @@
 # 代理使用示例
 
-本文给出把 OpenAI SDK、OpenAI Responses / Codex、Claude Code 等客户端接到本地 `llm-tracelab` 代理的最小可用示例。所有示例指向同一台代理：proxy 监听 `8080`，Monitor 监听 `8081`（见 `config/config.yaml`）。
+本文给出把 OpenAI SDK、OpenAI Responses / Codex、Claude Code 等客户端接到本地 Trajecta 代理的最小可用示例。所有示例指向同一台代理：proxy 监听 `8080`，Monitor 监听 `8081`（见 `config/config.yaml`）。
 
 代理 API 需要个人 token，认证方式是 `Authorization: Bearer <token>`；代理入口只校验这个 header，不校验 `x-api-key`。token 可在 Monitor 的 `Tokens` 页面创建，也可用 CLI 创建，完整 token 只在创建时输出一次。
 
@@ -10,7 +10,7 @@
 
 ```bash
 # 方式一：导出 Postgres DSN，继续使用 config/config.yaml
-export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=disable'
 task run
 
 # 方式二：改用本地 SQLite 配置（CONFIG 是 Taskfile 变量；直接运行二进制时用 -c 指定配置）
@@ -27,8 +27,8 @@ go run ./cmd/server -c config/examples/local-sqlite.yaml auth create-token --use
 后续示例统一使用这两个 shell 变量；如果 `server.port` 不是 `8080`，请同步修改它们以及 SDK 的 `base_url`：
 
 ```bash
-export LLM_TRACELAB_URL=http://localhost:8080
-export LLM_TRACELAB_TOKEN=llmtl_xxx
+export TRAJECTA_URL=http://localhost:8080
+export TRAJECTA_TOKEN=llmtl_xxx
 ```
 
 ## 入口与端口
@@ -49,8 +49,8 @@ export LLM_TRACELAB_TOKEN=llmtl_xxx
 ## 查询模型
 
 ```bash
-curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
-  "${LLM_TRACELAB_URL}/v1/models" | jq
+curl -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
+  "${TRAJECTA_URL}/v1/models" | jq
 ```
 
 ## OpenAI-Compatible Chat Completions
@@ -58,8 +58,8 @@ curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
 非流式（`gpt-4o-mini` 取自 `config/examples/local-sqlite.yaml`，请替换成你的上游实际提供的模型）：
 
 ```bash
-curl "${LLM_TRACELAB_URL}/v1/chat/completions" \
-  -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+curl "${TRAJECTA_URL}/v1/chat/completions" \
+  -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"1+1=? Just answer with a number."}],"max_completion_tokens":64}'
 ```
@@ -67,8 +67,8 @@ curl "${LLM_TRACELAB_URL}/v1/chat/completions" \
 流式：
 
 ```bash
-curl -N "${LLM_TRACELAB_URL}/v1/chat/completions" \
-  -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+curl -N "${TRAJECTA_URL}/v1/chat/completions" \
+  -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"讲一个20字笑话"}],"max_completion_tokens":128,"stream":true,"stream_options":{"include_usage":true}}'
 ```
@@ -84,8 +84,8 @@ import os
 from openai import OpenAI
 
 client = OpenAI(
-    base_url=os.getenv("LLM_TRACELAB_BASE_URL", "http://localhost:8080/v1"),
-    api_key=os.environ["LLM_TRACELAB_TOKEN"],
+    base_url=os.getenv("TRAJECTA_BASE_URL", "http://localhost:8080/v1"),
+    api_key=os.environ["TRAJECTA_TOKEN"],
 )
 
 resp = client.chat.completions.create(
@@ -100,8 +100,8 @@ print(resp.choices[0].message.content)
 `/v1/responses` 和别名 `/responses` 都被无条件接受。Codex 的 `base_url` 指向 `http://localhost:8080/v1`（请求 `/v1/responses`）或根地址 `http://localhost:8080`（请求 `/responses`）都命中同一入口：
 
 ```bash
-curl "${LLM_TRACELAB_URL}/v1/responses" \
-  -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+curl "${TRAJECTA_URL}/v1/responses" \
+  -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","input":"ping"}'
 ```
@@ -109,7 +109,7 @@ curl "${LLM_TRACELAB_URL}/v1/responses" \
 同一个 endpoint 按**模型**在两个执行方式之间二选一，没有 YAML 开关：
 
 1. 原生 Responses 上游：模型声明了 Responses 能力时，请求透传给该上游的 `/v1/responses`。
-2. 本地 Responses runtime：模型只声明 chat completions 能力时，由本地 runtime 把请求编排成对上游 `/v1/chat/completions` 的调用。该执行方式始终可用；旧的 `responses_server.enabled` 字段和 `LLM_TRACELAB_RESPONSES_ENABLED` 变量已被移除。
+2. 本地 Responses runtime：模型只声明 chat completions 能力时，由本地 runtime 把请求编排成对上游 `/v1/chat/completions` 的调用。该执行方式始终可用；旧的 `responses_server.enabled` 字段和 `TRAJECTA_RESPONSES_ENABLED` 变量已被移除。
 
 判定按模型而不是按渠道：`channel_models.supports_responses` / `supports_chat_completions`（可在 Monitor 编辑）优先于渠道级 `api_type` / `capabilities`，未声明的模型回落到渠道级配置；YAML 中用 `upstream.model_capabilities` 表达同样的覆盖。
 
@@ -117,19 +117,19 @@ curl "${LLM_TRACELAB_URL}/v1/responses" \
 
 ## Claude Code / Anthropic Messages
 
-Claude Code 走 Anthropic Messages 协议，base URL 指向代理根地址 `http://localhost:8080` 即可，它会自行请求 `/v1/messages`；`/anthropic/messages` 与 `/anthropic/v1/messages` 也都归一化到 `/v1/messages`。认证仍使用 TraceLab 的个人 token：代理入口只接受 `Authorization: Bearer <token>`。
+Claude Code 走 Anthropic Messages 协议，base URL 指向代理根地址 `http://localhost:8080` 即可，它会自行请求 `/v1/messages`；`/anthropic/messages` 与 `/anthropic/v1/messages` 也都归一化到 `/v1/messages`。认证仍使用 Trajecta 的个人 token：代理入口只接受 `Authorization: Bearer <token>`。
 
 手工 curl 示例（模型名取自 `config/examples/anthropic.yaml`）：
 
 ```bash
-curl "${LLM_TRACELAB_URL}/v1/messages" \
-  -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+curl "${TRAJECTA_URL}/v1/messages" \
+  -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{"model":"claude-3-5-sonnet-latest","max_tokens":64,"messages":[{"role":"user","content":"ping"}]}'
 ```
 
-TraceLab 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求，`/v1/messages` 必须路由到支持 Anthropic Messages 的上游或兼容网关；base URL 不要重复追加 `/v1`。
+Trajecta 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求，`/v1/messages` 必须路由到支持 Anthropic Messages 的上游或兼容网关；base URL 不要重复追加 `/v1`。
 
 ## 常见排查
 

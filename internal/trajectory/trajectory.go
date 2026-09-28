@@ -162,7 +162,7 @@ func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exc
 	}
 	b.trajectory.FinalMetrics = aggregateMetrics(b.trajectory.Steps)
 	b.trajectory.FinalMetrics.Extra = map[string]any{"recorded_requests": len(exchanges), "requests_with_usage": b.metricsRequests, "usage_scope": "recorded_client_visible_responses"}
-	b.trajectory.Extra = map[string]any{"exporter": "llm-tracelab", "exporter_version": "2", "session_source": sessionSource, "scope": "client_visible_responses", "request_count": len(exchanges), "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id"}
+	b.trajectory.Extra = map[string]any{"exporter": "trajecta", "exporter_version": "2", "session_source": sessionSource, "scope": "client_visible_responses", "request_count": len(exchanges), "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id"}
 	return b.trajectory, nil
 }
 func (b *builder) reference(origin, path string) map[string]any {

@@ -14,7 +14,7 @@ func main() {
 		"./schema",
 		&gen.Config{
 			Target:   "./dao",
-			Package:  "github.com/kingfs/llm-tracelab/ent/dao",
+			Package:  "github.com/kingfs/Trajecta/ent/dao",
 			Features: gen.AllFeatures,
 		},
 	); err != nil {

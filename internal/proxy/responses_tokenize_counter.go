@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
-	"github.com/kingfs/llm-tracelab/internal/router"
+	"github.com/kingfs/Trajecta/internal/config"
+	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/router"
 )
 
 type responsesTokenizeCounterProfile struct {

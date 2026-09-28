@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 type ExchangeMetadataBackfillOptions struct {
@@ -209,7 +209,7 @@ func (s *Store) exchangeMetadataFromCassette(path string) (recordfile.MetaData, 
 		}
 		return recordfile.MetaData{}, false, false, fmt.Errorf("read cassette %s: %w", resolved, err)
 	}
-	isV3 := strings.HasPrefix(string(content), recordfile.FileMagic+"\n")
+	isV3 := recordfile.IsV3Prelude(content)
 	prelude, err := recordfile.ParsePrelude(content)
 	if err != nil {
 		return recordfile.MetaData{}, isV3, true, nil

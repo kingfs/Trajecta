@@ -25,27 +25,27 @@ COPY . .
 
 RUN go build -trimpath \
 	-ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${BUILD_DATE} -X main.Branch=${BRANCH}" \
-	-o /out/llm-tracelab ./cmd/server
+	-o /out/trajecta ./cmd/server
 
 FROM alpine:3.22 AS runtime
 
 ENV APP_HOME=/app \
-	LLM_TRACELAB_CONFIG=/app/config/config.yaml
+	TRAJECTA_CONFIG=/app/config/config.yaml
 
 ENV TZ=UTC \
-	LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
-	LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces
+	TRAJECTA_OUTPUT_DIR=/app/data/traces \
+	TRAJECTA_TRACE_OUTPUT_DIR=/app/data/traces
 
 RUN mkdir -p /app/bin /app/config /app/data/traces
 
 WORKDIR /app
 
-COPY --from=builder /out/llm-tracelab /app/bin/llm-tracelab
+COPY --from=builder /out/trajecta /app/bin/trajecta
 COPY config/config.yaml /app/config/config.yaml
 
 VOLUME ["/app/config", "/app/data"]
 
 EXPOSE 8080 8081
 
-ENTRYPOINT ["/app/bin/llm-tracelab"]
+ENTRYPOINT ["/app/bin/trajecta"]
 CMD ["serve", "-c", "/app/config/config.yaml"]

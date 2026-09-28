@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { PrimaryNav } from "./PrimaryNav";
 
-const SIDEBAR_COLLAPSED_KEY = "llm-tracelab.monitor.sidebar.collapsed";
+const SIDEBAR_COLLAPSED_KEY = "trajecta.monitor.sidebar.collapsed";
 
 export function AppShell({ children, user, onLogout }) {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");

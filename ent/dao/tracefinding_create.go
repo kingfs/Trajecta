@@ -11,7 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
+	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
 )
 
 // TraceFindingCreate is the builder for creating a TraceFinding entity.

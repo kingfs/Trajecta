@@ -12,13 +12,13 @@ import (
 	"unicode/utf8"
 
 	entsql "entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
-	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
-	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao/executionevent"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
+	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 const (
@@ -984,7 +984,7 @@ func requestAuditOperationPredicate(operation string) predicate.RequestAudit {
 	case "input_items":
 		return requestaudit.And(requestaudit.MethodEQ("GET"), requestaudit.PathHasPrefix("/v1/responses/"), requestaudit.PathHasSuffix("/input_items"))
 	default:
-		return requestaudit.IDEQ("__llm_tracelab_no_such_request_audit_operation__")
+		return requestaudit.IDEQ("__trajecta_no_such_request_audit_operation__")
 	}
 }
 

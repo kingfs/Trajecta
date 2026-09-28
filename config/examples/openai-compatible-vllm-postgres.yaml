@@ -13,7 +13,7 @@ auth:
 
 database:
   driver: "postgres"
-  dsn: "$env:LLM_TRACELAB_DATABASE_DSN"
+  dsn: "$env:TRAJECTA_DATABASE_DSN"
   max_open_conns: 16
   max_idle_conns: 8
   auto_migrate: true
@@ -25,7 +25,7 @@ trace:
 # translation, set responses_strategy to "native_only" in the Monitor Routing
 # settings (application DB app_settings key "routing.settings", not a YAML key).
 responses_server:
-  default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+  default_model: "$env:TRAJECTA_RESPONSES_DEFAULT_MODEL"
   force_store: true
   max_request_body_bytes: 67108864
   path: "/v1/responses"
@@ -36,7 +36,7 @@ responses_server:
       context_window_tokens: 128000
       max_output_tokens: 4096
       compact_history_item_threshold: 80
-      upstream_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+      upstream_model: "$env:TRAJECTA_RESPONSES_DEFAULT_MODEL"
 
 tools:
   web_search:
@@ -66,10 +66,10 @@ upstreams:
     capacity_hint: 1.0
     model_discovery: "static_only"
     static_models:
-      - "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+      - "$env:TRAJECTA_RESPONSES_DEFAULT_MODEL"
     upstream:
-      base_url: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"
-      api_key: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"
+      base_url: "$env:TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL"
+      api_key: "$env:TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY"
       provider_preset: "vllm"
       api_type: "chat_completions"
       mode: "proxy"

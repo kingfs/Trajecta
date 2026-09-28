@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-`llm-tracelab` 是本地优先（local-first）的 LLM API record/replay 代理，覆盖 OpenAI-compatible 及 Anthropic Messages、Google Gemini、Vertex native 等主流协议族。典型用法：
+Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆盖 OpenAI-compatible 及 Anthropic Messages、Google Gemini、Vertex native 等主流协议族。典型用法：
 
 1. 开发期让 SDK 流量经过本地代理；
 2. 把原始 HTTP 交换持久化为 `.http` cassette；
@@ -83,7 +83,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 `/v1/responses` 是唯一例外，按请求在 native 与本地 runtime 之间二选一：
 
 - native：匹配到支持 Responses 的上游时直接透传。
-- 本地 runtime：把请求编排为一次内部上游 `/v1/chat/completions` 调用（`responses_server` 执行模式）。该模式始终可用且没有配置开关；旧的 `responses_server.enabled` 与 `LLM_TRACELAB_RESPONSES_ENABLED` 已移除。本地 runtime 延迟构建，构建失败只影响触发该次构建的请求，不阻塞启动。
+- 本地 runtime：把请求编排为一次内部上游 `/v1/chat/completions` 调用（`responses_server` 执行模式）。该模式始终可用且没有配置开关；旧的 `responses_server.enabled` 与 `TRAJECTA_RESPONSES_ENABLED` 已移除。本地 runtime 延迟构建，构建失败只影响触发该次构建的请求，不阻塞启动。
 - 策略存于 application DB 的 `app_settings` 键 `routing.settings`，经 `GET`/`PATCH /api/settings/routing` 读写，不是 YAML 键；取值为 `auto`、`prefer_native`、`prefer_local_server`、`native_only`、`local_server_only`。
 - native 与 local 的选择按模型解析而非按渠道：`channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 可编辑）覆盖渠道级 `api_type`/`capabilities`，未声明值的模型回落到渠道级行为；YAML 侧对应 `upstream.model_capabilities`。
 
@@ -93,7 +93,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 
 新录制只写 `LLM_PROXY_V3`：
 
-1. 以 `# llm-tracelab/v3` 开头的短 prelude；
+1. 以 `# trajecta/v3` 开头的短 prelude；
 2. 一行 `# meta: {...}` JSON；
 3. 零或多行 `# event: {...}` JSON；
 4. 一个空行；
@@ -101,7 +101,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 6. 一个分隔换行；
 7. 原始 HTTP 响应字节。
 
-读取端继续支持 legacy `LLM_PROXY_V2`（固定 2KB JSON header block）。cassette 保持人类可读；修改格式时先改 `pkg/recordfile`，再同步 recorder、monitor、replay。
+读取端继续支持 legacy `LLM_PROXY_V2`（固定 2KB JSON header block），并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`。`LLM_PROXY_V3` 这个 meta header `version` 值是稳定的格式标识，刻意不随项目改名。cassette 保持人类可读；修改格式时先改 `pkg/recordfile`，再同步 recorder、monitor、replay。
 
 ## 存储边界
 
@@ -117,7 +117,7 @@ application DB 是结构化查询源：
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）。
 
-生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。SQLite 仅作为本地/开发/测试 fallback，默认文件为 `{{output_dir}}/llm_tracelab.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
+生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。SQLite 仅作为本地/开发/测试 fallback，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
 
 部署与迁移细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)，Postgres 长期运行优化见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 
@@ -148,7 +148,7 @@ application DB 是结构化查询源：
 - 新录制只写 V3；读取端继续支持 V2，cassette 保持人类可读。
 - `pkg/replay` 是硬性要求，且不能依赖网络或 Observation IR。
 - 存储 schema 只做 additive 演进；新列需通过启动时迁移兼容旧 DB（Postgres 走 `internal/appdbmigrate`，SQLite 走启动 schema）。
-- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认 `llm_tracelab.sqlite3` 必须可原地升级。
+- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认 `trajecta.sqlite3` 必须可原地升级。
 - Observation parser 对 unknown fields 保持 tolerant；所有派生分析结果都必须能从 raw cassette 重算。
 
 ## 测试基线

@@ -10,7 +10,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
+	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 )
 
 // ToolCallAudit is the model entity for the ToolCallAudit schema.

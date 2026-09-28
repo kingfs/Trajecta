@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/migrate"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/migrate"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

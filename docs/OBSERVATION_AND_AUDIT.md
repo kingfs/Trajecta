@@ -2,7 +2,7 @@
 
 ## 目标与边界
 
-`llm-tracelab` 的观测层把记录下来的原始 HTTP 交换解析成语义结构，用于协议展示、审计和长期行为分析。它围绕三类事实工作：
+Trajecta 的观测层把记录下来的原始 HTTP 交换解析成语义结构，用于协议展示、审计和长期行为分析。它围绕三类事实工作：
 
 - `.http` cassette 中保存的原始 HTTP request/response bytes 是唯一原始证据。
 - Observation IR（`pkg/observe`）是解析后的中间表示，可由 cassette 重算。
@@ -192,8 +192,8 @@ OpenAI-compatible 不等同于 OpenAI，但复用 `openAIParser`：未知字段�
 
 两类 HTTP exchange 是一等观测对象：
 
-- entry exchange：客户端到 TraceLab 的 HTTP 交换。本地 Responses server-mode 的入口在 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 外层由 `responsesEntryRecorder` 以 write-through tee 录制（`SiteURL=http://llm-tracelab.local`，`ExchangeKind=entry`、`ExchangeRole=client_request`），并追加 `responses.entry.target` 事件记录目标 path。普通 reverse proxy 请求由同一 recorder pipeline 记录，未写 `exchange_kind` 时按 `model` 索引。
-- model exchange：TraceLab 到上游模型 provider 的 HTTP 交换，由 recorder 正常记录，承载 replay 所需的原始响应。
+- entry exchange：客户端到 Trajecta 的 HTTP 交换。本地 Responses server-mode 的入口在 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 外层由 `responsesEntryRecorder` 以 write-through tee 录制（`SiteURL=http://trajecta.local`，`ExchangeKind=entry`、`ExchangeRole=client_request`），并追加 `responses.entry.target` 事件记录目标 path。普通 reverse proxy 请求由同一 recorder pipeline 记录，未写 `exchange_kind` 时按 `model` 索引。
+- model exchange：Trajecta 到上游模型 provider 的 HTTP 交换，由 recorder 正常记录，承载 replay 所需的原始响应。
 
 taxonomy 由两个独立字段表达（`recordfile.MetaData`，全部可选、additive）：
 

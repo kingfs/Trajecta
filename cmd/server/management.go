@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/auth"
-	"github.com/kingfs/llm-tracelab/internal/channel"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/mcpserver"
-	"github.com/kingfs/llm-tracelab/internal/monitor"
-	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/mcpserver"
+	"github.com/kingfs/Trajecta/internal/monitor"
+	"github.com/kingfs/Trajecta/internal/responses/functionexec"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -59,7 +59,7 @@ func newManagementMuxWithFunctionExecutorManager(
 			// endpoint for older clients.
 			Stateless: true,
 		})
-		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
+		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "trajecta-mcp", verifier))
 	}
 	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()
 	if functionExecutorManager != nil {
@@ -88,7 +88,7 @@ func newMonitorJWTManager(traceStore *store.Store, ttl time.Duration) (*auth.JWT
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(append([]byte("llm-tracelab-monitor-jwt:"), key...))
+	sum := sha256.Sum256(append([]byte("trajecta-monitor-jwt:"), key...))
 	return auth.NewJWTManager(auth.JWTOptions{Secret: sum[:], TTL: ttl})
 }
 

@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // ParsedData 提供给 UI 的完整数据结构

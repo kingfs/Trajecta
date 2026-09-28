@@ -200,9 +200,9 @@ func TestMigrateDownRejectsUnsupportedDriver(t *testing.T) {
 }
 
 func TestMigrateUpPostgresIntegration(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 
 	if err := MigrateUp("postgres", dsn, 0); err != nil {

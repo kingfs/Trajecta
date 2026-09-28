@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 // AggregateChatCompletionStreamWithCallback folds OpenAI-compatible Chat Completions SSE chunks into a final response,

@@ -8,11 +8,11 @@
 ## Files
 
 - [`aiplatform-discovery-v1-2026-06-02.json`](./aiplatform-discovery-v1-2026-06-02.json): raw official AI Platform discovery document.
-- [`generate-content-core-schemas-2026-06-02.json`](./generate-content-core-schemas-2026-06-02.json): extracted Vertex GenerateContent schemas and model methods used by TraceLab.
+- [`generate-content-core-schemas-2026-06-02.json`](./generate-content-core-schemas-2026-06-02.json): extracted Vertex GenerateContent schemas and model methods used by Trajecta.
 
-## TraceLab Coverage
+## Trajecta Coverage
 
-Current TraceLab parser coverage targets:
+Current Trajecta parser coverage targets:
 
 - express-style publisher/model GenerateContent paths
 - project/location publisher/model GenerateContent paths

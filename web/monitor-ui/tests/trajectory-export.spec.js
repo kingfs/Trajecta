@@ -7,8 +7,8 @@ const session = {
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("llm-tracelab.monitor.language", "en");
-    localStorage.setItem("llm-tracelab.monitor.token", "test-monitor-jwt");
+    localStorage.setItem("trajecta.monitor.language", "en");
+    localStorage.setItem("trajecta.monitor.token", "test-monitor-jwt");
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/replay"
+	"github.com/kingfs/Trajecta/pkg/replay"
 
 	"github.com/sashabaranov/go-openai"
 )

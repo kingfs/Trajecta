@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/ent/dao/migrate"
+	"github.com/kingfs/Trajecta/ent/dao/migrate"
 
 	_ "ariga.io/atlas/sql/postgres"
 	"ariga.io/atlas/sql/sqltool"
@@ -19,7 +19,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const DevURLEnv = "LLM_TRACELAB_ENT_MIGRATE_DEV_URL"
+const DevURLEnv = "TRAJECTA_ENT_MIGRATE_DEV_URL"
 
 type Config struct {
 	Dialect string
@@ -81,7 +81,7 @@ func ParseConfig(args []string) (Config, error) {
 	switch cfg.Dialect {
 	case dialect.SQLite:
 		if cfg.DevURL == "" {
-			devPath := filepath.Join(os.TempDir(), "llm-tracelab-ent-migrate-dev.sqlite3")
+			devPath := filepath.Join(os.TempDir(), "trajecta-ent-migrate-dev.sqlite3")
 			_ = os.Remove(devPath)
 			cfg.DevURL = "sqlite://" + devPath + "?_fk=1"
 		}

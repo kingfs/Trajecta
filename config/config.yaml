@@ -59,7 +59,7 @@ tools:
     max_results: 5
     base_url: "http://searxng:8080"
     timeout_ms: 5000
-    user_agent: "llm-tracelab/production"
+    user_agent: "trajecta/production"
   mcp:
     enabled: true
     default_timeout_ms: 60000

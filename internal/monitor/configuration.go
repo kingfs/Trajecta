@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/channel"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
 )
 
 type configurationHandlerFactory func(*store.Store, *router.Router, *channel.Service) http.HandlerFunc

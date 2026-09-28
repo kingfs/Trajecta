@@ -35,30 +35,30 @@ func TestExternalCommandFunctionToolExecutorSuccessSendsCallOnStdin(t *testing.T
 }
 
 func TestExternalCommandFunctionToolExecutorDoesNotInheritEnvironmentByDefault(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_EXTERNAL_EXECUTOR_SECRET", "do-not-leak")
+	t.Setenv("TRAJECTA_EXTERNAL_EXECUTOR_SECRET", "do-not-leak")
 	executor := externalCommandTestExecutor("env")
 
 	result, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
 	if err != nil {
 		t.Fatalf("ExecuteFunctionTool() error = %v", err)
 	}
-	if got := result.Output.(string); strings.Contains(got, "do-not-leak") || strings.Contains(got, "LLM_TRACELAB_EXTERNAL_EXECUTOR_SECRET") {
+	if got := result.Output.(string); strings.Contains(got, "do-not-leak") || strings.Contains(got, "TRAJECTA_EXTERNAL_EXECUTOR_SECRET") {
 		t.Fatalf("executor inherited parent environment: %q", got)
 	}
 }
 
 func TestExternalCommandFunctionToolExecutorSupportsStaticEnvAndAllowlist(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_ALLOWED_EXECUTOR_ENV", "allowed")
+	t.Setenv("TRAJECTA_ALLOWED_EXECUTOR_ENV", "allowed")
 	executor := externalCommandTestExecutor("env")
 	executor.Env["STATIC_VALUE"] = "static"
-	executor.EnvAllowlist = []string{"LLM_TRACELAB_ALLOWED_EXECUTOR_ENV"}
+	executor.EnvAllowlist = []string{"TRAJECTA_ALLOWED_EXECUTOR_ENV"}
 
 	result, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
 	if err != nil {
 		t.Fatalf("ExecuteFunctionTool() error = %v", err)
 	}
 	output := result.Output.(string)
-	if !strings.Contains(output, "STATIC_VALUE=static") || !strings.Contains(output, "LLM_TRACELAB_ALLOWED_EXECUTOR_ENV=allowed") {
+	if !strings.Contains(output, "STATIC_VALUE=static") || !strings.Contains(output, "TRAJECTA_ALLOWED_EXECUTOR_ENV=allowed") {
 		t.Fatalf("executor env = %q, want static and allowlisted values", output)
 	}
 }
@@ -234,12 +234,12 @@ func externalCommandTestExecutor(mode string, extraArgs ...string) ExternalComma
 	return ExternalCommandFunctionToolExecutor{
 		Command: os.Args[0],
 		Args:    args,
-		Env:     map[string]string{"LLM_TRACELAB_EXTERNAL_EXECUTOR_HELPER": "1"},
+		Env:     map[string]string{"TRAJECTA_EXTERNAL_EXECUTOR_HELPER": "1"},
 	}
 }
 
 func TestExternalCommandExecutorHelper(t *testing.T) {
-	if os.Getenv("LLM_TRACELAB_EXTERNAL_EXECUTOR_HELPER") != "1" {
+	if os.Getenv("TRAJECTA_EXTERNAL_EXECUTOR_HELPER") != "1" {
 		return
 	}
 	args := os.Args

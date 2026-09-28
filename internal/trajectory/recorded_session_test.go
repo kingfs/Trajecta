@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // Optional local regression runner. Private cassettes never enter the repository.

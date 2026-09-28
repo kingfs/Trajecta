@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 const maxErrorBodyBytes = 4096

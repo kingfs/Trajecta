@@ -17,16 +17,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	"github.com/kingfs/llm-tracelab/internal/auth"
-	"github.com/kingfs/llm-tracelab/internal/channel"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/config"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )
@@ -94,7 +94,7 @@ func TestRootCommandHelpWorksWithConfigShortcut(t *testing.T) {
 }
 
 func TestCLIRuntimeReadsConfigFromEnv(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_CONFIG", "env-config.yaml")
+	t.Setenv("TRAJECTA_CONFIG", "env-config.yaml")
 
 	runtime := newCLIRuntime()
 	if got := runtime.configPath(); got != "env-config.yaml" {
@@ -293,7 +293,7 @@ func TestSchemaCommandSupportsJSONEnvelopeForCommandPath(t *testing.T) {
 	if !envelope.OK || len(envelope.Result.Commands) != 1 {
 		t.Fatalf("schema envelope = %+v", envelope)
 	}
-	if envelope.Result.Commands[0].Path != "llm-tracelab auth create-token" {
+	if envelope.Result.Commands[0].Path != "trajecta auth create-token" {
 		t.Fatalf("schema path = %q", envelope.Result.Commands[0].Path)
 	}
 	if len(envelope.Result.Contracts.Formats) == 0 || envelope.Result.Contracts.Stdout == "" || envelope.Result.Contracts.Stderr == "" {
@@ -632,10 +632,10 @@ upstreams:
 	if envelope.Result.Model != "gpt-5" || envelope.Result.WireAPI != "responses" {
 		t.Fatalf("result identity = %+v", envelope.Result)
 	}
-	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8181/v1" || envelope.Result.Provider.ResponsesPath != "/v1/responses" || envelope.Result.Provider.EnvKey != "LLM_TRACELAB_API_KEY" || envelope.Result.Provider.WireAPI != "responses" {
+	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8181/v1" || envelope.Result.Provider.ResponsesPath != "/v1/responses" || envelope.Result.Provider.EnvKey != "TRAJECTA_API_KEY" || envelope.Result.Provider.WireAPI != "responses" {
 		t.Fatalf("provider = %+v", envelope.Result.Provider)
 	}
-	if envelope.Result.Profile.ModelProvider != "llm-tracelab" || envelope.Result.Profile.Model != "gpt-5" || envelope.Result.Profile.ModelContextWindow != 200 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 160 || envelope.Result.Profile.ToolOutputTokenLimit != 7000 || envelope.Result.Profile.ModelReasoningEffort != "high" {
+	if envelope.Result.Profile.ModelProvider != "trajecta" || envelope.Result.Profile.Model != "gpt-5" || envelope.Result.Profile.ModelContextWindow != 200 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 160 || envelope.Result.Profile.ToolOutputTokenLimit != 7000 || envelope.Result.Profile.ModelReasoningEffort != "high" {
 		t.Fatalf("profile = %+v", envelope.Result.Profile)
 	}
 	if !envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Kind != "exact" || envelope.Result.Diagnostics.MatchedProfile.Index != 1 || envelope.Result.Diagnostics.MatchedProfile.Source != "responses_server.model_profiles[1].name" {
@@ -664,7 +664,7 @@ upstreams:
 	if len(envelope.Result.Warnings) != 0 {
 		t.Fatalf("warnings = %+v, want none", envelope.Result.Warnings)
 	}
-	if !strings.Contains(envelope.Result.TOML, `wire_api = "responses"`) || !strings.Contains(envelope.Result.TOML, `env_key = "LLM_TRACELAB_API_KEY"`) || !strings.Contains(envelope.Result.TOML, `tool_output_token_limit = 7000`) || !strings.Contains(envelope.Result.TOML, `model_reasoning_effort = "high"`) {
+	if !strings.Contains(envelope.Result.TOML, `wire_api = "responses"`) || !strings.Contains(envelope.Result.TOML, `env_key = "TRAJECTA_API_KEY"`) || !strings.Contains(envelope.Result.TOML, `tool_output_token_limit = 7000`) || !strings.Contains(envelope.Result.TOML, `model_reasoning_effort = "high"`) {
 		t.Fatalf("toml = %s", envelope.Result.TOML)
 	}
 }
@@ -707,15 +707,15 @@ upstream:
 		`# codex_profile_fields: model_context_window_source=responses_server.model_profiles[0].pattern.context_window_tokens model_auto_compact_token_limit_source=responses_server.model_profiles[0].pattern.context_window_tokens_80_percent tool_output_token_limit_source=default.tool_output_token_limit model_reasoning_effort_source=default.model_reasoning_effort`,
 		`# profile_adoption: provider_channel_profile_adoption=report_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
 		`# profile_adoption_gates: adoption_ready=true blocking_gate_count=0 required_gate_statuses=schema_migration:implemented_runtime_opt_in,dry_run_diff:implemented_contract,conflict_report:implemented_contract,rollback_plan:implemented_contract,dsn_gated_tests:implemented_contract`,
-		`model_provider = "llm-tracelab"`,
+		`model_provider = "trajecta"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
 		`model_auto_compact_token_limit = 25600`,
 		`tool_output_token_limit = 6000`,
 		`model_reasoning_effort = "medium"`,
-		`[model_providers.llm-tracelab]`,
+		`[model_providers.trajecta]`,
 		`base_url = "http://127.0.0.1:8080/openai/v1"`,
-		`env_key = "LLM_TRACELAB_API_KEY"`,
+		`env_key = "TRAJECTA_API_KEY"`,
 		`wire_api = "responses"`,
 	} {
 		if !strings.Contains(output, want) {
@@ -1138,9 +1138,9 @@ responses_server:
 }
 
 func TestModelsCodexConfigCommandReportsPostgresProfileAdoptionWithCheckDB(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1326,17 +1326,17 @@ responses_server:
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
 [profiles.gpt-5]
-model_provider = "llm-tracelab"
+model_provider = "trajecta"
 model = "gpt-5"
 model_context_window = 200
 model_auto_compact_token_limit = 160
 tool_output_token_limit = 6000
 model_reasoning_effort = "medium"
 
-[model_providers.llm-tracelab]
-name = "llm-tracelab"
+[model_providers.trajecta]
+name = "trajecta"
 base_url = "http://127.0.0.1:8080/v1"
-env_key = "LLM_TRACELAB_API_KEY"
+env_key = "TRAJECTA_API_KEY"
 wire_api = "responses"
 request_max_retries = 2
 stream_max_retries = 2
@@ -1397,7 +1397,7 @@ wire_api = "chat"
 	if codexConfig.Status != "drift" || !codexConfig.Present || !codexConfig.Readable || !codexConfig.Parsed || codexConfig.ProfilePresent || codexConfig.ProviderPresent {
 		t.Fatalf("codex_config = %+v, want missing profile/provider drift", codexConfig)
 	}
-	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"llm-tracelab\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
+	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"trajecta\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
 		if !containsStringFragment(codexConfig.DriftWarnings, want) || !containsStringFragment(envelope.Result.Warnings, want) {
 			t.Fatalf("warnings missing %q: warnings=%+v codex=%+v", want, envelope.Result.Warnings, codexConfig.DriftWarnings)
 		}
@@ -1421,14 +1421,14 @@ responses_server:
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
 [profiles.gpt-5]
-model_provider = "llm-tracelab"
+model_provider = "trajecta"
 model = "gpt-5"
 model_context_window = 100
 model_auto_compact_token_limit = 80
 
-[model_providers.llm-tracelab]
+[model_providers.trajecta]
 base_url = "https://user:codex-url-secret@example.com/v1?token=codex-query-secret"
-env_key = "LLM_TRACELAB_API_KEY"
+env_key = "TRAJECTA_API_KEY"
 wire_api = "chat"
 api_key = "codex-api-secret"
 `
@@ -1650,7 +1650,7 @@ func TestRootCommandRegistersModelsCodexConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find(models codex-config) error = %v", err)
 	}
-	if found == nil || found.CommandPath() != "llm-tracelab models codex-config" {
+	if found == nil || found.CommandPath() != "trajecta models codex-config" {
 		t.Fatalf("found command path = %q", found.CommandPath())
 	}
 }
@@ -2582,7 +2582,7 @@ func TestOpenAuthStoreAutoMigratePostgresSkipsAuthMigrator(t *testing.T) {
 	autoMigrate := true
 	cfg := &config.Config{}
 	cfg.Database.Driver = "postgresql"
-	cfg.Database.DSN = "postgres://user:pass@example.invalid/llm_tracelab?sslmode=disable"
+	cfg.Database.DSN = "postgres://user:pass@example.invalid/trajecta?sslmode=disable"
 	cfg.Database.MaxOpenConns = 7
 	cfg.Database.MaxIdleConns = 3
 	cfg.Database.AutoMigrate = &autoMigrate
@@ -3744,7 +3744,7 @@ trace:
   output_dir: "` + dir + `"
 database:
   driver: postgres
-  dsn: "postgres://user:secret@127.0.0.1:15432/llm_tracelab?sslmode=disable"
+  dsn: "postgres://user:secret@127.0.0.1:15432/trajecta?sslmode=disable"
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -4508,7 +4508,7 @@ debug:
 func TestRunAnalyzeReparsePersistsObservation(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	dbPath := filepath.Join(dir, "trajecta.sqlite3")
 	configBody := []byte(strings.TrimSpace(`
 server:
   port: "8080"
@@ -4726,7 +4726,7 @@ func TestAnalyzeBackfillExchangesDryRunDoesNotModifyIndex(t *testing.T) {
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	dbPath := filepath.Join(dir, "trajecta.sqlite3")
 	configBody := []byte(strings.TrimSpace(`
 server:
   port: "8080"
@@ -4836,7 +4836,7 @@ func TestAnalyzeCommandsEndToEnd(t *testing.T) {
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	dbPath := filepath.Join(dir, "trajecta.sqlite3")
 	configBody := []byte(strings.TrimSpace(`
 server:
   port: "8080"
@@ -5310,7 +5310,7 @@ mcp:
   enabled: true
 database:
   driver: "mysql"
-  dsn: "mysql://llm_tracelab:secret@mysql:3306/llm_tracelab"
+  dsn: "mysql://trajecta:secret@mysql:3306/trajecta"
 upstream:
   base_url: "https://api.openai.com/v1"
 debug:

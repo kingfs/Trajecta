@@ -1,6 +1,7 @@
 package recordfile
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -155,4 +156,50 @@ func TestSummarizeHTTPExchangePreservesCorrelationAndBoundsBodies(t *testing.T) 
 	assert.True(t, summary.Response.BodyTruncated)
 	assert.NotEmpty(t, summary.Response.BodySHA256)
 	assert.Len(t, summary.Events, 2)
+}
+
+func TestParsePreludeAcceptsLegacyFileMagic(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID:  "req-legacy",
+			Time:       time.Date(2026, 3, 26, 10, 0, 0, 0, time.UTC),
+			Model:      "gpt-4.1",
+			URL:        "/v1/chat/completions",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+
+	current, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(string(current), FileMagic))
+
+	// A cassette recorded before the rename carries the legacy magic.
+	legacy := append([]byte(LegacyFileMagic), current[len(FileMagic):]...)
+	legacy = append(legacy, []byte("REQUEST\nRESPONSE")...)
+
+	parsed, err := ParsePrelude(legacy)
+	require.NoError(t, err)
+
+	assert.Equal(t, header, parsed.Header)
+	assert.Len(t, parsed.Events, 2)
+	assert.Equal(t, int64(len(legacy))-int64(len("REQUEST\nRESPONSE")), parsed.PayloadOffset)
+}
+
+func TestFileMagicHelpers(t *testing.T) {
+	current := []byte(FileMagic + "\n# meta: {}\n\nREQUEST")
+	legacy := []byte(LegacyFileMagic + "\n# meta: {}\n\nREQUEST")
+	v2 := []byte(`{"version":"LLM_PROXY_V2"}` + "\n")
+
+	assert.True(t, HasFileMagic(current))
+	assert.True(t, HasFileMagic(legacy))
+	assert.False(t, HasFileMagic(v2))
+
+	assert.True(t, IsV3Prelude(current))
+	assert.True(t, IsV3Prelude(legacy))
+	assert.False(t, IsV3Prelude(v2))
+	// Magic without the terminating newline is not yet a complete prelude.
+	assert.False(t, IsV3Prelude([]byte(FileMagic)))
+	assert.True(t, HasFileMagic([]byte(FileMagic)))
 }

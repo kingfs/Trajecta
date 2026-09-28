@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/parserversion"
+	"github.com/kingfs/Trajecta/ent/dao/parserversion"
 )
 
 // ParserVersion is the model entity for the ParserVersion schema.

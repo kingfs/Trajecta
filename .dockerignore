@@ -5,7 +5,7 @@
 logs
 tmp
 dist
-llm-tracelab
+trajecta
 trace_index.sqlite3
 *.sqlite3
 *.sqlite3-shm

@@ -1,4 +1,4 @@
-export const THEME_KEY = "llm-tracelab.monitor.theme";
+export const THEME_KEY = "trajecta.monitor.theme";
 
 export const themeOptions = [
   { value: "system", label: "System", short: "S" },

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
 const excerptLimit = 240

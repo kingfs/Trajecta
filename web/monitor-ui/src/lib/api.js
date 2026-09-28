@@ -1,4 +1,4 @@
-export const MONITOR_TOKEN_KEY = "llm-tracelab.monitor.token";
+export const MONITOR_TOKEN_KEY = "trajecta.monitor.token";
 
 export const apiPaths = {
   authStatus: "/api/auth/status",

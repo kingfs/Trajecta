@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {

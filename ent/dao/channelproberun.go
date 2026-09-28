@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
 )
 
 // ChannelProbeRun is the model entity for the ChannelProbeRun schema.

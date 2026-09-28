@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	appconfig "github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/providerprobe"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
-	"github.com/kingfs/llm-tracelab/internal/router"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	appconfig "github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/providerprobe"
+	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
+	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/spf13/cobra"
 )
 

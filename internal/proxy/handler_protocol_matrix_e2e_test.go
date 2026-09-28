@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // This file pins down the downstream-entrypoint x upstream-protocol matrix.
 //
-// TraceLab accepts three client surfaces (/v1/chat/completions, /v1/responses,
+// Trajecta accepts three client surfaces (/v1/chat/completions, /v1/responses,
 // /v1/messages) and forwards to upstreams that speak one of those protocols.
 // The hot path deliberately does NOT translate schemas across protocol
 // families, with one exception: when the local Responses server is enabled, a

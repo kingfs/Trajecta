@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 type Manager struct {

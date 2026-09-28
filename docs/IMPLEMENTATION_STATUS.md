@@ -1,10 +1,10 @@
 # 当前实现状态
 
-本文档回答“现在到底实现了什么”，是 `llm-tracelab` 现状的事实源。文中每一条都能在当前 HEAD 的代码中核对；`AGENTS.md` 是项目地图与不变量，代码与来源文档冲突时以代码为准。本文只描述当前代码事实，不承载任何计划性内容。
+本文档回答“现在到底实现了什么”，是 Trajecta 现状的事实源。文中每一条都能在当前 HEAD 的代码中核对；`AGENTS.md` 是项目地图与不变量，代码与来源文档冲突时以代码为准。本文只描述当前代码事实，不承载任何计划性内容。
 
 ## 产品定位与边界
 
-`llm-tracelab` 是本地优先的 LLM API 录制/回放代理，同时用生产可用的 Postgres 应用库存放结构化状态与观测数据。当前核心闭环已实现：
+Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用的 Postgres 应用库存放结构化状态与观测数据。当前核心闭环已实现：
 
 1. SDK 或 CLI 流量经 gateway 转发。
 2. 代理按协议族选择上游并透传请求（协议感知，不是跨协议转换网关）。
@@ -37,9 +37,9 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 ## 录制与回放
 
-录制写入格式是 V3（`pkg/recordfile`，前导 `# llm-tracelab/v3`），结构固定为：
+录制写入格式是 V3（`pkg/recordfile`，前导 `# trajecta/v3`），结构固定为：
 
-1. 以 `# llm-tracelab/v3` 开头的 prelude。
+1. 以 `# trajecta/v3` 开头的 prelude。
 2. 一行 `# meta: {...}` JSON。
 3. 零到多行 `# event: {...}` JSON。
 4. 一个空行。
@@ -47,7 +47,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 6. 一个分隔换行。
 7. 原始 HTTP 响应字节。
 
-读取端必须继续兼容旧 `LLM_PROXY_V2` 的固定 2KB JSON header block；写入端只产出 V3。`.http` cassette 是 replay 和详情页的事实源，保持人类可读，并优先做增量演进而不是破坏性迁移。
+读取端必须继续兼容旧 `LLM_PROXY_V2` 的固定 2KB JSON header block，并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`。`LLM_PROXY_V3` 是稳定的格式标识，刻意不随项目改名。`.http` cassette 是 replay 和详情页的事实源，保持人类可读，并优先做增量演进而不是破坏性迁移。
 
 本地 Responses runtime 调用内部上游 `/v1/chat/completions` 时，该上游 HTTP exchange 也按同一 recorder 写入 `.http` cassette；Responses semantic state 不替代 raw cassette。回放由 `pkg/replay` 提供硬性保证，测试回放不访问上游网络。相关背景见 [./ARCHITECTURE.md](./ARCHITECTURE.md)。
 
@@ -55,7 +55,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 生产环境的结构化状态主路径是 Postgres：checked-in SQL 位于 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 和 `golang-migrate` 应用，入口是 `db migrate up`。命令与 server 打开应用库时已拆分 migrate 与 open：`database.auto_migrate=true` 先执行应用迁移再以 no-auto-migrate 模式打开 store，`false` 只打开已存在的 schema。
 
-SQLite 仅作为本地开发、离线测试和既有本地 DB 兼容的 fallback（`{{output_dir}}/llm_tracelab.sqlite3`），其 schema 由启动时的 raw DDL 应用，不走 versioned migration；它是 `startup_schema_fallback`，不是生产边界。
+SQLite 仅作为本地开发、离线测试和既有本地 DB 兼容的 fallback（`{{output_dir}}/trajecta.sqlite3`），其 schema 由启动时的 raw DDL 应用，不走 versioned migration；它是 `startup_schema_fallback`，不是生产边界。
 
 当前应用库中的主要表：
 
@@ -65,7 +65,7 @@ SQLite 仅作为本地开发、离线测试和既有本地 DB 兼容的 fallback
 - eval 与实验：`datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`。
 - 其他：`app_settings`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`users`、`api_tokens`。
 
-`config inspect`、`db migrate status` 和 `doctor` 会输出 `production_storage_driver=postgres`、`production_ready`、`storage_role`、`storage_contract`。`db migrate status` 与 `db migrate up/down --dry-run` 报告迁移来源：Postgres 为 checked-in SQL，SQLite 为 `internal/store` 启动 DDL fallback；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 与 required table 状态，不创建缺失文件、不做 destructive repair。Postgres 真实检查与代表 runtime SQL 路径由 `LLM_TRACELAB_TEST_POSTGRES_DSN` 门控，默认测试离线。
+`config inspect`、`db migrate status` 和 `doctor` 会输出 `production_storage_driver=postgres`、`production_ready`、`storage_role`、`storage_contract`。`db migrate status` 与 `db migrate up/down --dry-run` 报告迁移来源：Postgres 为 checked-in SQL，SQLite 为 `internal/store` 启动 DDL fallback；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 与 required table 状态，不创建缺失文件、不做 destructive repair。Postgres 真实检查与代表 runtime SQL 路径由 `TRAJECTA_TEST_POSTGRES_DSN` 门控，默认测试离线。
 
 Postgres 的 auth 表由 application migration set 拥有：`auth migrate up` 复用同一套 checked-in SQL，`auth migrate down` 已被阻止，status/dry-run 报告 `effective_database_namespace=application`、`schema_authority=application_postgres_migration_set`、`storage_contract=postgres_application_schema_owns_auth_tables`、`postgres_auth_namespace_strategy=shared_application_schema_migrations`、`independent_auth_namespace_status=not_implemented`。
 
@@ -73,7 +73,7 @@ Postgres 的 auth 表由 application migration set 拥有：`auth migrate up` �
 
 ## 本地 Responses runtime
 
-本地 Responses execution mode 始终可用，没有配置开关。历史上用于控制它的 `responses_server.enabled` 字段和 `LLM_TRACELAB_RESPONSES_ENABLED` 环境变量已被删除；`ResponsesServerConfig` 中不存在 `enabled` 字段。本地 runtime 采用惰性构建：`tools.web_search`、function executor、model profile 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上以 502 报错。
+本地 Responses execution mode 始终可用，没有配置开关。历史上用于控制它的 `responses_server.enabled` 字段和 `TRAJECTA_RESPONSES_ENABLED` 环境变量已被删除；`ResponsesServerConfig` 中不存在 `enabled` 字段。本地 runtime 采用惰性构建：`tools.web_search`、function executor、model profile 等可选配置出错不会阻塞服务启动，而是在首个真正需要它的本地 Responses 请求上以 502 报错。
 
 `/v1/responses` 在选路时按模型在上游能力之间二选一：命中 native Responses upstream 时直接代理透传（native Responses target 原样转发并录制为 `/v1/responses` cassette）；否则由本地 runtime 接管，把请求编排为内部上游 `/v1/chat/completions` 调用。选路策略来自应用库 `app_settings` 键 `routing.settings`（不是 YAML 键），由 `PATCH /api/settings/routing` / `GET /api/settings/routing` 管理，`responses_strategy` 有五个取值：
 

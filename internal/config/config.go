@@ -388,267 +388,267 @@ func validateLimits(cfg *Config) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("LLM_TRACELAB_SERVER_PORT"); v != "" {
+	if v := os.Getenv("TRAJECTA_SERVER_PORT"); v != "" {
 		cfg.Server.Port = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_MONITOR_PORT"); v != "" {
+	if v := os.Getenv("TRAJECTA_MONITOR_PORT"); v != "" {
 		cfg.Monitor.Port = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_MCP_ENABLED"); v != "" {
+	if v := os.Getenv("TRAJECTA_MCP_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.MCP.Enabled = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_MCP_PATH"); v != "" {
+	if v := os.Getenv("TRAJECTA_MCP_PATH"); v != "" {
 		cfg.MCP.Path = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_AUTH_DATABASE_PATH"); v != "" {
+	if v := os.Getenv("TRAJECTA_AUTH_DATABASE_PATH"); v != "" {
 		cfg.Auth.DatabasePath = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_AUTH_SESSION_TTL"); v != "" {
+	if v := os.Getenv("TRAJECTA_AUTH_SESSION_TTL"); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil {
 			cfg.Auth.SessionTTL = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_DRIVER"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_DRIVER"); v != "" {
 		cfg.Database.Driver = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_DSN"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_DSN"); v != "" {
 		cfg.Database.DSN = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_MAX_OPEN_CONNS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Database.MaxOpenConns = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_MAX_IDLE_CONNS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Database.MaxIdleConns = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_AUTO_MIGRATE"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_AUTO_MIGRATE"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Database.AutoMigrate = &parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ"); v != "" {
+	if v := os.Getenv("TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Database.UseSessionSummaryRead = &parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.BaseURL = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_KEY"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_API_KEY"); v != "" {
 		cfg.Upstream.ApiKey = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ApiKey = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_PROVIDER_PRESET"); v != "" {
 		cfg.Upstream.ProviderPreset = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ProviderPreset = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_TYPE"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_API_TYPE"); v != "" {
 		cfg.Upstream.APIType = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.APIType = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_MODE"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_MODE"); v != "" {
 		cfg.Upstream.Mode = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.Mode = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
 		cfg.Upstream.ProtocolFamily = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ProtocolFamily = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_ROUTING_PROFILE"); v != "" {
 		cfg.Upstream.RoutingProfile = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.RoutingProfile = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_VERSION"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_API_VERSION"); v != "" {
 		cfg.Upstream.APIVersion = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.APIVersion = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_DEPLOYMENT"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_DEPLOYMENT"); v != "" {
 		cfg.Upstream.Deployment = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.Deployment = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROJECT"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_PROJECT"); v != "" {
 		cfg.Upstream.Project = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.Project = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_LOCATION"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_LOCATION"); v != "" {
 		cfg.Upstream.Location = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.Location = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE"); v != "" {
+	if v := os.Getenv("TRAJECTA_UPSTREAM_MODEL_RESOURCE"); v != "" {
 		cfg.Upstream.ModelResource = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ModelResource = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"); v != "" {
+	if v := os.Getenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL"); v != "" {
 		ensureBootstrapUpstream(cfg)
 		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
 			upstream.BaseURL = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"); v != "" {
+	if v := os.Getenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY"); v != "" {
 		ensureBootstrapUpstream(cfg)
 		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
 			upstream.ApiKey = v
 		})
 	}
-	if v := os.Getenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL"); v != "" {
+	if v := os.Getenv("TRAJECTA_PROVIDER_PROBE_STARTUP_FILL"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ProviderProbe.StartupFill = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_PROVIDER_PROBE_TIMEOUT"); v != "" {
+	if v := os.Getenv("TRAJECTA_PROVIDER_PROBE_TIMEOUT"); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil {
 			cfg.ProviderProbe.Timeout = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
+	if v := os.Getenv("TRAJECTA_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v
 		cfg.Trace.OutputDir = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_TRACE_OUTPUT_DIR"); v != "" {
+	if v := os.Getenv("TRAJECTA_TRACE_OUTPUT_DIR"); v != "" {
 		cfg.Trace.OutputDir = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_MASK_KEY"); v != "" {
+	if v := os.Getenv("TRAJECTA_MASK_KEY"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Debug.MaskKey = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_DEFAULT_MODEL"); v != "" {
 		cfg.ResponsesServer.DefaultModel = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FORCE_STORE"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FORCE_STORE"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.ForceStore = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES"); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
 			cfg.ResponsesServer.MaxRequestBodyBytes = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_PATH"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_PATH"); v != "" {
 		cfg.ResponsesServer.Path = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_AUTO_COMPACT"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_AUTO_COMPACT"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.AutoCompact = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.ResponsesServer.CompactHistoryItemThreshold = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_ENABLED"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.Enabled = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT"); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.Timeout = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.MaxResultBytes = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.Redaction.Arguments = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.Redaction.Output = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.CodexCompat.Enabled = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"); v != "" {
 		cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = splitCommaEnv(v)
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.CodexCompat.PreserveClientTools = &parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"); v != "" {
+	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"); v != "" {
 		cfg.ResponsesServer.CodexCompat.DefaultToolChoice = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Tools.WebSearch.Enabled = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER"); v != "" {
 		cfg.Tools.WebSearch.Provider = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_MAX_RESULTS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Tools.WebSearch.MaxResults = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL"); v != "" {
 		cfg.Tools.WebSearch.BaseURL = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_TIMEOUT_MS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Tools.WebSearch.TimeoutMS = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_USER_AGENT"); v != "" {
 		cfg.Tools.WebSearch.UserAgent = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_ENABLED"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_MCP_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Tools.MCP.Enabled = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Tools.MCP.DefaultTimeoutMS = parsed
 		}
 	}
-	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES"); v != "" {
+	if v := os.Getenv("TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.Tools.MCP.MaxResultBytes = parsed
 		}
@@ -869,6 +869,36 @@ func (c Config) DatabaseDriver() string {
 	return "sqlite"
 }
 
+// DefaultSQLiteFileName is the local SQLite application database file used when
+// neither database.dsn nor auth.database_path is configured.
+const DefaultSQLiteFileName = "trajecta.sqlite3"
+
+// LegacySQLiteFileName is the pre-rename default file name. A local database
+// created before the project was renamed from llm-tracelab is opened in place
+// instead of silently starting a new empty one.
+const LegacySQLiteFileName = "llm_tracelab.sqlite3"
+
+// DefaultSQLitePath returns the default local SQLite database path inside
+// outputDir.
+func DefaultSQLitePath(outputDir string) string {
+	return filepath.Join(outputDir, DefaultSQLiteFileName)
+}
+
+// ResolveDefaultSQLitePath prefers DefaultSQLitePath(outputDir), but falls back
+// to an existing legacy llm_tracelab.sqlite3 file so that a local database
+// created before the rename keeps working without manual migration.
+func ResolveDefaultSQLitePath(outputDir string) string {
+	path := DefaultSQLitePath(outputDir)
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	legacy := filepath.Join(outputDir, LegacySQLiteFileName)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return path
+}
+
 func (c Config) DatabasePath() string {
 	if strings.TrimSpace(c.Database.DSN) != "" && c.DatabaseDriver() == "sqlite" {
 		if path := SQLitePathFromDSN(c.Database.DSN); path != "" {
@@ -878,7 +908,7 @@ func (c Config) DatabasePath() string {
 	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
 		return c.Auth.DatabasePath
 	}
-	return filepath.Join(c.TraceOutputDir(), "llm_tracelab.sqlite3")
+	return ResolveDefaultSQLitePath(c.TraceOutputDir())
 }
 
 func SQLitePathFromDSN(dsn string) string {
@@ -1307,7 +1337,7 @@ func (c Config) WebSearchConfig() WebSearchToolConfig {
 	}
 	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = "llm-tracelab web_search"
+		cfg.UserAgent = "trajecta web_search"
 	}
 	return cfg
 }

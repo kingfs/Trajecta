@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/reanalysis"
-	"github.com/kingfs/llm-tracelab/internal/sessionanalysis"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/reanalysis"
+	"github.com/kingfs/Trajecta/internal/sessionanalysis"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/spf13/cobra"
 )
 

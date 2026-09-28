@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/config"
+	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 func TestManagerApplyKeepsStableRegistryPointer(t *testing.T) {

@@ -1,5 +1,5 @@
 services:
-  llm-tracelab:
+  trajecta:
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,4 +14,4 @@ services:
         http_proxy: ${DOCKER_BUILD_http_proxy:-${http_proxy:-}}
         https_proxy: ${DOCKER_BUILD_https_proxy:-${https_proxy:-}}
         no_proxy: ${DOCKER_BUILD_no_proxy:-${no_proxy:-}}
-    image: llm-tracelab:local
+    image: trajecta:local

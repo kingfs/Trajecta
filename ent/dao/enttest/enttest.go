@@ -5,12 +5,12 @@ package enttest
 import (
 	"context"
 
-	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao"
 	// required by schema hooks.
-	_ "github.com/kingfs/llm-tracelab/ent/dao/runtime"
+	_ "github.com/kingfs/Trajecta/ent/dao/runtime"
 
 	"entgo.io/ent/dialect/sql/schema"
-	"github.com/kingfs/llm-tracelab/ent/dao/migrate"
+	"github.com/kingfs/Trajecta/ent/dao/migrate"
 )
 
 type (

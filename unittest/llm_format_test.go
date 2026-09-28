@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 
 	"github.com/stretchr/testify/assert"
 )

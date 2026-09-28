@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

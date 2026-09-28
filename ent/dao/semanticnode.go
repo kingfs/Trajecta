@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
+	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 )
 
 // SemanticNode is the model entity for the SemanticNode schema.

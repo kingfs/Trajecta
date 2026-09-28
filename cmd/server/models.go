@@ -10,17 +10,17 @@ import (
 	"strconv"
 	"strings"
 
-	appconfig "github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/store"
+	appconfig "github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
 const (
 	codexConfigCommand           = "models.codex_config"
-	codexConfigModelProvider     = "llm-tracelab"
-	codexConfigProviderName      = "llm-tracelab"
-	codexConfigAPIKeyEnv         = "LLM_TRACELAB_API_KEY"
+	codexConfigModelProvider     = "trajecta"
+	codexConfigProviderName      = "trajecta"
+	codexConfigAPIKeyEnv         = "TRAJECTA_API_KEY"
 	codexConfigWireAPI           = "responses"
 	codexConfigRequestMaxRetries = 2
 	codexConfigStreamMaxRetries  = 2
@@ -1072,7 +1072,7 @@ func codexModelReasoningEffort(match appconfig.ResponsesModelProfileMatch) (stri
 }
 
 func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
-	fmt.Fprintf(w, "# llm-tracelab Codex config suggestion\n")
+	fmt.Fprintf(w, "# trajecta Codex config suggestion\n")
 	fmt.Fprintf(w, "# model: %s\n", result.Model)
 	if len(result.Warnings) > 0 {
 		fmt.Fprintln(w, "# warnings:")

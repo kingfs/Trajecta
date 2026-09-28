@@ -2,7 +2,7 @@
 
 主流 LLM API 在概念层面高度重叠：模型、指令、用户输入、工具定义、生成内容、工具调用、usage、流式。
 
-但它们差异足够大，因此 TraceLab 把它们当作彼此独立的协议族处理。
+但它们差异足够大，因此 Trajecta 把它们当作彼此独立的协议族处理。
 
 ## 总体形态
 
@@ -16,7 +16,7 @@
 
 ## 为什么是"识别"而不是"转换"
 
-TraceLab 能够识别并解析 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions 与 Gemini GenerateContent。识别指：
+Trajecta 能够识别并解析 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions 与 Gemini GenerateContent。识别指：
 
 - 归类 endpoint
 - 抽取模型与 usage 元数据

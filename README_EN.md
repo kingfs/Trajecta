@@ -1,11 +1,11 @@
-# llm-tracelab
+# Trajecta
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 [中文说明](./README.md) | **English**
 
-`llm-tracelab` is a Postgres-first LLM gateway with built-in LLM HTTP record/replay, a local Responses runtime, Monitor, and MCP diagnostics. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
+Trajecta is a Postgres-first LLM gateway with built-in LLM HTTP record/replay, a local Responses runtime, Monitor, and MCP diagnostics. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
 The core workflow is simple:
 
 - use Postgres for production users, tokens, trace index, channels/models, Responses state, and audit data
@@ -16,12 +16,35 @@ Raw `.http` cassettes remain the source of truth for replay and detail views. Po
 
 ## Current Release Notes
 
-This refactor introduces four major changes:
+`v2.0.0` is the rename release; the only breaking change is naming:
 
-- `pkg/llm` is now a provider/endpoint adapter layer for requests, responses, stream transcripts, and usage pipelines
-- the monitor is now an embedded React UI with async pagination and detail views for timeline / summary / raw protocol
-- Postgres application migrations now use checked-in SQL; SQLite is explicitly a startup-schema fallback
-- `LLM_PROXY_V3` `# event:` lines now include `llm.*` provider timelines in addition to base request/response events
+- the project moved from `llm-tracelab` to `trajecta`: Go module path, CLI binary, Docker image / Compose service and volume, env var prefix, and Monitor `localStorage` keys all use the new name
+- cassettes now write the `# trajecta/v3` magic, while readers keep accepting `# llm-tracelab/v3` and the older `LLM_PROXY_V2`; existing cassettes need no rewrite
+- the default local SQLite file is now `trajecta.sqlite3`, and an existing `llm_tracelab.sqlite3` is still reused in place
+- forwarding, recording, replay, the Responses runtime, Monitor, and audit behaviour are unchanged
+
+Everything from previous releases still holds: the `pkg/llm` provider/endpoint adapter layer, the Go-embedded Monitor UI with `Sessions / Requests` views, the checked-in Postgres migration path, and `LLM_PROXY_V3` `llm.*` provider timelines.
+
+## Renamed From llm-tracelab
+
+The project was renamed from `llm-tracelab` to `trajecta`. Most of that is naming only, but these points affect existing deployments and local data:
+
+- env vars moved from `LLM_TRACELAB_*` to `TRAJECTA_*`; the old prefix is no longer read, so deployment scripts, `.env` files, and CI secrets must be updated
+- the Go module path is now `github.com/kingfs/Trajecta`, the binary is `trajecta`, and the Docker image and Compose service are `kingfs/trajecta` and `trajecta`
+- new cassettes write the prelude magic `# trajecta/v3`; readers still accept the pre-rename `# llm-tracelab/v3` and the older `LLM_PROXY_V2`, so existing cassettes need no rewrite
+- the default local SQLite file is now `{{output_dir}}/trajecta.sqlite3`; when only a legacy `llm_tracelab.sqlite3` exists it is reused in place instead of silently creating an empty database
+- the Compose Postgres defaults are now `trajecta` for database, user, and password, and the volume is `trajecta-data`; an existing Postgres volume must be re-initialized or migrated manually
+- Monitor `localStorage` keys are now `trajecta.monitor.*`, so a previously saved language, theme, or monitor token must be set again
+- `LLM_PROXY_V3` is a stable format identifier and is deliberately unchanged
+
+For an existing deployment, run the migration script first (dry run by default):
+
+```bash
+scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces            # report only
+scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces    # write
+```
+
+It rewrites the `LLM_TRACELAB_*` keys in `.env`, renames the local SQLite database (including `-wal`/`-shm`), counts cassette magics, and lists the items that always need a human decision: the Postgres database name, Docker image and volumes, CI secrets, and browser `localStorage`. It is safe to re-run, and cassettes are left untouched by default because readers already accept the legacy magic.
 
 ## Good Fit
 
@@ -135,7 +158,7 @@ debug:
   mask_key: true
 ```
 
-Legacy `upstream` / `upstreams` YAML is still supported, but it is no longer the long-term production configuration entry point. On first startup, setting `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` imports one OpenAI-compatible bootstrap provider; leaving it empty starts only the Web and management surface. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
+Legacy `upstream` / `upstreams` YAML is still supported, but it is no longer the long-term production configuration entry point. On first startup, setting `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL` imports one OpenAI-compatible bootstrap provider; leaving it empty starts only the Web and management surface. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
 
 For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
 
@@ -149,7 +172,7 @@ If you prefer starting from a ready-made bootstrap config, use one of these exam
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-Production environment injection should stay small: `LLM_TRACELAB_DATABASE_DSN`, `POSTGRES_PASSWORD`, `LLM_TRACELAB_HOST_SERVER_PORT`, `LLM_TRACELAB_HOST_MONITOR_PORT`, and optional `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`, `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`, `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`. Keep other service behavior in `config/config.yaml`. The legacy `LLM_TRACELAB_UPSTREAM_*` variables remain available for old single-upstream migrations, but new deployments should manage providers in Monitor Web.
+Production environment injection should stay small: `TRAJECTA_DATABASE_DSN`, `POSTGRES_PASSWORD`, `TRAJECTA_HOST_SERVER_PORT`, `TRAJECTA_HOST_MONITOR_PORT`, and optional `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL`, `TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY`, `TRAJECTA_TOOLS_WEB_SEARCH_ENABLED`. Keep other service behavior in `config/config.yaml`. The legacy `TRAJECTA_UPSTREAM_*` variables remain available for old single-upstream migrations, but new deployments should manage providers in Monitor Web.
 
 Access control notes:
 
@@ -295,21 +318,21 @@ CONFIG=config/examples/local-sqlite.yaml task run
 Direct run also works:
 
 ```bash
-export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@localhost:5432/llm_tracelab?sslmode=disable'
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
+export TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@localhost:5432/trajecta?sslmode=disable'
+export TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
+export TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
+export TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
 go run ./cmd/server -c config/config.yaml
 ```
 
 Point your SDK `base_url` to `http://localhost:8080/v1` and traffic will be recorded through the proxy.
-The proxy API requires a personal token. OpenAI-compatible SDKs usually send `api_key` as `Authorization: Bearer <api_key>`, so set the SDK API key to the llm-tracelab token generated from the Monitor `Tokens` page.
+The proxy API requires a personal token. OpenAI-compatible SDKs usually send `api_key` as `Authorization: Bearer <api_key>`, so set the SDK API key to the Trajecta token generated from the Monitor `Tokens` page.
 
 curl example:
 
 ```bash
-export LLM_TRACELAB_TOKEN=llmtl_xxx
-curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+export TRAJECTA_TOKEN=llmtl_xxx
+curl -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   http://localhost:8080/v1/models | jq
 ```
 
@@ -351,10 +374,10 @@ This is intended for bulk upgrades of old cassette directories and for structure
 
 The standardized in-container paths are:
 
-- binary: `/app/bin/llm-tracelab`
+- binary: `/app/bin/trajecta`
 - config file: `/app/config/config.yaml`
 - trace directory: `/app/data/traces`
-- database: Postgres service, configured through `LLM_TRACELAB_DATABASE_DSN`
+- database: Postgres service, configured through `TRAJECTA_DATABASE_DSN`
 
 The repo now includes:
 
@@ -367,7 +390,7 @@ Start it with:
 ```bash
 cp .env.example .env
 docker compose up -d
-docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
 Then visit `http://localhost:8081`, sign in, configure upstream base URLs, API keys, and models from the `Providers` page, and create a personal token from the `Tokens` page for SDK / MCP traffic.
@@ -376,7 +399,7 @@ When SDKs call the proxy, use this token as the SDK API key. For direct curl cal
 Optional SearXNG hosted `web_search`:
 
 ```bash
-export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
+export TRAJECTA_TOOLS_WEB_SEARCH_ENABLED=true
 docker compose --profile search up -d
 ```
 
@@ -392,26 +415,26 @@ If you only want to use the published Docker Hub image, provide an external Post
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_DATABASE_DRIVER=postgres \
-  -e LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@host.docker.internal:5432/llm_tracelab?sslmode=disable' \
-  -e LLM_TRACELAB_RESPONSES_FORCE_STORE=true \
-  -e LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
-  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
-  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
-  -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
-  -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
-  -e LLM_TRACELAB_SERVER_PORT=8080 \
-  -e LLM_TRACELAB_MONITOR_PORT=8081 \
+  -e TRAJECTA_DATABASE_DRIVER=postgres \
+  -e TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@host.docker.internal:5432/trajecta?sslmode=disable' \
+  -e TRAJECTA_RESPONSES_FORCE_STORE=true \
+  -e TRAJECTA_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
+  -e TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
+  -e TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
+  -e TRAJECTA_OUTPUT_DIR=/app/data/traces \
+  -e TRAJECTA_TRACE_OUTPUT_DIR=/app/data/traces \
+  -e TRAJECTA_SERVER_PORT=8080 \
+  -e TRAJECTA_MONITOR_PORT=8081 \
   -v "$(pwd)/docker-data:/app/data" \
-  kingfs/llm-tracelab:latest serve -c /app/config/config.yaml
+  kingfs/trajecta:latest serve -c /app/config/config.yaml
 ```
 
 If you prefer `docker compose`, you can also reference the Docker Hub image directly:
 
 ```yaml
 services:
-  llm-tracelab:
-    image: kingfs/llm-tracelab:latest
+  trajecta:
+    image: kingfs/trajecta:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -419,16 +442,16 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_DATABASE_DRIVER: postgres
-      LLM_TRACELAB_DATABASE_DSN: postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable
-      LLM_TRACELAB_RESPONSES_FORCE_STORE: "true"
-      LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
-      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
-      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
-      LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_SERVER_PORT: "8080"
-      LLM_TRACELAB_MONITOR_PORT: "8081"
+      TRAJECTA_DATABASE_DRIVER: postgres
+      TRAJECTA_DATABASE_DSN: postgres://trajecta:trajecta@postgres:5432/trajecta?sslmode=disable
+      TRAJECTA_RESPONSES_FORCE_STORE: "true"
+      TRAJECTA_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
+      TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
+      TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
+      TRAJECTA_OUTPUT_DIR: /app/data/traces
+      TRAJECTA_TRACE_OUTPUT_DIR: /app/data/traces
+      TRAJECTA_SERVER_PORT: "8080"
+      TRAJECTA_MONITOR_PORT: "8081"
     volumes:
       - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
@@ -436,9 +459,9 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: llm_tracelab
-      POSTGRES_USER: llm_tracelab
-      POSTGRES_PASSWORD: llm_tracelab
+      POSTGRES_DB: trajecta
+      POSTGRES_USER: trajecta
+      POSTGRES_PASSWORD: trajecta
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -477,7 +500,7 @@ Recommended convention:
 Default mounts:
 
 - `./config/config.yaml -> /app/config/config.yaml:ro`
-- `llm-tracelab-data -> /app/data`
+- `trajecta-data -> /app/data`
 - `postgres-data -> /var/lib/postgresql/data`
 
 The runtime image starts as `root` by default. This avoids common bind-mount permission failures when the host directory owner does not match a fixed in-container UID/GID, such as failing to create `/app/data/traces`.

@@ -19,7 +19,7 @@ const (
 	ProviderSearXNG  = "searxng"
 
 	defaultTimeout    = 5 * time.Second
-	defaultUserAgent  = "llm-tracelab web_search"
+	defaultUserAgent  = "trajecta web_search"
 	defaultMaxResults = 5
 )
 

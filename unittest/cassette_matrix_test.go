@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/monitor"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
-	"github.com/kingfs/llm-tracelab/pkg/replay"
+	"github.com/kingfs/Trajecta/internal/monitor"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/replay"
 )
 
 func TestCassetteMatrixReplayAndParse(t *testing.T) {

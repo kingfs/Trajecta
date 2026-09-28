@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 const responsesFunctionExecutorConfigSnapshotKey = "responses.function_executors.config_snapshot"

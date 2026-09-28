@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 func TestConfiguredModelAuthorizationOverridesDiscoveryAndFallback(t *testing.T) {

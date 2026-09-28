@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 const openAIParserVersion = "0.1.0"

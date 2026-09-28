@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
-	"github.com/kingfs/llm-tracelab/internal/router"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/router"
 )
 
 func TestResponsesTokenizeEstimatorOptionDisabledWithoutContextWindow(t *testing.T) {

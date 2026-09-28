@@ -9,8 +9,8 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
-	"github.com/kingfs/llm-tracelab/ent/dao/user"
+	"github.com/kingfs/Trajecta/ent/dao/apitoken"
+	"github.com/kingfs/Trajecta/ent/dao/user"
 )
 
 // APIToken is the model entity for the APIToken schema.

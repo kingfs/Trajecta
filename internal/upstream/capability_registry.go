@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 const (

@@ -50,7 +50,7 @@ export function EventsPage() {
     try {
       await postJSON(path, {});
       setRefreshTick((tick) => tick + 1);
-      window.dispatchEvent(new Event("llm-tracelab:events-refresh"));
+      window.dispatchEvent(new Event("trajecta:events-refresh"));
     } finally {
       setBusyID("");
     }
@@ -61,7 +61,7 @@ export function EventsPage() {
     try {
       await postJSON(apiURL(apiPaths.eventsReadAll, params), {});
       setRefreshTick((tick) => tick + 1);
-      window.dispatchEvent(new Event("llm-tracelab:events-refresh"));
+      window.dispatchEvent(new Event("trajecta:events-refresh"));
     } finally {
       setBusyID("");
     }

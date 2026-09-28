@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/auth"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/recorder"
-	"github.com/kingfs/llm-tracelab/internal/redaction"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/recorder"
+	"github.com/kingfs/Trajecta/internal/redaction"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
@@ -632,7 +632,7 @@ func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
 	}
-	if got := rr.Header().Get("WWW-Authenticate"); got != `Bearer realm="llm-tracelab-proxy"` {
+	if got := rr.Header().Get("WWW-Authenticate"); got != `Bearer realm="trajecta-proxy"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 }

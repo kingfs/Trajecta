@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/Trajecta/ent/dao/tracelog"
 )
 
 // TraceLog is the model entity for the TraceLog schema.

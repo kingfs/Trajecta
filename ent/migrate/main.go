@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	entmigrate "github.com/kingfs/llm-tracelab/ent/migrate"
+	entmigrate "github.com/kingfs/Trajecta/ent/migrate"
 )
 
 func main() {

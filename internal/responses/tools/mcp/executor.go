@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/tools/hosted"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

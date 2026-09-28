@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 type ChatPromptTokenCountRequest struct {

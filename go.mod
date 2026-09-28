@@ -1,4 +1,4 @@
-module github.com/kingfs/llm-tracelab
+module github.com/kingfs/Trajecta
 
 go 1.25.0
 

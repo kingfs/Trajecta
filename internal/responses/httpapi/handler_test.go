@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 type fakeRuntime struct {
@@ -247,7 +247,7 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	body := `{"model":"gpt-test","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "tracelab-test")
+	req.Header.Set("User-Agent", "trajecta-test")
 	req.Header.Set("X-Client-Request-Id", "client-1")
 	req.Header.Set("X-Codex-Window-Id", "window-1")
 	req.Header.Set("Session-Id", "session-1")
@@ -271,7 +271,7 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	if entry.BodySha256 != audit.BodySHA256([]byte(body)) || entry.BodyPreview != body {
 		t.Fatalf("body audit mismatch: %#v", entry)
 	}
-	if entry.HeaderJSON["content-type"] != "application/json" || entry.HeaderJSON["user-agent"] != "tracelab-test" || entry.HeaderJSON["x-client-request-id"] != "client-1" || entry.HeaderJSON["x-codex-window-id"] != "window-1" || entry.HeaderJSON["session-id"] != "session-1" || entry.HeaderJSON["thread-id"] != "thread-1" || entry.HeaderJSON["originator"] != "codex-tui" || entry.HeaderJSON["x-codex-turn-metadata"] != `{"session_id":"session-1","thread_id":"thread-1"}` {
+	if entry.HeaderJSON["content-type"] != "application/json" || entry.HeaderJSON["user-agent"] != "trajecta-test" || entry.HeaderJSON["x-client-request-id"] != "client-1" || entry.HeaderJSON["x-codex-window-id"] != "window-1" || entry.HeaderJSON["session-id"] != "session-1" || entry.HeaderJSON["thread-id"] != "thread-1" || entry.HeaderJSON["originator"] != "codex-tui" || entry.HeaderJSON["x-codex-turn-metadata"] != `{"session_id":"session-1","thread_id":"thread-1"}` {
 		t.Fatalf("header audit mismatch: %#v", entry.HeaderJSON)
 	}
 	if auditor.completedID != "audit_1" {

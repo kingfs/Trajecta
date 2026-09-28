@@ -34,18 +34,18 @@ production DSN as the Atlas dev database.
 go run -mod=mod ent/migrate/main.go \
   --dialect postgres \
   --dir ent/postgres-migrations \
-  --dev-url 'postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable' \
+  --dev-url 'postgres://user:pass@localhost:5432/trajecta_migrate_dev?sslmode=disable' \
   <migration_name>
 ```
 
-The dev URL can also be supplied with `LLM_TRACELAB_ENT_MIGRATE_DEV_URL`.
+The dev URL can also be supplied with `TRAJECTA_ENT_MIGRATE_DEV_URL`.
 
 Equivalent task entry:
 
 ```bash
 task migrate:ent:postgres \
   NAME=<migration_name> \
-  DEV_URL='postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable'
+  DEV_URL='postgres://user:pass@localhost:5432/trajecta_migrate_dev?sslmode=disable'
 ```
 
 The required flow is:

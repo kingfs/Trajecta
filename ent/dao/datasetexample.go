@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
+	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 )
 
 // DatasetExample is the model entity for the DatasetExample schema.

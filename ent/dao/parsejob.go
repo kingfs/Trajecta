@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/parsejob"
+	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 )
 
 // ParseJob is the model entity for the ParseJob schema.

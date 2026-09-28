@@ -20,6 +20,6 @@ outgoing:
         - http://your-proxy-server:7890
 
 server:
-  secret_key: "llm-tracelab-compose-secret-change-me"
+  secret_key: "trajecta-compose-secret-change-me"
   limiter: false
   image_proxy: true

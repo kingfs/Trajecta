@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/kingfs/llm-tracelab/internal/responses/protocol"
+import "github.com/kingfs/Trajecta/internal/responses/protocol"
 
 func cloneResponseValue(resp protocol.Response) protocol.Response {
 	resp.Output = cloneOutputItems(resp.Output)

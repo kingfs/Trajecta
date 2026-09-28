@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
 )
 
 // ID filters vertices based on their ID field.

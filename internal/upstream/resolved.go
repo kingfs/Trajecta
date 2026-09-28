@@ -7,8 +7,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 const (

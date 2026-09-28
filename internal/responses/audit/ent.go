@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao/executionevent"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
 )
 
 type EntAuditor struct {

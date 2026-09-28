@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
+	"github.com/kingfs/Trajecta/ent/dao/traceobservation"
 )
 
 // TraceObservation is the model entity for the TraceObservation schema.

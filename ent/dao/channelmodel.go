@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 )
 
 // ChannelModel is the model entity for the ChannelModel schema.

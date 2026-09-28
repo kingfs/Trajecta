@@ -5,7 +5,7 @@
     {
       "type": "function_call_output",
       "call_id": "call_read_file_1",
-      "output": "{\"content\":\"module github.com/kingfs/llm-tracelab\"}"
+      "output": "{\"content\":\"module github.com/kingfs/Trajecta\"}"
     }
   ],
   "store": true,

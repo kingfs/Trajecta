@@ -94,7 +94,7 @@ function renderMarkdownToHTML(input) {
   }
 
   const codeBlocks = [];
-  const placeholderPrefix = "__LLM_TRACELAB_CODE_BLOCK_";
+  const placeholderPrefix = "__TRAJECTA_CODE_BLOCK_";
   let text = String(input).replace(/\r\n/g, "\n");
 
   text = text.replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_, language = "", code = "") => {

@@ -11,7 +11,7 @@ const baseOrigin = () => {
 export function ConnectPage() {
   const { t } = useI18n();
   const origin = baseOrigin();
-  const token = "${LLM_TRACELAB_TOKEN}";
+  const token = "${TRAJECTA_TOKEN}";
   const examples = [
     {
       title: "OpenAI-compatible Chat Completions",

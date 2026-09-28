@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 )
 
 // ExperimentRun is the model entity for the ExperimentRun schema.

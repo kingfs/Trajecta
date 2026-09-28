@@ -12,11 +12,35 @@ import (
 )
 
 const (
-	FileMagic       = "# llm-tracelab/v3"
+	// FileMagic is the prelude magic emitted for new V3 recordings.
+	FileMagic = "# trajecta/v3"
+	// LegacyFileMagic is the prelude magic written before the project was
+	// renamed from llm-tracelab. Readers must keep accepting it: cassettes are
+	// the durable replay artifact and are never rewritten by a rename.
+	LegacyFileMagic = "# llm-tracelab/v3"
 	metaPrefix      = "# meta: "
 	eventPrefix     = "# event: "
 	LegacyHeaderLen = 2048
 )
+
+// HasFileMagic reports whether content starts with a supported V3 prelude
+// magic, current or legacy.
+func HasFileMagic(content []byte) bool {
+	return bytes.HasPrefix(content, []byte(FileMagic)) ||
+		bytes.HasPrefix(content, []byte(LegacyFileMagic))
+}
+
+// IsV3Prelude reports whether content starts with a supported V3 prelude magic
+// followed by the newline that terminates the magic line.
+func IsV3Prelude(content []byte) bool {
+	return bytes.HasPrefix(content, []byte(FileMagic+"\n")) ||
+		bytes.HasPrefix(content, []byte(LegacyFileMagic+"\n"))
+}
+
+// isMagicLine reports whether line is exactly a supported V3 prelude magic.
+func isMagicLine(line []byte) bool {
+	return bytes.Equal(line, []byte(FileMagic)) || bytes.Equal(line, []byte(LegacyFileMagic))
+}
 
 type PromptTokenDetails struct {
 	CachedTokens int `json:"cached_tokens"`
@@ -195,7 +219,7 @@ func ParsePrelude(content []byte) (*ParsedPrelude, error) {
 	}
 
 	line := bytes.TrimSuffix(content[:lineEnd], []byte("\r"))
-	if bytes.Equal(line, []byte(FileMagic)) {
+	if isMagicLine(line) {
 		return parseV3Prelude(content)
 	}
 
@@ -229,7 +253,7 @@ func parseV3Prelude(content []byte) (*ParsedPrelude, error) {
 		offset += int64(lineEnd + 1)
 		content = content[lineEnd+1:]
 
-		if bytes.Equal(line, []byte(FileMagic)) {
+		if isMagicLine(line) {
 			continue
 		}
 		if len(line) == 0 {

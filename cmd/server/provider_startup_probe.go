@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/providerprobe"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/providerprobe"
+	"github.com/kingfs/Trajecta/internal/upstream"
 )
 
 func applyStartupProviderProbeSuggestions(ctx context.Context, cfg *config.Config, client *http.Client) error {

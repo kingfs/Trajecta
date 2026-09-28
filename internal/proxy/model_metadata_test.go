@@ -43,8 +43,8 @@ func TestNewAggregatedModelListEntryKeepsUnknownModelMinimal(t *testing.T) {
 	if entry.Object != "model" {
 		t.Fatalf("Object = %q, want model", entry.Object)
 	}
-	if entry.OwnedBy != "llm-tracelab" {
-		t.Fatalf("OwnedBy = %q, want llm-tracelab", entry.OwnedBy)
+	if entry.OwnedBy != "trajecta" {
+		t.Fatalf("OwnedBy = %q, want trajecta", entry.OwnedBy)
 	}
 	if entry.ContextLength != 0 || entry.CanonicalSlug != "" || entry.TopProvider != nil {
 		t.Fatalf("unknown model was unexpectedly enriched: %#v", entry)

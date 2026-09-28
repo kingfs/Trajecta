@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   // The Monitor UI defaults to Chinese when no language is persisted, while
   // this smoke suite asserts English labels. Pin the language for every test.
   await page.addInitScript(() => {
-    window.localStorage.setItem("llm-tracelab.monitor.language", "en");
+    window.localStorage.setItem("trajecta.monitor.language", "en");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());

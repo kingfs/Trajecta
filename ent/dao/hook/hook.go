@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao"
 )
 
 // The APITokenFunc type is an adapter to allow the use of ordinary

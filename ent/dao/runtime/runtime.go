@@ -2,7 +2,7 @@
 
 package runtime
 
-// The schema-stitching logic is generated in github.com/kingfs/llm-tracelab/ent/dao/runtime.go
+// The schema-stitching logic is generated in github.com/kingfs/Trajecta/ent/dao/runtime.go
 
 const (
 	Version = "v0.14.6"                                         // Version of ent codegen.

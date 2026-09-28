@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func staticRefreshTarget(id string, models ...string) config.UpstreamTargetConfig {

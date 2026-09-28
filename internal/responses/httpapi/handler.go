@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
 
 const defaultMaxBodyBytes int64 = 16 << 20

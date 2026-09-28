@@ -7,7 +7,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao"
 )
 
 // ConfigurationTransaction serializes management writes in this process. Both

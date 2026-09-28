@@ -12,7 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
-	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/Trajecta/ent/dao/tracelog"
 )
 
 // TraceLogCreate is the builder for creating a TraceLog entity.

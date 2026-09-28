@@ -7,7 +7,7 @@ Usage:
   scripts/postgres-baseline.sh [output_file]
 
 Environment:
-  LLM_TRACELAB_DATABASE_DSN  PostgreSQL DSN. Falls back to DATABASE_URL.
+  TRAJECTA_DATABASE_DSN  PostgreSQL DSN. Falls back to DATABASE_URL.
   DATABASE_URL              PostgreSQL DSN fallback.
   PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
                             Standard libpq environment variables when no DSN is set.
@@ -17,11 +17,11 @@ Environment:
   SYSTEM_EVENT_CURSOR_ID    Optional id for keyset EXPLAIN. Default: empty string.
 
 Examples:
-  LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
+  TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
     scripts/postgres-baseline.sh
 
   BASELINE_WINDOW='24 hours' DATABASE_URL='postgres://...' \
-    scripts/postgres-baseline.sh /tmp/tracelab-postgres-baseline.txt
+    scripts/postgres-baseline.sh /tmp/trajecta-postgres-baseline.txt
 EOF
 }
 
@@ -35,7 +35,7 @@ BASELINE_WINDOW="${BASELINE_WINDOW:-7 days}"
 SYSTEM_EVENT_CURSOR_AT="${SYSTEM_EVENT_CURSOR_AT:-1970-01-01T00:00:00Z}"
 SYSTEM_EVENT_CURSOR_ID="${SYSTEM_EVENT_CURSOR_ID:-}"
 OUTPUT="${1:-${POSTGRES_BASELINE_OUTPUT:-postgres-baseline-$(date -u +%Y%m%dT%H%M%SZ).txt}}"
-DSN="${LLM_TRACELAB_DATABASE_DSN:-${DATABASE_URL:-}}"
+DSN="${TRAJECTA_DATABASE_DSN:-${DATABASE_URL:-}}"
 
 if ! command -v "$PSQL" >/dev/null 2>&1; then
   echo "psql binary not found: $PSQL" >&2
@@ -68,7 +68,7 @@ fi
 mkdir -p "$(dirname "$OUTPUT")"
 
 {
-  echo "# llm-tracelab PostgreSQL baseline"
+  echo "# trajecta PostgreSQL baseline"
   echo "# generated_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "# baseline_window=$BASELINE_WINDOW"
   echo "# dsn=$(redact_dsn "$DSN")"

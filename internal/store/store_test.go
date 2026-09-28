@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/ent/dao/tracelog"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	_ "modernc.org/sqlite"
 )
 
@@ -725,7 +725,7 @@ func TestNewInitializesSQLiteApplicationSchemaMarker(t *testing.T) {
 
 func TestNewWithDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	dbPath := filepath.Join(dir, "trajecta.sqlite3")
 	st, err := NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
 	if err != nil {
 		t.Fatalf("NewWithDatabase() error = %v", err)
@@ -757,7 +757,7 @@ func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
 
 func TestNewWithDatabaseOptionsCanOpenWithoutMigratingSQLite(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	dbPath := filepath.Join(dir, "trajecta.sqlite3")
 	st, err := NewWithDatabaseOptions(dir, "sqlite", dbPath, 4, 4, DatabaseOptions{AutoMigrate: false})
 	if err != nil {
 		t.Fatalf("NewWithDatabaseOptions(AutoMigrate=false) error = %v", err)
@@ -860,9 +860,9 @@ func TestRebindPostgresPlaceholders(t *testing.T) {
 }
 
 func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1066,9 +1066,9 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 }
 
 func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1316,9 +1316,9 @@ func findDataset(datasets []DatasetRecord, id string) (DatasetRecord, bool) {
 }
 
 func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1492,9 +1492,9 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 }
 
 func TestPostgresExperimentRunReadModelsRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1619,9 +1619,9 @@ func TestPostgresExperimentRunReadModelsRoundTrip(t *testing.T) {
 }
 
 func TestPostgresAnalysisJobReadModelsRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1776,9 +1776,9 @@ func analysisJobListContains(jobs []AnalysisJobRecord, id int64, status string) 
 }
 
 func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -1920,9 +1920,9 @@ func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
 }
 
 func TestPostgresSessionAndOverviewRuntimeSQLRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -2030,9 +2030,9 @@ func TestPostgresSessionAndOverviewRuntimeSQLRoundTrip(t *testing.T) {
 }
 
 func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -2071,7 +2071,7 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 	writeLog := func(name string, requestID string, recordedAt time.Time, modelName string, statusCode int, errorText string, routingFailureReason string) {
 		t.Helper()
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte("# llm-tracelab/v3\n\nPOST /v1/responses HTTP/1.1\n\nHTTP/1.1 200 OK\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("# trajecta/v3\n\nPOST /v1/responses HTTP/1.1\n\nHTTP/1.1 200 OK\n"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", path, err)
 		}
 		header := recordfile.RecordHeader{
@@ -2170,9 +2170,9 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 }
 
 func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)
@@ -2312,9 +2312,9 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 }
 
 func TestPostgresChannelAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
-		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
 	}
 	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
 		t.Fatalf("MigrateUp(postgres) error = %v", err)

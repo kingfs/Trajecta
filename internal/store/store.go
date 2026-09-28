@@ -27,24 +27,24 @@ import (
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
-	"github.com/kingfs/llm-tracelab/ent/dao"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
-	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
-	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
-	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
-	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
-	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
-	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
-	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
-	"github.com/kingfs/llm-tracelab/ent/dao/score"
-	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
-	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
-	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/ent/dao"
+	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
+	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
+	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/dataset"
+	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
+	"github.com/kingfs/Trajecta/ent/dao/evalrun"
+	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
+	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
+	"github.com/kingfs/Trajecta/ent/dao/predicate"
+	"github.com/kingfs/Trajecta/ent/dao/score"
+	"github.com/kingfs/Trajecta/ent/dao/tracelog"
+	"github.com/kingfs/Trajecta/ent/dao/upstreammodel"
+	"github.com/kingfs/Trajecta/ent/dao/upstreamtarget"
+	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
@@ -2941,7 +2941,7 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 		return fmt.Errorf("check postgres application migrations: %w", err)
 	}
 	if !migrationTableExists {
-		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `llm-tracelab db migrate up` with the same config before starting with database.auto_migrate=false")
+		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `trajecta db migrate up` with the same config before starting with database.auto_migrate=false")
 	}
 	for _, table := range []string{"session_summaries", "overview_metric_buckets", "overview_metric_bucket_members"} {
 		var exists bool
@@ -2953,7 +2953,7 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 			return fmt.Errorf("check postgres %s migration: %w", table, err)
 		}
 		if !exists {
-			return fmt.Errorf("postgres application schema is missing %s; run `llm-tracelab db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
+			return fmt.Errorf("postgres application schema is missing %s; run `trajecta db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
 		}
 	}
 	return nil
@@ -2983,7 +2983,7 @@ func openStoreDatabase(outputDir string, driver string, dsn string) (*sql.DB, st
 	case "sqlite":
 		dbPath := config.SQLitePathFromDSN(dsn)
 		if strings.TrimSpace(dbPath) == "" {
-			dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
+			dbPath = config.ResolveDefaultSQLitePath(outputDir)
 		}
 		if dbPath != ":memory:" {
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -5420,7 +5420,7 @@ func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
 		}
 		seen[sessionID] = struct{}{}
 		if err := s.RebuildSessionSummary(sessionID); err != nil {
-			fmt.Fprintf(os.Stderr, "llm-tracelab: refresh session summary %q failed: %v\n", sessionID, err)
+			fmt.Fprintf(os.Stderr, "trajecta: refresh session summary %q failed: %v\n", sessionID, err)
 		}
 	}
 }
@@ -5439,7 +5439,7 @@ func (s *Store) refreshOverviewMetricBucketForTraceIDBestEffort(traceID string) 
 
 func (s *Store) refreshOverviewMetricBucketForPathBestEffort(path string) {
 	if err := s.RefreshOverviewMetricBucketForPath(path); err != nil {
-		fmt.Fprintf(os.Stderr, "llm-tracelab: refresh overview metric bucket for %q failed: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric bucket for %q failed: %v\n", path, err)
 	}
 }
 
@@ -5882,7 +5882,7 @@ func shouldSkipIncompleteRecord(content []byte, err error) bool {
 		return true
 	}
 
-	if bytes.HasPrefix(trimmed, []byte(recordfile.FileMagic)) {
+	if recordfile.HasFileMagic(trimmed) {
 		errText := err.Error()
 		return strings.Contains(errText, "failed to read prelude") ||
 			strings.Contains(errText, "missing v3 meta line") ||

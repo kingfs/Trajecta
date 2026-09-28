@@ -1,13 +1,13 @@
 # 协议参考
 
-本目录是 TraceLab 的协议参考入口。
+本目录是 Trajecta 的协议参考入口。
 
 它区分两类内容：
 
-- TraceLab 当前实现事实：代理现在能路由、录制、回放、解析什么
+- Trajecta 当前实现事实：代理现在能路由、录制、回放、解析什么
 - 上游协议材料：实现 parser 与协议族路由时使用的官方 API 规范或文档快照
 
-TraceLab 当前是一个协议族感知的透传录制器，代理热路径不做协议族之间的请求翻译。
+Trajecta 当前是一个协议族感知的透传录制器，代理热路径不做协议族之间的请求翻译。
 
 ## 当前实现参考
 
@@ -34,7 +34,7 @@ protocol-reference/
 - 优先使用官方上游规范或文档。
 - 原始快照保持可人工定位，并带日期。
 - 抽取出的 schema 子集与原始快照放在一起，便于实现时查阅。
-- 不要把上游 schema 当作 TraceLab 的内部 IR。TraceLab 的语义 parser 输出始终是 Observation IR。
+- 不要把上游 schema 当作 Trajecta 的内部 IR。Trajecta 的语义 parser 输出始终是 Observation IR。
 - OpenAI-compatible provider 只声明"兼容 OpenAI 风格行为的某个子集"，不自动等同于 OpenAI 官方 API。
 - 本目录是上游协议快照的唯一事实源。
 

@@ -172,7 +172,7 @@ func TestSearXNGProviderSearchReturnsResults(t *testing.T) {
 		Provider:  "searxng",
 		BaseURL:   server.URL + "/instance",
 		TimeoutMS: 1000,
-		UserAgent: "llm-tracelab-test",
+		UserAgent: "trajecta-test",
 	})
 	if err != nil {
 		t.Fatalf("NewProvider returned error: %v", err)
@@ -195,8 +195,8 @@ func TestSearXNGProviderSearchReturnsResults(t *testing.T) {
 	if gotMaxResults != "1" {
 		t.Fatalf("max_results = %q, want 1", gotMaxResults)
 	}
-	if gotUserAgent != "llm-tracelab-test" {
-		t.Fatalf("User-Agent = %q, want llm-tracelab-test", gotUserAgent)
+	if gotUserAgent != "trajecta-test" {
+		t.Fatalf("User-Agent = %q, want trajecta-test", gotUserAgent)
 	}
 	if gotForwardedFor != "127.0.0.1" {
 		t.Fatalf("X-Forwarded-For = %q, want 127.0.0.1", gotForwardedFor)
@@ -234,8 +234,8 @@ func TestSearXNGProviderUsesDefaultUserAgentAndMaxResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
-	if gotUserAgent != "llm-tracelab web_search" {
-		t.Fatalf("User-Agent = %q, want llm-tracelab web_search", gotUserAgent)
+	if gotUserAgent != "trajecta web_search" {
+		t.Fatalf("User-Agent = %q, want trajecta web_search", gotUserAgent)
 	}
 	if gotMaxResults != "5" {
 		t.Fatalf("max_results = %q, want 5", gotMaxResults)

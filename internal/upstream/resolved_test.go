@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/config"
 )
 
 func TestResolveProviderPresets(t *testing.T) {
@@ -889,12 +889,12 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 	}
 }
 
-// The bootstrap upstream synthesized from LLM_TRACELAB_BOOTSTRAP_UPSTREAM_*
+// The bootstrap upstream synthesized from TRAJECTA_BOOTSTRAP_UPSTREAM_*
 // must satisfy the same registry validation as a hand-written config, so the
 // two pieces cannot drift apart.
 func TestBootstrapUpstreamFromConfigResolves(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "https://api.example.com/v1")
-	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("server:\n  port: \"8080\"\n"), 0o600); err != nil {

@@ -4,7 +4,7 @@
 
 ## 实现形态
 
-TraceLab 目前做三件协议感知的事情：
+Trajecta 目前做三件协议感知的事情：
 
 1. 在 `pkg/llm` 中把请求路径与上游归类为 provider／协议语义
 2. 在 `internal/upstream` 中把配置的上游解析为协议族、路由 profile、认证 header 与 URL 重写行为
@@ -36,7 +36,7 @@ OpenAI-compatible 用于 API 形态遵循 OpenAI 风格请求／响应语义的 
 
 要点：
 
-- 客户端 `/responses` 被接受为 TraceLab 入口别名，并归一化为 `/v1/responses`
+- 客户端 `/responses` 被接受为 Trajecta 入口别名，并归一化为 `/v1/responses`
 - 对 `vllm_openai` 路由 profile，客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 会被路由到 vLLM 根路径的 tokenization endpoint
 - `upstream.base_url` 应包含 provider 的 API 前缀，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`
 - 代理会录制并解析 Chat Completions、Responses 与 Models。Embeddings 与 vLLM 分词请求会被分类、路由与录制，但不是当前 Observation IR 的深度解析目标
@@ -48,13 +48,13 @@ Anthropic Messages 用于 Claude 风格的 `/v1/messages` 流量。
 
 当前行为：
 
-- 客户端 `/anthropic/messages`、`/anthropic/v1/messages` 被接受为 TraceLab 入口别名，并归一化为 `/v1/messages`
+- 客户端 `/anthropic/messages`、`/anthropic/v1/messages` 被接受为 Trajecta 入口别名，并归一化为 `/v1/messages`
 - 请求与响应 body 原样透传
 - 认证 header 被重写为 Anthropic 风格的 `x-api-key`
 - 上游配置了 `anthropic-version` 且请求缺失时，由代理注入
 - 请求／响应 body 与流式事件会被解析为 Observation IR
 
-因此，把 Claude Code 指向一个不重复 `/v1` 的 TraceLab base URL，并配置好兼容 Anthropic Messages 的上游（或所选网关确实支持该 endpoint）时，它就能正常工作。
+因此，把 Claude Code 指向一个不重复 `/v1` 的 Trajecta base URL，并配置好兼容 Anthropic Messages 的上游（或所选网关确实支持该 endpoint）时，它就能正常工作。
 
 ## Google Gemini 与 Vertex Native
 

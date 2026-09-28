@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/monitor"
-	"github.com/kingfs/llm-tracelab/internal/reanalysis"
-	"github.com/kingfs/llm-tracelab/internal/router"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/monitor"
+	"github.com/kingfs/Trajecta/internal/reanalysis"
+	"github.com/kingfs/Trajecta/internal/router"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -338,7 +338,7 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 
 	api := &serverAPI{handler: mux, store: traceStore}
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "llm-tracelab",
+		Name:    "trajecta",
 		Version: "1.0.0",
 	}, nil)
 
@@ -388,19 +388,19 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 	}, api.summarizeFailureClusters)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_system_events",
-		Description: "List TraceLab runtime and analysis exception events with pagination and filters.",
+		Description: "List Trajecta runtime and analysis exception events with pagination and filters.",
 	}, api.listSystemEvents)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_system_event",
-		Description: "Get one TraceLab system event detail by event_id.",
+		Description: "Get one Trajecta system event detail by event_id.",
 	}, api.getSystemEvent)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "summarize_system_events",
-		Description: "Return compact TraceLab system event counts and newest events for agent triage.",
+		Description: "Return compact Trajecta system event counts and newest events for agent triage.",
 	}, api.summarizeSystemEvents)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "query_unread_system_events",
-		Description: "Return unread warning/error/critical TraceLab system events ordered by severity and recency.",
+		Description: "Return unread warning/error/critical Trajecta system events ordered by severity and recency.",
 	}, api.queryUnreadSystemEvents)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "responses_audit_trace",

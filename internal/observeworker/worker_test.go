@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestWorkerRunOnceParsesQueuedJob(t *testing.T) {
@@ -196,7 +196,7 @@ func TestWorkerRunOnceParsesGeminiQueuedJob(t *testing.T) {
 
 func writeIndexedPlainTextProxyErrorTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
-	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: local.tracelab\r\nContent-Type: application/json\r\n\r\n"
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: local.trajecta\r\nContent-Type: application/json\r\n\r\n"
 	reqBody := `{"model":"qwen3.6-35b-a3b","input":"hi"}`
 	resHead := "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\n"
 	resBody := `Proxy Error: upstream 3a4c1531-4540-4fa2-ae29-10ea554bbec3 returned status 404 for model "qwen3.6-35b-a3b"`
@@ -292,7 +292,7 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 
 func writeIndexedEntryTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
-	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: local.tracelab\r\n\r\n"
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: local.trajecta\r\n\r\n"
 	reqBody := `{"model":"gpt-5.1","input":"hello"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_entry_1","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`

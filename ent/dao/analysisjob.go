@@ -9,7 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
-	"github.com/kingfs/llm-tracelab/ent/dao/analysisjob"
+	"github.com/kingfs/Trajecta/ent/dao/analysisjob"
 )
 
 // AnalysisJob is the model entity for the AnalysisJob schema.

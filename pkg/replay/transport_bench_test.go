@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func BenchmarkTransportRoundTrip(b *testing.B) {

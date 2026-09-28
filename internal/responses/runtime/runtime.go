@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
+	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/tools/hosted"
+	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
 )
 
 var ErrIncrementalStreamUnsupported = errors.New("incremental responses stream unsupported")

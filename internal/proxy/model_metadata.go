@@ -10,7 +10,7 @@ func newAggregatedModelListEntry(model string) aggregatedModelListEntry {
 	entry := aggregatedModelListEntry{
 		ID:      model,
 		Object:  "model",
-		OwnedBy: "llm-tracelab",
+		OwnedBy: "trajecta",
 	}
 
 	spec, ok := llmspecs.Get(model)

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // Transport 实现 http.RoundTripper 接口，用于回放本地 .http 文件

@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/codexfixtures"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/codexfixtures"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
 func decodeCodexFixture[T any](t *testing.T, name string) T {
@@ -135,7 +135,7 @@ func TestCodexFunctionCallContinuationFixtureAlignsWithRuntimeChatRequest(t *tes
 		t.Fatalf("history tool call mismatch: %#v", call)
 	}
 	tool := client.req.Messages[2]
-	if tool.Role != "tool" || tool.ToolCallID != "call_read_file_1" || tool.Content != `{"content":"module github.com/kingfs/llm-tracelab"}` {
+	if tool.Role != "tool" || tool.ToolCallID != "call_read_file_1" || tool.Content != `{"content":"module github.com/kingfs/Trajecta"}` {
 		t.Fatalf("continuation tool message mismatch: %#v", tool)
 	}
 	if resp.PreviousResponseID != "resp_fixture_tool_call" {

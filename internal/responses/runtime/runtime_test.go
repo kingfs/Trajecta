@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/responses/audit"
-	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
+	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/protocol"
+	"github.com/kingfs/Trajecta/internal/responses/tools/mcp"
+	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
 )
 
 type fakeChatClient struct {
@@ -1217,7 +1217,7 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 						Index:          1,
 						ID:             "call_search",
 						FunctionName:   "web_search",
-						ArgumentsDelta: `{"query":"llm tracelab"}`,
+						ArgumentsDelta: `{"query":"llm trajecta"}`,
 					},
 				}},
 			},
@@ -1244,7 +1244,7 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 								Type: "function",
 								Function: ChatToolCallFunction{
 									Name:      "web_search",
-									Arguments: `{"query":"llm tracelab"}`,
+									Arguments: `{"query":"llm trajecta"}`,
 								},
 							},
 						},
@@ -1264,8 +1264,8 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 	}
 	provider := &fakeWebSearchProvider{
 		result: websearch.Result{Results: []websearch.SearchResult{{
-			Title:   "TraceLab",
-			URL:     "https://example.test/tracelab",
+			Title:   "Trajecta",
+			URL:     "https://example.test/trajecta",
 			Snippet: "Responses gateway runtime.",
 		}}},
 	}
@@ -1303,8 +1303,8 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 	if !hasChatTool(firstTools, "lookup") || !hasChatTool(firstTools, "web_search") {
 		t.Fatalf("first stream tools = %#v, want lookup and web_search", firstTools)
 	}
-	if len(provider.queries) != 1 || provider.queries[0].Text != "llm tracelab" || provider.queries[0].MaxResults != 3 {
-		t.Fatalf("provider queries = %#v, want llm tracelab max 3", provider.queries)
+	if len(provider.queries) != 1 || provider.queries[0].Text != "llm trajecta" || provider.queries[0].MaxResults != 3 {
+		t.Fatalf("provider queries = %#v, want llm trajecta max 3", provider.queries)
 	}
 	secondMessages := client.streamReqs[1].Messages
 	if len(secondMessages) != 4 {
@@ -1317,7 +1317,7 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 		t.Fatalf("lookup tool message mismatch: %#v", secondMessages[2])
 	}
 	searchContent, _ := secondMessages[3].Content.(string)
-	if secondMessages[3].Role != "tool" || secondMessages[3].ToolCallID != "call_search" || !strings.Contains(searchContent, "TraceLab") || !strings.Contains(searchContent, "llm tracelab") {
+	if secondMessages[3].Role != "tool" || secondMessages[3].ToolCallID != "call_search" || !strings.Contains(searchContent, "Trajecta") || !strings.Contains(searchContent, "llm trajecta") {
 		t.Fatalf("web_search tool message mismatch: %#v", secondMessages[3])
 	}
 	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_search" {
@@ -1391,7 +1391,7 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 					Index:          1,
 					ID:             "call_search",
 					FunctionName:   "web_search",
-					ArgumentsDelta: `{"query":"llm tracelab"}`,
+					ArgumentsDelta: `{"query":"llm trajecta"}`,
 				},
 			}},
 		},
@@ -1412,7 +1412,7 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 							Type: "function",
 							Function: ChatToolCallFunction{
 								Name:      "web_search",
-								Arguments: `{"query":"llm tracelab"}`,
+								Arguments: `{"query":"llm trajecta"}`,
 							},
 						},
 					},
@@ -1453,8 +1453,8 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 	if len(client.streamReqs) != 1 {
 		t.Fatalf("stream requests = %d, want only failed tool-call round", len(client.streamReqs))
 	}
-	if len(provider.queries) != 1 || provider.queries[0].Text != "llm tracelab" || provider.queries[0].MaxResults != 3 {
-		t.Fatalf("provider queries = %#v, want llm tracelab max 3", provider.queries)
+	if len(provider.queries) != 1 || provider.queries[0].Text != "llm trajecta" || provider.queries[0].MaxResults != 3 {
+		t.Fatalf("provider queries = %#v, want llm trajecta max 3", provider.queries)
 	}
 	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_search" {
 		t.Fatalf("function argument done = %#v, want lookup then web_search", sink.functionDone)
@@ -1478,7 +1478,7 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 	if sink.outputDone[1].OutputIndex != 1 || failed.Type != "web_search_call" || failed.CallID != "call_search" || failed.Status != "failed" {
 		t.Fatalf("second output item done = %#v, want failed web_search", sink.outputDone[1])
 	}
-	if got := failed.Action["query"]; got != "llm tracelab" {
+	if got := failed.Action["query"]; got != "llm trajecta" {
 		t.Fatalf("failed web_search query = %#v", got)
 	}
 	if _, ok := failed.Action["sources"]; ok {
@@ -1747,7 +1747,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	}
 	provider := &fakeWebSearchProvider{
 		result: websearch.Result{Results: []websearch.SearchResult{{
-			Title:   "TraceLab docs",
+			Title:   "Trajecta docs",
 			URL:     "https://example.test/docs",
 			Snippet: "Record and replay LLM API traffic." + strings.Repeat(" extra detail", 80),
 		}}},
@@ -1792,7 +1792,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 		t.Fatalf("second tool message metadata mismatch: %#v", secondMessages[2])
 	}
 	toolContent, _ := secondMessages[2].Content.(string)
-	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "https://example.test/docs") || !strings.Contains(toolContent, "Record and replay LLM API traffic.") || !strings.Contains(toolContent, "llm trace replay") {
+	if !strings.Contains(toolContent, "Trajecta docs") || !strings.Contains(toolContent, "https://example.test/docs") || !strings.Contains(toolContent, "Record and replay LLM API traffic.") || !strings.Contains(toolContent, "llm trace replay") {
 		t.Fatalf("second tool message content missing result: %q", toolContent)
 	}
 	if strings.Contains(toolContent, strings.Repeat(" extra detail", 30)) {
@@ -1849,7 +1849,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if !ok || len(sources) != 1 {
 		t.Fatalf("web_search action sources = %#v, want one summarized source", resp.Output[0].Action["sources"])
 	}
-	if sources[0]["title"] != "TraceLab docs" || sources[0]["url"] != "https://example.test/docs" {
+	if sources[0]["title"] != "Trajecta docs" || sources[0]["url"] != "https://example.test/docs" {
 		t.Fatalf("web_search action source identity = %#v", sources[0])
 	}
 	snippet, _ := sources[0]["snippet"].(string)
@@ -2792,7 +2792,7 @@ func TestRuntimeCreateStreamAutoCompactsHostedWebSearchExecutesAndContinuesStrea
 			}
 			provider := &fakeWebSearchProvider{
 				result: websearch.Result{Results: []websearch.SearchResult{{
-					Title:   "TraceLab docs",
+					Title:   "Trajecta docs",
 					URL:     "https://example.test/docs",
 					Snippet: "Record and replay LLM API traffic.",
 				}}},
@@ -3682,7 +3682,7 @@ func TestRuntimeCreateExecutesHostedMCPToolLoop(t *testing.T) {
 				Tools: []mcp.ToolDescriptor{{
 					Name:       "read_file",
 					Enabled:    true,
-					TextResult: "module github.com/kingfs/llm-tracelab",
+					TextResult: "module github.com/kingfs/Trajecta",
 					StructuredResult: map[string]any{
 						"bytes": float64(38),
 					},
@@ -3841,7 +3841,7 @@ func TestMCPProtocolToolForCallMatchesServerDescriptorSafely(t *testing.T) {
 
 func TestRuntimeCreateStreamExecutesHostedMCPToolLoop(t *testing.T) {
 	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"module github.com/kingfs/llm-tracelab"}],"structuredContent":{"bytes":38}}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"module github.com/kingfs/Trajecta"}],"structuredContent":{"bytes":38}}}`))
 	}))
 	defer mcpServer.Close()
 	callArguments := `{"server_label":"workspace","server_url":"` + mcpServer.URL + `","tool":"read_file","arguments":{"path":"go.mod"}}`
@@ -3901,7 +3901,7 @@ func TestRuntimeCreateStreamExecutesHostedMCPToolLoop(t *testing.T) {
 				Tools: []mcp.ToolDescriptor{{
 					Name:       "read_file",
 					Enabled:    true,
-					TextResult: "module github.com/kingfs/llm-tracelab",
+					TextResult: "module github.com/kingfs/Trajecta",
 				}},
 			}},
 		})),
@@ -4085,7 +4085,7 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	}
 	provider := &fakeWebSearchProvider{
 		result: websearch.Result{Results: []websearch.SearchResult{{
-			Title:   "TraceLab docs",
+			Title:   "Trajecta docs",
 			URL:     "https://example.test/docs",
 			Snippet: "Record and replay LLM API traffic.",
 		}}},
@@ -4139,7 +4139,7 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 		t.Fatalf("second tool message metadata mismatch: %#v", secondMessages[2])
 	}
 	toolContent, _ := secondMessages[2].Content.(string)
-	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "llm trace replay") {
+	if !strings.Contains(toolContent, "Trajecta docs") || !strings.Contains(toolContent, "llm trace replay") {
 		t.Fatalf("second tool message content missing result: %q", toolContent)
 	}
 
@@ -4208,7 +4208,7 @@ func TestRuntimeCreateRecordsHostedWebSearchToolCallAudits(t *testing.T) {
 	}
 	provider := &fakeWebSearchProvider{
 		result: websearch.Result{Results: []websearch.SearchResult{{
-			Title:   "TraceLab docs",
+			Title:   "Trajecta docs",
 			URL:     "https://example.test/docs",
 			Snippet: "Record and replay LLM API traffic.",
 		}}},
@@ -4260,7 +4260,7 @@ func TestRuntimeCreateRecordsHostedWebSearchToolCallAudits(t *testing.T) {
 		t.Fatalf("request audit ids seen = %#v", toolAudits.requestAuditIDSeen)
 	}
 	data := toJSONForTest(t, toolAudits.entries)
-	if strings.Contains(data, "llm trace replay") || strings.Contains(data, "TraceLab docs") || strings.Contains(data, "Record and replay") {
+	if strings.Contains(data, "llm trace replay") || strings.Contains(data, "Trajecta docs") || strings.Contains(data, "Record and replay") {
 		t.Fatalf("tool call audit leaked raw query/output: %s", data)
 	}
 }

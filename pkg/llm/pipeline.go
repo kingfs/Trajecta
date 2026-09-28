@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 type UsageSummary = recordfile.UsageInfo

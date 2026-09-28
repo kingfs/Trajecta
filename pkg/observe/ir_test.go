@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 func TestTraceObservationJSONRoundTrip(t *testing.T) {

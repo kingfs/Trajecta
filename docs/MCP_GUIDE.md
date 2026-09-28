@@ -1,22 +1,22 @@
 # MCP 使用指南
 
-本文档描述 TraceLab 当前与 MCP 相关的两个实现面、启动与认证方式，以及 `internal/mcpserver/server.go` 中真实注册的工具清单。工具数量以代码为准。
+本文档描述 Trajecta 当前与 MCP 相关的两个实现面、启动与认证方式，以及 `internal/mcpserver/server.go` 中真实注册的工具清单。工具数量以代码为准。
 
 ## 定位
 
-TraceLab 有两个方向相反的 MCP 实现面，二者都基于官方 `github.com/modelcontextprotocol/go-sdk`（当前 `v1.7.0`），但用途、配置和进程内位置都不同：
+Trajecta 有两个方向相反的 MCP 实现面，二者都基于官方 `github.com/modelcontextprotocol/go-sdk`（当前 `v1.7.0`），但用途、配置和进程内位置都不同：
 
-- **对外排障 server**：实现在 `internal/mcpserver`，由 `cmd/server/management.go` 装配，挂在 management server 的 MCP endpoint 上。方向是「外部 AI agent → TraceLab」：agent 通过 MCP 查询本地 trace、session、upstream、failures、system events、Responses audit，并触发受控重分析。
-- **Responses runtime 内部 tool executor**：实现在 `internal/responses/tools/mcp/executor.go`，是 hosted tools registry 中类型为 `mcp` 的 executor。方向是「TraceLab 本地 Responses runtime → 外部 MCP server」：处理 `/v1/responses` 时，runtime 通过 Streamable HTTP `tools/call` 调用配置好的外部 MCP server，并把结果回灌给模型。它由 `tools.mcp` 配置，映射给上游模型的 Chat tool 名为 `mcp_call`，执行 lifecycle 写入 `tool_call_audits`。
+- **对外排障 server**：实现在 `internal/mcpserver`，由 `cmd/server/management.go` 装配，挂在 management server 的 MCP endpoint 上。方向是「外部 AI agent → Trajecta」：agent 通过 MCP 查询本地 trace、session、upstream、failures、system events、Responses audit，并触发受控重分析。
+- **Responses runtime 内部 tool executor**：实现在 `internal/responses/tools/mcp/executor.go`，是 hosted tools registry 中类型为 `mcp` 的 executor。方向是「Trajecta 本地 Responses runtime → 外部 MCP server」：处理 `/v1/responses` 时，runtime 通过 Streamable HTTP `tools/call` 调用配置好的外部 MCP server，并把结果回灌给模型。它由 `tools.mcp` 配置，映射给上游模型的 Chat tool 名为 `mcp_call`，执行 lifecycle 写入 `tool_call_audits`。
 
 内部 hosted `mcp` executor 已实现并接线；未实现的只有 `file_search`、`code_interpreter`、`computer_use_preview` 三类 hosted tool 的执行器。内部 executor 的完整行为见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)，本文其余部分只描述对外排障 server。
 
 ## 启动与挂载路径
 
-MCP 与 proxy、Monitor 使用同一份配置启动。`config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `LLM_TRACELAB_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
+MCP 与 proxy、Monitor 使用同一份配置启动。`config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `TRAJECTA_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
 
 ```bash
-export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=disable'
 go run ./cmd/server serve -c config/config.yaml
 ```
 
@@ -33,30 +33,30 @@ mcp:
 
 - MCP 挂在 management server 上，因此 `monitor.port` 为空时该 HTTP 服务不启动，MCP 也不可用。
 - endpoint 默认是 `http://localhost:<monitor.port>/mcp`。`mcp.path` 会被规范化为以 `/` 开头、不以 `/` 结尾；空值回退到 `/mcp`，`/` 是非法值。
-- 环境变量覆盖：`LLM_TRACELAB_MCP_ENABLED`、`LLM_TRACELAB_MCP_PATH`。
+- 环境变量覆盖：`TRAJECTA_MCP_ENABLED`、`TRAJECTA_MCP_PATH`。
 
 transport 与协议：
 
 - 使用 streamable HTTP，`Stateless: true`，即 `2026-07-28` 的 sessionless/stateless 请求模型；不创建 `Mcp-Session-Id`，也没有独立 GET、DELETE 和基于 `Last-Event-ID` 的恢复流。
 - `2026-07-28` 客户端通过 `server/discover` 发现能力，并在每次请求的 `_meta` 中携带协议版本、客户端信息与能力。
 - 同一 endpoint 兼容协商旧协议版本：`2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05`。
-- `v1.7.0` 的 SDK 完整支持 `2026-07-28`（标准化 MCP HTTP headers、cacheable list result、统一 subscription stream 与 multi-round-trip request 基础设施）。TraceLab 当前以查询工具为主，没有暴露需要 multi-round-trip input 的工具，也不依赖已弃用的 roots、sampling 或 logging。
-- server 实现名为 `llm-tracelab`，版本 `1.0.0`。
+- `v1.7.0` 的 SDK 完整支持 `2026-07-28`（标准化 MCP HTTP headers、cacheable list result、统一 subscription stream 与 multi-round-trip request 基础设施）。Trajecta 当前以查询工具为主，没有暴露需要 multi-round-trip input 的工具，也不依赖已弃用的 roots、sampling 或 logging。
+- server 实现名为 `trajecta`，版本 `1.0.0`。
 
 ## 认证
 
-MCP endpoint 始终包在个人 token 认证中间件里（`auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier)`）：缺失、格式错误或无效 token 的请求返回 `401 Unauthorized`，并带 `WWW-Authenticate: Bearer realm="llm-tracelab-mcp"`。没有免认证本地模式。
+MCP endpoint 始终包在个人 token 认证中间件里（`auth.Middleware(mcpHandler, "trajecta-mcp", verifier)`）：缺失、格式错误或无效 token 的请求返回 `401 Unauthorized`，并带 `WWW-Authenticate: Bearer realm="trajecta-mcp"`。没有免认证本地模式。
 
 流程：
 
-1. 用 `llm-tracelab auth init-user` 初始化首个用户。
-2. 登录 Monitor，在 `Tokens` 页面创建个人 token；或用 `llm-tracelab auth create-token` 创建。
+1. 用 `trajecta auth init-user` 初始化首个用户。
+2. 登录 Monitor，在 `Tokens` 页面创建个人 token；或用 `trajecta auth create-token` 创建。
 3. MCP client 每个请求发送 `Authorization: Bearer <token>`。
 
 要点：
 
 - MCP 与 proxy API 复用同一套个人 API token；Monitor 登录态 JWT 只用于 Monitor API，Monitor API 反过来不接受个人 API token。
-- server 侧没有 MCP token 环境变量。Codex 示例里的 `LLM_TRACELAB_MCP_TOKEN` 是**客户端**自己声明的环境变量名（`bearer_token_env_var`），不是服务端配置项。
+- server 侧没有 MCP token 环境变量。Codex 示例里的 `TRAJECTA_MCP_TOKEN` 是**客户端**自己声明的环境变量名（`bearer_token_env_var`），不是服务端配置项。
 - `internal/responses/tools/mcp` 的 `tools.mcp.servers[].bearer_token_env` 是另一回事：它指定 hosted executor 去哪个环境变量读取访问**外部** MCP server 的 token。
 
 token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITOR_GUIDE.md)。
@@ -87,12 +87,12 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 
 ### 系统事件
 
-- `list_system_events`：分页列出 TraceLab 运行时与派生管道异常事件；支持 `status`、`severity`、`source`、`category`、`q`、`window`。
+- `list_system_events`：分页列出 Trajecta 运行时与派生管道异常事件；支持 `status`、`severity`、`source`、`category`、`q`、`window`。
 - `get_system_event`：按 `event_id` 取单个事件；`include_details` 时附带 `details_json`。
 - `summarize_system_events`：返回事件计数与最新事件，供 agent 快速 triage；支持 `window`、`status`。
 - `query_unread_system_events`：返回未读的 warning/error/critical 事件，按严重度与时间排序；支持 `limit`（默认 20，上限 200）、`min_severity`。
 
-系统事件只覆盖 TraceLab 自身的异常来源，例如 parser failure、analyzer failure、router selection failure、upstream transport error；它不是普通请求失败列表（后者用 `query_failures` 与 `summarize_failure_clusters`）。
+系统事件只覆盖 Trajecta 自身的异常来源，例如 parser failure、analyzer failure、router selection failure、upstream transport error；它不是普通请求失败列表（后者用 `query_failures` 与 `summarize_failure_clusters`）。
 
 ### Responses 审计
 
@@ -113,15 +113,15 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 本仓库约定的 Codex MCP client 本地配置路径是工作区内的 `.codex/config.toml`。`.codex/` 已被 git 忽略，因此该文件不会进入版本库；仍然不要把 token 或敏感 endpoint 写进文件本身。
 
 ```toml
-[mcp_servers.tracelab-remote]
+[mcp_servers.trajecta-remote]
 url = "http://ip:port/mcp"
-bearer_token_env_var = "LLM_TRACELAB_MCP_TOKEN"
+bearer_token_env_var = "TRAJECTA_MCP_TOKEN"
 ```
 
-这里的 `LLM_TRACELAB_MCP_TOKEN` 只是客户端从环境变量读取 bearer token 的名字，不是服务端变量。MCP endpoint 始终要求有效的 `Authorization: Bearer <token>`，缺失或无效 token 返回 401，因此启动 Codex 前先导出：
+这里的 `TRAJECTA_MCP_TOKEN` 只是客户端从环境变量读取 bearer token 的名字，不是服务端变量。MCP endpoint 始终要求有效的 `Authorization: Bearer <token>`，缺失或无效 token 返回 401，因此启动 Codex 前先导出：
 
 ```bash
-export LLM_TRACELAB_MCP_TOKEN='...'
+export TRAJECTA_MCP_TOKEN='...'
 ```
 
 认证要求见上文「认证」。
@@ -132,16 +132,16 @@ export LLM_TRACELAB_MCP_TOKEN='...'
 
 ```bash
 CODEX_HOME="$PWD/.codex" codex mcp list
-CODEX_HOME="$PWD/.codex" codex mcp get tracelab-remote
+CODEX_HOME="$PWD/.codex" codex mcp get trajecta-remote
 ```
 
 更新远端 endpoint：
 
 ```bash
-CODEX_HOME="$PWD/.codex" codex mcp remove tracelab-remote
-CODEX_HOME="$PWD/.codex" codex mcp add tracelab-remote \
+CODEX_HOME="$PWD/.codex" codex mcp remove trajecta-remote
+CODEX_HOME="$PWD/.codex" codex mcp add trajecta-remote \
   --url http://HOST:PORT/mcp \
-  --bearer-token-env-var LLM_TRACELAB_MCP_TOKEN
+  --bearer-token-env-var TRAJECTA_MCP_TOKEN
 ```
 
 ## Evaluator
@@ -161,7 +161,7 @@ CODEX_HOME="$PWD/.codex" codex mcp add tracelab-remote \
 - 只读工具不改变 replay 行为或 raw cassette。
 - 重分析工具必须生成可审计的 `analysis_jobs`。
 - 不通过 MCP 暴露 raw secret；`responses_audit_tool_calls` 的 payload 也默认不返回。
-- MCP 不是 TraceLab 的存储事实源：列表与聚合来自 application DB，trace 详情来自 raw cassette。
+- MCP 不是 Trajecta 的存储事实源：列表与聚合来自 application DB，trace 详情来自 raw cassette。
 - 修改 MCP 工具面必须同步更新本文档与测试。
 
 ## 非目标与未实现

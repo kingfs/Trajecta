@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	appconfig "github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
-	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
+	appconfig "github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/responses/tools/hosted"
+	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
 	"github.com/spf13/cobra"
 )
 

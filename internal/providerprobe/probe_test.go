@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/kingfs/Trajecta/internal/upstream"
 )
 
 func TestProbeOpenAIChatOnly(t *testing.T) {

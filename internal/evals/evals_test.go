@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
-	"github.com/kingfs/llm-tracelab/pkg/replay"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/replay"
 )
 
 func TestEvaluateBaselineIncludesLatencyAndTokenBudgetChecks(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
-	appconfig "github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	appconfig "github.com/kingfs/Trajecta/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -347,44 +347,44 @@ func buildConfigInspectSources(configPath string, cfg *appconfig.Config) configI
 	return configInspectSources{
 		ConfigPath: configPathSource(configPath),
 		Server: configInspectServerSources{
-			Port: probe.stringFieldSource("server.port", cfg.Server.Port, "LLM_TRACELAB_SERVER_PORT"),
+			Port: probe.stringFieldSource("server.port", cfg.Server.Port, "TRAJECTA_SERVER_PORT"),
 		},
 		Monitor: configInspectMonitorSources{
-			Port: probe.stringFieldSource("monitor.port", cfg.Monitor.Port, "LLM_TRACELAB_MONITOR_PORT"),
+			Port: probe.stringFieldSource("monitor.port", cfg.Monitor.Port, "TRAJECTA_MONITOR_PORT"),
 		},
 		MCP: configInspectMCPSources{
-			Enabled: probe.boolFieldSource("mcp.enabled", "LLM_TRACELAB_MCP_ENABLED"),
-			Path:    probe.stringFieldSource("mcp.path", configInspectMCPPath(cfg), "LLM_TRACELAB_MCP_PATH"),
+			Enabled: probe.boolFieldSource("mcp.enabled", "TRAJECTA_MCP_ENABLED"),
+			Path:    probe.stringFieldSource("mcp.path", configInspectMCPPath(cfg), "TRAJECTA_MCP_PATH"),
 		},
 		Database: configInspectDatabaseSources{
-			Driver:      probe.defaultableStringFieldSource("database.driver", cfg.Database.Driver, "LLM_TRACELAB_DATABASE_DRIVER"),
+			Driver:      probe.defaultableStringFieldSource("database.driver", cfg.Database.Driver, "TRAJECTA_DATABASE_DRIVER"),
 			DSN:         probe.databaseDSNSource(cfg),
-			AutoMigrate: probe.pointerBoolFieldSource("database.auto_migrate", cfg.Database.AutoMigrate, "LLM_TRACELAB_DATABASE_AUTO_MIGRATE"),
+			AutoMigrate: probe.pointerBoolFieldSource("database.auto_migrate", cfg.Database.AutoMigrate, "TRAJECTA_DATABASE_AUTO_MIGRATE"),
 		},
 		Trace: configInspectTraceSources{
 			OutputDir: probe.traceOutputDirSource(cfg),
 		},
 		ResponsesServer: configInspectResponsesSources{
-			Path:         probe.defaultableStringFieldSource("responses_server.path", cfg.ResponsesServer.Path, "LLM_TRACELAB_RESPONSES_PATH"),
-			DefaultModel: probe.stringFieldSource("responses_server.default_model", cfg.ResponsesDefaultModel(), "LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"),
+			Path:         probe.defaultableStringFieldSource("responses_server.path", cfg.ResponsesServer.Path, "TRAJECTA_RESPONSES_PATH"),
+			DefaultModel: probe.stringFieldSource("responses_server.default_model", cfg.ResponsesDefaultModel(), "TRAJECTA_RESPONSES_DEFAULT_MODEL"),
 			CodexCompat: configInspectCodexCompatSources{
-				Enabled:               probe.boolFieldSource("responses_server.codex_compat.enabled", "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED"),
-				AutoInjectHostedTools: probe.listFieldSource("responses_server.codex_compat.auto_inject_hosted_tools", len(cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools), "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"),
-				InjectWhenToolsAbsent: probe.pointerBoolFieldSource("responses_server.codex_compat.inject_when_tools_absent", cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"),
-				PreserveClientTools:   probe.pointerBoolFieldSource("responses_server.codex_compat.preserve_client_tools", cfg.ResponsesServer.CodexCompat.PreserveClientTools, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"),
-				DefaultToolChoice:     probe.defaultableAnyStringFieldSource("responses_server.codex_compat.default_tool_choice", cfg.ResponsesServer.CodexCompat.DefaultToolChoice, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"),
+				Enabled:               probe.boolFieldSource("responses_server.codex_compat.enabled", "TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED"),
+				AutoInjectHostedTools: probe.listFieldSource("responses_server.codex_compat.auto_inject_hosted_tools", len(cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools), "TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"),
+				InjectWhenToolsAbsent: probe.pointerBoolFieldSource("responses_server.codex_compat.inject_when_tools_absent", cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent, "TRAJECTA_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"),
+				PreserveClientTools:   probe.pointerBoolFieldSource("responses_server.codex_compat.preserve_client_tools", cfg.ResponsesServer.CodexCompat.PreserveClientTools, "TRAJECTA_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"),
+				DefaultToolChoice:     probe.defaultableAnyStringFieldSource("responses_server.codex_compat.default_tool_choice", cfg.ResponsesServer.CodexCompat.DefaultToolChoice, "TRAJECTA_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"),
 			},
 		},
 		Tools: configInspectToolsSources{
 			WebSearch: configInspectWebSearchSources{
-				Enabled:  probe.boolFieldSource("tools.web_search.enabled", "LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"),
-				Provider: probe.defaultableStringFieldSource("tools.web_search.provider", cfg.Tools.WebSearch.Provider, "LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER"),
-				BaseURL:  probe.stringFieldSource("tools.web_search.base_url", cfg.Tools.WebSearch.BaseURL, "LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL"),
+				Enabled:  probe.boolFieldSource("tools.web_search.enabled", "TRAJECTA_TOOLS_WEB_SEARCH_ENABLED"),
+				Provider: probe.defaultableStringFieldSource("tools.web_search.provider", cfg.Tools.WebSearch.Provider, "TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER"),
+				BaseURL:  probe.stringFieldSource("tools.web_search.base_url", cfg.Tools.WebSearch.BaseURL, "TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL"),
 			},
 			MCP: configInspectMCPToolsSources{
-				Enabled:          probe.boolFieldSource("tools.mcp.enabled", "LLM_TRACELAB_TOOLS_MCP_ENABLED"),
-				DefaultTimeoutMS: probe.intFieldSource("tools.mcp.default_timeout_ms", cfg.Tools.MCP.DefaultTimeoutMS, "LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS"),
-				MaxResultBytes:   probe.intFieldSource("tools.mcp.max_result_bytes", cfg.Tools.MCP.MaxResultBytes, "LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES"),
+				Enabled:          probe.boolFieldSource("tools.mcp.enabled", "TRAJECTA_TOOLS_MCP_ENABLED"),
+				DefaultTimeoutMS: probe.intFieldSource("tools.mcp.default_timeout_ms", cfg.Tools.MCP.DefaultTimeoutMS, "TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS"),
+				MaxResultBytes:   probe.intFieldSource("tools.mcp.max_result_bytes", cfg.Tools.MCP.MaxResultBytes, "TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES"),
 				Servers:          probe.listFieldSource("tools.mcp.servers", len(cfg.Tools.MCP.Servers)),
 			},
 		},
@@ -536,10 +536,10 @@ func (p configSourceProbe) defaultableAnyStringFieldSource(path string, rawValue
 }
 
 func (p configSourceProbe) traceOutputDirSource(cfg *appconfig.Config) string {
-	if anyStringEnvSet("LLM_TRACELAB_TRACE_OUTPUT_DIR") {
+	if anyStringEnvSet("TRAJECTA_TRACE_OUTPUT_DIR") {
 		return configSourceEffective
 	}
-	if anyStringEnvSet("LLM_TRACELAB_OUTPUT_DIR") {
+	if anyStringEnvSet("TRAJECTA_OUTPUT_DIR") {
 		return configSourceEffective
 	}
 	if p.has("trace.output_dir") {
@@ -555,7 +555,7 @@ func (p configSourceProbe) traceOutputDirSource(cfg *appconfig.Config) string {
 }
 
 func (p configSourceProbe) databaseDSNSource(cfg *appconfig.Config) string {
-	if anyStringEnvSet("LLM_TRACELAB_DATABASE_DSN") {
+	if anyStringEnvSet("TRAJECTA_DATABASE_DSN") {
 		return configSourceEffective
 	}
 	if p.has("database.dsn") {
@@ -578,24 +578,24 @@ func (p configSourceProbe) upstreamsSourceSummary(cfg *appconfig.Config) configI
 		targets = configSourceConfigFile
 	}
 	if anyStringEnvSet(
-		"LLM_TRACELAB_UPSTREAM_BASE_URL",
-		"LLM_TRACELAB_UPSTREAM_API_KEY",
-		"LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET",
-		"LLM_TRACELAB_UPSTREAM_API_TYPE",
-		"LLM_TRACELAB_UPSTREAM_MODE",
-		"LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY",
-		"LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE",
-		"LLM_TRACELAB_UPSTREAM_API_VERSION",
-		"LLM_TRACELAB_UPSTREAM_DEPLOYMENT",
-		"LLM_TRACELAB_UPSTREAM_PROJECT",
-		"LLM_TRACELAB_UPSTREAM_LOCATION",
-		"LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE",
-		"LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL",
-		"LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY",
+		"TRAJECTA_UPSTREAM_BASE_URL",
+		"TRAJECTA_UPSTREAM_API_KEY",
+		"TRAJECTA_UPSTREAM_PROVIDER_PRESET",
+		"TRAJECTA_UPSTREAM_API_TYPE",
+		"TRAJECTA_UPSTREAM_MODE",
+		"TRAJECTA_UPSTREAM_PROTOCOL_FAMILY",
+		"TRAJECTA_UPSTREAM_ROUTING_PROFILE",
+		"TRAJECTA_UPSTREAM_API_VERSION",
+		"TRAJECTA_UPSTREAM_DEPLOYMENT",
+		"TRAJECTA_UPSTREAM_PROJECT",
+		"TRAJECTA_UPSTREAM_LOCATION",
+		"TRAJECTA_UPSTREAM_MODEL_RESOURCE",
+		"TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL",
+		"TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY",
 	) {
 		targets = configSourceEffective
 	}
-	if anyStringEnvSet("LLM_TRACELAB_UPSTREAM_API_KEY", "LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY") {
+	if anyStringEnvSet("TRAJECTA_UPSTREAM_API_KEY", "TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY") {
 		credentials = configSourceEffective
 	}
 	if strings.TrimSpace(cfg.Upstream.ApiKey) != "" && len(cfg.Upstreams) == 0 && credentials == configSourceNotConfigured {

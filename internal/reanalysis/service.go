@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/llm-tracelab/internal/analyzer"
-	"github.com/kingfs/llm-tracelab/internal/observeworker"
-	"github.com/kingfs/llm-tracelab/internal/sessionanalysis"
-	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/llm"
-	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/Trajecta/internal/analyzer"
+	"github.com/kingfs/Trajecta/internal/observeworker"
+	"github.com/kingfs/Trajecta/internal/sessionanalysis"
+	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 const (
