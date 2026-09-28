@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- `cmd/trajecta-migrate`, a second binary that performs the rename migration without shell scripting. It loads a pre-rename `.env` and maps `LLM_TRACELAB_*` onto `TRAJECTA_*`, merges the legacy SQLite application databases into Postgres (idempotent: rows whose primary or unique key already exists are skipped, only the column intersection is written, the four historical timestamp encodings are normalized to UTC, identity sequences only ever move forward, and every source primary key is verified present afterwards), rewrites the `# llm-tracelab/v3` cassette prelude magic in parallel (only the first line changes, the recorded payload is copied byte for byte through a temporary file and an atomic rename, and an interrupted run cannot truncate a cassette), validates cassette structure without reading the payload, warns when `docker-compose.yml` still passes legacy variables, and renames the SQLite files to `*.migrated` once every key is verified. Every command is a dry run unless `--apply` is passed. `internal/legacymigrate` owns the logic; `task build:go` now builds both binaries, `task clean` removes both, `task migrate:legacy` runs the pipeline from source, and the Docker image ships the helper at `/app/bin/trajecta-migrate` for use with `--entrypoint`.
+- `docs/LEGACY_MIGRATION.md`, the Chinese end-to-end guide for migrating a pre-rename deployment: environment prefix mapping (including the requirement to update `docker-compose.yml`), the SQLite-to-Postgres merge, the optional cassette magic rewrite, structural validation, archiving, the `run` pipeline, the command and exit-code reference, and troubleshooting entries.
+
 ### Fixed
 
 - The README badge now reads the repository's tags (`github/v/tag`). The project publishes release tags without GitHub Releases, so the previous `github/v/release` badge rendered "no releases or repo not found", and it now also links to the tag list.

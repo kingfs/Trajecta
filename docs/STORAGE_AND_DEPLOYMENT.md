@@ -106,14 +106,21 @@ docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth i
 
 从 `llm-tracelab` 升级已有部署：
 
+完整路径见[从 llm-tracelab 迁移](./LEGACY_MIGRATION.md)。推荐用独立二进制（所有命令默认 dry-run，加 `--apply` 才写盘）：
+
 ```bash
-scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces            # 默认 dry-run
-scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces
+task build:go                                  # 同时产出 trajecta 与 trajecta-migrate
+./trajecta-migrate env                         # 只读：.env、有效配置、发现的旧库、compose 前缀检查
+./trajecta-migrate run                         # dry-run：合并 SQLite → 重写 magic → 校验 → 归档
+./trajecta-migrate run --apply
 ```
 
-- 脚本改写 `.env` 中的 `LLM_TRACELAB_*` key（同名冲突会注释掉旧行并在 `.env.trajecta-migration.bak` 留备份）、重命名 `{{output_dir}}/llm_tracelab.sqlite3` 及其 `-wal`/`-shm`、统计 `.http` cassette 的 prelude magic 版本；可重复执行。
-- 脚本只报告不执行的部分：Postgres 库名/角色名（`ALTER DATABASE` 需连到其它库执行；保留旧库名、只更新 `TRAJECTA_DATABASE_DSN` 同样可行，schema 内不含旧品牌词）、Docker 镜像 `kingfs/trajecta` 与卷 `trajecta-data`、CI secret、Monitor `localStorage`。
-- cassette 默认不重写：读取端同时接受 `# llm-tracelab/v3` 与 `# trajecta/v3`，`.http` 保持 replay 事实源不被改名改动；`--rewrite-cassette-magic` 才做只替换首行、其余字节不变的归一化。
+- `trajecta-migrate db` 把改名前的 SQLite 条目合并进 Postgres：按主键/唯一键去重（`ON CONFLICT DO NOTHING`）、只写两库交集列、时间戳兼容四种历史编码、identity 序列只前进不回退，写完后校验源主键是否都在 Postgres；`schema_migrations`、`app_schema_status` 属于源库记账，跳过。
+- `trajecta-migrate cassettes rewrite` 只把首行 `# llm-tracelab/v3` 换成 `# trajecta/v3`，payload 逐字节拷贝，同目录临时文件加原子 rename；`cassettes check` 只按格式校验（magic、meta/event JSON、layout 声明长度与文件大小是否自洽），不读录制内容。
+- `trajecta-migrate sqlite archive` 在主键校验全部通过后把旧库改名为 `*.migrated`（`-wal`/`-shm`/`-journal` 一起改名），文件只重命名不删除；迁移后不再有 SQLite 文件被 `serve` 使用。
+- 轻量脚本 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh) 仍然可用：改写 `.env` 中的 `LLM_TRACELAB_*` key（同名冲突会注释掉旧行并在 `.env.trajecta-migration.bak` 留备份）、重命名 `{{output_dir}}/llm_tracelab.sqlite3` 及其 `-wal`/`-shm`、统计 `.http` cassette 的 prelude magic 版本，可重复执行。它不合并 SQLite 数据，而且 cassette 阶段是每文件一个 `head` 进程，数十万文件会非常慢。
+- 两者都不执行的部分：Postgres 库名/角色名（`ALTER DATABASE` 需连到其它库执行；保留旧库名、只更新 `TRAJECTA_DATABASE_DSN` 同样可行，schema 内不含旧品牌词）、Docker 镜像 `kingfs/trajecta` 与卷 `trajecta-data`、CI secret、Monitor `localStorage`。
+- 旧前缀没有回退：二进制只读 `TRAJECTA_*`，compose 里保留 `LLM_TRACELAB_*` 会被静默忽略（`trajecta-migrate env` 会警告该组合），必须同步更新 `docker-compose.yml`。
 
 ## 可选组件（SearXNG 等）
 

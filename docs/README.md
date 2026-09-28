@@ -12,6 +12,7 @@
 - 要用 MCP：读 [MCP 使用指南](./MCP_GUIDE.md)。
 - 要参与开发：读 [开发与测试](./DEVELOPMENT.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 - 要部署与运维：读 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 与 [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md)。
+- 要把改名前的 `llm-tracelab` 部署迁到 Postgres：读 [从 llm-tracelab 迁移](./LEGACY_MIGRATION.md)。
 - 要看协议矩阵与协议原文：读 [协议参考](./protocol-reference/README.md)。
 - 要提交改动或报告安全问题：读 [CONTRIBUTING](../CONTRIBUTING.md) 与 [SECURITY](../SECURITY.md)；每个版本改了什么见 [CHANGELOG](../CHANGELOG.md)。
 
@@ -36,6 +37,7 @@
 | [Monitor 使用指南](./MONITOR_GUIDE.md) | 界面有哪些页面、每个页面怎么用、怎么导出会话轨迹（ATIF v1.8） |
 | [MCP 使用指南](./MCP_GUIDE.md) | MCP 怎么启动、认证怎么做、有哪些工具 |
 | [代理使用示例](./PROXY_USAGE_EXAMPLES.md) | 怎么把 SDK 或 CLI 接到代理上 |
+| [从 llm-tracelab 迁移](./LEGACY_MIGRATION.md) | 旧前缀 `.env`、SQLite 旧库、cassette magic 与文件归档怎么处理 |
 | [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md) | 长期运行的基线采集、索引、调优与排障 |
 | [CONTRIBUTING](../CONTRIBUTING.md) | 怎么贡献、提交前要跑哪些验证、有哪些硬性约束 |
 | [SECURITY](../SECURITY.md) | 怎么报告漏洞、部署时需要额外注意什么 |

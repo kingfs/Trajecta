@@ -37,7 +37,9 @@ jobs:
       run: bun run build
 
     - name: Build
-      run: go build -v -o trajecta ./cmd/server
+      run: |
+        go build -v -o trajecta ./cmd/server
+        go build -v -o trajecta-migrate ./cmd/trajecta-migrate
 
     - name: Check Go formatting
       run: |

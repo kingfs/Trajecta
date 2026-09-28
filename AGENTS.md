@@ -15,6 +15,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 
 - CLI entry point: `cmd/server/main.go` only exits through `run`; command wiring lives in `cmd/server/root.go`
 - CLI command files: `cmd/server/root.go` wires `serve.go`, `migrate.go`, `db.go`, `config.go`, `doctor.go`, `provider.go`, `models.go`, `tools.go`, `audit.go`, `auth.go`, `analyze.go`, `version.go`, `schema.go`, `completion.go` (`provider_startup_probe.go` holds provider-probe helpers)
+- Second binary: `cmd/trajecta-migrate` performs the one-off rename migration (`.env` prefix mapping, legacy SQLite merge into Postgres, cassette magic rewrite and structural validation, SQLite archiving). Its logic lives in `internal/legacymigrate`; every command is a dry run unless `--apply` is passed, and no legacy `LLM_TRACELAB_*` fallback exists in the binaries
 - Management HTTP/MCP wiring shared by serve and tests: `cmd/server/management.go`
 - Reverse proxy: `internal/proxy`
 - Recording pipeline: `internal/recorder`
@@ -74,7 +75,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
 - ATIF-v1.8 export and offline official-model validator: `task test:atif`
 - ATIF-v1.8 JSONL validation with the pinned Harbor models (install `scripts/atif-requirements.txt` first): `task atif:validate`
 - Benchmarks: `task bench:core`
-- Build backend only: `task build:go`
+- Build backend only: `task build:go` (builds `trajecta` and `trajecta-migrate`)
 - Build everything: `task build`
 - Run locally: `task run`
 - See `docs/DEVELOPMENT.md` for the command matrix humans and AI agents should use.
@@ -108,5 +109,6 @@ All files under `docs/` are written in Chinese and describe current code facts o
 - `docs/PROXY_USAGE_EXAMPLES.md`: 把 SDK 与 CLI 接到代理上的示例
 - `docs/POSTGRES_OPERATIONS.md`: Postgres 长期运行的基线采集、索引、调优与排障
 - `docs/DEVELOPMENT.md`: 测试、lint、构建、基准与依赖的稳定命令入口
+- `docs/LEGACY_MIGRATION.md`: 从 `llm-tracelab` 迁移的操作路径（`.env` 前缀、SQLite → Postgres 合并、cassette magic 重写与结构校验、旧库归档），也是 `cmd/trajecta-migrate` 的用户文档
 - `docs/protocol-reference/README.md`: 协议参考入口、已实现协议矩阵、协议差异与带日期的上游 schema 快照
 - add focused docs under `docs/` only when they clarify architecture or storage decisions

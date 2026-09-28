@@ -25,7 +25,10 @@ COPY . .
 
 RUN go build -trimpath \
 	-ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${BUILD_DATE} -X main.Branch=${BRANCH}" \
-	-o /out/trajecta ./cmd/server
+	-o /out/trajecta ./cmd/server && \
+	go build -trimpath \
+	-ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${BUILD_DATE} -X main.Branch=${BRANCH}" \
+	-o /out/trajecta-migrate ./cmd/trajecta-migrate
 
 FROM alpine:3.22 AS runtime
 
@@ -41,11 +44,16 @@ RUN mkdir -p /app/bin /app/config /app/data/traces
 WORKDIR /app
 
 COPY --from=builder /out/trajecta /app/bin/trajecta
+COPY --from=builder /out/trajecta-migrate /app/bin/trajecta-migrate
 COPY config/config.yaml /app/config/config.yaml
 
 VOLUME ["/app/config", "/app/data"]
 
 EXPOSE 8080 8081
 
+# A container runs a single entrypoint, so the migration helper is invoked
+# explicitly with the same image and the same mounts:
+#   docker run --rm -v /host/data:/app/data -v /host/config:/app/config \
+#     --entrypoint /app/bin/trajecta-migrate <image> env
 ENTRYPOINT ["/app/bin/trajecta"]
 CMD ["serve", "-c", "/app/config/config.yaml"]

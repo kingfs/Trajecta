@@ -81,14 +81,15 @@ go run ./cmd/server -c config/config.yaml
 
 ### Option 3: Upgrading from llm-tracelab
 
-The project was renamed to Trajecta in `v2.0.0`. Existing deployments can run the migration script (a dry run by default):
+The project was renamed to Trajecta in `v2.0.0`, and the application database moved to Postgres. Existing deployments use the dedicated migration binary (a dry run by default):
 
 ```bash
-scripts/migrate-to-trajecta.sh --env-file .env --output-dir ./data/traces
-scripts/migrate-to-trajecta.sh --apply --env-file .env --output-dir ./data/traces
+task build:go                    # builds trajecta and trajecta-migrate
+./trajecta-migrate env           # read-only: .env, effective config, discovered legacy databases
+./trajecta-migrate run --apply   # merge SQLite -> rewrite cassette magic -> validate -> archive
 ```
 
-It rewrites the `LLM_TRACELAB_*` keys in `.env`, renames the local SQLite database with its `-wal`/`-shm` siblings, reports cassette magic versions, and lists the items that need a manual decision. Breaking changes and compatibility guarantees are in the [CHANGELOG](./CHANGELOG.md).
+It reads `.env` and maps `LLM_TRACELAB_*` onto `TRAJECTA_*`, merges the legacy SQLite rows into Postgres (skipping primary-key and unique-key duplicates), replaces only the cassette prelude magic line, validates recordings structurally, and renames the legacy databases to `*.migrated` once every primary key is verified present. Update both `.env` and `docker-compose.yml`. Full steps: [migrating from llm-tracelab](./docs/LEGACY_MIGRATION.md); breaking changes and compatibility guarantees: [CHANGELOG](./CHANGELOG.md).
 
 ## Five Minutes: Record a Call, Replay It in a Test
 
