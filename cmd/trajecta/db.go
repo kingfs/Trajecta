@@ -20,6 +20,7 @@ type dbFlags struct {
 	noAnalyze     bool
 	verifyOnly    bool
 	tolerateDrift bool
+	reconcile     bool
 }
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -48,6 +49,8 @@ being invented; pass --fill-missing-required to insert placeholders instead.`,
 	cmd.Flags().BoolVar(&flags.verifyOnly, "verify-only", false, "check that the legacy rows exist in Postgres without writing anything")
 	cmd.Flags().BoolVar(&flags.tolerateDrift, "tolerate-snapshot-drift", false,
 		"excuse missing keys in runtime snapshot tables (upstream_targets, upstream_models) that the running server rewrites")
+	cmd.Flags().BoolVar(&flags.reconcile, "reconcile-derived-trace-ids", false,
+		"repair derived tables whose trace_id still carries the legacy value instead of merging rows")
 	return cmd
 }
 
@@ -55,6 +58,9 @@ func (r *cliRuntime) execDB(cmd *cobra.Command, flags dbFlags) error {
 	env, cfg, err := r.prepare()
 	if err != nil {
 		return err
+	}
+	if flags.reconcile {
+		return r.execReconcile(cmd, cfg, flags)
 	}
 	report, warnings, err := r.runDatabaseMerge(cmd, cfg, flags)
 	if env != nil {
@@ -85,6 +91,87 @@ func (r *cliRuntime) execDB(cmd *cobra.Command, flags dbFlags) error {
 			report.Failed, report.Missing, report.TablesSkip)
 	}
 	return nil
+}
+
+// execReconcile repairs derived tables whose trace ids still carry the value the
+// legacy index recorded. It never deletes the last copy of a row: rows whose
+// identity already exists under the current id are removed as superseded
+// duplicates, and every other orphan row is moved onto the current id.
+func (r *cliRuntime) execReconcile(cmd *cobra.Command, cfg *config.Config, flags dbFlags) error {
+	if !strings.EqualFold(strings.TrimSpace(cfg.Database.Driver), "postgres") {
+		return usageErr("database.driver",
+			"the target must be Postgres, but the configuration resolves to %q; set TRAJECTA_DATABASE_DRIVER=postgres and TRAJECTA_DATABASE_DSN",
+			cfg.Database.Driver)
+	}
+	paths, warnings, err := r.resolveSQLitePaths(cfg)
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return fail("no legacy SQLite database was found; pass --sqlite <path> (the archived %s files are accepted)", "*.sqlite3.migrated")
+	}
+	report, err := legacymigrate.ReconcileDerivedTraceIDs(cmd.Context(), legacymigrate.ReconcileOptions{
+		SQLitePaths: paths,
+		PostgresDSN: cfg.Database.DSN,
+		Apply:       r.opts.apply,
+		OpenMode:    r.opts.sqliteOpen,
+		BatchSize:   r.opts.batchSize,
+		Tables:      flags.tables,
+	})
+	if err != nil {
+		return err
+	}
+	if writeErr := r.writeResult(cmd.OutOrStdout(), "db-reconcile", report.OK(), report, func(w io.Writer) error {
+		printReconcileReport(w, report)
+		return nil
+	}, warnings); writeErr != nil {
+		return writeErr
+	}
+	for _, warning := range warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warning)
+	}
+	if !report.OK() {
+		return fail("reconciliation left %d orphan rows and %d tables that need attention",
+			report.Unresolved(), reconcileErrors(report))
+	}
+	return nil
+}
+
+// reconcileErrors counts the tables whose reconciliation failed.
+func reconcileErrors(report *legacymigrate.ReconcileReport) int {
+	failed := 0
+	for _, table := range report.Tables {
+		if table.Err != "" {
+			failed++
+		}
+	}
+	return failed
+}
+
+// printReconcileReport renders a reconciliation report as text.
+func printReconcileReport(w io.Writer, report *legacymigrate.ReconcileReport) {
+	fmt.Fprintf(w, "%-32s %9s %9s %10s %10s %11s\n", "table", "orphans", "mapped", "duplicates", "remapped", "unresolved")
+	for _, table := range report.Tables {
+		fmt.Fprintf(w, "%-32s %9d %9d %10d %10d %11d", table.Table, table.OrphanIDs, table.MappedIDs, table.DuplicateRows, table.RemappedRows, table.UnresolvedRows)
+		if len(table.IdentityKeys) > 0 {
+			fmt.Fprintf(w, "  identity(%s)", strings.Join(table.IdentityKeys, ", "))
+		}
+		if table.Err != "" {
+			fmt.Fprintf(w, "  error: %s", table.Err)
+		}
+		fmt.Fprintln(w)
+		for _, id := range table.SampleUnmapped {
+			fmt.Fprintf(w, "      ? no legacy trace for %s\n", id)
+		}
+	}
+	fmt.Fprintf(w, "totals            %d legacy ids, %d mapped to a current trace, %d duplicate rows, %d rows remapped, %d unresolved\n",
+		report.LegacyIDs, report.MappedIDs, report.Deleted(), report.Remapped(), report.Unresolved())
+	if report.DryRun {
+		fmt.Fprintln(w, "note              dry run; pass --apply to delete the duplicates and rewrite the remaining rows")
+	}
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(w, "warning           %s\n", warning)
+	}
 }
 
 // runDatabaseMerge resolves the legacy databases and merges them.
