@@ -126,6 +126,15 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 归档前会对每个库跑一次 `--verify-only`：只有每张表的源主键都能在 Postgres 中找到才执行重命名。`--force` 可跳过该校验（不推荐）。`--suffix` 默认 `.migrated`；目标名已存在时追加 UTC 时间戳，不会覆盖。`-wal` / `-shm` / `-journal` 会跟着一起改名。
 
+**运行时快照表的漂移**：`upstream_targets` 与 `upstream_models` 不是权威记录，而是运行中的服务按当前 provider 配置与探测结果重写的运行时快照与兼容投影（见 `docs/ROUTING_AND_CREDENTIALS.md`）。因此服务运行期间，旧库里这两张表的行可能已被当前状态替换而不在 Postgres 中——这属于设计行为，不是丢数据。这类缺失默认仍会让闸门拒绝归档；确认过「缺失全部落在快照表内」后，可用 `--tolerate-snapshot-drift`：
+
+```bash
+./trajecta upgrade sqlite archive --tolerate-snapshot-drift          # 先看计划与 tolerated 计数
+./trajecta upgrade sqlite archive --tolerate-snapshot-drift --apply
+```
+
+该开关只豁免 `upstream_targets`、`upstream_models` 这两张表，并在报告里单独打印 `tolerated` 计数（`upgrade db --verify-only` 同样支持），其余每张权威表（`logs`、`parse_jobs`、`semantic_nodes`、`trace_observations`、`users`、`api_tokens` 等）仍逐主键严格校验；任何权威表缺键时依旧拒绝归档。它比 `--force` 更可取：`--force` 会取消全部校验。
+
 ## 一键执行：`trajecta upgrade`
 
 ```bash
@@ -146,7 +155,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | `trajecta upgrade cassettes rewrite` | 重写 prelude magic | 需 `--apply` |
 | `trajecta upgrade cassettes check` | 校验 cassette 格式 | 否 |
 | `trajecta upgrade sqlite list` | 列出旧库文件 | 否 |
-| `trajecta upgrade sqlite archive` | 归档旧库文件 | 需 `--apply` |
+| `trajecta upgrade sqlite archive` | 归档旧库文件（`--tolerate-snapshot-drift` 只豁免两张运行时快照表） | 需 `--apply` |
 | `trajecta upgrade` | 上述流程串联 | 需 `--apply` |
 | `trajecta layout plan` | 只读地报告 cassette 目录布局的搬迁计划 | 否 |
 | `trajecta layout apply` | 执行搬迁计划：重命名 cassette 并同步索引路径 | 需 `--apply` |
@@ -168,7 +177,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 - **SQLite 只读**：默认 `auto` 先尝试 `mode=ro`，被文件系统拒绝时回退 `immutable=1`。`immutable` 在存在非空 `-wal`/`-journal` 时会被拒绝，避免读到过期快照；打开可写（`rw`）需要显式指定。
 - **进度可观测**：长任务每 2 秒打印一行进度（扫描/重写/复制/跳过/失败计数）。
 - **`trace_index.secret`**：`{{output_dir}}/trace_index.secret`（权限 600）是 `channel_configs.api_key_ciphertext` 与部分 `headers_json` 的本地加密密钥。迁移 SQLite 数据时**保持它与数据目录在一起**，否则历史密文在新环境里无法解密。
-- **不要在校验失败时归档**：归档闸门依赖主键校验；`--force` 只应在确认过源数据已被 Postgres 覆盖后使用。
+- **不要在校验失败时归档**：归档闸门依赖主键校验；`--force` 只应在确认过源数据已被 Postgres 覆盖后使用。若缺失只出现在运行时快照表 `upstream_targets` / `upstream_models` 中，用 `--tolerate-snapshot-drift` 精确豁免这两张表，而不是用 `--force` 关闭全部校验。
 
 ## 故障处理
 
@@ -178,6 +187,8 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | 某表 `blocked`，打印 `missing required columns` | Postgres 侧 `NOT NULL` 且无默认值的列在旧表里不存在 | 先确认该列语义；可接受占位值时加 `--fill-missing-required`；否则先手动补齐再迁移 |
 | 某表 `failed > 0` | 单行数据无法转换（类型、超长、非法 JSON 等） | 查看打印的失败样本；修正源库行或先手动导入，再重跑（幂等） |
 | `missing keys > 0` | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
+| `missing keys > 0` 且**只在** `upstream_targets` / `upstream_models` | 服务已按当前配置/探测结果重写了这两张运行时快照表，旧行被替换而非丢失 | 确认缺失键都在这两张表内后，用 `--tolerate-snapshot-drift` 归档；报告会打印 `tolerated` 计数 |
+| `missing keys > 0` 出现在 `logs` / `parse_jobs` / `semantic_nodes` / `trace_observations` 等权威表 | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
 | `unable to open database file (14)` | 文件系统不允许只读打开 | 使用默认 `auto`（会回退 `immutable`）或显式 `--sqlite-open immutable` |
 | `prelude_unterminated` / `layout_mismatch` | 录制被中断，前言没有空行或长度不自洽 | 用 `--tolerate-partial` 降级为 warning，或删除该录制后重建索引 |
 | compose 里旧前缀变量被忽略 | 二进制只读 `TRAJECTA_*` | 同步更新 `docker-compose.yml` 的 `environment:` |

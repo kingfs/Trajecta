@@ -74,8 +74,9 @@ func newSQLiteListCommand(runtime *cliRuntime) *cobra.Command {
 
 func newSQLiteArchiveCommand(runtime *cliRuntime) *cobra.Command {
 	var (
-		suffix string
-		force  bool
+		suffix        string
+		force         bool
+		tolerateDrift bool
 	)
 	cmd := &cobra.Command{
 		Use:   "archive",
@@ -87,15 +88,17 @@ SQLite files already exists in Postgres, so a database whose rows were not
 merged is never archived. Files are renamed, never deleted.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runtime.execArchive(cmd, suffix, force)
+			return runtime.execArchive(cmd, suffix, force, tolerateDrift)
 		},
 	}
 	cmd.Flags().StringVar(&suffix, "suffix", ".migrated", "suffix appended to the archived database file name")
 	cmd.Flags().BoolVar(&force, "force", false, "archive without verifying that every row reached Postgres")
+	cmd.Flags().BoolVar(&tolerateDrift, "tolerate-snapshot-drift", false,
+		"excuse missing keys in the runtime snapshot tables (upstream_targets, upstream_models) that the running server rewrites")
 	return cmd
 }
 
-func (r *cliRuntime) execArchive(cmd *cobra.Command, suffix string, force bool) error {
+func (r *cliRuntime) execArchive(cmd *cobra.Command, suffix string, force, tolerateDrift bool) error {
 	env, cfg, err := r.prepare()
 	if err != nil {
 		return err
@@ -122,13 +125,14 @@ func (r *cliRuntime) execArchive(cmd *cobra.Command, suffix string, force bool) 
 			return usageErr("database.dsn", "no Postgres DSN is configured, so the archive gate cannot verify the rows")
 		}
 		verification, err = legacymigrate.MergeSQLiteIntoPostgres(cmd.Context(), legacymigrate.CopyOptions{
-			SQLitePaths: paths,
-			PostgresDSN: cfg.Database.DSN,
-			VerifyOnly:  true,
-			BatchSize:   r.opts.batchSize,
-			Workers:     r.databaseWorkers(),
-			OpenMode:    r.opts.sqliteOpen,
-			Progress:    r.progressFunc(),
+			SQLitePaths:           paths,
+			PostgresDSN:           cfg.Database.DSN,
+			VerifyOnly:            true,
+			BatchSize:             r.opts.batchSize,
+			Workers:               r.databaseWorkers(),
+			OpenMode:              r.opts.sqliteOpen,
+			TolerateSnapshotDrift: tolerateDrift,
+			Progress:              r.progressFunc(),
 		})
 		if err != nil {
 			return err
@@ -138,12 +142,19 @@ func (r *cliRuntime) execArchive(cmd *cobra.Command, suffix string, force bool) 
 			if writeErr := r.writeResult(cmd.OutOrStdout(), "sqlite archive", false, report, func(w io.Writer) error {
 				printCopyReport(w, verification, false)
 				fmt.Fprintln(w, "refused           the verification found rows that are not in Postgres")
+				if !tolerateDrift {
+					fmt.Fprintln(w, "hint              rows the running server replaced in a runtime snapshot table can be excused with --tolerate-snapshot-drift")
+				}
 				return nil
 			}, warnings); writeErr != nil {
 				return writeErr
 			}
-			return fail("refusing to archive: %d missing keys and %d tables need attention (pass --force to archive anyway)",
-				verification.Missing, verification.TablesSkip)
+			hint := "(pass --force to archive anyway)"
+			if !tolerateDrift {
+				hint = "(pass --tolerate-snapshot-drift for runtime snapshot drift, or --force to archive anyway)"
+			}
+			return fail("refusing to archive: %d missing keys and %d tables need attention %s",
+				verification.Missing, verification.TablesSkip, hint)
 		}
 	}
 

@@ -133,7 +133,7 @@ task build:go                                  # 同时产出服务端 server �
 
 - `trajecta upgrade db` 把改名前的 SQLite 条目合并进 Postgres：按主键/唯一键去重（`ON CONFLICT DO NOTHING`）、只写两库交集列、时间戳兼容四种历史编码、identity 序列只前进不回退，写完后校验源主键是否都在 Postgres；`schema_migrations`、`app_schema_status` 属于源库记账，跳过。
 - `trajecta upgrade cassettes rewrite` 只把首行 `# llm-tracelab/v3` 换成 `# trajecta/v3`，payload 逐字节拷贝，同目录临时文件加原子 rename；`cassettes check` 只按格式校验（magic、meta/event JSON、layout 声明长度与文件大小是否自洽），不读录制内容。
-- `trajecta upgrade sqlite archive` 在主键校验全部通过后把旧库改名为 `*.migrated`（`-wal`/`-shm`/`-journal` 一起改名），文件只重命名不删除；迁移后不再有 SQLite 文件被 `serve` 使用。
+- `trajecta upgrade sqlite archive` 在主键校验全部通过后把旧库改名为 `*.migrated`（`-wal`/`-shm`/`-journal` 一起改名），文件只重命名不删除；迁移后不再有 SQLite 文件被 `serve` 使用。`upstream_targets` / `upstream_models` 是运行中的服务按当前 provider 配置重写的运行时快照（`internal/store.ReplaceUpstreamModels`），它们的旧行可能已被替换而不在 Postgres；确认缺失只落在这两张表后可用 `--tolerate-snapshot-drift` 精确豁免（报告会打印 `tolerated` 计数），其余表仍逐主键严格校验，比 `--force` 更可取。
 - 轻量脚本 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh) 仍然可用：改写 `.env` 中的 `LLM_TRACELAB_*` key（同名冲突会注释掉旧行并在 `.env.trajecta-migration.bak` 留备份）、重命名 `{{output_dir}}/llm_tracelab.sqlite3` 及其 `-wal`/`-shm`、统计 `.http` cassette 的 prelude magic 版本，可重复执行。它不合并 SQLite 数据，而且 cassette 阶段是每文件一个 `head` 进程，数十万文件会非常慢。
 - 两者都不执行的部分：Postgres 库名/角色名（`ALTER DATABASE` 需连到其它库执行；保留旧库名、只更新 `TRAJECTA_DATABASE_DSN` 同样可行，schema 内不含旧品牌词）、Docker 镜像 `kingfs/trajecta` 与卷 `trajecta-data`、CI secret、Monitor `localStorage`。
 - 旧前缀没有回退：二进制只读 `TRAJECTA_*`，compose 里保留 `LLM_TRACELAB_*` 会被静默忽略（`trajecta upgrade env` 会警告该组合），必须同步更新 `docker-compose.yml`。

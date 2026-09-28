@@ -13,12 +13,13 @@ import (
 
 // dbFlags collects the `db` command flags.
 type dbFlags struct {
-	tables      []string
-	skipTables  []string
-	fillMissing bool
-	noVerify    bool
-	noAnalyze   bool
-	verifyOnly  bool
+	tables        []string
+	skipTables    []string
+	fillMissing   bool
+	noVerify      bool
+	noAnalyze     bool
+	verifyOnly    bool
+	tolerateDrift bool
 }
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -45,6 +46,8 @@ being invented; pass --fill-missing-required to insert placeholders instead.`,
 	cmd.Flags().BoolVar(&flags.noVerify, "no-verify-keys", false, "skip the post-copy primary key verification")
 	cmd.Flags().BoolVar(&flags.noAnalyze, "no-analyze", false, "do not run ANALYZE after a table is merged")
 	cmd.Flags().BoolVar(&flags.verifyOnly, "verify-only", false, "check that the legacy rows exist in Postgres without writing anything")
+	cmd.Flags().BoolVar(&flags.tolerateDrift, "tolerate-snapshot-drift", false,
+		"excuse missing keys in runtime snapshot tables (upstream_targets, upstream_models) that the running server rewrites")
 	return cmd
 }
 
@@ -101,19 +104,20 @@ func (r *cliRuntime) runDatabaseMerge(cmd *cobra.Command, cfg *config.Config, fl
 	}
 
 	report, err := legacymigrate.MergeSQLiteIntoPostgres(cmd.Context(), legacymigrate.CopyOptions{
-		SQLitePaths: paths,
-		PostgresDSN: cfg.Database.DSN,
-		BatchSize:   r.opts.batchSize,
-		Workers:     r.databaseWorkers(),
-		Tables:      flags.tables,
-		SkipTables:  flags.skipTables,
-		FillMissing: flags.fillMissing,
-		Analyze:     !flags.noAnalyze,
-		VerifyKeys:  !flags.noVerify,
-		VerifyOnly:  flags.verifyOnly,
-		DryRun:      !r.opts.apply || flags.verifyOnly,
-		OpenMode:    r.opts.sqliteOpen,
-		Progress:    r.progressFunc(),
+		SQLitePaths:           paths,
+		PostgresDSN:           cfg.Database.DSN,
+		BatchSize:             r.opts.batchSize,
+		Workers:               r.databaseWorkers(),
+		Tables:                flags.tables,
+		SkipTables:            flags.skipTables,
+		FillMissing:           flags.fillMissing,
+		Analyze:               !flags.noAnalyze,
+		VerifyKeys:            !flags.noVerify,
+		VerifyOnly:            flags.verifyOnly,
+		TolerateSnapshotDrift: flags.tolerateDrift,
+		DryRun:                !r.opts.apply || flags.verifyOnly,
+		OpenMode:              r.opts.sqliteOpen,
+		Progress:              r.progressFunc(),
 	})
 	if err != nil {
 		return nil, warnings, err
@@ -158,13 +162,19 @@ func printCopyReport(w io.Writer, report *legacymigrate.CopyReport, applied bool
 				for _, missing := range table.SampleMissingKeys {
 					fmt.Fprintf(w, "      ? not found in Postgres: %s\n", missing)
 				}
+				if table.ToleratedKeys > 0 {
+					fmt.Fprintf(w, "      ~ tolerated %d missing snapshot keys (%s)\n", table.ToleratedKeys, legacymigrate.SnapshotDriftReason(table.Table))
+				}
 			}
 		}
 	}
-	fmt.Fprintf(w, "totals            %d copied, %d already present, %d failed rows, %d missing keys, %d tables\n",
-		report.Copied, report.Duplicate, report.Failed, report.Missing, report.TablesDone)
+	fmt.Fprintf(w, "totals            %d copied, %d already present, %d failed rows, %d missing keys, %d tolerated snapshot keys, %d tables\n",
+		report.Copied, report.Duplicate, report.Failed, report.Missing, report.Tolerated, report.TablesDone)
 	if report.DryRun && !applied {
 		fmt.Fprintln(w, "note              dry run; pass --apply to write the rows into Postgres")
+	}
+	if report.Tolerated > 0 && report.Missing == 0 && report.Failed == 0 {
+		fmt.Fprintln(w, "note              every missing key belongs to a runtime snapshot table (upstream_targets, upstream_models)")
 	}
 	for _, warning := range report.Warnings {
 		fmt.Fprintf(w, "warning           %s\n", warning)

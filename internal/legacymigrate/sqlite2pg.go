@@ -27,6 +27,29 @@ var skippedSourceTables = map[string]string{
 	"app_schema_status": "migration bookkeeping of the source backend",
 }
 
+// snapshotSourceTables hold runtime snapshots and compatibility projections
+// rather than authoritative records: a running server rewrites them from the
+// live provider configuration (see docs/ROUTING_AND_CREDENTIALS.md), so a
+// legacy row can be absent from Postgres simply because the row it described
+// was replaced or superseded by the current state. The archive gate must not
+// excuse those keys silently, so operators opt in explicitly with
+// TolerateSnapshotDrift and the excused count is reported.
+var snapshotSourceTables = map[string]string{
+	"upstream_targets": "runtime snapshot rewritten by configuration transactions and upstream refresh",
+	"upstream_models":  "runtime snapshot replaced per upstream by probes and upstream refresh",
+}
+
+// SnapshotDriftTables returns the legacy tables whose missing keys the archive
+// gate may excuse when TolerateSnapshotDrift is set, sorted by name.
+func SnapshotDriftTables() []string {
+	names := make([]string, 0, len(snapshotSourceTables))
+	for name := range snapshotSourceTables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // legacyTableDependencies is the complete set of cross-table foreign keys in
 // the application schema; parents are copied before children.
 var legacyTableDependencies = map[string][]string{
@@ -64,8 +87,27 @@ type CopyOptions struct {
 	// without writing anything. It is the gate used before archiving a legacy
 	// database file.
 	VerifyOnly bool
-	OpenMode   string
-	Progress   ProgressFunc
+	// TolerateSnapshotDrift excuses missing keys in the snapshotSourceTables
+	// (see SnapshotDriftTables) instead of refusing the archive. Only those
+	// tables are excused, and the excused key count is reported separately, so
+	// every authoritative table is still verified strictly.
+	TolerateSnapshotDrift bool
+	OpenMode              string
+	Progress              ProgressFunc
+}
+
+// toleratesMissingKeys reports whether a table's missing keys are excused.
+func (o CopyOptions) toleratesMissingKeys(table string) bool {
+	if !o.TolerateSnapshotDrift {
+		return false
+	}
+	_, ok := snapshotSourceTables[table]
+	return ok
+}
+
+// SnapshotDriftReason describes why a table's missing keys may be excused.
+func SnapshotDriftReason(table string) string {
+	return snapshotSourceTables[table]
 }
 
 // TableResult reports the outcome of one table.
@@ -82,8 +124,13 @@ type TableResult struct {
 	SampleFailures    []string `json:"sample_failures,omitempty"`
 	MissingKeys       int64    `json:"missing_keys,omitempty"`
 	SampleMissingKeys []string `json:"sample_missing_keys,omitempty"`
-	Sequence          string   `json:"sequence,omitempty"`
-	DurationMS        int64    `json:"duration_ms"`
+	// ToleratedKeys counts keys that are missing in Postgres but belong to a
+	// snapshot table the operator explicitly excused with
+	// TolerateSnapshotDrift. They never block an archive and are reported apart
+	// from MissingKeys.
+	ToleratedKeys int64  `json:"tolerated_keys,omitempty"`
+	Sequence      string `json:"sequence,omitempty"`
+	DurationMS    int64  `json:"duration_ms"`
 }
 
 // DatabaseResult reports the outcome of one legacy SQLite database.
@@ -99,16 +146,19 @@ type DatabaseResult struct {
 
 // CopyReport aggregates a full merge run.
 type CopyReport struct {
-	DryRun     bool             `json:"dry_run"`
-	Databases  []DatabaseResult `json:"databases"`
-	Warnings   []string         `json:"warnings,omitempty"`
-	Copied     int64            `json:"copied"`
-	Duplicate  int64            `json:"duplicate"`
-	Failed     int64            `json:"failed"`
-	Missing    int64            `json:"missing_keys"`
-	TablesDone int              `json:"tables_completed"`
-	TablesSkip int              `json:"tables_skipped"`
-	DurationMS int64            `json:"duration_ms"`
+	DryRun    bool             `json:"dry_run"`
+	Databases []DatabaseResult `json:"databases"`
+	Warnings  []string         `json:"warnings,omitempty"`
+	Copied    int64            `json:"copied"`
+	Duplicate int64            `json:"duplicate"`
+	Failed    int64            `json:"failed"`
+	Missing   int64            `json:"missing_keys"`
+	// Tolerated sums the missing keys that TolerateSnapshotDrift excused. It is
+	// reported so an operator can see exactly how much drift was accepted.
+	Tolerated  int64 `json:"tolerated_keys,omitempty"`
+	TablesDone int   `json:"tables_completed"`
+	TablesSkip int   `json:"tables_skipped"`
+	DurationMS int64 `json:"duration_ms"`
 }
 
 // OK reports whether every table was merged and verified without problems.
@@ -232,6 +282,7 @@ func MergeSQLiteIntoPostgres(ctx context.Context, opts CopyOptions) (*CopyReport
 			report.Duplicate += table.Duplicate
 			report.Failed += table.Failed
 			report.Missing += table.MissingKeys
+			report.Tolerated += table.ToleratedKeys
 			switch table.Status {
 			case "copied", "verified", "planned", "empty", "skipped":
 				report.TablesDone++
@@ -552,7 +603,16 @@ func copyTable(ctx context.Context, source, pg *sql.DB, table string, target []C
 			result.SampleMissingKeys = samples
 			result.Status = "verified"
 			if missing > 0 {
-				result.Status = "partial"
+				if opts.toleratesMissingKeys(table) {
+					// The rows were replaced by the running server rather than
+					// lost; keep the samples for the report but do not let the
+					// table block the archive.
+					result.ToleratedKeys = missing
+					result.MissingKeys = 0
+					result.Reason = snapshotSourceTables[table]
+				} else {
+					result.Status = "partial"
+				}
 			}
 		}
 		result.DurationMS = time.Since(started).Milliseconds()
