@@ -102,7 +102,7 @@ curl -s http://localhost:8080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
-**2. The proxy writes the exchange as a cassette** at `<output_dir>/<upstream host>/<model>/<yyyy>/<mm>/<dd>/<timestamp>.http`:
+**2. The proxy writes the exchange as a cassette** at `<output_dir>/<upstream host>/<model>/<yyyy>/<mm>/<dd>/<yyyyMMdd_HHmmss>_<ns>.http`:
 
 ```text
 # trajecta/v3

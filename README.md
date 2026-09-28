@@ -102,7 +102,7 @@ curl -s http://localhost:8080/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
 
-**2. 代理把这次交换写成 cassette**，路径是 `<output_dir>/<上游 host>/<model>/<yyyy>/<mm>/<dd>/<timestamp>.http`：
+**2. 代理把这次交换写成 cassette**，路径是 `<output_dir>/<上游 host>/<model>/<yyyy>/<mm>/<dd>/<yyyyMMdd_HHmmss>_<纳秒>.http`：
 
 ```text
 # trajecta/v3
