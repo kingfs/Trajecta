@@ -23,13 +23,20 @@ func (c Column) Required() bool {
 	return !c.Nullable && !c.HasDefault && !c.IsIdentity
 }
 
-// sqlSafeText replaces invalid UTF-8 so Postgres accepts the value as text.
-// This mirrors internal/store.sqlSafeText.
+// sqlSafeText replaces NUL bytes and invalid UTF-8 so Postgres accepts the
+// value as text. A NUL byte is valid UTF-8 but Postgres rejects it with
+// `22021 invalid byte sequence for encoding "UTF8": 0x00`, and legacy
+// recordings do contain them (the trace index drops the same byte in
+// internal/store.sanitizeDBText, so both write paths agree on the result).
 func sqlSafeText(value string) string {
-	if utf8.ValidString(value) {
+	if utf8.ValidString(value) && !strings.ContainsRune(value, 0) {
 		return value
 	}
-	return strings.ToValidUTF8(value, "\uFFFD")
+	cleaned := strings.ReplaceAll(value, "\x00", "")
+	if utf8.ValidString(cleaned) {
+		return cleaned
+	}
+	return strings.ToValidUTF8(cleaned, "\uFFFD")
 }
 
 func sqlSafeBytes(value []byte) []byte {

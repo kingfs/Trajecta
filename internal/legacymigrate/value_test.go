@@ -152,6 +152,60 @@ func TestColumnRequired(t *testing.T) {
 	}
 }
 
+// TestSQLSafeTextStripsNUL covers the byte Postgres rejects with `22021 invalid
+// byte sequence for encoding "UTF8": 0x00`. NUL is valid UTF-8, so a plain
+// utf8.ValidString guard is not enough; legacy text_preview/raw values really do
+// contain it. Invalid UTF-8 keeps the historical U+FFFD substitution.
+func TestSQLSafeTextStripsNUL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "clean text is unchanged", in: "plain text", want: "plain text"},
+		{name: "nul bytes are dropped", in: "a\x00b", want: "ab"},
+		{name: "leading and trailing nul", in: "\x00ab\x00", want: "ab"},
+		{name: "only nul", in: "\x00", want: ""},
+		{name: "nul and invalid utf8", in: "a\x00\xffb", want: "a\uFFFDb"},
+		{name: "invalid utf8 is replaced", in: "a\xffb", want: "a\uFFFDb"},
+		{name: "valid multibyte survives", in: "中文", want: "中文"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sqlSafeText(tc.in)
+			if got != tc.want {
+				t.Fatalf("sqlSafeText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("sqlSafeText(%q) = %q is not valid UTF-8", tc.in, got)
+			}
+		})
+	}
+}
+
+// TestConvertValueSanitizesTextAndJSONNUL pins that the sanitizing happens on
+// the conversion paths the merge uses, not only in the helper.
+func TestConvertValueSanitizesTextAndJSONNUL(t *testing.T) {
+	text := Column{Name: "text_preview", DataType: "text"}
+	got, err := ConvertValue(text, "before\x00after")
+	if err != nil {
+		t.Fatalf("ConvertValue(text) error: %v", err)
+	}
+	if got != "beforeafter" {
+		t.Fatalf("ConvertValue(text) = %q, want %q", got, "beforeafter")
+	}
+
+	jsonb := Column{Name: "json", DataType: "jsonb"}
+	payload := "{\"text\":\"a\x00b\"}"
+	got, err = ConvertValue(jsonb, payload)
+	if err != nil {
+		t.Fatalf("ConvertValue(jsonb) error: %v", err)
+	}
+	if got != "{\"text\":\"ab\"}" {
+		t.Fatalf("ConvertValue(jsonb) = %q, want %q", got, "{\"text\":\"ab\"}")
+	}
+}
+
 func valuesEqual(got, want any) bool {
 	switch expected := want.(type) {
 	case []byte:
