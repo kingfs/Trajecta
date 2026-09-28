@@ -315,13 +315,23 @@ func derivedTraceTables(ctx context.Context, pg *sql.DB) ([]string, error) {
 }
 
 // orphanTraceIDs returns the distinct trace ids of a table that no logs row uses.
+//
+// The distinct set is folded first and only then anti-joined against `logs`.
+// Written the other way round the planner probes `logs` once per table row,
+// which on the hundred-million-row `semantic_nodes` table means tens of
+// millions of index probes instead of a few hundred thousand, and the join
+// form lets Postgres pick a hash anti-join over the small `logs` side.
 func orphanTraceIDs(ctx context.Context, pg *sql.DB, table string) ([]string, error) {
 	rows, err := pg.QueryContext(ctx, fmt.Sprintf(`
-		SELECT DISTINCT d.trace_id
-		FROM %s d
-		WHERE d.trace_id IS NOT NULL AND d.trace_id <> ''
-		  AND NOT EXISTS (SELECT 1 FROM logs l WHERE l.trace_id = d.trace_id)
-		ORDER BY d.trace_id`, quoteIdent(table)))
+		SELECT t.trace_id
+		FROM (
+			SELECT DISTINCT d.trace_id
+			FROM %s d
+			WHERE d.trace_id IS NOT NULL AND d.trace_id <> ''
+		) t
+		LEFT JOIN logs l ON l.trace_id = t.trace_id
+		WHERE l.trace_id IS NULL
+		ORDER BY t.trace_id`, quoteIdent(table)))
 	if err != nil {
 		return nil, fmt.Errorf("list orphan trace ids of %s: %w", table, err)
 	}
