@@ -28,8 +28,8 @@ psql "$TRAJECTA_DATABASE_DSN" -v ON_ERROR_STOP=1
 改动前先确认迁移状态（Postgres 下两个命令都读取共享的 application `schema_migrations` namespace）：
 
 ```bash
-trajecta -c config/config.yaml db migrate status --check-db
-trajecta -c config/config.yaml auth migrate status --check-db
+server -c config/config.yaml db migrate status --check-db
+server -c config/config.yaml auth migrate status --check-db
 ```
 
 两者应报告 schema 健康且 non-dirty。若处于 dirty 状态，先处理迁移一致性，不进入优化流程。

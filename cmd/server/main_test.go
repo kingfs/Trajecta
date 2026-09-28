@@ -293,7 +293,7 @@ func TestSchemaCommandSupportsJSONEnvelopeForCommandPath(t *testing.T) {
 	if !envelope.OK || len(envelope.Result.Commands) != 1 {
 		t.Fatalf("schema envelope = %+v", envelope)
 	}
-	if envelope.Result.Commands[0].Path != "trajecta auth create-token" {
+	if envelope.Result.Commands[0].Path != cliName+" auth create-token" {
 		t.Fatalf("schema path = %q", envelope.Result.Commands[0].Path)
 	}
 	if len(envelope.Result.Contracts.Formats) == 0 || envelope.Result.Contracts.Stdout == "" || envelope.Result.Contracts.Stderr == "" {
@@ -1650,7 +1650,7 @@ func TestRootCommandRegistersModelsCodexConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find(models codex-config) error = %v", err)
 	}
-	if found == nil || found.CommandPath() != "trajecta models codex-config" {
+	if found == nil || found.CommandPath() != cliName+" models codex-config" {
 		t.Fatalf("found command path = %q", found.CommandPath())
 	}
 }

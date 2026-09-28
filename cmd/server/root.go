@@ -14,7 +14,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-const cliName = "trajecta"
+// cliName is the server artifact name: it drives the usage text, the version
+// payload and the CLI schema name. The product name (for example the Codex
+// model_provider) is separate and stays "trajecta".
+const cliName = "server"
 
 func run(args []string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))

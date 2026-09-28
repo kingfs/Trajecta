@@ -3,7 +3,7 @@ __debug*
 .env.*
 !.env.example
 logs/
-trajecta
+/trajecta
 data/
 node_modules/
 /server
@@ -21,3 +21,4 @@ worktrees/
 __pycache__/
 *.pyc
 .venv-atif/
+.dsh-cache/

@@ -42,19 +42,23 @@ func runOK(report *runReport) bool {
 	return true
 }
 
-func newRunCommand(runtime *cliRuntime) *cobra.Command {
+func newUpgradeCommand(runtime *cliRuntime) *cobra.Command {
 	flags := runFlags{}
 	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Run the whole migration: database, cassettes, then archive",
-		Long: `run performs every migration step in order:
+		Use:   "upgrade",
+		Short: "Move a pre-rename llm-tracelab deployment onto the current layout",
+		Long: `upgrade moves a pre-rename llm-tracelab deployment onto the current layout.
+
+Without a subcommand it performs every step in order:
 
   1. merge the legacy SQLite databases into Postgres
   2. rewrite the pre-rename cassette prelude magic
   3. validate the cassette structure
   4. archive the SQLite databases once every row is verified present
 
-The SQLite files are archived only when steps 1 and 3 reported no problems.`,
+The SQLite files are archived only when steps 1 and 3 reported no problems.
+The subcommands env, db, cassettes and sqlite run one step at a time.
+Nothing is written unless --apply is passed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runtime.execRun(cmd, flags)
@@ -67,6 +71,10 @@ The SQLite files are archived only when steps 1 and 3 reported no problems.`,
 		"insert placeholder values for required Postgres columns the legacy table lacks")
 	cmd.Flags().BoolVar(&flags.tolerate, "tolerate-partial", false, "downgrade cassette layout mismatches to warnings")
 	cmd.Flags().StringVar(&flags.root, "root", "", "cassette root directory (default: the configured trace output directory)")
+	cmd.AddCommand(newEnvCommand(runtime))
+	cmd.AddCommand(newDBCommand(runtime))
+	cmd.AddCommand(newCassettesCommand(runtime))
+	cmd.AddCommand(newSQLiteCommand(runtime))
 	return cmd
 }
 
@@ -198,12 +206,12 @@ type buildInfo struct {
 func newVersionCommand(runtime *cliRuntime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the trajecta-migrate build information",
+		Short: "Print the trajecta build information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			info := buildInfo{Name: "trajecta-migrate", Version: Version, Commit: Commit, Date: Date, Branch: Branch}
+			info := buildInfo{Name: "trajecta", Version: Version, Commit: Commit, Date: Date, Branch: Branch}
 			return runtime.writeResult(cmd.OutOrStdout(), "version", true, info, func(w io.Writer) error {
-				fmt.Fprintf(w, "trajecta-migrate %s (commit %s, built %s, branch %s)\n", info.Version, info.Commit, info.Date, info.Branch)
+				fmt.Fprintf(w, "trajecta %s (commit %s, built %s, branch %s)\n", info.Version, info.Commit, info.Date, info.Branch)
 				return nil
 			}, nil)
 		},

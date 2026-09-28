@@ -110,7 +110,7 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 `provider probe` 是手动诊断命令，用于检查配置中的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
 
 ```bash
-trajecta --config config.yaml provider probe --id openai-local --format json
+server --config config.yaml provider probe --id openai-local --format json
 ```
 
 探测的 endpoint 固定为：OpenAI 兼容 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`；Anthropic `POST /v1/messages`、`GET /v1/models`；Gemini `GET /v1beta/models`。鉴权按 endpoint 选择：OpenAI 风格用 `Authorization: Bearer`，Anthropic 用 `x-api-key` 加 `anthropic-version: 2023-06-01`，Gemini 用 `x-goog-api-key`。
@@ -123,7 +123,7 @@ trajecta --config config.yaml provider probe --id openai-local --format json
 `provider probe-report` 是面向 YAML upstream 的只读批量报告；`provider probe-apply` 是面向 managed channel 的写入口，会打开 application store，对已有 channel 运行同类 probe 并只填补缺失字段：
 
 ```bash
-trajecta --config config.yaml provider probe-apply --id openai-local --format json
+server --config config.yaml provider probe-apply --id openai-local --format json
 ```
 
 `provider probe-apply` 只填补空白的 `api_type`、`protocol_family` 和未设置的能力布尔；不写入 API key 或 header secret，也不覆盖显式 `api_type`、`protocol_family` 或显式 `false` 能力。省略 `--id` 时处理所有启用且有 `base_url` 的 channel。

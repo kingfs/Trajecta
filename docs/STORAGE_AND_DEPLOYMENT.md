@@ -17,6 +17,21 @@ Raw cassette (.http, LLM_PROXY_V3)
 - 需要扩展时优先扩展 `# event:` 与 `# meta:`，不要破坏已有 parser；reader 必须继续支持 legacy `LLM_PROXY_V2`（固定 2KB JSON header），writer 只写 V3。
 - 所有 schema 变更保持 additive。派生表可以清空重建；不会自动重写 cassette。
 
+### cassette 目录布局
+
+写入端（`internal/recorder/recorder.go`）只按下面的路径写文件：
+
+```text
+{{trace.output_dir}}/<upstream site host>/<model>/<YYYY>/<MM>/<DD>/<YYYYMMDD_HHMMSS>_<纳秒>.http
+```
+
+- 第一段是该次请求命中的 upstream base URL 的 host（例如 `ai-api-gateway.app.baizhi.cloud`、`10.2.69.245:32080`），不是客户端访问的 host，也不是协议族。
+- `<model>` 直接来自请求/响应里的 model 名，**可以含 `/`**（例如 `feature/gpt-5.6-sol`、`dev/gpt-5.5`），此时目录会多一层；不要把中间那层当成固定的“环境/分组”维度。
+- 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
+- 文件名用录制时刻（UTC）与纳秒，不保证与同目录内其它文件单调可比。
+- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）与 `upstream_exchanges.cassette_path`：移动文件后必须同步这两列，`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 都按 trace_id 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
+- 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
+
 ## 应用数据库（生产 Postgres + 版本化迁移；SQLite 仅本地/dev/test fallback 及启动建表）
 
 生产存储是 Postgres（compose 使用 `postgres:17-alpine`）。`database.driver` 接受 `postgres` / `postgresql`，并且必须提供显式 `database.dsn`：对非 SQLite driver，DSN 为空时 `DatabaseDSN()` 返回空串，迁移会直接报 `postgres application database dsn is required`。
@@ -101,7 +116,7 @@ docker compose up -d
 ```bash
 docker compose run --rm trajecta -c /app/config/config.yaml db migrate up
 docker compose up -d
-docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+docker compose exec trajecta /app/bin/server -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
 从 `llm-tracelab` 升级已有部署：
@@ -109,18 +124,18 @@ docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth i
 完整路径见[从 llm-tracelab 迁移](./LEGACY_MIGRATION.md)。推荐用独立二进制（所有命令默认 dry-run，加 `--apply` 才写盘）：
 
 ```bash
-task build:go                                  # 同时产出 trajecta 与 trajecta-migrate
-./trajecta-migrate env                         # 只读：.env、有效配置、发现的旧库、compose 前缀检查
-./trajecta-migrate run                         # dry-run：合并 SQLite → 重写 magic → 校验 → 归档
-./trajecta-migrate run --apply
+task build:go                                  # 同时产出服务端 server 与 CLI trajecta
+./trajecta upgrade env                         # 只读：.env、有效配置、发现的旧库、compose 前缀检查
+./trajecta upgrade                             # dry-run：合并 SQLite → 重写 magic → 校验 → 归档
+./trajecta upgrade --apply
 ```
 
-- `trajecta-migrate db` 把改名前的 SQLite 条目合并进 Postgres：按主键/唯一键去重（`ON CONFLICT DO NOTHING`）、只写两库交集列、时间戳兼容四种历史编码、identity 序列只前进不回退，写完后校验源主键是否都在 Postgres；`schema_migrations`、`app_schema_status` 属于源库记账，跳过。
-- `trajecta-migrate cassettes rewrite` 只把首行 `# llm-tracelab/v3` 换成 `# trajecta/v3`，payload 逐字节拷贝，同目录临时文件加原子 rename；`cassettes check` 只按格式校验（magic、meta/event JSON、layout 声明长度与文件大小是否自洽），不读录制内容。
-- `trajecta-migrate sqlite archive` 在主键校验全部通过后把旧库改名为 `*.migrated`（`-wal`/`-shm`/`-journal` 一起改名），文件只重命名不删除；迁移后不再有 SQLite 文件被 `serve` 使用。
+- `trajecta upgrade db` 把改名前的 SQLite 条目合并进 Postgres：按主键/唯一键去重（`ON CONFLICT DO NOTHING`）、只写两库交集列、时间戳兼容四种历史编码、identity 序列只前进不回退，写完后校验源主键是否都在 Postgres；`schema_migrations`、`app_schema_status` 属于源库记账，跳过。
+- `trajecta upgrade cassettes rewrite` 只把首行 `# llm-tracelab/v3` 换成 `# trajecta/v3`，payload 逐字节拷贝，同目录临时文件加原子 rename；`cassettes check` 只按格式校验（magic、meta/event JSON、layout 声明长度与文件大小是否自洽），不读录制内容。
+- `trajecta upgrade sqlite archive` 在主键校验全部通过后把旧库改名为 `*.migrated`（`-wal`/`-shm`/`-journal` 一起改名），文件只重命名不删除；迁移后不再有 SQLite 文件被 `serve` 使用。
 - 轻量脚本 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh) 仍然可用：改写 `.env` 中的 `LLM_TRACELAB_*` key（同名冲突会注释掉旧行并在 `.env.trajecta-migration.bak` 留备份）、重命名 `{{output_dir}}/llm_tracelab.sqlite3` 及其 `-wal`/`-shm`、统计 `.http` cassette 的 prelude magic 版本，可重复执行。它不合并 SQLite 数据，而且 cassette 阶段是每文件一个 `head` 进程，数十万文件会非常慢。
 - 两者都不执行的部分：Postgres 库名/角色名（`ALTER DATABASE` 需连到其它库执行；保留旧库名、只更新 `TRAJECTA_DATABASE_DSN` 同样可行，schema 内不含旧品牌词）、Docker 镜像 `kingfs/trajecta` 与卷 `trajecta-data`、CI secret、Monitor `localStorage`。
-- 旧前缀没有回退：二进制只读 `TRAJECTA_*`，compose 里保留 `LLM_TRACELAB_*` 会被静默忽略（`trajecta-migrate env` 会警告该组合），必须同步更新 `docker-compose.yml`。
+- 旧前缀没有回退：二进制只读 `TRAJECTA_*`，compose 里保留 `LLM_TRACELAB_*` 会被静默忽略（`trajecta upgrade env` 会警告该组合），必须同步更新 `docker-compose.yml`。
 
 ## 可选组件（SearXNG 等）
 
@@ -161,15 +176,15 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 重算命令（均为当前可用子命令）：
 
 ```bash
-trajecta analyze reparse --trace-id <id>
-trajecta analyze scan --trace-id <id>
-trajecta analyze reanalyze --trace-id <id>   # 或 --session-id <id>
-trajecta analyze repair-usage --trace-id <id> [--rewrite-cassette]
-trajecta analyze backfill-exchanges [--dry-run]
-trajecta analyze session --session-id <id>
-trajecta analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
-trajecta analyze refresh --all
-trajecta db summary rebuild sessions [--session-id <id>]
+server analyze reparse --trace-id <id>
+server analyze scan --trace-id <id>
+server analyze reanalyze --trace-id <id>   # 或 --session-id <id>
+server analyze repair-usage --trace-id <id> [--rewrite-cassette]
+server analyze backfill-exchanges [--dry-run]
+server analyze session --session-id <id>
+server analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
+server analyze refresh --all
+server db summary rebuild sessions [--session-id <id>]
 ```
 
 `analyze batch` 与 `analyze refresh` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。

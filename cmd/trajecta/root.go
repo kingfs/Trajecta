@@ -1,4 +1,4 @@
-// Command trajecta-migrate performs the one-off migration work that a
+// Command trajecta is the Trajecta command-line tool: local, server-less
 // Trajecta deployment needs after the project was renamed from llm-tracelab:
 // it loads a pre-rename .env file, merges legacy SQLite application databases
 // into Postgres, and normalizes or validates existing .http cassettes.
@@ -118,13 +118,16 @@ func newRootCommand() *cobra.Command {
 	activeRuntime = runtime
 
 	root := &cobra.Command{
-		Use:   "trajecta-migrate",
-		Short: "Migrate a pre-rename llm-tracelab deployment to Trajecta",
-		Long: `trajecta-migrate moves a pre-rename deployment onto the current layout.
+		Use:   "trajecta",
+		Short: "Trajecta command-line tool",
+		Long: `trajecta is the Trajecta command-line tool.
 
-It reads the deployment .env file, merges legacy SQLite application databases
-into Postgres, rewrites the cassette prelude magic and validates cassette
-structure. Nothing is written unless --apply is passed.`,
+It runs operations that do not need the server process: reading a deployment
+.env file, migrating a pre-rename llm-tracelab deployment onto the current
+layout, and maintaining the recorded .http cassettes. Commands that talk to a
+running server are added here as well.
+
+Nothing is written unless --apply is passed.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -149,11 +152,7 @@ structure. Nothing is written unless --apply is passed.`,
 	flags.StringArrayVar(&opts.sqlitePaths, "sqlite", nil, "explicit legacy SQLite database path (repeatable)")
 	flags.IntVar(&opts.batchSize, "batch-size", 500, "rows per Postgres insert batch")
 
-	root.AddCommand(newEnvCommand(runtime))
-	root.AddCommand(newDBCommand(runtime))
-	root.AddCommand(newCassettesCommand(runtime))
-	root.AddCommand(newSQLiteCommand(runtime))
-	root.AddCommand(newRunCommand(runtime))
+	root.AddCommand(newUpgradeCommand(runtime))
 	root.AddCommand(newVersionCommand(runtime))
 	return root
 }
@@ -377,7 +376,7 @@ func (r *cliRuntime) writeError(w io.Writer, command string, err error) {
 		return
 	}
 	if command == "" {
-		command = "trajecta-migrate"
+		command = "trajecta"
 	}
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")

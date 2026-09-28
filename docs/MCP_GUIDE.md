@@ -49,8 +49,8 @@ MCP endpoint 始终包在个人 token 认证中间件里（`auth.Middleware(mcpH
 
 流程：
 
-1. 用 `trajecta auth init-user` 初始化首个用户。
-2. 登录 Monitor，在 `Tokens` 页面创建个人 token；或用 `trajecta auth create-token` 创建。
+1. 用 `server auth init-user` 初始化首个用户。
+2. 登录 Monitor，在 `Tokens` 页面创建个人 token；或用 `server auth create-token` 创建。
 3. MCP client 每个请求发送 `Authorization: Bearer <token>`。
 
 要点：

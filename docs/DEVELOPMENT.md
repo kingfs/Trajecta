@@ -26,7 +26,7 @@
 | `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay` |
 | `task deps:verify` | `go mod verify` + `go list -mod=readonly ./...` |
 | `task deps:tidy` | `go mod tidy` |
-| `task build:go` | `go build -trimpath -ldflags=... -o trajecta ./cmd/server` 以及 `-o trajecta-migrate ./cmd/trajecta-migrate` |
+| `task build:go` | `go build -trimpath -ldflags=... -o server ./cmd/server` 以及 `-o trajecta ./cmd/trajecta` |
 | `task build:all` | `task ui:build` 然后 `task build:go`（`task build`、`default` 同此） |
 | `task run` | `go run ./cmd/server -c {{.CONFIG}}`，不带子命令即启动 serve |
 | `task ui:build` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run build` |
@@ -34,7 +34,7 @@
 | `task ui:test:real` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui:real` |
 | `task migrate` | `go run ./cmd/server migrate -c {{.CONFIG}}`（V2 cassette 重写为 V3 并重建索引） |
 | `task migrate:db:up` | `go run ./cmd/server db migrate up -c {{.CONFIG}}` |
-| `task migrate:legacy` | `go run ./cmd/trajecta-migrate run -c {{.CONFIG}} {{.ARGS}}`（默认 dry-run，`ARGS="--apply"` 才写盘） |
+| `task migrate:legacy` | `go run ./cmd/trajecta upgrade -c {{.CONFIG}} {{.ARGS}}`（默认 dry-run，`ARGS="--apply"` 才写盘） |
 | `task auth:init-user` | `go run ./cmd/server auth init-user -c {{.CONFIG}} --username "$USER" --password "$PASSWORD"` |
 | `task auth:create-token` | `go run ./cmd/server auth create-token -c {{.CONFIG}} --username "$USER" --name "$NAME"` |
 | `task generate:ent` | `go generate ./ent/...` |
@@ -100,10 +100,10 @@ task build:go
 
 ## 构建产物（Go 二进制、UI dist 与 go:embed 的关系）
 
-- Go 二进制：`task build:go` 在仓库根目录生成 `trajecta`（`./cmd/server`）与 `trajecta-migrate`（`./cmd/trajecta-migrate`），都使用 `-trimpath`，并通过 ldflags 注入 `main.Version`、`main.Commit`、`main.Date`、`main.Branch`（分别来自 `git describe`、`git rev-parse --short=12 HEAD`、UTC 构建时间、当前分支）。两个 `package main` 各自声明这些变量，`task clean` 同时删除两个产物。
+- Go 二进制：`task build:go` 在仓库根目录生成服务端 `server`（`./cmd/server`）与 CLI `trajecta`（`./cmd/trajecta`），都使用 `-trimpath`，并通过 ldflags 注入 `main.Version`、`main.Commit`、`main.Date`、`main.Branch`（分别来自 `git describe`、`git rev-parse --short=12 HEAD`、UTC 构建时间、当前分支）。两个 `package main` 各自声明这些变量，`task clean` 同时删除两个产物。
 - UI 产物：`internal/monitor/ui/dist/`（`index.html` 与 `assets/`），由 `vite build` 生成，并已提交到仓库。
 - 二者关系：`internal/monitor/server.go` 用 `//go:embed ui/dist/*` 把该目录编译进二进制，因此 `go build ./cmd/server` 读取的是编译时刻 `internal/monitor/ui/dist` 的内容。前端改动后必须先 `task ui:build`（或直接用 `task build` / `task build:all`，它们会先跑 `ui:build`）再编译，否则二进制里仍是旧 UI。
-- 容器镜像：`task docker:build` 构建本地镜像 `trajecta:local`；`task docker:up` 用 compose 起本地栈。镜像内同时包含 `/app/bin/trajecta` 与 `/app/bin/trajecta-migrate`，容器只有一个 entrypoint，用 `--entrypoint /app/bin/trajecta-migrate` 调用迁移工具。
+- 容器镜像：`task docker:build` 构建本地镜像 `trajecta:local`；`task docker:up` 用 compose 起本地栈。镜像内同时包含 `/app/bin/server`（entrypoint）与 `/app/bin/trajecta`（CLI），容器只有一个 entrypoint，用 `--entrypoint /app/bin/trajecta` 调用 CLI。
 
 ## 依赖管理
 
@@ -134,10 +134,10 @@ task auth:create-token USER=admin NAME=local
 渠道密钥的本地加密 key 通过 `db secret` 子命令管理：
 
 ```bash
-trajecta -c config/config.yaml db secret status
-trajecta -c config/config.yaml db secret export --out trace_index.secret.backup
-trajecta -c config/config.yaml db secret rotate --yes
-trajecta -c config/config.yaml --format json db secret status
+server -c config/config.yaml db secret status
+server -c config/config.yaml db secret export --out trace_index.secret.backup
+server -c config/config.yaml db secret rotate --yes
+server -c config/config.yaml --format json db secret status
 ```
 
 - `status` 只输出路径、可读性与 fingerprint，不打印密钥；`export --out` 以 `0600` 权限写备份文件，不带 `--out` 时把 key 写到 stdout。
@@ -154,10 +154,10 @@ trajecta -c config/config.yaml --format json db secret status
 **预检命令**（按顺序）：
 
 ```bash
-trajecta -c config/config.yaml --format json config inspect
-trajecta -c config/config.yaml --format json doctor
-trajecta -c config/config.yaml --format json tools status
-trajecta -c config/config.yaml --format json models codex-config <model>
+server -c config/config.yaml --format json config inspect
+server -c config/config.yaml --format json doctor
+server -c config/config.yaml --format json tools status
+server -c config/config.yaml --format json models codex-config <model>
 ```
 
 判断标准：
@@ -178,21 +178,21 @@ codex -p dgx "搜索一下今日新闻"
 **失败时收集**：优先用 `client_request_id`、`response_id`、`request_audit_id` 或最新请求查询。
 
 ```bash
-trajecta -c config/config.yaml --format json audit query --list --status failed --limit 20
+server -c config/config.yaml --format json audit query --list --status failed --limit 20
 
-trajecta -c config/config.yaml --format json audit query \
+server -c config/config.yaml --format json audit query \
   --client-request-id <client_request_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-trajecta -c config/config.yaml --format json audit query \
+server -c config/config.yaml --format json audit query \
   --response-id <response_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-trajecta -c config/config.yaml --format json audit query \
+server -c config/config.yaml --format json audit query \
   --request-audit-id <request_audit_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call --limit 100
+server -c config/config.yaml --format json audit tool-calls --latest-by-call --limit 100
 ```
 
 **日志定位字段**：服务日志会输出用于关联数据库与请求链路的结构化字段——`request_audit_id`、`response_id`、`conversation_id`、`client_request_id`、`trace_id`、`cassette_path`、`upstream_id`、`model`、`endpoint`、`status`、`status_code`、`duration_ms`、`ttft_ms`、`tool_type`、`tool_name`、`executor`、`call_id`、`stream`、`server_id`、`server_label`。
@@ -216,7 +216,7 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 4. `go mod download`。
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
-7. `go build -v -o trajecta ./cmd/server`。
+7. `go build -v -o server ./cmd/server`。
 8. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
 9. `go vet ./...`。
 10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.11.4`。

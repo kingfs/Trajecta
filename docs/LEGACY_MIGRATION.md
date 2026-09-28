@@ -2,7 +2,7 @@
 
 项目在 `v2.0.0` 从 `llm-tracelab` 改名为 Trajecta。改名不只是字符串替换：环境变量前缀、默认数据库文件、cassette prelude magic 都换了名字，而且应用数据库已经从 SQLite 转为 Postgres 唯一事实源。
 
-本文描述当前二进制提供的迁移路径。迁移工具是独立二进制 `trajecta-migrate`（源码在 `cmd/trajecta-migrate`，逻辑在 `internal/legacymigrate`），它负责四件事：
+本文描述当前二进制提供的迁移路径。迁移工具是独立 CLI `trajecta`（源码在 `cmd/trajecta`，逻辑在 `internal/legacymigrate`），迁移命令都挂在 `trajecta upgrade` 下，它负责四件事：
 
 1. 读取部署 `.env`，把旧前缀变量映射成当前前缀并加载配置；
 2. 读取改名前的 SQLite 应用库，把其中的条目合并进 Postgres（重复即跳过）；
@@ -24,12 +24,12 @@
 
 ## 前置条件
 
-- 目标 Postgres 可连接，并已应用应用库 schema：`trajecta db migrate up -c config.yaml`（`trajecta-migrate db` 只写数据，不建表）。
+- 目标 Postgres 可连接，并已应用应用库 schema：`server db migrate up -c config.yaml`（`trajecta upgrade db` 只写数据，不建表）。
 - 一个可用的 `config.yaml` 或等价环境变量；`.env` 会被自动读取。
-- 二进制：`task build:go` 会同时产出 `trajecta` 与 `trajecta-migrate`，也可以单独构建：
+- 二进制：`task build:go` 会同时产出服务端 `server` 与 CLI `trajecta`，也可以单独构建：
 
 ```bash
-go build -trimpath -o trajecta-migrate ./cmd/trajecta-migrate
+go build -trimpath -o trajecta ./cmd/trajecta
 ```
 
 ### 从宿主机跑，还是从容器里跑
@@ -38,12 +38,12 @@ Postgres 由 compose 提供时，`.env` 里的 DSN 主机名通常是 compose �
 
 ```bash
 # 1) 在 compose 网络内运行（推荐：DSN、目录、.env 都不需要改）
-docker compose run --rm --entrypoint /app/bin/trajecta-migrate trajecta env
-docker compose run --rm --entrypoint /app/bin/trajecta-migrate trajecta run --apply
+docker compose run --rm --entrypoint /app/bin/trajecta trajecta upgrade env
+docker compose run --rm --entrypoint /app/bin/trajecta trajecta upgrade --apply
 
 # 2) 在宿主机运行，把 DSN 指向已发布端口
 TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=disable' \
-  ./trajecta-migrate run --apply --trace-dir ./data/traces
+  ./trajecta upgrade --apply --trace-dir ./data/traces
 ```
 
 容器里的 `/app/data/traces` 必须是同一个卷，否则 cassette 与 SQLite 文件会在容器内不可见。
@@ -51,16 +51,16 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ## 第 0 步：只读确认现状
 
 ```bash
-./trajecta-migrate env               # .env、有效配置、发现的旧库、compose 前缀检查
-./trajecta-migrate sqlite list       # 将要迁移的 SQLite 文件（路径、大小、mtime）
-./trajecta-migrate cassettes census  # cassette 格式普查（只读首行，很快）
+./trajecta upgrade env               # .env、有效配置、发现的旧库、compose 前缀检查
+./trajecta upgrade sqlite list       # 将要迁移的 SQLite 文件（路径、大小、mtime）
+./trajecta upgrade cassettes census  # cassette 格式普查（只读首行，很快）
 ```
 
 `env` 会打印每条 `.env` 变量的去向（`LLM_TRACELAB_X → TRAJECTA_X`，值中的 DSN 密码会被打码）、有效 `database.driver`/`dsn`、实际搜索目录，以及 `docker-compose.yml` 是否仍在传旧前缀变量。
 
 ### 变量前缀与 compose 必须一起改
 
-当前二进制只读 `TRAJECTA_*`，代码里没有 legacy 前缀回退。compose 里继续传 `LLM_TRACELAB_*` 不会报错，但会被静默忽略，应用会退回 `config.yaml` 中的配置（默认可能是 `database.driver: sqlite`）。`trajecta-migrate env` 会对这种组合给出警告；改 `.env` 时必须同步改 compose 的 `environment:` 段。
+当前二进制只读 `TRAJECTA_*`，代码里没有 legacy 前缀回退。compose 里继续传 `LLM_TRACELAB_*` 不会报错，但会被静默忽略，应用会退回 `config.yaml` 中的配置（默认可能是 `database.driver: sqlite`）。`trajecta upgrade env` 会对这种组合给出警告；改 `.env` 时必须同步改 compose 的 `environment:` 段。
 
 ### 不要让 `config.yaml` 继续指向 SQLite 文件
 
@@ -69,8 +69,8 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ## 第 1 步：把 SQLite 条目合并进 Postgres
 
 ```bash
-./trajecta-migrate db                 # dry-run：报告每张表将要写入多少行
-./trajecta-migrate db --apply         # 实际写入
+./trajecta upgrade db                 # dry-run：报告每张表将要写入多少行
+./trajecta upgrade db --apply         # 实际写入
 ```
 
 行为与保证：
@@ -89,8 +89,8 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ## 第 2 步：重写 cassette magic（可选，但推荐）
 
 ```bash
-./trajecta-migrate cassettes rewrite            # dry-run
-./trajecta-migrate cassettes rewrite --apply
+./trajecta upgrade cassettes rewrite            # dry-run
+./trajecta upgrade cassettes rewrite --apply
 ```
 
 读取端同时接受 `# llm-tracelab/v3` 与 `# trajecta/v3`，所以这一步不是必须的；它的价值是让整个 cassette 库与当前写入端一致。
@@ -105,7 +105,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ## 第 3 步：只校验格式
 
 ```bash
-./trajecta-migrate cassettes check
+./trajecta upgrade cassettes check
 ```
 
 只检查**格式**，不检查内容：magic 行、`# meta:` / `# event:` 的 JSON 是否可解析、`layout` 里声明的四段长度加上 payload 偏移是否正好等于文件大小。录制内容本身从不读取，所以半截录制会以「长度不自洽」被报出来，而不是被当成内容错误。
@@ -120,17 +120,17 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ## 第 4 步：归档旧 SQLite 文件
 
 ```bash
-./trajecta-migrate sqlite archive            # 先校验，再报告计划
-./trajecta-migrate sqlite archive --apply
+./trajecta upgrade sqlite archive            # 先校验，再报告计划
+./trajecta upgrade sqlite archive --apply
 ```
 
 归档前会对每个库跑一次 `--verify-only`：只有每张表的源主键都能在 Postgres 中找到才执行重命名。`--force` 可跳过该校验（不推荐）。`--suffix` 默认 `.migrated`；目标名已存在时追加 UTC 时间戳，不会覆盖。`-wal` / `-shm` / `-journal` 会跟着一起改名。
 
-## 一键执行：run
+## 一键执行：`trajecta upgrade`
 
 ```bash
-./trajecta-migrate run            # dry-run 全流程
-./trajecta-migrate run --apply
+./trajecta upgrade            # dry-run 全流程
+./trajecta upgrade --apply
 ```
 
 顺序为「合并数据库 → 重写 magic → 校验 → 归档」。任何一步报告失败行或结构错误时都不会归档；`--skip-cassettes` 跳过第 2、3 步，`--skip-archive` 保留旧文件。
@@ -139,16 +139,16 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 | 命令 | 作用 | 是否写盘 |
 | --- | --- | --- |
-| `env` | 加载 `.env`、打印有效配置、列出旧库、检查 compose 前缀 | 否 |
-| `db` | SQLite → Postgres 合并（`--apply` 才写） | 需 `--apply` |
-| `db --verify-only` | 只确认源主键都在 Postgres | 否 |
-| `cassettes census`（别名 `version`） | 统计 cassette 格式分布 | 否 |
-| `cassettes rewrite` | 重写 prelude magic | 需 `--apply` |
-| `cassettes check` | 校验 cassette 格式 | 否 |
-| `sqlite list` | 列出旧库文件 | 否 |
-| `sqlite archive` | 归档旧库文件 | 需 `--apply` |
-| `run` | 上述流程串联 | 需 `--apply` |
-| `version` | 打印构建信息 | 否 |
+| `trajecta upgrade env` | 加载 `.env`、打印有效配置、列出旧库、检查 compose 前缀 | 否 |
+| `trajecta upgrade db` | SQLite → Postgres 合并（`--apply` 才写） | 需 `--apply` |
+| `trajecta upgrade db --verify-only` | 只确认源主键都在 Postgres | 否 |
+| `trajecta upgrade cassettes census`（别名 `version`） | 统计 cassette 格式分布 | 否 |
+| `trajecta upgrade cassettes rewrite` | 重写 prelude magic | 需 `--apply` |
+| `trajecta upgrade cassettes check` | 校验 cassette 格式 | 否 |
+| `trajecta upgrade sqlite list` | 列出旧库文件 | 否 |
+| `trajecta upgrade sqlite archive` | 归档旧库文件 | 需 `--apply` |
+| `trajecta upgrade` | 上述流程串联 | 需 `--apply` |
+| `trajecta version` | 打印构建信息 | 否 |
 
 退出码：`0` 成功；`1` 命令已执行但发现问题（失败行、缺失主键、结构错误、需要人工处理的表）；`3` 用法或前置条件错误（例如目标数据库不是 Postgres）。
 
@@ -184,7 +184,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 `scripts/migrate-to-trajecta.sh` 仍然可用，适合只做「`.env` 前缀改写 + SQLite 文件改名 + 人工确认清单」的轻量场景（它默认 dry-run，并在写入前备份 `.env`）。它不适合大库：cassette 阶段为每个文件起一个 `head` 进程，数十万文件会非常慢。
 
-二进制 `trajecta-migrate` 是当前推荐路径：它读同一份 `.env`、并发处理 cassette、把 SQLite 条目真正合并进 Postgres，并在验证通过后归档文件。
+CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发处理 cassette、把 SQLite 条目真正合并进 Postgres，并在验证通过后归档文件。
 
 ## 迁移之后
 

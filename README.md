@@ -54,7 +54,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
 cp .env.example .env          # 修改 POSTGRES_PASSWORD
 docker compose up -d
-docker compose exec trajecta /app/bin/trajecta \
+docker compose exec trajecta /app/bin/server \
   -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
@@ -84,9 +84,9 @@ go run ./cmd/server -c config/config.yaml
 项目已改名为 Trajecta（`v2.0.0`），应用数据库也转为 Postgres。已有部署用独立迁移二进制（默认 dry-run，只报告不写入）：
 
 ```bash
-task build:go                    # 产出 trajecta 与 trajecta-migrate
-./trajecta-migrate env           # 只读：.env、有效配置、发现的旧库、compose 前缀检查
-./trajecta-migrate run --apply   # 合并 SQLite → 重写 cassette magic → 校验 → 归档旧库
+task build:go                    # 产出服务端 server 与 CLI trajecta
+./trajecta upgrade env           # 只读：.env、有效配置、发现的旧库、compose 前缀检查
+./trajecta upgrade --apply       # 合并 SQLite → 重写 cassette magic → 校验 → 归档旧库
 ```
 
 它读取 `.env` 并把 `LLM_TRACELAB_*` 映射为 `TRAJECTA_*`、把旧 SQLite 条目合并进 Postgres（主键/唯一键重复即跳过）、只替换 cassette 首行的 prelude magic、按格式校验录制，并在主键校验全部通过后把旧库改名为 `*.migrated`。`.env` 与 `docker-compose.yml` 的前缀需要一起更新。完整步骤见[从 llm-tracelab 迁移](./docs/LEGACY_MIGRATION.md)，破坏性变化与兼容策略见 [CHANGELOG](./CHANGELOG.md)。
@@ -188,7 +188,7 @@ func TestChat(t *testing.T) {
                 │  OpenAI · Anthropic · Google · Vertex
                 ▼
 ┌──────────────────────────────────────────────────────────┐
-│ trajecta serve                                           │
+│ server serve                                           │
 │                                                          │
 │   proxy ──▶ router ──▶ 上游 provider（渠道 / 凭据 / 限流）  │
 │     │         │                                          │

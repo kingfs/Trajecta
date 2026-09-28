@@ -84,7 +84,7 @@ continuation 与 input items：
 - Ordinary hosted `web_search` descriptor：`{"type":"web_search"}` / `{"type":"web_search_preview"}` 可被解析和审计；provider 未启用时普通 descriptor 不阻断 text create/stream，也不会暴露给上游；provider 就绪时映射为内部 function tool，由模型显式 tool call 后执行。
 - Unsupported hosted tools：强制 `tool_choice` 为 `file_search` / `code_interpreter` / `computer_use_preview`（以及未就绪的 `mcp` / `web_search`）时返回稳定 OpenAI-style error envelope，`code` 为 `unsupported_tool`，message 含 `unsupported hosted tool "<tool>"`，并写不含 raw descriptor/payload 的 `tool_call_audits` rejected 记录。
 
-Codex TOML 生成命令 `trajecta models codex-config <model>`：
+Codex TOML 生成命令 `server models codex-config <model>`：
 
 - 离线运行，不探测上游、不运行真实 Codex、不读取真实 API key；支持全局 `--format text|json` 与可选 `--codex-config <path>`。
 - JSON envelope 的 `command` 为 `models.codex_config`；`result.profile` 含 `model_provider`、`model`、`model_context_window`、`model_auto_compact_token_limit`。

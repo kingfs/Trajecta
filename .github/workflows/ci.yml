@@ -38,8 +38,8 @@ jobs:
 
     - name: Build
       run: |
-        go build -v -o trajecta ./cmd/server
-        go build -v -o trajecta-migrate ./cmd/trajecta-migrate
+        go build -v -o server ./cmd/server
+        go build -v -o trajecta ./cmd/trajecta
 
     - name: Check Go formatting
       run: |

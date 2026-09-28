@@ -11,7 +11,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/legacymigrate"
 )
 
-// envReport is the machine-readable result of `trajecta-migrate env`.
+// envReport is the machine-readable result of `trajecta upgrade env`.
 type envReport struct {
 	EnvFile         *legacymigrate.EnvLoadResult    `json:"env_file,omitempty"`
 	ConfigPath      string                          `json:"config_path"`

@@ -54,7 +54,7 @@ Requires Docker and Docker Compose.
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
 cp .env.example .env          # change POSTGRES_PASSWORD
 docker compose up -d
-docker compose exec trajecta /app/bin/trajecta \
+docker compose exec trajecta /app/bin/server \
   -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
@@ -84,9 +84,9 @@ go run ./cmd/server -c config/config.yaml
 The project was renamed to Trajecta in `v2.0.0`, and the application database moved to Postgres. Existing deployments use the dedicated migration binary (a dry run by default):
 
 ```bash
-task build:go                    # builds trajecta and trajecta-migrate
-./trajecta-migrate env           # read-only: .env, effective config, discovered legacy databases
-./trajecta-migrate run --apply   # merge SQLite -> rewrite cassette magic -> validate -> archive
+task build:go                    # builds the server binary `server` and the CLI `trajecta`
+./trajecta upgrade env           # read-only: .env, effective config, discovered legacy databases
+./trajecta upgrade --apply       # merge SQLite -> rewrite cassette magic -> validate -> archive
 ```
 
 It reads `.env` and maps `LLM_TRACELAB_*` onto `TRAJECTA_*`, merges the legacy SQLite rows into Postgres (skipping primary-key and unique-key duplicates), replaces only the cassette prelude magic line, validates recordings structurally, and renames the legacy databases to `*.migrated` once every primary key is verified present. Update both `.env` and `docker-compose.yml`. Full steps: [migrating from llm-tracelab](./docs/LEGACY_MIGRATION.md); breaking changes and compatibility guarantees: [CHANGELOG](./CHANGELOG.md).
@@ -188,7 +188,7 @@ The complete preset list (25 registry keys, 20 distinct providers after alias de
                 │  OpenAI · Anthropic · Google · Vertex
                 ▼
 ┌──────────────────────────────────────────────────────────┐
-│ trajecta serve                                           │
+│ server serve                                           │
 │                                                          │
 │   proxy ──▶ router ──▶ upstream provider (channel/key/limit)
 │     │         │                                          │

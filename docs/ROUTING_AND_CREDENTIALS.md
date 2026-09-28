@@ -163,7 +163,7 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 - 渠道 API 返回值中的 `headers` 会对敏感 header 名（如 `Authorization`、`api-key`、`token` 类）掩码为 `***`；写路径接受 `{ "keep": true }` 表示保留原值，避免 UI 回传掩码覆盖真实密钥。
 - 渠道 API 始终不返回明文 API key，只返回 `api_key_hint` 与 `secret_storage_mode`；`base_url` 按配置原样返回，路由事件里的候选 base URL 才会做 URL 脱敏。
 - 本地 secret：API key 与敏感 header 以 `tlsec:v1:` envelope 保存，主密钥文件是 `{{output_dir}}/trace_index.secret`（权限 `0600`，本地 AES-GCM）；历史明文保持可读，下次写入时转为加密 envelope。
-- 运维入口：`trajecta db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）；Monitor 侧对应 `/api/secrets/local-key` 的状态、导出与轮换。
+- 运维入口：`server db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）；Monitor 侧对应 `/api/secrets/local-key` 的状态、导出与轮换。
 - 没有加密能力时 `secret_storage_mode` 为 `plaintext-local`，UI 据此提示本地风险。
 
 ## Monitor 与 MCP 的管理入口
@@ -178,7 +178,7 @@ MCP 侧提供查询工具与受控重分析动作工具，但没有渠道/模型
 - `query_failures`、`summarize_failure_clusters`：失败 trace 与失败聚类。
 - `reanalyze_trace`、`reanalyze_session`：对单条 trace / 单个 session 运行或入队受控重分析（动作工具，不是只读查询）。
 
-CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe-apply`、`models codex-config`、`db secret status/export/rotate`。
+CLI 侧的管理入口包括 `server provider probe` / `probe-report` / `probe-apply`、`models codex-config`、`db secret status/export/rotate`。
 
 ## Replay 兼容性
 

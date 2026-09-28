@@ -1,8 +1,8 @@
 version: "3"
 
 vars:
-  BIN: trajecta
-  MIGRATE_BIN: trajecta-migrate
+  SERVER_BIN: server
+  CLI_BIN: trajecta
   CONFIG: '{{default "config/config.yaml" .CONFIG}}'
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo dev
@@ -163,10 +163,10 @@ tasks:
       - go mod tidy
 
   build:go:
-    desc: Build the server and migration binaries without rebuilding the UI
+    desc: Build the server and CLI binaries without rebuilding the UI
     cmds:
-      - go build -trimpath -ldflags="{{.LDFLAGS}}" -o {{.BIN}} ./cmd/server
-      - go build -trimpath -ldflags="{{.LDFLAGS}}" -o {{.MIGRATE_BIN}} ./cmd/trajecta-migrate
+      - go build -trimpath -ldflags="{{.LDFLAGS}}" -o {{.SERVER_BIN}} ./cmd/server
+      - go build -trimpath -ldflags="{{.LDFLAGS}}" -o {{.CLI_BIN}} ./cmd/trajecta
 
   build:all:
     desc: Build embedded UI and server binary
@@ -192,7 +192,7 @@ tasks:
   migrate:legacy:
     desc: Inspect a pre-rename deployment; pass ARGS="--apply" to write changes
     cmds:
-      - go run ./cmd/trajecta-migrate run -c {{.CONFIG}} {{default "" .ARGS}}
+      - go run ./cmd/trajecta upgrade -c {{.CONFIG}} {{default "" .ARGS}}
 
   auth:init-user:
     desc: Initialize an auth user, pass USER and PASSWORD
@@ -265,4 +265,4 @@ tasks:
   clean:
     desc: Remove local build artifacts
     cmds:
-      - rm -f {{.BIN}} {{.MIGRATE_BIN}}
+      - rm -f {{.SERVER_BIN}} {{.CLI_BIN}}

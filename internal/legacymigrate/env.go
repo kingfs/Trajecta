@@ -1,5 +1,5 @@
 // Package legacymigrate implements the one-off migration helpers used by the
-// trajecta-migrate binary: it loads pre-rename .env files, merges a legacy
+// trajecta CLI: it loads pre-rename .env files, merges a legacy
 // SQLite application database into Postgres, and rewrites or validates .http
 // cassettes.
 //

@@ -15,13 +15,13 @@
 #
 # Default mode is a dry run: nothing is written until you pass --apply.
 #
-# For a full migration prefer the dedicated binary `cmd/trajecta-migrate`
+# For a full migration prefer the CLI in `cmd/trajecta`
 # (`task build:go`), which maps the environment variables the same way but also
 # merges the legacy SQLite rows into Postgres, rewrites the cassette magic with
 # a worker pool, validates cassette structure and archives the SQLite files:
 #
-#     ./trajecta-migrate env            # read-only report, including this check
-#     ./trajecta-migrate run --apply
+#     ./trajecta upgrade env            # read-only report, including this check
+#     ./trajecta upgrade --apply
 #
 # This script stays useful for the .env-only path and for deployments that only
 # need the file rename. Its cassette stage starts one `head` process per file,
