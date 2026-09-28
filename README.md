@@ -7,7 +7,7 @@
 把真实的 LLM API 流量，变成可回放、可审计、可 review 的测试资产。
 
 [![Go CI](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml/badge.svg)](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/kingfs/Trajecta?color=blue)](https://github.com/kingfs/Trajecta/releases)
+[![Latest tag](https://img.shields.io/github/v/tag/kingfs/Trajecta?color=blue)](https://github.com/kingfs/Trajecta/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/kingfs/Trajecta)](./go.mod)
 

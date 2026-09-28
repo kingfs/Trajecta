@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- The README badge now reads the repository's tags (`github/v/tag`). The project publishes release tags without GitHub Releases, so the previous `github/v/release` badge rendered "no releases or repo not found", and it now also links to the tag list.
+
 <!-- Add entries here as changes land. -->
 
 ## [2.0.1] - 2026-09-28

@@ -7,7 +7,7 @@
 Turn real LLM API traffic into replayable, auditable, reviewable test assets.
 
 [![Go CI](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml/badge.svg)](https://github.com/kingfs/Trajecta/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/kingfs/Trajecta?color=blue)](https://github.com/kingfs/Trajecta/releases)
+[![Latest tag](https://img.shields.io/github/v/tag/kingfs/Trajecta?color=blue)](https://github.com/kingfs/Trajecta/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/kingfs/Trajecta)](./go.mod)
 
