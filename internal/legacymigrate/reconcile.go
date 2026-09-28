@@ -807,16 +807,16 @@ func pruneSupersededIndexRows(ctx context.Context, pg *sql.DB, tables, donors []
 
 // supersededPruneStatement removes a `logs` row only when every table that stores
 // a `logs.trace_id` stopped referencing it, so pruning a donor can never take
-// derived rows with it.
+// derived rows with it. An empty table list means the caller has no evidence at
+// all, so the statement is made a no-op instead of an unguarded delete.
 func supersededPruneStatement(tables []string) string {
-	conditions := make([]string, 0, len(tables))
+	conditions := make([]string, 0, len(tables)+1)
 	for _, table := range tables {
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s d WHERE d.trace_id = l.trace_id)", quoteIdent(table)))
 	}
-	where := "l.trace_id = ANY($1)"
-	if len(conditions) > 0 {
-		where += " AND " + strings.Join(conditions, " AND ")
+	if len(conditions) == 0 {
+		conditions = append(conditions, "FALSE")
 	}
-	return "DELETE FROM logs l WHERE " + where
+	return "DELETE FROM logs l WHERE l.trace_id = ANY($1) AND " + strings.Join(conditions, " AND ")
 }

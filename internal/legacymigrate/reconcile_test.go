@@ -228,6 +228,11 @@ func TestDuplicateDeleteStatement(t *testing.T) {
 	if !strings.HasPrefix(withoutIdentity, "DELETE FROM") {
 		t.Errorf("delete statement = %q, want a DELETE", withoutIdentity)
 	}
+	// Without any table to check, the statement must not delete anything.
+	unguarded := supersededPruneStatement(nil)
+	if !strings.Contains(unguarded, "AND FALSE") {
+		t.Errorf("prune statement without tables = %q, want an unconditional no-op guard", unguarded)
+	}
 }
 
 // TestReconcileSupersededIndexRowsIntegration proves the second repair a layout
