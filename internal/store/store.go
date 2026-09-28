@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -5306,25 +5307,25 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			routing_candidate_count=excluded.routing_candidate_count,
 			routing_failure_reason=excluded.routing_failure_reason
 	`,
-		path,
-		traceID,
+		sanitizeDBText(path),
+		sanitizeDBText(traceID),
 		info.ModTime().UnixNano(),
 		info.Size(),
-		header.Version,
-		header.Meta.RequestID,
+		sanitizeDBText(header.Version),
+		sanitizeDBText(header.Meta.RequestID),
 		header.Meta.Time.UTC().Format(timeLayout),
-		header.Meta.Model,
-		header.Meta.Provider,
-		header.Meta.Operation,
-		header.Meta.Endpoint,
-		header.Meta.URL,
-		header.Meta.Method,
+		sanitizeDBText(header.Meta.Model),
+		sanitizeDBText(header.Meta.Provider),
+		sanitizeDBText(header.Meta.Operation),
+		sanitizeDBText(header.Meta.Endpoint),
+		sanitizeDBText(header.Meta.URL),
+		sanitizeDBText(header.Meta.Method),
 		header.Meta.StatusCode,
 		header.Meta.DurationMs,
 		header.Meta.TTFTMs,
-		header.Meta.ClientIP,
+		sanitizeDBText(header.Meta.ClientIP),
 		header.Meta.ContentLength,
-		header.Meta.Error,
+		sanitizeDBText(header.Meta.Error),
 		header.Usage.PromptTokens,
 		header.Usage.CompletionTokens,
 		header.Usage.TotalTokens,
@@ -5334,24 +5335,24 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
 		header.Layout.IsStream,
-		grouping.SessionID,
-		grouping.SessionSource,
-		grouping.WindowID,
-		grouping.ClientRequestID,
-		header.Meta.RequestAuditID,
-		header.Meta.ResponseID,
-		header.Meta.ExchangeID,
-		header.Meta.ExchangeKind,
-		header.Meta.ExchangeRole,
-		header.Meta.ParentExchangeID,
+		sanitizeDBText(grouping.SessionID),
+		sanitizeDBText(grouping.SessionSource),
+		sanitizeDBText(grouping.WindowID),
+		sanitizeDBText(grouping.ClientRequestID),
+		sanitizeDBText(header.Meta.RequestAuditID),
+		sanitizeDBText(header.Meta.ResponseID),
+		sanitizeDBText(header.Meta.ExchangeID),
+		sanitizeDBText(header.Meta.ExchangeKind),
+		sanitizeDBText(header.Meta.ExchangeRole),
+		sanitizeDBText(header.Meta.ParentExchangeID),
 		header.Meta.SequenceIndex,
-		header.Meta.SelectedUpstreamID,
-		header.Meta.SelectedUpstreamBaseURL,
-		header.Meta.SelectedUpstreamProviderPreset,
-		header.Meta.RoutingPolicy,
+		sanitizeDBText(header.Meta.SelectedUpstreamID),
+		sanitizeDBText(header.Meta.SelectedUpstreamBaseURL),
+		sanitizeDBText(header.Meta.SelectedUpstreamProviderPreset),
+		sanitizeDBText(header.Meta.RoutingPolicy),
 		header.Meta.RoutingScore,
 		header.Meta.RoutingCandidateCount,
-		header.Meta.RoutingFailureReason,
+		sanitizeDBText(header.Meta.RoutingFailureReason),
 	)
 
 	if err != nil {
@@ -6614,9 +6615,12 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 				WHEN system_events.status = 'ignored' THEN system_events.resolved_at
 				ELSE NULL
 			END
-	`, event.ID, event.Fingerprint, event.Source, event.Category, event.Severity, event.Status,
-		textPreview(event.Title, 300), textPreview(event.Message, 2000), detailsJSON,
-		event.TraceID, event.SessionID, event.JobID, event.UpstreamID, event.Model, event.OccurrenceCount,
+	`, sanitizeDBText(event.ID), sanitizeDBText(event.Fingerprint), sanitizeDBText(event.Source),
+		sanitizeDBText(event.Category), sanitizeDBText(event.Severity), sanitizeDBText(event.Status),
+		sanitizeDBText(textPreview(event.Title, 300)), sanitizeDBText(textPreview(event.Message, 2000)),
+		sanitizeDBText(detailsJSON),
+		sanitizeDBText(event.TraceID), sanitizeDBText(event.SessionID), sanitizeDBText(event.JobID),
+		sanitizeDBText(event.UpstreamID), sanitizeDBText(event.Model), event.OccurrenceCount,
 		event.FirstSeenAt, event.LastSeenAt, event.CreatedAt, event.UpdatedAt)
 	if err != nil {
 		return SystemEvent{}, err
@@ -8655,7 +8659,34 @@ func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (Grou
 	return extractGroupingInfoFromRequest(reqFull)
 }
 
+// sanitizeDBText drops bytes that Postgres rejects in a text column. A cassette
+// is a byte-for-byte copy of what the upstream and the client exchanged, so a
+// recorded header value can contain a NUL byte (0x00) or invalid UTF-8; storing
+// it verbatim fails the whole statement, and one such recording must not abort
+// the entire index sync. NUL has no valid use in text, and invalid sequences
+// carry no information that survives the database, so both are removed.
+func sanitizeDBText(value string) string {
+	if utf8.ValidString(value) && !strings.ContainsRune(value, 0) {
+		return value
+	}
+	return strings.ToValidUTF8(strings.ReplaceAll(value, "\x00", ""), "")
+}
+
+// extractGroupingInfoFromRequest sanitizes the grouping identifiers it derives
+// from request headers: they are stored as text and are used as grouping keys.
 func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
+	info, err := extractGroupingInfoFromRequestRaw(reqFull)
+	if err != nil {
+		return info, err
+	}
+	info.SessionID = sanitizeDBText(info.SessionID)
+	info.SessionSource = sanitizeDBText(info.SessionSource)
+	info.WindowID = sanitizeDBText(info.WindowID)
+	info.ClientRequestID = sanitizeDBText(info.ClientRequestID)
+	return info, nil
+}
+
+func extractGroupingInfoFromRequestRaw(reqFull []byte) (GroupingInfo, error) {
 	headers := parseRawRequestHeaders(reqFull)
 	info := GroupingInfo{
 		WindowID:        strings.TrimSpace(headers.Get("X-Codex-Window-Id")),

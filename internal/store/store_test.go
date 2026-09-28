@@ -3098,6 +3098,102 @@ func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 	}
 }
 
+func TestSyncSanitizesBytesPostgresCannotStore(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	// A cassette is a byte-for-byte copy of an exchange, so a recorded header or
+	// an upstream error can contain a NUL byte. Postgres rejects NUL in text, and
+	// before sanitization a single such recording aborted the entire Sync walk.
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "sanitize",
+			Time:          time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC),
+			Model:         "gpt\x00-test",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    500,
+			DurationMs:    12,
+			TTFTMs:        4,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 2,
+			Error:         "upstream said \x00 boom",
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession-Id: sess\x00nul\r\n\r\n"),
+			ReqBodyLen:   len64(`{"x":1}`),
+			ResHeaderLen: len64("HTTP/1.1 500 Internal Server Error\r\n\r\n"),
+			ResBodyLen:   len64(`{}`),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	content := string(prelude) +
+		"POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession-Id: sess\x00nul\r\n\r\n" +
+		`{"x":1}` + "\n" +
+		"HTTP/1.1 500 Internal Server Error\r\n\r\n{}"
+	path := filepath.Join(dir, "nul.http")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	var sessionID, model, errorText string
+	if err := st.db.QueryRow(`SELECT session_id, model, error_text FROM logs`).Scan(&sessionID, &model, &errorText); err != nil {
+		t.Fatalf("read logs row: %v", err)
+	}
+	if sessionID != "sessnul" {
+		t.Fatalf("session_id = %q, want the NUL stripped (sessnul)", sessionID)
+	}
+	if model != "gpt-test" {
+		t.Fatalf("model = %q, want the NUL stripped (gpt-test)", model)
+	}
+	if errorText != "upstream said  boom" {
+		t.Fatalf("error_text = %q, want the NUL stripped", errorText)
+	}
+
+	var message string
+	if err := st.db.QueryRow(`SELECT message FROM system_events`).Scan(&message); err != nil {
+		t.Fatalf("read system_events row: %v", err)
+	}
+	if strings.ContainsRune(message, 0) {
+		t.Fatalf("system_events.message still carries a NUL byte: %q", message)
+	}
+}
+
+func TestSanitizeDBText(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "plain", input: "deepseek-flash", want: "deepseek-flash"},
+		{name: "empty", input: "", want: ""},
+		{name: "nul", input: "sess\x00-1", want: "sess-1"},
+		{name: "nul only", input: "\x00\x00", want: ""},
+		{name: "invalid utf8", input: "bad\xffbyte", want: "badbyte"},
+		{name: "truncated rune", input: "tail\xe2\x82", want: "tail"},
+		{name: "unicode kept", input: "模型-\u00e9", want: "模型-\u00e9"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeDBText(tc.input); got != tc.want {
+				t.Fatalf("sanitizeDBText(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExtractGroupingInfoPrefersSessionIDHeader(t *testing.T) {
 	req := []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession-Id: sess-123\r\nX-Codex-Window-Id: sess-123:0\r\nX-Client-Request-Id: req-123\r\n\r\n{}")
 	info, err := extractGroupingInfoFromRequest(req)
