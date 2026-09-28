@@ -81,7 +81,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 - **布尔**：旧库用 `numeric` 存布尔，`0/1`、`true/false`、`yes/no`、`t/f` 都能转换。
 - **自增主键**：Postgres 的 identity 列由数据库生成，值按源数据写入；写完一张表后，工具会把对应序列推进到不小于 `MAX(列)`，且**绝不回退**（例如 `channel_models` 的 `START WITH 47244640256` 不会被拉低）。
 - **源库记账表跳过**：`schema_migrations`、`app_schema_status` 属于源库自身的迁移记账，不迁移。
-- **迁移后校验**：每张表写完后会把源库主键流式取出，逐个确认在 Postgres 中存在；缺失数不为 0 时以退出码 1 结束。`--verify-only` 只做这项校验而不写任何数据（`sqlite archive` 的归档闸门就是它）。插入用的是 `ON CONFLICT DO NOTHING`，任何唯一键命中都会跳过该行，所以校验也按同一语义比对：先比 Postgres 主键，未命中的行再比该表的**其它唯一键**（完整、非部分、非表达式索引，主键优先）。通过次级唯一键命中的行计入 `alt_key_matched` 并在报告中单独列出（例如服务已用自增主键建过同一 `username` / `token_hash` / `(upstream_id, model)`，旧行因此带着旧代理主键），不算缺失；只有**任何**唯一键都不命中的行才计入 `missing_keys`。`logs` 的唯一键 `trace_id` 让 `layout apply` 改写过 `logs.path` 的库也能对账。
+- **迁移后校验**：每张表写完后会把源库主键流式取出，逐个确认在 Postgres 中存在；缺失数不为 0 时以退出码 1 结束。`--verify-only` 只做这项校验而不写任何数据（`sqlite archive` 的归档闸门就是它）。插入用的是 `ON CONFLICT DO NOTHING`，任何唯一键命中都会跳过该行，所以校验也按同一语义比对：先比 Postgres 主键，未命中的行再比该表的**其它唯一键**（完整、非部分、非表达式索引，主键优先）。通过次级唯一键命中的行计入 `alt_key_matched` 并在报告中单独列出（例如服务已用自增主键建过同一 `username` / `token_hash` / `(upstream_id, model)`，旧行因此带着旧代理主键），不算缺失；只有**任何**唯一键都不命中的行才计入 `missing_keys`。`logs` 的唯一键 `trace_id` 让 `layout apply` 改写过 `logs.path` 的库也能对账。校验分两遍：第一遍只流式取主键列（命中主键索引，代价与只看主键时相同），只有主键未命中的行才回查次级唯一键的列。这样即使表上还有别的唯一索引（例如 `semantic_nodes` 除主键 `id` 外还有 `(trace_id, node_id)`），也不会因为要一次取出所有键列的并集而失去覆盖索引、退化成全表扫描；除主键外没有任何可用唯一键时，仍以复制阶段的行数记账作为闸门。
 - **并发**：表之间按外键依赖分波并行（当前 schema 里唯一的外键是 `api_tokens.user_tokens → users.id`），行按批（`--batch-size`，默认 500）插入；批内出现数据异常或唯一键冲突时，该批会退化为逐行隔离，只把真正失败的行计入 `failed`。
 
 常用参数：`--table` / `--skip-table`（可重复）、`--batch-size`、`--jobs`、`--sqlite`（显式指定库文件，可重复）、`--sqlite-open auto|ro|immutable|rw`。
