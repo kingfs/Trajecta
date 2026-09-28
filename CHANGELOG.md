@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- The docs tree was consolidated from 43 files into 13 current-fact Chinese documents plus `docs/protocol-reference/`: `IMPLEMENTATION_STATUS.md`, `ARCHITECTURE.md`, `PROTOCOLS_AND_PROVIDERS.md`, `ROUTING_AND_CREDENTIALS.md`, `RESPONSES_RUNTIME.md`, `OBSERVATION_AND_AUDIT.md`, `STORAGE_AND_DEPLOYMENT.md` and `DEVELOPMENT.md` were added, `MONITOR_GUIDE.md`, `MCP_GUIDE.md` and `PROXY_USAGE_EXAMPLES.md` were rewritten against the current UI routes, MCP tools and proxy entrypoints, and every roadmap, phase, milestone and progress claim was dropped in favour of current code facts.
+- The docs tree was consolidated from 43 files into 13 current-fact Chinese documents plus `docs/protocol-reference/`: `IMPLEMENTATION_STATUS.md`, `PROTOCOLS_AND_PROVIDERS.md`, `ROUTING_AND_CREDENTIALS.md`, `RESPONSES_RUNTIME.md`, `OBSERVATION_AND_AUDIT.md`, `STORAGE_AND_DEPLOYMENT.md`, `DEVELOPMENT.md` and `POSTGRES_OPERATIONS.md` were added, `ARCHITECTURE.md`, `MONITOR_GUIDE.md`, `MCP_GUIDE.md` and `PROXY_USAGE_EXAMPLES.md` were rewritten against the current UI routes, MCP tools and proxy entrypoints, and every roadmap, phase, milestone and progress claim was dropped in favour of current code facts.
 - The embedded Monitor UI bundle was rebuilt from the renamed sources.
 - Documentation corrected against the code: `db migrate down` and `auth migrate down` exit with usage code 3, `AutoMigrate: false` applies to Postgres only, the exact `analyze backfill-exchanges` column set, the written `exchange_kind`/`exchange_role` value sets, and the stable channel id rule.
 - YAML keys that no config field reads are now warned about at startup, and unknown `limits.scope` values plus a header scope without `limits.channel_key_header` are rejected at load time.
@@ -153,7 +153,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Fixed
 
 - Unsupported hosted response tools are rejected instead of being forwarded.
-- The Responses gateway Compose smoke path was hardened, the default gateway config is inspectable, manual provider setup no longer requires validation, and a missing or wrong Responses chat backend is a warning rather than a startup failure.
+- The Responses gateway Compose smoke path was hardened, the default gateway config is inspectable, manual provider setup no longer requires validation; a missing or wrong Responses chat backend fails startup validation while `responses_server.enabled` is on.
 - Docker build proxy environment handling was normalized.
 
 ## [1.0.8] - 2026-06-16
@@ -304,7 +304,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
-- A read-only MCP server over streamable HTTP with auth tokens and a narrowed tool surface: replay tools, dataset curation, persisted experiment runs with baselines, scores and comparison, versioned evaluator profiles, deterministic budget evaluators, a tool-call conformance evaluator, experiment regression clustering, summaries and explanations, dataset creation from regressions, and trace failure clustering.
+- A read-only MCP server over streamable HTTP with auth tokens and a narrowed tool surface: replay tools, dataset curation, persisted experiment runs with baselines, scores and comparison, versioned evaluator profiles, deterministic budget evaluators, a tool-call conformance evaluator, summaries and explanations, dataset creation from regressions, and trace failure clustering.
 - Model list aggregation and routing across upstreams, and token access control.
 - Core performance benchmarks and a development command matrix.
 
