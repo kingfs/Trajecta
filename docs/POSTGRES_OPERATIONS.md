@@ -445,6 +445,30 @@ Trajecta 热表优先级：
 - `analysis_jobs`、`analysis_runs`、`trace_observations`、`trace_findings`、`system_events`：重分析、findings、Monitor summary。
 - `channel_configs`、`channel_models`、`model_catalog`、`model_aliases`：routing/model 管理读路径。
 
+## 大表聚合的内存与并行度
+
+`/dev/shm` 决定并行查询能申请多少共享内存。容器默认只有 64 MB，`work_mem` 给得高、并行 worker 又多时，hash 聚合会直接失败：
+
+```text
+pq: could not resize shared memory segment "/PostgreSQL.4213527324" to 67244032 bytes: No space left on device (53100)
+```
+
+派生表修复（`trajecta upgrade db --reconcile-derived-trace-ids`）在一次真实运行中就是这样失败的：`work_mem=256MB` 配 6 个 worker 需要 67 MB 的段，超过 64 MB。同一份数据（`semantic_nodes` 7400 万行、总大小 120 GB、堆 55 GB，`trace_id` 上有 `(trace_id, depth, node_index)` 索引）的实测：
+
+| 会话设置 | 结果 |
+| --- | --- |
+| 默认 `work_mem=4MB`、`max_parallel_workers_per_gather=2` | `DISTINCT trace_id` 反连接超过 45 分钟未结束，`pg_stat_database.temp_bytes` 持续增长（排序溢出到磁盘） |
+| `work_mem=32MB`、`max_parallel_workers_per_gather=1` | 5 分钟窗口内新增临时文件 0 MB，扫描约 25 分钟完成 |
+| `work_mem=256MB`、`max_parallel_workers_per_gather=6` | 不再溢写，但并行段超过 64 MB 的 `/dev/shm` 而报错 |
+
+可用两种方式解决：只对重活调「中等 `work_mem` + 少量并行」，或给 `postgres` 服务显式设置 `shm_size`（官方镜像建议不小于 1 GB）后再提高并行度。前者不需要改全局配置，例如在 DSN 上追加：
+
+```text
+options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D1
+```
+
+判断是否仍在溢写要看增量而不是累计值：`pg_stat_database.temp_bytes` 是自统计重置以来的累计量，前后两次采样相减才说明当前语句有没有落盘。
+
 ## 并发索引变更
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。
