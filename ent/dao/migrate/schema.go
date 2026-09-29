@@ -439,6 +439,11 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{ParseJobsColumns[2], ParseJobsColumns[6]},
 			},
+			{
+				Name:    "parsejob_trace_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{ParseJobsColumns[1], ParseJobsColumns[2]},
+			},
 		},
 	}
 	// ParserVersionsColumns holds the columns for the "parser_versions" table.
