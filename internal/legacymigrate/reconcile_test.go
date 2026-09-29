@@ -212,14 +212,20 @@ func reconcileTestTable(t *testing.T, report *ReconcileReport, table string) Der
 }
 
 // TestDuplicateDeleteStatement pins the shape of the two statements the repair
-// relies on: the identity comparison must survive NULL values, and a table whose
-// key is only the trace id has to treat every row as the same identity.
+// relies on, and the comparison that decides whether the identity match can use
+// an index: a NOT NULL column must use `=` because `IS NOT DISTINCT FROM` is not
+// an index condition, which makes the planner read every row of the mapped trace
+// for every candidate row. A nullable column keeps the NULL-safe form.
 func TestDuplicateDeleteStatement(t *testing.T) {
-	withIdentity := duplicateDeleteStatement("semantic_nodes", []string{"node_id"}, true)
-	for _, want := range []string{"count(*)", "semantic_nodes", "unnest($1::text[], $2::text[])", `c."node_id" IS NOT DISTINCT FROM d."node_id"`} {
+	withIdentity := duplicateDeleteStatement("semantic_nodes", []identityColumn{{Name: "node_id", NotNull: true}}, true)
+	for _, want := range []string{"count(*)", "semantic_nodes", "unnest($1::text[], $2::text[])", `c."node_id" = d."node_id"`} {
 		if !strings.Contains(withIdentity, want) {
 			t.Errorf("count statement %q does not contain %q", withIdentity, want)
 		}
+	}
+	nullableIdentity := duplicateDeleteStatement("semantic_nodes", []identityColumn{{Name: "node_id"}}, true)
+	if !strings.Contains(nullableIdentity, `c."node_id" IS NOT DISTINCT FROM d."node_id"`) {
+		t.Errorf("nullable identity statement %q does not keep the NULL-safe comparison", nullableIdentity)
 	}
 	withoutIdentity := duplicateDeleteStatement("trace_observations", nil, false)
 	if !strings.Contains(withoutIdentity, "AND EXISTS (SELECT 1 FROM") || !strings.Contains(withoutIdentity, "AND TRUE") {

@@ -512,7 +512,7 @@ func reconcileTable(ctx context.Context, pg *sql.DB, table string, orphans []str
 		result.Err = err.Error()
 		return result
 	}
-	result.IdentityKeys = identity
+	result.IdentityKeys = identityNames(identity)
 
 	type pair struct{ legacy, current string }
 	pairs := make([]pair, 0, len(orphans))
@@ -576,31 +576,104 @@ func reconcileTable(ctx context.Context, pg *sql.DB, table string, orphans []str
 	return result
 }
 
+// identityColumn is one column of a derived table's identity key. NotNull is
+// carried along because it decides which comparison the duplicate match may use:
+// a btree index can serve `=`, while `IS NOT DISTINCT FROM` is not an index
+// condition at all and makes the planner fetch every row of the mapped trace for
+// every candidate row.
+type identityColumn struct {
+	Name    string
+	NotNull bool
+}
+
+// operator is the NULL-aware comparison to use against the same column of the
+// mapped trace. For a NOT NULL column it is plain equality, which the unique key
+// (trace_id, identity...) can answer with one index probe per candidate row.
+func (c identityColumn) operator() string {
+	if c.NotNull {
+		return "="
+	}
+	return "IS NOT DISTINCT FROM"
+}
+
 // traceIdentityColumns returns the columns that identify a row of a derived
-// table independently of its trace id.
-func traceIdentityColumns(ctx context.Context, pg *sql.DB, table string) ([]string, error) {
+// table independently of its trace id, together with their nullability.
+func traceIdentityColumns(ctx context.Context, pg *sql.DB, table string) ([]identityColumn, error) {
 	sets, err := uniqueKeySets(ctx, pg, table)
 	if err != nil {
 		return nil, err
 	}
 	for _, set := range sets {
 		hasTrace := false
-		identity := make([]string, 0, len(set.Names))
+		names := make([]string, 0, len(set.Names))
 		for _, name := range set.Names {
 			if name == "trace_id" {
 				hasTrace = true
 				continue
 			}
-			identity = append(identity, name)
+			names = append(names, name)
 		}
 		if hasTrace {
-			return identity, nil
+			return identityColumns(ctx, pg, table, names)
 		}
 	}
 	return nil, nil
 }
 
-func countDuplicateRows(ctx context.Context, pg *sql.DB, table string, identity, legacy, current []string) (int64, error) {
+// identityColumns keeps the declared order of the identity key and records which
+// of its columns are declared NOT NULL.
+func identityColumns(ctx context.Context, pg *sql.DB, table string, names []string) ([]identityColumn, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := pg.QueryContext(ctx, `
+		SELECT a.attname, a.attnotnull
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = current_schema()
+		  AND c.relname = $1
+		  AND a.attnum > 0
+		  AND NOT a.attisdropped
+		  AND a.attname = ANY($2)`, table, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notNull := make(map[string]bool, len(names))
+	for rows.Next() {
+		var (
+			name     string
+			required bool
+		)
+		if err := rows.Scan(&name, &required); err != nil {
+			return nil, err
+		}
+		notNull[name] = required
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	columns := make([]identityColumn, 0, len(names))
+	for _, name := range names {
+		columns = append(columns, identityColumn{Name: name, NotNull: notNull[name]})
+	}
+	return columns, nil
+}
+
+// identityNames renders the identity key for reports.
+func identityNames(identity []identityColumn) []string {
+	if len(identity) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(identity))
+	for _, column := range identity {
+		names = append(names, column.Name)
+	}
+	return names
+}
+
+func countDuplicateRows(ctx context.Context, pg *sql.DB, table string, identity []identityColumn, legacy, current []string) (int64, error) {
 	var count int64
 	err := pg.QueryRowContext(ctx, duplicateDeleteStatement(table, identity, true),
 		legacy, current).Scan(&count)
@@ -613,12 +686,13 @@ func countDuplicateRows(ctx context.Context, pg *sql.DB, table string, identity,
 // duplicateDeleteStatement builds the statement that removes the orphan rows
 // whose identity already exists under the mapped id. With countOnly it counts
 // them instead, so a dry run reports exactly what an apply would delete.
-func duplicateDeleteStatement(table string, identity []string, countOnly bool) string {
+func duplicateDeleteStatement(table string, identity []identityColumn, countOnly bool) string {
 	match := "TRUE"
 	if len(identity) > 0 {
 		conditions := make([]string, 0, len(identity))
-		for _, name := range identity {
-			conditions = append(conditions, fmt.Sprintf("c.%s IS NOT DISTINCT FROM d.%s", quoteIdent(name), quoteIdent(name)))
+		for _, column := range identity {
+			conditions = append(conditions, fmt.Sprintf("c.%s %s d.%s",
+				quoteIdent(column.Name), column.operator(), quoteIdent(column.Name)))
 		}
 		match = strings.Join(conditions, " AND ")
 	}
@@ -639,7 +713,7 @@ func remapStatement(table string) string {
 // applyBatch deletes one batch of duplicates and moves the remaining rows. The
 // two statements share a transaction, and a conflict during the update falls
 // back to per-pair handling so a single stubborn row cannot stop the run.
-func applyBatch(ctx context.Context, pg *sql.DB, table string, identity, legacy, current []string) error {
+func applyBatch(ctx context.Context, pg *sql.DB, table string, identity []identityColumn, legacy, current []string) error {
 	tx, err := pg.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -657,7 +731,7 @@ func applyBatch(ctx context.Context, pg *sql.DB, table string, identity, legacy,
 
 // remapOneByOne retries a failing batch pair by pair, keeping the pairs that
 // still conflict exactly as they are.
-func remapOneByOne(ctx context.Context, pg *sql.DB, table string, identity, legacy, current []string) error {
+func remapOneByOne(ctx context.Context, pg *sql.DB, table string, identity []identityColumn, legacy, current []string) error {
 	for i := range legacy {
 		l := []string{legacy[i]}
 		c := []string{current[i]}
