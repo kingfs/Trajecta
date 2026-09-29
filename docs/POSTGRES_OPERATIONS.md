@@ -471,6 +471,23 @@ options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D1
 
 这个上限不只影响大表。在默认 64 MB 下，只要多个会话同时使用并行 hash 节点，`logs` 这种 26 万行量级的普通 `count(*)` 也会报同一个 `No space left on device`——修复期间实测被拒两次，其中一次只申请 8 MB。所以给 `postgres` 服务设置 `shm_size: 1g` 并重建容器，是这台机器上比任何会话级 `work_mem` 调整都更根本的修法；会话级设置只能保证「本次会话不占用共享内存」，挡不住同一实例上并发的其它会话。
 
+## 派生表修复里最容易踩的一条：`IS NOT DISTINCT FROM` 不走索引
+
+`IS NOT DISTINCT FROM` **不能作为 btree 索引条件**。用它比较派生表的身份列时，规划器只会保留 `trace_id` 进 `Index Cond`，其余列退化成 join filter，于是每个候选行都要把对端 trace 的**全部**节点取回来再逐行丢弃，代价是 O(候选行 × 对端 trace 行数)。
+
+实测：`semantic_nodes` 有 7,400 万行、29,253 个不同 trace id，平均每个 trace id 2,530 行。一批 200 个 id 的重复计数因此要跑 **46 分钟以上**，而同一表达式还用在 `DELETE` 上，只会更慢。身份列都是 `NOT NULL`，改用 `=` 语义完全等价，计数变成两列 index-only 探测、删除变成 `Index Scan`，同一对 id 从 462 ms 降到 0.255 ms：
+
+```
+-- 改前
+Join Filter: (NOT ((c.node_id)::text IS DISTINCT FROM (d.node_id)::text))
+  Rows Removed by Join Filter: 171
+  Index Cond: (trace_id = m.current)                       -- node_id 没进索引条件
+-- 改后
+  Index Cond: ((trace_id = m.current) AND (node_id = (d.node_id)::text))
+```
+
+判断方法就是看 `EXPLAIN`：`Index Cond` 里必须出现你要比较的每一列；只有 `trace_id` 出现、另一列出现在 `Filter`/`Join Filter` 里，就是这个问题。代码侧由 `internal/legacymigrate` 从 `pg_attribute.attnotnull` 取可空性，只有真正可空的身份列才退回 NULL 安全写法。
+
 ## 并发索引变更
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。
