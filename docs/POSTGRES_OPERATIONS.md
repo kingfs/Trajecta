@@ -469,6 +469,8 @@ options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D1
 
 判断是否仍在溢写要看增量而不是累计值：`pg_stat_database.temp_bytes` 是自统计重置以来的累计量，前后两次采样相减才说明当前语句有没有落盘。
 
+这个上限不只影响大表。在默认 64 MB 下，只要多个会话同时使用并行 hash 节点，`logs` 这种 26 万行量级的普通 `count(*)` 也会报同一个 `No space left on device`——修复期间实测被拒两次，其中一次只申请 8 MB。所以给 `postgres` 服务设置 `shm_size: 1g` 并重建容器，是这台机器上比任何会话级 `work_mem` 调整都更根本的修法；会话级设置只能保证「本次会话不占用共享内存」，挡不住同一实例上并发的其它会话。
+
 ## 并发索引变更
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。
