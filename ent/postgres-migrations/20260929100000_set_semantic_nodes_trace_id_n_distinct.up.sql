@@ -1,19 +1,30 @@
 -- Pin the distinct-value estimate for "semantic_nodes"."trace_id".
 --
--- The planner estimated 29,253 distinct trace ids for a table with ~74M rows.
--- That is a sampling artifact rather than staleness: ANALYZE samples ~30k rows,
--- and a high-cardinality column cannot show more distinct values than the
--- sample has rows, so re-running ANALYZE cannot fix it. With that estimate the
--- derived-trace-id repair's orphan anti-join looks cheap as a nested loop (one
--- "logs" index probe per distinct id). It actually needs ~8.9M probes, and
--- because the outer side scans a 7.4 GB index the whole time, the 21 MB
--- "logs_trace_id_key" index is continuously evicted from the buffer cache, so
--- each probe becomes a random disk read: ~29 hours instead of the ~10 minutes
--- the merge anti join needs. The same estimate feeds the monitor's own
--- planning.
+-- The planner used 29,253 distinct trace ids for a table of ~74M rows, and
+-- that one number decided how long the derived-trace-id repair took. It is a
+-- sampling artifact rather than staleness: ANALYZE samples ~30k rows, and a
+-- high-cardinality column cannot show more distinct values than the sample has
+-- rows, so re-running ANALYZE always lands near 30k.
+--
+-- The true value follows from a strict bound. "logs"."trace_id" is unique and
+-- has 248,164 rows, so at most 248,164 distinct ids in "semantic_nodes" can
+-- exist in "logs"; a TABLESAMPLE SYSTEM (0.001) probe found 66 of 77 sampled
+-- distinct ids present (86%), so D ~= 248,164 / 0.86 ~= 289k, i.e. ~0.39% of
+-- rows. A page-sample extrapolation had claimed ~8.9M from 73,488 sampled rows
+-- with 8,874 distinct ids, but page sampling systematically over-counts
+-- distinctness when one trace's rows span many pages, and the bound above
+-- refutes that magnitude.
+--
+-- Why it matters: at 29,253 the orphan anti-join's two candidate plans were
+-- within 0.04% of each other (6,072,730 for the Nested Loop Anti Join against
+-- 6,075,165 for the serial Merge Anti Join) and the planner picked the nested
+-- loop. That plan probes "logs_trace_id_key" once per distinct id while
+-- scanning a 7.4 GB index, so the small logs index is evicted from the buffer
+-- cache continuously and every probe becomes a random disk read: that run was
+-- stopped after 193 minutes with the scan still unfinished. With the estimate
+-- corrected the Merge Anti Join wins by ~7% (serial) to ~17% (parallel) and
+-- completed the same scan in 77 minutes.
 --
 -- A negative value means "fraction of rows", so the estimate tracks table
--- growth instead of going stale. The fraction is measured: TABLESAMPLE
--- SYSTEM (0.1) returned 8,874 distinct ids out of 73,488 rows, so roughly
--- 12% of rows carry a distinct trace id.
-ALTER TABLE "semantic_nodes" ALTER COLUMN "trace_id" SET (n_distinct = -0.12);
+-- growth instead of going stale.
+ALTER TABLE "semantic_nodes" ALTER COLUMN "trace_id" SET (n_distinct = -0.004);
