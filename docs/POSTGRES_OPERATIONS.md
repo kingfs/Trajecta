@@ -453,18 +453,29 @@ Trajecta 热表优先级：
 pq: could not resize shared memory segment "/PostgreSQL.4213527324" to 67244032 bytes: No space left on device (53100)
 ```
 
-派生表修复（`trajecta upgrade db --reconcile-derived-trace-ids`）在一次真实运行中就是这样失败的：`work_mem=256MB` 配 6 个 worker 需要 67 MB 的段，超过 64 MB。同一份数据（`semantic_nodes` 7400 万行、总大小 120 GB、堆 55 GB，`trace_id` 上有 `(trace_id, depth, node_index)` 索引）的实测：
+派生表修复（`trajecta upgrade db --reconcile-derived-trace-ids`）在一次真实运行中就是这样失败的，而且当时 `work_mem` 还是默认的 4 MB——申请的段只有 8 MB 也被拒，所以 64 MB 的 `/dev/shm` 对任何并行度都偏小。同一份数据（`semantic_nodes` 7400 万行、总大小 120 GB、堆 55 GB，`trace_id` 上有 `(trace_id, depth, node_index)` 索引）的实测：
 
-| 会话设置 | 结果 |
+| 观察 | 结果 |
 | --- | --- |
-| 默认 `work_mem=4MB`、`max_parallel_workers_per_gather=2` | `DISTINCT trace_id` 反连接超过 45 分钟未结束，`pg_stat_database.temp_bytes` 持续增长（排序溢出到磁盘） |
-| `work_mem=32MB`、`max_parallel_workers_per_gather=1` | 5 分钟窗口内新增临时文件 0 MB，扫描约 25 分钟完成 |
-| `work_mem=256MB`、`max_parallel_workers_per_gather=6` | 不再溢写，但并行段超过 64 MB 的 `/dev/shm` 而报错 |
+| 默认 `work_mem=4MB`、`max_parallel_workers_per_gather=2` | `DISTINCT trace_id` 反连接长时间不结束，`pg_stat_database.temp_bytes` 持续增长（排序溢出到磁盘） |
+| 并行段申请 | 超过 64 MB 的 `/dev/shm` 时直接报错结束，与 `work_mem` 高低无关 |
 
-可用两种方式解决：只对重活调「中等 `work_mem` + 少量并行」，或给 `postgres` 服务显式设置 `shm_size`（官方镜像建议不小于 1 GB）后再提高并行度。前者不需要改全局配置，例如在 DSN 上追加：
+**这些参数不能通过 DSN 的 `options` 传递。** 本项目的 Postgres 驱动是 `github.com/lib/pq`，它不转发 DSN 里的 `options`；同一串 DSN 在 `libpq`（`psql`）下生效，经应用连接时被静默忽略——所以「换个 DSN 就调好了」是错觉，用它解释运行快慢也会得出错误结论：
 
 ```text
-options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D1
+# psql（libpq）读到 32MB / 0
+psql "postgres://…/llm_tracelab?sslmode=disable&options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D0" \
+  -c "select current_setting('work_mem'), current_setting('max_parallel_workers_per_gather')"
+# 应用连接（lib/pq）仍是 4MB / 2，复核正在运行的会话即可看到：
+select current_setting('work_mem'), current_setting('max_parallel_workers_per_gather')
+from pg_stat_activity where pid = <pid>;
+```
+
+会话级调参要么写进 `postgresql.conf`／容器启动参数，要么按库或角色设置——服务端在建立连接时施加，与驱动无关，实测可即时生效也可即时撤销：
+
+```sql
+ALTER DATABASE llm_tracelab SET work_mem = '32MB';
+-- 撤销：ALTER DATABASE llm_tracelab RESET work_mem;
 ```
 
 判断是否仍在溢写要看增量而不是累计值：`pg_stat_database.temp_bytes` 是自统计重置以来的累计量，前后两次采样相减才说明当前语句有没有落盘。
