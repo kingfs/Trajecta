@@ -471,6 +471,8 @@ options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D1
 
 这个上限不只影响大表。在默认 64 MB 下，只要多个会话同时使用并行 hash 节点，`logs` 这种 26 万行量级的普通 `count(*)` 也会报同一个 `No space left on device`——修复期间实测被拒两次，其中一次只申请 8 MB。所以给 `postgres` 服务设置 `shm_size: 1g` 并重建容器，是这台机器上比任何会话级 `work_mem` 调整都更根本的修法；会话级设置只能保证「本次会话不占用共享内存」，挡不住同一实例上并发的其它会话。
 
+枚举 `DISTINCT trace_id` 没有更省 I/O 的替代写法。常见想法是用递归 CTE 做松散索引扫描（每次取 `WHERE trace_id > 上一个值 ORDER BY trace_id LIMIT 1`），它确实有效——索引下降会直接跳过同一个 trace 的全部重复项，头 1 万次迭代只要 162 ms（约 16 µs/次）——但到 20 万次迭代就超过 200 秒：每次跳跃要跨过约 50 个叶页，于是退化成一次**随机**叶页读，在这台盘上比顺序读取整个 7.4 GB 索引更贵。所以孤儿扫描保持顺序全扫，约 167 分钟是一次性真实 I/O，不是缺索引造成的；给 `semantic_nodes` 再补单列索引也只能把顺序读量减半，抵不过一次 74M 行的建索引成本。
+
 ## 派生表修复里最容易踩的一条：`IS NOT DISTINCT FROM` 不走索引
 
 `IS NOT DISTINCT FROM` **不能作为 btree 索引条件**。用它比较派生表的身份列时，规划器只会保留 `trace_id` 进 `Index Cond`，其余列退化成 join filter，于是每个候选行都要把对端 trace 的**全部**节点取回来再逐行丢弃，代价是 O(候选行 × 对端 trace 行数)。
@@ -487,6 +489,21 @@ Join Filter: (NOT ((c.node_id)::text IS DISTINCT FROM (d.node_id)::text))
 ```
 
 判断方法就是看 `EXPLAIN`：`Index Cond` 里必须出现你要比较的每一列；只有 `trace_id` 出现、另一列出现在 `Filter`/`Join Filter` 里，就是这个问题。代码侧由 `internal/legacymigrate` 从 `pg_attribute.attnotnull` 取可空性，只有真正可空的身份列才退回 NULL 安全写法。
+
+## 派生表修复里第二容易踩的一条：schema 缺了以 `trace_id` 打头的索引
+
+Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两个索引，没有任何以 `trace_id` 打头的索引；而同一张表在 SQLite 启动 schema 里一直有 `idx_parse_jobs_status_trace`，也就是这个形状**从来没有跟着进 Postgres 迁移**。于是所有按 trace id 取解析任务的查询都只能全表扫：Monitor 的 trace 详情、派生表修复的 `trace_id = ANY(...)` 与去重、以及 `--prune-superseded-index-rows` 的 `NOT EXISTS (… d.trace_id = l.trace_id)` 守卫。
+
+代价在一次真实修复里是可测的：prune 守卫对每个待删索引行探一次 `parse_jobs`，`pg_stat_user_tables` 因此记下 `seq_scan 14,650`、`seq_tup_read 6,580,802,230`——约 67 亿行，等于同一张 449k 行的表被完整扫了 14,994 次，这是那一步 11 分钟几乎全部的来源。同一条按 trace id 的探测，前后对比：
+
+| 计划 | 执行时间 | 读页 |
+| --- | --- | --- |
+| 修复前（无可用索引，`Parallel Seq Scan`） | ≈58 ms | 7,404 页（约 60 MB） |
+| 修复后（`Index Only Scan using parsejob_trace_id_status`） | 0.125 ms | 4 页 |
+
+修法是把索引补进 ent schema（`ent/schema/parse_job.go` 的 `index.Fields("trace_id", "status")`）并配一条版本化迁移（`20260929090000_add_parse_jobs_trace_id_index`）。迁移里用 `CREATE INDEX IF NOT EXISTS`，18 MB、2.3 秒，因此可以先把索引手工建在实例上，之后迁移只是空操作。`trace_id` 打头也顺带覆盖 Monitor 的 `trace_id = ? AND status = ?`（两列都进 `Index Cond`），只按 `status` 的查询仍由原有的 `(status, updated_at)` 服务。
+
+这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 抽出 SQLite 的 `CREATE INDEX … ON <表>(<列>)`，再和线上 `pg_index` 的实际索引逐表比对首列与列组合，缺失的形状才会显形。本次全量比对只剩 `parse_jobs`、`system_events`、`logs` 三处，其中只有 `parse_jobs` 影响能力，另外两处的首列已被现有索引覆盖。
 
 ## 并发索引变更
 
