@@ -1,0 +1,19 @@
+-- Pin the distinct-value estimate for "semantic_nodes"."trace_id".
+--
+-- The planner estimated 29,253 distinct trace ids for a table with ~74M rows.
+-- That is a sampling artifact rather than staleness: ANALYZE samples ~30k rows,
+-- and a high-cardinality column cannot show more distinct values than the
+-- sample has rows, so re-running ANALYZE cannot fix it. With that estimate the
+-- derived-trace-id repair's orphan anti-join looks cheap as a nested loop (one
+-- "logs" index probe per distinct id). It actually needs ~8.9M probes, and
+-- because the outer side scans a 7.4 GB index the whole time, the 21 MB
+-- "logs_trace_id_key" index is continuously evicted from the buffer cache, so
+-- each probe becomes a random disk read: ~29 hours instead of the ~10 minutes
+-- the merge anti join needs. The same estimate feeds the monitor's own
+-- planning.
+--
+-- A negative value means "fraction of rows", so the estimate tracks table
+-- growth instead of going stale. The fraction is measured: TABLESAMPLE
+-- SYSTEM (0.1) returned 8,874 distinct ids out of 73,488 rows, so roughly
+-- 12% of rows carry a distinct trace id.
+ALTER TABLE "semantic_nodes" ALTER COLUMN "trace_id" SET (n_distinct = -0.12);
