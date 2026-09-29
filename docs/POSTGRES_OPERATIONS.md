@@ -521,6 +521,16 @@ tracelog_routing_failure_recent_client_visible_idx  routing failure 分析与列
 tracelog_duration_slow_client_visible_idx       duration DESC 慢请求列表
 ```
 
+未建这 5 个索引时的实测基线（`logs` 248,164 行 / 388 MB，`shared_buffers` 已预热，`max_parallel_workers_per_gather=0`）：
+
+| 产品查询 | 计划 | 执行时间 |
+| --- | --- | --- |
+| 最近失败列表（`status_code >= 400` 按 `recorded_at DESC` 取 50） | `Index Scan Backward using tracelog_recorded_at`，`Rows Removed by Filter: 8790`，读 836 页 | 934 ms |
+| 慢请求列表（`duration_ms DESC` 取 50） | `Seq Scan on logs`（246,336 行）+ top-N heapsort，读 24,682 页 | 250 ms |
+| 最新 trace 列表（`recorded_at DESC` 取 50） | `Index Scan Backward using tracelog_recorded_at` | 0.16 ms |
+
+第三行是反例：同一个 `COALESCE(exchange_kind, '') IN (...)` 过滤，只要排序键是 `recorded_at` 而结果集又是最新的 50 条，现有的 `tracelog_recorded_at` 就已足够——所以这 5 个索引是按查询形态逐个判定后加的，不是「给 `logs` 多加几个索引总没坏处」。
+
 相应的谓词形态：
 
 ```sql
