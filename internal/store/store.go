@@ -5413,21 +5413,31 @@ func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourc
 			return 0, 0, err
 		}
 	}
+	// Both checks below used to be one query per candidate trace: a read of the
+	// trace row and an existence count of the dataset example.
+	knownTraces, err := s.knownTraceIDs(ctx, ordered)
+	if err != nil {
+		return 0, 0, err
+	}
+	presentExamples, err := datasetExampleTraceIDs(ctx, tx, datasetID, ordered)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	now := time.Now().UTC()
 	added := 0
 	skipped := 0
 	creates := make([]*dao.DatasetExampleCreate, 0, len(ordered))
 	for _, traceID := range ordered {
-		if _, err := s.GetByID(traceID); err != nil {
-			return 0, 0, err
+		if _, ok := knownTraces[traceID]; !ok {
+			// Re-read the missing trace for the error the per-trace read raised,
+			// which is sql.ErrNoRows for an unknown trace id.
+			if _, err := s.GetByID(traceID); err != nil {
+				return 0, 0, err
+			}
+			return 0, 0, fmt.Errorf("trace %q not found", traceID)
 		}
-		exists, err := tx.DatasetExample.Query().
-			Where(datasetexample.DatasetIDEQ(datasetID), datasetexample.TraceIDEQ(traceID)).
-			Count(ctx)
-		if err != nil {
-			return 0, 0, err
-		}
-		if exists > 0 {
+		if _, ok := presentExamples[traceID]; ok {
 			skipped++
 			continue
 		}
@@ -7064,6 +7074,55 @@ func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// knownTraceIDs reports which of the given trace ids the index holds, in chunks
+// the database accepts.
+func (s *Store) knownTraceIDs(ctx context.Context, traceIDs []string) (map[string]struct{}, error) {
+	known := make(map[string]struct{}, len(traceIDs))
+	for _, chunk := range chunkStrings(traceIDs, storeSQLParamChunk) {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT trace_id
+			FROM logs
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+		`, stringArgs(chunk)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var traceID string
+			if err := rows.Scan(&traceID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			known[traceID] = struct{}{}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return known, nil
+}
+
+// datasetExampleTraceIDs reports which of the given traces the dataset already
+// holds, in chunks the database accepts.
+func datasetExampleTraceIDs(ctx context.Context, tx *dao.Tx, datasetID string, traceIDs []string) (map[string]struct{}, error) {
+	present := make(map[string]struct{}, len(traceIDs))
+	for _, chunk := range chunkStrings(traceIDs, storeSQLParamChunk) {
+		rows, err := tx.DatasetExample.Query().
+			Where(datasetexample.DatasetIDEQ(datasetID), datasetexample.TraceIDIn(chunk...)).
+			Select(datasetexample.FieldTraceID).
+			All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			present[row.TraceID] = struct{}{}
+		}
+	}
+	return present, nil
 }
 
 func (s *Store) GetByID(traceID string) (LogEntry, error) {

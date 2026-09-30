@@ -4337,6 +4337,55 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 }
 
+func TestAppendDatasetExamplesRejectsBatchWithUnknownTrace(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	writeModelLog(t, st, dir, "dataset-batch-a.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 5, now.Add(-time.Minute))
+	writeModelLog(t, st, dir, "dataset-batch-b.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 6, now)
+	// writeModelLog keys the request id on the file name.
+	entryA, err := st.GetByRequestID("dataset-batch-a.http")
+	if err != nil {
+		t.Fatalf("GetByRequestID(a) error = %v", err)
+	}
+	entryB, err := st.GetByRequestID("dataset-batch-b.http")
+	if err != nil {
+		t.Fatalf("GetByRequestID(b) error = %v", err)
+	}
+	traceA, traceB := entryA.ID, entryB.ID
+
+	dataset, err := st.CreateDataset("batch", "")
+	if err != nil {
+		t.Fatalf("CreateDataset() error = %v", err)
+	}
+	added, skipped, err := st.AppendDatasetExamples(dataset.ID, []string{traceA, traceB}, "trace_list", "", "")
+	if err != nil || added != 2 || skipped != 0 {
+		t.Fatalf("first append added/skipped/err = %d/%d/%v, want 2/0/nil", added, skipped, err)
+	}
+
+	// The unknown trace sits behind a trace the dataset already holds, so the
+	// batch also covers the skip path before the rejection.
+	added, skipped, err = st.AppendDatasetExamples(dataset.ID, []string{traceB, "missing-trace"}, "trace_list", "", "")
+	if err == nil {
+		t.Fatal("AppendDatasetExamples() error = nil, want the unknown trace reported")
+	}
+	if added != 0 || skipped != 0 {
+		t.Fatalf("rejected append added/skipped = %d/%d, want 0/0", added, skipped)
+	}
+	examples, err := st.GetDatasetExamples(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDatasetExamples() error = %v", err)
+	}
+	if len(examples) != 2 {
+		t.Fatalf("len(GetDatasetExamples()) = %d, want the rejected batch to add nothing", len(examples))
+	}
+}
+
 func TestEvalRunAndScoresRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
