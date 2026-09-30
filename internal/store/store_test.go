@@ -4337,6 +4337,50 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 }
 
+func TestGetDatasetExamplesSkipsExamplesWithoutTraceRows(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	writeModelLog(t, st, dir, "dataset-orphan-a.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 5, now.Add(-time.Minute))
+	writeModelLog(t, st, dir, "dataset-orphan-b.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 6, now)
+	first, err := st.GetByRequestID("dataset-orphan-a.http")
+	if err != nil {
+		t.Fatalf("GetByRequestID(a) error = %v", err)
+	}
+	second, err := st.GetByRequestID("dataset-orphan-b.http")
+	if err != nil {
+		t.Fatalf("GetByRequestID(b) error = %v", err)
+	}
+	dataset, err := st.CreateDataset("orphans", "")
+	if err != nil {
+		t.Fatalf("CreateDataset() error = %v", err)
+	}
+	if _, _, err := st.AppendDatasetExamples(dataset.ID, []string{first.ID, second.ID}, "trace_list", "", ""); err != nil {
+		t.Fatalf("AppendDatasetExamples() error = %v", err)
+	}
+
+	// Drop the first trace row the way a cassette removal does, leaving the
+	// example behind: the detail view reports the surviving example only.
+	if err := st.client.TraceLog.DeleteOneID(first.LogPath).Exec(context.Background()); err != nil {
+		t.Fatalf("delete trace row: %v", err)
+	}
+	examples, err := st.GetDatasetExamples(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDatasetExamples() error = %v", err)
+	}
+	if len(examples) != 1 || examples[0].TraceID != second.ID {
+		t.Fatalf("GetDatasetExamples() = %#v, want only %q", examples, second.ID)
+	}
+	if examples[0].Position != 2 || examples[0].Trace.Header.Meta.RequestID != "dataset-orphan-b.http" {
+		t.Fatalf("surviving example = %#v, want position 2 with its trace loaded", examples[0])
+	}
+}
+
 func TestAppendDatasetExamplesRejectsBatchWithUnknownTrace(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
@@ -6121,6 +6165,28 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	}
 	if len(allFindings) != 1 || allFindings[0].TraceID != "trace-findings" {
 		t.Fatalf("all findings = %+v", allFindings)
+	}
+
+	// A second trace pins the grouping of the batched read: a bug that keyed the
+	// findings on the wrong trace would put these under the first trace.
+	other := first
+	other.ID = "finding-other-1"
+	other.TraceID = "trace-findings-other"
+	if err := st.SaveFindings("trace-findings-other", []observe.Finding{other}); err != nil {
+		t.Fatalf("SaveFindings(other) error = %v", err)
+	}
+	grouped, err := st.ListFindingsByTraceIDs([]string{"trace-findings", "trace-findings-other", "trace-findings-missing"})
+	if err != nil {
+		t.Fatalf("ListFindingsByTraceIDs() error = %v", err)
+	}
+	if len(grouped["trace-findings"]) != 1 || grouped["trace-findings"][0].ID != "finding-2" {
+		t.Fatalf("grouped findings for trace-findings = %+v", grouped["trace-findings"])
+	}
+	if len(grouped["trace-findings-other"]) != 1 || grouped["trace-findings-other"][0].TraceID != "trace-findings-other" {
+		t.Fatalf("grouped findings for trace-findings-other = %+v", grouped["trace-findings-other"])
+	}
+	if _, ok := grouped["trace-findings-missing"]; ok {
+		t.Fatalf("grouped findings = %+v, want no entry for a trace without findings", grouped)
 	}
 }
 

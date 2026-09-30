@@ -5478,14 +5478,23 @@ func (s *Store) GetDatasetExamples(datasetID string) ([]DatasetExampleRecord, er
 		return nil, err
 	}
 
+	// One query per chunk of trace ids replaces the read of the trace row per
+	// example, which a dataset detail view paid for every example.
+	traceIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		traceIDs = append(traceIDs, row.TraceID)
+	}
+	traces, err := s.traceLogsByTraceID(context.Background(), traceIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]DatasetExampleRecord, 0, len(rows))
 	for _, row := range rows {
-		trace, err := s.GetByID(row.TraceID)
-		if errors.Is(err, sql.ErrNoRows) {
+		trace, ok := traces[row.TraceID]
+		if !ok {
+			// The example outlived the trace it points at.
 			continue
-		}
-		if err != nil {
-			return nil, err
 		}
 		out = append(out, DatasetExampleRecord{
 			DatasetID:  row.DatasetID,
@@ -7138,6 +7147,24 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 	return logEntryFromTraceLog(row), nil
 }
 
+// traceLogsByTraceID loads the log rows with the given trace ids in chunks the
+// database accepts, keyed by trace id.
+func (s *Store) traceLogsByTraceID(ctx context.Context, traceIDs []string) (map[string]LogEntry, error) {
+	traces := make(map[string]LogEntry, len(traceIDs))
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(traceIDs), storeSQLParamChunk) {
+		rows, err := s.client.TraceLog.Query().
+			Where(tracelog.TraceIDIn(chunk...)).
+			All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			traces[row.TraceID] = logEntryFromTraceLog(row)
+		}
+	}
+	return traces, nil
+}
+
 func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
 	row, err := s.client.TraceLog.Query().
 		Where(tracelog.RequestIDEQ(requestID)).
@@ -7845,21 +7872,65 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 
 	var out []observe.Finding
 	for rows.Next() {
-		var finding observe.Finding
-		var severity string
-		var createdAt any
-		if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
-			&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
-			&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
-			return nil, err
-		}
-		finding.Severity = observe.Severity(severity)
-		if finding.CreatedAt, err = timeParseValue(createdAt); err != nil {
+		finding, err := scanFindingRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, finding)
 	}
 	return out, rows.Err()
+}
+
+// ListFindingsByTraceIDs groups the findings of the given traces by trace id, in
+// chunks the database accepts. The batch reanalysis used to call ListFindings
+// once per trace of the session.
+func (s *Store) ListFindingsByTraceIDs(traceIDs []string) (map[string][]observe.Finding, error) {
+	out := make(map[string][]observe.Finding, len(traceIDs))
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(traceIDs), storeSQLParamChunk) {
+		rows, err := s.db.Query(`
+			SELECT finding_id, trace_id, category, severity, confidence, title, description,
+				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
+			FROM trace_findings
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+			ORDER BY id ASC
+		`, stringArgs(chunk)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			finding, err := scanFindingRow(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[finding.TraceID] = append(out[finding.TraceID], finding)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// scanFindingRow reads one trace_findings row from the shared column list.
+func scanFindingRow(rows *sql.Rows) (observe.Finding, error) {
+	var finding observe.Finding
+	var severity string
+	var createdAt any
+	if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
+		&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
+		&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
+		return observe.Finding{}, err
+	}
+	finding.Severity = observe.Severity(severity)
+	parsed, err := timeParseValue(createdAt)
+	if err != nil {
+		return observe.Finding{}, err
+	}
+	finding.CreatedAt = parsed
+	return finding, nil
 }
 
 func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Finding, error) {

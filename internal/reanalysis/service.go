@@ -573,14 +573,22 @@ func (s *Service) runSessionJob(ctx context.Context, job store.AnalysisJobRecord
 			return Result{}, err
 		}
 	}
-	findingsByTrace := map[string][]observe.Finding{}
+	// One grouped read for the whole session replaces the per-trace findings
+	// query this loop used to run.
+	traceIDs := make([]string, 0, len(traces))
 	for _, trace := range traces {
-		findings, findErr := s.store.ListFindings(trace.ID, store.FindingFilter{})
-		if findErr != nil {
-			err = findErr
-			return Result{}, err
+		traceIDs = append(traceIDs, trace.ID)
+	}
+	findingsByTrace, err := s.store.ListFindingsByTraceIDs(traceIDs)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, trace := range traces {
+		if _, ok := findingsByTrace[trace.ID]; !ok {
+			// Keep every trace of the session in the map, the way the per-trace
+			// read did for a trace without findings.
+			findingsByTrace[trace.ID] = nil
 		}
-		findingsByTrace[trace.ID] = findings
 	}
 	output := sessionanalysis.Build(summary, traces, findingsByTrace)
 	outputJSON, err := sessionanalysis.Marshal(output)
