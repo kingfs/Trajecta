@@ -1021,6 +1021,9 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
 		t.Fatalf("UpsertLogWithGrouping(postgres) error = %v", err)
 	}
+	// The write only queues the derived refresh; the bucket row checked below is
+	// produced when a reader applies the queue.
+	st.FlushDerivedRefresh()
 	got, err := st.GetByRequestID(requestID)
 	if err != nil {
 		t.Fatalf("GetByRequestID(postgres) error = %v", err)
