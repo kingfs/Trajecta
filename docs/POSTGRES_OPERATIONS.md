@@ -673,6 +673,33 @@ WHERE schemaname = 'public'
 ORDER BY tablename, indexname;
 ```
 
+## Overview 观测汇总的实测
+
+Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refresh / 60s`），其中观测汇总的六个数在 2026-09 之前是 4 条独立语句，现在合并成 1 条（`internal/store/store.go` 的 `overviewObservation`）。同形合成表（250,000 行 `logs` / 200,000 行 `trace_observations` / 20,000 行 `parse_jobs`，`ANALYZE` 后三轮取最小）实测：
+
+| 查询 | 计划 | 执行时间 |
+| --- | --- | --- |
+| `trace_observations` 的 total / parsed | `Parallel Seq Scan` | 33.5 ms |
+| failed 去重（观测与 `parse_jobs` 的 UNION） | `Bitmap Index Scan` + 排序去重 | 30.7 ms |
+| **unparsed 反连接**（`NOT EXISTS`） | `Parallel Hash Anti Join` | **105.2 ms** |
+| parse_jobs 的 queued / running | `Seq Scan` | 6.2 ms |
+
+反连接这条是汇总里唯一真正贵的：`logs` 的 13546 页要全部读一遍再和 `trace_observations` 做哈希反连接。**它现在已经是规划器能给出的最优形态**，另外三种等价写法都更慢，所以不要为了「看起来更 SQL」去改写它：
+
+| 等价写法 | 执行时间 | 结果是否与 `NOT EXISTS` 相等 |
+| --- | --- | --- |
+| `NOT EXISTS`（现有） | 105.2 ms | — |
+| `NOT IN (SELECT …)` | 164.0 ms | 相等 |
+| `SELECT trace_id FROM logs EXCEPT SELECT …` | 998.9 ms | 相等 |
+| `COUNT(logs) - COUNT(logs INTERSECT trace_observations)` | 1021.0 ms | 相等 |
+
+结论：把 4 条语句合并成 1 条只是省 3 次往返，DB 侧工作量不变（同一条语句里六个标量子查询各自扫描一次），真正的开销上限由反连接决定。要去掉这 105 ms 只有两条路，都不是索引能解决的：
+
+1. **派生计数**：在 `logs` 写入、`SaveObservation`、任务状态变更时维护 unparsed 计数，并配一条对账语句／命令。读变成 O(1)，代价是计数可能漂移，需要覆盖所有写入路径。
+2. **短 TTL 缓存 + 写路径失效**：读到的是同一份精确结果，只是最多滞后一个 TTL。
+
+按当前 60 秒轮询频率，105 ms／分钟（生产 `logs` 388 MB，按行数比例约 150 ms）不值得引入上面任何一种复杂度；如果将来轮询频率提高或 `logs` 增长到百万级，再按上面的顺序做。
+
 ## 运维脚本（`scripts/postgres/`）
 
 `scripts/postgres/` 把上面这些操作封装成可重复执行的入口。每个脚本都只是薄薄一层 `docker compose` 加项目自带命令：它不自己拼 DSN、不复制凭据，而是复用 compose 已经注入服务的 `TRAJECTA_DATABASE_DRIVER` / `TRAJECTA_DATABASE_DSN` / `TRAJECTA_CONFIG`，并用 `docker compose exec` 在数据库容器内跑 `psql`（走容器内本地认证）。所以同一套脚本既能驱动本仓库的 `docker-compose.yml`，也能驱动一份自建部署目录（本次就是用 `TRAJECTA_OPS_DEPLOY_DIR=/data/gateway` 逐条验证的）。

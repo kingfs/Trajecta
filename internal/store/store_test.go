@@ -6566,6 +6566,58 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 	if overview.Observation.Unparsed != 1 || overview.Observation.Parsed != 1 || overview.Observation.TotalObservations != 1 {
 		t.Fatalf("overview observation = %+v, want one parsed observation and one unparsed log", overview.Observation)
 	}
+
+	// The remaining counts come from a failed observation and from the parse job
+	// queue, which the single summary statement reads together.
+	header.Meta.RequestID = "req-batch-failed"
+	failedPath := filepath.Join(t.TempDir(), "batch-failed.http")
+	if err := os.WriteFile(failedPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(failedPath, header); err != nil {
+		t.Fatalf("UpsertLog(failed) error = %v", err)
+	}
+	failedEntry, err := st.GetByRequestID("req-batch-failed")
+	if err != nil {
+		t.Fatalf("GetByRequestID(failed) error = %v", err)
+	}
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       failedEntry.ID,
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatus("failed"),
+	}); err != nil {
+		t.Fatalf("SaveObservation(failed) error = %v", err)
+	}
+	// One queued job, one running job and one failed job: the failed trace joins
+	// the failed observation in the distinct failed count. The jobs are written
+	// directly because saving a failed observation enqueues a repair job of its
+	// own, which would make the counts depend on that behaviour.
+	if _, err := st.db.Exec(`DELETE FROM parse_jobs`); err != nil {
+		t.Fatalf("delete parse jobs error = %v", err)
+	}
+	for traceID, status := range map[string]string{
+		parsedEntry.ID:   "queued",
+		failedEntry.ID:   "running",
+		unparsedEntry.ID: "failed",
+	} {
+		if _, err := st.db.Exec(
+			`INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
+			traceID, status, time.Now().UTC(), time.Now().UTC(),
+		); err != nil {
+			t.Fatalf("insert parse job(%s, %s) error = %v", traceID, status, err)
+		}
+	}
+
+	overview, err = st.Overview(OverviewOptions{Limit: 5, BucketCount: 1, BucketSize: time.Hour})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if overview.Observation.TotalObservations != 2 || overview.Observation.Parsed != 1 ||
+		overview.Observation.Failed != 2 || overview.Observation.Unparsed != 1 ||
+		overview.Observation.Queued != 1 || overview.Observation.Running != 1 {
+		t.Fatalf("overview observation = %+v, want total 2, parsed 1, failed 2, unparsed 1, queued 1, running 1", overview.Observation)
+	}
 }
 
 func TestMarkAnalysisJobFailedCreatesSystemEvent(t *testing.T) {

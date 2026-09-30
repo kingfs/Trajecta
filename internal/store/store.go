@@ -9323,41 +9323,32 @@ func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 
 func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, error) {
 	var summary OverviewObservationSummary
+	// One statement for the six counts; each scalar subquery is the query that
+	// served the field on its own. The unparsed count is the expensive one: it
+	// anti-joins logs against trace_observations, and the planner already picks
+	// the hash anti join for it (see docs/POSTGRES_OPERATIONS.md).
 	if err := s.db.QueryRow(`
 		SELECT
-			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed
-		FROM trace_observations
-	`).Scan(&summary.TotalObservations, &summary.Parsed); err != nil {
-		return OverviewObservationSummary{}, err
-	}
-	if err := s.db.QueryRow(`
-		SELECT COUNT(DISTINCT trace_id)
-		FROM (
-			SELECT trace_id FROM trace_observations WHERE status IN ('failed', 'parse_failed', 'analysis_failed')
-			UNION
-			SELECT trace_id FROM parse_jobs WHERE status = 'failed'
-		) AS failed_traces
-	`).Scan(&summary.Failed); err != nil {
-		return OverviewObservationSummary{}, err
-	}
-	if err := s.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM logs l
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM trace_observations o
-			WHERE o.trace_id = l.trace_id
-		)
-	`).Scan(&summary.Unparsed); err != nil {
-		return OverviewObservationSummary{}, err
-	}
-	if err := s.db.QueryRow(`
-		SELECT
-			COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0) AS queued,
-			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running
-		FROM parse_jobs
-	`).Scan(&summary.Queued, &summary.Running); err != nil {
+			(SELECT COUNT(*) FROM trace_observations),
+			(SELECT COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) FROM trace_observations),
+			(SELECT COUNT(DISTINCT trace_id) FROM (
+				SELECT trace_id FROM trace_observations WHERE status IN ('failed', 'parse_failed', 'analysis_failed')
+				UNION
+				SELECT trace_id FROM parse_jobs WHERE status = 'failed'
+			) AS failed_traces),
+			(SELECT COUNT(*) FROM logs l WHERE NOT EXISTS (
+				SELECT 1 FROM trace_observations o WHERE o.trace_id = l.trace_id
+			)),
+			(SELECT COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0) FROM parse_jobs),
+			(SELECT COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) FROM parse_jobs)
+	`).Scan(
+		&summary.TotalObservations,
+		&summary.Parsed,
+		&summary.Failed,
+		&summary.Unparsed,
+		&summary.Queued,
+		&summary.Running,
+	); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	jobs, err := s.overviewRecentParseFailures(limit)
