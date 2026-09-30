@@ -4857,7 +4857,7 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
 		}
-		stats, err := st.Stats()
+		stats, err := st.Stats(filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats error: " + err.Error()})
 			return

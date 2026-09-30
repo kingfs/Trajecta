@@ -5263,7 +5263,7 @@ debug:
 		t.Fatalf("store.NewWithDatabase() error = %v", err)
 	}
 	defer traceStore.Close()
-	if _, err := traceStore.Stats(); err != nil {
+	if _, err := traceStore.Stats(store.ListFilter{}); err != nil {
 		t.Fatalf("Stats() error = %v", err)
 	}
 }

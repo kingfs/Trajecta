@@ -1032,7 +1032,7 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	if got.LogPath != recordPath || !got.Header.Layout.IsStream {
 		t.Fatalf("postgres log round trip mismatch: path=%q stream=%v", got.LogPath, got.Header.Layout.IsStream)
 	}
-	stats, err := st.Stats()
+	stats, err := st.Stats(ListFilter{})
 	if err != nil {
 		t.Fatalf("Stats(postgres) error = %v", err)
 	}
@@ -3389,7 +3389,7 @@ func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 	writeLog("success-b.http", 201, 813, 20)
 	writeLog("failed.http", 500, 999, 99)
 
-	stats, err := st.Stats()
+	stats, err := st.Stats(ListFilter{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)
 	}
@@ -3419,7 +3419,7 @@ func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
 	}
 	defer st.Close()
 
-	empty, err := st.Stats()
+	empty, err := st.Stats(ListFilter{})
 	if err != nil {
 		t.Fatalf("Stats() on empty store error = %v", err)
 	}
@@ -3471,7 +3471,7 @@ func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
 	writeLog("failed.http", 500, 999, 99, "")
 	writeLog("upstream.http", 200, 100, 1000, "upstream")
 
-	stats, err := st.Stats()
+	stats, err := st.Stats(ListFilter{})
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)
 	}
@@ -4334,6 +4334,87 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 	if counts[dataset.ID] != 2 || counts[second.ID] != 1 || counts[empty.ID] != 0 {
 		t.Fatalf("ListDatasets() example counts = %#v, want %q:2 %q:1 %q:0", counts, dataset.ID, second.ID, empty.ID)
+	}
+}
+
+func TestStatsFollowsListFilterAndInvalidatesCache(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, model string, statusCode int, tokens int, recordedAt time.Time) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		if err := st.UpsertLog(path, recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:  name,
+				Time:       recordedAt,
+				Model:      model,
+				Provider:   "openai_compatible",
+				Endpoint:   "/v1/responses",
+				URL:        "/v1/responses",
+				Method:     "POST",
+				StatusCode: statusCode,
+			},
+			Usage: recordfile.UsageInfo{TotalTokens: tokens},
+		}); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	writeLog("log-a.http", "gpt-5", 200, 100, now.Add(-time.Minute))
+	writeLog("log-b.http", "gpt-5", 500, 0, now.Add(-2*time.Minute))
+	writeLog("log-c.http", "claude-4", 200, 40, now.Add(-3*time.Minute))
+
+	// Every filter must produce the same totals as the list it sits next to.
+	for _, filter := range []ListFilter{
+		{},
+		{Model: "gpt-5"},
+		{Model: "claude"},
+		{Status: "failed"},
+		{Provider: "openai_compatible", Model: "gpt"},
+	} {
+		stats, err := st.Stats(filter)
+		if err != nil {
+			t.Fatalf("Stats(%+v) error = %v", filter, err)
+		}
+		page, err := st.ListPage(1, 50, filter)
+		if err != nil {
+			t.Fatalf("ListPage(%+v) error = %v", filter, err)
+		}
+		if stats.TotalRequest != page.Total {
+			t.Fatalf("Stats(%+v).TotalRequest = %d, want the list total %d", filter, stats.TotalRequest, page.Total)
+		}
+		if stats.SuccessRequest+stats.FailedRequest != stats.TotalRequest {
+			t.Fatalf("Stats(%+v) = %+v, want success + failed to equal total", filter, stats)
+		}
+	}
+
+	claude, err := st.Stats(ListFilter{Model: "claude"})
+	if err != nil {
+		t.Fatalf("Stats(claude) error = %v", err)
+	}
+	if claude.TotalRequest != 1 || claude.TotalTokens != 40 {
+		t.Fatalf("Stats(claude) = %+v, want the single claude trace with 40 tokens", claude)
+	}
+
+	// A write clears the cached entry, so the next read sees it even though the
+	// TTL has not expired.
+	writeLog("log-d.http", "claude-4", 200, 7, now)
+	afterWrite, err := st.Stats(ListFilter{Model: "claude"})
+	if err != nil {
+		t.Fatalf("Stats(claude) after write error = %v", err)
+	}
+	if afterWrite.TotalRequest != 2 || afterWrite.TotalTokens != 47 {
+		t.Fatalf("Stats(claude) after write = %+v, want the write reflected", afterWrite)
 	}
 }
 

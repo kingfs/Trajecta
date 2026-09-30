@@ -122,7 +122,20 @@ type storeShared struct {
 	// derivedLimit overrides derivedQueueLimit when positive; tests use it to
 	// observe the bound without writing the default number of recordings.
 	derivedLimit int
+
+	// statsMu guards the one-entry request-statistics cache. The monitor list
+	// page asks for the same aggregate on every page it renders, and a log write
+	// clears the entry, so a cached value is either current or at most
+	// statsCacheTTL old. See Stats.
+	statsMu    sync.Mutex
+	statsKey   string
+	statsValue Stats
+	statsAt    time.Time
 }
+
+// statsCacheTTL bounds how long Stats may serve a cached aggregate. Log writes
+// clear the entry, so the bound only matters for writes the store does not see.
+const statsCacheTTL = 15 * time.Second
 
 type DatabaseOptions struct {
 	AutoMigrate           bool
@@ -6063,6 +6076,7 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	s.invalidateStatsCache()
 	s.markDerivedRefreshForPath(path, previousSessionID, grouping.SessionID)
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
@@ -8872,11 +8886,24 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 	return out, nil
 }
 
-func (s *Store) Stats() (Stats, error) {
-	// Single aggregate pass: the monitor request list calls Stats() on every
-	// page load, so the previous four separate aggregates (total, success,
-	// mean TTFT, token sum) over the same rows were four times the scan cost.
-	whereSQL := clientVisibleLogClause("")
+// Stats summarizes the traces the filter selects, the same rows ListPage and
+// ListTraceIDs return for that filter, so the monitor can show one set of
+// numbers next to its list.
+//
+// It is a single aggregate pass. The monitor list page asks for it on every
+// render, so the previous four separate aggregates (total, success, mean TTFT,
+// token sum) over the same rows were four times the scan cost, and the result is
+// cached per filter for statsCacheTTL.
+func (s *Store) Stats(filter ListFilter) (Stats, error) {
+	whereSQL, whereArgs := buildLogFilterClause(filter, "")
+	whereSQL = andSQL(whereSQL, clientVisibleLogClause(""))
+	if whereSQL == "" {
+		whereSQL = "1 = 1"
+	}
+	cacheKey := fmt.Sprintf("%+v", filter)
+	if cached, ok := s.cachedStats(cacheKey); ok {
+		return cached, nil
+	}
 	var (
 		total        int
 		successCount int
@@ -8890,7 +8917,7 @@ func (s *Store) Stats() (Stats, error) {
 			COALESCE(AVG(CASE WHEN status_code >= 200 AND status_code < 300 THEN ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN total_tokens ELSE 0 END), 0) AS total_tokens
 		FROM logs
-		WHERE `+whereSQL).Scan(&total, &successCount, &avgTTFT, &totalTokens); err != nil {
+		WHERE `+whereSQL, whereArgs...).Scan(&total, &successCount, &avgTTFT, &totalTokens); err != nil {
 		return Stats{}, err
 	}
 
@@ -8902,12 +8929,51 @@ func (s *Store) Stats() (Stats, error) {
 	if total > 0 {
 		stats.SuccessRate = 100.0 * float64(successCount) / float64(total)
 	}
-	if successCount == 0 {
-		return stats, nil
+	if successCount > 0 {
+		stats.AvgTTFT = int(math.Round(avgTTFT))
+		stats.TotalTokens = totalTokens
 	}
-	stats.AvgTTFT = int(math.Round(avgTTFT))
-	stats.TotalTokens = totalTokens
+	s.storeCachedStats(cacheKey, stats)
 	return stats, nil
+}
+
+func (s *Store) cachedStats(key string) (Stats, bool) {
+	if s == nil || s.shared == nil {
+		return Stats{}, false
+	}
+	shared := s.shared
+	shared.statsMu.Lock()
+	defer shared.statsMu.Unlock()
+	if shared.statsKey != key || time.Since(shared.statsAt) >= statsCacheTTL {
+		return Stats{}, false
+	}
+	return shared.statsValue, true
+}
+
+func (s *Store) storeCachedStats(key string, stats Stats) {
+	if s == nil || s.shared == nil {
+		return
+	}
+	shared := s.shared
+	shared.statsMu.Lock()
+	shared.statsKey = key
+	shared.statsValue = stats
+	shared.statsAt = time.Now()
+	shared.statsMu.Unlock()
+}
+
+// invalidateStatsCache drops the cached aggregate after a log write, so the
+// monitor never shows numbers from before the write.
+func (s *Store) invalidateStatsCache() {
+	if s == nil || s.shared == nil {
+		return
+	}
+	shared := s.shared
+	shared.statsMu.Lock()
+	shared.statsKey = ""
+	shared.statsValue = Stats{}
+	shared.statsAt = time.Time{}
+	shared.statsMu.Unlock()
 }
 
 func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
