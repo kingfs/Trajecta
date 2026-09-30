@@ -4306,12 +4306,34 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 		t.Fatalf("trace order = %q,%q, want %q,%q", items[0].TraceID, items[1].TraceID, traceA, traceB)
 	}
 
+	// A second dataset with one example and a third with none: the list counts
+	// every dataset's examples in one grouped query, so a grouping bug would
+	// hand one of them its neighbour's count.
+	second, err := st.CreateDataset("second", "")
+	if err != nil {
+		t.Fatalf("CreateDataset(second) error = %v", err)
+	}
+	if _, _, err := st.AppendDatasetExamples(second.ID, []string{traceA}, "trace_list", "", ""); err != nil {
+		t.Fatalf("AppendDatasetExamples(second) error = %v", err)
+	}
+	empty, err := st.CreateDataset("empty", "")
+	if err != nil {
+		t.Fatalf("CreateDataset(empty) error = %v", err)
+	}
+
 	list, err := st.ListDatasets()
 	if err != nil {
 		t.Fatalf("ListDatasets() error = %v", err)
 	}
-	if len(list) != 1 || list[0].ID != dataset.ID {
-		t.Fatalf("ListDatasets() = %#v, want one dataset %q", list, dataset.ID)
+	if len(list) != 3 {
+		t.Fatalf("ListDatasets() = %#v, want three datasets", list)
+	}
+	counts := map[string]int{}
+	for _, record := range list {
+		counts[record.ID] = record.ExampleCount
+	}
+	if counts[dataset.ID] != 2 || counts[second.ID] != 1 || counts[empty.ID] != 0 {
+		t.Fatalf("ListDatasets() example counts = %#v, want %q:2 %q:1 %q:0", counts, dataset.ID, second.ID, empty.ID)
 	}
 }
 

@@ -5315,15 +5315,33 @@ func (s *Store) ListDatasets() ([]DatasetRecord, error) {
 		return nil, err
 	}
 
-	out := make([]DatasetRecord, 0, len(rows))
-	for _, row := range rows {
-		count, err := s.client.DatasetExample.Query().
-			Where(datasetexample.DatasetIDEQ(row.ID)).
-			Count(ctx)
-		if err != nil {
+	// One grouped count for every dataset replaces the per-dataset COUNT this
+	// loop used to run.
+	counts := map[string]int{}
+	countRows, err := s.db.Query(`SELECT dataset_id, COUNT(*) FROM dataset_examples GROUP BY dataset_id`)
+	if err != nil {
+		return nil, err
+	}
+	for countRows.Next() {
+		var (
+			datasetID string
+			count     int
+		)
+		if err := countRows.Scan(&datasetID, &count); err != nil {
+			countRows.Close()
 			return nil, err
 		}
-		out = append(out, datasetRecordFromEnt(row, count))
+		counts[datasetID] = count
+	}
+	err = countRows.Err()
+	countRows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]DatasetRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, datasetRecordFromEnt(row, counts[row.ID]))
 	}
 	return out, nil
 }
