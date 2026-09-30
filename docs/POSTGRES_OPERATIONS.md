@@ -585,6 +585,22 @@ tracelog_duration_slow_client_visible_idx       duration DESC 慢请求列表
 
 第三行是反例：同一个 `COALESCE(exchange_kind, '') IN (...)` 过滤，只要排序键是 `recorded_at` 而结果集又是最新的 50 条，现有的 `tracelog_recorded_at` 就已足够——所以这 5 个索引是按查询形态逐个判定后加的，不是「给 `logs` 多加几个索引总没坏处」。
 
+这 5 个索引的收益与代价用一张同形合成表量过（250,000 行 / 202 MB，`ANALYZE logs` 后取三轮 `EXPLAIN (ANALYZE, BUFFERS)` 的最小值）：
+
+| 产品查询 | 只有默认迁移索引 | 加上 5 个 partial index |
+| --- | --- | --- |
+| 最新 trace 列表（`recorded_at DESC, trace_id DESC` 取 50） | 0.64 ms | 0.45 ms |
+| session 详情（`session_id = ?` 取 50） | 2.45 ms | 0.44 ms |
+| 最近失败列表（`recorded_at >= ? AND 失败谓词` 取 50） | 71.5 ms | 0.50 ms |
+| routing failure 列表（`routing_failure_reason <> ''` 取 50） | 61.2 ms（`Seq Scan`） | 0.48 ms |
+| 慢请求列表（`duration_ms DESC` 取 50） | 81.0 ms | 0.49 ms |
+
+前两行说明「已有索引够用」的那一档基本没有变化，后三行才是这 5 个索引存在的理由：默认索引下它们要么靠 `tracelog_recorded_at` 扫掉整个窗口再过滤，要么直接全表扫，加上之后都走 `Index Only Scan`，只读 50 行对应的索引页。
+
+代价同样量了：在 250,000 行 / 202 MB 的表上逐条执行普通 `CREATE INDEX`（版本化迁移与 `db migrate up` 用的形态）合计 **1.98 s 的写入阻塞**，5 个索引合计约 28 MB。因此这 5 个索引留在 opt-in 的 `db migrate optimize-indexes`（`CREATE INDEX CONCURRENTLY`，不阻塞写入）里，而不是进默认迁移路径；生产 `logs` 388 MB，阻塞时间按同比例放大。
+
+overview 的两个百分位查询（`overviewPercentile`：`WHERE <窗口谓词> AND col > 0 ORDER BY col ASC LIMIT 1 OFFSET n`）也顺带量过，结论是**不要**为它们加 `logs(ttft_ms)` / `logs(duration_ms)`：24 小时窗口下这个形状只取 7,007 行、耗时 20.4 ms，单独建 `(ttft_ms)`（239 ms 建索引）与 `(duration_ms)`（250 ms）之后 `EXPLAIN` 的计划与耗时都不变（仍是 partial index 位图扫描 + top-N heapsort，20.2 ms），原因是排序键与窗口谓词没有可用的组合索引时规划器仍偏好小索引加排序。窗口放宽到 30 天时该形状会退化为 83 ms（加 partial index 后 133 ms，因为位图扫描要取回 212,486 行再排序），这属于窗口大小问题而不是索引缺口。
+
 相应的谓词形态：
 
 ```sql
