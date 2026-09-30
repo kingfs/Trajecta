@@ -2221,6 +2221,12 @@ func TestChannelManagementAPI(t *testing.T) {
 	writeChannelLog("channel-success.http", "gpt-4.1", 200, 120)
 	writeChannelLog("channel-failed.http", "gpt-5", 429, 30)
 
+	// A channel without any recorded request is absent from the grouped usage
+	// passes, so the list still has to give it an empty trend series.
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "silent", Name: "Silent", Enabled: true, BaseURL: "https://silent.invalid/v1", ProviderPreset: "openai"}); err != nil {
+		t.Fatalf("UpsertChannelConfig(silent) error = %v", err)
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "/api/channels?window=24h", nil)
 	rr = httptest.NewRecorder()
 	channelListCreateAPIHandler(st, nil, nil).ServeHTTP(rr, req)
@@ -2231,8 +2237,23 @@ func TestChannelManagementAPI(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &channelList); err != nil {
 		t.Fatalf("json.Unmarshal(channelList) error = %v", err)
 	}
-	if len(channelList.Items) != 1 || channelList.Items[0].Summary.TotalTokens != 150 || len(channelList.Items[0].Trends) != 24 {
+	if len(channelList.Items) != 2 {
 		t.Fatalf("channelList = %+v", channelList)
+	}
+	var listed, silent *channelItem
+	for i := range channelList.Items {
+		switch channelList.Items[i].ID {
+		case "openai-primary":
+			listed = &channelList.Items[i]
+		case "silent":
+			silent = &channelList.Items[i]
+		}
+	}
+	if listed == nil || listed.Summary.TotalTokens != 150 || len(listed.Trends) != 24 {
+		t.Fatalf("channelList = %+v", channelList)
+	}
+	if silent == nil || silent.Summary != (usageSummaryView{}) || len(silent.Trends) != 24 {
+		t.Fatalf("channelList silent item = %+v", silent)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary?window=24h", nil)

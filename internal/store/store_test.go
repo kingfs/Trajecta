@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -3079,6 +3080,80 @@ func TestModelCatalogAnalyticsSummarizesEveryModel(t *testing.T) {
 	}
 	if empty.Summary != (UsageSummaryRecord{}) || empty.Today != (UsageSummaryRecord{}) {
 		t.Fatalf("catalog-only summaries = %+v / %+v, want zeroes", empty.Summary, empty.Today)
+	}
+}
+
+func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	// alpha has its latest record inside the window but also one outside it,
+	// beta only has records inside the window, and gamma has none at all, which
+	// is the case the grouped scan cannot reconstruct.
+	writeModelLog(t, st, dir, "alpha-old.http", "m1", "/v1/responses", "POST", "alpha", 200, 999, now.Add(-30*time.Hour))
+	writeModelLog(t, st, dir, "alpha-1.http", "m1", "/v1/responses", "POST", "alpha", 200, 10, now.Add(-90*time.Minute))
+	writeModelLog(t, st, dir, "alpha-2.http", "m2", "/v1/responses", "POST", "alpha", 500, 0, now.Add(-30*time.Minute))
+	writeModelLog(t, st, dir, "beta-1.http", "m1", "/v1/responses", "POST", "beta", 200, 0, now.Add(-45*time.Minute))
+	writeModelLog(t, st, dir, "internal.http", "m1", "/v1/responses", "POST", "", 200, 7, now.Add(-15*time.Minute))
+
+	since := now.Add(-24 * time.Hour)
+	bucketSize := time.Hour
+	bucketCount := 4
+
+	batched, err := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount)
+	if err != nil {
+		t.Fatalf("GetChannelUsageTrendsBatch() error = %v", err)
+	}
+	for _, channelID := range []string{"alpha", "beta"} {
+		want, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount)
+		if err != nil {
+			t.Fatalf("GetChannelUsageTrends(%s) error = %v", channelID, err)
+		}
+		got, ok := batched[channelID]
+		if !ok {
+			t.Fatalf("GetChannelUsageTrendsBatch() has no series for %s in %#v", channelID, batched)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("batched trends for %s = %#v, want %#v", channelID, got, want)
+		}
+	}
+	if _, ok := batched["gamma"]; ok {
+		t.Fatalf("GetChannelUsageTrendsBatch() invented a series for a channel without rows: %#v", batched["gamma"])
+	}
+	if _, ok := batched[""]; ok {
+		t.Fatalf("GetChannelUsageTrendsBatch() grouped rows without an upstream id: %#v", batched[""])
+	}
+	if token := batched["alpha"][len(batched["alpha"])-1].TotalTokens; token != 0 {
+		t.Fatalf("alpha last bucket tokens = %d, want 0 (the failed request has no usage)", token)
+	}
+	var alphaTotal int
+	for _, record := range batched["alpha"] {
+		alphaTotal += record.TotalTokens
+	}
+	if alphaTotal != 10 {
+		t.Fatalf("alpha window tokens = %d, want 10 (the record outside the window stays out)", alphaTotal)
+	}
+
+	summaries, err := st.GetChannelUsageSummaries(since)
+	if err != nil {
+		t.Fatalf("GetChannelUsageSummaries() error = %v", err)
+	}
+	for _, channelID := range []string{"alpha", "beta", "gamma"} {
+		want, err := st.GetChannelUsageSummary(channelID, since)
+		if err != nil {
+			t.Fatalf("GetChannelUsageSummary(%s) error = %v", channelID, err)
+		}
+		if got := summaries[channelID]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("batched summary for %s = %#v, want %#v", channelID, got, want)
+		}
+	}
+	if summaries["alpha"].RequestCount != 2 || summaries["beta"].MissingUsage != 1 {
+		t.Fatalf("batched summaries = alpha:%+v beta:%+v", summaries["alpha"], summaries["beta"])
 	}
 }
 

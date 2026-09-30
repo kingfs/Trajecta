@@ -2921,10 +2921,40 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 				return
 			}
 			counts := channelModelCounts(models)
+			// The list only needs the summary and the trend series of each
+			// channel, which one grouped pass each can produce for the whole
+			// list. A channel with no rows at all is absent from the trend map,
+			// so it keeps its own query, and a failed grouped pass falls back to
+			// the per-channel path the same way.
+			summaries, summariesErr := st.GetChannelUsageSummaries(since)
+			trends, trendsErr := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount)
+			channelSummary := func(channelID string) store.UsageSummaryRecord {
+				if summariesErr == nil {
+					return summaries[channelID]
+				}
+				summary, err := st.GetChannelUsageSummary(channelID, since)
+				if err != nil {
+					return store.UsageSummaryRecord{}
+				}
+				return summary
+			}
+			channelTrends := func(channelID string) []store.UsageTrendRecord {
+				if trendsErr == nil {
+					if series, ok := trends[channelID]; ok {
+						return series
+					}
+				}
+				series, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount)
+				if err != nil {
+					return nil
+				}
+				return series
+			}
 			items := make([]channelItem, 0, len(channels))
 			for _, record := range channels {
 				item := channelItemFromRecord(st, record, counts[record.ID], enabledChannelModelCount(models, record.ID))
-				enrichChannelItemAnalytics(st, &item, record.ID, since, bucketSize, bucketCount, false)
+				item.Summary = usageSummaryViewFromRecord(channelSummary(record.ID))
+				item.Trends = usageTrendViews(channelTrends(record.ID))
 				items = append(items, item)
 			}
 			writeJSON(w, http.StatusOK, channelListResponse{Items: items, RefreshedAt: time.Now().UTC()})

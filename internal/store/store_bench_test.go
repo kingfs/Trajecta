@@ -179,3 +179,67 @@ func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkChannelUsageAnalytics measures what the channel list page needs per
+// configured channel: the per-channel form asks for one summary and one trend
+// series per channel, the batched form asks for both in one grouped pass each.
+func BenchmarkChannelUsageAnalytics(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const channels = 12
+	const logsPerChannel = 20
+	dir := b.TempDir()
+	now := time.Now().UTC()
+	header := benchmarkStoreHeader()
+	for c := 0; c < channels; c++ {
+		channelID := fmt.Sprintf("bench-channel-%02d", c)
+		for i := 0; i < logsPerChannel; i++ {
+			path := filepath.Join(dir, fmt.Sprintf("%s-%d.http", channelID, i))
+			if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+				b.Fatal(err)
+			}
+			header.Meta.RequestID = fmt.Sprintf("%s-%d", channelID, i)
+			header.Meta.Model = fmt.Sprintf("bench-model-%d", i%4)
+			header.Meta.Time = now.Add(-time.Duration(i%10) * time.Hour)
+			header.Meta.SelectedUpstreamID = channelID
+			header.Usage.TotalTokens = 10
+			if err := st.UpsertLog(path, header); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	since := now.Add(-24 * time.Hour)
+	ids := make([]string, 0, channels)
+	for c := 0; c < channels; c++ {
+		ids = append(ids, fmt.Sprintf("bench-channel-%02d", c))
+	}
+
+	b.Run("per-channel", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for _, channelID := range ids {
+				if _, err := st.GetChannelUsageSummary(channelID, since); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := st.GetChannelUsageTrends(channelID, since, time.Hour, 24); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
+	b.Run("batched", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := st.GetChannelUsageSummaries(since); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := st.GetChannelUsageTrendsBatch(since, time.Hour, 24); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

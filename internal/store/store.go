@@ -2755,12 +2755,23 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 	return usageSummaryRecordFromAggregate(record, successRate, avgTTFT, avgDuration, lastSeenValue)
 }
 
-// usageSummariesByModel computes the same aggregate as usageSummary(model = ?)
-// for every model in one grouped pass, keyed by the raw model column value. The
-// model catalog ran one pair of these queries per catalog entry (the selected
-// window and today), which is two scans of logs per model; a group the map does
-// not contain is the zero summary a no-match single-key query returned.
-func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryRecord, error) {
+// usageSummaryGroupKeys is the closed set of columns a grouped usage summary may
+// group by. The key is interpolated into the query text, so it is validated
+// against this map instead of being taken from a caller.
+var usageSummaryGroupKeys = map[string]struct{}{
+	"model":                {},
+	"selected_upstream_id": {},
+}
+
+// usageSummariesByGroupKey computes the same aggregate as usageSummary for one
+// equality clause on groupKey, for every group in one pass, keyed by the raw
+// column value. The model catalog and the channel list otherwise run this
+// aggregate once per entry (twice per model, once per channel); a group the map
+// does not contain is the zero summary a no-match single-key query returned.
+func (s *Store) usageSummariesByGroupKey(groupKey string, since time.Time) (map[string]UsageSummaryRecord, error) {
+	if _, ok := usageSummaryGroupKeys[groupKey]; !ok {
+		return nil, fmt.Errorf("unsupported usage summary group key %q", groupKey)
+	}
 	where := "1=1"
 	var args []any
 	if !since.IsZero() {
@@ -2768,10 +2779,10 @@ func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryR
 		args = append(args, since.UTC().Format(timeLayout))
 	}
 	rows, err := s.db.Query(`
-		SELECT model,`+usageSummaryAggregateColumns+`
+		SELECT `+groupKey+`,`+usageSummaryAggregateColumns+`
 		FROM logs
 		WHERE `+where+`
-		GROUP BY model
+		GROUP BY `+groupKey+`
 	`, args...)
 	if err != nil {
 		return nil, err
@@ -2781,7 +2792,7 @@ func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryR
 	summaries := map[string]UsageSummaryRecord{}
 	for rows.Next() {
 		var (
-			model         string
+			group         string
 			record        UsageSummaryRecord
 			successRate   float64
 			avgTTFT       float64
@@ -2789,7 +2800,7 @@ func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryR
 			lastSeenValue any
 		)
 		if err := rows.Scan(
-			&model,
+			&group,
 			&record.RequestCount,
 			&record.SuccessRequest,
 			&record.FailedRequest,
@@ -2809,9 +2820,20 @@ func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryR
 		if err != nil {
 			return nil, err
 		}
-		summaries[model] = converted
+		summaries[group] = converted
 	}
 	return summaries, rows.Err()
+}
+
+func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryRecord, error) {
+	return s.usageSummariesByGroupKey("model", since)
+}
+
+// GetChannelUsageSummaries returns the per-channel usage summary for the window
+// in one grouped pass, keyed by channel id. The channel list page would
+// otherwise ask for one summary per configured channel.
+func (s *Store) GetChannelUsageSummaries(since time.Time) (map[string]UsageSummaryRecord, error) {
+	return s.usageSummariesByGroupKey("selected_upstream_id", since)
 }
 
 func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
@@ -2914,6 +2936,165 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 			TotalTokens:   item.tokens,
 			ModelCount:    len(item.models),
 		})
+	}
+	return out, nil
+}
+
+// GetChannelUsageTrendsBatch computes the same series GetChannelUsageTrends
+// computes for one channel, for every channel in one ordered pass. Each channel
+// anchors its series at its own latest record, exactly like the single-key form,
+// so the shared scan starts at the earliest of those windows and a row that
+// falls outside its own channel's window is dropped while bucketing. A channel
+// with no rows at all is absent from the result, because the scan cannot know
+// the empty window such a channel would have.
+func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Duration, bucketCount int) (map[string][]UsageTrendRecord, error) {
+	if bucketSize <= 0 {
+		bucketSize = 24 * time.Hour
+	}
+	if bucketCount <= 0 {
+		bucketCount = 7
+	}
+	// The reference time of a channel is its latest record over all time, not
+	// just the window, which is what the single-key form reads too.
+	referenceRows, err := s.db.Query(`
+		SELECT selected_upstream_id, MAX(recorded_at)
+		FROM logs
+		WHERE selected_upstream_id <> ''
+		GROUP BY selected_upstream_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	references := map[string]time.Time{}
+	for referenceRows.Next() {
+		var (
+			channelID    string
+			latestRecord any
+		)
+		if err := referenceRows.Scan(&channelID, &latestRecord); err != nil {
+			referenceRows.Close()
+			return nil, err
+		}
+		latestTime, err := timeParseNullableValue(latestRecord)
+		if err != nil {
+			referenceRows.Close()
+			return nil, err
+		}
+		if !latestTime.IsZero() {
+			references[channelID] = latestTime.UTC()
+		}
+	}
+	err = referenceRows.Err()
+	referenceRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(references) == 0 {
+		return map[string][]UsageTrendRecord{}, nil
+	}
+
+	type bucket struct {
+		requests int
+		failed   int
+		missing  int
+		tokens   int
+		models   map[string]struct{}
+	}
+	where := "selected_upstream_id <> ''"
+	var args []any
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	var scanStart time.Time
+	slotsByChannel := make(map[string][]time.Time, len(references))
+	bucketsByChannel := make(map[string]map[time.Time]*bucket, len(references))
+	for channelID, referenceTime := range references {
+		bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+		slots := make([]time.Time, 0, bucketCount)
+		buckets := make(map[time.Time]*bucket, bucketCount)
+		for index := 0; index < bucketCount; index++ {
+			slot := bucketStart.Add(time.Duration(index) * bucketSize)
+			slots = append(slots, slot)
+			buckets[slot] = &bucket{models: map[string]struct{}{}}
+		}
+		slotsByChannel[channelID] = slots
+		bucketsByChannel[channelID] = buckets
+		if scanStart.IsZero() || bucketStart.Before(scanStart) {
+			scanStart = bucketStart
+		}
+	}
+
+	queryArgs := append([]any(nil), args...)
+	queryArgs = append(queryArgs, scanStart.Format(timeLayout))
+	rows, err := s.db.Query(`
+		SELECT selected_upstream_id, recorded_at, status_code, total_tokens, prompt_tokens, completion_tokens, model
+		FROM logs
+		WHERE `+where+` AND recorded_at >= ?
+		ORDER BY selected_upstream_id, recorded_at ASC
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			channelID   string
+			recordedAt  string
+			statusCode  int
+			totalTokens int
+			prompt      int
+			completion  int
+			model       string
+		)
+		if err := rows.Scan(&channelID, &recordedAt, &statusCode, &totalTokens, &prompt, &completion, &model); err != nil {
+			return nil, err
+		}
+		buckets := bucketsByChannel[channelID]
+		if buckets == nil {
+			continue
+		}
+		recordedTime, err := timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		item := buckets[recordedTime.UTC().Truncate(bucketSize)]
+		if item == nil {
+			continue
+		}
+		item.requests++
+		if statusCode < 200 || statusCode >= 300 {
+			item.failed++
+		}
+		if statusCode >= 200 && statusCode < 300 && totalTokens == 0 && prompt == 0 && completion == 0 {
+			item.missing++
+		}
+		item.tokens += totalTokens
+		if model = strings.TrimSpace(model); isUsageModelName(model) {
+			item.models[strings.ToLower(model)] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string][]UsageTrendRecord, len(references))
+	for channelID, slots := range slotsByChannel {
+		buckets := bucketsByChannel[channelID]
+		series := make([]UsageTrendRecord, 0, len(slots))
+		for _, slot := range slots {
+			item := buckets[slot]
+			series = append(series, UsageTrendRecord{
+				Time:          slot,
+				RequestCount:  item.requests,
+				FailedRequest: item.failed,
+				MissingUsage:  item.missing,
+				TotalTokens:   item.tokens,
+				ModelCount:    len(item.models),
+			})
+		}
+		out[channelID] = series
 	}
 	return out, nil
 }
