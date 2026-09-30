@@ -610,6 +610,58 @@ WHERE schemaname = 'public'
 ORDER BY tablename, indexname;
 ```
 
+## 运维脚本（`scripts/postgres/`）
+
+`scripts/postgres/` 把上面这些操作封装成可重复执行的入口。每个脚本都只是薄薄一层 `docker compose` 加项目自带命令：它不自己拼 DSN、不复制凭据，而是复用 compose 已经注入服务的 `TRAJECTA_DATABASE_DRIVER` / `TRAJECTA_DATABASE_DSN` / `TRAJECTA_CONFIG`，并用 `docker compose exec` 在数据库容器内跑 `psql`（走容器内本地认证）。所以同一套脚本既能驱动本仓库的 `docker-compose.yml`，也能驱动一份自建部署目录（本次就是用 `TRAJECTA_OPS_DEPLOY_DIR=/data/gateway` 逐条验证的）。
+
+| 脚本 | 作用 | 何时跑 |
+| --- | --- | --- |
+| `common.sh` | 共享库：配置解析、`psql`/CLI/API 包装、通过/失败计数器。只被 source，单独执行会报错退出 | — |
+| `evidence.sh` | **只读**证据报告：驱动与配置、迁移版本、SQLite 归档、索引健康、路径前缀与文件存在性、派生表孤儿、Monitor API、cassette magic 抽样。永不判定失败，适合贴进迁移记录或事故说明 | 迁移后、例行巡检 |
+| `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`semantic_nodes` 反连接仍为 `Merge Anti Join`、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
+| `reconcile-apply.sh` | 跑 `upgrade db --reconcile-derived-trace-ids`（默认干跑，`--apply` 才写；可加 `--prune-superseded-index-rows`），完整日志落到 `backups/` | 派生 trace id 需要修复时 |
+| `vacuum-after-repair.sh` | 修复后的统计刷新与死元组回收：中小编制表 `VACUUM (ANALYZE)`，大表默认只 `ANALYZE` 并报出 dead tuples | 修复结束后紧接着 |
+| `optimize-indexes.sh` | 建热查询部分索引（`server db migrate optimize-indexes`，`CONCURRENTLY` 且幂等）并用 `EXPLAIN (ANALYZE)` 复测失败列表与慢请求列表 | 首次建索引、索引变更后 |
+| `verify-after-rewrite.sh` | cassette 普查 → 结构校验（`--fail-on-legacy`，旧 magic 记为错误）→ 起服务 → 无活动 SQLite → API 探针 | magic 重写之后 |
+| `wait-for-rewrite.sh` | 等一个长时间重写容器退出，并校验其末行计数自洽：`scanned == rewritten + current + other` | 重写跑在一次性容器里时 |
+| `rebuild-image.sh` | 从工作树重建 `server`/`trajecta` 并烤进镜像；替换前把旧镜像打成 `<image>-prev-<utc>` 以便回滚 | 本地迭代后端改动 |
+| `restart-and-verify.sh` | 用镜像重建容器、确认容器**确实**运行在该镜像上、等 Monitor 就绪、显式应用迁移、再交给 `acceptance.sh` | 部署新镜像之后 |
+
+每个脚本的 `--help` 就是打印它自己的头部注释（例如 `scripts/postgres/acceptance.sh --help`），参数含义以那里为准。
+
+### 配置：先自动探测，再环境变量
+
+默认值面向本仓库的 `docker-compose.yml`（服务名 `trajecta`、数据目录 `data/traces`），自建部署只需覆盖少数几项：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `TRAJECTA_OPS_DEPLOY_DIR` | `$PWD` | 放 `docker-compose.yml` 的目录 |
+| `TRAJECTA_OPS_COMPOSE_FILE` | `$DEPLOY_DIR/docker-compose.yml` | compose 文件 |
+| `TRAJECTA_OPS_SERVICE` | 自动探测 `trajecta` 或 `llm-tracelab` | 应用服务名 |
+| `TRAJECTA_OPS_POSTGRES_SERVICE` | 自动探测 `postgres` | 数据库服务名 |
+| `TRAJECTA_OPS_PG_USER` / `TRAJECTA_OPS_PG_DB` | `.env` 的 `POSTGRES_USER`/`POSTGRES_DB`，缺失时回读 postgres 容器自身环境，再退回 `trajecta` | 数据库角色与库名 |
+| `TRAJECTA_OPS_DATA_ROOT` / `TRAJECTA_OPS_DATA_ROOT_HOST` | `/app/data/traces` / `$DEPLOY_DIR/data/traces` | 容器内与宿主机的 cassette 根，用于互相映射路径 |
+| `TRAJECTA_OPS_LEGACY_ROOT` | `/opt/llm_proxy/logs` | 改名前记录在库里的旧前缀，验收要求它只剩 0 行 |
+| `TRAJECTA_OPS_MONITOR_PORT` | `.env` 的 `TRAJECTA_HOST_MONITOR_PORT`，否则 `8081` | Monitor 端口；`TRAJECTA_OPS_BASE_URL` 可整体覆盖 |
+| `AUTH_USER` / `AUTH_PASSWORD` | 部署 `.env` 同名键 | API 探针凭据；缺失时只跳过探针 |
+| `DOCKER_CONFIG` | 系统默认 | 默认 docker 配置目录不可写时（沙箱、CI）需要显式设置 |
+
+各脚本还有自己的开关，同样可用环境变量给定：`reconcile-apply.sh` 的 `TRAJECTA_OPS_LOG_DIR`、`evidence.sh` 的 `TRAJECTA_OPS_MAGIC_SAMPLE` 与 `TRAJECTA_OPS_LEGACY_TRACE_LIST`（`trace_id|旧路径` 列表，用来抽样复验曾经 404 的 legacy trace）、`vacuum-after-repair.sh` 的 `TRAJECTA_OPS_SMALL_TABLES`/`TRAJECTA_OPS_BIG_TABLES`/`TRAJECTA_OPS_BIG_TABLES_VACUUM`、`rebuild-image.sh` 的 `TRAJECTA_OPS_IMAGE`/`TRAJECTA_OPS_BASE_IMAGE`。
+
+### 典型序列
+
+```bash
+export TRAJECTA_OPS_DEPLOY_DIR=/data/gateway    # 自建部署目录；本仓库里留空即 $PWD
+
+scripts/postgres/evidence.sh                    # 先看现状（只读）
+scripts/postgres/reconcile-apply.sh             # 干跑，读它写进 backups/ 的日志
+scripts/postgres/reconcile-apply.sh --apply --prune-superseded-index-rows
+scripts/postgres/vacuum-after-repair.sh         # 修复留下的死元组与陈旧统计
+scripts/postgres/acceptance.sh                  # 门禁：失败即非 0 退出
+```
+
+`acceptance.sh`、`evidence.sh` 和 `optimize-indexes.sh` 的探针查询都以 `PGOPTIONS='-c max_parallel_workers_per_gather=0'` 注入会话（libpq 会转发连接 `options`，而应用侧的 `lib/pq` 不会——见上文那张表）。它们要的是**正确结果**而不是并行加速，这样即便容器的 `/dev/shm` 很小也不会让整条验收语句失败。
+
 ## 查询调优与 EXPLAIN 模板
 
 分析步骤：

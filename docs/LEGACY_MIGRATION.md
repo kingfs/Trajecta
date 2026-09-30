@@ -318,4 +318,5 @@ COMMIT;
 
 - Postgres 是唯一事实源；`serve` 只连 Postgres，不再打开任何 SQLite 文件。
 - 归档文件（`*.migrated`）保留在磁盘上，是否删除由运维决定；它们不再被任何命令读取。
+- 迁移收尾与验收有现成脚本：`scripts/postgres/acceptance.sh` 断言派生表无孤儿、路径不越界、无活动 SQLite、迁移不 dirty、无 invalid 索引与 Monitor API 可用，并跑一次 reconcile 干跑确认没有 superseded 行；`scripts/postgres/evidence.sh` 出一份只读证据报告。两者的配置与典型序列见 [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md) 的「运维脚本」一节。
 - 原始 `.http` cassette 始终是 replay 与详情页的事实源，数据库只是派生索引；需要重建索引或派生数据时见[存储与部署](./STORAGE_AND_DEPLOYMENT.md)与[语义解析、Observation IR 与审计](./OBSERVATION_AND_AUDIT.md)。
