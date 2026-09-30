@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -3179,6 +3180,262 @@ func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 	}
 	if entries[0].LogPath != validPath {
 		t.Fatalf("entries[0].LogPath = %q, want %q", entries[0].LogPath, validPath)
+	}
+}
+
+// writeSyncCassetteForTest writes a cassette whose request carries a Session-Id
+// header, so Sync() derives the session grouping from the file contents exactly
+// like the proxy does for a recorded request.
+func writeSyncCassetteForTest(t testing.TB, dir string, name string, sessionID string, recordedAt time.Time, statusCode int, ttftMs int64, totalTokens int, stream bool) string {
+	t.Helper()
+
+	requestHeaders := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nSession-Id: " + sessionID + "\r\n\r\n"
+	requestBody := `{"model":"gpt-test"}`
+	responseHeaders := "HTTP/1.1 " + strconv.Itoa(statusCode) + " " + http.StatusText(statusCode) + "\r\nContent-Type: application/json\r\n\r\n"
+	responseBody := `{}`
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     name,
+			Time:          recordedAt,
+			Model:         "gpt-test",
+			URL:           "/v1/chat/completions",
+			Method:        http.MethodPost,
+			StatusCode:    statusCode,
+			DurationMs:    ttftMs + 200,
+			TTFTMs:        ttftMs,
+			ClientIP:      "127.0.0.1",
+			ContentLength: len64(requestBody),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64(requestHeaders),
+			ReqBodyLen:   len64(requestBody),
+			ResHeaderLen: len64(responseHeaders),
+			ResBodyLen:   len64(responseBody),
+			IsStream:     stream,
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude(%q) error = %v", name, err)
+	}
+	path := filepath.Join(dir, name)
+	content := string(prelude) + requestHeaders + requestBody + "\n" + responseHeaders + responseBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	return path
+}
+
+func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSyncCassetteForTest(t, dir, "sync-a.http", "sess-sync", base, http.StatusOK, 20, 10, true)
+	writeSyncCassetteForTest(t, dir, "sync-b.http", "sess-sync", base.Add(time.Minute), http.StatusCreated, 30, 20, false)
+	writeSyncCassetteForTest(t, dir, "sync-c.http", "sess-sync", base.Add(2*time.Minute), http.StatusInternalServerError, 40, 30, false)
+	writeSyncCassetteForTest(t, dir, "sync-other.http", "sess-other", base.Add(3*time.Minute), http.StatusOK, 50, 40, true)
+
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	// A bulk walk refreshes each session once, so the summary aggregates every
+	// recording of that session rather than only the last one it touched.
+	var (
+		requestCount int
+		failedCount  int
+		totalTokens  int
+	)
+	if err := st.db.QueryRow(`
+		SELECT request_count, failed_request, total_tokens
+		FROM session_summaries
+		WHERE session_id = ?
+	`, "sess-sync").Scan(&requestCount, &failedCount, &totalTokens); err != nil {
+		t.Fatalf("query session summary error = %v", err)
+	}
+	if requestCount != 3 || failedCount != 1 || totalTokens != 30 {
+		t.Fatalf("session summary = requests:%d failed:%d tokens:%d, want 3/1/30", requestCount, failedCount, totalTokens)
+	}
+
+	bucket := readOverviewMetricBucketForTest(t, st, base)
+	if bucket.requestCount != 4 || bucket.successRequest != 3 || bucket.failedRequest != 1 ||
+		bucket.totalTokens != 100 || bucket.ttftSum != 140 || bucket.ttftCount != 4 ||
+		bucket.durationSum != 940 || bucket.durationCount != 4 || bucket.streamCount != 2 {
+		t.Fatalf("bucket after first sync = %+v", bucket)
+	}
+
+	// A second walk with no changed file must leave the derived tables alone.
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() (second) error = %v", err)
+	}
+	if err := st.db.QueryRow(`SELECT request_count FROM session_summaries WHERE session_id = ?`, "sess-sync").Scan(&requestCount); err != nil {
+		t.Fatalf("query session summary (second) error = %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("session summary after second sync = %d, want 3", requestCount)
+	}
+	if again := readOverviewMetricBucketForTest(t, st, base); again != bucket {
+		t.Fatalf("bucket after second sync = %+v, want %+v", again, bucket)
+	}
+}
+
+// overviewMetricStateForTest renders both derived tables as ordered lines so two
+// refresh strategies can be compared field by field.
+func overviewMetricStateForTest(t *testing.T, st *Store) string {
+	t.Helper()
+
+	lines := make([]string, 0, 8)
+	rows, err := st.db.Query(`
+		SELECT bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+		FROM overview_metric_buckets
+		ORDER BY bucket_start, bucket_size_seconds
+	`)
+	if err != nil {
+		t.Fatalf("query overview_metric_buckets error = %v", err)
+	}
+	for rows.Next() {
+		var (
+			bucketStart any
+			size        int64
+			values      [9]int64
+		)
+		if err := rows.Scan(
+			&bucketStart,
+			&size,
+			&values[0],
+			&values[1],
+			&values[2],
+			&values[3],
+			&values[4],
+			&values[5],
+			&values[6],
+			&values[7],
+			&values[8],
+		); err != nil {
+			rows.Close()
+			t.Fatalf("scan overview_metric_buckets error = %v", err)
+		}
+		parsed, err := timeParseValue(bucketStart)
+		if err != nil {
+			rows.Close()
+			t.Fatalf("parse bucket_start error = %v", err)
+		}
+		lines = append(lines, fmt.Sprintf("bucket %s %d %v", parsed.UTC().Format(timeLayout), size, values))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("iterate overview_metric_buckets error = %v", err)
+	}
+	rows.Close()
+
+	rows, err = st.db.Query(`
+		SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+		FROM overview_metric_bucket_members
+		ORDER BY path
+	`)
+	if err != nil {
+		t.Fatalf("query overview_metric_bucket_members error = %v", err)
+	}
+	for rows.Next() {
+		var (
+			path        string
+			bucketStart any
+			size        int64
+			values      [9]int64
+		)
+		if err := rows.Scan(
+			&path,
+			&bucketStart,
+			&size,
+			&values[0],
+			&values[1],
+			&values[2],
+			&values[3],
+			&values[4],
+			&values[5],
+			&values[6],
+			&values[7],
+			&values[8],
+		); err != nil {
+			rows.Close()
+			t.Fatalf("scan overview_metric_bucket_members error = %v", err)
+		}
+		parsed, err := timeParseValue(bucketStart)
+		if err != nil {
+			rows.Close()
+			t.Fatalf("parse member bucket_start error = %v", err)
+		}
+		lines = append(lines, fmt.Sprintf("member %s %s %d %v", path, parsed.UTC().Format(timeLayout), size, values))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("iterate overview_metric_bucket_members error = %v", err)
+	}
+	rows.Close()
+
+	return strings.Join(lines, "\n")
+}
+
+func TestBatchedOverviewMetricRefreshMatchesPerPath(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSessionSummaryTestLog(t, st, dir, "batch-a.http", "sess-batch", base, http.StatusOK, 20, 10, true)
+	writeSessionSummaryTestLog(t, st, dir, "batch-b.http", "sess-batch", base.Add(5*time.Minute), http.StatusInternalServerError, 30, 20, false)
+	writeSessionSummaryTestLog(t, st, dir, "batch-c.http", "sess-other", base.Add(80*time.Minute), http.StatusOK, 40, 30, true)
+
+	paths := []string{
+		filepath.Join(dir, "batch-a.http"),
+		filepath.Join(dir, "batch-b.http"),
+		filepath.Join(dir, "batch-c.http"),
+	}
+	perPath := overviewMetricStateForTest(t, st)
+
+	// Rebuild the same state from scratch through the batched entry point: the
+	// two strategies must agree on every bucket and member field.
+	if _, err := st.db.Exec(`DELETE FROM overview_metric_bucket_members`); err != nil {
+		t.Fatalf("delete members error = %v", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM overview_metric_buckets`); err != nil {
+		t.Fatalf("delete buckets error = %v", err)
+	}
+	if err := st.refreshOverviewMetricBuckets(paths); err != nil {
+		t.Fatalf("refreshOverviewMetricBuckets() error = %v", err)
+	}
+	if batched := overviewMetricStateForTest(t, st); batched != perPath {
+		t.Fatalf("batched refresh state =\n%s\nwant\n%s", batched, perPath)
+	}
+
+	// A path whose index row disappeared must lose its member row and its bucket
+	// contribution through the batched path exactly like the per-path one.
+	if _, err := st.db.Exec(`DELETE FROM logs WHERE path = ?`, filepath.Join(dir, "batch-c.http")); err != nil {
+		t.Fatalf("delete log row error = %v", err)
+	}
+	if err := st.refreshOverviewMetricBuckets(paths); err != nil {
+		t.Fatalf("refreshOverviewMetricBuckets() (after delete) error = %v", err)
+	}
+	batchedAfterDelete := overviewMetricStateForTest(t, st)
+
+	if err := st.RefreshOverviewMetricBucketForPath(filepath.Join(dir, "batch-c.http")); err != nil {
+		t.Fatalf("RefreshOverviewMetricBucketForPath() error = %v", err)
+	}
+	if perPathAfterDelete := overviewMetricStateForTest(t, st); perPathAfterDelete != batchedAfterDelete {
+		t.Fatalf("per-path refresh after delete =\n%s\nwant\n%s", perPathAfterDelete, batchedAfterDelete)
 	}
 }
 

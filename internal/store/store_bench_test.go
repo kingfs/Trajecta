@@ -75,3 +75,50 @@ func benchmarkStoreHeader() recordfile.RecordHeader {
 		},
 	}
 }
+
+// BenchmarkSyncSingleSessionVault measures a full vault walk that indexes many
+// recordings of one session: the derived tables are rebuilt from whole sessions
+// and hour buckets, so this is the shape that pays for a per-file refresh.
+func BenchmarkSyncSingleSessionVault(b *testing.B) {
+	const files = 200
+	dir := b.TempDir()
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	for i := 0; i < files; i++ {
+		writeSyncCassetteForTest(
+			b,
+			dir,
+			fmt.Sprintf("trace-%03d.http", i),
+			"bench-session",
+			base.Add(time.Duration(i)*time.Second),
+			200,
+			20,
+			10,
+			true,
+		)
+	}
+
+	st, err := New(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		if err := st.Reset(); err != nil {
+			b.Fatal(err)
+		}
+		for _, table := range []string{"overview_metric_bucket_members", "overview_metric_buckets", "session_summaries"} {
+			if _, err := st.db.Exec(`DELETE FROM ` + table); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+
+		if err := st.Sync(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -815,6 +815,8 @@ session_summaries
 
 重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/store.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
 
+两条派生路径的刷新粒度不同：单次交互写入（`UpsertLogWithGrouping`、`UpdateLogUsage`）写完一行就刷新该 path 与涉及到的 session；而一次 vault 遍历（`Sync`、`Rebuild`）会把整轮碰到的 path 和 session 收集起来，在遍历结束后按 session 去重重建一次 `session_summaries`，并把同一小时桶的增量合并成一次 `overview_metric_buckets` 更新。因此 N 个同 session 的 cassette 只汇总一次而不是 N 次，`overview_metric_bucket_members` 的删除与插入也按绑定参数上限分批执行；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
+
 语义要点（用于一致性对比）：
 
 - `request_count` 为该 session 下 client-visible 的 `logs` 行数；`first_seen`/`last_seen` 取 `MIN/MAX(recorded_at)`。

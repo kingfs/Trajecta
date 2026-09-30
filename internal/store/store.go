@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2836,7 +2837,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	return out, nil
 }
 
-func sortedKeys(values map[string]struct{}) []string {
+func sortedKeys[V any](values map[string]V) []string {
 	out := make([]string, 0, len(values))
 	for value := range values {
 		out = append(out, value)
@@ -5223,6 +5224,14 @@ func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModel
 }
 
 func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
+	return s.upsertLogWithGrouping(path, header, grouping, nil)
+}
+
+// upsertLogWithGrouping indexes one cassette. A non-nil pending collector defers
+// the derived-table refreshes to the end of a bulk vault walk, so a session with
+// N recordings is summarised once instead of N times; nil keeps the per-file
+// behaviour for single interactive writes.
+func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo, pending *pendingDerivedRefresh) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -5361,8 +5370,14 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
-	s.refreshOverviewMetricBucketForPathBestEffort(path)
-	s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
+	if pending != nil {
+		pending.addPath(path)
+		pending.addSession(previousSessionID)
+		pending.addSession(grouping.SessionID)
+	} else {
+		s.refreshOverviewMetricBucketForPathBestEffort(path)
+		s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
+	}
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
@@ -5445,6 +5460,315 @@ func (s *Store) refreshOverviewMetricBucketForPathBestEffort(path string) {
 	if err := s.RefreshOverviewMetricBucketForPath(path); err != nil {
 		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric bucket for %q failed: %v\n", path, err)
 	}
+}
+
+// pendingDerivedRefresh collects the derived-table work one bulk vault walk
+// accumulates. Both derived tables are rebuilt from the whole session row set,
+// so refreshing them once per file turns a session with N recordings into N
+// rebuilds of the same rows; collapsing the paths and sessions first makes it
+// one rebuild (and one transaction) per touched bucket and session.
+type pendingDerivedRefresh struct {
+	sessions map[string]struct{}
+	paths    map[string]struct{}
+}
+
+func newPendingDerivedRefresh() *pendingDerivedRefresh {
+	return &pendingDerivedRefresh{
+		sessions: map[string]struct{}{},
+		paths:    map[string]struct{}{},
+	}
+}
+
+func (p *pendingDerivedRefresh) addSession(sessionID string) {
+	if p == nil {
+		return
+	}
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		p.sessions[sessionID] = struct{}{}
+	}
+}
+
+func (p *pendingDerivedRefresh) addPath(path string) {
+	if p == nil {
+		return
+	}
+	if path = strings.TrimSpace(path); path != "" {
+		p.paths[path] = struct{}{}
+	}
+}
+
+func (p *pendingDerivedRefresh) pending() bool {
+	return p != nil && (len(p.sessions) > 0 || len(p.paths) > 0)
+}
+
+// flushPendingDerivedRefresh applies the accumulated refreshes best-effort, in
+// the same spirit as the per-file path it replaces: the index rows themselves
+// are already committed, so a derived-table failure is reported and never
+// fails the walk.
+func (s *Store) flushPendingDerivedRefresh(pending *pendingDerivedRefresh) {
+	if !pending.pending() {
+		return
+	}
+	paths := make([]string, 0, len(pending.paths))
+	for path := range pending.paths {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	s.refreshOverviewMetricBucketsBestEffort(paths)
+
+	sessions := make([]string, 0, len(pending.sessions))
+	for sessionID := range pending.sessions {
+		sessions = append(sessions, sessionID)
+	}
+	sort.Strings(sessions)
+	s.refreshSessionSummariesBestEffort(sessions...)
+}
+
+func (s *Store) refreshOverviewMetricBucketsBestEffort(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	if err := s.refreshOverviewMetricBuckets(paths); err != nil {
+		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric buckets failed: %v\n", err)
+	}
+}
+
+// refreshOverviewMetricBuckets rebuilds the hourly bucket contribution of a set
+// of paths in one transaction. Path by path costs a contribution read, a member
+// read, a member delete and two upserts each in its own transaction; the batched
+// form reads both sides once and writes one aggregated delta per distinct bucket,
+// with the member rows deleted and re-inserted in parameter-bounded chunks.
+func (s *Store) refreshOverviewMetricBuckets(paths []string) error {
+	paths = dedupeNonEmptyStrings(paths)
+	if len(paths) == 0 {
+		return nil
+	}
+
+	contributions := map[string]overviewMetricContribution{}
+	previous := map[string]overviewMetricContribution{}
+	for _, chunk := range chunkStrings(paths, storeSQLParamChunk) {
+		args := stringArgs(chunk)
+
+		rows, err := s.db.Query(`
+			SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
+			FROM logs
+			WHERE path IN (`+placeholders(len(chunk))+`) AND `+clientVisibleLogClause("")+`
+		`, args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			contribution, err := s.scanOverviewMetricContribution(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			contributions[contribution.Path] = contribution
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+
+		rows, err = s.db.Query(`
+			SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+				total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+			FROM overview_metric_bucket_members
+			WHERE path IN (`+placeholders(len(chunk))+`)
+		`, args...)
+		if err != nil {
+			return err
+		}
+		var bucketStart any
+		for rows.Next() {
+			var member overviewMetricContribution
+			if err := rows.Scan(
+				&member.Path,
+				&bucketStart,
+				&member.BucketSizeSeconds,
+				&member.RequestCount,
+				&member.SuccessRequest,
+				&member.FailedRequest,
+				&member.TotalTokens,
+				&member.TTFTSum,
+				&member.TTFTCount,
+				&member.DurationSum,
+				&member.DurationCount,
+				&member.StreamCount,
+			); err != nil {
+				rows.Close()
+				return err
+			}
+			parsed, err := timeParseValue(bucketStart)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			member.BucketStart = parsed.UTC()
+			previous[member.Path] = member
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	deltas := map[string]overviewMetricContribution{}
+	for _, member := range previous {
+		member.RequestCount = -member.RequestCount
+		member.SuccessRequest = -member.SuccessRequest
+		member.FailedRequest = -member.FailedRequest
+		member.TotalTokens = -member.TotalTokens
+		member.TTFTSum = -member.TTFTSum
+		member.TTFTCount = -member.TTFTCount
+		member.DurationSum = -member.DurationSum
+		member.DurationCount = -member.DurationCount
+		member.StreamCount = -member.StreamCount
+		addOverviewMetricContributionDelta(deltas, member)
+	}
+	for _, contribution := range contributions {
+		addOverviewMetricContributionDelta(deltas, contribution)
+	}
+	// Deterministic write order keeps concurrent rebuilds and test failures
+	// reproducible; the deltas are independent additions either way.
+	for _, key := range sortedKeys(deltas) {
+		if err := s.addOverviewMetricBucketTx(tx, deltas[key]); err != nil {
+			return err
+		}
+	}
+	for _, chunk := range chunkStrings(paths, storeSQLParamChunk) {
+		if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members WHERE path IN (`+placeholders(len(chunk))+`)`, stringArgs(chunk)...); err != nil {
+			return err
+		}
+	}
+	if err := s.insertOverviewMetricMembersTx(tx, contributions); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// addOverviewMetricContributionDelta accumulates one bucket delta. A net-zero
+// delta writes nothing: the previous implementation added the removed member and
+// the new contribution as two separate upserts, which left a zero-valued row
+// behind when a path ended up in the same bucket with the same numbers.
+func addOverviewMetricContributionDelta(deltas map[string]overviewMetricContribution, contribution overviewMetricContribution) {
+	key := overviewMetricBucketKey(contribution)
+	current, ok := deltas[key]
+	if !ok {
+		current = overviewMetricContribution{
+			BucketStart:       contribution.BucketStart.UTC(),
+			BucketSizeSeconds: contribution.BucketSizeSeconds,
+		}
+	}
+	current.RequestCount += contribution.RequestCount
+	current.SuccessRequest += contribution.SuccessRequest
+	current.FailedRequest += contribution.FailedRequest
+	current.TotalTokens += contribution.TotalTokens
+	current.TTFTSum += contribution.TTFTSum
+	current.TTFTCount += contribution.TTFTCount
+	current.DurationSum += contribution.DurationSum
+	current.DurationCount += contribution.DurationCount
+	current.StreamCount += contribution.StreamCount
+	deltas[key] = current
+}
+
+func overviewMetricBucketKey(contribution overviewMetricContribution) string {
+	return contribution.BucketStart.UTC().Format(timeLayout) + "|" + strconv.Itoa(contribution.BucketSizeSeconds)
+}
+
+func (s *Store) insertOverviewMetricMembersTx(tx *sql.Tx, contributions map[string]overviewMetricContribution) error {
+	if len(contributions) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(timeLayout)
+	const memberColumns = 13
+	rowsPerStatement := storeSQLParamChunk / memberColumns
+	valueRow := "(" + placeholders(memberColumns) + ")"
+	for _, chunk := range chunkStrings(sortedKeys(contributions), rowsPerStatement) {
+		values := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk)*memberColumns)
+		for _, path := range chunk {
+			contribution := contributions[path]
+			values = append(values, valueRow)
+			args = append(args,
+				contribution.Path,
+				contribution.BucketStart.UTC().Format(timeLayout),
+				contribution.BucketSizeSeconds,
+				contribution.RequestCount,
+				contribution.SuccessRequest,
+				contribution.FailedRequest,
+				contribution.TotalTokens,
+				contribution.TTFTSum,
+				contribution.TTFTCount,
+				contribution.DurationSum,
+				contribution.DurationCount,
+				contribution.StreamCount,
+				now,
+			)
+		}
+		if _, err := s.execTx(tx, `
+			INSERT INTO overview_metric_bucket_members (
+				path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+				total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
+			) VALUES `+strings.Join(values, ", "), args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storeSQLParamChunk bounds how many bind parameters one statement carries.
+// Postgres allows 65535 and current SQLite builds allow 32766, but the historic
+// SQLite limit of 999 is the only value that is safe for every driver and
+// version the project supports.
+const storeSQLParamChunk = 900
+
+func dedupeNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func chunkStrings(values []string, size int) [][]string {
+	if size <= 0 || len(values) == 0 {
+		return nil
+	}
+	out := make([][]string, 0, (len(values)+size-1)/size)
+	for start := 0; start < len(values); start += size {
+		end := start + size
+		if end > len(values) {
+			end = len(values)
+		}
+		out = append(out, values[start:end])
+	}
+	return out
+}
+
+func stringArgs(values []string) []any {
+	args := make([]any, 0, len(values))
+	for _, value := range values {
+		args = append(args, value)
+	}
+	return args
 }
 
 func (s *Store) RefreshOverviewMetricBucketForPath(path string) error {
@@ -5809,7 +6133,11 @@ func (s *Store) Sync() error {
 		return err
 	}
 
-	return filepath.Walk(s.outputDir, func(path string, info os.FileInfo, err error) error {
+	// A vault walk touches every changed recording, and the derived tables are
+	// rebuilt from whole sessions and hour buckets: collect them here and refresh
+	// once at the end instead of once per file.
+	pending := newPendingDerivedRefresh()
+	walkErr := filepath.Walk(s.outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -5845,8 +6173,13 @@ func (s *Store) Sync() error {
 			return fmt.Errorf("extract grouping %s: %w", path, err)
 		}
 
-		return s.UpsertLogWithGrouping(path, parsed.Header, grouping)
+		return s.upsertLogWithGrouping(path, parsed.Header, grouping, pending)
 	})
+	// The index rows written before a walk failure are already committed, so the
+	// deferred refreshes run either way; a derived-table failure is reported and
+	// never masks the walk error.
+	s.flushPendingDerivedRefresh(pending)
+	return walkErr
 }
 
 type freshnessRecord struct {
