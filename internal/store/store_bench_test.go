@@ -122,3 +122,60 @@ func BenchmarkSyncSingleSessionVault(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkModelCatalogUsageSummaries measures the aggregate the model catalog
+// page needs per catalog entry: the per-key form issues one query per model per
+// window, the grouped form issues one query per window.
+func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const models = 40
+	const logsPerModel = 8
+	dir := b.TempDir()
+	now := time.Now().UTC()
+	header := benchmarkStoreHeader()
+	for m := 0; m < models; m++ {
+		model := fmt.Sprintf("bench-model-%02d", m)
+		for i := 0; i < logsPerModel; i++ {
+			path := filepath.Join(dir, fmt.Sprintf("%s-%d.http", model, i))
+			if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+				b.Fatal(err)
+			}
+			header.Meta.RequestID = fmt.Sprintf("%s-%d", model, i)
+			header.Meta.Model = model
+			header.Meta.Time = now.Add(-time.Duration(i) * time.Minute)
+			header.Usage.TotalTokens = 10
+			if err := st.UpsertLog(path, header); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	since := now.Add(-24 * time.Hour)
+	names := make([]string, 0, models)
+	for m := 0; m < models; m++ {
+		names = append(names, fmt.Sprintf("bench-model-%02d", m))
+	}
+
+	b.Run("single-key", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for _, name := range names {
+				if _, err := st.usageSummary("model = ?", []any{name}, since); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
+	b.Run("grouped", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := st.usageSummariesByModel(since); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

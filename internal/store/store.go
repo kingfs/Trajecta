@@ -1807,17 +1807,17 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 			}
 		}
 	}
+	summariesByModel, err := s.usageSummariesByModel(since)
+	if err != nil {
+		return nil, err
+	}
+	todayByModel, err := s.usageSummariesByModel(todaySince)
+	if err != nil {
+		return nil, err
+	}
 	for _, record := range modelSet {
-		summary, err := s.usageSummary("model = ?", []any{record.Model}, since)
-		if err != nil {
-			return nil, err
-		}
-		today, err := s.usageSummary("model = ?", []any{record.Model}, todaySince)
-		if err != nil {
-			return nil, err
-		}
-		record.Summary = summary
-		record.Today = today
+		record.Summary = summariesByModel[record.Model]
+		record.Today = todayByModel[record.Model]
 		record.ProviderCount = len(providersByModel[record.Model])
 		record.ChannelCount = len(channelsByModel[record.Model])
 		record.EnabledChannelCount = len(enabledChannelsByModel[record.Model])
@@ -2685,6 +2685,37 @@ func (s *Store) logModelChannels(since time.Time) (map[string]map[string]struct{
 	return out, rows.Err()
 }
 
+// usageSummaryAggregateColumns is the aggregate projection behind a usage
+// summary. The single-key and the grouped form below share it so that one can
+// stand in for the other without drifting.
+const usageSummaryAggregateColumns = `
+		COUNT(*) AS request_count,
+		COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+		COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+		CASE WHEN COUNT(*) = 0 THEN 0 ELSE 100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*) END AS success_rate,
+		COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 AND total_tokens = 0 AND prompt_tokens = 0 AND completion_tokens = 0 THEN 1 ELSE 0 END), 0) AS missing_usage_request,
+		COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+		COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+		COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		COALESCE(AVG(ttft_ms), 0) AS avg_ttft,
+		COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
+		MAX(recorded_at) AS last_seen`
+
+// usageSummaryRecordFromAggregate finishes one aggregate row. A group the query
+// did not return and a single-key query that matched nothing both stay zero.
+func usageSummaryRecordFromAggregate(record UsageSummaryRecord, successRate float64, avgTTFT float64, avgDuration float64, lastSeenValue any) (UsageSummaryRecord, error) {
+	record.SuccessRate = successRate
+	record.AvgTTFT = int(math.Round(avgTTFT))
+	record.AvgDurationMs = int64(math.Round(avgDuration))
+	if lastSeen, err := timeParseNullableValue(lastSeenValue); err != nil {
+		return UsageSummaryRecord{}, err
+	} else if !lastSeen.IsZero() {
+		record.LastSeen = lastSeen
+	}
+	return record, nil
+}
+
 func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) (UsageSummaryRecord, error) {
 	where := strings.TrimSpace(baseWhere)
 	if where == "" {
@@ -2697,25 +2728,13 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 	}
 	var (
 		record        UsageSummaryRecord
+		successRate   float64
 		avgTTFT       float64
 		avgDuration   float64
-		successRate   float64
 		lastSeenValue any
 	)
 	if err := s.db.QueryRow(`
-		SELECT
-			COUNT(*) AS request_count,
-			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
-			COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
-			CASE WHEN COUNT(*) = 0 THEN 0 ELSE 100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*) END AS success_rate,
-			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 AND total_tokens = 0 AND prompt_tokens = 0 AND completion_tokens = 0 THEN 1 ELSE 0 END), 0) AS missing_usage_request,
-			COALESCE(SUM(total_tokens), 0) AS total_tokens,
-			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-			COALESCE(AVG(ttft_ms), 0) AS avg_ttft,
-			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
-				MAX(recorded_at) AS last_seen
+		SELECT`+usageSummaryAggregateColumns+`
 		FROM logs
 		WHERE `+where, args...).Scan(
 		&record.RequestCount,
@@ -2733,15 +2752,66 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 	); err != nil {
 		return UsageSummaryRecord{}, err
 	}
-	record.SuccessRate = successRate
-	record.AvgTTFT = int(math.Round(avgTTFT))
-	record.AvgDurationMs = int64(math.Round(avgDuration))
-	if lastSeen, err := timeParseNullableValue(lastSeenValue); err != nil {
-		return UsageSummaryRecord{}, err
-	} else if !lastSeen.IsZero() {
-		record.LastSeen = lastSeen
+	return usageSummaryRecordFromAggregate(record, successRate, avgTTFT, avgDuration, lastSeenValue)
+}
+
+// usageSummariesByModel computes the same aggregate as usageSummary(model = ?)
+// for every model in one grouped pass, keyed by the raw model column value. The
+// model catalog ran one pair of these queries per catalog entry (the selected
+// window and today), which is two scans of logs per model; a group the map does
+// not contain is the zero summary a no-match single-key query returned.
+func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryRecord, error) {
+	where := "1=1"
+	var args []any
+	if !since.IsZero() {
+		where = "recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
 	}
-	return record, nil
+	rows, err := s.db.Query(`
+		SELECT model,`+usageSummaryAggregateColumns+`
+		FROM logs
+		WHERE `+where+`
+		GROUP BY model
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summaries := map[string]UsageSummaryRecord{}
+	for rows.Next() {
+		var (
+			model         string
+			record        UsageSummaryRecord
+			successRate   float64
+			avgTTFT       float64
+			avgDuration   float64
+			lastSeenValue any
+		)
+		if err := rows.Scan(
+			&model,
+			&record.RequestCount,
+			&record.SuccessRequest,
+			&record.FailedRequest,
+			&successRate,
+			&record.MissingUsage,
+			&record.TotalTokens,
+			&record.PromptTokens,
+			&record.CompletionTokens,
+			&record.CachedTokens,
+			&avgTTFT,
+			&avgDuration,
+			&lastSeenValue,
+		); err != nil {
+			return nil, err
+		}
+		converted, err := usageSummaryRecordFromAggregate(record, successRate, avgTTFT, avgDuration, lastSeenValue)
+		if err != nil {
+			return nil, err
+		}
+		summaries[model] = converted
+	}
+	return summaries, rows.Err()
 }
 
 func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {

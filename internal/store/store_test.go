@@ -2946,6 +2946,91 @@ func writeModelLog(t *testing.T, st *Store, dir string, name string, model strin
 	}
 }
 
+func TestModelCatalogAnalyticsSummarizesEveryModel(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channel := range []ChannelConfigRecord{
+		{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", ProviderPreset: "openai", HeadersJSON: "{}", Enabled: true},
+		{ID: "anthropic", Name: "Anthropic", BaseURL: "https://api.anthropic.com/v1", ProviderPreset: "anthropic", HeadersJSON: "{}", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channel.ID, err)
+		}
+	}
+	if err := st.ReplaceChannelModels("openai", []ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+		{Model: "catalog-only", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels(openai) error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("anthropic", []ChannelModelRecord{{Model: "claude-3", Source: "manual", Enabled: false}}); err != nil {
+		t.Fatalf("ReplaceChannelModels(anthropic) error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	today := startOfDayForTest(now)
+	windowStart := now.Add(-30 * 24 * time.Hour)
+	// gpt-5 has two requests inside today and one earlier in the window, claude-3
+	// has one request today only, and catalog-only has no logs at all: the point
+	// is that the two windows and the empty model are all resolved from the one
+	// grouped pass each.
+	writeModelLog(t, st, dir, "gpt5-today-1.http", "gpt-5", "/v1/responses", "POST", "openai", 200, 100, now.Add(-2*time.Minute))
+	writeModelLog(t, st, dir, "gpt5-today-2.http", "gpt-5", "/v1/responses", "POST", "openai", 500, 0, now.Add(-time.Minute))
+	writeModelLog(t, st, dir, "gpt5-today-3.http", "gpt-5", "/v1/responses", "POST", "openai", 200, 0, now.Add(-4*time.Minute))
+	writeModelLog(t, st, dir, "gpt5-window.http", "gpt-5", "/v1/responses", "POST", "openai", 200, 300, now.Add(-72*time.Hour))
+	writeModelLog(t, st, dir, "claude-today.http", "claude-3", "/v1/messages", "POST", "anthropic", 200, 50, now.Add(-3*time.Minute))
+
+	items, err := st.ListModelCatalogAnalytics(windowStart, today)
+	if err != nil {
+		t.Fatalf("ListModelCatalogAnalytics() error = %v", err)
+	}
+	byModel := map[string]ModelCatalogAnalyticsRecord{}
+	for _, item := range items {
+		byModel[item.Model] = item
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3 (%#v)", len(items), items)
+	}
+
+	gpt := byModel["gpt-5"]
+	if gpt.Summary.RequestCount != 4 || gpt.Summary.TotalTokens != 400 || gpt.Summary.MissingUsage != 1 || gpt.Summary.FailedRequest != 1 {
+		t.Fatalf("gpt-5 summary = %+v, want 4 requests/400 tokens/1 missing/1 failed", gpt.Summary)
+	}
+	if gpt.Summary.SuccessRequest != 3 || gpt.Summary.SuccessRate != 75 {
+		t.Fatalf("gpt-5 success = %d requests at %v%%, want 3 at 75%%", gpt.Summary.SuccessRequest, gpt.Summary.SuccessRate)
+	}
+	if gpt.Today.RequestCount != 3 || gpt.Today.TotalTokens != 100 || gpt.Today.MissingUsage != 1 {
+		t.Fatalf("gpt-5 today = %+v, want 3 requests/100 tokens/1 missing", gpt.Today)
+	}
+	if gpt.ProviderCount != 1 || gpt.ChannelCount != 1 || gpt.EnabledChannelCount != 1 {
+		t.Fatalf("gpt-5 coverage = providers:%d channels:%d enabled:%d", gpt.ProviderCount, gpt.ChannelCount, gpt.EnabledChannelCount)
+	}
+	if gpt.Summary.LastSeen.IsZero() || gpt.Today.LastSeen.IsZero() {
+		t.Fatalf("gpt-5 last seen = window:%v today:%v, want both set", gpt.Summary.LastSeen, gpt.Today.LastSeen)
+	}
+
+	claude := byModel["claude-3"]
+	if claude.Summary.RequestCount != 1 || claude.Summary.TotalTokens != 50 || claude.Today.RequestCount != 1 {
+		t.Fatalf("claude-3 = %+v / today %+v, want 1 request in both windows", claude.Summary, claude.Today)
+	}
+	if claude.ChannelCount != 1 || claude.EnabledChannelCount != 0 {
+		t.Fatalf("claude-3 coverage = channels:%d enabled:%d, want 1/0", claude.ChannelCount, claude.EnabledChannelCount)
+	}
+
+	empty, ok := byModel["catalog-only"]
+	if !ok {
+		t.Fatalf("catalog-only missing from %#v", items)
+	}
+	if empty.Summary != (UsageSummaryRecord{}) || empty.Today != (UsageSummaryRecord{}) {
+		t.Fatalf("catalog-only summaries = %+v / %+v, want zeroes", empty.Summary, empty.Today)
+	}
+}
+
 func startOfDayForTest(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
