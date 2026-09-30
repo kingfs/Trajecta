@@ -536,7 +536,31 @@ Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两
 
 修法是把索引补进 ent schema（`ent/schema/parse_job.go` 的 `index.Fields("trace_id", "status")`）并配一条版本化迁移（`20260929090000_add_parse_jobs_trace_id_index`）。迁移里用 `CREATE INDEX IF NOT EXISTS`，18 MB、2.3 秒，因此可以先把索引手工建在实例上，之后迁移只是空操作。`trace_id` 打头也顺带覆盖 Monitor 的 `trace_id = ? AND status = ?`（两列都进 `Index Cond`），只按 `status` 的查询仍由原有的 `(status, updated_at)` 服务。
 
-这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 抽出 SQLite 的 `CREATE INDEX … ON <表>(<列>)`，再和线上 `pg_index` 的实际索引逐表比对首列与列组合，缺失的形状才会显形。本次全量比对只剩 `parse_jobs`、`system_events`、`logs` 三处，其中只有 `parse_jobs` 影响能力，另外两处的首列已被现有索引覆盖。
+这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 里抽出所有反引号语句中的 `CREATE INDEX … ON <表>(<列>)`，与迁移后数据库的 `pg_indexes` 逐形状（表 + 归一化后的列序列，忽略 `ASC`/`DESC`、partial 与唯一性）比对。
+
+按这个方法复核过当前状态（SQLite 启动 schema 82 个形状，迁移后的 Postgres 83 个，`parsejob_trace_id_status` 等上一批补的形状两侧都在），剩下的差异都不影响能力，只是形状不同：
+
+| 只有 SQLite | 只有 Postgres | 判定 |
+| --- | --- | --- |
+| `logs(session_id, recorded_at, trace_id)` | `logs(session_id, recorded_at)` | PG 的索引少了尾列 `trace_id`，同序时只多一次并列排序 |
+| `parse_jobs(status, trace_id)` | `parsejob_trace_id_status(trace_id, status)` | 两列都是等值条件，两种顺序都能进 `Index Cond` |
+| `session_summaries(last_seen)` | `session_summaries(last_seen DESC, session_id DESC)` | PG 的形状是 SQLite 的超集 |
+| `system_events(last_seen_at, id)`、`(status, last_seen_at, id)`、`(source, category, last_seen_at, id)` | `systemevent_status_last_seen_at(status, last_seen_at)`、`systemevent_source_category_last_seen_at(source, category, last_seen_at)` | 头几列相同，PG 上没有尾列 `id`，稳定分页的并列需要一次排序 |
+| `system_events(trace_id, last_seen_at) WHERE trace_id <> ''` | `systemevent_trace_id_last_seen_at(trace_id, last_seen_at)` | SQLite 用 partial，PG 用全量 |
+| — | `api_tokens(enabled)`、`api_tokens(prefix)`、`datasets(updated_at)`、`eval_runs(created_at)`、`parser_versions(parser, version)`、`trace_observations(request_audit_id, updated_at)`、`trace_observations(response_id, updated_at)` | 都在小表或只在 Postgres 才可能大的表上（`trace_observations`），SQLite 侧全表扫的代价可忽略 |
+
+另外复核了一次前缀冗余：把 Postgres 里所有非唯一、非 partial 索引按列序列两两比较，没有「左边的列是右边严格前缀」的重复索引。
+
+**待确认的删除候选：`tracelog_parent_exchange_id`。** `logs.parent_exchange_id` 在 `internal/store` 里只出现在 SELECT 投影和写入里，全仓库没有任何 `WHERE parent_exchange_id = ?`（raw SQL 与 ent 谓词都查过），MCP 与 Monitor 侧只在结构体/JSON 里引用该字段；索引由 `c8601e6` 引入。`logs` 是写入最热的表，这个索引只在每次插入时增加维护成本，但「代码里没用到」不等于「实例上没用到」——生产上先按下面的查询确认 `idx_scan = 0`，再决定是否 `DROP INDEX CONCURRENTLY`：
+
+```sql
+SELECT indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid)) AS size
+FROM pg_stat_user_indexes
+WHERE relname = 'logs'
+ORDER BY idx_scan, indexrelname;
+```
+
+`idx_scan` 统计在 `pg_stat_reset()` 或实例重启后清零，判断前要先确认统计窗口覆盖了完整的流量周期（至少一个工作日加一次周报/月度报表）。
 
 ## 第二批缺口：`logs(selected_upstream_id)`、审计表与分析表的 `created_at`
 
