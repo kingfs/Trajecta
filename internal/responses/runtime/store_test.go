@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -149,6 +150,113 @@ func TestEntStorePutGetInputItemsRoundTrip(t *testing.T) {
 	}
 	if len(gotInputs) != 1 || gotInputs[0].Content[0].Text != "ping" {
 		t.Fatalf("InputItems() = %#v, want ping", gotInputs)
+	}
+}
+
+func TestEntStoreChunksLongItemHistories(t *testing.T) {
+	ctx := context.Background()
+	store := newEntStoreForTest(t)
+	// More items than one insert chunk carries, so the round trip also covers
+	// the chunk boundary and the order the batched reads have to restore.
+	const itemCount = responseItemInsertChunk + 3
+	inputs := make([]protocol.InputItem, 0, itemCount)
+	for i := 0; i < itemCount; i++ {
+		inputs = append(inputs, messageInput(fmt.Sprintf("in_ent_chunk_%03d", i), fmt.Sprintf("ping-%03d", i)))
+	}
+	outputs := []protocol.OutputItem{{
+		ID:      "out_ent_chunk",
+		Type:    "message",
+		Role:    "assistant",
+		Content: []protocol.ContentPart{{Type: "output_text", Text: "pong"}},
+	}}
+	resp := protocol.Response{
+		ID:        "resp_ent_chunked",
+		Object:    "response",
+		CreatedAt: 21,
+		Status:    "completed",
+		Model:     "model",
+		Output:    outputs,
+	}
+	if err := store.Put(ctx, resp, protocol.CreateResponseRequest{Input: "ping"}, inputs, outputs); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+
+	gotInputs, ok, err := store.InputItems(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("InputItems() ok=%v err=%v", ok, err)
+	}
+	if len(gotInputs) != itemCount {
+		t.Fatalf("len(InputItems()) = %d, want %d", len(gotInputs), itemCount)
+	}
+	for i, item := range gotInputs {
+		if want := fmt.Sprintf("ping-%03d", i); item.Content[0].Text != want {
+			t.Fatalf("InputItems()[%d] = %q, want %q", i, item.Content[0].Text, want)
+		}
+	}
+
+	got, ok, err := store.Get(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get() ok=%v err=%v", ok, err)
+	}
+	if len(got.Output) != 1 || got.Output[0].Content[0].Text != "pong" {
+		t.Fatalf("Get().Output = %#v, want pong", got.Output)
+	}
+
+	ledger, ok, err := store.ContinuationItems(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("ContinuationItems() ok=%v err=%v", ok, err)
+	}
+	if len(ledger) != itemCount+1 {
+		t.Fatalf("len(ContinuationItems()) = %d, want %d", len(ledger), itemCount+1)
+	}
+	if got := ledger[0].Input.Content[0].Text; got != "ping-000" {
+		t.Fatalf("first ledger item = %q, want ping-000", got)
+	}
+	if last := ledger[len(ledger)-1]; last.Output == nil || last.Output.Content[0].Text != "pong" {
+		t.Fatalf("last ledger item = %#v, want the pong output", last)
+	}
+}
+
+func TestEntStoreDanglingItemReferenceStillFails(t *testing.T) {
+	ctx := context.Background()
+	store := newEntStoreForTest(t)
+	outputs := []protocol.OutputItem{{
+		ID:      "out_ent_dangling",
+		Type:    "message",
+		Role:    "assistant",
+		Content: []protocol.ContentPart{{Type: "output_text", Text: "pong"}},
+	}}
+	resp := protocol.Response{
+		ID:        "resp_ent_dangling",
+		Object:    "response",
+		CreatedAt: 22,
+		Status:    "completed",
+		Model:     "model",
+		Output:    outputs,
+	}
+	inputs := []protocol.InputItem{messageInput("in_ent_dangling", "ping")}
+	if err := store.Put(ctx, resp, protocol.CreateResponseRequest{Input: "ping"}, inputs, outputs); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+
+	// The history keeps referring to the item after the row is gone, which the
+	// per-item read reported as an error and the batched read must keep doing
+	// instead of dropping the item from the history.
+	if err := store.client.ResponseItem.DeleteOneID(storedItemID(resp.ID, "input", inputs[0].ID, 0)).Exec(ctx); err != nil {
+		t.Fatalf("delete input item: %v", err)
+	}
+	if _, _, err := store.InputItems(ctx, resp.ID); err == nil {
+		t.Fatal("InputItems() error = nil, want the dangling reference reported")
+	}
+	if _, ok, err := store.ContinuationItems(ctx, resp.ID); err == nil || ok {
+		t.Fatalf("ContinuationItems() ok=%v err=%v, want an error", ok, err)
+	}
+
+	if err := store.client.ResponseItem.DeleteOneID(storedItemID(resp.ID, "output", outputs[0].ID, 0)).Exec(ctx); err != nil {
+		t.Fatalf("delete output item: %v", err)
+	}
+	if _, ok, err := store.Get(ctx, resp.ID); err == nil || ok {
+		t.Fatalf("Get() ok=%v err=%v, want an error", ok, err)
 	}
 }
 

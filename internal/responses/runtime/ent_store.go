@@ -13,6 +13,10 @@ import (
 	"github.com/kingfs/Trajecta/internal/responses/protocol"
 )
 
+// responseItemInsertChunk bounds how many response items one multi-row insert
+// carries, the same way the store bounds its own bulk statements.
+const responseItemInsertChunk = 200
+
 type EntStore struct {
 	client *dao.Client
 }
@@ -31,21 +35,22 @@ func (s *EntStore) Put(ctx context.Context, resp protocol.Response, req protocol
 	historyItemIDs := make([]string, 0, len(inputItems)+len(outputItems))
 	outputItemIDs := make([]string, 0, len(outputItems))
 
+	// Every item of the response goes in with multi-row inserts. The per-item
+	// form issued one INSERT per input and output item of the conversation
+	// history, which is the largest statement count on the Responses write path.
+	builders := make([]*dao.ResponseItemCreate, 0, len(inputItems)+len(outputItems))
 	for i, input := range inputItems {
 		id := storedItemID(resp.ID, "input", input.ID, i)
 		payload, err := jsonMap(input)
 		if err != nil {
 			return rollback(tx, err)
 		}
-		if err := client.ResponseItem.Create().
+		builders = append(builders, client.ResponseItem.Create().
 			SetID(id).
 			SetKind(responseitem.KindInput).
 			SetResponseID(resp.ID).
 			SetConversationID(conversationID).
-			SetPayload(payload).
-			Exec(ctx); err != nil {
-			return rollback(tx, err)
-		}
+			SetPayload(payload))
 		historyItemIDs = append(historyItemIDs, id)
 	}
 	for i, output := range outputItems {
@@ -54,17 +59,23 @@ func (s *EntStore) Put(ctx context.Context, resp protocol.Response, req protocol
 		if err != nil {
 			return rollback(tx, err)
 		}
-		if err := client.ResponseItem.Create().
+		builders = append(builders, client.ResponseItem.Create().
 			SetID(id).
 			SetKind(responseitem.KindOutput).
 			SetResponseID(resp.ID).
 			SetConversationID(conversationID).
-			SetPayload(payload).
-			Exec(ctx); err != nil {
-			return rollback(tx, err)
-		}
+			SetPayload(payload))
 		historyItemIDs = append(historyItemIDs, id)
 		outputItemIDs = append(outputItemIDs, id)
+	}
+	for start := 0; start < len(builders); start += responseItemInsertChunk {
+		end := start + responseItemInsertChunk
+		if end > len(builders) {
+			end = len(builders)
+		}
+		if err := client.ResponseItem.CreateBulk(builders[start:end]...).Exec(ctx); err != nil {
+			return rollback(tx, err)
+		}
 	}
 
 	createdAt := time.Unix(resp.CreatedAt, 0)
@@ -144,16 +155,20 @@ func (s *EntStore) InputItems(ctx context.Context, id string) ([]protocol.InputI
 	if err != nil {
 		return nil, false, err
 	}
+	stored, err := s.itemsByID(ctx, row.HistoryItemIds)
+	if err != nil {
+		return nil, false, err
+	}
 	items := make([]protocol.InputItem, 0, len(row.HistoryItemIds))
 	for _, itemID := range row.HistoryItemIds {
-		stored, err := s.client.ResponseItem.Get(ctx, itemID)
-		if err != nil {
-			return nil, false, err
+		entry, ok := stored[itemID]
+		if !ok {
+			return nil, false, s.missingItemError(ctx, itemID)
 		}
-		if stored.Kind != responseitem.KindInput {
+		if entry.Kind != responseitem.KindInput {
 			continue
 		}
-		input, err := inputItemFromPayload(stored.Payload)
+		input, err := inputItemFromPayload(entry.Payload)
 		if err != nil {
 			return nil, false, err
 		}
@@ -164,6 +179,8 @@ func (s *EntStore) InputItems(ctx context.Context, id string) ([]protocol.InputI
 
 func (s *EntStore) ContinuationItems(ctx context.Context, id string) ([]LedgerItem, bool, error) {
 	ids := make([]string, 0, 8)
+	rowsByID := make(map[string]*dao.Response, 8)
+	itemsByID := make(map[string]*dao.ResponseItem)
 	for current := id; current != ""; {
 		row, err := s.client.Response.Get(ctx, current)
 		if dao.IsNotFound(err) {
@@ -173,7 +190,17 @@ func (s *EntStore) ContinuationItems(ctx context.Context, id string) ([]LedgerIt
 			return nil, false, err
 		}
 		ids = append(ids, current)
-		hasCompactRequest, err := s.responseHasCompactRequest(ctx, row)
+		rowsByID[current] = row
+		// The whole history of this step in one query: the compact boundary
+		// check below and the ledger assembly further down both read it.
+		stored, err := s.itemsByID(ctx, row.HistoryItemIds)
+		if err != nil {
+			return nil, false, err
+		}
+		for itemID, entry := range stored {
+			itemsByID[itemID] = entry
+		}
+		hasCompactRequest, err := compactRequestIn(row.HistoryItemIds, stored)
 		if err != nil {
 			return nil, false, err
 		}
@@ -185,14 +212,11 @@ func (s *EntStore) ContinuationItems(ctx context.Context, id string) ([]LedgerIt
 
 	items := make([]LedgerItem, 0, len(ids)*2)
 	for i := len(ids) - 1; i >= 0; i-- {
-		row, err := s.client.Response.Get(ctx, ids[i])
-		if err != nil {
-			return nil, false, err
-		}
+		row := rowsByID[ids[i]]
 		for _, itemID := range row.HistoryItemIds {
-			stored, err := s.client.ResponseItem.Get(ctx, itemID)
-			if err != nil {
-				return nil, false, err
+			stored, ok := itemsByID[itemID]
+			if !ok {
+				return nil, false, s.missingItemError(ctx, itemID)
 			}
 			switch stored.Kind {
 			case responseitem.KindInput:
@@ -228,13 +252,17 @@ func (s *EntStore) LatestResponseIDByConversation(ctx context.Context, conversat
 }
 
 func (s *EntStore) outputItems(ctx context.Context, itemIDs []string) ([]protocol.OutputItem, error) {
+	stored, err := s.itemsByID(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]protocol.OutputItem, 0, len(itemIDs))
 	for _, itemID := range itemIDs {
-		stored, err := s.client.ResponseItem.Get(ctx, itemID)
-		if err != nil {
-			return nil, err
+		entry, ok := stored[itemID]
+		if !ok {
+			return nil, s.missingItemError(ctx, itemID)
 		}
-		output, err := outputItemFromPayload(stored.Payload)
+		output, err := outputItemFromPayload(entry.Payload)
 		if err != nil {
 			return nil, err
 		}
@@ -243,11 +271,40 @@ func (s *EntStore) outputItems(ctx context.Context, itemIDs []string) ([]protoco
 	return items, nil
 }
 
-func (s *EntStore) responseHasCompactRequest(ctx context.Context, row *dao.Response) (bool, error) {
-	for _, itemID := range row.HistoryItemIds {
-		stored, err := s.client.ResponseItem.Get(ctx, itemID)
-		if err != nil {
-			return false, err
+// itemsByID loads the stored items with the given ids in one query, keyed by id.
+// Every caller walks its own id list, which is what keeps the stored order
+// without reading one row per id.
+func (s *EntStore) itemsByID(ctx context.Context, ids []string) (map[string]*dao.ResponseItem, error) {
+	items := make(map[string]*dao.ResponseItem, len(ids))
+	if len(ids) == 0 {
+		return items, nil
+	}
+	rows, err := s.client.ResponseItem.Query().Where(responseitem.IDIn(ids...)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		items[row.ID] = row
+	}
+	return items, nil
+}
+
+// missingItemError reports an item id a response still references but that no
+// longer exists, with the error a direct read of that id returned.
+func (s *EntStore) missingItemError(ctx context.Context, itemID string) error {
+	if _, err := s.client.ResponseItem.Get(ctx, itemID); err != nil {
+		return err
+	}
+	return fmt.Errorf("response item %q not found", itemID)
+}
+
+// compactRequestIn reports whether the given history holds a compact request
+// item. The caller passes the items it already loaded for that history.
+func compactRequestIn(historyItemIDs []string, items map[string]*dao.ResponseItem) (bool, error) {
+	for _, itemID := range historyItemIDs {
+		stored, ok := items[itemID]
+		if !ok {
+			return false, fmt.Errorf("response item %q is missing from its own history", itemID)
 		}
 		if stored.Kind != responseitem.KindInput {
 			continue
