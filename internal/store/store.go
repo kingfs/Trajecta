@@ -2027,6 +2027,21 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 	}
 	defer rows.Close()
 
+	// The per-upstream lists come from three grouped queries for the whole page
+	// instead of four per upstream, which is what the loop below used to run.
+	coverages, err := s.upstreamModelCoverageAll(limitModels, since, modelFilter)
+	if err != nil {
+		return nil, err
+	}
+	errorsByUpstream, err := s.upstreamRecentErrorsAll(limitErrors, since, modelFilter)
+	if err != nil {
+		return nil, err
+	}
+	failuresByUpstream, err := s.upstreamRecentFailuresAll(limitErrors, since, modelFilter)
+	if err != nil {
+		return nil, err
+	}
+
 	var out []UpstreamAnalyticsRecord
 	for rows.Next() {
 		var (
@@ -2051,18 +2066,11 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 		if err != nil {
 			return nil, err
 		}
-		record.Models, record.LastModel, err = s.upstreamModelCoverage(record.UpstreamID, limitModels, since, modelFilter)
-		if err != nil {
-			return nil, err
-		}
-		record.RecentErrors, err = s.upstreamRecentErrors(record.UpstreamID, limitErrors, since, modelFilter)
-		if err != nil {
-			return nil, err
-		}
-		record.RecentFailures, err = s.upstreamRecentFailures(record.UpstreamID, limitErrors, since, modelFilter)
-		if err != nil {
-			return nil, err
-		}
+		coverage := coverages[record.UpstreamID]
+		record.Models = coverage.Models
+		record.LastModel = coverage.LastModel
+		record.RecentErrors = errorsByUpstream[record.UpstreamID]
+		record.RecentFailures = failuresByUpstream[record.UpstreamID]
 		out = append(out, record)
 	}
 	return out, rows.Err()
@@ -2474,6 +2482,213 @@ func (s *Store) upstreamRecentFailures(upstreamID string, limit int, since time.
 		}
 		record.Reason = classifyUpstreamFailure(record.StatusCode, record.ErrorText)
 		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+// upstreamModelCoverageRecord is the per-upstream result of the batched model
+// coverage query.
+type upstreamModelCoverageRecord struct {
+	Models    []string
+	LastModel string
+}
+
+// upstreamModelCoverageAll computes upstreamModelCoverage for every upstream in
+// two queries. The per-upstream form ran both of them once per upstream, and the
+// analytics page calls it for every upstream it lists. Both queries rank inside
+// the database so the model order and the top-N cut keep the collation the
+// per-upstream query used.
+func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter string) (map[string]upstreamModelCoverageRecord, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	out := map[string]upstreamModelCoverageRecord{}
+
+	rankedArgs := append([]any(nil), whereArgs...)
+	rankedArgs = append(rankedArgs, limit)
+	rows, err := s.db.Query(`
+		SELECT selected_upstream_id, model
+		FROM (
+			SELECT
+				selected_upstream_id,
+				model,
+				ROW_NUMBER() OVER (
+					PARTITION BY selected_upstream_id
+					ORDER BY COUNT(*) DESC, model ASC
+				) AS model_rank
+			FROM logs
+			WHERE selected_upstream_id <> '' AND model <> ''`+whereSQL+`
+			GROUP BY selected_upstream_id, model
+		) ranked
+		WHERE model_rank <= ?
+		ORDER BY selected_upstream_id, model_rank
+	`, rankedArgs...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var (
+			upstreamID string
+			model      string
+		)
+		if err := rows.Scan(&upstreamID, &model); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		record := out[upstreamID]
+		record.Models = append(record.Models, model)
+		out[upstreamID] = record
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	lastRows, err := s.db.Query(`
+		SELECT selected_upstream_id, model
+		FROM (
+			SELECT
+				selected_upstream_id,
+				model,
+				ROW_NUMBER() OVER (
+					PARTITION BY selected_upstream_id
+					ORDER BY recorded_at DESC, trace_id DESC
+				) AS row_number
+			FROM logs
+			WHERE selected_upstream_id <> '' AND model <> ''`+whereSQL+`
+		) ranked
+		WHERE row_number = 1
+	`, whereArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer lastRows.Close()
+	for lastRows.Next() {
+		var (
+			upstreamID string
+			model      string
+		)
+		if err := lastRows.Scan(&upstreamID, &model); err != nil {
+			return nil, err
+		}
+		record := out[upstreamID]
+		record.LastModel = model
+		out[upstreamID] = record
+	}
+	return out, lastRows.Err()
+}
+
+// upstreamRecentErrorsAll computes upstreamRecentErrors for every upstream in one
+// query, ranking the last limit rows of each upstream inside the database.
+func (s *Store) upstreamRecentErrorsAll(limit int, since time.Time, modelFilter string) (map[string][]string, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any(nil), whereArgs...)
+	args = append(args, limit)
+	rows, err := s.db.Query(`
+		SELECT selected_upstream_id, error_text, status_code, endpoint
+		FROM (
+			SELECT
+				selected_upstream_id,
+				error_text,
+				status_code,
+				endpoint,
+				ROW_NUMBER() OVER (
+					PARTITION BY selected_upstream_id
+					ORDER BY recorded_at DESC, trace_id DESC
+				) AS row_number
+			FROM logs
+			WHERE selected_upstream_id <> ''`+whereSQL+`
+			  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
+		) ranked
+		WHERE row_number <= ?
+		ORDER BY selected_upstream_id, row_number
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string][]string{}
+	for rows.Next() {
+		var (
+			upstreamID string
+			errorText  string
+			statusCode int
+			endpoint   string
+		)
+		if err := rows.Scan(&upstreamID, &errorText, &statusCode, &endpoint); err != nil {
+			return nil, err
+		}
+		switch {
+		case strings.TrimSpace(errorText) != "":
+			out[upstreamID] = append(out[upstreamID], errorText)
+		case strings.TrimSpace(endpoint) != "":
+			out[upstreamID] = append(out[upstreamID], fmt.Sprintf("%s HTTP %d", endpoint, statusCode))
+		default:
+			out[upstreamID] = append(out[upstreamID], fmt.Sprintf("HTTP %d", statusCode))
+		}
+	}
+	return out, rows.Err()
+}
+
+// upstreamRecentFailuresAll computes upstreamRecentFailures for every upstream
+// in one query, ranking the last limit rows of each upstream inside the database.
+func (s *Store) upstreamRecentFailuresAll(limit int, since time.Time, modelFilter string) (map[string][]UpstreamFailureRecord, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any(nil), whereArgs...)
+	args = append(args, limit)
+	rows, err := s.db.Query(`
+		SELECT selected_upstream_id, trace_id, model, endpoint, status_code, recorded_at, error_text
+		FROM (
+			SELECT
+				selected_upstream_id,
+				trace_id,
+				model,
+				endpoint,
+				status_code,
+				recorded_at,
+				error_text,
+				ROW_NUMBER() OVER (
+					PARTITION BY selected_upstream_id
+					ORDER BY recorded_at DESC, trace_id DESC
+				) AS row_number
+			FROM logs
+			WHERE selected_upstream_id <> ''`+whereSQL+`
+			  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
+		) ranked
+		WHERE row_number <= ?
+		ORDER BY selected_upstream_id, row_number
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string][]UpstreamFailureRecord{}
+	for rows.Next() {
+		var (
+			upstreamID string
+			record     UpstreamFailureRecord
+			recordedAt string
+		)
+		if err := rows.Scan(&upstreamID, &record.TraceID, &record.Model, &record.Endpoint, &record.StatusCode, &recordedAt, &record.ErrorText); err != nil {
+			return nil, err
+		}
+		parsed, err := timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		record.RecordedAt = parsed
+		record.Reason = classifyUpstreamFailure(record.StatusCode, record.ErrorText)
+		out[upstreamID] = append(out[upstreamID], record)
 	}
 	return out, rows.Err()
 }

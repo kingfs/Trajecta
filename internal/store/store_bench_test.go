@@ -243,3 +243,77 @@ func BenchmarkChannelUsageAnalytics(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkUpstreamAnalytics measures what the analytics page needs per upstream:
+// the per-upstream form ranks the models, the last model, the recent errors and
+// the recent failures once per upstream, the batched form once for all of them.
+func BenchmarkUpstreamAnalytics(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const upstreams = 8
+	const logsPerUpstream = 30
+	dir := b.TempDir()
+	now := time.Now().UTC()
+	header := benchmarkStoreHeader()
+	for u := 0; u < upstreams; u++ {
+		upstreamID := fmt.Sprintf("bench-upstream-%02d", u)
+		for i := 0; i < logsPerUpstream; i++ {
+			path := filepath.Join(dir, fmt.Sprintf("%s-%d.http", upstreamID, i))
+			if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+				b.Fatal(err)
+			}
+			header.Meta.RequestID = fmt.Sprintf("%s-%d", upstreamID, i)
+			header.Meta.Model = fmt.Sprintf("bench-model-%d", i%5)
+			header.Meta.Time = now.Add(-time.Duration(i) * time.Minute)
+			header.Meta.StatusCode = 200
+			if i%4 == 0 {
+				header.Meta.StatusCode = 500
+			}
+			header.Meta.SelectedUpstreamID = upstreamID
+			header.Usage.TotalTokens = 10
+			if err := st.UpsertLog(path, header); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	since := now.Add(-24 * time.Hour)
+	ids := make([]string, 0, upstreams)
+	for u := 0; u < upstreams; u++ {
+		ids = append(ids, fmt.Sprintf("bench-upstream-%02d", u))
+	}
+
+	b.Run("per-upstream", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for _, upstreamID := range ids {
+				if _, _, err := st.upstreamModelCoverage(upstreamID, 5, since, ""); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := st.upstreamRecentErrors(upstreamID, 3, since, ""); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := st.upstreamRecentFailures(upstreamID, 3, since, ""); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
+	b.Run("batched", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := st.upstreamModelCoverageAll(5, since, ""); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := st.upstreamRecentErrorsAll(3, since, ""); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := st.upstreamRecentFailuresAll(3, since, ""); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

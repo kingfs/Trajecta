@@ -3157,6 +3157,97 @@ func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
 	}
 }
 
+func TestUpstreamAnalyticsBatchMatchesPerUpstreamQueries(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	// up-a has four models so the top-N cut and its ordering matter, two rows
+	// share a timestamp so the trace id tie-break matters, and up-c only has
+	// successful requests so it has no errors or failures at all.
+	writeModelLog(t, st, dir, "upa-a1.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 10, now.Add(-50*time.Minute))
+	writeModelLog(t, st, dir, "upa-a2.http", "gpt-5", "/v1/responses", "POST", "up-a", 500, 0, now.Add(-40*time.Minute))
+	writeModelLog(t, st, dir, "upa-b1.http", "gpt-4.1", "/v1/responses", "POST", "up-a", 429, 5, now.Add(-30*time.Minute))
+	writeModelLog(t, st, dir, "upa-c1.http", "claude-3", "/v1/messages", "POST", "up-a", 200, 7, now.Add(-20*time.Minute))
+	writeModelLog(t, st, dir, "upa-d1.http", "gemini-pro", "/v1/responses", "POST", "up-a", 200, 9, now.Add(-20*time.Minute))
+	writeModelLog(t, st, dir, "upb-a1.http", "gpt-5", "/v1/responses", "POST", "up-b", 200, 3, now.Add(-10*time.Minute))
+	writeModelLog(t, st, dir, "upc-a1.http", "gpt-5", "/v1/responses", "POST", "up-c", 200, 4, now.Add(-5*time.Minute))
+	writeModelLog(t, st, dir, "outside.http", "gpt-5", "/v1/responses", "POST", "up-a", 200, 1, now.Add(-48*time.Hour))
+
+	since := now.Add(-24 * time.Hour)
+	for _, modelFilter := range []string{"", "gpt-5"} {
+		t.Run("model="+modelFilter, func(t *testing.T) {
+			const limitModels = 2
+			const limitErrors = 2
+
+			coverages, err := st.upstreamModelCoverageAll(limitModels, since, modelFilter)
+			if err != nil {
+				t.Fatalf("upstreamModelCoverageAll() error = %v", err)
+			}
+			errorsByUpstream, err := st.upstreamRecentErrorsAll(limitErrors, since, modelFilter)
+			if err != nil {
+				t.Fatalf("upstreamRecentErrorsAll() error = %v", err)
+			}
+			failuresByUpstream, err := st.upstreamRecentFailuresAll(limitErrors, since, modelFilter)
+			if err != nil {
+				t.Fatalf("upstreamRecentFailuresAll() error = %v", err)
+			}
+
+			for _, upstreamID := range []string{"up-a", "up-b", "up-c"} {
+				wantModels, wantLastModel, err := st.upstreamModelCoverage(upstreamID, limitModels, since, modelFilter)
+				if err != nil {
+					t.Fatalf("upstreamModelCoverage(%s) error = %v", upstreamID, err)
+				}
+				coverage := coverages[upstreamID]
+				if !reflect.DeepEqual(coverage.Models, wantModels) {
+					t.Fatalf("batched models for %s = %#v, want %#v", upstreamID, coverage.Models, wantModels)
+				}
+				if coverage.LastModel != wantLastModel {
+					t.Fatalf("batched last model for %s = %q, want %q", upstreamID, coverage.LastModel, wantLastModel)
+				}
+
+				wantErrors, err := st.upstreamRecentErrors(upstreamID, limitErrors, since, modelFilter)
+				if err != nil {
+					t.Fatalf("upstreamRecentErrors(%s) error = %v", upstreamID, err)
+				}
+				if got := errorsByUpstream[upstreamID]; !reflect.DeepEqual(got, wantErrors) {
+					t.Fatalf("batched errors for %s = %#v, want %#v", upstreamID, got, wantErrors)
+				}
+
+				wantFailures, err := st.upstreamRecentFailures(upstreamID, limitErrors, since, modelFilter)
+				if err != nil {
+					t.Fatalf("upstreamRecentFailures(%s) error = %v", upstreamID, err)
+				}
+				if got := failuresByUpstream[upstreamID]; !reflect.DeepEqual(got, wantFailures) {
+					t.Fatalf("batched failures for %s = %#v, want %#v", upstreamID, got, wantFailures)
+				}
+			}
+
+			if modelFilter == "" {
+				coverage := coverages["up-a"]
+				if len(coverage.Models) != limitModels || coverage.Models[0] != "gpt-5" {
+					t.Fatalf("up-a models = %#v, want the two most requested with gpt-5 first", coverage.Models)
+				}
+				// Two requests share the newest timestamp, so which of the two the
+				// tie-break picks is not fixed; both queries must still agree.
+				if coverage.LastModel != "gemini-pro" && coverage.LastModel != "claude-3" {
+					t.Fatalf("up-a last model = %q, want a model of the newest request", coverage.LastModel)
+				}
+				if len(failuresByUpstream["up-a"]) != limitErrors || failuresByUpstream["up-a"][0].StatusCode != 429 {
+					t.Fatalf("up-a failures = %#v", failuresByUpstream["up-a"])
+				}
+				if _, ok := failuresByUpstream["up-c"]; ok {
+					t.Fatalf("up-c has no failures but produced %#v", failuresByUpstream["up-c"])
+				}
+			}
+		})
+	}
+}
+
 func startOfDayForTest(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
