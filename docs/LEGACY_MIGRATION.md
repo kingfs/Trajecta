@@ -270,6 +270,50 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 
 报告默认只列 10 条示例路径；把 `--max-samples` 调大（例如 `--max-samples 2000`）即可把「找不到 cassette」与「候选不唯一」的路径全部列出，用来逐条核对。
 
+## 旧挂载点的录制导入
+
+旧部署常把宿主机目录挂到**容器内的旧路径**（例如 `/opt/llm_proxy/logs`），`logs` 表记的就是那个容器内前缀。新部署把录制写进当前 trace 目录（默认 `/app/data/traces`），而目录整理（`layout plan`/`layout apply`）与 cassette magic 重写都只扫描**当前数据根**，所以留在旧挂载点的录制永远不会被搬进 vault：
+
+- 现象：`GET /api/traces/<id>` 返回 `404 {"error":"file not found"}`——列表里看得见这条，详情与 raw 打不开；
+- 数据仍在：文件在宿主机旧挂载点下，相对路径与 `logs.path` 去掉旧前缀后一致（这正是上一节里「找不到 cassette 的元数据行一律保留」保住的那批行）；
+- 也**不是** magic 问题：这批文件多半是 `LLM_PROXY_V2`（定长 2KB 头）。读取端必须继续支持该格式，因此不需要为它们重写 magic。
+
+判定（只读）：
+
+```bash
+# 索引里指向旧前缀的行，以及它们引用了哪些相对路径
+psql -c "SELECT path FROM logs WHERE path LIKE '/opt/llm_proxy/logs/%' ORDER BY path" > /tmp/legacy.txt
+# 逐条确认文件仍在旧根下（把 /opt/llm_proxy/logs/ 换成宿主机旧根）
+while IFS= read -r p; do [ -f "<旧根>/${p#/opt/llm_proxy/logs/}" ] || echo "缺失: $p"; done < /tmp/legacy.txt
+```
+
+导入分三步：先复制，再改索引，最后验证。
+
+```bash
+# 1) 复制进当前 vault，保持相对路径；排除旧索引自带的非 cassette 文件
+tar -C <旧根> --exclude=./trace_index.secret -cf - . | tar -C <vault 根> -xf -
+```
+
+```sql
+-- 2) 改写前缀。logs.path 是主键，改写后不能与既有行冲突；整批放在一个事务里。
+--    WHERE 带前缀所以幂等，重跑不会二次改动。
+BEGIN;
+UPDATE logs SET path = replace(path, '/opt/llm_proxy/logs/', '/app/data/traces/')
+ WHERE path LIKE '/opt/llm_proxy/logs/%';
+COMMIT;
+```
+
+```bash
+# 3) 验证：逐条确认新路径存在，再用 API 抽样 detail 与 raw
+```
+
+要点：
+
+- 另外两张表也存 cassette 路径：`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`。含旧前缀时同样要改写；先分别统计，为 0 才只需改 `logs.path`。
+- 改写前先落一份 `trace_id,path` 回滚清单，回滚就是反向 `replace`；也要先查新路径是否已被既有行占用。
+- 旧根里可能有索引没收录的 `.http`（旧索引没收，或索引重建过）。它们会被复制进 vault，但**不会**自动获得索引行：`layout plan` 只整理布局、不为文件建索引，`migrate --rebuild-index` 会重新生成 `trace_id`，不能用于已有数据。
+- 导入后这些行与其它行没有区别（前缀统一、能被 API 打开）；它们不会有 Observation/findings，除非另行重解析。
+
 ## 迁移之后
 
 - Postgres 是唯一事实源；`serve` 只连 Postgres，不再打开任何 SQLite 文件。
