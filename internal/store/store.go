@@ -9077,7 +9077,10 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 	}
 	for rows.Next() {
 		var (
-			recordedAt  string
+			// Scanned as any: the Postgres driver hands back a time.Time for
+			// timestamptz, so timeParseValue reads it directly instead of the
+			// driver formatting it to text and timeParse parsing it back.
+			recordedAt  any
 			statusCode  int
 			errorText   string
 			totalTokens int
@@ -9087,9 +9090,12 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		if err := rows.Scan(&recordedAt, &statusCode, &errorText, &totalTokens, &ttftMs, &durationMs); err != nil {
 			return nil, err
 		}
-		recorded, err := timeParse(recordedAt)
+		recorded, err := timeParseValue(recordedAt)
 		if err != nil {
 			return nil, err
+		}
+		if recorded.IsZero() {
+			return nil, errors.New("overview timeline: log row has an empty recorded_at")
 		}
 		bucketTime := recorded.UTC().Truncate(opts.BucketSize)
 		bucket, ok := buckets[bucketTime]

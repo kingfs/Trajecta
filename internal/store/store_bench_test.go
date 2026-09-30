@@ -126,6 +126,53 @@ func BenchmarkSyncSingleSessionVault(b *testing.B) {
 // BenchmarkModelCatalogUsageSummaries measures the aggregate the model catalog
 // page needs per catalog entry: the per-key form issues one query per model per
 // window, the grouped form issues one query per window.
+func BenchmarkOverviewTimeline(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	// 2,000 rows spread over the 24 hourly buckets the dashboard renders, which is
+	// the row count the timeline loop scans, parses and buckets in Go.
+	const rows = 2000
+	dir := b.TempDir()
+	now := time.Now().UTC()
+	header := benchmarkStoreHeader()
+	for i := 0; i < rows; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("timeline-%05d.http", i))
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			b.Fatal(err)
+		}
+		header.Meta.RequestID = fmt.Sprintf("timeline-%05d", i)
+		header.Meta.Time = now.Add(-time.Duration(i%24) * time.Hour)
+		header.Meta.StatusCode = 200
+		header.Meta.Error = ""
+		if i%20 == 0 {
+			header.Meta.StatusCode = 500
+			header.Meta.Error = "upstream error"
+		}
+		header.Usage.TotalTokens = 42
+		if err := st.UpsertLog(path, header); err != nil {
+			b.Fatal(err)
+		}
+	}
+	whereSQL, whereArgs := overviewLogWhere(now.Add(-24 * time.Hour))
+	opts := OverviewOptions{BucketSize: time.Hour, BucketCount: 24}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		items, err := st.overviewTimeline(whereSQL, whereArgs, opts)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(items) != 24 {
+			b.Fatalf("len(items) = %d, want 24", len(items))
+		}
+	}
+}
+
 func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
 	st, err := New(b.TempDir())
 	if err != nil {
