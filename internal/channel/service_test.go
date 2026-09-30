@@ -629,28 +629,53 @@ func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertChannelConfig(disabled) error = %v", err)
 	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "enabled-secondary",
+		Name:           "Enabled Secondary",
+		BaseURL:        "https://secondary.example.com/v1",
+		ProviderPreset: "anthropic",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig(enabled-secondary) error = %v", err)
+	}
 	if err := st.ReplaceChannelModels("enabled", []store.ChannelModelRecord{
 		{Model: "gpt-5", Source: "manual", Enabled: true},
 		{Model: "gpt-4.1", Source: "manual", Enabled: false},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}
+	if err := st.ReplaceChannelModels("enabled-secondary", []store.ChannelModelRecord{
+		{Model: "claude-3", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels(enabled-secondary) error = %v", err)
+	}
 
 	targets, err := NewService(st).RuntimeTargets()
 	if err != nil {
 		t.Fatalf("RuntimeTargets() error = %v", err)
 	}
-	if len(targets) != 1 {
-		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	if len(targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(targets))
 	}
-	if targets[0].ID != "enabled" {
-		t.Fatalf("target.ID = %q", targets[0].ID)
+	// Each channel keeps its own models: the service reads every channel's models
+	// in one query and groups them, so a channel must never inherit its
+	// neighbour's list.
+	byID := map[string][]string{}
+	for _, target := range targets {
+		byID[target.ID] = target.StaticModels
+		if !target.ConfiguredModelsOnly {
+			t.Fatalf("ConfiguredModelsOnly = false for %q, want true for a channel runtime target", target.ID)
+		}
 	}
-	if len(targets[0].StaticModels) != 1 || targets[0].StaticModels[0] != "gpt-5" {
-		t.Fatalf("StaticModels = %#v", targets[0].StaticModels)
+	if len(byID["enabled"]) != 1 || byID["enabled"][0] != "gpt-5" {
+		t.Fatalf("StaticModels(enabled) = %#v", byID["enabled"])
 	}
-	if !targets[0].ConfiguredModelsOnly {
-		t.Fatalf("ConfiguredModelsOnly = false, want true for channel runtime target")
+	if len(byID["enabled-secondary"]) != 1 || byID["enabled-secondary"][0] != "claude-3" {
+		t.Fatalf("StaticModels(enabled-secondary) = %#v", byID["enabled-secondary"])
+	}
+	if _, ok := byID["disabled"]; ok {
+		t.Fatalf("disabled channel reached the runtime targets: %#v", byID)
 	}
 }
 

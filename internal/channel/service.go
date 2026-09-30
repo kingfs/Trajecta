@@ -275,15 +275,23 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Every channel's models come back in one query ordered by channel id, which
+	// is the same order and the same rows the per-channel lookups returned; the
+	// per-channel form ran one query per enabled channel on every routing reload.
+	allModels, err := s.store.ListChannelModels("", false)
+	if err != nil {
+		return nil, err
+	}
+	modelsByChannel := make(map[string][]store.ChannelModelRecord, len(channels))
+	for _, model := range allModels {
+		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model)
+	}
 	targets := make([]config.UpstreamTargetConfig, 0, len(channels))
 	for _, channel := range channels {
 		if !channel.Enabled {
 			continue
 		}
-		models, err := s.store.ListChannelModels(channel.ID, false)
-		if err != nil {
-			return nil, err
-		}
+		models := modelsByChannel[channel.ID]
 		var enabledModels []store.ChannelModelRecord
 		var disabledModels []string
 		for _, model := range models {
