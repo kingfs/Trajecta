@@ -37,5 +37,9 @@ func (AnalysisRun) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("session_id", "kind", "created_at"),
 		index.Fields("trace_id", "kind", "created_at"),
+		// The overview calls ListAnalysisRuns without filters, so it orders by
+		// created_at over the whole table while both indexes above lead with
+		// trace_id or session_id.
+		index.Fields("created_at", "id"),
 	}
 }

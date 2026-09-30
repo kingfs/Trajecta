@@ -4715,6 +4715,13 @@ func (s *Store) ensureHotpathIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC)`,
+		// The same five indexes the versioned Postgres migrations add, so the
+		// two schemas keep serving the same access paths.
+		`CREATE INDEX IF NOT EXISTS tracelog_selected_upstream_id_recorded_at ON logs(selected_upstream_id, recorded_at)`,
+		`CREATE INDEX IF NOT EXISTS requestaudit_created_at_id ON request_audits(created_at, id)`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_created_at_id ON tool_call_audits(created_at, id)`,
+		`CREATE INDEX IF NOT EXISTS analysisrun_created_at_id ON analysis_runs(created_at, id)`,
+		`CREATE INDEX IF NOT EXISTS tracefinding_severity_created_at ON trace_findings(severity, created_at)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err

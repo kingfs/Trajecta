@@ -76,6 +76,54 @@ func TestNewInitializesResponsesStateSchema(t *testing.T) {
 	}
 }
 
+// TestNewInitializesAnalyticsIndexes pins the SQLite side of the analytics
+// indexes the versioned Postgres migrations add. Startup creates them with
+// CREATE INDEX IF NOT EXISTS, so a dropped statement would stay silent, and the
+// column list is the part that has to match Postgres.
+func TestNewInitializesAnalyticsIndexes(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	expected := map[string][]string{
+		"tracelog_selected_upstream_id_recorded_at": {"selected_upstream_id", "recorded_at"},
+		"requestaudit_created_at_id":                {"created_at", "id"},
+		"toolcallaudit_created_at_id":               {"created_at", "id"},
+		"analysisrun_created_at_id":                 {"created_at", "id"},
+		"tracefinding_severity_created_at":          {"severity", "created_at"},
+	}
+	for name, want := range expected {
+		t.Run(name, func(t *testing.T) {
+			rows, err := st.db.Query(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, name)
+			if err != nil {
+				t.Fatalf("pragma_index_info(%q) error = %v", name, err)
+			}
+			defer rows.Close()
+			var got []string
+			for rows.Next() {
+				var column string
+				if err := rows.Scan(&column); err != nil {
+					t.Fatalf("scan index column error = %v", err)
+				}
+				got = append(got, column)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("read index columns error = %v", err)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("index %q columns = %#v, want %#v", name, got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("index %q columns = %#v, want %#v", name, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestNewInitializesAppSettingsSchema(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {

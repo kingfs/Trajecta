@@ -113,6 +113,11 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{AnalysisRunsColumns[1], AnalysisRunsColumns[3], AnalysisRunsColumns[10]},
 			},
+			{
+				Name:    "analysisrun_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisRunsColumns[10], AnalysisRunsColumns[0]},
+			},
 		},
 	}
 	// ChannelConfigsColumns holds the columns for the "channel_configs" table.
@@ -509,6 +514,11 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{RequestAuditsColumns[10], RequestAuditsColumns[12]},
 			},
+			{
+				Name:    "requestaudit_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{RequestAuditsColumns[12], RequestAuditsColumns[0]},
+			},
 		},
 	}
 	// ResponsesColumns holds the columns for the "responses" table.
@@ -759,6 +769,11 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{ToolCallAuditsColumns[8], ToolCallAuditsColumns[16]},
 			},
+			{
+				Name:    "toolcallaudit_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[16], ToolCallAuditsColumns[0]},
+			},
 		},
 	}
 	// TraceFindingsColumns holds the columns for the "trace_findings" table.
@@ -793,6 +808,11 @@ var (
 				Name:    "tracefinding_trace_id_severity_category",
 				Unique:  false,
 				Columns: []*schema.Column{TraceFindingsColumns[1], TraceFindingsColumns[4], TraceFindingsColumns[3]},
+			},
+			{
+				Name:    "tracefinding_severity_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{TraceFindingsColumns[4], TraceFindingsColumns[13]},
 			},
 		},
 	}
@@ -885,6 +905,11 @@ var (
 				Name:    "tracelog_parent_exchange_id",
 				Unique:  false,
 				Columns: []*schema.Column{LogsColumns[40]},
+			},
+			{
+				Name:    "tracelog_selected_upstream_id_recorded_at",
+				Unique:  false,
+				Columns: []*schema.Column{LogsColumns[34], LogsColumns[6]},
 			},
 		},
 	}

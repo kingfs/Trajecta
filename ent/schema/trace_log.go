@@ -78,5 +78,9 @@ func (TraceLog) Indexes() []ent.Index {
 		index.Fields("request_audit_id", "recorded_at"),
 		index.Fields("exchange_kind", "recorded_at"),
 		index.Fields("parent_exchange_id"),
+		// The upstream analytics helpers all start from the upstream id
+		// (`WHERE selected_upstream_id = ?` or `<> ''`) and no other index
+		// covers that column, so each of them scans logs today.
+		index.Fields("selected_upstream_id", "recorded_at"),
 	}
 }

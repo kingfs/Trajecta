@@ -49,5 +49,9 @@ func (ToolCallAudit) Indexes() []ent.Index {
 		index.Fields("call_id"),
 		index.Fields("tool_name", "status", "created_at"),
 		index.Fields("status", "created_at"),
+		// The default tool-call audit list has no filter and only orders by
+		// created_at DESC, id DESC, which none of the filtered indexes above
+		// can serve.
+		index.Fields("created_at", "id"),
 	}
 }

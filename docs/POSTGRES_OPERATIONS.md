@@ -538,6 +538,29 @@ Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两
 
 这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 抽出 SQLite 的 `CREATE INDEX … ON <表>(<列>)`，再和线上 `pg_index` 的实际索引逐表比对首列与列组合，缺失的形状才会显形。本次全量比对只剩 `parse_jobs`、`system_events`、`logs` 三处，其中只有 `parse_jobs` 影响能力，另外两处的首列已被现有索引覆盖。
 
+## 第二批缺口：`logs(selected_upstream_id)`、审计表与分析表的 `created_at`
+
+按上面同样的方法再把两套 schema 对一遍，又找到五处形状缺口，都进同一条版本化迁移 `20260930130000_add_analytics_indexes`（`ent/schema` 同步声明，SQLite 启动 schema 在 `ensureHotpathIndexes` 里用同样的索引名与列补齐）：
+
+| 索引 | 表 | 服务的查询 |
+| --- | --- | --- |
+| `tracelog_selected_upstream_id_recorded_at` | `logs` | `ListUpstreamAnalytics` 与每个 upstream 的 model coverage / recent errors / recent failures（`WHERE selected_upstream_id = ?` 或 `<> ''`），以及 `DISTINCT selected_upstream_id` 列表 |
+| `requestaudit_created_at_id` | `request_audits` | 默认 Responses audit 列表（无过滤，`ORDER BY created_at DESC, id DESC`） |
+| `toolcallaudit_created_at_id` | `tool_call_audits` | 同上 |
+| `analysisrun_created_at_id` | `analysis_runs` | `ListAnalysisRuns("", "", "", limit)`（overview 的最近分析），原有两个索引都以 `trace_id` 或 `session_id` 打头 |
+| `tracefinding_severity_created_at` | `trace_findings` | `overviewHighRiskFindings` 的 `severity IN ('critical', 'high')`，原有索引都以 `trace_id` 打头 |
+
+`logs` 这一处最贵：`selected_upstream_id` 在 `internal/store/store.go` 里有十处等值或分组过滤，而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
+
+| 计划 | 执行时间 |
+| --- | --- |
+| 无索引（`Parallel Seq Scan`，20 万行） | 41.9 ms |
+| `Bitmap Index Scan`（2.5 万行） | 10.9 ms |
+
+真实 `logs` 是 388 MB / 248,164 行的宽表，同一个形状在 5 个 upstream 的 analytics 页上会重复约 20 次，省下的是页面级的重复全表扫而不是单条查询的常数。审计表的两个索引则要跟着请求写入放大，取舍依据是「无过滤、按 `created_at` 倒序分页」的默认列表在 Postgres 上只能全表扫加排序；另外三张表都不在请求热路径上。
+
+这五个索引和 `parsejob_trace_id_status` 一样由 `db migrate up`（或启动时的迁移）以普通 `CREATE INDEX` 创建：`logs` 上的那个要在 388 MB 的表上写入阻塞数秒。可以先在实例上手工执行对应的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，之后的迁移就是空操作。
+
 ## 并发索引变更
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。

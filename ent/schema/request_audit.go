@@ -43,5 +43,9 @@ func (RequestAudit) Indexes() []ent.Index {
 		index.Fields("conversation_id", "created_at"),
 		index.Fields("client_request_id"),
 		index.Fields("status", "created_at"),
+		// The default Responses audit list has no filter and only orders by
+		// created_at DESC, id DESC, which none of the filtered indexes above
+		// can serve.
+		index.Fields("created_at", "id"),
 	}
 }

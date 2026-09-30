@@ -40,5 +40,9 @@ func (TraceFinding) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("trace_id", "finding_id").Unique(),
 		index.Fields("trace_id", "severity", "category"),
+		// overviewHighRiskFindings filters `WHERE severity IN ('critical',
+		// 'high')` across all traces, and the index above only helps once the
+		// trace id is known.
+		index.Fields("severity", "created_at"),
 	}
 }
