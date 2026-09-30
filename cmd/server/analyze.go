@@ -887,14 +887,23 @@ func resolveAnalyzeBatchTraceIDs(st *store.Store, opts analyzeBatchOptions) ([]s
 	for _, traceID := range opts.traceIDs {
 		add(traceID, &traceIDs)
 	}
+	// One grouped read for every request id replaces the query per id.
+	entries, err := st.GetByRequestIDs(opts.requestIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, requestID := range opts.requestIDs {
 		requestID = strings.TrimSpace(requestID)
 		if requestID == "" {
 			continue
 		}
-		entry, err := st.GetByRequestID(requestID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve request id %q: %w", requestID, err)
+		entry, ok := entries[requestID]
+		if !ok {
+			// Re-read the missing id for the error the per-id read raised.
+			if _, err := st.GetByRequestID(requestID); err != nil {
+				return nil, fmt.Errorf("resolve request id %q: %w", requestID, err)
+			}
+			return nil, fmt.Errorf("resolve request id %q: not found", requestID)
 		}
 		add(entry.ID, &traceIDs)
 	}

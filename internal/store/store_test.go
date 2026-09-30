@@ -4337,6 +4337,73 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 }
 
+func TestGetByRequestIDsReturnsNewestRowPerRequestID(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	// One request id carries two rows, the way a retried request does: the
+	// batched read has to return the newest one, which is what the per-id read
+	// returned.
+	writeRequestLog := func(name string, requestID string, recordedAt time.Time) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:  requestID,
+				Time:       recordedAt,
+				Model:      "gpt-5",
+				Endpoint:   "v1/responses",
+				URL:        "/v1/responses",
+				Method:     "POST",
+				StatusCode: 200,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+		entry, err := st.GetByRequestID(requestID)
+		if err != nil {
+			t.Fatalf("GetByRequestID(%q) error = %v", requestID, err)
+		}
+		return entry.LogPath
+	}
+
+	now := time.Now().UTC()
+	older := writeRequestLog("request-old.http", "req-retried", now.Add(-time.Hour))
+	newer := writeRequestLog("request-new.http", "req-retried", now)
+	other := writeRequestLog("request-other.http", "req-other", now.Add(-2*time.Minute))
+
+	entries, err := st.GetByRequestIDs([]string{"req-retried", "req-other", "req-missing"})
+	if err != nil {
+		t.Fatalf("GetByRequestIDs() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2: %#v", len(entries), entries)
+	}
+	if entries["req-retried"].LogPath != newer || entries["req-retried"].LogPath == older {
+		t.Fatalf("req-retried = %q, want the newest row %q", entries["req-retried"].LogPath, newer)
+	}
+	if entries["req-other"].LogPath != other {
+		t.Fatalf("req-other = %q, want %q", entries["req-other"].LogPath, other)
+	}
+	if _, ok := entries["req-missing"]; ok {
+		t.Fatalf("entries = %#v, want no entry for a request id without rows", entries)
+	}
+
+	empty, err := st.GetByRequestIDs(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("GetByRequestIDs(nil) = %#v, %v, want an empty map", empty, err)
+	}
+}
+
 func TestUpsertChannelModelsGroupsWritesAndKeepsProbeTimes(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {

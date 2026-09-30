@@ -7338,6 +7338,35 @@ func (s *Store) traceLogsByTraceID(ctx context.Context, traceIDs []string) (map[
 	return traces, nil
 }
 
+// GetByRequestIDs resolves the given request ids to their newest log row in
+// chunks the database accepts, keyed by request id. A request id that no row
+// carries is absent from the map. The batch form replaces one query per request
+// id; the rows are ordered so the first row of a request id is its newest one,
+// the same row GetByRequestID returns.
+func (s *Store) GetByRequestIDs(requestIDs []string) (map[string]LogEntry, error) {
+	out := make(map[string]LogEntry, len(requestIDs))
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(requestIDs), storeSQLParamChunk) {
+		rows, err := s.client.TraceLog.Query().
+			Where(tracelog.RequestIDIn(chunk...)).
+			Order(
+				tracelog.ByRequestID(),
+				tracelog.ByRecordedAt(entsql.OrderDesc()),
+				tracelog.ByTraceID(entsql.OrderDesc()),
+			).
+			All(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if _, ok := out[row.RequestID]; ok {
+				continue
+			}
+			out[row.RequestID] = logEntryFromTraceLog(row)
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
 	row, err := s.client.TraceLog.Query().
 		Where(tracelog.RequestIDEQ(requestID)).
