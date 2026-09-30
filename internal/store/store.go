@@ -7638,17 +7638,24 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 }
 
 func (s *Store) Stats() (Stats, error) {
-	ctx := context.Background()
-	clientVisible := clientVisibleTraceLogPredicate()
-	total, err := s.client.TraceLog.Query().Where(clientVisible).Count(ctx)
-	if err != nil {
-		return Stats{}, err
-	}
-
-	successQuery := s.client.TraceLog.Query().
-		Where(clientVisible, tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
-	successCount, err := successQuery.Clone().Count(ctx)
-	if err != nil {
+	// Single aggregate pass: the monitor request list calls Stats() on every
+	// page load, so the previous four separate aggregates (total, success,
+	// mean TTFT, token sum) over the same rows were four times the scan cost.
+	whereSQL := clientVisibleLogClause("")
+	var (
+		total        int
+		successCount int
+		avgTTFT      float64
+		totalTokens  int
+	)
+	if err := s.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total_request,
+			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(AVG(CASE WHEN status_code >= 200 AND status_code < 300 THEN ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN total_tokens ELSE 0 END), 0) AS total_tokens
+		FROM logs
+		WHERE `+whereSQL).Scan(&total, &successCount, &avgTTFT, &totalTokens); err != nil {
 		return Stats{}, err
 	}
 
@@ -7662,19 +7669,6 @@ func (s *Store) Stats() (Stats, error) {
 	}
 	if successCount == 0 {
 		return stats, nil
-	}
-
-	avgTTFT, err := successQuery.Clone().
-		Aggregate(dao.Mean(tracelog.FieldTtftMs)).
-		Float64(ctx)
-	if err != nil {
-		return Stats{}, err
-	}
-	totalTokens, err := successQuery.Clone().
-		Aggregate(dao.Sum(tracelog.FieldTotalTokens)).
-		Int(ctx)
-	if err != nil {
-		return Stats{}, err
 	}
 	stats.AvgTTFT = int(math.Round(avgTTFT))
 	stats.TotalTokens = totalTokens

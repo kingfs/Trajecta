@@ -3035,6 +3035,90 @@ func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 	}
 }
 
+func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	empty, err := st.Stats()
+	if err != nil {
+		t.Fatalf("Stats() on empty store error = %v", err)
+	}
+	if empty != (Stats{}) {
+		t.Fatalf("Stats() on empty store = %+v, want zero value", empty)
+	}
+
+	writeLog := func(name string, statusCode int, ttftMs int64, totalTokens int, exchangeKind string) {
+		t.Helper()
+
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:     name,
+				Time:          time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC),
+				Model:         "gpt-test",
+				URL:           "/v1/chat/completions",
+				Method:        "POST",
+				StatusCode:    statusCode,
+				DurationMs:    ttftMs,
+				TTFTMs:        ttftMs,
+				ClientIP:      "127.0.0.1",
+				ContentLength: 4,
+				ExchangeKind:  exchangeKind,
+			},
+			Layout: recordfile.LayoutInfo{},
+			Usage: recordfile.UsageInfo{
+				TotalTokens: totalTokens,
+			},
+		}
+
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		}
+	}
+
+	// 2xx boundaries are inclusive on 200 and exclusive on 300; a successful
+	// request with a zero TTFT still counts in the AVG denominator; failed
+	// requests contribute neither TTFT nor tokens; upstream exchanges are not
+	// client visible and stay out of the monitor statistics entirely.
+	writeLog("code-200.http", 200, 0, 5, "")
+	writeLog("code-299.http", 299, 10, 1, "")
+	writeLog("code-300.http", 300, 10, 1, "")
+	writeLog("failed.http", 500, 999, 99, "")
+	writeLog("upstream.http", 200, 100, 1000, "upstream")
+
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.TotalRequest != 4 {
+		t.Fatalf("TotalRequest = %d, want 4", stats.TotalRequest)
+	}
+	if stats.SuccessRequest != 2 {
+		t.Fatalf("SuccessRequest = %d, want 2", stats.SuccessRequest)
+	}
+	if stats.FailedRequest != 2 {
+		t.Fatalf("FailedRequest = %d, want 2", stats.FailedRequest)
+	}
+	if stats.TotalTokens != 6 {
+		t.Fatalf("TotalTokens = %d, want 6", stats.TotalTokens)
+	}
+	if stats.AvgTTFT != 5 {
+		t.Fatalf("AvgTTFT = %d, want 5", stats.AvgTTFT)
+	}
+	if stats.SuccessRate != 50 {
+		t.Fatalf("SuccessRate = %v, want 50", stats.SuccessRate)
+	}
+}
+
 func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
