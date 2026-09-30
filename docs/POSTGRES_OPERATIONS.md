@@ -480,7 +480,7 @@ ALTER DATABASE llm_tracelab SET work_mem = '32MB';
 
 判断是否仍在溢写要看增量而不是累计值：`pg_stat_database.temp_bytes` 是自统计重置以来的累计量，前后两次采样相减才说明当前语句有没有落盘。
 
-这个上限不只影响大表。在默认 64 MB 下，只要多个会话同时使用并行 hash 节点，`logs` 这种 26 万行量级的普通 `count(*)` 也会报同一个 `No space left on device`——修复期间实测被拒两次，其中一次只申请 8 MB。所以给 `postgres` 服务设置 `shm_size: 1g` 并重建容器，是这台机器上比任何会话级 `work_mem` 调整都更根本的修法；会话级设置只能保证「本次会话不占用共享内存」，挡不住同一实例上并发的其它会话。
+这个上限不只影响大表。在默认 64 MB 下，只要多个会话同时使用并行 hash 节点，`logs` 这种 26 万行量级的普通 `count(*)` 也会报同一个 `No space left on device`——修复期间实测被拒两次，其中一次只申请 8 MB。所以提高 `/dev/shm` 是比任何会话级 `work_mem` 调整都更根本的修法；会话级设置只能保证「本次会话不占用共享内存」，挡不住同一实例上并发的其它会话。仓库的 `docker-compose.yml` 已为 `postgres` 服务设置 `shm_size: "1gb"`；改动后必须重建 postgres 容器才生效（`docker compose up -d --force-recreate postgres`），且自建 compose 的部署要同步这一项。
 
 枚举 `DISTINCT trace_id` 没有更省 I/O 的替代写法。常见想法是用递归 CTE 做松散索引扫描（每次取 `WHERE trace_id > 上一个值 ORDER BY trace_id LIMIT 1`），它确实有效——索引下降会直接跳过同一个 trace 的全部重复项，头 1 万次迭代只要 162 ms（约 16 µs/次）——但到 20 万次迭代就超过 200 秒：每次跳跃要跨过约 50 个叶页，于是退化成一次**随机**叶页读，在这台盘上比顺序读取整个 7.4 GB 索引更贵。所以孤儿枚举保持顺序全扫。
 

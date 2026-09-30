@@ -30,6 +30,11 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    # 并行查询的动态共享内存段分配在 /dev/shm，容器默认只有 64 MB：并发会话使用
+    # 并行 hash 节点时会直接失败（could not resize shared memory segment ... No
+    # space left on device），实测连 logs 这种 26 万行量级的 count(*) 都会被拒。
+    # 详见 docs/POSTGRES_OPERATIONS.md「大表聚合的内存与并行度」。
+    shm_size: "1gb"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-trajecta}
       POSTGRES_USER: ${POSTGRES_USER:-trajecta}
