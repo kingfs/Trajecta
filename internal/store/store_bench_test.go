@@ -317,3 +317,49 @@ func BenchmarkUpstreamAnalytics(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkUpsertChannelModels measures a model re-discovery, which rewrites the
+// channel model rows, their catalog entries and reads the stored rows back. The
+// per-model arm is the upsert loop the discovery used, the batched arm the
+// grouped write.
+func BenchmarkUpsertChannelModels(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const channelID = "bench-channel"
+	const models = 60
+	now := time.Now().UTC()
+	records := make([]ChannelModelRecord, 0, models)
+	for i := 0; i < models; i++ {
+		records = append(records, ChannelModelRecord{
+			Model:       fmt.Sprintf("bench-model-%03d", i),
+			DisplayName: fmt.Sprintf("Bench Model %03d", i),
+			Source:      "discovered",
+			Enabled:     true,
+			LastSeenAt:  now,
+			LastProbeAt: now,
+		})
+	}
+
+	b.Run("per-model", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			for _, record := range records {
+				if _, err := st.UpsertChannelModel(channelID, record); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
+	b.Run("batched", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := st.UpsertChannelModels(channelID, records); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

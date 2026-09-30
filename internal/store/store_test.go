@@ -4337,6 +4337,102 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 }
 
+func TestUpsertChannelModelsGroupsWritesAndKeepsProbeTimes(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	// Postgres keeps microseconds, so the fixture truncates to that.
+	probe := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	second := time.Now().UTC().Truncate(time.Microsecond)
+	const channelID = "batch-channel"
+
+	saved, err := st.UpsertChannelModels(channelID, []ChannelModelRecord{
+		{Model: "gpt-a", DisplayName: "A", Source: "discovered", Enabled: true, LastProbeAt: probe},
+		{Model: "GPT-B", Source: "discovered"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertChannelModels() error = %v", err)
+	}
+	if len(saved) != 2 {
+		t.Fatalf("len(saved) = %d, want 2", len(saved))
+	}
+	if saved[0].Model != "gpt-a" || saved[0].Source != "discovered" || !saved[0].Enabled || saved[0].LastProbeAt.UTC() != probe {
+		t.Fatalf("saved[0] = %+v, want the first record stored", saved[0])
+	}
+	if saved[1].Model != "gpt-b" {
+		t.Fatalf("saved[1].Model = %q, want the model lowercased", saved[1].Model)
+	}
+	if saved[1].Source != "discovered" || saved[1].Enabled {
+		t.Fatalf("saved[1] = %+v, want the discovered record stored disabled", saved[1])
+	}
+
+	// The second pass carries no probe time for gpt-a: the single-row upsert left
+	// the column out of its statement in that case, so the stored probe time has
+	// to survive the conflict update.
+	saved, err = st.UpsertChannelModels(channelID, []ChannelModelRecord{
+		{Model: "gpt-a", DisplayName: "A renamed", Source: "discovered", Enabled: true},
+		{Model: "gpt-b", DisplayName: "B", Source: "discovered", Enabled: true, LastProbeAt: second},
+	})
+	if err != nil {
+		t.Fatalf("UpsertChannelModels(second) error = %v", err)
+	}
+	if saved[0].DisplayName != "A renamed" || !saved[0].Enabled {
+		t.Fatalf("saved[0] = %+v, want the updated columns", saved[0])
+	}
+	if saved[0].LastProbeAt.UTC() != probe {
+		t.Fatalf("saved[0].LastProbeAt = %v, want the stored probe time %v", saved[0].LastProbeAt, probe)
+	}
+	if saved[1].LastProbeAt.UTC() != second {
+		t.Fatalf("saved[1].LastProbeAt = %v, want %v", saved[1].LastProbeAt, second)
+	}
+
+	// A model repeated inside one batch collapses to its last occurrence, because
+	// one INSERT cannot update the same conflict target twice on Postgres.
+	saved, err = st.UpsertChannelModels(channelID, []ChannelModelRecord{
+		{Model: "gpt-a", DisplayName: "first", Source: "discovered"},
+		{Model: "gpt-a", DisplayName: "last", Source: "discovered"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertChannelModels(duplicate) error = %v", err)
+	}
+	if len(saved) != 2 || saved[0].DisplayName != "last" || saved[1].DisplayName != "last" {
+		t.Fatalf("saved = %+v, want one record per input record with the last value", saved)
+	}
+	models, err := st.ListChannelModels(channelID, false)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	for _, model := range models {
+		if model.Model == "gpt-a" && model.DisplayName != "last" {
+			t.Fatalf("stored gpt-a = %+v, want the last value of the batch", model)
+		}
+	}
+
+	for _, model := range []string{"gpt-a", "gpt-b"} {
+		catalog, err := st.GetModelCatalog(model)
+		if err != nil {
+			t.Fatalf("GetModelCatalog(%q) error = %v", model, err)
+		}
+		if catalog.Model != model {
+			t.Fatalf("catalog = %+v, want %q", catalog, model)
+		}
+	}
+
+	empty, err := st.UpsertChannelModels(channelID, nil)
+	if err != nil || empty != nil {
+		t.Fatalf("UpsertChannelModels(nil) = %#v, %v, want nil, nil", empty, err)
+	}
+	if _, err := st.UpsertChannelModels("  ", []ChannelModelRecord{{Model: "gpt-a"}}); err == nil {
+		t.Fatal("UpsertChannelModels(empty channel) error = nil, want an error")
+	}
+	if _, err := st.UpsertChannelModels(channelID, []ChannelModelRecord{{Model: " "}}); err == nil {
+		t.Fatal("UpsertChannelModels(empty model) error = nil, want an error")
+	}
+}
+
 func TestGetDatasetExamplesSkipsExamplesWithoutTraceRows(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

@@ -1498,6 +1498,179 @@ func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) 
 	return channelModelRecordFromEnt(row), nil
 }
 
+// channelModelUpsertChunk bounds how many models one grouped upsert carries, so
+// the statement stays inside the parameter limits of both dialects.
+const channelModelUpsertChunk = 100
+
+// UpsertChannelModels stores the given models of one channel in grouped
+// statements. UpsertChannelModel runs an upsert of the channel model, an upsert
+// of the catalog entry and a read of the stored row per model, which the model
+// discovery paid once per discovered model.
+//
+// Rows with the same model are collapsed to the last occurrence, because a single
+// INSERT with two rows of the same conflict target fails on Postgres, and the
+// returned slice still holds one record per input record, in input order.
+func (s *Store) UpsertChannelModels(channelID string, records []ChannelModelRecord) ([]ChannelModelRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, fmt.Errorf("channel id is required")
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	normalized := make([]ChannelModelRecord, 0, len(records))
+	for _, record := range records {
+		model := strings.ToLower(strings.TrimSpace(record.Model))
+		if model == "" {
+			return nil, fmt.Errorf("model is required")
+		}
+		record.Model = model
+		if record.FirstSeenAt.IsZero() {
+			record.FirstSeenAt = now
+		}
+		if record.LastSeenAt.IsZero() {
+			record.LastSeenAt = now
+		}
+		if source := strings.TrimSpace(record.Source); source == "" {
+			record.Source = "manual"
+		} else {
+			record.Source = source
+		}
+		normalized = append(normalized, record)
+	}
+	unique := make([]ChannelModelRecord, 0, len(normalized))
+	at := make(map[string]int, len(normalized))
+	for _, record := range normalized {
+		if index, ok := at[record.Model]; ok {
+			unique[index] = record
+			continue
+		}
+		at[record.Model] = len(unique)
+		unique = append(unique, record)
+	}
+
+	ctx := context.Background()
+	tx, err := s.client.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	client := tx.Client()
+
+	for start := 0; start < len(unique); start += channelModelUpsertChunk {
+		end := start + channelModelUpsertChunk
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+		// The single-row upsert leaves last_probe_at out of the statement when
+		// the record carries no probe time, so an existing probe time survives the
+		// conflict update. A batch has one column set for all of its rows, so the
+		// records without a probe time go in their own statement.
+		withProbe := make([]*dao.ChannelModelCreate, 0, len(chunk))
+		withoutProbe := make([]*dao.ChannelModelCreate, 0, len(chunk))
+		catalogs := make([]*dao.ModelCatalogCreate, 0, len(chunk))
+		for _, record := range chunk {
+			builder := channelModelCreateBuilder(client, channelID, record)
+			if record.LastProbeAt.IsZero() {
+				withoutProbe = append(withoutProbe, builder)
+			} else {
+				withProbe = append(withProbe, builder.SetLastProbeAt(record.LastProbeAt.UTC()))
+			}
+			// The same field set UpsertModelCatalog writes for UpsertChannelModel,
+			// which also resets the catalog columns it does not carry.
+			catalogs = append(catalogs, client.ModelCatalog.Create().
+				SetID(record.Model).
+				SetDisplayName(strings.TrimSpace(record.DisplayName)).
+				SetFamily("").
+				SetVendor("").
+				SetDescription("").
+				SetTagsJSON(defaultJSON("", "[]")).
+				SetFirstSeenAt(record.FirstSeenAt.UTC()).
+				SetLastSeenAt(record.LastSeenAt.UTC()))
+		}
+		for _, group := range [][]*dao.ChannelModelCreate{withProbe, withoutProbe} {
+			if len(group) == 0 {
+				continue
+			}
+			if err := client.ChannelModel.CreateBulk(group...).
+				OnConflictColumns(channelmodel.FieldChannelID, channelmodel.FieldModel).
+				UpdateNewValues().
+				Exec(ctx); err != nil {
+				return nil, err
+			}
+		}
+		if err := client.ModelCatalog.CreateBulk(catalogs...).
+			OnConflictColumns(modelcatalog.FieldID).
+			UpdateNewValues().
+			Exec(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	stored := make(map[string]ChannelModelRecord, len(unique))
+	for start := 0; start < len(unique); start += storeSQLParamChunk {
+		end := start + storeSQLParamChunk
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+		names := make([]string, 0, len(chunk))
+		for _, record := range chunk {
+			names = append(names, record.Model)
+		}
+		rows, err := client.ChannelModel.Query().
+			Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelIn(names...)).
+			All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			stored[row.Model] = channelModelRecordFromEnt(row)
+		}
+	}
+
+	out := make([]ChannelModelRecord, 0, len(normalized))
+	for _, record := range normalized {
+		saved, ok := stored[record.Model]
+		if !ok {
+			return nil, fmt.Errorf("channel model %q was not stored", record.Model)
+		}
+		out = append(out, saved)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// channelModelCreateBuilder builds the insert of one channel model row, with the
+// same field set UpsertChannelModel writes. The caller adds last_probe_at.
+func channelModelCreateBuilder(client *dao.Client, channelID string, record ChannelModelRecord) *dao.ChannelModelCreate {
+	create := client.ChannelModel.Create().
+		SetChannelID(channelID).
+		SetModel(record.Model).
+		SetDisplayName(strings.TrimSpace(record.DisplayName)).
+		SetSource(record.Source).
+		SetEnabled(record.Enabled).
+		SetNillableSupportsResponses(record.SupportsResponses).
+		SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
+		SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
+		SetNillableContextWindow(record.ContextWindow).
+		SetNillableMaxOutputTokens(record.MaxOutputTokens).
+		SetNillableCompactHistoryItemThreshold(record.CompactHistoryItemThreshold).
+		SetUpstreamModel(strings.TrimSpace(record.UpstreamModel)).
+		SetProfileSource(strings.TrimSpace(record.ProfileSource)).
+		SetProfileAdoptionStatus(strings.TrimSpace(record.ProfileAdoptionStatus)).
+		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
+		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
+		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+		SetFirstSeenAt(record.FirstSeenAt.UTC()).
+		SetLastSeenAt(record.LastSeenAt.UTC())
+	return create
+}
+
 func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled bool) error {
 	channelID = strings.TrimSpace(channelID)
 	model = strings.ToLower(strings.TrimSpace(model))

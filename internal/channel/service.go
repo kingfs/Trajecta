@@ -31,6 +31,7 @@ type Store interface {
 	ListModelAliases(alias string, enabledOnly bool) ([]store.ModelAliasRecord, error)
 	ReplaceChannelModels(channelID string, records []store.ChannelModelRecord) error
 	UpsertChannelModel(channelID string, record store.ChannelModelRecord) (store.ChannelModelRecord, error)
+	UpsertChannelModels(channelID string, records []store.ChannelModelRecord) ([]store.ChannelModelRecord, error)
 	UpsertModelCatalog(store.ModelCatalogRecord) error
 	CreateChannelProbeRun(store.ChannelProbeRunRecord) (store.ChannelProbeRunRecord, error)
 	ReplaceUpstreamModels(upstreamID string, records []store.UpstreamModelRecord) error
@@ -612,7 +613,7 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 	for _, record := range existing {
 		existingByModel[record.Model] = record
 	}
-	merged := make([]store.ChannelModelRecord, 0, len(discovered))
+	records := make([]store.ChannelModelRecord, 0, len(discovered))
 	for _, record := range discovered {
 		model := strings.ToLower(strings.TrimSpace(record.Model))
 		if model == "" {
@@ -627,13 +628,11 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 			record.LastSeenAt = lastSeen
 			record.LastProbeAt = lastProbe
 		}
-		saved, err := s.store.UpsertChannelModel(channelID, record)
-		if err != nil {
-			return nil, err
-		}
-		merged = append(merged, saved)
+		records = append(records, record)
 	}
-	return merged, nil
+	// One grouped upsert for the whole discovery replaces the upsert, catalog
+	// write and read back the loop used to run per model.
+	return s.store.UpsertChannelModels(channelID, records)
 }
 
 func enableDiscoveredByDefault(options ProbeOptions) bool {
