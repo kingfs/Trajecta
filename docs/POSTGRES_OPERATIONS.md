@@ -815,7 +815,9 @@ session_summaries
 
 重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/store.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
 
-两条派生路径的刷新粒度不同：单次交互写入（`UpsertLogWithGrouping`、`UpdateLogUsage`）写完一行就刷新该 path 与涉及到的 session；而一次 vault 遍历（`Sync`、`Rebuild`）会把整轮碰到的 path 和 session 收集起来，在遍历结束后按 session 去重重建一次 `session_summaries`，并把同一小时桶的增量合并成一次 `overview_metric_buckets` 更新。因此 N 个同 session 的 cassette 只汇总一次而不是 N 次，`overview_metric_bucket_members` 的删除与插入也按绑定参数上限分批执行；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
+两条派生表都不是写完 `logs` 就同步刷新的：写入路径只把受影响的 path、trace 与 session 记进一个进程内队列（`Store.markDerivedRefreshForPath` / `markDerivedRefreshForTrace`），队列达到上限（256 条）或调用 `Store.FlushDerivedRefresh()` 时才真正落库。读 `session_summaries` 的两个入口（`ListSessionPage`、`GetSession`）在任何查询之前先冲刷队列，所以 Monitor 看到的一定包含它之前完成的写入；`db summary rebuild sessions --dry-run` 用的 `SessionSummaryRebuildStats` 故意不冲刷，它要报告表里现存的漂移而不是先把漂移修好。冲刷按 session 去重重建一次 `session_summaries`，并把同一小时桶的增量合并成一次 `overview_metric_buckets` 更新，`overview_metric_bucket_members` 的删除与插入按绑定参数上限分批执行。`Sync`/`Rebuild` 在遍历结束后冲刷一次，所以 N 个同 session 的 cassette 只汇总一次而不是 N 次；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
+
+这条队列只存在于进程内，不落盘：进程被强杀时最多丢掉 256 条待刷新记录。丢掉的 session 汇总会一直滞后，直到该 session 下次写入或执行 `db summary rebuild sessions` 才恢复；Monitor 的轮询本身就是冲刷点，所以只有目前没有读取者的派生表（例如 `overview_metric_buckets`）才可能长期停在滞后状态。`serve` 在后台同步停止之后、关闭数据库之前会调用一次 `FlushDerivedRefresh()`，正常停机不会把待刷新记录留给下一次启动。
 
 语义要点（用于一致性对比）：
 

@@ -141,6 +141,7 @@ func TestOverviewMetricBucketsTrackLogUpsertDeltas(t *testing.T) {
 		t.Fatalf("UpsertLogWithGrouping(first) error = %v", err)
 	}
 
+	st.flushDerivedRefresh()
 	firstBucket := readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
 	if firstBucket.requestCount != 1 || firstBucket.successRequest != 1 || firstBucket.failedRequest != 0 ||
 		firstBucket.totalTokens != 42 || firstBucket.ttftSum != 120 || firstBucket.ttftCount != 1 ||
@@ -161,6 +162,7 @@ func TestOverviewMetricBucketsTrackLogUpsertDeltas(t *testing.T) {
 		t.Fatalf("UpsertLogWithGrouping(second) error = %v", err)
 	}
 
+	st.flushDerivedRefresh()
 	firstBucket = readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
 	if firstBucket.requestCount != 0 || firstBucket.successRequest != 0 || firstBucket.totalTokens != 0 ||
 		firstBucket.ttftSum != 0 || firstBucket.streamCount != 0 {
@@ -208,6 +210,7 @@ func TestOverviewMetricBucketsRefreshAfterUsageUpdate(t *testing.T) {
 		t.Fatalf("UpdateLogUsage() error = %v", err)
 	}
 
+	st.flushDerivedRefresh()
 	bucket := readOverviewMetricBucketForTest(t, st, recordedAt.Truncate(time.Hour))
 	if bucket.requestCount != 1 || bucket.totalTokens != 25 {
 		t.Fatalf("bucket after usage update = %+v, want one request and refreshed token total", bucket)
@@ -3229,6 +3232,67 @@ func writeSyncCassetteForTest(t testing.TB, dir string, name string, sessionID s
 	return path
 }
 
+func TestDerivedRefreshIsDeferredAndAppliedOnRead(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSessionSummaryTestLog(t, st, dir, "deferred-a.http", "sess-deferred", base, http.StatusOK, 10, 0, true)
+	writeSessionSummaryTestLog(t, st, dir, "deferred-b.http", "sess-deferred", base.Add(time.Minute), http.StatusOK, 20, 0, false)
+
+	// The index row is committed, the derived read models are not.
+	var logsCount int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM logs`).Scan(&logsCount); err != nil {
+		t.Fatalf("count logs error = %v", err)
+	}
+	if logsCount != 2 {
+		t.Fatalf("logs count = %d, want 2", logsCount)
+	}
+	var summaries, buckets int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaries); err != nil {
+		t.Fatalf("count session_summaries error = %v", err)
+	}
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_buckets`).Scan(&buckets); err != nil {
+		t.Fatalf("count overview_metric_buckets error = %v", err)
+	}
+	if summaries != 0 || buckets != 0 {
+		t.Fatalf("derived rows after write = summaries:%d buckets:%d, want 0/0 (deferred)", summaries, buckets)
+	}
+
+	// Reading the session list is the barrier that applies them.
+	st.useSessionSummaryRead = true
+	page, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage() error = %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].SessionID != "sess-deferred" || page.Items[0].RequestCount != 2 {
+		t.Fatalf("ListSessionPage() items = %#v, want one session with 2 requests", page.Items)
+	}
+	bucket := readOverviewMetricBucketForTest(t, st, base)
+	if bucket.requestCount != 2 || bucket.totalTokens != 0 || bucket.ttftCount != 2 {
+		t.Fatalf("bucket after read = %+v", bucket)
+	}
+
+	// A fresh writer applies the deferred work as soon as the queue reaches the
+	// bound, so a process that never reads cannot grow it without bound.
+	writeSessionSummaryTestLog(t, st, dir, "deferred-c.http", "sess-bounded", base.Add(2*time.Minute), http.StatusOK, 30, 0, true)
+	st.shared.derivedMu.Lock()
+	st.shared.derivedLimit = 1
+	st.shared.derivedMu.Unlock()
+	writeSessionSummaryTestLog(t, st, dir, "deferred-d.http", "sess-bounded", base.Add(3*time.Minute), http.StatusOK, 40, 0, false)
+	var boundedRequests int
+	if err := st.db.QueryRow(`SELECT request_count FROM session_summaries WHERE session_id = ?`, "sess-bounded").Scan(&boundedRequests); err != nil {
+		t.Fatalf("query bounded session summary error = %v", err)
+	}
+	if boundedRequests != 2 {
+		t.Fatalf("bounded session request_count = %d, want 2", boundedRequests)
+	}
+}
+
 func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
@@ -3404,6 +3468,7 @@ func TestBatchedOverviewMetricRefreshMatchesPerPath(t *testing.T) {
 		filepath.Join(dir, "batch-b.http"),
 		filepath.Join(dir, "batch-c.http"),
 	}
+	st.flushDerivedRefresh()
 	perPath := overviewMetricStateForTest(t, st)
 
 	// Rebuild the same state from scratch through the batched entry point: the
@@ -4138,6 +4203,7 @@ func TestSessionSummariesMaintainedAndReadBehindFlag(t *testing.T) {
 	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
 	writeSessionSummaryTestLog(t, st, dir, "summary-a.http", "sess-summary", base, http.StatusOK, 20, 100, true)
 	writeSessionSummaryTestLog(t, st, dir, "summary-b.http", "sess-summary", base.Add(time.Minute), http.StatusInternalServerError, 30, 999, false)
+	st.flushDerivedRefresh()
 
 	var requestCount int
 	var failedRequest int
@@ -4200,6 +4266,7 @@ func TestRebuildSessionSummariesFromLogs(t *testing.T) {
 	if err := st.UpdateLogUsage(entry.ID, recordfile.UsageInfo{TotalTokens: 42}); err != nil {
 		t.Fatalf("UpdateLogUsage() error = %v", err)
 	}
+	st.flushDerivedRefresh()
 	var totalTokens int
 	if err := st.db.QueryRow(`SELECT total_tokens FROM session_summaries WHERE session_id = ?`, "sess-rebuild-a").Scan(&totalTokens); err != nil {
 		t.Fatalf("query refreshed total_tokens error = %v", err)
@@ -4249,6 +4316,7 @@ func TestSessionSummaryRebuildStatsAreReadOnly(t *testing.T) {
 	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
 	writeSessionSummaryTestLog(t, st, dir, "stats-a.http", "sess-stats-a", base, http.StatusOK, 10, 0, true)
 	writeSessionSummaryTestLog(t, st, dir, "stats-b.http", "sess-stats-b", base.Add(time.Minute), http.StatusOK, 20, 0, false)
+	st.flushDerivedRefresh()
 
 	if _, err := st.db.Exec(`DELETE FROM session_summaries WHERE session_id = ?`, "sess-stats-b"); err != nil {
 		t.Fatalf("delete one summary error = %v", err)

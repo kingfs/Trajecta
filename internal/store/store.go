@@ -111,6 +111,17 @@ type storeShared struct {
 	eventMu    sync.Mutex
 	eventSeq   uint64
 	eventSubs  map[chan SystemEventNotification]struct{}
+
+	// derivedMu guards the deferred derived-table queues; derivedFlushMu
+	// serializes the flushes themselves. See markDerivedRefreshForPath.
+	derivedMu       sync.Mutex
+	derivedFlushMu  sync.Mutex
+	derivedPaths    map[string]struct{}
+	derivedTraces   map[string]struct{}
+	derivedSessions map[string]struct{}
+	// derivedLimit overrides derivedQueueLimit when positive; tests use it to
+	// observe the bound without writing the default number of recordings.
+	derivedLimit int
 }
 
 type DatabaseOptions struct {
@@ -5223,15 +5234,14 @@ func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModel
 	return tx.Commit()
 }
 
+// UpsertLogWithGrouping indexes one cassette. The derived read models
+// (session_summaries and the overview metric buckets) are deferred; see
+// markDerivedRefreshForPath.
 func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
-	return s.upsertLogWithGrouping(path, header, grouping, nil)
+	return s.upsertLogWithGrouping(path, header, grouping)
 }
 
-// upsertLogWithGrouping indexes one cassette. A non-nil pending collector defers
-// the derived-table refreshes to the end of a bulk vault walk, so a session with
-// N recordings is summarised once instead of N times; nil keeps the per-file
-// behaviour for single interactive writes.
-func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo, pending *pendingDerivedRefresh) error {
+func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -5370,14 +5380,7 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
-	if pending != nil {
-		pending.addPath(path)
-		pending.addSession(previousSessionID)
-		pending.addSession(grouping.SessionID)
-	} else {
-		s.refreshOverviewMetricBucketForPathBestEffort(path)
-		s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
-	}
+	s.markDerivedRefreshForPath(path, previousSessionID, grouping.SessionID)
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
@@ -5398,8 +5401,7 @@ func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error
 	if err != nil {
 		return err
 	}
-	s.refreshOverviewMetricBucketForTraceIDBestEffort(traceID)
-	s.refreshSessionSummariesBestEffort(s.sessionIDForTraceID(traceID))
+	s.markDerivedRefreshForTrace(traceID)
 	return nil
 }
 
@@ -5410,18 +5412,6 @@ func (s *Store) sessionIDForPath(path string) string {
 	}
 	var sessionID string
 	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE path = ?`, path).Scan(&sessionID); err != nil {
-		return ""
-	}
-	return sessionID
-}
-
-func (s *Store) sessionIDForTraceID(traceID string) string {
-	traceID = strings.TrimSpace(traceID)
-	if traceID == "" {
-		return ""
-	}
-	var sessionID string
-	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE trace_id = ?`, traceID).Scan(&sessionID); err != nil {
 		return ""
 	}
 	return sessionID
@@ -5444,84 +5434,168 @@ func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
 	}
 }
 
-func (s *Store) refreshOverviewMetricBucketForTraceIDBestEffort(traceID string) {
+// derivedQueueLimit bounds how many paths, traces and sessions one process
+// keeps deferred before it applies them. A long-running writer must not grow the
+// queue without bound, and a smaller bound also keeps the staleness window short.
+const derivedQueueLimit = 256
+
+func (shared *storeShared) derivedQueueLimitLocked() int {
+	if shared.derivedLimit > 0 {
+		return shared.derivedLimit
+	}
+	return derivedQueueLimit
+}
+
+// markDerivedRefreshForPath defers the derived-table work for one indexed
+// recording. Both derived tables are rebuilt from whole sessions and hour
+// buckets, and they are read models: doing that work inside the recording path
+// cost about as much as the rest of the write (measured on the SQLite harness)
+// and it repeated the whole-session aggregate once per request of that session.
+// The work is applied by flushDerivedRefresh, which every reader calls first.
+func (s *Store) markDerivedRefreshForPath(path string, sessionIDs ...string) {
+	if s == nil || s.shared == nil {
+		return
+	}
+	path = strings.TrimSpace(path)
+	shared := s.shared
+	shared.derivedMu.Lock()
+	ensureDerivedQueuesLocked(shared)
+	if path != "" {
+		shared.derivedPaths[path] = struct{}{}
+	}
+	for _, sessionID := range sessionIDs {
+		if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+			shared.derivedSessions[sessionID] = struct{}{}
+		}
+	}
+	over := shared.derivedQueueSizeLocked() >= shared.derivedQueueLimitLocked()
+	shared.derivedMu.Unlock()
+	if over {
+		s.flushDerivedRefresh()
+	}
+}
+
+// markDerivedRefreshForTrace defers the derived-table work for a trace whose
+// metric columns changed. Resolving the trace to its path and session is part of
+// the flush, so an update no longer pays two extra point queries per call.
+func (s *Store) markDerivedRefreshForTrace(traceID string) {
+	if s == nil || s.shared == nil {
+		return
+	}
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
 		return
 	}
-	var path string
-	if err := s.db.QueryRow(`SELECT path FROM logs WHERE trace_id = ?`, traceID).Scan(&path); err != nil {
+	shared := s.shared
+	shared.derivedMu.Lock()
+	ensureDerivedQueuesLocked(shared)
+	shared.derivedTraces[traceID] = struct{}{}
+	over := shared.derivedQueueSizeLocked() >= shared.derivedQueueLimitLocked()
+	shared.derivedMu.Unlock()
+	if over {
+		s.flushDerivedRefresh()
+	}
+}
+
+func ensureDerivedQueuesLocked(shared *storeShared) {
+	if shared.derivedPaths == nil {
+		shared.derivedPaths = map[string]struct{}{}
+	}
+	if shared.derivedTraces == nil {
+		shared.derivedTraces = map[string]struct{}{}
+	}
+	if shared.derivedSessions == nil {
+		shared.derivedSessions = map[string]struct{}{}
+	}
+}
+
+func (shared *storeShared) derivedQueueSizeLocked() int {
+	return len(shared.derivedPaths) + len(shared.derivedTraces) + len(shared.derivedSessions)
+}
+
+// FlushDerivedRefresh applies every deferred derived-table refresh now. Every
+// reader of the derived tables already does this before it answers; the entry
+// point exists for callers that want the write side settled without reading, such
+// as a shutdown path or a tool that reports on the derived tables.
+func (s *Store) FlushDerivedRefresh() {
+	s.flushDerivedRefresh()
+}
+
+// flushDerivedRefresh applies every deferred derived-table refresh, best-effort:
+// the index rows are already committed, so a failure is reported and never
+// returned, exactly like the per-file refresh it replaces. Callers that read the
+// derived tables call this first, which is what keeps the read models consistent
+// for every consumer while the write path stays cheap.
+func (s *Store) flushDerivedRefresh() {
+	if s == nil || s.shared == nil || s.db == nil {
 		return
 	}
-	s.refreshOverviewMetricBucketForPathBestEffort(path)
-}
-
-func (s *Store) refreshOverviewMetricBucketForPathBestEffort(path string) {
-	if err := s.RefreshOverviewMetricBucketForPath(path); err != nil {
-		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric bucket for %q failed: %v\n", path, err)
-	}
-}
-
-// pendingDerivedRefresh collects the derived-table work one bulk vault walk
-// accumulates. Both derived tables are rebuilt from the whole session row set,
-// so refreshing them once per file turns a session with N recordings into N
-// rebuilds of the same rows; collapsing the paths and sessions first makes it
-// one rebuild (and one transaction) per touched bucket and session.
-type pendingDerivedRefresh struct {
-	sessions map[string]struct{}
-	paths    map[string]struct{}
-}
-
-func newPendingDerivedRefresh() *pendingDerivedRefresh {
-	return &pendingDerivedRefresh{
-		sessions: map[string]struct{}{},
-		paths:    map[string]struct{}{},
-	}
-}
-
-func (p *pendingDerivedRefresh) addSession(sessionID string) {
-	if p == nil {
+	if s.TransactionScoped() {
+		// A transaction-scoped view shares the queue but not the transaction:
+		// applying the work here would join somebody else's transaction.
 		return
 	}
-	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		p.sessions[sessionID] = struct{}{}
-	}
-}
+	shared := s.shared
+	// One flush at a time, and the lock is taken before the queue is read: a
+	// reader that arrives while a flush is running waits for it and then finds an
+	// empty queue, so the barrier really is complete. It also keeps two rebuilds
+	// of the same session from committing out of order.
+	shared.derivedFlushMu.Lock()
+	defer shared.derivedFlushMu.Unlock()
 
-func (p *pendingDerivedRefresh) addPath(path string) {
-	if p == nil {
+	shared.derivedMu.Lock()
+	paths := sortedKeys(shared.derivedPaths)
+	traces := sortedKeys(shared.derivedTraces)
+	sessions := sortedKeys(shared.derivedSessions)
+	shared.derivedPaths = map[string]struct{}{}
+	shared.derivedTraces = map[string]struct{}{}
+	shared.derivedSessions = map[string]struct{}{}
+	shared.derivedMu.Unlock()
+	if len(paths) == 0 && len(traces) == 0 && len(sessions) == 0 {
 		return
 	}
-	if path = strings.TrimSpace(path); path != "" {
-		p.paths[path] = struct{}{}
-	}
-}
 
-func (p *pendingDerivedRefresh) pending() bool {
-	return p != nil && (len(p.sessions) > 0 || len(p.paths) > 0)
-}
-
-// flushPendingDerivedRefresh applies the accumulated refreshes best-effort, in
-// the same spirit as the per-file path it replaces: the index rows themselves
-// are already committed, so a derived-table failure is reported and never
-// fails the walk.
-func (s *Store) flushPendingDerivedRefresh(pending *pendingDerivedRefresh) {
-	if !pending.pending() {
-		return
+	if len(traces) > 0 {
+		resolvedPaths, resolvedSessions, err := s.resolveDeferredTraceRefs(traces)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "trajecta: resolve deferred derived refresh failed: %v\n", err)
+		} else {
+			paths = dedupeNonEmptyStrings(append(paths, resolvedPaths...))
+			sessions = dedupeNonEmptyStrings(append(sessions, resolvedSessions...))
+		}
 	}
-	paths := make([]string, 0, len(pending.paths))
-	for path := range pending.paths {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
 	s.refreshOverviewMetricBucketsBestEffort(paths)
-
-	sessions := make([]string, 0, len(pending.sessions))
-	for sessionID := range pending.sessions {
-		sessions = append(sessions, sessionID)
-	}
-	sort.Strings(sessions)
 	s.refreshSessionSummariesBestEffort(sessions...)
+}
+
+func (s *Store) resolveDeferredTraceRefs(traceIDs []string) ([]string, []string, error) {
+	paths := make([]string, 0, len(traceIDs))
+	sessions := make([]string, 0, len(traceIDs))
+	for _, chunk := range chunkStrings(traceIDs, storeSQLParamChunk) {
+		rows, err := s.db.Query(`
+			SELECT path, session_id
+			FROM logs
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+		`, stringArgs(chunk)...)
+		if err != nil {
+			return nil, nil, err
+		}
+		for rows.Next() {
+			var path, sessionID string
+			if err := rows.Scan(&path, &sessionID); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			paths = append(paths, path)
+			sessions = append(sessions, sessionID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		rows.Close()
+	}
+	return paths, sessions, nil
 }
 
 func (s *Store) refreshOverviewMetricBucketsBestEffort(paths []string) {
@@ -6047,6 +6121,10 @@ func (s *Store) RebuildSessionSummary(sessionID string) error {
 	return tx.Commit()
 }
 
+// SessionSummaryRebuildStats reports the summary table as it is, without
+// applying anything the write path deferred: it is the dry-run input of
+// `db summary rebuild sessions`, and the operator needs to see existing drift
+// rather than have it repaired before it is counted.
 func (s *Store) SessionSummaryRebuildStats(sessionID string) (SessionSummaryRebuildStats, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	stats := SessionSummaryRebuildStats{SessionID: sessionID}
@@ -6133,10 +6211,6 @@ func (s *Store) Sync() error {
 		return err
 	}
 
-	// A vault walk touches every changed recording, and the derived tables are
-	// rebuilt from whole sessions and hour buckets: collect them here and refresh
-	// once at the end instead of once per file.
-	pending := newPendingDerivedRefresh()
 	walkErr := filepath.Walk(s.outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -6173,12 +6247,12 @@ func (s *Store) Sync() error {
 			return fmt.Errorf("extract grouping %s: %w", path, err)
 		}
 
-		return s.upsertLogWithGrouping(path, parsed.Header, grouping, pending)
+		return s.upsertLogWithGrouping(path, parsed.Header, grouping)
 	})
 	// The index rows written before a walk failure are already committed, so the
-	// deferred refreshes run either way; a derived-table failure is reported and
-	// never masks the walk error.
-	s.flushPendingDerivedRefresh(pending)
+	// deferred derived refreshes run either way; a derived-table failure is
+	// reported and never masks the walk error.
+	s.flushDerivedRefresh()
 	return walkErr
 }
 
@@ -7676,6 +7750,10 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
+	// The summary read path is a derived read model, so it observes every
+	// deferred write before it answers; the log-derived fallback below does not
+	// need it but is cheap to keep behind the same barrier.
+	s.flushDerivedRefresh()
 	if page < 1 {
 		page = 1
 	}
@@ -7806,6 +7884,7 @@ func (s *Store) listSessionPageIDs(sessionWhere string, whereArgs []any, page in
 }
 
 func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
+	s.flushDerivedRefresh()
 	if s.useSessionSummaryRead {
 		summary, err := s.getSessionFromSummary(sessionID)
 		if err == nil {

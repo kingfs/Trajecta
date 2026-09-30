@@ -106,7 +106,12 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
 	}
-	defer traceStore.Close()
+	defer func() {
+		// The derived read models are maintained through a deferred queue, so a
+		// clean shutdown settles it before the database handle goes away.
+		traceStore.FlushDerivedRefresh()
+		traceStore.Close()
+	}()
 	syncCtx, cancelSync := context.WithCancel(context.Background())
 	var background sync.WaitGroup
 	defer func() {

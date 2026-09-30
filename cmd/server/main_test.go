@@ -2695,6 +2695,9 @@ func TestOpenApplicationDatabasePassesSessionSummaryReadConfig(t *testing.T) {
 	defer st.Close()
 
 	writeCLISessionSummaryTestLog(t, st, dir, "config-summary-read.http", "sess-config-summary-read", time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC), http.StatusOK, 12)
+	// Settle the write path first: the poisoned value below is what proves the
+	// read came from the summary table, so nothing may rewrite it afterwards.
+	st.FlushDerivedRefresh()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "trace_index.sqlite3"))
 	if err != nil {
 		t.Fatalf("sql.Open() error = %v", err)
@@ -2723,6 +2726,9 @@ func TestDBSummaryRebuildSessionsDryRunAndRebuildSQLite(t *testing.T) {
 	}
 	writeCLISessionSummaryTestLog(t, st, dir, "summary-cli-a.http", "sess-summary-cli-a", time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC), http.StatusOK, 10)
 	writeCLISessionSummaryTestLog(t, st, dir, "summary-cli-b.http", "sess-summary-cli-b", time.Date(2026, 7, 3, 10, 1, 0, 0, time.UTC), http.StatusOK, 20)
+	// Build both summaries, then remove one out of band: the dry run below has to
+	// report that drift without repairing it.
+	st.FlushDerivedRefresh()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "trace_index.sqlite3"))
 	if err != nil {
 		t.Fatalf("sql.Open() error = %v", err)
