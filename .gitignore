@@ -21,4 +21,6 @@ worktrees/
 __pycache__/
 *.pyc
 .venv-atif/
+# 本地临时物：调试脚本与缓存目录，不入库
+.dsh-bin/
 .dsh-cache/
