@@ -8136,6 +8136,10 @@ func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSummary, error) {
 	var summary OverviewSummary
 	var avgTTFT, avgDuration float64
+	// ttft_samples and duration_samples are the denominators the p95 lookups
+	// below need. They filter exactly the way those lookups do (`col > 0`), so
+	// the single pass over the window also replaces their two COUNT queries.
+	var ttftSamples, durationSamples int
 	query := `
 		SELECT
 			COUNT(*) AS request_count,
@@ -8144,7 +8148,9 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 			COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms END), 0) AS avg_ttft,
 			COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_duration,
 			COALESCE(SUM(` + s.boolCountCaseSQL("is_stream") + `), 0) AS stream_count,
-			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count
+			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count,
+			COALESCE(SUM(CASE WHEN ttft_ms > 0 THEN 1 ELSE 0 END), 0) AS ttft_samples,
+			COALESCE(SUM(CASE WHEN duration_ms > 0 THEN 1 ELSE 0 END), 0) AS duration_samples
 		FROM logs
 		WHERE ` + whereSQL
 	if err := s.db.QueryRow(query, whereArgs...).Scan(
@@ -8155,6 +8161,8 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 		&avgDuration,
 		&summary.StreamCount,
 		&summary.SessionCount,
+		&ttftSamples,
+		&durationSamples,
 	); err != nil {
 		return OverviewSummary{}, err
 	}
@@ -8165,11 +8173,11 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 	summary.AvgTTFTMs = int(math.Round(avgTTFT))
 	summary.AvgDurationMs = int64(math.Round(avgDuration))
 	if summary.RequestCount > 0 {
-		p95TTFT, err := s.overviewPercentile("ttft_ms", whereSQL, whereArgs, 0.95)
+		p95TTFT, err := s.overviewPercentile("ttft_ms", whereSQL, whereArgs, 0.95, ttftSamples)
 		if err != nil {
 			return OverviewSummary{}, err
 		}
-		p95Duration, err := s.overviewPercentile("duration_ms", whereSQL, whereArgs, 0.95)
+		p95Duration, err := s.overviewPercentile("duration_ms", whereSQL, whereArgs, 0.95, durationSamples)
 		if err != nil {
 			return OverviewSummary{}, err
 		}
@@ -8179,12 +8187,11 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 	return summary, nil
 }
 
-func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []any, percentile float64) (int64, error) {
-	var count int
-	countArgs := append([]any{}, whereArgs...)
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
-		return 0, err
-	}
+// overviewPercentile returns the value at the given percentile among the rows the
+// window matched with a positive value for the column. count is that number of
+// samples, which the caller already computed in its own aggregate pass; the
+// lookup itself is the only query left.
+func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []any, percentile float64, count int) (int64, error) {
 	if count == 0 {
 		return 0, nil
 	}
@@ -8516,10 +8523,12 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 	`).Scan(&summary.Unparsed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
-		return OverviewObservationSummary{}, err
-	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
+	if err := s.db.QueryRow(`
+		SELECT
+			COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0) AS queued,
+			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running
+		FROM parse_jobs
+	`).Scan(&summary.Queued, &summary.Running); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	jobs, err := s.overviewRecentParseFailures(limit)

@@ -217,6 +217,76 @@ func TestOverviewMetricBucketsRefreshAfterUsageUpdate(t *testing.T) {
 	}
 }
 
+func TestOverviewPercentilesIgnoreZeroSamples(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	// The first row carries the zero values that both percentile lookups filter
+	// out: the summary counts the samples, so a mismatch would move the p95.
+	ttfts := []int64{0, 10, 20, 30, 40}
+	durations := []int64{0, 100, 200, 300, 400}
+	for i := range ttfts {
+		name := fmt.Sprintf("overview-percentile-%d.http", i)
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("# percentile\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+		header.Meta.RequestID = name
+		header.Meta.Time = base.Add(time.Duration(i) * time.Second)
+		header.Meta.URL = "https://api.openai.com/v1/responses"
+		header.Meta.Method = http.MethodPost
+		header.Meta.StatusCode = http.StatusOK
+		header.Meta.Model = "gpt-overview"
+		header.Meta.ExchangeKind = "entry"
+		header.Meta.TTFTMs = ttfts[i]
+		header.Meta.DurationMs = durations[i]
+		header.Usage.TotalTokens = 5
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%d) error = %v", i, err)
+		}
+	}
+
+	dashboard, err := st.Overview(OverviewOptions{
+		Since:       base.Add(-time.Minute),
+		Limit:       5,
+		BucketSize:  time.Hour,
+		BucketCount: 2,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if dashboard.Summary.RequestCount != 5 || dashboard.Summary.AvgTTFTMs != 25 {
+		t.Fatalf("summary = requests:%d avgTTFT:%d, want 5/25", dashboard.Summary.RequestCount, dashboard.Summary.AvgTTFTMs)
+	}
+	if dashboard.Summary.P95TTFTMs != 40 || dashboard.Summary.P95DurationMs != 400 {
+		t.Fatalf("p95 = ttft:%d duration:%d, want 40/400", dashboard.Summary.P95TTFTMs, dashboard.Summary.P95DurationMs)
+	}
+
+	// Every sample filtered out: the lookup must report zero, not the offset that
+	// a wrong sample count would produce.
+	if _, err := st.db.Exec(`UPDATE logs SET ttft_ms = 0, duration_ms = 0`); err != nil {
+		t.Fatalf("zero out metrics error = %v", err)
+	}
+	dashboard, err = st.Overview(OverviewOptions{
+		Since:       base.Add(-time.Minute),
+		Limit:       5,
+		BucketSize:  time.Hour,
+		BucketCount: 2,
+	})
+	if err != nil {
+		t.Fatalf("Overview(zeroed) error = %v", err)
+	}
+	if dashboard.Summary.P95TTFTMs != 0 || dashboard.Summary.P95DurationMs != 0 {
+		t.Fatalf("zeroed p95 = ttft:%d duration:%d, want 0/0", dashboard.Summary.P95TTFTMs, dashboard.Summary.P95DurationMs)
+	}
+}
+
 func TestRebuildOverviewMetricBucketsFromLogs(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
