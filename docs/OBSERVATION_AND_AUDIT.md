@@ -16,7 +16,8 @@ Trajecta 的观测层把记录下来的原始 HTTP 交换解析成语义结构�
 
 解析链路：`.http cassette（LLM_PROXY_V3 或 legacy V2） → recordfile.ParsePrelude/ExtractSections → observe.ParseInput → observe.Registry.Select → TraceObservation（Observation IR） → analyzer.Runner.Analyze → store`。
 
-- recorder 写完 cassette 后通过 `store.EnqueueParseJob` 入队；`internal/observeworker` 以 5s 间隔、每批 10 条消费 `parse_jobs`，调用 `observeworker.ReparseTrace` 再 `SaveObservation`。
+- recorder 写完 cassette 后通过 `store.EnqueueParseJob` 入队；`internal/observeworker` 以 5s 间隔、每批 10 条消费 `parse_jobs`：`store.ClaimParseJobs` 用一条 `UPDATE … RETURNING` 把队首若干条置为 `running` 并原子地返回（Postgres 的子查询用 `FOR UPDATE SKIP LOCKED`，SQLite 没有行锁，靠写锁加进程内 claim 互斥和 `status = 'queued'` 谓词保证不重复认领），随后对每条跑 `observeworker.ReparseTrace` 再 `SaveObservation`。`internal/reanalysis` 的 `analysis_jobs` 用同一套方式认领（`store.ClaimAnalysisJobsForWorker`），所以并发的 server 进程与 CLI 不会重复消费同一个任务。
+- `SaveObservation` 的 semantic nodes 与 `SaveFindings` 的 findings 都按参数上限分批写入（各 900 个绑定参数一条多行 `INSERT`），同一批里重复的 `(trace_id, node_id)` / `(trace_id, finding_id)` 先折叠，避免 Postgres 拒绝整条语句。
 - 人工与批量重算由 `internal/reanalysis` 的 job 系统驱动，读取同一 IR 与检测器。
 
 ## Observation IR 顶层结构

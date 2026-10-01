@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -1899,6 +1900,110 @@ func analysisJobListContains(jobs []AnalysisJobRecord, id int64, status string) 
 		}
 	}
 	return false
+}
+
+// TestPostgresClaimSkipsLockedRows pins the Postgres half of the atomic claim: a
+// queued row another transaction already locked is skipped instead of blocking
+// the claim. Without FOR UPDATE SKIP LOCKED the claim would wait for that lock.
+func TestPostgresClaimSkipsLockedRows(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+	if st.driver != "postgres" || !strings.Contains(st.claimRowLockSQL(), "SKIP LOCKED") {
+		t.Fatalf("postgres claim lock clause = %q, want SKIP LOCKED", st.claimRowLockSQL())
+	}
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	// The claim is database-wide, so drop queued rows other Postgres tests left
+	// behind; this test only asserts about the three jobs it enqueues.
+	if _, err := st.db.Exec(`DELETE FROM parse_jobs WHERE status = 'queued'`); err != nil {
+		t.Fatalf("clear queued parse jobs error = %v", err)
+	}
+	traceIDs := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		traceID := fmt.Sprintf("trace-pg-claim-%s-%02d", suffix, i)
+		traceIDs = append(traceIDs, traceID)
+		if err := st.EnqueueParseJob(traceID); err != nil {
+			t.Fatalf("EnqueueParseJob() error = %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := st.db.Exec(`DELETE FROM parse_jobs WHERE trace_id IN (?, ?, ?)`, traceIDs[0], traceIDs[1], traceIDs[2]); err != nil {
+			t.Logf("cleanup postgres parse jobs error = %v", err)
+		}
+	})
+
+	// Lock the first job from a second connection and keep the lock while the
+	// claim runs.
+	lockTx, err := st.db.DB.Begin()
+	if err != nil {
+		t.Fatalf("Begin(lock) error = %v", err)
+	}
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			_ = lockTx.Rollback()
+		}
+	}()
+	var lockedID int64
+	if err := lockTx.QueryRow(`SELECT id FROM parse_jobs WHERE trace_id = $1 FOR UPDATE`, traceIDs[0]).Scan(&lockedID); err != nil {
+		t.Fatalf("lock parse job error = %v", err)
+	}
+
+	type claimResult struct {
+		jobs []ParseJobRecord
+		err  error
+	}
+	done := make(chan claimResult, 1)
+	go func() {
+		jobs, err := st.ClaimParseJobs(3)
+		done <- claimResult{jobs: jobs, err: err}
+	}()
+	var result claimResult
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ClaimParseJobs blocked on the locked row; SKIP LOCKED is missing")
+	}
+	if result.err != nil {
+		t.Fatalf("ClaimParseJobs() error = %v", result.err)
+	}
+	if len(result.jobs) != 2 {
+		t.Fatalf("claimed %d jobs, want the 2 unlocked ones", len(result.jobs))
+	}
+	for _, job := range result.jobs {
+		if job.ID == lockedID {
+			t.Fatalf("claimed the locked job %d", lockedID)
+		}
+	}
+
+	if err := lockTx.Rollback(); err != nil {
+		t.Fatalf("Rollback(lock) error = %v", err)
+	}
+	unlocked = true
+
+	remaining, err := st.ClaimParseJobs(3)
+	if err != nil {
+		t.Fatalf("ClaimParseJobs(after unlock) error = %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != lockedID {
+		t.Fatalf("claimed after unlock = %+v, want job %d", remaining, lockedID)
+	}
 }
 
 func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
@@ -6431,6 +6536,241 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	}
 	if _, ok := grouped["trace-findings-missing"]; ok {
 		t.Fatalf("grouped findings = %+v, want no entry for a trace without findings", grouped)
+	}
+}
+
+// TestSaveFindingsBatchesRepeatedKeys pins the multi-row write: one statement per
+// parameter-bounded chunk, duplicate (trace_id, finding_id) keys folded with the
+// last occurrence winning, and an empty list still clearing the trace's findings.
+func TestSaveFindingsBatchesRepeatedKeys(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	// 140 unique findings is more than one chunk (900 parameters / 13 columns).
+	findings := make([]observe.Finding, 0, 142)
+	for i := 0; i < 140; i++ {
+		findings = append(findings, observe.Finding{
+			ID:              fmt.Sprintf("finding-%03d", i),
+			Category:        "batched",
+			Severity:        observe.SeverityLow,
+			Confidence:      0.5,
+			Title:           fmt.Sprintf("finding %03d", i),
+			Detector:        "store_test",
+			DetectorVersion: "1",
+		})
+	}
+	// Repeats of an early and a late key: folding must keep the later title.
+	for _, index := range []int{0, 69} {
+		repeat := findings[index]
+		repeat.Title = fmt.Sprintf("finding %03d updated", index)
+		findings = append(findings, repeat)
+	}
+	if err := st.SaveFindings("trace-batched-findings", findings); err != nil {
+		t.Fatalf("SaveFindings(batched) error = %v", err)
+	}
+	stored, err := st.ListFindings("trace-batched-findings", FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(stored) != 140 {
+		t.Fatalf("findings = %d, want 140", len(stored))
+	}
+	byID := make(map[string]string, len(stored))
+	for _, finding := range stored {
+		byID[finding.ID] = finding.Title
+	}
+	for _, index := range []int{0, 69} {
+		id := fmt.Sprintf("finding-%03d", index)
+		if byID[id] != fmt.Sprintf("finding %03d updated", index) {
+			t.Fatalf("title for %s = %q, want the last duplicate", id, byID[id])
+		}
+	}
+
+	if err := st.SaveFindings("trace-batched-findings", nil); err != nil {
+		t.Fatalf("SaveFindings(empty) error = %v", err)
+	}
+	stored, err = st.ListFindings("trace-batched-findings", FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings(empty) error = %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("findings after empty save = %d, want 0", len(stored))
+	}
+}
+
+// TestSaveObservationBatchesSemanticNodes exercises the chunked node write: more
+// nodes than one statement carries, plus a repeated node id that the batch must
+// fold before sending.
+func TestSaveObservationBatchesSemanticNodes(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const nodes = 150 // more than one chunk (900 parameters / 14 columns)
+	rootNodes := make([]observe.SemanticNode, 0, nodes+1)
+	for i := 0; i < nodes; i++ {
+		rootNodes = append(rootNodes, observe.SemanticNode{
+			ID:             fmt.Sprintf("node-%03d", i),
+			ProviderType:   "message",
+			NormalizedType: observe.NodeMessage,
+			Role:           "assistant",
+			Path:           fmt.Sprintf("$.choices[%d].message", i),
+			Index:          i,
+			Text:           fmt.Sprintf("node text %03d", i),
+		})
+	}
+	// The same id cannot appear twice in one statement. observationFlatNodes
+	// already folds a repeated id first-wins before the nodes reach the batch
+	// writer, so this pins that the batch still stores exactly one row.
+	repeat := rootNodes[7]
+	repeat.Text = "node text 007 updated"
+	rootNodes = append(rootNodes, repeat)
+
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       "trace-batched-nodes",
+		Provider:      "openai_compatible",
+		Operation:     "chat.completions",
+		Model:         "gpt-test",
+		Parser:        "store-test",
+		ParserVersion: "1",
+		Status:        observe.ParseStatusParsed,
+		Response:      observe.ObservationResponse{Nodes: rootNodes},
+	}); err != nil {
+		t.Fatalf("SaveObservation(batched) error = %v", err)
+	}
+
+	stored, err := st.ListSemanticNodes("trace-batched-nodes")
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	if len(stored) != nodes {
+		t.Fatalf("semantic nodes = %d, want %d", len(stored), nodes)
+	}
+	byID := make(map[string]string, len(stored))
+	for _, node := range stored {
+		byID[node.Node.ID] = node.Node.Text
+	}
+	if byID["node-007"] != "node text 007" {
+		t.Fatalf("node-007 text = %q, want the first occurrence kept by the upstream fold", byID["node-007"])
+	}
+}
+
+// TestClaimParseJobsIsExclusive checks the single-statement claim hands each
+// queued job to exactly one caller and moves it to running with one attempt.
+func TestClaimParseJobsIsExclusive(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const total = 40
+	for i := 0; i < total; i++ {
+		if err := st.EnqueueParseJob(fmt.Sprintf("trace-claim-%02d", i)); err != nil {
+			t.Fatalf("EnqueueParseJob() error = %v", err)
+		}
+	}
+
+	var mu sync.Mutex
+	seen := make(map[int64]int, total)
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				jobs, err := st.ClaimParseJobs(7)
+				if err != nil {
+					t.Errorf("ClaimParseJobs() error = %v", err)
+					return
+				}
+				if len(jobs) == 0 {
+					return
+				}
+				mu.Lock()
+				for _, job := range jobs {
+					seen[job.ID]++
+					if job.Status != "running" {
+						t.Errorf("claimed job %d status = %q, want running", job.ID, job.Status)
+					}
+					if job.Attempts != 1 {
+						t.Errorf("claimed job %d attempts = %d, want 1", job.ID, job.Attempts)
+					}
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(seen) != total {
+		t.Fatalf("claimed %d distinct jobs, want %d", len(seen), total)
+	}
+	for id, count := range seen {
+		if count != 1 {
+			t.Fatalf("job %d claimed %d times, want 1", id, count)
+		}
+	}
+	more, err := st.ClaimParseJobs(10)
+	if err != nil {
+		t.Fatalf("ClaimParseJobs(after drain) error = %v", err)
+	}
+	if len(more) != 0 {
+		t.Fatalf("claimed %d jobs after drain, want 0", len(more))
+	}
+}
+
+func TestClaimAnalysisJobsForWorkerIsExclusive(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const total = 12
+	for i := 0; i < total; i++ {
+		if _, err := st.CreateAnalysisJob(AnalysisJobRecord{
+			JobType:     "trace_reanalyze",
+			TargetType:  "trace",
+			TargetID:    fmt.Sprintf("trace-claim-analysis-%02d", i),
+			Status:      "queued",
+			StepsJSON:   "[]",
+			RequestJSON: "{}",
+			ResultJSON:  "{}",
+		}); err != nil {
+			t.Fatalf("CreateAnalysisJob() error = %v", err)
+		}
+	}
+
+	claimed, err := st.ClaimAnalysisJobsForWorker(total)
+	if err != nil {
+		t.Fatalf("ClaimAnalysisJobsForWorker() error = %v", err)
+	}
+	if len(claimed) != total {
+		t.Fatalf("claimed = %d, want %d", len(claimed), total)
+	}
+	for _, job := range claimed {
+		if job.Status != "running" {
+			t.Fatalf("job %d status = %q, want running", job.ID, job.Status)
+		}
+		if job.Attempts != 1 {
+			t.Fatalf("job %d attempts = %d, want 1", job.ID, job.Attempts)
+		}
+		if job.StartedAt.IsZero() {
+			t.Fatalf("job %d started_at is zero", job.ID)
+		}
+	}
+	more, err := st.ClaimAnalysisJobsForWorker(total)
+	if err != nil {
+		t.Fatalf("ClaimAnalysisJobsForWorker(after drain) error = %v", err)
+	}
+	if len(more) != 0 {
+		t.Fatalf("claimed %d jobs after drain, want 0", len(more))
 	}
 }
 

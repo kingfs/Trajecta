@@ -64,9 +64,9 @@ func (w *Worker) RunOnce(ctx context.Context) {
 }
 
 func (w *Worker) runOnce(ctx context.Context) {
-	jobs, err := w.store.ListAnalysisJobsForWorker(w.batchSize)
+	jobs, err := w.store.ClaimAnalysisJobsForWorker(w.batchSize)
 	if err != nil {
-		slog.Warn("List analysis jobs failed", "error", err)
+		slog.Warn("Claim analysis jobs failed", "error", err)
 		return
 	}
 	for _, job := range jobs {

@@ -28,6 +28,11 @@ func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 	if result.Job.Status != "completed" || result.Job.JobType != JobTypeTraceReanalyze {
 		t.Fatalf("job = %+v, want completed trace_reanalyze", result.Job)
 	}
+	// A synchronous run marks its own job running, so the attempt count and
+	// started_at are recorded the same way the worker's claim records them.
+	if result.Job.Attempts != 1 || result.Job.StartedAt.IsZero() {
+		t.Fatalf("job attempts = %d started_at = %v, want one marked attempt", result.Job.Attempts, result.Job.StartedAt)
+	}
 	if result.Observation == nil || result.Observation.Parser != "openai" || result.RequestNodes == 0 || result.ResponseNodes == 0 {
 		t.Fatalf("observation result = %+v request=%d response=%d", result.Observation, result.RequestNodes, result.ResponseNodes)
 	}

@@ -144,6 +144,12 @@ func (s *Service) ReparseTrace(ctx context.Context, traceID string, opts TraceOp
 	if err != nil {
 		return Result{}, err
 	}
+	// This call runs the job inline instead of handing it to the worker, which
+	// would have claimed it as running; mark it here so attempts and started_at
+	// are recorded exactly once.
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
+		return Result{}, err
+	}
 	result, err := s.runTraceJob(ctx, job, opts)
 	if err != nil {
 		return Result{}, err
@@ -154,6 +160,9 @@ func (s *Service) ReparseTrace(ctx context.Context, traceID string, opts TraceOp
 func (s *Service) RescanTrace(ctx context.Context, traceID string) (Result, error) {
 	job, err := s.createTraceJob(JobTypeTraceRescan, traceID, []string{StepScanFindings})
 	if err != nil {
+		return Result{}, err
+	}
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
 		return Result{}, err
 	}
 	result, err := s.runTraceJob(ctx, job, TraceOptions{Scan: true})
@@ -168,6 +177,9 @@ func (s *Service) RepairTraceUsage(ctx context.Context, traceID string, opts Rep
 	if err != nil {
 		return Result{}, err
 	}
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
+		return Result{}, err
+	}
 	result, err := s.runRepairUsageJob(ctx, job, opts)
 	if err != nil {
 		return Result{}, err
@@ -178,6 +190,9 @@ func (s *Service) RepairTraceUsage(ctx context.Context, traceID string, opts Rep
 func (s *Service) ReanalyzeTrace(ctx context.Context, traceID string) (Result, error) {
 	job, err := s.createTraceJob(JobTypeTraceReanalyze, traceID, []string{StepReparseObservation, StepScanFindings})
 	if err != nil {
+		return Result{}, err
+	}
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
 		return Result{}, err
 	}
 	result, err := s.runTraceJob(ctx, job, TraceOptions{Scan: true})
@@ -212,6 +227,9 @@ func (s *Service) ReanalyzeSession(ctx context.Context, sessionID string, opts S
 	if err != nil {
 		return Result{}, err
 	}
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
+		return Result{}, err
+	}
 	return s.runSessionJob(ctx, job, opts)
 }
 
@@ -222,6 +240,9 @@ func (s *Service) EnqueueSessionReanalyze(sessionID string, opts SessionOptions)
 func (s *Service) ReanalyzeBatch(ctx context.Context, opts BatchOptions) (Result, error) {
 	job, err := s.createBatchJob(opts)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
 		return Result{}, err
 	}
 	return s.runBatchJob(ctx, job, opts)
@@ -258,9 +279,8 @@ func (s *Service) ExecuteJob(ctx context.Context, job store.AnalysisJobRecord) (
 }
 
 func (s *Service) runRepairUsageJob(ctx context.Context, job store.AnalysisJobRecord, opts RepairUsageOptions) (Result, error) {
-	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
-		return Result{}, err
-	}
+	// The caller already marked the job running: the worker claimed it, and the
+	// synchronous wrappers marked it right after creating it.
 	var err error
 	defer func() {
 		if err != nil {
@@ -454,9 +474,8 @@ func (s *Service) createBatchJob(opts BatchOptions) (store.AnalysisJobRecord, er
 }
 
 func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, opts TraceOptions) (Result, error) {
-	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
-		return Result{}, err
-	}
+	// The caller already marked the job running: the worker claimed it, and the
+	// synchronous wrappers marked it right after creating it.
 	result := Result{Job: job}
 	var err error
 	defer func() {
@@ -523,9 +542,8 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 }
 
 func (s *Service) runSessionJob(ctx context.Context, job store.AnalysisJobRecord, opts SessionOptions) (Result, error) {
-	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
-		return Result{}, err
-	}
+	// The caller already marked the job running: the worker claimed it, and the
+	// synchronous wrappers marked it right after creating it.
 	result := Result{Job: job}
 	var err error
 	defer func() {
@@ -629,9 +647,8 @@ func (s *Service) runSessionJob(ctx context.Context, job store.AnalysisJobRecord
 }
 
 func (s *Service) runBatchJob(ctx context.Context, job store.AnalysisJobRecord, opts BatchOptions) (Result, error) {
-	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
-		return Result{}, err
-	}
+	// The caller already marked the job running: the worker claimed it, and the
+	// synchronous wrappers marked it right after creating it.
 	result := Result{Job: job}
 	var err error
 	defer func() {

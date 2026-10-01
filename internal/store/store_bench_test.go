@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
@@ -409,4 +410,81 @@ func BenchmarkUpsertChannelModels(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkSaveFindings measures a session reanalysis write. The row-by-row form
+// this replaced issued one INSERT per finding (120 statements here); the batched
+// form issues one DELETE plus one INSERT per 69-row parameter chunk.
+func BenchmarkSaveFindings(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const findings = 120
+	items := make([]observe.Finding, 0, findings)
+	for i := 0; i < findings; i++ {
+		items = append(items, observe.Finding{
+			ID:              fmt.Sprintf("finding-%03d", i),
+			Category:        "bench",
+			Severity:        observe.SeverityLow,
+			Confidence:      0.5,
+			Title:           fmt.Sprintf("finding %03d", i),
+			EvidenceExcerpt: "evidence",
+			Detector:        "bench",
+			DetectorVersion: "1",
+		})
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := st.SaveFindings("bench-trace-findings", items); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkSaveObservationNodes measures the semantic-node half of a reparse. The
+// row-by-row form this replaced issued one INSERT per node (200 statements here);
+// the batched form issues one INSERT per 64-node parameter chunk.
+func BenchmarkSaveObservationNodes(b *testing.B) {
+	st, err := New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	const nodes = 200
+	roots := make([]observe.SemanticNode, 0, nodes)
+	for i := 0; i < nodes; i++ {
+		roots = append(roots, observe.SemanticNode{
+			ID:             fmt.Sprintf("node-%03d", i),
+			ProviderType:   "message",
+			NormalizedType: observe.NodeMessage,
+			Role:           "assistant",
+			Path:           fmt.Sprintf("$.choices[%d].message", i),
+			Index:          i,
+			Text:           fmt.Sprintf("node text %03d", i),
+		})
+	}
+	obs := observe.TraceObservation{
+		TraceID:       "bench-trace-nodes",
+		Provider:      "openai_compatible",
+		Operation:     "chat.completions",
+		Model:         "gpt-test",
+		Parser:        "bench",
+		ParserVersion: "1",
+		Status:        observe.ParseStatusParsed,
+		Response:      observe.ObservationResponse{Nodes: roots},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := st.SaveObservation(obs); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

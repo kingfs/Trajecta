@@ -70,9 +70,9 @@ func (w *Worker) RunOnce(ctx context.Context) {
 }
 
 func (w *Worker) runOnce(ctx context.Context) {
-	jobs, err := w.store.ListParseJobs("queued", w.batchSize)
+	jobs, err := w.store.ClaimParseJobs(w.batchSize)
 	if err != nil {
-		slog.Warn("List parse jobs failed", "error", err)
+		slog.Warn("Claim parse jobs failed", "error", err)
 		return
 	}
 	for _, job := range jobs {
@@ -87,10 +87,9 @@ func (w *Worker) runOnce(ctx context.Context) {
 	}
 }
 
+// processJob parses one already-claimed job. The claim moved the row to running
+// and incremented its attempt count, so there is no separate mark-running step.
 func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error {
-	if err := w.store.MarkParseJobRunning(job.ID); err != nil {
-		return err
-	}
 	obs, err := ReparseTrace(ctx, w.store, w.registry, job.TraceID)
 	if err != nil {
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())

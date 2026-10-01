@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Changed
+
+- Observation and findings writes are grouped into parameter-bounded multi-row statements. `SaveObservation` issued one `INSERT` per semantic node and `SaveFindings` one per finding, so reanalysing a session of a few hundred nodes issued a few hundred statements inside one transaction; both now send one `INSERT` per 900-parameter chunk (64 nodes, 69 findings). A multi-row statement cannot name the same `(trace_id, node_id)` or `(trace_id, finding_id)` twice on Postgres, so each batch folds its duplicate conflict keys first; findings keep the last occurrence, nodes keep the first, which is the order `observationFlatNodes` already folded with. `BenchmarkSaveFindings` (120 findings) and `BenchmarkSaveObservationNodes` (200 nodes) keep the write measured, and on SQLite the statement count drops from 120 to 3 and from 200 to 5. `TestSaveFindingsBatchesRepeatedKeys` covers the chunk boundary, the last-duplicate fold and the empty findings list that still clears the trace, and `TestSaveObservationBatchesSemanticNodes` covers a node list longer than one chunk.
+
+### Fixed
+
+- Task claiming is one atomic statement, so two processes cannot run the same job. The observe and reanalysis workers listed queued rows and then marked each one running with a second statement, which left a window for a second `trajecta serve` or a CLI run to claim the same parse or analysis job. `Store.ClaimParseJobs` and `Store.ClaimAnalysisJobsForWorker` now move a batch of queued rows to running in one `UPDATE ... RETURNING`: Postgres selects the rows with `FOR UPDATE SKIP LOCKED`, SQLite has no row locks and relies on its write lock plus an in-process claim mutex and an outer `status = 'queued'` predicate that makes a racing claimer update nothing, and the claim also increments `attempts` and stamps `started_at`, so a claimed job is not marked a second time. The synchronous reanalysis methods (`ReanalyzeTrace`, `ReanalyzeSession`, `ReanalyzeBatch`, and the rest), which run a job inline without the worker, mark their own job running as before. `TestClaimParseJobsIsExclusive` claims a 40-job queue from four goroutines and asserts every job is handed out once with one attempt, `TestClaimAnalysisJobsForWorkerIsExclusive` covers the analysis queue, and `TestPostgresClaimSkipsLockedRows` holds a row lock from a second connection and asserts the claim skips that row instead of blocking, then claims it once the lock is released.
+
 ## [2.1.1] - 2026-09-30
 
 ### Changed

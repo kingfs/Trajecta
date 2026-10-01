@@ -112,6 +112,12 @@ type storeShared struct {
 	eventSeq   uint64
 	eventSubs  map[chan SystemEventNotification]struct{}
 
+	// claimMu serializes the SQLite task claims. Postgres takes its rows with
+	// FOR UPDATE SKIP LOCKED, so two claimers cannot overlap there; SQLite has no
+	// row locks, and this lock keeps two goroutines in one process from reading
+	// the same queued rows before either UPDATE lands.
+	claimMu sync.Mutex
+
 	// derivedMu guards the deferred derived-table queues; derivedFlushMu
 	// serializes the flushes themselves. See markDerivedRefreshForPath.
 	derivedMu       sync.Mutex
@@ -7454,27 +7460,8 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
 		return err
 	}
-	for _, row := range nodes {
-		nodeJSON, err := json.Marshal(row.Node.JSON)
-		if err != nil {
-			return err
-		}
-		rawJSON, err := json.Marshal(row.Node.Raw)
-		if err != nil {
-			return err
-		}
-		nodeJSON = sqlSafeBytes(nodeJSON)
-		rawJSON = sqlSafeBytes(rawJSON)
-		if _, err := s.execTx(tx, `
-			INSERT INTO semantic_nodes (
-				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
-				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, sqlSafeText(obs.TraceID), sqlSafeText(row.Node.ID), sqlSafeText(row.ParentID), sqlSafeText(row.Node.ProviderType), string(row.Node.NormalizedType), sqlSafeText(row.Node.Role),
-			sqlSafeText(row.Node.Path), row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
-			return err
-		}
+	if err := s.insertSemanticNodesTx(tx, obs.TraceID, nodes, now); err != nil {
+		return err
 	}
 	if _, err := s.execTx(tx, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
@@ -7483,6 +7470,63 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// insertSemanticNodesTx writes a trace's semantic nodes in parameter-bounded
+// multi-row statements. The row-by-row loop it replaces issued one INSERT per
+// node, and a session reanalysis flattens hundreds of them into one call.
+func (s *Store) insertSemanticNodesTx(tx *sql.Tx, traceID string, nodes []observe.FlatSemanticNode, now time.Time) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	// (trace_id, node_id) is unique, so a batch that repeats a node id would fail
+	// the whole statement. observationFlatNodes already folds the non-empty ids
+	// first-wins, so this is the safety net for the empty ids it keeps: the last
+	// one wins and the batch always sends one row per key.
+	unique := make([]observe.FlatSemanticNode, 0, len(nodes))
+	at := make(map[string]int, len(nodes))
+	for _, row := range nodes {
+		if index, ok := at[row.Node.ID]; ok {
+			unique[index] = row
+			continue
+		}
+		at[row.Node.ID] = len(unique)
+		unique = append(unique, row)
+	}
+	safeTraceID := sqlSafeText(traceID)
+	const nodeColumns = 14
+	rowsPerStatement := storeSQLParamChunk / nodeColumns
+	valueRow := "(" + placeholders(nodeColumns) + ")"
+	for start := 0; start < len(unique); start += rowsPerStatement {
+		end := start + rowsPerStatement
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+		values := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk)*nodeColumns)
+		for _, row := range chunk {
+			nodeJSON, err := json.Marshal(row.Node.JSON)
+			if err != nil {
+				return err
+			}
+			rawJSON, err := json.Marshal(row.Node.Raw)
+			if err != nil {
+				return err
+			}
+			values = append(values, valueRow)
+			args = append(args, safeTraceID, sqlSafeText(row.Node.ID), sqlSafeText(row.ParentID), sqlSafeText(row.Node.ProviderType), string(row.Node.NormalizedType), sqlSafeText(row.Node.Role),
+				sqlSafeText(row.Node.Path), row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(sqlSafeBytes(nodeJSON)), string(sqlSafeBytes(rawJSON)), "", now)
+		}
+		if _, err := s.execTx(tx, `
+			INSERT INTO semantic_nodes (
+				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
+				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
+			) VALUES `+strings.Join(values, ", "), args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error) {
@@ -7714,6 +7758,39 @@ func (s *Store) MarkParseJobRunning(id int64) error {
 		WHERE id = ?
 	`, time.Now().UTC(), id)
 	return err
+}
+
+// ClaimParseJobs moves up to limit queued parse jobs to running in one statement
+// and returns them. The worker used to list queued jobs and then mark each one
+// running, which let a second process (another `trajecta serve`, or a CLI run)
+// pick up the same job in between. The claim is a single UPDATE with RETURNING:
+// Postgres takes the oldest queued rows with FOR UPDATE SKIP LOCKED so concurrent
+// claimers step over each other's rows, SQLite has no row locks so its statement
+// relies on the database write lock plus claimMu and gives up the row when the
+// outer status predicate no longer matches.
+func (s *Store) ClaimParseJobs(limit int) ([]ParseJobRecord, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	now := time.Now().UTC()
+	s.shared.claimMu.Lock()
+	defer s.shared.claimMu.Unlock()
+	rows, err := s.db.Query(`
+		UPDATE parse_jobs
+		SET status = 'running', attempts = attempts + 1, updated_at = ?
+		WHERE status = 'queued' AND id IN (
+			SELECT id FROM parse_jobs
+			WHERE status = 'queued'
+			ORDER BY updated_at ASC, id ASC
+			LIMIT ?`+s.claimRowLockSQL()+`
+		)
+		RETURNING id, trace_id, status, attempts, last_error, created_at, updated_at
+	`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanParseJobs(rows)
 }
 
 func (s *Store) MarkParseJobDone(id int64) error {
@@ -8025,15 +8102,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 		return fmt.Errorf("save findings: trace id is required")
 	}
 	now := time.Now().UTC()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := s.execTx(tx, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
-		return err
-	}
+	normalized := make([]observe.Finding, 0, len(findings))
 	for _, finding := range findings {
 		if finding.ID == "" {
 			return fmt.Errorf("save findings: finding id is required")
@@ -8044,19 +8113,71 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 		if finding.TraceID == "" {
 			finding.TraceID = traceID
 		}
+		normalized = append(normalized, finding)
+	}
+	// A multi-row INSERT cannot name the same (trace_id, finding_id) twice:
+	// Postgres fails the whole statement, and the row-by-row form it replaces
+	// failed on the second row anyway. Fold duplicates first, last one wins, so a
+	// reanalysis that emits the same finding twice still writes one row.
+	unique := dedupeFindingsByKey(normalized)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := s.execTx(tx, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
+		return err
+	}
+	// One statement per parameter-bounded chunk of findings instead of one per
+	// finding; a session reanalysis used to issue hundreds of inserts.
+	const findingColumns = 13
+	rowsPerStatement := storeSQLParamChunk / findingColumns
+	valueRow := "(" + placeholders(findingColumns) + ")"
+	for start := 0; start < len(unique); start += rowsPerStatement {
+		end := start + rowsPerStatement
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+		values := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk)*findingColumns)
+		for _, finding := range chunk {
+			values = append(values, valueRow)
+			args = append(args, finding.TraceID, finding.ID, finding.Category, string(finding.Severity), finding.Confidence,
+				finding.Title, finding.Description, finding.EvidencePath, textPreview(finding.EvidenceExcerpt, 500),
+				finding.NodeID, finding.Detector, finding.DetectorVersion, finding.CreatedAt)
+		}
 		if _, err := s.execTx(tx, `
 			INSERT INTO trace_findings (
 				trace_id, finding_id, category, severity, confidence, title, description,
 				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, finding.TraceID, finding.ID, finding.Category, string(finding.Severity), finding.Confidence, finding.Title,
-			finding.Description, finding.EvidencePath, textPreview(finding.EvidenceExcerpt, 500), finding.NodeID,
-			finding.Detector, finding.DetectorVersion, finding.CreatedAt); err != nil {
+			) VALUES `+strings.Join(values, ", "), args...); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// dedupeFindingsByKey folds findings that share the (trace_id, finding_id)
+// unique key, keeping the last occurrence in input order.
+func dedupeFindingsByKey(findings []observe.Finding) []observe.Finding {
+	if len(findings) < 2 {
+		return findings
+	}
+	out := make([]observe.Finding, 0, len(findings))
+	at := make(map[string]int, len(findings))
+	for _, finding := range findings {
+		key := finding.TraceID + "\x00" + finding.ID
+		if index, ok := at[key]; ok {
+			out[index] = finding
+			continue
+		}
+		at[key] = len(out)
+		out = append(out, finding)
+	}
+	return out
 }
 
 func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Finding, error) {
@@ -8414,6 +8535,38 @@ func (s *Store) MarkAnalysisJobRunning(id int64) error {
 		WHERE id = ?
 	`, time.Now().UTC(), time.Now().UTC(), id)
 	return err
+}
+
+// ClaimAnalysisJobsForWorker is the analysis-job counterpart of ClaimParseJobs:
+// it flips up to limit queued jobs to running in one UPDATE ... RETURNING so the
+// server worker and a second process cannot execute the same job twice. The
+// reanalysis service no longer marks a job running itself; the claim already
+// incremented attempts and stamped started_at.
+func (s *Store) ClaimAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	now := time.Now().UTC()
+	s.shared.claimMu.Lock()
+	defer s.shared.claimMu.Unlock()
+	rows, err := s.db.Query(`
+		UPDATE analysis_jobs
+		SET status = 'running', attempts = attempts + 1,
+			started_at = COALESCE(started_at, ?), updated_at = ?
+		WHERE status = 'queued' AND id IN (
+			SELECT id FROM analysis_jobs
+			WHERE status = 'queued'
+			ORDER BY updated_at ASC, id ASC
+			LIMIT ?`+s.claimRowLockSQL()+`
+		)
+		RETURNING id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
+			attempts, created_at, updated_at, started_at, finished_at
+	`, now, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAnalysisJobs(rows)
 }
 
 func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
@@ -10206,6 +10359,17 @@ func placeholders(count int) string {
 		return ""
 	}
 	return strings.TrimRight(strings.Repeat("?,", count), ",")
+}
+
+// claimRowLockSQL is the locking clause of a task claim's row-selecting subquery.
+// Postgres takes the selected rows with FOR UPDATE SKIP LOCKED, which is what
+// makes two claimers pick disjoint jobs; SQLite has no row locks, so its claim
+// relies on the database write lock and the status predicate in the outer UPDATE.
+func (s *Store) claimRowLockSQL() string {
+	if s != nil && s.driver == "postgres" {
+		return "\n\t\t\tFOR UPDATE SKIP LOCKED"
+	}
+	return ""
 }
 
 func overviewLogWhere(since time.Time) (string, []any) {
