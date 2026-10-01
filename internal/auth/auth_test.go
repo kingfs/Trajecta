@@ -72,7 +72,18 @@ func TestJWTManagerIssuesAndConstrainsMonitorTokens(t *testing.T) {
 		t.Fatalf("principal = %+v", principal)
 	}
 
-	tampered := token.Token[:len(token.Token)-1] + "x"
+	// Flip the first signature character. Appending a fixed "x" to the token left
+	// it unchanged whenever the signature already ended in x, and the final base64
+	// character only carries four significant bits, so the tamper has to land on a
+	// character whose bits all count.
+	parts := strings.Split(token.Token, ".")
+	signature := []byte(parts[2])
+	if signature[0] == 'A' {
+		signature[0] = 'B'
+	} else {
+		signature[0] = 'A'
+	}
+	tampered := parts[0] + "." + parts[1] + "." + string(signature)
 	if _, ok, err := manager.VerifyToken(context.Background(), tampered); err != nil || ok {
 		t.Fatalf("VerifyToken(tampered) ok=%v err=%v, want false nil", ok, err)
 	}
