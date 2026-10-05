@@ -27,7 +27,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 - **Replays for free** — `replay.NewTransport()` plugs into any SDK's `http.Client`
 - **Readable and diffable** — cassettes are text: review them in a PR, edit them by hand, commit them with your tests
 - **Trajectories you can see** — the monitor parses every trace into one timeline: messages, tool calls, tokens, routing decisions
-- **Clear source of truth** — cassettes are authoritative; the application database (Postgres in production, SQLite locally) is only a derived index
+- **Clear source of truth** — cassettes are authoritative for recorded traffic; the application database (Postgres in production, SQLite locally) is the derived index for trace lists and aggregates and the authoritative store for channels, credentials, routing and Responses state
 
 ## Highlights
 
@@ -120,7 +120,7 @@ curl -s http://localhost:8080/v1/chat/completions \
 
 POST /v1/chat/completions HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer sk-***
+Authorization: Bearer fake-key-logging
 
 {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}
 
@@ -132,7 +132,7 @@ data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: [DONE]
 ```
 
-(The example is abridged; `…` marks omitted content. With the default `debug.mask_key: true`, the recorder replaces the value of `Authorization`, `api-key`, `x-api-key` and `x-goog-api-key` in the recorded request headers with `fake-key-logging`; every other header and both bodies are stored verbatim, which is what makes replay faithful.)
+(The example is abridged; `…` marks omitted content. With the default `debug.mask_key: true`, the recorder replaces the `Authorization` value with `Bearer fake-key-logging` and the `api-key` / `x-api-key` / `x-goog-api-key` values with `fake-key-logging`; every other header and both bodies are stored verbatim, which is what makes replay faithful.)
 
 **3. Replay that file in a unit test**, with no network and no API key:
 
@@ -169,7 +169,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 
 ## Supported Upstreams
 
-| Protocol family | Provider presets | Support |
+| Upstream / surface | Provider presets | Support |
 | --- | --- | --- |
 | OpenAI-compatible | `openai`, `openrouter`, `fireworks`, `together`, `groq`, `xai`, `github`, `deepseek`, `moonshot`, `cerebras`, `perplexity` and more | verified / compatible |
 | OpenAI Responses | native `/v1/responses` pass-through, or translated to chat completions by the local runtime | verified |
@@ -218,7 +218,7 @@ The complete preset list (25 registry keys, 20 distinct providers after alias de
 | `internal/store` | Application database and metadata index |
 | `internal/upstream`, `internal/channel` | Upstream resolution, channel configuration, capabilities and probing |
 | `internal/responses` | Local Responses runtime, hosted tools, audit queries |
-| `internal/observe`, `internal/analyzer` | Semantic parsing pipeline and audit findings |
+| `pkg/observe`, `internal/observeworker`, `internal/analyzer` | Semantic parsing pipeline and audit findings |
 | `internal/monitor` | Monitor HTTP API and the embedded UI |
 | `internal/mcpserver` | MCP tool surface |
 | `internal/trajectory` | ATIF v1.8 session trajectory rebuild and export |
@@ -258,7 +258,7 @@ Trace detail splits one exchange into Routing & Conversation, Protocol, Audit, P
 
 ## Project Status and Scope
 
-Current release `v2.0.0`, MIT licensed. Deliberately out of scope:
+Current release `v2.1.1`, MIT licensed. Deliberately out of scope:
 
 - public multi-tenant relay, billing, top-up or subscription distribution
 - cross-protocol translation in the forwarding hot path (the local `/v1/responses` runtime is the only exception)

@@ -22,10 +22,14 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Application store and metadata index: `internal/store`
 - Upstream resolution and capability/protocol-family rules: `internal/upstream`
 - Channel (provider) config and probe services: `internal/channel`
+- Routing core: multi-upstream selection, health, retries, sticky routing and snapshot publication in `internal/router`; entry-endpoint and execution-mode decisions in `internal/routeplan`; request rate limiting in `internal/limit`
 - Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses` (subpackages `runtime`, `httpapi`, `chatclient`, `audit`, `functionexec`, `tools`, `protocol`, `codexfixtures`)
-- Postgres application migrations: `internal/appdbmigrate`
-- Monitor UI: `internal/monitor`
+- Postgres application migrations: `internal/appdbmigrate`; legacy V2 cassette upgrade and index rebuild: `internal/migrate`
+- Monitor UI: `internal/monitor`; MCP tool surface: `internal/mcpserver`
+- Semantic parsing and findings: Observation IR types and protocol parsers in `pkg/observe`, the cassette-backed parse worker in `internal/observeworker`, deterministic detectors in `internal/analyzer`
+- Reanalysis and session aggregation: `internal/reanalysis`, `internal/sessionanalysis`
 - Session trajectory rebuild (ATIF-v1.8) from client-visible Responses cassettes, plus the offline official-model validator under `scripts/atif_*`: `internal/trajectory`
+- Auth (users, tokens, JWT): `internal/auth`; YAML/env configuration loading: `internal/config`; secret redaction: `internal/redaction`; fault injection: `internal/chaos`; replay-based deterministic eval harness: `internal/evals`
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`

@@ -27,7 +27,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 - **回放零成本**：`replay.NewTransport()` 直接挂到任意 SDK 的 `http.Client` 上
 - **文件可读可 diff**：cassette 是文本，可以 code review、可以手工修、可以随 PR 一起提交
 - **看得见的轨迹**：Monitor 把每条 trace 解析成统一 timeline——消息、工具调用、token、路由决策
-- **事实源清晰**：cassette 永远是事实源，应用数据库（生产 Postgres / 本地 SQLite）只是派生索引
+- **事实源清晰**：cassette 永远是录制内容的事实源；应用数据库（生产 Postgres / 本地 SQLite）既是 trace 列表与聚合的派生索引，也是渠道、凭据、路由与 Responses 状态的权威存储
 
 ## 核心能力
 
@@ -120,7 +120,7 @@ curl -s http://localhost:8080/v1/chat/completions \
 
 POST /v1/chat/completions HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer sk-***
+Authorization: Bearer fake-key-logging
 
 {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}
 
@@ -132,7 +132,7 @@ data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: [DONE]
 ```
 
-（示例为节选，`…` 表示省略。默认 `debug.mask_key: true` 会在落盘前把请求头中的 `Authorization` / `api-key` / `x-api-key` / `x-goog-api-key` 值替换成 `fake-key-logging`；其余请求头与请求、响应正文原样保存，这正是回放能够保真的原因。）
+（示例为节选，`…` 表示省略。默认 `debug.mask_key: true` 会在落盘前把请求头中的 `Authorization` 值替换成 `Bearer fake-key-logging`，把 `api-key` / `x-api-key` / `x-goog-api-key` 的值替换成 `fake-key-logging`；其余请求头与请求、响应正文原样保存，这正是回放能够保真的原因。）
 
 **3. 在单元测试里回放这个文件**，不需要网络，也不需要 API key：
 
@@ -169,7 +169,7 @@ func TestChat(t *testing.T) {
 
 ## 支持的上游
 
-| 协议族 | provider preset | 支持级别 |
+| 上游 / 接口面 | provider preset | 支持级别 |
 | --- | --- | --- |
 | OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`groq`、`xai`、`github`、`deepseek`、`moonshot`、`cerebras`、`perplexity` 等 | verified / compatible |
 | OpenAI Responses | 原生 `/v1/responses` 上游直通，或由本地 runtime 翻译为 chat completions | verified |
@@ -218,7 +218,7 @@ func TestChat(t *testing.T) {
 | `internal/store` | 应用数据库与 metadata 索引 |
 | `internal/upstream`、`internal/channel` | 上游解析、渠道配置、能力与探测 |
 | `internal/responses` | 本地 Responses runtime、hosted tools、审计查询 |
-| `internal/observe`、`internal/analyzer` | 语义解析管道与审计 findings |
+| `pkg/observe`、`internal/observeworker`、`internal/analyzer` | 语义解析管道与审计 findings |
 | `internal/monitor` | Monitor HTTP API 与内嵌 UI |
 | `internal/mcpserver` | MCP 工具面 |
 | `internal/trajectory` | ATIF v1.8 会话轨迹重建与导出 |
@@ -258,7 +258,7 @@ trace 详情把一次交换拆成 Routing & Conversation、Protocol、Audit、Pe
 
 ## 项目状态与边界
 
-当前版本 `v2.0.0`，MIT 许可。明确不做的事：
+当前版本 `v2.1.1`，MIT 许可。明确不做的事：
 
 - 公网多租户中转、计费 / 充值 / 订阅分发
 - 转发热路径上的跨协议转换（`/v1/responses` 的本地 runtime 是唯一例外）

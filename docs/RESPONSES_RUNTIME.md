@@ -27,8 +27,8 @@
 
 | 策略 | 行为 |
 | --- | --- |
-| `auto` | 有可用 native Responses upstream 时直通；否则回退本地 runtime。 |
-| `prefer_native` | 当前实现与 `auto` 行为相同（native 优先，再回退本地）。 |
+| `auto` | 有可被选中的 native Responses upstream 时直通；存在 native Responses target 但本次请求不可选中时以 502 拒绝；两者都不成立时才回退本地 runtime。 |
+| `prefer_native` | 当前实现与 `auto` 行为相同。 |
 | `prefer_local_server` | 有可用 Chat Completions backend 时用本地 runtime；否则回退 native 直通。 |
 | `native_only` | 只用 native Responses upstream；没有匹配目标时拒绝本地翻译。 |
 | `local_server_only` | 只用本地 runtime；没有 Chat Completions backend 时拒绝 native 直通。 |
@@ -54,7 +54,7 @@ create 流程：
 
 1. 鉴权与 body limit 之后，写最小 `request_audits` 入站记录。
 2. 选路（见上一节）。命中本地时由 runtime 读取 `previous_response_id`、历史 items 与本次 `input`，构造当前 turn 的上下文。
-3. 把 `instructions` 映射为内部 Chat Completions system message，把 `input` 映射为 user message / input item，把 `tools`、`tool_choice`、reasoning/metadata 等映射到 Chat Completions 请求。
+3. 把 `instructions` 映射为内部 Chat Completions system message，把 `input` 映射为 user message / input item，把 `tools`、`tool_choice`、`max_output_tokens`、`temperature`、`top_p` 映射到内部 Chat Completions 请求；`metadata` 只用于 response object / 审计 / compact provenance，不转发上游；`reasoning` 参数未实现。
 4. 调用内部上游 `POST /v1/chat/completions`；该 external exchange 经现有 recorder 写为一条 `.http` V3 cassette（`exchange_kind=model`，`exchange_role` 为 `primary_model_call` / `tool_followup_model_call` / `compact_model_call` 之一，`parent_exchange_id=entry:<response_id>`），并在有 ent audit store 时写一条 `upstream_exchanges` 关联（response id、request audit id、recorder request id、cassette path、route target、model、endpoint、status、时间戳）。本地 `/v1/responses` 入站请求本身同样录制为一条独立的 `.http` V3 cassette：`exchange_kind=entry`、`exchange_role=client_request`，在请求结束时经 `UpdateLogFile` 落盘，能从响应中解析出 response id 时其 `exchange_id` 记为 `entry:<response_id>`。因此一次本地执行产生「入站 entry cassette + 内部上游 model cassette」两条 cassette，后者以 `parent_exchange_id=entry:<response_id>` 指向前者。
 5. 返回 OpenAI Responses 风格 response object，并写入 `responses` / `response_items` semantic state、`execution_events` 和 tool call 相关审计。
 
@@ -66,7 +66,7 @@ continuation 与 input items：
 
 流式：
 
-- `stream:true` 返回 `text/event-stream`，最小事件序列为 `response.created`、`response.in_progress`、`response.output_item.added`、`response.content_part.added`、`response.output_text.delta*`、`response.output_text.done`、`response.content_part.done`、`response.output_item.done`、`response.completed`、`data: [DONE]`。
+- `stream:true` 返回 `text/event-stream`，最小事件序列为 `response.created`、`response.in_progress`、`response.output_item.added`、`response.content_part.added`、`response.output_text.delta*`、`response.output_text.done`、`response.content_part.done`、`response.output_item.done`、`response.completed`。本地 SSE writer 不写 `data: [DONE]` 哨兵；只有内部上游 Chat Completions SSE 的 `[DONE]` 会被读取端消费。
 - 简单文本输出是真实增量转发：边读内部 Chat Completions SSE，边输出 `response.output_text.delta`，完成后存储完整 response。`internal/responses/chatclient` 会把上游 SSE 聚合为内部 `ChatCompletionResponse`（文本 delta、function tool call delta、usage trailer）。普通 function tool 参数分片输出 `response.function_call_arguments.delta/done`；已注册 function executor、provider 就绪的 hosted `web_search` / `web_search_preview` 和 hosted `mcp` 的 stream tool loop 会输出 started 态 `response.output_item.added` 与完成/失败态 `response.output_item.done`，把 tool output 注入下一轮内部 Chat Completions，再继续最终文本 delta；tool_call events 会标记 `stream=true`。
 - 未知 hosted 工具、非平凡 `tool_choice`、不支持的组合以及部分 auto compact 组合在写出 SSE 和调用上游之前返回包装的 `ErrIncrementalStreamUnsupported`，HTTP 层记录 `response.stream` fallback event 后转入 deferred SSE envelope。
 - 已写出 SSE 之后的 runtime 错误会尽量追加最小 `response.failed` SSE，并保留 `response.stream` failed audit。
@@ -74,7 +74,7 @@ continuation 与 input items：
 
 ## Codex 兼容
 
-配置面 `responses_server.codex_compat`：`enabled`、`auto_inject_hosted_tools`（工具类型列表）、`inject_when_tools_absent`（默认 `true`）、`preserve_client_tools`（默认 `true`）、`default_tool_choice`（默认 `"auto"`）。启用后 handler 会把 `auto_inject_hosted_tools` 中当前真正可用的 hosted tool 注入到没有 `tools` 的请求，并按 `preserve_client_tools` 决定是否保留客户端工具。
+配置面 `responses_server.codex_compat`：`enabled`、`auto_inject_hosted_tools`（工具类型列表）、`inject_when_tools_absent`（默认 `true`）、`preserve_client_tools`（默认 `true`）、`default_tool_choice`（默认 `"auto"`）。启用后 handler 只在请求没有 `tools` 时注入 hosted tool，因此客户端工具始终保留；`preserve_client_tools` 目前只由 `config inspect` / `doctor` 暴露，handler 尚未消费它。注入类型只有 `web_search`（`web_search_preview` 归一为 `web_search`）：`auto_inject_hosted_tools` 里的 `mcp` 等其它取值不会注入任何工具。
 
 最小兼容合约（原独立的 Codex 兼容性文档已并入本节）：
 
@@ -101,7 +101,7 @@ Codex TOML 生成命令 `server models codex-config <model>`：
 
 当前可执行：
 
-- `web_search` / `web_search_preview`：由 `internal/responses/tools/websearch` 提供，`tools.web_search.provider` 支持 `disabled`、`mock`、`searxng`；`enabled=true` 且 provider 非 disabled 时注册 hosted executor。普通 descriptor 只在模型显式 tool call 后执行；强制 `tool_choice` 但 provider 不可用时返回 `unsupported hosted tool "web_search"` 并写 rejected audit。
+- `web_search` / `web_search_preview`：provider 由 `internal/responses/tools/websearch` 提供，hosted executor 是 `internal/responses/runtime` 里的 `hostedWebSearchExecutor`（由 `registerWebSearchHostedExecutor` 经 `WithWebSearchProvider` 注册）。`tools.web_search.provider` 支持 `disabled`、`mock`、`searxng`；`enabled=true` 且 provider 非 disabled 时注册 hosted executor。普通 descriptor 只在模型显式 tool call 后执行；强制 `tool_choice` 但 provider 不可用时返回 `unsupported hosted tool "web_search"` 并写 rejected audit。
 - `mcp`：由 `internal/responses/tools/mcp/executor.go` 提供，`tools.mcp.enabled=true` 且存在 enabled server 时经 runtime 的 `executeMCPToolCall` 执行（Streamable HTTP `tools/call`）。支持 `bearer_token_env`、`enabled_tools` / `disabled_tools`、`default_timeout_ms`、`max_result_bytes`、安全错误与 redaction；映射给上游模型的 Chat tool 名为 `mcp_call`。执行结果与 lifecycle 写入 `tool_call_audits`。
 - Server-side function executor：`internal/responses/functionexec` 的默认空 registry，YAML opt-in `responses_server.function_executors`；只对已注册的同名普通 `function` 做 server-owned 执行。类型为 `static_response` 与受限 `external_command`（不用 shell，默认不继承环境变量，stdin JSON 传入 tool call，stdout 作为 tool output，stderr 只进失败摘要并受截断上限保护）。
 
@@ -134,7 +134,7 @@ Tool Matrix（仅当前为真的部分）：
 
 - runtime store：serve 装配时若 trace store 提供 ent client，使用 `runtime.NewEntStore`（表 `responses`、`response_items`）；否则退回 memory store。语义状态包括 response checkpoint、input/output item 与 `previous_response_id` 链，是 `/v1/responses/{id}/input_items` 的数据来源。
 - `force_store=true` 时所有 response 都落库；否则遵循请求的 `store` 字段（未传视为落库）。
-- 审计写入语义：`request_audits`（入站 envelope，含 accepted/completed/failed/rejected/cancelled 状态）、`execution_events`（runtime plan、model call、tool/stream lifecycle、compact、cancel/error）、`upstream_exchanges`（semantic response 与 `.http` cassette / trace id / route target 的关联）、`tool_call_audits`（hosted/server-side tool 的持久 read model）；`routing.settings` 存于 `app_settings`。本地执行时入站 exchange 记为 `exchange_kind=entry` / `exchange_role=client_request`，内部上游 chat exchange 的 `parent_exchange_id=entry:<response_id>`。表清单、存储分层与事实源边界由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 拥有。
+- 审计写入语义：`request_audits`（入站 envelope，含 accepted/completed/failed/rejected/cancelled 状态）、`execution_events`（只有 `response.request`、`response.model_call`、`response.tool_call`、`response.stream`、`response.compact` 五种 event type；路由决策写在 cassette event 而不是 execution event 里）、`upstream_exchanges`（semantic response 与 `.http` cassette / trace id / route target 的关联）、`tool_call_audits`（hosted/server-side tool 的持久 read model）；`routing.settings` 存于 `app_settings`。本地执行时入站 exchange 记为 `exchange_kind=entry` / `exchange_role=client_request`，内部上游 chat exchange 的 `parent_exchange_id=entry:<response_id>`。表清单、存储分层与事实源边界由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 拥有。
 - 代码中没有针对 Responses semantic/audit 表的 TTL 或定期清理逻辑，保留策略由底层数据库与部署决定。运维细节见 `./STORAGE_AND_DEPLOYMENT.md` 与 `./POSTGRES_OPERATIONS.md`。
 
 审计查询面（都复用同一个 `internal/responses/audit.QueryService`）：
@@ -161,6 +161,8 @@ Tool Matrix（仅当前为真的部分）：
 | `function_executors.executors[]` | list | 每项：`name`、`type`（`static_response` \| `external_command`）、`enabled`、`output`、`command`、`args`、`timeout`、`env`、`env_allowlist`、`process{working_dir,require_absolute_command,allowed_command_dirs,reject_root}`。 |
 | `codex_compat` | object | `enabled`、`auto_inject_hosted_tools`、`inject_when_tools_absent`（默认 `true`）、`preserve_client_tools`（默认 `true`）、`default_tool_choice`（默认 `"auto"`）。 |
 
+工具循环上限不是配置项而是代码常量：`responsesruntime` 的 `Config.MaxToolIterations` 默认 4，超过后请求以 `MaxToolIterationsError` 失败。`model_profiles[].tool_output_token_limit` 与 `model_reasoning_effort` 只被 `models codex-config` 读取，runtime 本身不使用它们。
+
 相关但不在 `responses_server` 下的配置：`tools.web_search`（`enabled`、`provider`、`max_results`、`base_url`、`timeout_ms`、`user_agent`）、`tools.mcp`（`enabled`、`default_timeout_ms`、`max_result_bytes`、`servers[].{id,label,url,bearer_token_env,enabled_tools,disabled_tools,enabled}`）。大部分可选字段有对应 `TRAJECTA_RESPONSES_*` 环境变量覆盖（例如 `..._DEFAULT_MODEL`、`..._FORCE_STORE`、`..._MAX_REQUEST_BODY_BYTES`、`..._PATH`、`..._AUTO_COMPACT`、`..._COMPACT_HISTORY_ITEM_THRESHOLD`、`..._FUNCTION_EXECUTORS_*`、`..._CODEX_COMPAT_*`），没有 `TRAJECTA_RESPONSES_ENABLED`；`adopt_channel_model_profiles` 与 `model_profiles[]`（含 `tokenize_counter.*`）没有环境变量覆盖，只能通过配置文件设置。完整配置与部署方式见 `./README.md`、`./PROXY_USAGE_EXAMPLES.md` 与 `./DEVELOPMENT.md`。
 
 ## 非目标与未实现
@@ -175,7 +177,7 @@ Tool Matrix（仅当前为真的部分）：
 - 没有 semantic execution replay：replay 仍只针对 `.http` cassette，不依赖 execution events 或 semantic DB。
 - Provider auto-detect 未完成：capability 需显式配置或由渠道/模型数据表达，`provider probe` 只是诊断与保守补全。
 - `external_command` 只有轻量 process policy（`working_dir`、`require_absolute_command`、`allowed_command_dirs`、`reject_root`），没有 root/container 级沙箱。
-- SQLite 版本化迁移与独立 auth migration namespace 未实现：Postgres auth 与 application schema 共享同一 namespace。
+- SQLite 应用 schema 走启动期 store init 而非版本化迁移；`auth` 在 SQLite 上使用独立的 `schema_migrations` namespace，在 Postgres 上则与 application schema 共享同一 namespace。Postgres 独立 auth namespace 未实现。
 - 本地 `/v1/responses` 入站请求**会**录制为 `exchange_kind=entry` / `exchange_role=client_request` 的 V3 cassette，但它不是 external upstream exchange：`upstream_exchanges` 只关联内部上游 Chat Completions 调用（其 `parent_exchange_id=entry:<response_id>` 指回该入站 cassette）。
 - 本地 runtime 不做 OpenAI、Anthropic、Gemini、Vertex 之间的跨协议转换：普通代理热路径是 protocol-aware pass-through，跨协议翻译只在 `/v1/responses` 的本地执行模式内发生。
 - 渠道 `mode: responses_server` 不会被当作行为开关：它只是描述性/校验元数据，native 与本地由按模型的 capability 决定。

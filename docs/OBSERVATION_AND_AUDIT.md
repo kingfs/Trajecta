@@ -8,13 +8,14 @@ Trajecta 的观测层把记录下来的原始 HTTP 交换解析成语义结构�
 - Observation IR（`pkg/observe`）是解析后的中间表示，可由 cassette 重算。
 - Findings 由确定性检测器基于 Observation IR 产生，检测器不直接读写 cassette。
 
-边界：解析与检测在记录之后异步进行，不在转发热路径执行；解析不做 provider 协议互转，请求互转只存在于 `/v1/responses` 的本地运行时；审计结果不替代原始证据，任何 finding 都必须带 evidence path。
+边界：解析由后台 worker 在记录之后异步进行，检测只在显式 scan/reanalyze 时执行，两者都不在转发热路径上；解析不做 provider 协议互转，请求互转只存在于 `/v1/responses` 的本地运行时；审计结果不替代原始证据，任何 finding 都必须带 evidence path。
 
 相关文档：[ARCHITECTURE.md](./ARCHITECTURE.md)、[RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)、[protocol-reference/README.md](./protocol-reference/README.md)。
 
 ## 解析管道
 
-解析链路：`.http cassette（LLM_PROXY_V3 或 legacy V2） → recordfile.ParsePrelude/ExtractSections → observe.ParseInput → observe.Registry.Select → TraceObservation（Observation IR） → analyzer.Runner.Analyze → store`。
+解析链路（后台 worker）：`.http cassette（LLM_PROXY_V3 或 legacy V2） → recordfile.ParsePrelude/ExtractSections → observe.ParseInput → observe.Registry.Select → TraceObservation（Observation IR） → store.SaveObservation`。
+检测链路（只在显式 `analyze scan`、`analyze reanalyze`、`analyze batch --scan` 或 Monitor 重分析时触发）：`TraceObservation → analyzer.Runner.Analyze → store.SaveFindings`。后台解析 worker 不运行检测器，因此只经过代理转发、没有做过 scan 的 trace 不会产生 finding 行。
 
 - recorder 写完 cassette 后通过 `store.EnqueueParseJob` 入队；`internal/observeworker` 以 5s 间隔、每批 10 条消费 `parse_jobs`：`store.ClaimParseJobs` 用一条 `UPDATE … RETURNING` 把队首若干条置为 `running` 并原子地返回（Postgres 的子查询用 `FOR UPDATE SKIP LOCKED`，SQLite 没有行锁，靠写锁加进程内 claim 互斥和 `status = 'queued'` 谓词保证不重复认领），随后对每条跑 `observeworker.ReparseTrace` 再 `SaveObservation`。`internal/reanalysis` 的 `analysis_jobs` 用同一套方式认领（`store.ClaimAnalysisJobsForWorker`），所以并发的 server 进程与 CLI 不会重复消费同一个任务。
 - `SaveObservation` 的 semantic nodes 与 `SaveFindings` 的 findings 都按参数上限分批写入（各 900 个绑定参数一条多行 `INSERT`），同一批里重复的 `(trace_id, node_id)` / `(trace_id, finding_id)` 先折叠，避免 Postgres 拒绝整条语句。
@@ -208,7 +209,7 @@ TraceID          string `json:"trace_id,omitempty"`
 ```
 
 - `exchange_kind`：写入侧只产生 `entry` 与 `model`；读取侧的 client-visible 判定还会接受空值与 legacy 的 `proxy`（`clientVisibleLogClause`），所以 `proxy` 是读取兼容值而非写入值。
-- `exchange_role`：写入侧产生 `client_request`、`primary_model_call`、`tool_followup_model_call`、`compact_model_call`。前两个是 `pkg/observe` 在 metadata 缺省时的推断值（`exchange_kind=entry` 推 `client_request`，否则推 `primary_model_call`）；后两个来自 `internal/responses/runtime/chat.go` 的常量。Responses runtime 在发起上游调用前决定 role，recorder 只持久化传入的 metadata。
+- `exchange_role`：写入侧产生 `client_request`、`primary_model_call`、`tool_followup_model_call`、`compact_model_call`。前两个是 `pkg/observe` 在 metadata 缺省时的推断值（`exchange_kind=entry` 推 `client_request`，否则推 `primary_model_call`）；后两个来自 `internal/responses/runtime/chat.go` 的常量。Responses runtime 在发起上游调用前决定 role，recorder 只持久化传入的 metadata。此外 analyzer 在 `scope.Role` 为空且 kind 为 `model` 时把 scope 视为 `legacy_model`（`internal/analyzer/analyzer.go`），这个值不会写回 cassette 或索引。
 - 关联字段：`request_audit_id` 是 Responses 根关联 id；`response_id`、`client_request_id`、`conversation_id` 来自 meta；`trace_id` 与 `cassette_path` 把 model exchange 指回原始 cassette。
 
 索引落点（应用数据库）：
@@ -219,7 +220,7 @@ TraceID          string `json:"trace_id,omitempty"`
 - `request_audits`：entry/client_request 的根；读模型用 `syntheticEntryExchange` 合成 `exchange_id="entry:"+request_audit_id`、`exchange_kind=entry`、`exchange_role=client_request`、`sequence_index=0`。
 - `execution_events` 与 `tool_call_audits`：生命周期事件与工具调用审计。
 
-读取回退分布在两处，职责不同：`normalizeExchangeView`（`internal/responses/audit/query.go`）与 `observeworker.applyExchangeFallbacks`（`internal/observeworker/worker.go`）只处理 kind 与 role——缺失 kind 时按元数据与路径推断、仍无法判定时为 `model`；缺失 role 时 entry→`client_request`、model→`primary_model_call`。两者都不碰 `trace_id`；缺失 `trace_id` 时回退到 V3 `meta.request_id` 的行为在 Monitor 与 MCP 的 cassette loader 里（`internal/monitor/server.go` 的 `responsesEntryExchangeFromAudit`、`internal/mcpserver/responses_audit.go` 的 `responsesModelExchangeFromAudit`）。
+读取回退分布在多处，职责不同：`normalizeExchangeView`（`internal/responses/audit/query.go`）与 `observeworker.applyExchangeFallbacks`（`internal/observeworker/worker.go`）只处理 kind 与 role——缺失 kind 时按元数据与路径提示推断，且 `applyExchangeFallbacks` 只在 kind 非空时补 role（entry→`client_request`、model→`primary_model_call`），两者都无法判定时保持空值；kind 兜底为 `model`、role 兜底为 `primary_model_call` 发生在 MCP 的 cassette loader（`internal/mcpserver/responses_audit.go` 的 `responsesModelExchangeFromAudit`）与 Monitor（`internal/monitor/server.go`）里。两者都不碰 `trace_id`；缺失 `trace_id` 时回退到 V3 `meta.request_id` 的行为在 Monitor 与 MCP 的 cassette loader 里（`internal/monitor/server.go` 的 `responsesEntryExchangeFromAudit`、`internal/mcpserver/responses_audit.go` 的 `responsesModelExchangeFromAudit`）。
 
 读模型 `internal/responses/audit.RequestAuditTrace` 返回 `EntryExchange`、`ModelExchanges`（`[]UpstreamExchangeView`，字段含 `exchange_id`/`exchange_kind`/`exchange_role`/`parent_exchange_id`/`sequence_index`/`trace_id`/`cassette_path`）、`UpstreamExchanges` 别名、`RawCassettes` 与 `Diagnostics`。MCP `responses_audit_trace` 输出 `entry_exchange`、`model_exchanges` 与带 kind 的 `raw_cassettes`，并保留 `upstream_exchanges` alias。详见 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md) 与 [MCP_GUIDE.md](./MCP_GUIDE.md)。
 
@@ -297,5 +298,5 @@ CLI 入口（`cmd/server/analyze.go`）：`analyze reparse`、`analyze scan`、`
 - 敏感信息只有 observe 模式，`redact_at_rest` 与 `inline_redact` 未实现。
 - 通用 `exchanges` 图表现未引入，exchange 关系仍由现有索引表的同名字段表达：`logs` 与 `trace_observations` 用 `NOT NULL DEFAULT ''`（`sequence_index` 为 `NOT NULL DEFAULT 0`），`upstream_exchanges` 用 nullable 列。
 - `pkg/replay` 只回放单个 `.http`，不读取数据库，也不编排 entry 与多个 model cassette。
-- 旧 V2 cassette 不被重写；V3 cassette 只在 `analyze repair-usage --rewrite-cassette`（或 `analyze batch --repair-usage --rewrite-cassette`）下重写 prelude 的 usage，raw payload 不变。缺失 taxonomy 只在读取与查询时推断。
+- 重分析链路不改写 V2 cassette；legacy V2→V3 的格式升级由 `migrate` / `trajecta upgrade cassettes` 单独完成。V3 cassette 只在 `analyze repair-usage --rewrite-cassette`（或 `analyze batch --repair-usage --rewrite-cassette`）下重写 prelude 的 usage，raw payload 不变。缺失 taxonomy 只在读取与查询时推断。
 - auth 失败发生在入口 handler 外层时不产生 entry cassette。

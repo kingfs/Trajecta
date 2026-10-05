@@ -32,6 +32,7 @@
 | `task ui:build` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run build` |
 | `task ui:test` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui` |
 | `task ui:test:real` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui:real` |
+| `task ui:screenshots` | 在 `web/monitor-ui` 下 `bunx playwright test --config playwright.screenshots.config.js`，重新生成 README 截图 |
 | `task migrate` | `go run ./cmd/server migrate -c {{.CONFIG}}`（V2 cassette 重写为 V3 并重建索引） |
 | `task migrate:db:up` | `go run ./cmd/server db migrate up -c {{.CONFIG}}` |
 | `task migrate:legacy` | `go run ./cmd/trajecta upgrade -c {{.CONFIG}} {{.ARGS}}`（默认 dry-run，`ARGS="--apply"` 才写盘） |
@@ -40,7 +41,7 @@
 | `task generate:ent` | `go generate ./ent/...` |
 | `task migrate:ent:sqlite NAME=x` | `ent/migrate/main.go --dialect sqlite --dir ent/migrations` + `update_hash.go`；Postgres 版为 `migrate:ent:postgres NAME=x DEV_URL=...`，写 `ent/postgres-migrations`；两个方向的完整生成流程与提交要求见 [Ent Migration Workflow](../ent/migrate/README.md) |
 | `task docker:build` / `docker:up` | `scripts/docker-build-env.sh` + `docker build -t trajecta:local .`；`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d` |
-| `task clean` | `rm -f trajecta` |
+| `task clean` | `rm -f {{.SERVER_BIN}} {{.CLI_BIN}}`，即删除 `server` 与 `trajecta` 两个产物 |
 
 `CONFIG` 默认是 `config/config.yaml`，可用 `CONFIG=path/to/config.yaml task <task>` 覆盖，所有读取配置的 task 都支持。
 
@@ -216,7 +217,7 @@ server -c config/config.yaml --format json audit tool-calls --latest-by-call --l
 4. `go mod download`。
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
-7. `go build -v -o server ./cmd/server`。
+7. `go build -v -o server ./cmd/server` 与 `go build -v -o trajecta ./cmd/trajecta`（同时产出服务端与 CLI，供第 17 步上传）。
 8. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
 9. `go vet ./...`。
 10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.11.4`。

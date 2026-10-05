@@ -60,7 +60,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 ### 变量前缀与 compose 必须一起改
 
-当前二进制只读 `TRAJECTA_*`，代码里没有 legacy 前缀回退。compose 里继续传 `LLM_TRACELAB_*` 不会报错，但会被静默忽略，应用会退回 `config.yaml` 中的配置（默认可能是 `database.driver: sqlite`）。`trajecta upgrade env` 会对这种组合给出警告；改 `.env` 时必须同步改 compose 的 `environment:` 段。
+当前二进制只读 `TRAJECTA_*`，代码里没有 legacy 前缀回退。compose 里继续传 `LLM_TRACELAB_*` 不会报错，但会被静默忽略，应用会退回 `config.yaml` 中的配置（未设置 `database.driver` 时按 Postgres 处理，缺 `database.dsn` 会直接报错）。`trajecta upgrade env` 会对这种组合给出警告；改 `.env` 时必须同步改 compose 的 `environment:` 段。
 
 ### 不要让 `config.yaml` 继续指向 SQLite 文件
 
@@ -77,7 +77,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 - **幂等**：每行用 `INSERT ... ON CONFLICT DO NOTHING` 写入，主键或其它唯一键已存在的行会被跳过并计入 `duplicate`，可以反复执行。
 - **只写交集列**：只迁移 SQLite 与 Postgres 都存在的列。Postgres 侧 `NOT NULL` 且无默认值、而旧表没有的列会让该表进入 `blocked` 状态并打印列名；确认可以用占位值填充时加 `--fill-missing-required`。
-- **时间戳**：旧库里的时间列存在四种历史编码——raw SQL 的 RFC3339Nano（`2025-12-23T12:17:14.088863521Z`）、SQLite 驱动写入的 `time.Time.String()`（`2026-05-15 01:54:55.069380977 +0000 UTC`）、带单调时钟后缀的同一格式（`... m=+0.095068526`）、以及 `CURRENT_TIMESTAMP` 的 `2026-01-02 03:04:05`。三者都会解析为 UTC；Postgres 的 `timestamptz` 精确到微秒，纳秒部分由 Postgres 四舍五入。
+- **时间戳**：旧库里的时间列存在四种历史编码——raw SQL 的 RFC3339Nano（`2025-12-23T12:17:14.088863521Z`）、SQLite 驱动写入的 `time.Time.String()`（`2026-05-15 01:54:55.069380977 +0000 UTC`）、带单调时钟后缀的同一格式（`... m=+0.095068526`）、以及 `CURRENT_TIMESTAMP` 的 `2026-01-02 03:04:05`。四者都会解析为 UTC；Postgres 的 `timestamptz` 精确到微秒，纳秒部分由 Postgres 四舍五入。
 - **布尔**：旧库用 `numeric` 存布尔，`0/1`、`true/false`、`yes/no`、`t/f` 都能转换。
 - **自增主键**：Postgres 的 identity 列由数据库生成，值按源数据写入；写完一张表后，工具会把对应序列推进到不小于 `MAX(列)`，且**绝不回退**（例如 `channel_models` 的 `START WITH 47244640256` 不会被拉低）。
 - **源库记账表跳过**：`schema_migrations`、`app_schema_status` 属于源库自身的迁移记账，不迁移。
@@ -143,6 +143,8 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ```
 
 顺序为「合并数据库 → 重写 magic → 校验 → 归档」。任何一步报告失败行或结构错误时都不会归档；`--skip-cassettes` 跳过第 2、3 步，`--skip-archive` 保留旧文件。
+
+一键流程还接受几个只在这一层存在的开关：`--force-archive` 在不确认每行都已进入 Postgres 的情况下归档（等价于 `sqlite archive --force`），`--fill-missing-required` 为旧表缺失的 Postgres `NOT NULL` 列填占位值，`--tolerate-partial` 把 cassette 布局不匹配降级为警告，`--root DIR` 指定 cassette 根目录（默认取配置的 trace 输出目录）。
 
 ## 命令与退出码
 
@@ -231,7 +233,7 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 | `upstream_exchanges.cassette_path` | 可选副本（可空） |
 | `overview_metric_bucket_members.path` | 概览指标的成员主键（按 path 增量维护，没有重建入口） |
 
-`logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 与 trace 的关联保持不变；`request_audits.path`（HTTP 路径）、`semantic_nodes.path`（JSONPath）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
+`logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 与 trace 的关联保持不变（`analysis_jobs` 按 `target_type`/`target_id`、`session_summaries` 按 `session_id` 关联，两者都不带 `trace_id`）；`request_audits.path`（HTTP 路径）、`semantic_nodes.path`（JSONPath）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
 
 安全语义：
 

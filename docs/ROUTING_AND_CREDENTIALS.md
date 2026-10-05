@@ -29,7 +29,7 @@
 - 凭据：YAML `credentials[]` 的字段是 `id`、`name`、`enabled`、`api_key`、`headers`、`concurrency_limit`。
   未配置显式 credentials 时，inline `upstream.api_key` 被视为一个隐式 credential（见下）。
 
-SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` 中的版本化迁移（例如 `20260629192000_add_model_aliases`）。
+SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` 中的版本化迁移（例如 `20260629192000_add_model_aliases.up.sql` 与配对的 `.down.sql`；`model_aliases` 没有 ent schema，只存在于 SQL 迁移里）。
 
 ## 管理写路径的一致性
 
@@ -110,29 +110,29 @@ Provider 与探测：
 
 ## 路由选择与 responses_strategy
 
-入口与执行模式定义在 `internal/routeplan`：客户端入口有 `chat_completions`（`/v1/chat/completions`）、`responses`（`/v1/responses`）、`anthropic_messages`（`/v1/messages`）；执行模式有 `proxy_pass` 与 `responses_server`。
+入口与执行模式定义在 `internal/routeplan`：客户端入口有 `chat_completions`（`/v1/chat/completions`）、`responses`（`/v1/responses`）、`anthropic_messages`（`/v1/messages`）；执行模式有 `proxy_pass` 与 `responses_server`。`internal/routeplan` 只服务 `POST /api/routing/inspect` 与测试；代理热路径由 `internal/router`（`SelectWithBody`）选路，两者是各自独立的判定。
 
 - Chat Completions 与 Anthropic Messages 只生成 `proxy_pass` 计划；候选过滤顺序为渠道启用 → 模型匹配 → endpoint 能力（`requires_chat_completions` / `requires_anthropic_messages`）→ `HasTools` 时的 tool calling 能力。
 - 模型匹配基于渠道的启用模型集合与别名；`UpstreamCandidate.ModelCapabilities` 支持按模型覆盖能力，键大小写不敏感。
 - `/v1/responses` 由 `responses_strategy` 决定 native 直通与本地 runtime 的 rank 顺序：`auto`（默认）与 `prefer_native` 为 native rank 0 / 本地 rank 1，`prefer_local_server` 反过来，`native_only` 只保留 native（chat 候选标记 `strategy_disallows_chat_fallback`），`local_server_only` 只保留本地 runtime（native 候选标记 `strategy_disallows_native_responses`）；其它取值返回 `unsupported_responses_strategy`。
 - 各档策略的完整语义与本地 runtime 执行细节见 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)；本节只记录路由决策侧的事实。
-- 代理热路径上的 `responsesRoutingDecision` 与上述规则一致：native 可选中则直通；native 存在但本请求不可选时直接拒绝并说明原因；否则在有本地 runtime 且存在 Chat Completions backend 时走 `responses_server`。
-- 每个 plan candidate 都带过滤原因（`selected`、`channel_not_enabled`、`model_not_matched`、`requires_chat_completions`、`requires_responses`、`requires_anthropic_messages`、`requires_tool_calling`、`no_route_candidate` 等），route plan 会写入 V3 cassette event 并在 Monitor trace detail 展示。
+- 代理热路径上的 `responsesRoutingDecision` 采用更严格的判定，不会回退到本地 runtime：native 可选中则直通；native 存在但本请求不可选时直接拒绝并说明原因；否则在有本地 runtime 且存在 Chat Completions backend 时走 `responses_server`。routeplan 的 `planResponses` 在 native 不可选时还会列出本地候选，因此两者的候选序列并不相同，以热路径为准。
+- routeplan 的每个 plan candidate 都带过滤原因（`selected`、`channel_not_enabled`、`model_not_matched`、`requires_chat_completions`、`requires_responses`、`requires_anthropic_messages`、`requires_tool_calling`、`no_route_candidate` 等），这些只出现在 `POST /api/routing/inspect` 的返回里。V3 cassette 的 `routing.route_plan` 事件由 router 生成，其 `candidate_summary[].filter_reason` 取值为 `unsupported_path`、`unsupported_model`、`unsupported_tools`、`target_open`、`target_probation_full`、`model_open`、`model_probation_full`、`excluded`（选中项为空），失败原因写在 `failure_reason`。
 - native-vs-local 按模型解析：`channel_models.supports_responses` / `supports_chat_completions` 的显式值覆盖渠道级 `api_type` / `capabilities`，未声明则回退渠道级；YAML 等价项是 `upstream.model_capabilities`。
-- 负载均衡策略取自 router 配置 `router.selection.policy`：`p2c`（默认）或 `first_available`；缺失模型回退由 `router.fallback.on_missing_model` 控制（默认 `reject`）。
+- 负载均衡策略取自 router 配置 `router.selection.policy`：`p2c`（默认）或 `first_available`；缺失模型回退由 `router.fallback.on_missing_model` 控制（默认 `reject`）。候选在打分前先按健康/退避过滤（`router.selection.open_window` 默认 15s、`selection.failure_threshold` 默认 3，以及 EWMA 驱动的 degraded/probation/open 状态；对应 `filter_reason` 为 `target_open`、`target_probation_full`、`model_open`、`model_probation_full`），再按 EWMA 成本与 priority/weight/capacity 打分。
 - 别名在 proxy 侧改写上游请求体 `model`：`Target.ResolveModelAlias` 命中时把下游模型名替换为 `target_model`，route plan event 同时记录 `requested_model` 与 `upstream_model`。
 
 ## Sticky Route Target
 
 - route target 身份是 `<channel_id>:<credential_id>`，没有显式凭据时为 `<channel_id>:default`。
 - sticky key 依次从请求头 `Session_id`、`X-Claude-Code-Session-Id`、`X-Codex-Window-Id`（取 `:` 前前缀）、`X-Codex-Turn-Metadata` 的 `session_id` 提取；都没有时回退到请求体的 `previous_response_id`。
-- binding 默认 TTL 为 1 小时，记录在进程内的 `StickyBindingStore`。
+- binding TTL 固定为 1 小时（当前没有配置项），记录在进程内的 `StickyBindingStore`。
 - sticky 命中且该 target 仍可用时复用同一 route target；命中但 target 不可用时记录一次 `sticky break` 并重新绑定到新的可用 target；未命中则正常选择后绑定。
 - Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`，不暴露原始 sticky key。
 
 ## 凭据与隐式 default credential
 
-- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、credential 级 `headers` 与 route target 身份。
+- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、`api_key` 覆盖与 route target 身份。`credentials[].headers` 目前只被 CLI `server provider probe` 读取，router/proxy 不合并它。
 - 配置了显式 `credentials` 时，每个 credential 展开成一个独立 route target（`<channel_id>:<credential_id>`）；credential 的 `api_key` 覆盖 target 的 resolved key，`credential_id` 缺省由 `name` 生成 slug，再缺省为 `credential-N`。
 - 没有显式 `credentials` 且 `upstream.api_key` 非空时，该 inline key 被视为隐式 credential：`credential_id = default`、`route_target_id = <channel_id>:default`。
 - 没有显式 credentials 也没有 inline key 时，渠道仍会产生一个 route target，其 credential id 为 `default`。
@@ -148,7 +148,7 @@ Provider 与探测：
 - 当 `limits.enabled = true` 时，未知 scope 在配置加载期直接报错 `limits.scope %q is not supported; use one of global, header, channel, route_target, credential`；`header` scope 缺少 `limits.channel_key_header` 也会报错。因此不会出现“限流被静默忽略”。
 - pre-selection 判定 `global` 与 `header`（按 `channel_key_header` 取值分桶，取不到时归入 `missing`）。
 - post-selection 判定 `channel`（键为 channel ID）、`route_target`（键为 route target ID）、`credential`（键为 channel + credential）——三者都依赖 router 选择结果中的凭据身份。
-- 拒绝语义：并发/速率拒绝返回 `429` 与 `limit.concurrency_rejected`；队列饱和返回 `503` 与 `limit.queue_saturated`。
+- 拒绝语义：并发拒绝返回 `429` 与 `limit.concurrency_rejected`；队列饱和返回 `503` 与 `limit.queue_saturated`。当前没有速率（时间窗口）限制。
 - 拒绝会写入带 `limit_key_fingerprint` 的事件，不写原始 limit key。
 - tracked 的 `config/config.yaml` 目前没有 `limits` 示例块，实际字段以 `internal/config` 结构体为准。
 

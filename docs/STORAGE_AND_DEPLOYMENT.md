@@ -28,9 +28,9 @@ Raw cassette (.http, LLM_PROXY_V3)
 - 第一段是该次请求命中的 upstream base URL 的 host（例如 `ai-api-gateway.app.baizhi.cloud`、`10.2.69.245:32080`），不是客户端访问的 host，也不是协议族。
 - `<model>` 直接来自请求/响应里的 model 名，**可以含 `/`**（例如 `feature/gpt-5.6-sol`、`dev/gpt-5.5`），此时目录会多一层；不要把中间那层当成固定的“环境/分组”维度。
 - 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
-- 文件名用录制时刻（UTC）与纳秒，不保证与同目录内其它文件单调可比。
-- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）、`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`：移动文件后必须同步这三列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`session_summaries` 都按 trace_id 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
-- `upstream_exchanges.trace_id` **不属于** `logs.trace_id` 的命名空间。它是**上游调用自己的 id**（形如 `1789090160442478635` 的时间戳，与 cassette 文件名后缀一致，文件 prelude 里声明的也是同一个值），而同一份 cassette 在 `logs` 里是按客户端 trace id（UUID）索引的：两者靠 `upstream_exchanges.cassette_path` 与 `logs.path` 指向同一个文件来关联，没有外键。所以用「客户端 trace id」口径做孤儿检查时，`upstream_exchanges` 整表都不匹配是**正常的**，不能据此判断索引断裂；必须为 0 的是 `parse_jobs`、`trace_observations`、`trace_findings`、`system_events` 这些真正按客户端 trace id 关联的表。
+- 文件名用录制进程的时刻（容器镜像通过 `TZ=UTC` 固定为 UTC）与纳秒，不保证与同目录内其它文件单调可比。
+- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）、`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`：移动文件后必须同步这三列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
+- `upstream_exchanges.trace_id` **不属于** `logs.trace_id` 的命名空间。它是**上游调用自己的 id**（`meta.request_id`，形如 `1789090160442478635` 的 UnixNano 时间戳；cassette 文件名里的数字是同一时刻的纳秒部分，即该时间戳的后 9 位，文件 prelude 里声明的也是同一个完整值），而同一份 cassette 在 `logs` 里是按客户端 trace id（UUID）索引的：两者靠 `upstream_exchanges.cassette_path` 与 `logs.path` 指向同一个文件来关联，没有外键。所以用「客户端 trace id」口径做孤儿检查时，`upstream_exchanges` 整表都不匹配是**正常的**，不能据此判断索引断裂；必须为 0 的是 `parse_jobs`、`trace_observations`、`trace_findings`、`system_events` 这些真正按客户端 trace id 关联的表。
 - 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
 - `trajecta layout plan` 只读地报告哪些 cassette 不在当前布局里、以及它们的目标路径（判定依据是每个文件 prelude 里的 `meta.model`）。搬迁本身不在 `serve` 里做，也不会由任何命令自动触发。
 
@@ -175,7 +175,7 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 
-重算命令（均为当前可用子命令）：
+重算命令（均为当前可用子命令；`analyze reparse` / `scan` / `repair-usage` / `reanalyze` / `batch` 在 cobra 里是 `Hidden`，`--help` 只列出 `refresh` 与 `session`）：
 
 ```bash
 server analyze reparse --trace-id <id>
@@ -189,7 +189,7 @@ server analyze refresh --all
 server db summary rebuild sessions [--session-id <id>]
 ```
 
-`analyze batch` 与 `analyze refresh` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
+`analyze batch` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器；`analyze refresh` 固定执行 reparse + scan（没有 `--reparse` / `--scan` 开关），另支持 `--repair-usage`、`--rewrite-cassette`、`--enqueue`、`--workers`、`--limit` 与同样的过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
 
 ## 数据体积与归档策略
 

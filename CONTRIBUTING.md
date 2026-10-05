@@ -47,7 +47,7 @@ task migrate:db:up  # apply Postgres migrations (only when database.auto_migrate
 
 ## What to run before opening a pull request
 
-- **Always**: `task check:quick`.
+- **Always**: `task check:quick`. Its formatting check covers the same directories as CI (`./cmd`, `./internal`, `./pkg`, `./unittest`, `./web/monitor-ui/test-fixtures`), so a green local run also passes the CI formatting step.
 - **If you touched storage, the record format, the proxy, the Responses runtime, routing, or the UI**: `task check:full`.
 - **If you changed the monitor UI**: run `task ui:build`. The bundle in `internal/monitor/ui/dist` is embedded with `go:embed`, so the rebuilt files belong in the same commit as the source change.
 
@@ -62,7 +62,7 @@ These are enforced by review, and several of them are asserted by tests:
 - **Record format changes start in `pkg/recordfile`.** Writers emit V3 only. Readers must keep supporting legacy `LLM_PROXY_V2` files (fixed 2KB JSON header block) and the pre-rename prelude magic `# llm-tracelab/v3`. `LLM_PROXY_V3` stays the stable format identifier and is deliberately not renamed.
 - **Keep cassettes human-inspectable, and prefer additive evolution** over rewriting files that already exist on disk.
 - **Do not commit real traffic or secrets.** `logs/`, `data/` and `docker-data/` are gitignored; keep it that way, and never paste a real API key into a config, test, or doc example.
-- **The application database is a derived index.** Raw `.http` cassettes remain the source of truth for replay and detail views.
+- **Raw `.http` cassettes remain the source of truth for replay and detail views.** The application database is a derived index for trace lists and aggregates, and the authoritative store for channels, credentials, routing and Responses state.
 
 ## Documentation
 
@@ -81,7 +81,7 @@ These are enforced by review, and several of them are asserted by tests:
 
 ## Commit and pull request conventions
 
-- Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `clean:`. Use `!` and a `BREAKING CHANGE:` footer for incompatible changes.
+- Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `chore:`. Use `!` and a `BREAKING CHANGE:` footer for incompatible changes.
 - Keep a pull request to one logical change; fill in the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md), including how you verified it.
 - Reference the issue it closes.
 

@@ -282,7 +282,7 @@ LIMIT 50;
 
 ### 扩展手查（脚本不覆盖的表）
 
-`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句：
+`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句。注意下面这份表集合是示例而非全集：`semantic_nodes`（本仓库最大的表）、`responses`、`response_items`、`upstream_targets`、`upstream_models`、`channel_probe_runs`、`datasets`、`dataset_examples`、`scores`、`experiment_runs`、`parser_versions`、`users`、`api_tokens` 既不在脚本里，也不在下面这份列表里，需要时把它们加进 `IN (...)`。
 
 表大小（脚本外）：
 
@@ -299,6 +299,7 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind = 'r'
   AND n.nspname = current_schema()
   AND c.relname IN (
+    'semantic_nodes',
     'tool_call_audits',
     'analysis_jobs',
     'app_settings',
@@ -464,7 +465,7 @@ pq: could not resize shared memory segment "/PostgreSQL.4213527324" to 67244032 
 
 ```text
 # psql（libpq）读到 32MB / 0
-psql "postgres://…/llm_tracelab?sslmode=disable&options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D0" \
+psql "postgres://…/trajecta?sslmode=disable&options=-c%20work_mem%3D32MB%20-c%20max_parallel_workers_per_gather%3D0" \
   -c "select current_setting('work_mem'), current_setting('max_parallel_workers_per_gather')"
 # 应用连接（lib/pq）仍是 4MB / 2，复核正在运行的会话即可看到：
 select current_setting('work_mem'), current_setting('max_parallel_workers_per_gather')
@@ -474,8 +475,8 @@ from pg_stat_activity where pid = <pid>;
 会话级调参要么写进 `postgresql.conf`／容器启动参数，要么按库或角色设置——服务端在建立连接时施加，与驱动无关，实测可即时生效也可即时撤销：
 
 ```sql
-ALTER DATABASE llm_tracelab SET work_mem = '32MB';
--- 撤销：ALTER DATABASE llm_tracelab RESET work_mem;
+ALTER DATABASE trajecta SET work_mem = '32MB';
+-- 撤销：ALTER DATABASE trajecta RESET work_mem;
 ```
 
 判断是否仍在溢写要看增量而不是累计值：`pg_stat_database.temp_bytes` 是自统计重置以来的累计量，前后两次采样相减才说明当前语句有没有落盘。
@@ -538,7 +539,7 @@ Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两
 
 这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 里抽出所有反引号语句中的 `CREATE INDEX … ON <表>(<列>)`，与迁移后数据库的 `pg_indexes` 逐形状（表 + 归一化后的列序列，忽略 `ASC`/`DESC`、partial 与唯一性）比对。
 
-按这个方法复核过当前状态（SQLite 启动 schema 82 个形状，迁移后的 Postgres 83 个，`parsejob_trace_id_status` 等上一批补的形状两侧都在），剩下的差异都不影响能力，只是形状不同：
+按这个方法复核过当前状态（SQLite 启动 schema 82 个形状，迁移后的 Postgres 87 个，`parsejob_trace_id_status` 等上一批补的形状两侧都在），剩下的差异都不影响能力，只是形状不同：
 
 | 只有 SQLite | 只有 Postgres | 判定 |
 | --- | --- | --- |
@@ -547,7 +548,7 @@ Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两
 | `session_summaries(last_seen)` | `session_summaries(last_seen DESC, session_id DESC)` | PG 的形状是 SQLite 的超集 |
 | `system_events(last_seen_at, id)`、`(status, last_seen_at, id)`、`(source, category, last_seen_at, id)` | `systemevent_status_last_seen_at(status, last_seen_at)`、`systemevent_source_category_last_seen_at(source, category, last_seen_at)` | 头几列相同，PG 上没有尾列 `id`，稳定分页的并列需要一次排序 |
 | `system_events(trace_id, last_seen_at) WHERE trace_id <> ''` | `systemevent_trace_id_last_seen_at(trace_id, last_seen_at)` | SQLite 用 partial，PG 用全量 |
-| — | `api_tokens(enabled)`、`api_tokens(prefix)`、`datasets(updated_at)`、`eval_runs(created_at)`、`parser_versions(parser, version)`、`trace_observations(request_audit_id, updated_at)`、`trace_observations(response_id, updated_at)` | 都在小表或只在 Postgres 才可能大的表上（`trace_observations`），SQLite 侧全表扫的代价可忽略 |
+| — | `api_tokens(enabled)`、`api_tokens(prefix)`、`api_tokens(token_hash)`、`users(username)`、`datasets(updated_at)`、`eval_runs(created_at)`、`parser_versions(parser, version)`、`trace_observations(request_audit_id, updated_at)`、`trace_observations(response_id, updated_at)` | 都在小表或只在 Postgres 才可能大的表上（`trace_observations`），SQLite 侧全表扫的代价可忽略 |
 
 另外复核了一次前缀冗余：把 Postgres 里所有非唯一、非 partial 索引按列序列两两比较，没有「左边的列是右边严格前缀」的重复索引。
 
@@ -574,7 +575,7 @@ ORDER BY idx_scan, indexrelname;
 | `analysisrun_created_at_id` | `analysis_runs` | `ListAnalysisRuns("", "", "", limit)`（overview 的最近分析），原有两个索引都以 `trace_id` 或 `session_id` 打头 |
 | `tracefinding_severity_created_at` | `trace_findings` | `overviewHighRiskFindings` 的 `severity IN ('critical', 'high')`，原有索引都以 `trace_id` 打头 |
 
-`logs` 这一处最贵：`selected_upstream_id` 在 `internal/store/store.go` 里有十处等值或分组过滤，而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
+`logs` 这一处最贵：`selected_upstream_id` 在 `internal/store/store.go` 里被十七个函数、二十多处等值或分组过滤命中（24 处 `= ?` / `<> ''` 谓词加 3 处 `GROUP BY`），而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
 
 | 计划 | 执行时间 |
 | --- | --- |
@@ -589,7 +590,7 @@ ORDER BY idx_scan, indexrelname;
 
 加索引前必须同时满足：pg_stat_statements 有明确慢 SQL 或高成本 SQL；`EXPLAIN (ANALYZE, BUFFERS)` 证明现有索引未覆盖过滤、排序或 join；候选索引匹配稳定产品查询而非一次性排障；已评估写入放大、索引体积和 vacuum 成本。
 
-内置的安全入口是 `db migrate optimize-indexes`（`--dry-run` 只预览不执行），命令归属与通用行为见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。该命令要求非空 Postgres DSN，逐条执行非事务的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`；SQLite 不适用，此时返回 `ErrSQLiteUsesStoreInit`（`internal/appdbmigrate/migrate.go` 的 `OptimizeIndexes`）。当前它只覆盖 `logs` 热点查询，创建以下 5 个索引：
+内置的安全入口是 `db migrate optimize-indexes`（`--dry-run` 只预览不执行），命令归属与通用行为见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。该命令要求非空 Postgres DSN，逐条执行非事务的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`；SQLite 上该命令直接报告 `index_optimization_status: not_applicable` 并以 0 退出（`internal/appdbmigrate` 的 `OptimizeIndexes` 对 SQLite 才会返回 `ErrSQLiteUsesStoreInit`，CLI 在调用前已按迁移模式短路）。当前它只覆盖 `logs` 热点查询，创建以下 5 个索引：
 
 ```text
 tracelog_recent_client_visible_idx              最新 logs 与分页 trace list（recorded_at DESC, trace_id DESC）
@@ -750,7 +751,7 @@ scripts/postgres/vacuum-after-repair.sh         # 修复留下的死元组与陈
 scripts/postgres/acceptance.sh                  # 门禁：失败即非 0 退出
 ```
 
-`acceptance.sh`、`evidence.sh` 和 `optimize-indexes.sh` 的探针查询都以 `PGOPTIONS='-c max_parallel_workers_per_gather=0'` 注入会话（libpq 会转发连接 `options`，而应用侧的 `lib/pq` 不会——见上文那张表）。它们要的是**正确结果**而不是并行加速，这样即便容器的 `/dev/shm` 很小也不会让整条验收语句失败。
+`acceptance.sh`、`evidence.sh` 和 `optimize-indexes.sh` 的探针查询都以 `PGOPTIONS='-c max_parallel_workers_per_gather=0'` 注入会话，且 `scripts/postgres/common.sh` 把该变量应用到所有脚本的 `psql` 调用（libpq 会转发连接 `options`，而应用侧的 `lib/pq` 不会——见上文 `psql` 与应用连接对比）。它们要的是**正确结果**而不是并行加速，这样即便容器的 `/dev/shm` 很小也不会让整条验收语句失败。
 
 ## 查询调优与 EXPLAIN 模板
 
@@ -978,7 +979,7 @@ LIMIT 1000;
 
 ## 分区与归档
 
-当前事实：`ent/postgres-migrations/*.up.sql` 里没有任何 `PARTITION` 语句，`logs`、`trace_observations`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`system_events` 等都是普通表；`internal/appdbmigrate` 只实现迁移（up/status，`db migrate down` 明确不支持）与并发索引优化，不包含分区或归档逻辑。
+当前事实：`ent/postgres-migrations/*.up.sql` 里没有任何 `PARTITION` 语句，`logs`、`trace_observations`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`system_events` 等都是普通表；`internal/appdbmigrate` 实现了 up/down 与并发索引优化，但 CLI 的 `db migrate down` 明确拒绝执行（包内 `MigrateDown` 目前没有 CLI 调用者），也不包含分区或归档逻辑。
 
 代码里也没有按时间删除、搬迁或导出历史行的 retention/archive job。`internal/store` 中可验证的删除路径全部是派生数据重建，不删除 raw `.http` cassette：
 
