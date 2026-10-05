@@ -81,13 +81,13 @@ tasks:
   fmt:
     desc: Format Go code
     cmds:
-      - gofmt -w ./cmd ./internal ./pkg ./unittest
+      - gofmt -w ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures
 
   fmt:check:
     desc: Check Go formatting without modifying files
     cmds:
       - >-
-        sh -c 'files="$(gofmt -l ./cmd ./internal ./pkg ./unittest)";
+        sh -c 'files="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures)";
         test -z "$files" || { echo "$files"; exit 1; }'
 
   lint:
