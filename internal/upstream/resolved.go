@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -113,7 +114,7 @@ type StartupDiagnostics struct {
 func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
-		return ResolvedUpstream{}, fmt.Errorf("upstream.base_url is required")
+		return ResolvedUpstream{}, errors.New("upstream.base_url is required")
 	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil {

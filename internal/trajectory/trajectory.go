@@ -5,6 +5,7 @@ package trajectory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,7 +33,7 @@ type builder struct {
 // context: they acquire neither inferred usage nor an invented model identity.
 func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exchange) (Trajectory, error) {
 	if len(exchanges) == 0 {
-		return Trajectory{}, fmt.Errorf("session has no recorded requests")
+		return Trajectory{}, errors.New("session has no recorded requests")
 	}
 	exchanges = append([]Exchange(nil), exchanges...)
 	sort.SliceStable(exchanges, func(i, j int) bool {

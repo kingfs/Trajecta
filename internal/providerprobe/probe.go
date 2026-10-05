@@ -3,6 +3,7 @@ package providerprobe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,7 +87,7 @@ func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report
 		Status:                  StatusUnknown,
 	}
 	if report.BaseURL == "" {
-		err := fmt.Errorf("providerprobe: base_url is required")
+		err := errors.New("providerprobe: base_url is required")
 		report.Status = StatusError
 		report.Error = err.Error()
 		return report, err

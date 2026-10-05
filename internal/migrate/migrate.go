@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,10 +26,10 @@ type Result struct {
 
 func Run(st *store.Store, opts Options) (Result, error) {
 	if opts.OutputDir == "" {
-		return Result{}, fmt.Errorf("output dir is required")
+		return Result{}, errors.New("output dir is required")
 	}
 	if st == nil {
-		return Result{}, fmt.Errorf("store is required")
+		return Result{}, errors.New("store is required")
 	}
 
 	var result Result

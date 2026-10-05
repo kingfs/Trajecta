@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -170,5 +171,5 @@ func cloneBoolPtr(value *bool) *bool {
 }
 
 func errorsNewStoreClosed() error {
-	return fmt.Errorf("store is closed")
+	return errors.New("store is closed")
 }

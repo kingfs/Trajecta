@@ -449,7 +449,7 @@ func (a *serverAPI) listTraces(ctx context.Context, req *mcp.CallToolRequest, in
 func (a *serverAPI) getTrace(ctx context.Context, req *mcp.CallToolRequest, in *getTraceInput) (*mcp.CallToolResult, map[string]any, error) {
 	traceID := strings.TrimSpace(in.TraceID)
 	if traceID == "" {
-		return nil, nil, fmt.Errorf("trace_id is required")
+		return nil, nil, errors.New("trace_id is required")
 	}
 
 	var out map[string]any
@@ -469,7 +469,7 @@ func (a *serverAPI) getTrace(ctx context.Context, req *mcp.CallToolRequest, in *
 func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallToolRequest, in *queryRoutingDecisionsInput) (*mcp.CallToolResult, *routingDecisionOutput, error) {
 	traceID := strings.TrimSpace(in.TraceID)
 	if traceID == "" {
-		return nil, nil, fmt.Errorf("trace_id is required")
+		return nil, nil, errors.New("trace_id is required")
 	}
 	entry, err := a.lookupTrace(traceID)
 	if err != nil {
@@ -901,10 +901,10 @@ func (a *serverAPI) listSystemEvents(ctx context.Context, req *mcp.CallToolReque
 func (a *serverAPI) getSystemEvent(ctx context.Context, req *mcp.CallToolRequest, in *getSystemEventInput) (*mcp.CallToolResult, map[string]any, error) {
 	eventID := strings.TrimSpace(in.EventID)
 	if eventID == "" {
-		return nil, nil, fmt.Errorf("event_id is required")
+		return nil, nil, errors.New("event_id is required")
 	}
 	if a.store == nil {
-		return nil, nil, fmt.Errorf("store not configured")
+		return nil, nil, errors.New("store not configured")
 	}
 	event, err := a.store.GetSystemEvent(eventID)
 	if err != nil {
@@ -975,7 +975,7 @@ func (a *serverAPI) queryUnreadSystemEvents(ctx context.Context, req *mcp.CallTo
 func (a *serverAPI) reanalyzeTrace(ctx context.Context, req *mcp.CallToolRequest, in *reanalyzeTraceInput) (*mcp.CallToolResult, map[string]any, error) {
 	traceID := strings.TrimSpace(in.TraceID)
 	if traceID == "" {
-		return nil, nil, fmt.Errorf("trace_id is required")
+		return nil, nil, errors.New("trace_id is required")
 	}
 	if err := a.requireStoreSync(); err != nil {
 		return nil, nil, err
@@ -1012,7 +1012,7 @@ func (a *serverAPI) reanalyzeTrace(ctx context.Context, req *mcp.CallToolRequest
 		result, err = svc.RescanTrace(ctx, traceID)
 	default:
 		if result.Job.ID == 0 {
-			return nil, nil, fmt.Errorf("at least one reanalysis step is required")
+			return nil, nil, errors.New("at least one reanalysis step is required")
 		}
 	}
 	if err != nil {
@@ -1024,7 +1024,7 @@ func (a *serverAPI) reanalyzeTrace(ctx context.Context, req *mcp.CallToolRequest
 func (a *serverAPI) reanalyzeSession(ctx context.Context, req *mcp.CallToolRequest, in *reanalyzeSessionInput) (*mcp.CallToolResult, map[string]any, error) {
 	sessionID := strings.TrimSpace(in.SessionID)
 	if sessionID == "" {
-		return nil, nil, fmt.Errorf("session_id is required")
+		return nil, nil, errors.New("session_id is required")
 	}
 	if err := a.requireStoreSync(); err != nil {
 		return nil, nil, err
@@ -1069,7 +1069,7 @@ func (a *serverAPI) getAnalysisJob(ctx context.Context, req *mcp.CallToolRequest
 		return nil, nil, err
 	}
 	if in.JobID <= 0 {
-		return nil, nil, fmt.Errorf("job_id is required")
+		return nil, nil, errors.New("job_id is required")
 	}
 	job, err := a.store.GetAnalysisJob(in.JobID)
 	if err != nil {
@@ -1081,7 +1081,7 @@ func (a *serverAPI) getAnalysisJob(ctx context.Context, req *mcp.CallToolRequest
 func (a *serverAPI) traceFindings(ctx context.Context, traceID string, severity string, category string) (*mcp.CallToolResult, map[string]any, error) {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
-		return nil, nil, fmt.Errorf("trace_id is required")
+		return nil, nil, errors.New("trace_id is required")
 	}
 	values := url.Values{}
 	setIfNotEmpty(values, "severity", severity)
@@ -1097,7 +1097,7 @@ func (a *serverAPI) traceFindings(ctx context.Context, traceID string, severity 
 func (a *serverAPI) mergeTraceFindingCategories(ctx context.Context, traceID string, severity string, categories []string) (map[string]any, error) {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
-		return nil, fmt.Errorf("trace_id is required")
+		return nil, errors.New("trace_id is required")
 	}
 	out := map[string]any{
 		"id":    traceID,
@@ -1175,7 +1175,7 @@ func (a *serverAPI) allTraceEntries() ([]store.LogEntry, error) {
 
 func (a *serverAPI) requireStoreSync() error {
 	if a.store == nil {
-		return fmt.Errorf("store not configured")
+		return errors.New("store not configured")
 	}
 	return nil
 }
@@ -1391,7 +1391,7 @@ func enqueueTraceSteps(svc *reanalysis.Service, traceID string, reparse bool, sc
 	case scan:
 		return svc.EnqueueTraceRescan(traceID)
 	default:
-		return store.AnalysisJobRecord{}, fmt.Errorf("at least one reanalysis step is required")
+		return store.AnalysisJobRecord{}, errors.New("at least one reanalysis step is required")
 	}
 }
 

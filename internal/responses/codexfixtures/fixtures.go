@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,7 +75,7 @@ func List() ([]File, error) {
 		return files[i].Name < files[j].Name
 	})
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no codex fixture files found")
+		return nil, errors.New("no codex fixture files found")
 	}
 	return files, nil
 }
@@ -167,7 +168,7 @@ func ValidateAll() error {
 		return err
 	}
 	if _, ok := seen["unsupported_hosted_tool_expected_error.json"]; !ok {
-		return fmt.Errorf("missing unsupported hosted tool expected error fixture")
+		return errors.New("missing unsupported hosted tool expected error fixture")
 	}
 	if err := requirePhase0HostedToolFixtures(seen); err != nil {
 		return err

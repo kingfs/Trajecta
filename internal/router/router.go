@@ -352,7 +352,7 @@ type Outcome struct {
 func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	targetCfgs := cfg.EffectiveUpstreams()
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
-		return nil, fmt.Errorf("config cannot define both upstream and upstreams")
+		return nil, errors.New("config cannot define both upstream and upstreams")
 	}
 
 	r := &Router{
@@ -437,7 +437,7 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no enabled upstream targets configured")
+		return nil, errors.New("no enabled upstream targets configured")
 	}
 	sortTargets(targets)
 	return targets, nil
@@ -511,7 +511,7 @@ func (r *Router) Initialize() error {
 		return err
 	}
 	if usable == 0 {
-		return fmt.Errorf("no usable upstream targets after startup discovery")
+		return errors.New("no usable upstream targets after startup discovery")
 	}
 	r.mu.Lock()
 	r.rebuildCatalog()
@@ -521,7 +521,7 @@ func (r *Router) Initialize() error {
 
 func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	if r == nil {
-		return fmt.Errorf("router is nil")
+		return errors.New("router is nil")
 	}
 	return r.ReloadWithCommit(targetCfgs, r.store, nil)
 }
@@ -534,7 +534,7 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 // already owns the upstream lock must never wait for a reload that waits for it.
 func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *store.Store, commit func() error) error {
 	if r == nil {
-		return fmt.Errorf("router is nil")
+		return errors.New("router is nil")
 	}
 	if st != nil && !st.TransactionScoped() {
 		release, err := st.LockUpstreamWrites()
@@ -595,7 +595,7 @@ func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
 		return nil
 	}
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
-		return fmt.Errorf("config cannot define both upstream and upstreams")
+		return errors.New("config cannot define both upstream and upstreams")
 	}
 	targets := cfg.EffectiveUpstreams()
 	if len(targets) == 0 {

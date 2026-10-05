@@ -494,7 +494,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		if cfg.WebSearchEnabled() {
 			webSearchConfig := cfg.WebSearchConfig()
 			if webSearchConfig.Provider == websearch.ProviderDisabled {
-				return nil, fmt.Errorf("build web_search provider: provider is disabled")
+				return nil, errors.New("build web_search provider: provider is disabled")
 			}
 			provider, err := websearch.NewProvider(websearch.Options{
 				Provider:   webSearchConfig.Provider,

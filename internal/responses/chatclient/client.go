@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,7 +35,7 @@ var _ runtime.ChatCompletionsStreamer = (*Client)(nil)
 func New(opts Options) (*Client, error) {
 	baseURL := strings.TrimRight(opts.BaseURL, "/")
 	if baseURL == "" {
-		return nil, fmt.Errorf("base_url is required")
+		return nil, errors.New("base_url is required")
 	}
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
@@ -59,7 +60,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, chatReq runtime.ChatC
 
 func (c *Client) chatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	if c == nil {
-		return runtime.ChatCompletionResponse{}, fmt.Errorf("chat completions client is nil")
+		return runtime.ChatCompletionResponse{}, errors.New("chat completions client is nil")
 	}
 	body, err := json.Marshal(chatReq)
 	if err != nil {

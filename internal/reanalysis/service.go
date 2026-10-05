@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -334,7 +335,7 @@ func (s *Service) repairUsage(traceID string, opts RepairUsageOptions) (UsageRep
 	pipeline.Finalize()
 	usage, ok := pipeline.Usage()
 	if !ok {
-		return UsageRepairResult{}, fmt.Errorf("usage not found in recorded response")
+		return UsageRepairResult{}, errors.New("usage not found in recorded response")
 	}
 	after := recordfile.UsageInfo(usage)
 	before := parsed.Header.Usage
@@ -377,10 +378,10 @@ func (s *Service) repairUsage(traceID string, opts RepairUsageOptions) (UsageRep
 
 func (s *Service) createTraceJob(jobType string, traceID string, steps []string) (store.AnalysisJobRecord, error) {
 	if s == nil || s.store == nil {
-		return store.AnalysisJobRecord{}, fmt.Errorf("reanalysis store is nil")
+		return store.AnalysisJobRecord{}, errors.New("reanalysis store is nil")
 	}
 	if traceID == "" {
-		return store.AnalysisJobRecord{}, fmt.Errorf("trace id is required")
+		return store.AnalysisJobRecord{}, errors.New("trace id is required")
 	}
 	stepsJSON, err := json.Marshal(steps)
 	if err != nil {
@@ -401,10 +402,10 @@ func (s *Service) createTraceJob(jobType string, traceID string, steps []string)
 
 func (s *Service) createSessionJob(sessionID string, opts SessionOptions) (store.AnalysisJobRecord, error) {
 	if s == nil || s.store == nil {
-		return store.AnalysisJobRecord{}, fmt.Errorf("reanalysis store is nil")
+		return store.AnalysisJobRecord{}, errors.New("reanalysis store is nil")
 	}
 	if sessionID == "" {
-		return store.AnalysisJobRecord{}, fmt.Errorf("session id is required")
+		return store.AnalysisJobRecord{}, errors.New("session id is required")
 	}
 	steps := []string{}
 	if opts.Reparse {
@@ -433,10 +434,10 @@ func (s *Service) createSessionJob(sessionID string, opts SessionOptions) (store
 
 func (s *Service) createBatchJob(opts BatchOptions) (store.AnalysisJobRecord, error) {
 	if s == nil || s.store == nil {
-		return store.AnalysisJobRecord{}, fmt.Errorf("reanalysis store is nil")
+		return store.AnalysisJobRecord{}, errors.New("reanalysis store is nil")
 	}
 	if !opts.RepairUsage && !opts.Reparse && !opts.Scan {
-		return store.AnalysisJobRecord{}, fmt.Errorf("batch reanalysis requires at least one step")
+		return store.AnalysisJobRecord{}, errors.New("batch reanalysis requires at least one step")
 	}
 	if opts.Limit <= 0 {
 		opts.Limit = 1000
@@ -760,7 +761,7 @@ func resultSummary(result Result) map[string]any {
 func batchOptionsFromJob(job store.AnalysisJobRecord) (BatchOptions, error) {
 	var opts BatchOptions
 	if strings.TrimSpace(job.RequestJSON) == "" {
-		return opts, fmt.Errorf("batch job request is empty")
+		return opts, errors.New("batch job request is empty")
 	}
 	if err := json.Unmarshal([]byte(job.RequestJSON), &opts); err != nil {
 		return opts, err

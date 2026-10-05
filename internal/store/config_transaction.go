@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"entgo.io/ent/dialect"
@@ -22,7 +23,7 @@ func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store,
 		return fmt.Errorf("configuration transaction: %w", errorsNewStoreClosed())
 	}
 	if apply == nil {
-		return fmt.Errorf("configuration transaction: apply callback is required")
+		return errors.New("configuration transaction: apply callback is required")
 	}
 	if s.TransactionScoped() {
 		return fmt.Errorf("configuration transaction: %w", ErrNestedTransaction)
@@ -60,7 +61,7 @@ func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store,
 		return err
 	}
 	if !committed {
-		return fmt.Errorf("configuration transaction was not committed")
+		return errors.New("configuration transaction was not committed")
 	}
 	return nil
 }

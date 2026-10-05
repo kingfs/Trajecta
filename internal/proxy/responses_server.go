@@ -51,10 +51,10 @@ func (a *responsesChatCompletionsAdapter) ChatCompletionStream(ctx context.Conte
 
 func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	if a == nil || a.router == nil {
-		return runtime.ChatCompletionResponse{}, fmt.Errorf("responses chat completions router is required")
+		return runtime.ChatCompletionResponse{}, errors.New("responses chat completions router is required")
 	}
 	if a.recorder == nil {
-		return runtime.ChatCompletionResponse{}, fmt.Errorf("responses chat completions recorder is required")
+		return runtime.ChatCompletionResponse{}, errors.New("responses chat completions recorder is required")
 	}
 	body, err := json.Marshal(chatReq)
 	if err != nil {
@@ -414,7 +414,7 @@ type responsesEntryRecorder struct {
 
 func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []byte, targetPath string) (*responsesEntryRecorder, error) {
 	if h == nil || h.recorder == nil {
-		return nil, fmt.Errorf("responses entry recorder is required")
+		return nil, errors.New("responses entry recorder is required")
 	}
 	recordReq := r.Clone(r.Context())
 	recordReq.URL = cloneURL(r.URL)
@@ -642,7 +642,7 @@ func (w *responsesEntryRecordingResponseWriter) finalize() {
 
 func buildResponsesServerChatRequest(ctx context.Context, selection *router.Selection, body []byte) (*http.Request, *http.Request, error) {
 	if selection == nil || selection.Target == nil {
-		return nil, nil, fmt.Errorf("responses chat completions selection target is required")
+		return nil, nil, errors.New("responses chat completions selection target is required")
 	}
 	fullURL, err := selection.Target.Upstream.BuildURL(responsesServerChatCompletionsPath)
 	if err != nil {
@@ -695,7 +695,7 @@ func applyCorrelationHeaders(dst http.Header, ctx context.Context) {
 
 func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time) ([]byte, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
-		return nil, false, fmt.Errorf("responses chat completions log file is required")
+		return nil, false, errors.New("responses chat completions log file is required")
 	}
 	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt)
 	if err != nil {
@@ -714,7 +714,7 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 
 func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
-		return runtime.ChatCompletionResponse{}, false, fmt.Errorf("responses chat completions log file is required")
+		return runtime.ChatCompletionResponse{}, false, errors.New("responses chat completions log file is required")
 	}
 	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt)
 	if err != nil {

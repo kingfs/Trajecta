@@ -322,7 +322,7 @@ func validateServeConfig(cfg *config.Config) error {
 		return fmt.Errorf("database.driver %q is not supported yet; use sqlite or postgres", driver)
 	}
 	if cfg.MCP.Enabled && cfg.Monitor.Port == "" {
-		return fmt.Errorf("monitor.port is required when mcp.enabled=true")
+		return errors.New("monitor.port is required when mcp.enabled=true")
 	}
 	if cfg.MCP.Enabled {
 		if _, err := normalizeMCPPath(cfg.MCP.Path); err != nil {

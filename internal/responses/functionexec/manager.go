@@ -1,6 +1,7 @@
 package functionexec
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -96,7 +97,7 @@ func Registrations(cfg config.ResponsesFunctionExecutorConfig) (map[string]respo
 			continue
 		}
 		if binding.Name == "" {
-			return nil, fmt.Errorf("responses function executor name is required")
+			return nil, errors.New("responses function executor name is required")
 		}
 		switch binding.Type {
 		case config.ResponsesFunctionExecutorTypeStaticResponse:

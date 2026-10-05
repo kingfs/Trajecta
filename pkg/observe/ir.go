@@ -1,3 +1,10 @@
+// Package observe defines the Observation IR and the per-protocol parsers that
+// turn a recorded HTTP exchange into that IR. The IR is shared by the monitor,
+// the deterministic audit detectors and the MCP tools.
+//
+// Parsing is tolerant and side-effect free: unknown fields are ignored, a
+// malformed payload yields a warning instead of an error, and every derived
+// result can be recomputed from the raw cassette.
 package observe
 
 import (

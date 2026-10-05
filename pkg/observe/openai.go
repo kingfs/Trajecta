@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -1081,7 +1082,7 @@ func parseNullableObjectNode(raw json.RawMessage, section string, path string, p
 func decodeJSONObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("empty json")
+		return nil, errors.New("empty json")
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, err

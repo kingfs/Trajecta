@@ -123,7 +123,7 @@ func OptimizeIndexes(ctx context.Context, driver string, dsn string) (IndexOptim
 	case "postgres":
 		result.Statements = PostgresIndexOptimizationStatements()
 		if strings.TrimSpace(dsn) == "" {
-			return result, fmt.Errorf("postgres application database dsn is required")
+			return result, errors.New("postgres application database dsn is required")
 		}
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
@@ -274,7 +274,7 @@ func sqliteReadOnlyDSN(dbPath string) string {
 
 func checkPostgresStatus(dsn string, status Status) (Status, error) {
 	if strings.TrimSpace(dsn) == "" {
-		return status, fmt.Errorf("postgres application database dsn is required")
+		return status, errors.New("postgres application database dsn is required")
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -329,7 +329,7 @@ func migratePostgresDown(dsn string, steps int, all bool) error {
 
 func migratePostgres(dsn string, run func(*gomigrate.Migrate) error) error {
 	if strings.TrimSpace(dsn) == "" {
-		return fmt.Errorf("postgres application database dsn is required")
+		return errors.New("postgres application database dsn is required")
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {

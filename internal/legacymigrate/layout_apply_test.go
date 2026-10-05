@@ -2,6 +2,7 @@ package legacymigrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,7 +181,7 @@ func TestApplyCassetteLayoutRollsBackWhenIndexFails(t *testing.T) {
 	source := writeLayoutCassette(t, root, "gpt-5.5/2026/01/02/a.http", recordfile.FileMagic, "gpt-5.5")
 	index := newFakePathIndex()
 	index.seed("/vault/gpt-5.5/2026/01/02/a.http", PathRefs{Logs: 1})
-	index.moveErr = fmt.Errorf("unique violation on logs.path")
+	index.moveErr = errors.New("unique violation on logs.path")
 	withFakeIndex(t, index)
 
 	report, err := ApplyCassetteLayout(context.Background(), ApplyOptions{

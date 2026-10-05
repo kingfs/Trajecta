@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -364,10 +365,10 @@ func checkDoctorResponsesHTTPGuard(cfg *appconfig.Config) doctorCheck {
 func normalizeDoctorResponsesPath(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", fmt.Errorf("responses_server.path must not be empty")
+		return "", errors.New("responses_server.path must not be empty")
 	}
 	if !strings.HasPrefix(raw, "/") {
-		return "", fmt.Errorf("responses_server.path must be an absolute HTTP path starting with /")
+		return "", errors.New("responses_server.path must be an absolute HTTP path starting with /")
 	}
 	normalized := pathpkg.Clean(raw)
 	if normalized == "." {
@@ -635,14 +636,14 @@ func checkDoctorResponsesStoreTables(cfg *appconfig.Config, requiredTables []str
 func checkDoctorResponsesSQLiteTables(dsn string, requiredTables []string) ([]string, error) {
 	dbPath := appconfig.SQLitePathFromDSN(dsn)
 	if strings.TrimSpace(dbPath) == "" {
-		return nil, fmt.Errorf("sqlite application database path is empty")
+		return nil, errors.New("sqlite application database path is empty")
 	}
 	if dbPath == ":memory:" {
-		return nil, fmt.Errorf("sqlite in-memory database is not inspectable")
+		return nil, errors.New("sqlite in-memory database is not inspectable")
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("sqlite application database file does not exist")
+			return nil, errors.New("sqlite application database file does not exist")
 		}
 		return nil, err
 	}

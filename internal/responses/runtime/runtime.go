@@ -231,7 +231,7 @@ func (e hostedWebSearchExecutor) ExecuteHostedTool(ctx context.Context, _ hosted
 
 func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error) {
 	if r.client == nil {
-		return protocol.Response{}, fmt.Errorf("chat completions client is required")
+		return protocol.Response{}, errors.New("chat completions client is required")
 	}
 	ctx = withModelCallSequence(ctx)
 	model := req.Model
@@ -239,7 +239,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		model = r.cfg.DefaultModel
 	}
 	if model == "" {
-		return protocol.Response{}, fmt.Errorf("model is required")
+		return protocol.Response{}, errors.New("model is required")
 	}
 	inputItems := requestInputItems(req)
 	r.recordSubmittedFunctionOutputs(ctx, inputItems)
@@ -372,14 +372,14 @@ type ResponseOutputItemAdded struct {
 
 func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink ResponseStreamSink) (protocol.Response, error) {
 	if r.client == nil {
-		return protocol.Response{}, fmt.Errorf("chat completions client is required")
+		return protocol.Response{}, errors.New("chat completions client is required")
 	}
 	streamer, ok := r.client.(ChatCompletionsStreamer)
 	if !ok {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
 	if sink == nil {
-		return protocol.Response{}, fmt.Errorf("response stream sink is required")
+		return protocol.Response{}, errors.New("response stream sink is required")
 	}
 	ctx = withModelCallSequence(ctx)
 	model := req.Model
@@ -387,7 +387,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		model = r.cfg.DefaultModel
 	}
 	if model == "" {
-		return protocol.Response{}, fmt.Errorf("model is required")
+		return protocol.Response{}, errors.New("model is required")
 	}
 	inputItems := requestInputItems(req)
 	r.recordSubmittedFunctionOutputs(ctx, inputItems)
@@ -919,10 +919,10 @@ func (s *functionCallStreamState) call(delta ChatStreamToolCallDelta) *functionC
 func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error) {
 	ctx = withModelCallSequence(ctx)
 	if r.client == nil {
-		return protocol.Response{}, fmt.Errorf("chat completions client is required")
+		return protocol.Response{}, errors.New("chat completions client is required")
 	}
 	if req.ResponseID == "" {
-		return protocol.Response{}, fmt.Errorf("response_id is required")
+		return protocol.Response{}, errors.New("response_id is required")
 	}
 	target, ok, err := r.store.Get(ctx, req.ResponseID)
 	if err != nil {
@@ -946,7 +946,7 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 		model = r.cfg.DefaultModel
 	}
 	if model == "" {
-		return protocol.Response{}, fmt.Errorf("model is required")
+		return protocol.Response{}, errors.New("model is required")
 	}
 
 	respID := newResponseID()
@@ -3035,11 +3035,11 @@ func toolOutputContent(output any) string {
 }
 
 func contentPartsText(parts []protocol.ContentPart) string {
-	text := ""
+	var builder strings.Builder
 	for _, part := range parts {
-		text += part.Text
+		builder.WriteString(part.Text)
 	}
-	return text
+	return builder.String()
 }
 
 func newResponseID() string {

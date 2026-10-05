@@ -1702,7 +1702,7 @@ func applyResponsesFunctionExecutorUpdate(cfg config.ResponsesFunctionExecutorCo
 	if strings.TrimSpace(req.Timeout) != "" {
 		timeout, err := time.ParseDuration(strings.TrimSpace(req.Timeout))
 		if err != nil {
-			return config.ResponsesFunctionExecutorConfig{}, fmt.Errorf("timeout must be a Go duration such as 5s")
+			return config.ResponsesFunctionExecutorConfig{}, errors.New("timeout must be a Go duration such as 5s")
 		}
 		cfg.Timeout = timeout
 	}
@@ -3076,7 +3076,7 @@ func decodeChannelProbeRequest(r *http.Request) (channelProbeRequest, error) {
 		return req, nil
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return channelProbeRequest{}, fmt.Errorf("invalid probe payload")
+		return channelProbeRequest{}, errors.New("invalid probe payload")
 	}
 	return req, nil
 }
@@ -3991,7 +3991,7 @@ func reloadRouterFromChannels(rtr *router.Router, channelService *channel.Servic
 		return nil
 	}
 	if channelService == nil {
-		return fmt.Errorf("channel service not configured")
+		return errors.New("channel service not configured")
 	}
 	targets, err := channelService.RuntimeTargets()
 	if err != nil {

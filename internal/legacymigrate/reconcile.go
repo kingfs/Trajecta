@@ -3,6 +3,7 @@ package legacymigrate
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,10 +150,10 @@ func ReconcileDerivedTraceIDs(ctx context.Context, opts ReconcileOptions) (*Reco
 	defer func() { report.DurationMS = time.Since(started).Milliseconds() }()
 
 	if strings.TrimSpace(opts.PostgresDSN) == "" {
-		return nil, fmt.Errorf("postgres dsn must not be empty")
+		return nil, errors.New("postgres dsn must not be empty")
 	}
 	if len(opts.SQLitePaths) == 0 && strings.TrimSpace(opts.DataRoot) == "" {
-		return nil, fmt.Errorf("at least one legacy sqlite path or a data root is required")
+		return nil, errors.New("at least one legacy sqlite path or a data root is required")
 	}
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {

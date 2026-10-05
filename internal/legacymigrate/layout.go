@@ -322,7 +322,7 @@ func decideLayout(rel, model, unknownSite string) (string, LayoutMove, error) {
 	// so normalise it before it becomes a directory path.
 	model = strings.Trim(strings.TrimSpace(model), "/")
 	if model == "" {
-		return LayoutUnreadable, LayoutMove{From: rel}, fmt.Errorf(
+		return LayoutUnreadable, LayoutMove{From: rel}, errors.New(
 			"prelude records no model name, so the target directory is unknown")
 	}
 	if err := validateLayoutModel(model); err != nil {

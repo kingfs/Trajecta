@@ -1,3 +1,7 @@
+// Package replay provides an http.RoundTripper that answers requests from a
+// recorded `.http` cassette instead of the network, so unit tests can drive
+// real SDK code with no API key and no connectivity. It reads cassettes through
+// pkg/recordfile and does not depend on the application database.
 package replay
 
 import (

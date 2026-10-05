@@ -145,7 +145,7 @@ type ProviderProbeApplyItem struct {
 // startup that is already initialized stays read-only.
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	if s == nil || s.store == nil {
-		return 0, fmt.Errorf("channel service store is required")
+		return 0, errors.New("channel service store is required")
 	}
 	initialized, err := s.HasConfiguration()
 	if err != nil {
@@ -266,7 +266,7 @@ func hasExplicitCredentials(targets []config.UpstreamTargetConfig) bool {
 
 func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 	if s == nil || s.store == nil {
-		return nil, fmt.Errorf("channel service store is required")
+		return nil, errors.New("channel service store is required")
 	}
 	channels, err := s.store.ListChannelConfigs()
 	if err != nil {
@@ -411,7 +411,7 @@ func (s *Service) ApplyProviderProbeReport(ctx context.Context, options Provider
 
 func (s *Service) ProviderProbeTargets(channelID string) ([]providerprobe.ProbeTarget, error) {
 	if s == nil || s.store == nil {
-		return nil, fmt.Errorf("channel service store is required")
+		return nil, errors.New("channel service store is required")
 	}
 	channelID = strings.TrimSpace(channelID)
 	channels, err := s.store.ListChannelConfigs()
@@ -437,7 +437,7 @@ func (s *Service) ProviderProbeTargets(channelID string) ([]providerprobe.ProbeT
 		return nil, fmt.Errorf("channel %q was not found, is disabled, or has no base_url", channelID)
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no enabled channel with base_url is configured")
+		return nil, errors.New("no enabled channel with base_url is configured")
 	}
 	return targets, nil
 }
@@ -503,11 +503,11 @@ func (s *Service) Probe(channelID string) (ProbeResult, error) {
 
 func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (ProbeResult, error) {
 	if s == nil || s.store == nil {
-		return ProbeResult{}, fmt.Errorf("channel service store is required")
+		return ProbeResult{}, errors.New("channel service store is required")
 	}
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return ProbeResult{}, fmt.Errorf("channel id is required")
+		return ProbeResult{}, errors.New("channel id is required")
 	}
 	startedAt := time.Now().UTC()
 	result := ProbeResult{ChannelID: channelID, StartedAt: startedAt}

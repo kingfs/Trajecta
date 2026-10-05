@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -14,7 +15,7 @@ func (s *Store) SaveAppSettingJSON(ctx context.Context, key string, value any) e
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return fmt.Errorf("setting key is required")
+		return errors.New("setting key is required")
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -36,10 +37,10 @@ func (s *Store) LoadAppSettingJSON(ctx context.Context, key string, out any) (bo
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return false, fmt.Errorf("setting key is required")
+		return false, errors.New("setting key is required")
 	}
 	if out == nil {
-		return false, fmt.Errorf("setting output is required")
+		return false, errors.New("setting output is required")
 	}
 	var raw string
 	if err := s.db.QueryRowContext(ctx, `SELECT value_json FROM app_settings WHERE setting_key = ?`, key).Scan(&raw); err != nil {
@@ -61,7 +62,7 @@ func (s *Store) DeleteAppSetting(ctx context.Context, key string) (bool, error) 
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return false, fmt.Errorf("setting key is required")
+		return false, errors.New("setting key is required")
 	}
 	result, err := s.db.ExecContext(ctx, `DELETE FROM app_settings WHERE setting_key = ?`, key)
 	if err != nil {

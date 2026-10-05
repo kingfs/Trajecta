@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,7 +52,7 @@ func newResponsesProviderTokenizeCounter(cfg *config.Config, rtr *router.Router,
 			continue
 		}
 		if profile.Name == "" && profile.Pattern == "" {
-			return nil, fmt.Errorf("responses tokenize_counter profile requires name or pattern")
+			return nil, errors.New("responses tokenize_counter profile requires name or pattern")
 		}
 		counterProfiles = append(counterProfiles, responsesTokenizeCounterProfile{
 			name:          profile.Name,
@@ -65,7 +66,7 @@ func newResponsesProviderTokenizeCounter(cfg *config.Config, rtr *router.Router,
 		return nil, nil
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("responses tokenize_counter is enabled but no router targets are available")
+		return nil, errors.New("responses tokenize_counter is enabled but no router targets are available")
 	}
 	return &responsesProviderTokenizeCounter{
 		profiles: counterProfiles,
@@ -119,7 +120,7 @@ func hasEnabledTokenizeCapableTarget(targets []*router.Target, upstreamID string
 
 func (c *responsesProviderTokenizeCounter) CountChatPromptTokens(req responsesruntime.ChatPromptTokenCountRequest) (int, error) {
 	if c == nil {
-		return 0, fmt.Errorf("responses tokenize counter is nil")
+		return 0, errors.New("responses tokenize counter is nil")
 	}
 	profile, ok := c.matchProfile(req.Model)
 	if !ok {

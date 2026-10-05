@@ -2,7 +2,8 @@ package main
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"errors"
+
 	"log/slog"
 	"net/http"
 	"strings"
@@ -113,14 +114,14 @@ func normalizeMCPPath(path string) (string, error) {
 		return "/mcp", nil
 	}
 	if path == "/" {
-		return "", fmt.Errorf("mcp.path must not be /")
+		return "", errors.New("mcp.path must not be /")
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
 	path = strings.TrimRight(path, "/")
 	if path == "" {
-		return "", fmt.Errorf("mcp.path must not be empty")
+		return "", errors.New("mcp.path must not be empty")
 	}
 	return path, nil
 }

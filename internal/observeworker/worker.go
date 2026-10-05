@@ -2,7 +2,8 @@ package observeworker
 
 import (
 	"context"
-	"fmt"
+	"errors"
+
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -107,7 +108,7 @@ func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error
 
 func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Registry, traceID string) (observe.TraceObservation, error) {
 	if st == nil {
-		return observe.TraceObservation{}, fmt.Errorf("trace store is nil")
+		return observe.TraceObservation{}, errors.New("trace store is nil")
 	}
 	if registry == nil {
 		registry = observe.NewDefaultRegistry()

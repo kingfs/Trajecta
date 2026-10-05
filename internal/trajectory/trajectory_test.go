@@ -12,6 +12,13 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
+// parseOutput is a test-only view over parseResponse: the tests assert on the
+// four values they care about instead of the whole responseData.
+func parseOutput(body []byte, stream bool) ([]item, any, string, []string) {
+	r := parseResponse(body, stream)
+	return r.Output, r.Usage, r.Status, r.Warnings
+}
+
 func exchange(id, req, res string) Exchange {
 	return Exchange{TraceID: id, Time: time.Unix(100, 0), Model: "test-model", Endpoint: "/v1/responses", StatusCode: 200, Request: []byte(req), Response: []byte(res)}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,14 +37,14 @@ type externalCommandFunctionToolInput struct {
 
 func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
 	if strings.TrimSpace(e.Command) == "" {
-		return FunctionToolResult{}, fmt.Errorf("external command function executor command is required")
+		return FunctionToolResult{}, errors.New("external command function executor command is required")
 	}
 	workingDir, err := e.validatedWorkingDir()
 	if err != nil {
 		return FunctionToolResult{}, err
 	}
 	if e.RequireAbsPath && !filepath.IsAbs(e.Command) {
-		return FunctionToolResult{}, fmt.Errorf("external command function executor command must be absolute")
+		return FunctionToolResult{}, errors.New("external command function executor command must be absolute")
 	}
 	if err := e.validateSandboxConstraints(); err != nil {
 		return FunctionToolResult{}, err
@@ -90,27 +91,27 @@ func (e ExternalCommandFunctionToolExecutor) validatedWorkingDir() (string, erro
 		return "", nil
 	}
 	if !filepath.IsAbs(workingDir) {
-		return "", fmt.Errorf("external command function executor working_dir must be absolute")
+		return "", errors.New("external command function executor working_dir must be absolute")
 	}
 	info, err := os.Stat(workingDir)
 	if err != nil {
 		return "", fmt.Errorf("external command function executor working_dir is not accessible: %w", err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("external command function executor working_dir must be a directory")
+		return "", errors.New("external command function executor working_dir must be a directory")
 	}
 	return workingDir, nil
 }
 
 func (e ExternalCommandFunctionToolExecutor) validateSandboxConstraints() error {
 	if e.RejectRoot && os.Geteuid() == 0 {
-		return fmt.Errorf("external command function executor refuses to run as root")
+		return errors.New("external command function executor refuses to run as root")
 	}
 	if len(e.AllowedCommandDirs) == 0 {
 		return nil
 	}
 	if !filepath.IsAbs(e.Command) {
-		return fmt.Errorf("external command function executor command must be absolute when allowed_command_dirs is configured")
+		return errors.New("external command function executor command must be absolute when allowed_command_dirs is configured")
 	}
 	resolvedCommand, err := filepath.EvalSymlinks(e.Command)
 	if err != nil {
@@ -135,13 +136,13 @@ func (e ExternalCommandFunctionToolExecutor) validateSandboxConstraints() error 
 			return nil
 		}
 	}
-	return fmt.Errorf("external command function executor command is outside allowed_command_dirs")
+	return errors.New("external command function executor command is outside allowed_command_dirs")
 }
 
 func validatedAllowedCommandDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if !filepath.IsAbs(dir) {
-		return "", fmt.Errorf("external command function executor allowed_command_dirs entries must be absolute")
+		return "", errors.New("external command function executor allowed_command_dirs entries must be absolute")
 	}
 	resolvedDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -152,7 +153,7 @@ func validatedAllowedCommandDir(dir string) (string, error) {
 		return "", fmt.Errorf("external command function executor allowed_command_dirs entry is not accessible: %w", err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("external command function executor allowed_command_dirs entries must be directories")
+		return "", errors.New("external command function executor allowed_command_dirs entries must be directories")
 	}
 	return resolvedDir, nil
 }

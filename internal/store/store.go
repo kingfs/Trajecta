@@ -954,7 +954,7 @@ func (s *Store) ListChannelConfigs() ([]ChannelConfigRecord, error) {
 func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return ChannelConfigRecord{}, fmt.Errorf("channel id is required")
+		return ChannelConfigRecord{}, errors.New("channel id is required")
 	}
 	row, err := s.client.ChannelConfig.Get(context.Background(), channelID)
 	if err != nil {
@@ -969,7 +969,7 @@ func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) 
 func (s *Store) DeleteChannelConfig(channelID string) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return fmt.Errorf("channel id is required")
+		return errors.New("channel id is required")
 	}
 
 	ctx := context.Background()
@@ -999,10 +999,10 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		record.ID = uuid.NewString()
 	}
 	if record.Name == "" {
-		return ChannelConfigRecord{}, fmt.Errorf("channel name is required")
+		return ChannelConfigRecord{}, errors.New("channel name is required")
 	}
 	if record.BaseURL == "" {
-		return ChannelConfigRecord{}, fmt.Errorf("channel base_url is required")
+		return ChannelConfigRecord{}, errors.New("channel base_url is required")
 	}
 	if strings.TrimSpace(record.HeadersJSON) == "" {
 		record.HeadersJSON = "{}"
@@ -1083,7 +1083,7 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 func (s *Store) UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return fmt.Errorf("channel id is required")
+		return errors.New("channel id is required")
 	}
 	update := s.client.ChannelConfig.UpdateOneID(channelID).
 		SetUpdatedAt(time.Now().UTC()).
@@ -1158,7 +1158,7 @@ func (s *Store) ListAdoptedChannelModelProfiles() ([]ChannelModelRecord, error) 
 
 func (s *Store) ListModelAliases(alias string, enabledOnly bool) ([]ModelAliasRecord, error) {
 	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("store is not initialized")
+		return nil, errors.New("store is not initialized")
 	}
 	var args []any
 	where := "1=1"
@@ -1189,7 +1189,7 @@ func (s *Store) ListModelAliases(alias string, enabledOnly bool) ([]ModelAliasRe
 
 func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, error) {
 	if s == nil || s.db == nil {
-		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+		return ModelAliasRecord{}, errors.New("store is not initialized")
 	}
 	record = normalizeModelAliasRecord(record)
 	if err := s.ValidateModelAlias(record); err != nil {
@@ -1236,17 +1236,17 @@ func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, err
 
 func (s *Store) ValidateModelAlias(record ModelAliasRecord) error {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store is not initialized")
+		return errors.New("store is not initialized")
 	}
 	record = normalizeModelAliasRecord(record)
 	if record.Alias == "" {
-		return fmt.Errorf("alias is required")
+		return errors.New("alias is required")
 	}
 	if record.TargetModel == "" {
-		return fmt.Errorf("target model is required")
+		return errors.New("target model is required")
 	}
 	if record.Alias == record.TargetModel {
-		return fmt.Errorf("model alias cannot target itself")
+		return errors.New("model alias cannot target itself")
 	}
 	if record.ID == "" {
 		record.ID = stableModelAliasID(record)
@@ -1290,11 +1290,11 @@ func (s *Store) ensureNoDuplicateActiveModelAlias(record ModelAliasRecord) error
 
 func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {
 	if s == nil || s.db == nil {
-		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+		return ModelAliasRecord{}, errors.New("store is not initialized")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return ModelAliasRecord{}, fmt.Errorf("model alias id is required")
+		return ModelAliasRecord{}, errors.New("model alias id is required")
 	}
 	row := s.db.QueryRow(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
 		FROM model_aliases WHERE id = ?`, id)
@@ -1303,11 +1303,11 @@ func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {
 
 func (s *Store) SetModelAliasEnabled(id string, enabled bool) error {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store is not initialized")
+		return errors.New("store is not initialized")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("model alias id is required")
+		return errors.New("model alias id is required")
 	}
 	result, err := s.db.Exec(`UPDATE model_aliases SET enabled = ?, updated_at = ? WHERE id = ?`, enabled, time.Now().UTC(), id)
 	if err != nil {
@@ -1325,11 +1325,11 @@ func (s *Store) SetModelAliasEnabled(id string, enabled bool) error {
 
 func (s *Store) DeleteModelAlias(id string) error {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store is not initialized")
+		return errors.New("store is not initialized")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("model alias id is required")
+		return errors.New("model alias id is required")
 	}
 	result, err := s.db.Exec(`DELETE FROM model_aliases WHERE id = ?`, id)
 	if err != nil {
@@ -1386,7 +1386,7 @@ func stableModelAliasID(record ModelAliasRecord) string {
 func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRecord) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return fmt.Errorf("channel id is required")
+		return errors.New("channel id is required")
 	}
 
 	ctx := context.Background()
@@ -1455,10 +1455,10 @@ func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) 
 	channelID = strings.TrimSpace(channelID)
 	model := strings.ToLower(strings.TrimSpace(record.Model))
 	if channelID == "" {
-		return ChannelModelRecord{}, fmt.Errorf("channel id is required")
+		return ChannelModelRecord{}, errors.New("channel id is required")
 	}
 	if model == "" {
-		return ChannelModelRecord{}, fmt.Errorf("model is required")
+		return ChannelModelRecord{}, errors.New("model is required")
 	}
 	now := time.Now().UTC()
 	if record.FirstSeenAt.IsZero() {
@@ -1532,7 +1532,7 @@ const channelModelUpsertChunk = 100
 func (s *Store) UpsertChannelModels(channelID string, records []ChannelModelRecord) ([]ChannelModelRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return nil, fmt.Errorf("channel id is required")
+		return nil, errors.New("channel id is required")
 	}
 	if len(records) == 0 {
 		return nil, nil
@@ -1542,7 +1542,7 @@ func (s *Store) UpsertChannelModels(channelID string, records []ChannelModelReco
 	for _, record := range records {
 		model := strings.ToLower(strings.TrimSpace(record.Model))
 		if model == "" {
-			return nil, fmt.Errorf("model is required")
+			return nil, errors.New("model is required")
 		}
 		record.Model = model
 		if record.FirstSeenAt.IsZero() {
@@ -1694,10 +1694,10 @@ func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled b
 	channelID = strings.TrimSpace(channelID)
 	model = strings.ToLower(strings.TrimSpace(model))
 	if channelID == "" {
-		return fmt.Errorf("channel id is required")
+		return errors.New("channel id is required")
 	}
 	if model == "" {
-		return fmt.Errorf("model is required")
+		return errors.New("model is required")
 	}
 	affected, err := s.client.ChannelModel.Update().
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
@@ -1717,10 +1717,10 @@ func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch 
 	channelID = strings.TrimSpace(channelID)
 	model = strings.ToLower(strings.TrimSpace(model))
 	if channelID == "" {
-		return ChannelModelRecord{}, fmt.Errorf("channel id is required")
+		return ChannelModelRecord{}, errors.New("channel id is required")
 	}
 	if model == "" {
-		return ChannelModelRecord{}, fmt.Errorf("model is required")
+		return ChannelModelRecord{}, errors.New("model is required")
 	}
 	update := s.client.ChannelModel.Update().
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
@@ -1804,10 +1804,10 @@ func (s *Store) DeleteChannelModel(channelID string, model string) error {
 	channelID = strings.TrimSpace(channelID)
 	model = strings.ToLower(strings.TrimSpace(model))
 	if channelID == "" {
-		return fmt.Errorf("channel id is required")
+		return errors.New("channel id is required")
 	}
 	if model == "" {
-		return fmt.Errorf("model is required")
+		return errors.New("model is required")
 	}
 	affected, err := s.client.ChannelModel.Delete().
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
@@ -1824,7 +1824,7 @@ func (s *Store) DeleteChannelModel(channelID string, model string) error {
 func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
 	model := strings.ToLower(strings.TrimSpace(record.Model))
 	if model == "" {
-		return fmt.Errorf("model is required")
+		return errors.New("model is required")
 	}
 	now := time.Now().UTC()
 	if record.FirstSeenAt.IsZero() {
@@ -1854,7 +1854,7 @@ func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
 func (s *Store) GetModelCatalog(model string) (ModelCatalogRecord, error) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model == "" {
-		return ModelCatalogRecord{}, fmt.Errorf("model is required")
+		return ModelCatalogRecord{}, errors.New("model is required")
 	}
 	row, err := s.client.ModelCatalog.Get(context.Background(), model)
 	if err != nil {
@@ -1874,10 +1874,10 @@ func (s *Store) CreateChannelProbeRun(record ChannelProbeRunRecord) (ChannelProb
 		record.ID = uuid.NewString()
 	}
 	if record.ChannelID == "" {
-		return ChannelProbeRunRecord{}, fmt.Errorf("channel id is required")
+		return ChannelProbeRunRecord{}, errors.New("channel id is required")
 	}
 	if record.Status == "" {
-		return ChannelProbeRunRecord{}, fmt.Errorf("probe status is required")
+		return ChannelProbeRunRecord{}, errors.New("probe status is required")
 	}
 	if record.StartedAt.IsZero() {
 		record.StartedAt = time.Now().UTC()
@@ -2032,7 +2032,7 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySince time.Time, bucketSize time.Duration, bucketCount int) (ModelDetailAnalyticsRecord, error) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model == "" {
-		return ModelDetailAnalyticsRecord{}, fmt.Errorf("model is required")
+		return ModelDetailAnalyticsRecord{}, errors.New("model is required")
 	}
 	all, err := s.ListModelCatalogAnalytics(since, todaySince)
 	if err != nil {
@@ -2107,7 +2107,7 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 func (s *Store) GetChannelUsageTrends(channelID string, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return nil, fmt.Errorf("channel id is required")
+		return nil, errors.New("channel id is required")
 	}
 	return s.usageTrends("selected_upstream_id = ?", []any{channelID}, since, bucketSize, bucketCount)
 }
@@ -2115,7 +2115,7 @@ func (s *Store) GetChannelUsageTrends(channelID string, since time.Time, bucketS
 func (s *Store) GetChannelUsageSummary(channelID string, since time.Time) (UsageSummaryRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return UsageSummaryRecord{}, fmt.Errorf("channel id is required")
+		return UsageSummaryRecord{}, errors.New("channel id is required")
 	}
 	return s.usageSummary("selected_upstream_id = ?", []any{channelID}, since)
 }
@@ -2123,7 +2123,7 @@ func (s *Store) GetChannelUsageSummary(channelID string, since time.Time) (Usage
 func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]ChannelModelAnalyticsRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return nil, fmt.Errorf("channel id is required")
+		return nil, errors.New("channel id is required")
 	}
 	channelModels, err := s.ListChannelModels(channelID, false)
 	if err != nil {
@@ -2190,7 +2190,7 @@ func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]Chann
 func (s *Store) GetChannelRecentFailures(channelID string, since time.Time, limit int) ([]UpstreamFailureRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
-		return nil, fmt.Errorf("channel id is required")
+		return nil, errors.New("channel id is required")
 	}
 	return s.upstreamRecentFailures(channelID, limit, since, "")
 }
@@ -3035,7 +3035,7 @@ func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, e
 func (s *Store) modelLogChannels(model string, since time.Time) ([]string, error) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model == "" {
-		return nil, fmt.Errorf("model is required")
+		return nil, errors.New("model is required")
 	}
 	where := "LOWER(model) = ? AND selected_upstream_id <> ''"
 	args := []any{model}
@@ -3775,7 +3775,7 @@ func (b *secretBox) decryptSecretBytes(value []byte) ([]byte, error) {
 		return append([]byte(nil), value...), nil
 	}
 	if b == nil || b.aead == nil {
-		return nil, fmt.Errorf("encrypted local secret cannot be decrypted without a local key")
+		return nil, errors.New("encrypted local secret cannot be decrypted without a local key")
 	}
 	encoded := strings.TrimPrefix(string(value), secretEnvelopeV1)
 	payload, err := base64.RawStdEncoding.DecodeString(encoded)
@@ -3784,7 +3784,7 @@ func (b *secretBox) decryptSecretBytes(value []byte) ([]byte, error) {
 	}
 	nonceSize := b.aead.NonceSize()
 	if len(payload) < nonceSize {
-		return nil, fmt.Errorf("encrypted local secret payload is too short")
+		return nil, errors.New("encrypted local secret payload is too short")
 	}
 	nonce, ciphertext := payload[:nonceSize], payload[nonceSize:]
 	return b.aead.Open(nil, nonce, ciphertext, nil)
@@ -3826,7 +3826,7 @@ func (s *Store) SecretStatus() SecretStatus {
 func (s *Store) ExportLocalSecretKey() ([]byte, SecretStatus, error) {
 	status := s.SecretStatus()
 	if strings.TrimSpace(status.KeyPath) == "" {
-		return nil, status, fmt.Errorf("local secret key path is not configured")
+		return nil, status, errors.New("local secret key path is not configured")
 	}
 	key, err := readLocalSecretKey(status.KeyPath)
 	if err != nil {
@@ -3842,10 +3842,10 @@ func (s *Store) ExportLocalSecretKey() ([]byte, SecretStatus, error) {
 
 func (s *Store) RotateLocalSecretKey() (SecretRotationResult, error) {
 	if s == nil || s.secrets == nil || s.secrets.aead == nil {
-		return SecretRotationResult{}, fmt.Errorf("local secret encryption is not configured")
+		return SecretRotationResult{}, errors.New("local secret encryption is not configured")
 	}
 	if strings.TrimSpace(s.secrets.keyPath) == "" {
-		return SecretRotationResult{}, fmt.Errorf("local secret key path is not configured")
+		return SecretRotationResult{}, errors.New("local secret key path is not configured")
 	}
 	oldKey, err := readLocalSecretKey(s.secrets.keyPath)
 	if err != nil {
@@ -5476,7 +5476,7 @@ func (s *Store) UpsertUpstreamTarget(record UpstreamTargetRecord) error {
 func (s *Store) CreateDataset(name string, description string) (DatasetRecord, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return DatasetRecord{}, fmt.Errorf("dataset name is required")
+		return DatasetRecord{}, errors.New("dataset name is required")
 	}
 	now := time.Now().UTC()
 	record := DatasetRecord{
@@ -5559,7 +5559,7 @@ func (s *Store) GetDataset(datasetID string) (DatasetRecord, error) {
 func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourceType string, sourceID string, note string) (int, int, error) {
 	datasetID = strings.TrimSpace(datasetID)
 	if datasetID == "" {
-		return 0, 0, fmt.Errorf("dataset id is required")
+		return 0, 0, errors.New("dataset id is required")
 	}
 	if _, err := s.GetDataset(datasetID); err != nil {
 		return 0, 0, err
@@ -5705,7 +5705,7 @@ func (s *Store) GetDatasetExamples(datasetID string) ([]DatasetExampleRecord, er
 func (s *Store) CreateEvalRun(datasetID string, sourceType string, sourceID string, evaluatorSet string, traceCount int) (EvalRunRecord, error) {
 	evaluatorSet = strings.TrimSpace(evaluatorSet)
 	if evaluatorSet == "" {
-		return EvalRunRecord{}, fmt.Errorf("evaluator set is required")
+		return EvalRunRecord{}, errors.New("evaluator set is required")
 	}
 	now := time.Now().UTC()
 	record := EvalRunRecord{
@@ -5749,10 +5749,10 @@ func (s *Store) FinalizeEvalRun(evalRunID string, scoreCount int, passCount int,
 
 func (s *Store) AddScore(record ScoreRecord) (ScoreRecord, error) {
 	if strings.TrimSpace(record.TraceID) == "" {
-		return ScoreRecord{}, fmt.Errorf("trace id is required")
+		return ScoreRecord{}, errors.New("trace id is required")
 	}
 	if strings.TrimSpace(record.EvaluatorKey) == "" {
-		return ScoreRecord{}, fmt.Errorf("evaluator key is required")
+		return ScoreRecord{}, errors.New("evaluator key is required")
 	}
 	now := time.Now().UTC()
 	if record.ID == "" {
@@ -5840,10 +5840,10 @@ func (s *Store) ListScores(filter ScoreFilter, limit int) ([]ScoreRecord, error)
 
 func (s *Store) CreateExperimentRun(record ExperimentRunRecord) (ExperimentRunRecord, error) {
 	if strings.TrimSpace(record.BaselineEvalRunID) == "" {
-		return ExperimentRunRecord{}, fmt.Errorf("baseline eval run id is required")
+		return ExperimentRunRecord{}, errors.New("baseline eval run id is required")
 	}
 	if strings.TrimSpace(record.CandidateEvalRunID) == "" {
-		return ExperimentRunRecord{}, fmt.Errorf("candidate eval run id is required")
+		return ExperimentRunRecord{}, errors.New("candidate eval run id is required")
 	}
 	record.ID = uuid.NewString()
 	record.CreatedAt = time.Now().UTC()
@@ -6090,7 +6090,7 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
-		return fmt.Errorf("update log usage: trace id is required")
+		return errors.New("update log usage: trace id is required")
 	}
 	cachedTokens := 0
 	if usage.PromptTokenDetails != nil {
@@ -7403,7 +7403,7 @@ func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
 
 func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	if obs.TraceID == "" {
-		return fmt.Errorf("save observation: trace id is required")
+		return errors.New("save observation: trace id is required")
 	}
 	now := time.Now().UTC()
 	warningsJSON, err := json.Marshal(obs.Warnings)
@@ -7701,7 +7701,7 @@ func (s *Store) GetTraceExchangeMetadata(traceID string) (recordfile.MetaData, e
 
 func (s *Store) EnqueueParseJob(traceID string) error {
 	if strings.TrimSpace(traceID) == "" {
-		return fmt.Errorf("enqueue parse job: trace id is required")
+		return errors.New("enqueue parse job: trace id is required")
 	}
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
@@ -7822,15 +7822,15 @@ func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
 func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 	event.Fingerprint = strings.TrimSpace(event.Fingerprint)
 	if event.Fingerprint == "" {
-		return SystemEvent{}, fmt.Errorf("upsert system event: fingerprint is required")
+		return SystemEvent{}, errors.New("upsert system event: fingerprint is required")
 	}
 	event.Source = strings.TrimSpace(event.Source)
 	if event.Source == "" {
-		return SystemEvent{}, fmt.Errorf("upsert system event: source is required")
+		return SystemEvent{}, errors.New("upsert system event: source is required")
 	}
 	event.Category = strings.TrimSpace(event.Category)
 	if event.Category == "" {
-		return SystemEvent{}, fmt.Errorf("upsert system event: category is required")
+		return SystemEvent{}, errors.New("upsert system event: category is required")
 	}
 	event.Severity = strings.TrimSpace(event.Severity)
 	if event.Severity == "" {
@@ -8099,13 +8099,13 @@ func (s *Store) SubscribeSystemEvents(buffer int) (<-chan SystemEventNotificatio
 
 func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 	if strings.TrimSpace(traceID) == "" {
-		return fmt.Errorf("save findings: trace id is required")
+		return errors.New("save findings: trace id is required")
 	}
 	now := time.Now().UTC()
 	normalized := make([]observe.Finding, 0, len(findings))
 	for _, finding := range findings {
 		if finding.ID == "" {
-			return fmt.Errorf("save findings: finding id is required")
+			return errors.New("save findings: finding id is required")
 		}
 		if finding.CreatedAt.IsZero() {
 			finding.CreatedAt = now
@@ -8182,7 +8182,7 @@ func dedupeFindingsByKey(findings []observe.Finding) []observe.Finding {
 
 func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Finding, error) {
 	if strings.TrimSpace(traceID) == "" {
-		return nil, fmt.Errorf("list findings: trace id is required")
+		return nil, errors.New("list findings: trace id is required")
 	}
 	query := `
 		SELECT finding_id, trace_id, category, severity, confidence, title, description,
@@ -8302,10 +8302,10 @@ func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Find
 
 func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if strings.TrimSpace(run.Kind) == "" {
-		return 0, fmt.Errorf("save analysis run: kind is required")
+		return 0, errors.New("save analysis run: kind is required")
 	}
 	if strings.TrimSpace(run.Analyzer) == "" {
-		return 0, fmt.Errorf("save analysis run: analyzer is required")
+		return 0, errors.New("save analysis run: analyzer is required")
 	}
 	if strings.TrimSpace(run.Status) == "" {
 		run.Status = "completed"
@@ -8404,13 +8404,13 @@ func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, 
 
 func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, error) {
 	if strings.TrimSpace(job.JobType) == "" {
-		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: job type is required")
+		return AnalysisJobRecord{}, errors.New("create analysis job: job type is required")
 	}
 	if strings.TrimSpace(job.TargetType) == "" {
-		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: target type is required")
+		return AnalysisJobRecord{}, errors.New("create analysis job: target type is required")
 	}
 	if strings.TrimSpace(job.TargetID) == "" {
-		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: target id is required")
+		return AnalysisJobRecord{}, errors.New("create analysis job: target id is required")
 	}
 	if strings.TrimSpace(job.Status) == "" {
 		job.Status = "queued"
@@ -11082,7 +11082,7 @@ func normalizePage(page int, pageSize int) (int, int) {
 func encodeSystemEventCursor(event SystemEvent) (string, error) {
 	event.ID = strings.TrimSpace(event.ID)
 	if event.ID == "" || event.LastSeenAt.IsZero() {
-		return "", fmt.Errorf("encode system event cursor: missing sort key")
+		return "", errors.New("encode system event cursor: missing sort key")
 	}
 	payload := systemEventCursor{
 		Version:    systemEventCursorVersion,
@@ -11099,26 +11099,26 @@ func encodeSystemEventCursor(event SystemEvent) (string, error) {
 func decodeSystemEventCursor(value string) (systemEventCursorPosition, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: cursor is empty")
+		return systemEventCursorPosition{}, errors.New("decode system event cursor: cursor is empty")
 	}
 	data, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid encoding")
+		return systemEventCursorPosition{}, errors.New("decode system event cursor: invalid encoding")
 	}
 	var payload systemEventCursor
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid payload")
+		return systemEventCursorPosition{}, errors.New("decode system event cursor: invalid payload")
 	}
 	if payload.Version != systemEventCursorVersion {
 		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: unsupported version %d", payload.Version)
 	}
 	payload.ID = strings.TrimSpace(payload.ID)
 	if payload.ID == "" {
-		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: id is required")
+		return systemEventCursorPosition{}, errors.New("decode system event cursor: id is required")
 	}
 	lastSeenAt, err := timeParse(payload.LastSeenAt)
 	if err != nil || lastSeenAt.IsZero() {
-		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid last_seen_at")
+		return systemEventCursorPosition{}, errors.New("decode system event cursor: invalid last_seen_at")
 	}
 	return systemEventCursorPosition{LastSeenAt: lastSeenAt.UTC(), ID: payload.ID}, nil
 }

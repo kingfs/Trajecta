@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -148,10 +149,10 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 	responseID := strings.TrimSpace(in.ResponseID)
 	requestAuditID := strings.TrimSpace(in.RequestAuditID)
 	if responseID == "" && requestAuditID == "" {
-		return nil, nil, fmt.Errorf("response_id or request_audit_id is required")
+		return nil, nil, errors.New("response_id or request_audit_id is required")
 	}
 	if a.store == nil || a.store.EntClient() == nil {
-		return nil, nil, fmt.Errorf("store is not available")
+		return nil, nil, errors.New("store is not available")
 	}
 
 	trace, found, err := responsesaudit.NewQueryService(a.store.EntClient()).GetRequestAuditTrace(ctx, responsesaudit.GetRequestAuditTraceParams{
@@ -196,7 +197,7 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 
 func (a *serverAPI) responsesAuditToolCalls(ctx context.Context, req *mcp.CallToolRequest, in *responsesAuditToolCallsInput) (*mcp.CallToolResult, *responsesAuditToolCallsOutput, error) {
 	if a.store == nil || a.store.EntClient() == nil {
-		return nil, nil, fmt.Errorf("store is not available")
+		return nil, nil, errors.New("store is not available")
 	}
 	params := responsesaudit.ListToolCallAuditsParams{
 		ResponseID:     strings.TrimSpace(in.ResponseID),

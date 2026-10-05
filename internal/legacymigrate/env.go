@@ -9,6 +9,7 @@
 package legacymigrate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -112,7 +113,7 @@ func parseEnvValue(raw string) (string, error) {
 	case '"':
 		end := indexUnescapedQuote(value, '"')
 		if end < 0 {
-			return "", fmt.Errorf("unterminated double-quoted value")
+			return "", errors.New("unterminated double-quoted value")
 		}
 		if err := rejectTrailingContent(value[end+1:]); err != nil {
 			return "", err
@@ -120,11 +121,11 @@ func parseEnvValue(raw string) (string, error) {
 		return unescapeDoubleQuoted(value[1:end])
 	case '\'':
 		if len(value) < 2 {
-			return "", fmt.Errorf("unterminated single-quoted value")
+			return "", errors.New("unterminated single-quoted value")
 		}
 		end := strings.IndexByte(value[1:], '\'')
 		if end < 0 {
-			return "", fmt.Errorf("unterminated single-quoted value")
+			return "", errors.New("unterminated single-quoted value")
 		}
 		end++
 		if err := rejectTrailingContent(value[end+1:]); err != nil {
@@ -177,7 +178,7 @@ func unescapeDoubleQuoted(value string) (string, error) {
 		}
 		i++
 		if i >= len(value) {
-			return "", fmt.Errorf("trailing backslash in double-quoted value")
+			return "", errors.New("trailing backslash in double-quoted value")
 		}
 		switch value[i] {
 		case 'n':

@@ -3,7 +3,8 @@ package legacymigrate
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func TestIsRecoverableRowError(t *testing.T) {
 	if isRecoverableRowError(&pq.Error{Code: ""}) {
 		t.Error("an empty code must not be recoverable")
 	}
-	if isRecoverableRowError(fmt.Errorf("plain error")) {
+	if isRecoverableRowError(errors.New("plain error")) {
 		t.Error("a non-pq error must not be recoverable")
 	}
 	if !isUniqueViolation(&pq.Error{Code: "23505"}) || isUniqueViolation(&pq.Error{Code: "22001"}) {

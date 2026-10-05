@@ -1,3 +1,11 @@
+// Package recordfile reads and writes the `.http` cassette container: a short
+// prelude (the `# trajecta/v3` magic, one `# meta:` JSON line and zero or more
+// `# event:` JSON lines) followed by the raw HTTP request and response bytes.
+//
+// Writers emit V3 only. Readers additionally accept the legacy `LLM_PROXY_V2`
+// layout with its fixed 2KB JSON header block and the pre-rename prelude magic
+// `# llm-tracelab/v3`; `LLM_PROXY_V3` stays the stable format identifier and is
+// deliberately not renamed.
 package recordfile
 
 import (
@@ -6,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -215,7 +224,7 @@ func BuildEvents(header RecordHeader) []RecordEvent {
 func ParsePrelude(content []byte) (*ParsedPrelude, error) {
 	lineEnd := bytes.IndexByte(content, '\n')
 	if lineEnd < 0 {
-		return nil, fmt.Errorf("failed to read prelude: missing first line")
+		return nil, errors.New("failed to read prelude: missing first line")
 	}
 
 	line := bytes.TrimSuffix(content[:lineEnd], []byte("\r"))
@@ -245,7 +254,7 @@ func parseV3Prelude(content []byte) (*ParsedPrelude, error) {
 	for len(content) > 0 {
 		lineEnd := bytes.IndexByte(content, '\n')
 		if lineEnd < 0 {
-			return nil, fmt.Errorf("scan v3 prelude: missing blank line")
+			return nil, errors.New("scan v3 prelude: missing blank line")
 		}
 
 		rawLine := content[:lineEnd]
@@ -278,7 +287,7 @@ func parseV3Prelude(content []byte) (*ParsedPrelude, error) {
 	}
 
 	if !gotMeta {
-		return nil, fmt.Errorf("missing v3 meta line")
+		return nil, errors.New("missing v3 meta line")
 	}
 
 	return &ParsedPrelude{

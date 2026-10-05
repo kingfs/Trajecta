@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -175,7 +176,7 @@ func providerProbeTargets(cfg config.Config, id string) ([]providerprobe.ProbeTa
 		return nil, fmt.Errorf("upstream target %q was not found or has no base_url", id)
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no enabled upstream provider with base_url is configured")
+		return nil, errors.New("no enabled upstream provider with base_url is configured")
 	}
 	return targets, nil
 }

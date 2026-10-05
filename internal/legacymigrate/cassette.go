@@ -208,7 +208,7 @@ func readFirstLine(file *os.File) ([]byte, error) {
 		return nil, err
 	}
 	if n == 0 {
-		return nil, fmt.Errorf("empty file")
+		return nil, errors.New("empty file")
 	}
 	content := buffer[:n]
 	if idx := indexByte(content, '\n'); idx >= 0 {

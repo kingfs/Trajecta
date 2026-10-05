@@ -1,3 +1,11 @@
+// Package llm normalizes requests, responses, stream events and token usage
+// across the protocol families Trajecta records: OpenAI-compatible, Anthropic
+// Messages, Google GenAI and Vertex. It exposes the per-protocol adapters, the
+// trace semantics used by the monitor, and the streaming ResponsePipeline that
+// extracts usage and timeline events from a recorded response.
+//
+// Normalization is for observation only: the adapters never translate a
+// request into another protocol family for forwarding.
 package llm
 
 import (

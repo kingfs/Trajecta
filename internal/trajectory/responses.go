@@ -14,10 +14,6 @@ type responseData struct {
 	Warnings          []string
 }
 
-func parseOutput(body []byte, stream bool) ([]item, any, string, []string) {
-	r := parseResponse(body, stream)
-	return r.Output, r.Usage, r.Status, r.Warnings
-}
 func parseResponse(body []byte, stream bool) responseData {
 	text := strings.TrimSpace(string(body))
 	// Some failed streaming requests return JSON instead of SSE.

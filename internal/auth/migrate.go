@@ -191,7 +191,7 @@ func latestEmbeddedMigrationVersion() (int, error) {
 		}
 	}
 	if latest == 0 {
-		return 0, fmt.Errorf("no embedded up migrations found")
+		return 0, errors.New("no embedded up migrations found")
 	}
 	return latest, nil
 }
@@ -363,7 +363,7 @@ func checkSQLiteAuthTables(db *sql.DB, status *MigrationStatus) error {
 
 func checkPostgresAuthTables(dsn string, status *MigrationStatus) error {
 	if strings.TrimSpace(dsn) == "" {
-		return fmt.Errorf("postgres auth database dsn is required")
+		return errors.New("postgres auth database dsn is required")
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -413,7 +413,7 @@ func newMigrator(driverName string, dsn string) (*gomigrate.Migrate, error) {
 	}
 	path := config.SQLitePathFromDSN(dsn)
 	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("database path is required")
+		return nil, errors.New("database path is required")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
