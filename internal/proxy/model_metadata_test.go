@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -79,5 +80,52 @@ func TestRequestModelFromBodyFallsBackForUncoveredEntrypoint(t *testing.T) {
 	}
 	if got := requestModelFromBody(req, []byte(`{"input":"hello"}`)); got != "" {
 		t.Fatalf("requestModelFromBody(no model) = %q, want empty", got)
+	}
+}
+
+// TestAggregatedModelEntryKeepsTheOpenAIModelShape pins the field set the OpenAI model schema
+// requires, on the raw JSON rather than on the Go struct.
+//
+// `/v1/models` and `/v1/models/{id}` are answered locally, but the clients that call them are the
+// typed OpenAI SDKs, whose Model type requires id, object, created and owned_by. `created` is the
+// one field this catalog has no natural value for (an entry exists because a channel declares or
+// discovers the model, not because the model was released at a known time), which is exactly why
+// it is easy to drop: the object still marshals, so nothing but a client-side validation error
+// would notice. Decoding the marshalled bytes keeps `omitempty` and tag mistakes visible.
+func TestAggregatedModelEntryKeepsTheOpenAIModelShape(t *testing.T) {
+	for _, model := range []string{"qwen3.6-35b-a3b", "local-only-model"} {
+		raw, err := json.Marshal(newAggregatedModelListEntry(model))
+		if err != nil {
+			t.Fatalf("marshal %s: %v", model, err)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("unmarshal %s: %v; body=%s", model, err, raw)
+		}
+
+		var id string
+		if err := json.Unmarshal(payload["id"], &id); err != nil || id != model {
+			t.Errorf("id = %s (err %v), want %q; body=%s", payload["id"], err, model, raw)
+		}
+		var object string
+		if err := json.Unmarshal(payload["object"], &object); err != nil || object != "model" {
+			t.Errorf("object = %s (err %v), want \"model\"; body=%s", payload["object"], err, raw)
+		}
+		var ownedBy string
+		if err := json.Unmarshal(payload["owned_by"], &ownedBy); err != nil || ownedBy == "" {
+			t.Errorf("owned_by = %s (err %v), want a non-empty owner; body=%s", payload["owned_by"], err, raw)
+		}
+
+		created, ok := payload["created"]
+		if !ok {
+			t.Fatalf("body=%s has no created field; the OpenAI Model type requires it", raw)
+		}
+		var createdAt int64
+		if err := json.Unmarshal(created, &createdAt); err != nil {
+			t.Fatalf("created = %s is not a number: %v; body=%s", created, err, raw)
+		}
+		if createdAt != aggregatedModelCreatedAt {
+			t.Errorf("created = %d, want the fixed %d so the payload is stable for a given configuration", createdAt, aggregatedModelCreatedAt)
+		}
 	}
 }

@@ -51,7 +51,11 @@ type ollamaShowRequest struct {
 }
 
 type aggregatedModelListEntry struct {
-	ID            string                       `json:"id"`
+	ID string `json:"id"`
+	// Created is required by the OpenAI model schema; every entry reports the same fixed value
+	// because the catalog is a projection of the routing configuration (see
+	// aggregatedModelCreatedAt).
+	Created       int64                        `json:"created"`
 	CanonicalSlug string                       `json:"canonical_slug,omitempty"`
 	Name          string                       `json:"name,omitempty"`
 	Object        string                       `json:"object,omitempty"`

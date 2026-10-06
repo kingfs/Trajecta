@@ -78,7 +78,10 @@ func TestAggregatedModelListOnlyNamesRoutableModels(t *testing.T) {
 	}
 	var catalog struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created *int64 `json:"created"`
+			OwnedBy string `json:"owned_by"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &catalog); err != nil {
@@ -87,6 +90,15 @@ func TestAggregatedModelListOnlyNamesRoutableModels(t *testing.T) {
 	listed := map[string]bool{}
 	for _, item := range catalog.Data {
 		listed[item.ID] = true
+		// The list is consumed by typed OpenAI clients, whose Model type requires all four
+		// fields; a locally answered entry that omits one fails client-side validation even
+		// though the JSON is well formed.
+		if item.Object != "model" || item.OwnedBy == "" {
+			t.Errorf("catalog entry %q = %+v, want object \"model\" and a non-empty owned_by", item.ID, item)
+		}
+		if item.Created == nil {
+			t.Errorf("catalog entry %q has no created field; the OpenAI Model type requires it", item.ID)
+		}
 	}
 	if len(listed) == 0 {
 		t.Fatalf("catalog is empty, want the enabled target's models; body = %s", raw)
@@ -108,6 +120,29 @@ func TestAggregatedModelListOnlyNamesRoutableModels(t *testing.T) {
 		chatResp.Body.Close()
 		if chatResp.StatusCode != http.StatusOK {
 			t.Errorf("catalog advertises %q but the proxy answers %d: %s", model, chatResp.StatusCode, chatBody)
+		}
+
+		// The detail endpoint synthesizes the same object, so it has to carry the same shape.
+		detailResp, err := http.Get(proxySrv.URL + "/v1/models/" + model)
+		if err != nil {
+			t.Fatalf("GET /v1/models/%s error = %v", model, err)
+		}
+		detailBody, _ := io.ReadAll(detailResp.Body)
+		detailResp.Body.Close()
+		if detailResp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /v1/models/%s status = %d, body = %s", model, detailResp.StatusCode, detailBody)
+		}
+		var detail struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created *int64 `json:"created"`
+			OwnedBy string `json:"owned_by"`
+		}
+		if err := json.Unmarshal(detailBody, &detail); err != nil {
+			t.Fatalf("decode detail %s: %v", detailBody, err)
+		}
+		if detail.ID != model || detail.Object != "model" || detail.OwnedBy == "" || detail.Created == nil {
+			t.Errorf("GET /v1/models/%s = %s, want the id, object, owned_by and created fields the list entry carries", model, detailBody)
 		}
 	}
 }

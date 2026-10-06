@@ -6,10 +6,21 @@ import (
 	llmspecs "github.com/kingfs/go-llm-specs"
 )
 
+// aggregatedModelCreatedAt is the `created` value reported for every synthesized model object.
+//
+// The OpenAI model schema requires id, object, created and owned_by, and the typed clients built
+// from that schema reject an object whose `created` is missing, so the field cannot be left out
+// just because this endpoint is answered locally. Trajecta does not track a per-model creation
+// time: an entry exists because a channel declares or discovers the model, which has no upstream
+// release date to report. A fixed timestamp keeps the payload stable for a given configuration,
+// which a per-process clock would not.
+const aggregatedModelCreatedAt = 1735689600 // 2025-01-01T00:00:00Z
+
 func newAggregatedModelListEntry(model string) aggregatedModelListEntry {
 	entry := aggregatedModelListEntry{
 		ID:      model,
 		Object:  "model",
+		Created: aggregatedModelCreatedAt,
 		OwnedBy: "trajecta",
 	}
 

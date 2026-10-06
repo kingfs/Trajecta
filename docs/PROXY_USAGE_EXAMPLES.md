@@ -48,6 +48,8 @@ export TRAJECTA_TOKEN=llmtl_xxx
 | `/api/show`（Ollama） | `/api/show` | Ollama 模型详情（从聚合列表合成，不转发上游） |
 | `/v1/embeddings` | `/v1/embeddings` | 只被分类，不可路由：`pkg/llm.AdapterFor` 没有 embeddings adapter，路由判定的 `supportsPath` 因此永远返回 false |
 
+`/v1/models` 与 `/v1/models/{id}` 返回的是 OpenAI 模型对象，字段集会带上 `id`、`object: "model"`、`created` 与 `owned_by`：`created` 由 OpenAI 的模型 schema 要求（类型化客户端会校验它），而代理并不跟踪每个模型的发布时间，因此所有条目统一取固定值 `1735689600`（2025-01-01T00:00:00Z，`aggregatedModelCreatedAt`），让同一份配置的响应保持稳定。
+
 入口归一化、各协议族的 endpoint 覆盖与 provider 能力要求的完整矩阵见 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md) 与 [协议参考](./protocol-reference/implemented-protocols.md)。
 
 代理是协议感知的透传与录制，`/v1/messages` 只会路由到 Anthropic Messages 上游，不会退化成 `/v1/chat/completions`；跨协议翻译的边界与非目标见 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md)。除 `/v1/responses` 的本地 Responses runtime 外没有其他特例，见下文。
