@@ -151,14 +151,14 @@ type reanalyzeTraceInput struct {
 	RepairUsage bool   `json:"repair_usage,omitempty" jsonschema:"repair indexed usage before reparse/scan"`
 	Reparse     bool   `json:"reparse,omitempty" jsonschema:"rebuild Observation IR, default true"`
 	Scan        bool   `json:"scan,omitempty" jsonschema:"run deterministic audit scan, default true"`
-	Async       bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately"`
+	Async       bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately; default false, which runs synchronously and returns the reanalysis result"`
 }
 
 type reanalyzeSessionInput struct {
 	SessionID string `json:"session_id" jsonschema:"session identifier from list_sessions"`
 	Reparse   bool   `json:"reparse,omitempty" jsonschema:"rebuild Observation IR for session traces, default true"`
 	Scan      bool   `json:"scan,omitempty" jsonschema:"run deterministic audit scan for session traces, default true"`
-	Async     bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately, default true"`
+	Async     bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately; default false, which runs synchronously and returns the reanalysis result"`
 }
 
 type listAnalysisJobsInput struct {
