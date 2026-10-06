@@ -2118,19 +2118,7 @@ func supportsPath(target *Target, rawPath string, features RequestFeatures) bool
 	if target == nil {
 		return false
 	}
-	semantics := llm.ClassifyPath(rawPath, "")
-	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
-		return false
-	}
-	if !supportsAPISurface(target.Upstream, semantics.Endpoint, features.ModelName) {
-		return false
-	}
-	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
-	return err == nil
-}
-
-func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string, model string) bool {
-	return resolved.SupportsEndpointForModel(endpoint, model)
+	return target.Upstream.SupportsRawPath(rawPath, features.ModelName)
 }
 
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
@@ -2141,21 +2129,6 @@ func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 		return false
 	}
 	return true
-}
-
-func supportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {
-	switch protocolFamily {
-	case upstream.ProtocolFamilyAnthropicMessages:
-		return provider == llm.ProviderAnthropic || endpoint == "/v1/models"
-	case upstream.ProtocolFamilyGoogleGenAI:
-		return provider == llm.ProviderGoogleGenAI
-	case upstream.ProtocolFamilyVertexNative:
-		return provider == llm.ProviderVertexNative
-	case upstream.ProtocolFamilyOpenAICompatible, "":
-		return llm.IsOpenAICompatibleProvider(provider)
-	default:
-		return false
-	}
 }
 
 func requestModel(rawPath string, body []byte) string {

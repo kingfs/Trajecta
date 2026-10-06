@@ -135,7 +135,7 @@ Trajecta 自身的事件收件箱：
 - Decisions：最近选中的路由（数据来自 `GET /api/routing/exchanges`），可按模型、通道/上游、状态、耗时、TTFT、Token 过滤。
 - Settings：编辑路由设置（`PATCH /api/settings/routing`），包括 `responses_strategy`、`selection_policy`、`missing_model_policy`。
 - Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
-- Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。
+- Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。
 
 摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件、旧数据/缺失事件和解析错误的 trace。
 

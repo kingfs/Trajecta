@@ -743,6 +743,64 @@ func capabilityValue(value *bool) (bool, bool) {
 	return *value, true
 }
 
+// SupportsProtocolFamily reports whether an upstream of this protocol family can serve an
+// endpoint that belongs to the endpoint's provider.
+//
+// It is the family half of the routing rule, and it is deliberately shared: the forwarding hot
+// path and the Monitor's routing inspector must agree on which surfaces a channel can serve, or
+// the inspector answers a different question than the one the proxy acts on. The family is
+// authoritative because the proxy does not translate between protocol families, with the two
+// documented exceptions the endpoint check keeps: `/v1/models` is answered for every family,
+// and `/v1/responses` may be served by an OpenAI-compatible Chat Completions backend through
+// the local runtime.
+func SupportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {
+	switch protocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return provider == llm.ProviderAnthropic || endpoint == "/v1/models"
+	case ProtocolFamilyGoogleGenAI:
+		return provider == llm.ProviderGoogleGenAI
+	case ProtocolFamilyVertexNative:
+		return provider == llm.ProviderVertexNative
+	case ProtocolFamilyOpenAICompatible, "":
+		return llm.IsOpenAICompatibleProvider(provider)
+	default:
+		return false
+	}
+}
+
+// SupportsRawPath reports whether this upstream can serve rawPath for the named model: the
+// protocol family has to match the endpoint, the API surface has to be able to serve it (per
+// model, so a model that declares one surface is not selected for the other) and an adapter has
+// to exist for the endpoint.
+//
+// It is the whole structural half of the forwarding path's eligibility rule, kept here so that
+// the inspector and the hot path cannot drift apart.
+// SupportsNativeResponsesPath reports whether the upstream serves `/v1/responses` with its own
+// Responses API, without the local Responses runtime's Chat Completions translation.
+//
+// SupportsRawPath cannot answer this on its own: `/v1/responses` is the one endpoint an
+// OpenAI-compatible Chat Completions channel can also serve, through the local runtime, so
+// SupportsEndpointForModel accepts it for chat-only channels. The route planner derives that
+// local candidate (`responses_server`) from the Chat Completions capability, which means a
+// channel-level "can serve Responses" flag - such as the one the Monitor inspector passes to
+// routeplan.UpstreamCandidate - has to report the native surface only, or every Chat Completions
+// channel is offered a `proxy_pass` candidate it cannot honour.
+func (u ResolvedUpstream) SupportsNativeResponsesPath(model string) bool {
+	return u.SupportsResponsesAPIForModel(model) && u.SupportsRawPath("/v1/responses", model)
+}
+
+func (u ResolvedUpstream) SupportsRawPath(rawPath string, model string) bool {
+	semantics := llm.ClassifyPath(rawPath, "")
+	if !SupportsProtocolFamily(u.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
+		return false
+	}
+	if !u.SupportsEndpointForModel(semantics.Endpoint, model) {
+		return false
+	}
+	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
+	return err == nil
+}
+
 func defaultAPITypeForProtocolFamily(protocolFamily string) string {
 	switch protocolFamily {
 	case ProtocolFamilyAnthropicMessages:

@@ -522,7 +522,7 @@ func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (Prob
 			result.ProviderReport = providerReport
 		}
 	}
-	resolved, err := upstream.Resolve(upstreamConfigFromChannel(channel))
+	resolved, err := upstream.Resolve(UpstreamConfigFromChannel(channel))
 	if err != nil {
 		return s.finishProbe(result, resolved, nil, err, options)
 	}
@@ -715,7 +715,10 @@ func isNetworkProbeError(err error, text string) bool {
 		strings.Contains(text, "tls handshake")
 }
 
-func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.UpstreamConfig {
+// UpstreamConfigFromChannel maps a stored channel record onto the configuration the upstream
+// resolver reads. It is exported so the Monitor inspector resolves a channel exactly the way
+// the forwarding path does instead of re-deriving its capabilities from the raw api_type.
+func UpstreamConfigFromChannel(channel store.ChannelConfigRecord) config.UpstreamConfig {
 	headers := map[string]string{}
 	if strings.TrimSpace(channel.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(channel.HeadersJSON), &headers)
@@ -740,7 +743,7 @@ func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 }
 
 func providerProbeTargetFromChannel(channel store.ChannelConfigRecord) providerprobe.ProbeTarget {
-	upstreamCfg := upstreamConfigFromChannel(channel)
+	upstreamCfg := UpstreamConfigFromChannel(channel)
 	return providerprobe.ProbeTarget{
 		ProviderID:              channel.ID,
 		BaseURL:                 upstreamCfg.BaseURL,

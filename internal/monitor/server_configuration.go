@@ -1388,24 +1388,50 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 	return out, nil
 }
 
-func upstreamCapabilitiesFromChannel(channel store.ChannelConfigRecord) inspectCapabilities {
+func upstreamCapabilitiesFromChannel(record store.ChannelConfigRecord) inspectCapabilities {
 	var configured config.UpstreamCapabilitiesConfig
-	capabilitiesJSON := strings.TrimSpace(channel.CapabilitiesJSON)
+	capabilitiesJSON := strings.TrimSpace(record.CapabilitiesJSON)
 	if capabilitiesJSON == "" {
 		capabilitiesJSON = "{}"
 	}
 	_ = json.Unmarshal([]byte(capabilitiesJSON), &configured)
 	caps := inspectCapabilities{toolCalling: true}
+	if configured.ToolCalling != nil {
+		caps.toolCalling = *configured.ToolCalling
+	}
+
+	// Resolve the channel the way the forwarding path does and ask the same predicate the hot
+	// path asks, instead of reading the raw api_type.
+	//
+	// The stored record is not the resolved upstream: `api_type` and `protocol_family` are both
+	// optional, and the resolver fills them in from the provider preset
+	// (`upstream.Resolve` -> `defaultAPITypeForProtocolFamily`). Reading the raw field meant a
+	// channel configured the way config/examples/anthropic.yaml, google_genai.yaml and
+	// vertex.yaml are - provider preset, no api_type - was described as a Chat Completions
+	// channel: `POST /api/routing/inspect` denied the `/v1/messages` request the proxy serves
+	// with 200 and offered the `/v1/chat/completions` request the proxy refuses with 502.
+	// `SupportsRawPath` is the family, API-surface and adapter rule the router uses, so the two
+	// answers cannot drift apart again.
+	if resolved, err := upstream.Resolve(channel.UpstreamConfigFromChannel(record)); err == nil {
+		caps.chatCompletions = resolved.SupportsRawPath("/v1/chat/completions", "")
+		// `/v1/responses` has two servers: the channel's own Responses API (`proxy_pass`) and the
+		// local runtime translating to Chat Completions (`responses_server`). The planner derives
+		// the second from the Chat Completions flag, so this one reports the native surface only.
+		caps.responses = resolved.SupportsNativeResponsesPath("")
+		caps.anthropicMessages = resolved.SupportsRawPath("/v1/messages", "")
+		return caps
+	}
+
+	// The resolver rejected the channel, so the hot path cannot route it either. Keep the
+	// endpoint answering from the raw fields: an inspector that refuses to describe an
+	// unroutable channel with the reason it can see is less useful than one that does.
 	if configured.ChatCompletions != nil {
 		caps.chatCompletions = *configured.ChatCompletions
 	}
 	if configured.Responses != nil {
 		caps.responses = *configured.Responses
 	}
-	if configured.ToolCalling != nil {
-		caps.toolCalling = *configured.ToolCalling
-	}
-	switch strings.TrimSpace(channel.APIType) {
+	switch strings.TrimSpace(record.APIType) {
 	case upstream.APITypeChatCompletions, "":
 		if configured.ChatCompletions == nil {
 			caps.chatCompletions = true
