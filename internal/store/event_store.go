@@ -447,19 +447,19 @@ func scanSystemEvent(row systemEventScanner) (SystemEvent, error) {
 func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	var clauses []string
 	var args []any
-	if status := normalizedSystemEventFilterValue(filter.Status); status != "" {
+	if status := normalizedFilterToken(filter.Status); status != "" {
 		clauses = append(clauses, `status = ?`)
 		args = append(args, status)
 	}
-	if severity := normalizedSystemEventFilterValue(filter.Severity); severity != "" {
+	if severity := normalizedFilterToken(filter.Severity); severity != "" {
 		clauses = append(clauses, `severity = ?`)
 		args = append(args, severity)
 	}
-	if source := normalizedSystemEventFilterValue(filter.Source); source != "" {
+	if source := normalizedFilterToken(filter.Source); source != "" {
 		clauses = append(clauses, `source = ?`)
 		args = append(args, source)
 	}
-	if category := normalizedSystemEventFilterValue(filter.Category); category != "" {
+	if category := normalizedFilterToken(filter.Category); category != "" {
 		clauses = append(clauses, `category = ?`)
 		args = append(args, category)
 	}
@@ -488,7 +488,12 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	return strings.Join(clauses, " AND "), args
 }
 
-func normalizedSystemEventFilterValue(value string) string {
+// normalizedFilterToken normalizes a small enum-like filter value (event status/severity/source/
+// category, finding severity/category). Values are matched case-insensitively and `all` means "no
+// filter", so the same token means the same thing in every list API. The findings API used the raw
+// query value, which made `?severity=High` and `?severity=all` return an empty list where the events
+// API returned the matching rows.
+func normalizedFilterToken(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" || value == "all" {
 		return ""

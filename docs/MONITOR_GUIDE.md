@@ -101,7 +101,7 @@ session ID 的抽取顺序为：
 
 审计页面有两个面板：
 
-- 最近发现项（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。
+- 最近发现项（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 - 请求链路：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
 
 页面调用的接口只有 `GET /api/findings`、`GET /api/responses/audit/trace` 和 `GET /api/responses/function-executors`；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。

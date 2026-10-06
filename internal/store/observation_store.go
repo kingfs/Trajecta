@@ -411,11 +411,11 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 		WHERE trace_id = ?
 	`
 	args := []any{traceID}
-	if category := strings.TrimSpace(filter.Category); category != "" {
+	if category := normalizedFilterToken(filter.Category); category != "" {
 		query += ` AND category = ?`
 		args = append(args, category)
 	}
-	if severity := strings.TrimSpace(filter.Severity); severity != "" {
+	if severity := normalizedFilterToken(filter.Severity); severity != "" {
 		query += ` AND severity = ?`
 		args = append(args, severity)
 	}
@@ -501,11 +501,11 @@ func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Find
 		WHERE 1 = 1
 	`
 	var args []any
-	if category := strings.TrimSpace(filter.Category); category != "" {
+	if category := normalizedFilterToken(filter.Category); category != "" {
 		query += ` AND category = ?`
 		args = append(args, category)
 	}
-	if severity := strings.TrimSpace(filter.Severity); severity != "" {
+	if severity := normalizedFilterToken(filter.Severity); severity != "" {
 		query += ` AND severity = ?`
 		args = append(args, severity)
 	}
