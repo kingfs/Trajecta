@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 // TestProxyErrorEnvelopeMatchesTheRequestEntrypoint pins the error body shape
@@ -154,4 +156,60 @@ func assertGoogleEnvelope(t *testing.T, payload map[string]any) {
 	if _, leaked := payload["type"]; leaked {
 		t.Fatalf("google envelope must not carry the anthropic `type` field: %#v", payload)
 	}
+}
+
+// TestProxyErrorEnvelopeFamilyFollowsTheSharedClassification pins that the
+// envelope is a consumer of the shared path classification rather than a second
+// implementation of it.
+//
+// The proxy used to decide the family with its own path predicates, so the
+// envelope and the rest of the proxy could disagree about the same request. For
+// `/v1beta/models/<model>:countTokens` the local predicate said Google while
+// `llm.ClassifyPath` said `unknown`, and it was the local one that was right by
+// accident; every path a Google-family provider is classified for must produce a
+// Google-shaped envelope.
+func TestProxyErrorEnvelopeFamilyFollowsTheSharedClassification(t *testing.T) {
+	googleFamily := []string{
+		"/v1beta/models/gemini-2.0-flash:generateContent",
+		"/v1beta/models/gemini-2.0-flash:streamGenerateContent",
+		"/v1beta/models/gemini-2.0-flash:countTokens",
+		"/v1beta/models/text-embedding-004:embedContent",
+		"/v1/publishers/google/models/gemini-2.0-flash:countTokens",
+		"/v1/models/gemini-2.0-flash:countTokens",
+	}
+	for _, path := range googleFamily {
+		t.Run(path, func(t *testing.T) {
+			provider := llm.ClassifyPath(path, "").Provider
+			if provider != llm.ProviderGoogleGenAI && provider != llm.ProviderVertexNative {
+				t.Fatalf("ClassifyPath(%q).Provider = %q, want a Google family", path, provider)
+			}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			writeProxyError(rec, req, http.StatusBadGateway, "upstream_error", "boom")
+
+			var payload map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("body is not JSON: %v (%s)", err, rec.Body.String())
+			}
+			assertGoogleEnvelope(t, payload)
+		})
+	}
+
+	t.Run("anthropic family", func(t *testing.T) {
+		path := "/v1/messages"
+		if got := llm.ClassifyPath(path, "").Provider; got != llm.ProviderAnthropic {
+			t.Fatalf("ClassifyPath(%q).Provider = %q, want %q", path, got, llm.ProviderAnthropic)
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		writeProxyError(rec, req, http.StatusBadGateway, "upstream_error", "boom")
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("body is not JSON: %v (%s)", err, rec.Body.String())
+		}
+		if payload["type"] != "error" {
+			t.Fatalf("type = %v, want the Anthropic envelope", payload["type"])
+		}
+	})
 }

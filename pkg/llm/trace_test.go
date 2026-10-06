@@ -114,3 +114,40 @@ func TestParseRequestForPathPrefersTheModelInThePath(t *testing.T) {
 		t.Fatalf("req.Model = %q, want %q for a real listing", listReq.Model, ModelListSentinel)
 	}
 }
+
+// TestDetectProviderClassifiesActionSuffixedModelPaths pins the protocol family
+// of the Google-shaped model actions.
+//
+// NormalizeEndpoint keeps the `:action` of a model path so it cannot be answered
+// by the model catalog, but the family was then decided from the endpoint alone
+// and no case matched these forms: they came back `unknown`, which kept a
+// Google-shaped request out of provider filtering, out of the Google error
+// envelope and out of protocol-family routing. The classification is what the
+// router, the recorder, the index backfill and the error envelope all share, so
+// an unknown here is wrong in four places at once.
+func TestDetectProviderClassifiesActionSuffixedModelPaths(t *testing.T) {
+	cases := []struct {
+		path     string
+		provider string
+	}{
+		{path: "/v1beta/models/gemini-2.0-flash:countTokens", provider: ProviderGoogleGenAI},
+		{path: "/v1beta/models/text-embedding-004:embedContent", provider: ProviderGoogleGenAI},
+		{path: "/v1beta/models:text-batchEmbedContents", provider: ProviderGoogleGenAI},
+		{path: "/v1beta/models/gemini-2.0-flash:generateContent", provider: ProviderGoogleGenAI},
+		{path: "/v1/publishers/google/models/gemini-2.0-flash:countTokens", provider: ProviderVertexNative},
+		{path: "/v1/models/gemini-2.0-flash:countTokens", provider: ProviderVertexNative},
+		{path: "/v1/messages/count_tokens", provider: ProviderAnthropic},
+		{path: "/v1/messages", provider: ProviderAnthropic},
+		// The plain catalog endpoints keep their OpenAI-compatible family: many
+		// providers serve them, and `/v1beta/models` normalizes to `/v1/models`.
+		{path: "/v1/models", provider: ProviderOpenAICompatible},
+		{path: "/v1beta/models", provider: ProviderOpenAICompatible},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := ClassifyPath(tc.path, "").Provider; got != tc.provider {
+				t.Fatalf("ClassifyPath(%q).Provider = %q, want %q", tc.path, got, tc.provider)
+			}
+		})
+	}
+}

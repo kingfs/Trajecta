@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
 // proxyErrorEnvelope renders the error body for errors the proxy itself
@@ -23,9 +25,18 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 	if r != nil && r.URL != nil {
 		path = r.URL.Path
 	}
+	// The envelope follows the protocol family of the endpoint, which is the same
+	// classification the router, the recorder and the observer use. Deciding it
+	// here a second time with this package's own path predicates is how
+	// `/v1beta/models/<model>:countTokens` and `:embedContent` came to be answered
+	// with an OpenAI-shaped error while the rest of the proxy called them Google.
+	provider := ""
+	if path != "" {
+		provider = llm.ClassifyPath(path, "").Provider
+	}
 	var payload any
 	switch {
-	case isAnthropicMessagesPath(path):
+	case provider == llm.ProviderAnthropic:
 		payload = map[string]any{
 			"type": "error",
 			"error": map[string]any{
@@ -33,7 +44,7 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 				"message": message,
 			},
 		}
-	case isGoogleGenerateContentPath(path):
+	case provider == llm.ProviderGoogleGenAI, provider == llm.ProviderVertexNative:
 		payload = map[string]any{
 			"error": map[string]any{
 				"code":    statusCode,
@@ -56,30 +67,6 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 		return []byte(message)
 	}
 	return append(body, '\n')
-}
-
-// isGoogleGenerateContentPath matches the Google GenAI and Vertex native
-// request shapes. `:generateContent` alone is not enough: the streaming variant
-// is `:streamGenerateContent`, and `:countTokens`/`:embedContent` are the same
-// family, so a Google SDK would receive an OpenAI-shaped envelope it cannot
-// parse.
-func isGoogleGenerateContentPath(path string) bool {
-	if strings.HasPrefix(path, "/v1beta/") || strings.Contains(path, "/publishers/") {
-		return true
-	}
-	switch {
-	case strings.HasSuffix(path, ":generateContent"),
-		strings.HasSuffix(path, ":streamGenerateContent"),
-		strings.HasSuffix(path, ":countTokens"),
-		strings.HasSuffix(path, ":embedContent"),
-		strings.HasSuffix(path, ":batchEmbedContents"):
-		return true
-	}
-	return strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent")
-}
-
-func isAnthropicMessagesPath(path string) bool {
-	return path == "/v1/messages" || strings.HasPrefix(path, "/v1/messages/")
 }
 
 func openAIErrorType(statusCode int) string {

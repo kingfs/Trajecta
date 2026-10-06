@@ -156,19 +156,36 @@ func detectProvider(endpoint string, upstreamBaseURL string) string {
 	host := strings.ToLower(parsed.Host)
 	basePath := strings.ToLower(parsed.Path)
 	switch {
+	// The protocol family is decided by the path family first: these prefixes are
+	// Google's and Anthropic's alone, and the base URL is often not available to
+	// the caller (the error envelope and the index backfill classify with an empty
+	// one), so a host-only rule would leave a request that is unambiguously
+	// Google-shaped labelled `unknown`.
 	case endpoint == "/v1/messages",
 		endpoint == "/v1/messages/count_tokens",
+		strings.HasPrefix(endpoint, "/v1/messages/"),
 		strings.Contains(host, "anthropic.com"),
 		strings.Contains(host, "claude"):
 		return ProviderAnthropic
 	case endpoint == "/v1/publishers/models:generateContent",
 		endpoint == "/v1/publishers/models:streamGenerateContent",
 		endpoint == "/v1/publishers/models",
+		strings.HasPrefix(endpoint, "/v1/publishers/"),
+		// The express short form of a Vertex model resource: `/v1/models` alone is
+		// the OpenAI-compatible catalog, but a `:action` suffix on it is Vertex.
+		strings.HasPrefix(endpoint, "/v1/models:"),
 		strings.Contains(host, "aiplatform.googleapis.com"):
 		return ProviderVertexNative
 	case endpoint == "/v1beta/models:generateContent",
 		endpoint == "/v1beta/models:streamGenerateContent",
 		endpoint == "/v1beta/models",
+		// NormalizeEndpoint keeps the `:action` of a model path (`:countTokens`,
+		// `:embedContent`, `:batchEmbedContents`) so it cannot be answered by the
+		// model catalog; those forms then matched no case and came back `unknown`,
+		// which hid a Google-shaped request from provider filtering and from the
+		// Google error envelope. `/v1beta/models` itself normalizes to `/v1/models`
+		// above, so the catalog is unaffected by this prefix rule.
+		strings.HasPrefix(endpoint, "/v1beta/"),
 		strings.Contains(host, "googleapis.com"),
 		strings.Contains(host, "googleapis.cn"),
 		strings.Contains(host, "ai.google.dev"):

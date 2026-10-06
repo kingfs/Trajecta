@@ -52,6 +52,8 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 `google_genai` 与 `vertex_native` 是独立协议族，因为其 endpoint 形态、认证模型与请求/响应 schema 都不同于 OpenAI 与 Anthropic。两者都经 GenerateContent 语义适配路径解析；Vertex 使用资源路径（`model_resource`，可选的 `project`/`location`）与 `Authorization: Bearer` 鉴权。
 
+`pkg/llm.NormalizeEndpoint` 会保留模型路径上的 `:action` 后缀，使 `:countTokens`、`:embedContent`、`:batchEmbedContents` 这类操作不会被当成模型目录；`pkg/llm.ClassifyPath` 因此也把这些带后缀的形态（`/v1beta/models:<action>`、`/v1/publishers/models:<action>`、`/v1/models:<action>`）归入 `google_genai` / `vertex_native` 协议族，而不是 `unknown`。归类只影响 provider 标签、provider 过滤、协议族路由判定与错误响应包络：这些 endpoint 没有 adapter，仍然不可路由，代理也不会改写它们的路径。
+
 ## 协议差异要点
 
 各协议族在概念层的重叠（model、instructions、用户输入、工具定义、生成内容、tool calls、usage、streaming）与逐项差异（请求核心、响应核心、streaming 形态、tool 形态、usage 形态）、"识别不等于转换"的边界，以及由此产生的路由后果，见 [协议差异](./protocol-reference/protocol-differences.md)。
