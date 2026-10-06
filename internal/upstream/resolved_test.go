@@ -821,9 +821,10 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 			ChatCompletions: perModelBoolPtr(false),
 		},
 		ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
-			"native-only": {Responses: perModelBoolPtr(true), ChatCompletions: perModelBoolPtr(false)},
-			"CHAT-ONLY":   {Responses: perModelBoolPtr(false), ChatCompletions: perModelBoolPtr(true)},
-			"tools-off":   {ToolCalling: perModelBoolPtr(false)},
+			"native-only":  {Responses: perModelBoolPtr(true), ChatCompletions: perModelBoolPtr(false)},
+			"CHAT-ONLY":    {Responses: perModelBoolPtr(false), ChatCompletions: perModelBoolPtr(true)},
+			"tools-off":    {ToolCalling: perModelBoolPtr(false)},
+			"tokenize-off": {Tokenize: perModelBoolPtr(false)},
 		},
 	})
 	if err != nil {
@@ -838,11 +839,13 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 		wantResponsesPath bool
 		wantChatPath      bool
 		wantToolCalling   bool
+		wantTokenize      bool
 	}{
-		{name: "explicit native", model: "native-only", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true},
-		{name: "explicit chat overrides target", model: "chat-only", wantResponses: false, wantChat: true, wantResponsesPath: true, wantChatPath: true, wantToolCalling: true},
-		{name: "unlisted model falls back to target", model: "some-other-model", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true},
-		{name: "tool override only", model: "tools-off", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: false},
+		{name: "explicit native", model: "native-only", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true, wantTokenize: true},
+		{name: "explicit chat overrides target", model: "chat-only", wantResponses: false, wantChat: true, wantResponsesPath: true, wantChatPath: true, wantToolCalling: true, wantTokenize: true},
+		{name: "unlisted model falls back to target", model: "some-other-model", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true, wantTokenize: true},
+		{name: "tool override only", model: "tools-off", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: false, wantTokenize: true},
+		{name: "tokenize override only", model: "tokenize-off", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true, wantTokenize: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -860,6 +863,12 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 			}
 			if got := resolved.SupportsToolCallingForModel(tt.model); got != tt.wantToolCalling {
 				t.Fatalf("SupportsToolCallingForModel(%q) = %v, want %v", tt.model, got, tt.wantToolCalling)
+			}
+			if got := resolved.SupportsEndpointForModel("/tokenize", tt.model); got != tt.wantTokenize {
+				t.Fatalf("SupportsEndpointForModel(/tokenize, %q) = %v, want %v", tt.model, got, tt.wantTokenize)
+			}
+			if got := resolved.SupportsEndpointForModel("/v1/detokenize", tt.model); got != tt.wantTokenize {
+				t.Fatalf("SupportsEndpointForModel(/v1/detokenize, %q) = %v, want %v", tt.model, got, tt.wantTokenize)
 			}
 		})
 	}

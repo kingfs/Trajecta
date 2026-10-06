@@ -78,7 +78,7 @@ upstreams:
         responses: false
         tool_calling: true
         models: true
-        tokenize: false
+        tokenize: true
       protocol_family: "openai_compatible"
       routing_profile: "vllm_openai"
       headers: {}

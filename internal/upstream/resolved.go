@@ -563,6 +563,29 @@ func (u ResolvedUpstream) SupportsToolCallingForModel(model string) bool {
 	return u.SupportsToolCalling()
 }
 
+// SupportsTokenize reports whether the target serves the tokenize/detokenize surface.
+//
+// `/tokenize` and `/v1/detokenize` are extras an OpenAI-compatible upstream may or may not
+// expose, and unlike Chat Completions there is no `api_type` that implies them, so an
+// undeclared capability keeps the historical behaviour of forwarding them: only an explicit
+// `false` takes the target out of the candidate set. The capability was declared, probed,
+// stored and shown in the monitor without ever reaching the routing decision, so
+// `capabilities.tokenize: false` was silently ignored and the request landed on an upstream
+// the operator had said does not have the endpoint.
+func (u ResolvedUpstream) SupportsTokenize() bool {
+	enabled, configured := u.Capability(CapabilityTokenize)
+	return !configured || enabled
+}
+
+// SupportsTokenizeForModel resolves tokenize support for one model, preferring the
+// per-model override over the target-level capability.
+func (u ResolvedUpstream) SupportsTokenizeForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityTokenize); configured {
+		return enabled
+	}
+	return u.SupportsTokenize()
+}
+
 // SupportsEndpointForModel reports whether the target can serve one API surface
 // for a specific model.
 //
@@ -576,6 +599,8 @@ func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string
 		return u.SupportsChatCompletionsAPIForModel(model)
 	case "/v1/responses":
 		return u.SupportsResponsesAPIForModel(model) || u.SupportsChatCompletionsAPIForModel(model)
+	case "/tokenize", "/detokenize":
+		return u.SupportsTokenizeForModel(model)
 	default:
 		return true
 	}
