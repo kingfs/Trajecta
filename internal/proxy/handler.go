@@ -183,6 +183,30 @@ func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
 	return bodyBytes, nil
 }
 
+// decodeJSONObject decodes a JSON object body without losing the fidelity of the numbers
+// in it.
+//
+// A plain json.Unmarshal into map[string]interface{} decodes every number as a float64, so
+// re-serializing the object rewrites the client's own fields: a 64-bit seed came back as
+// 123456789012345680000 and a max_tokens above 2^53 came back one lower. The proxy rewrites
+// this body to add stream_options or to swap a model alias, and the cassette records what it
+// forwards, so the altered value is both what the upstream was asked for and what replay
+// reproduces. json.Number keeps every literal exactly as the client wrote it.
+func decodeJSONObject(body []byte) (map[string]interface{}, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var payload map[string]interface{}
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, false
+	}
+	// Reject trailing content the way json.Unmarshal did, so a body that is not a single
+	// JSON object is still forwarded untouched rather than silently truncated.
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, false
+	}
+	return payload, payload != nil
+}
+
 func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 	// 1. 只有 POST 请求且 Content-Type 为 JSON 才处理
 	if req.Method != http.MethodPost || !strings.Contains(req.Header.Get("Content-Type"), "application/json") {
@@ -192,11 +216,10 @@ func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 		return bodyBytes
 	}
 
-	// 3. 解析 JSON
-	// 使用 map[string]interface{} 以保留原始结构
-	var payload map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		return bodyBytes // 不是 JSON，放弃
+	// 3. 解析 JSON（保真：数字按原样保留，见 decodeJSONObject）
+	payload, ok := decodeJSONObject(bodyBytes)
+	if !ok {
+		return bodyBytes // 不是单个 JSON 对象，放弃
 	}
 
 	// 4. 检查 stream 字段
@@ -244,8 +267,8 @@ func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]
 	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
 		return bodyBytes, false
 	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+	payload, ok := decodeJSONObject(bodyBytes)
+	if !ok {
 		return bodyBytes, false
 	}
 	if _, ok := payload["model"]; !ok {
