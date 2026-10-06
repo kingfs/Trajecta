@@ -15,7 +15,7 @@ import (
 // newBodyLimitHandler builds a handler whose configured request-body limit is small
 // enough to exercise, together with a stub upstream that records the size of every
 // body it receives.
-func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int) {
+func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int, string) {
 	t.Helper()
 
 	outputDir := t.TempDir()
@@ -64,7 +64,7 @@ func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int) {
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
-	return handler, &received
+	return handler, &received, outputDir
 }
 
 func readAllLimited(r *http.Request) (int, error) {
@@ -93,7 +93,7 @@ func readAllLimited(r *http.Request) (int, error) {
 // that declares a size over the limit is rejected without being read.
 func TestHandlerBoundsTheRequestBodyItBuffers(t *testing.T) {
 	const limit = 4096
-	handler, received := newBodyLimitHandler(t, limit)
+	handler, received, _ := newBodyLimitHandler(t, limit)
 
 	post := func(path, body string) *httptest.ResponseRecorder {
 		t.Helper()
