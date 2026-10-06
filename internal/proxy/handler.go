@@ -761,34 +761,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	normalizeClientEntrypoint(r)
 
-	if !auth.RequestAuthorized(r, h.authVerifier) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
-		// The proxy surface is consumed by LLM SDKs, so the rejection must use
-		// the protocol error envelope; a bare text/plain "Unauthorized" is the
-		// first failure a misconfigured SDK hits and it cannot be parsed.
-		writeProxyError(w, r, http.StatusUnauthorized, "invalid_api_key", "Unauthorized")
+	if h.serveEntrypointShortcuts(w, r, start) {
 		return
 	}
-
-	if isOpenAIModelDetailRequest(r) {
-		h.serveOpenAIModelDetail(w, r, start)
-		return
-	}
-	if isOllamaShowRequest(r) {
-		h.serveOllamaShow(w, r, start)
-		return
-	}
-	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
-		h.serveAggregatedModelList(w, r, start)
-		return
-	}
-	if h.router == nil || len(h.router.Targets()) == 0 {
-		selectErr := &router.SelectionError{
-			Reason:  router.SelectionFailureNoSupportingTarget,
-			Message: "no upstream targets are configured; add a provider in Monitor",
-		}
-		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
-		writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+	if h.rejectWhenNoUpstreamTargets(w, r, start) {
 		return
 	}
 
@@ -800,53 +776,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
-		decision := h.responsesRoutingDecision(r, bodyBytes)
-		// A closed circuit window is transient, not a configuration problem:
-		// wait out the breaker (bounded by the upstream retry budget) and
-		// re-evaluate once instead of failing the request in milliseconds.
-		if decision.rejectReason != "" && decision.retryAfter > 0 {
-			// Cap the wait by the same budget the chat path uses so a long
-			// breaker window cannot stall a request indefinitely.
-			wait := decision.retryAfter
-			if wait > upstreamRetryBudget {
-				wait = upstreamRetryBudget
-			}
-			if !sleepBeforeRetry(r.Context(), wait) && r.Context().Err() != nil {
-				return
-			}
-			decision = h.responsesRoutingDecision(r, bodyBytes)
-		}
-		if decision.useLocal {
-			r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
-			h.serveLocalResponsesWithBody(w, r, bodyBytes)
-			return
-		}
-		if decision.rejectReason != "" {
-			selectErr := &router.SelectionError{
-				Reason:  decision.failureReason(),
-				Message: decision.rejectReason,
-			}
-			applyTransientAvailabilityHeaders(w, decision.retryAfter, decision.blockedByHealth)
-			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
-				routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
-			})
-			writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+		var finished bool
+		if r, finished = h.serveLocalResponsesWhenChosen(w, r, bodyBytes, start); finished {
 			return
 		}
 	}
-	if h.limiter != nil {
-		if decision, ok := h.preSelectionLimitDecision(r); ok {
-			lease, rejectReason := h.limiter.Acquire(r.Context(), decision.Key)
-			if rejectReason != limit.RejectNone {
-				statusCode, eventType := limitRejectionHTTP(rejectReason)
-				h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
-				writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
-				return
-			}
-			if lease != nil {
-				defer lease.Release()
-			}
-		}
+	if release, rejected := h.acquirePreSelectionLimit(w, r, bodyBytes, start); rejected {
+		return
+	} else if release != nil {
+		defer release()
 	}
 
 	irw := NewInstrumentedResponseWriter(w)
@@ -1095,6 +1033,121 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.reportExhaustedUpstreams(w, r, bodyBytes, start, selection, triedIDs, lastErr, retryEvents)
+}
+
+// serveEntrypointShortcuts answers the requests that are decided before any
+// upstream target is considered: authentication, the OpenAI model-detail call, the
+// Ollama show call and the aggregated model list. It reports whether the request
+// has been answered.
+func (h *Handler) serveEntrypointShortcuts(w http.ResponseWriter, r *http.Request, start time.Time) bool {
+	if !auth.RequestAuthorized(r, h.authVerifier) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
+		// The proxy surface is consumed by LLM SDKs, so the rejection must use
+		// the protocol error envelope; a bare text/plain "Unauthorized" is the
+		// first failure a misconfigured SDK hits and it cannot be parsed.
+		writeProxyError(w, r, http.StatusUnauthorized, "invalid_api_key", "Unauthorized")
+		return true
+	}
+	if isOpenAIModelDetailRequest(r) {
+		h.serveOpenAIModelDetail(w, r, start)
+		return true
+	}
+	if isOllamaShowRequest(r) {
+		h.serveOllamaShow(w, r, start)
+		return true
+	}
+	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
+		h.serveAggregatedModelList(w, r, start)
+		return true
+	}
+	return false
+}
+
+// rejectWhenNoUpstreamTargets answers with a selection failure when no upstream
+// target is configured, because nothing downstream can succeed.
+func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Request, start time.Time) bool {
+	if h.router != nil && len(h.router.Targets()) > 0 {
+		return false
+	}
+	selectErr := &router.SelectionError{
+		Reason:  router.SelectionFailureNoSupportingTarget,
+		Message: "no upstream targets are configured; add a provider in Monitor",
+	}
+	h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
+	writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+	return true
+}
+
+// serveLocalResponsesWhenChosen resolves the native-versus-local decision for a
+// Responses entrypoint. It reports whether the request is finished, either because
+// the local runtime answered it or because the decision rejected it; the returned
+// request carries the route-plan event when the local runtime took it.
+func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time) (*http.Request, bool) {
+	decision := h.responsesRoutingDecision(r, bodyBytes)
+	// A closed circuit window is transient, not a configuration problem:
+	// wait out the breaker (bounded by the upstream retry budget) and
+	// re-evaluate once instead of failing the request in milliseconds.
+	if decision.rejectReason != "" && decision.retryAfter > 0 {
+		// Cap the wait by the same budget the chat path uses so a long
+		// breaker window cannot stall a request indefinitely.
+		wait := decision.retryAfter
+		if wait > upstreamRetryBudget {
+			wait = upstreamRetryBudget
+		}
+		if !sleepBeforeRetry(r.Context(), wait) && r.Context().Err() != nil {
+			return r, true
+		}
+		decision = h.responsesRoutingDecision(r, bodyBytes)
+	}
+	if decision.useLocal {
+		r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
+		h.serveLocalResponsesWithBody(w, r, bodyBytes)
+		return r, true
+	}
+	if decision.rejectReason != "" {
+		selectErr := &router.SelectionError{
+			Reason:  decision.failureReason(),
+			Message: decision.rejectReason,
+		}
+		applyTransientAvailabilityHeaders(w, decision.retryAfter, decision.blockedByHealth)
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
+			routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
+		})
+		writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+		return r, true
+	}
+	return r, false
+}
+
+// acquirePreSelectionLimit takes a rate-limit lease before target selection. It
+// returns the release function for the caller to defer, or reports that the request
+// has already been rejected.
+func (h *Handler) acquirePreSelectionLimit(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time) (func(), bool) {
+	if h.limiter == nil {
+		return nil, false
+	}
+	decision, ok := h.preSelectionLimitDecision(r)
+	if !ok {
+		return nil, false
+	}
+	lease, rejectReason := h.limiter.Acquire(r.Context(), decision.Key)
+	if rejectReason != limit.RejectNone {
+		statusCode, eventType := limitRejectionHTTP(rejectReason)
+		h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
+		writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
+		return nil, true
+	}
+	if lease == nil {
+		return nil, false
+	}
+	return lease.Release, false
+}
+
+// reportExhaustedUpstreams answers when every candidate in every round failed. The
+// per-attempt logs were already closed by closeLogFile inside the retry loop, so
+// the failure is recorded with a fresh log file.
+func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time, selection *router.Selection, triedIDs []string, lastErr error, retryEvents []recorder.RecordEvent) {
 	// 全部候选目标都已尝试且失败
 	modelName := ""
 	if selection != nil {
