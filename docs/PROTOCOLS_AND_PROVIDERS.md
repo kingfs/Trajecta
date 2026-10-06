@@ -116,7 +116,7 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 ## 能力声明与 protocol_family 映射
 
 - 能力字段为 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`，对应 YAML `upstream.capabilities`（数据库为 channel 的 capabilities JSON）。每个字段都是可选布尔，未声明表示未知。
-- 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target，`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。
+- 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target（`tools` 与非空 `functions` 同等看待：后者是 OpenAI 已废弃但仍被客户端与上游接受的同义字段），`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。
 - `api_type` 的全局合法值为 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`；协议族另有约束：`anthropic_messages` 只接受 `messages`，`google_genai` 与 `vertex_native` 只接受 `gemini_generate_content`，`openai_compatible` 没有额外的 `api_type` 约束。`api_type` 缺失时按协议族取默认值：`anthropic_messages` → `messages`，`google_genai`、`vertex_native` → `gemini_generate_content`，其余 → `chat_completions`。
 - `mode` 的合法值为 `proxy`、`record_only`、`server`、`responses_server`。
 - 按模型覆盖：数据库 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 可编辑，YAML 对应 `upstream.model_capabilities`）对该模型覆盖 channel 级 `api_type`/capabilities；没有声明覆盖的模型回退到 channel 级行为。这使一个 channel 能对部分模型走原生 surface，对另一些模型走其他 surface。

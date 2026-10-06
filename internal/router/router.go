@@ -2195,6 +2195,17 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	if tools, ok := payload["tools"].([]any); ok && len(tools) > 0 {
 		features.HasTools = true
 	}
+	// OpenAI's deprecated `functions` field still reaches the proxy from older SDKs and is
+	// still accepted by providers, and it asks the model for exactly the tool calling the
+	// `tools` field asks for. Reading only `tools` made a target declared
+	// `capabilities.tool_calling: false` a routing candidate for such a request: the request
+	// was forwarded and the declaration was silently not honoured. An empty list asks for
+	// nothing, so it leaves the feature unset, the same way an empty `tools` list does.
+	if !features.HasTools {
+		if functions, ok := payload["functions"].([]any); ok && len(functions) > 0 {
+			features.HasTools = true
+		}
+	}
 	if _, ok := payload["response_format"]; ok {
 		features.HasStructuredOutput = true
 	}

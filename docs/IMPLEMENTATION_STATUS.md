@@ -29,7 +29,7 @@ Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用�
 
 代理可以识别、记录并把这些协议解析为统一观测结构，但不会在转发热路径中把 Anthropic Messages 转成 OpenAI-compatible，也不会把 Responses 转成 Gemini 或 Claude。
 
-能力声明与路由约束：upstream/channel 用 `api_type`、`mode`、`protocol_family` 和 `capabilities`（`responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`）描述 API surface。`api_type` 默认按协议族推断（OpenAI-compatible → `chat_completions`，Anthropic → `messages`，Google GenAI / Vertex → `gemini_generate_content`）。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被本地 Responses runtime 的内部 Chat Completions 调用选中；`capabilities.tool_calling: false` 的 target 在请求体包含 `tools` 时不被选中，routing decision trace 标记 `unsupported_tools`。
+能力声明与路由约束：upstream/channel 用 `api_type`、`mode`、`protocol_family` 和 `capabilities`（`responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`）描述 API surface。`api_type` 默认按协议族推断（OpenAI-compatible → `chat_completions`，Anthropic → `messages`，Google GenAI / Vertex → `gemini_generate_content`）。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被本地 Responses runtime 的内部 Chat Completions 调用选中；`capabilities.tool_calling: false` 的 target 在请求体包含非空 `tools` 或非空 `functions`（OpenAI 已废弃的同义字段）时不被选中，routing decision trace 标记 `unsupported_tools`。
 
 provider detection 属于部分实现：手动 `provider probe`、只读 `provider probe-report`、`provider probe-apply`、`doctor --probe-providers`，以及 Monitor 的 `POST /api/provider-probe`、`POST /api/provider-probe/report`、`POST /api/provider-probe/report/apply`、`POST /api/provider-setup/validate`、`POST /api/provider-setup/apply` 已接入，建议只填补缺失字段，不覆盖显式 `api_type`、`protocol_family` 或 capability false；更完整的批量 onboarding 与自动修复策略尚未实现。
 
