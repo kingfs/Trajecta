@@ -15,6 +15,8 @@ const (
 	FieldResponseID = "response_id"
 	// FieldRequestAuditID holds the string denoting the request_audit_id field in the database.
 	FieldRequestAuditID = "request_audit_id"
+	// FieldRequestID holds the string denoting the request_id field in the database.
+	FieldRequestID = "request_id"
 	// FieldTraceID holds the string denoting the trace_id field in the database.
 	FieldTraceID = "trace_id"
 	// FieldExchangeID holds the string denoting the exchange_id field in the database.
@@ -54,6 +56,7 @@ var Columns = []string{
 	FieldID,
 	FieldResponseID,
 	FieldRequestAuditID,
+	FieldRequestID,
 	FieldTraceID,
 	FieldExchangeID,
 	FieldExchangeKind,
@@ -102,6 +105,11 @@ func ByResponseID(opts ...sql.OrderTermOption) OrderOption {
 // ByRequestAuditID orders the results by the request_audit_id field.
 func ByRequestAuditID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRequestAuditID, opts...).ToFunc()
+}
+
+// ByRequestID orders the results by the request_id field.
+func ByRequestID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestID, opts...).ToFunc()
 }
 
 // ByTraceID orders the results by the trace_id field.

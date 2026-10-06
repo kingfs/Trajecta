@@ -70,6 +70,26 @@ func (_u *UpstreamExchangeUpdate) ClearRequestAuditID() *UpstreamExchangeUpdate 
 	return _u
 }
 
+// SetRequestID sets the "request_id" field.
+func (_u *UpstreamExchangeUpdate) SetRequestID(v string) *UpstreamExchangeUpdate {
+	_u.mutation.SetRequestID(v)
+	return _u
+}
+
+// SetNillableRequestID sets the "request_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableRequestID(v *string) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetRequestID(*v)
+	}
+	return _u
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (_u *UpstreamExchangeUpdate) ClearRequestID() *UpstreamExchangeUpdate {
+	_u.mutation.ClearRequestID()
+	return _u
+}
+
 // SetTraceID sets the "trace_id" field.
 func (_u *UpstreamExchangeUpdate) SetTraceID(v string) *UpstreamExchangeUpdate {
 	_u.mutation.SetTraceID(v)
@@ -443,6 +463,12 @@ func (_u *UpstreamExchangeUpdate) sqlSave(ctx context.Context) (_node int, err e
 	if _u.mutation.RequestAuditIDCleared() {
 		_spec.ClearField(upstreamexchange.FieldRequestAuditID, field.TypeString)
 	}
+	if value, ok := _u.mutation.RequestID(); ok {
+		_spec.SetField(upstreamexchange.FieldRequestID, field.TypeString, value)
+	}
+	if _u.mutation.RequestIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldRequestID, field.TypeString)
+	}
 	if value, ok := _u.mutation.TraceID(); ok {
 		_spec.SetField(upstreamexchange.FieldTraceID, field.TypeString, value)
 	}
@@ -600,6 +626,26 @@ func (_u *UpstreamExchangeUpdateOne) SetNillableRequestAuditID(v *string) *Upstr
 // ClearRequestAuditID clears the value of the "request_audit_id" field.
 func (_u *UpstreamExchangeUpdateOne) ClearRequestAuditID() *UpstreamExchangeUpdateOne {
 	_u.mutation.ClearRequestAuditID()
+	return _u
+}
+
+// SetRequestID sets the "request_id" field.
+func (_u *UpstreamExchangeUpdateOne) SetRequestID(v string) *UpstreamExchangeUpdateOne {
+	_u.mutation.SetRequestID(v)
+	return _u
+}
+
+// SetNillableRequestID sets the "request_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableRequestID(v *string) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetRequestID(*v)
+	}
+	return _u
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (_u *UpstreamExchangeUpdateOne) ClearRequestID() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearRequestID()
 	return _u
 }
 
@@ -1005,6 +1051,12 @@ func (_u *UpstreamExchangeUpdateOne) sqlSave(ctx context.Context) (_node *Upstre
 	}
 	if _u.mutation.RequestAuditIDCleared() {
 		_spec.ClearField(upstreamexchange.FieldRequestAuditID, field.TypeString)
+	}
+	if value, ok := _u.mutation.RequestID(); ok {
+		_spec.SetField(upstreamexchange.FieldRequestID, field.TypeString, value)
+	}
+	if _u.mutation.RequestIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldRequestID, field.TypeString)
 	}
 	if value, ok := _u.mutation.TraceID(); ok {
 		_spec.SetField(upstreamexchange.FieldTraceID, field.TypeString, value)

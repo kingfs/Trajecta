@@ -204,6 +204,26 @@ func (s *Store) CreateUser(ctx context.Context, username string, password string
 	return row, err
 }
 
+// DeleteUser removes a user and its tokens. It exists for test fixtures and
+// operator cleanup so a long-lived database can be reused without collisions.
+func (s *Store) DeleteUser(ctx context.Context, username string) error {
+	username = normalizeUsername(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	userRow, err := s.client.User.Query().Where(user.UsernameEQ(username)).Only(ctx)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if _, err := s.client.APIToken.Delete().Where(apitoken.HasUserWith(user.IDEQ(userRow.ID))).Exec(ctx); err != nil {
+		return err
+	}
+	return s.client.User.DeleteOneID(userRow.ID).Exec(ctx)
+}
+
 func (s *Store) ResetPassword(ctx context.Context, username string, password string) error {
 	username = normalizeUsername(username)
 	if username == "" {

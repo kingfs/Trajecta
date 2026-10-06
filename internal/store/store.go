@@ -4543,6 +4543,8 @@ func (s *Store) initSchema() error {
 			updated_at datetime NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status ON parse_jobs(status, updated_at ASC);`,
+		`DELETE FROM parse_jobs WHERE id NOT IN (SELECT MAX(id) FROM parse_jobs GROUP BY trace_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_parse_jobs_trace_id ON parse_jobs(trace_id);`,
 		`CREATE TABLE IF NOT EXISTS parser_versions (
 			parser TEXT NOT NULL,
 			version TEXT NOT NULL,
@@ -4645,6 +4647,7 @@ func (s *Store) initSchema() error {
 			id TEXT PRIMARY KEY,
 			response_id TEXT NULL,
 			request_audit_id TEXT NULL,
+			request_id TEXT NULL,
 			trace_id TEXT NULL,
 			exchange_id TEXT NULL,
 			exchange_kind TEXT NULL,
@@ -4752,6 +4755,15 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "request_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE upstream_exchanges SET request_id = trace_id WHERE request_id IS NULL AND trace_id IS NOT NULL`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_request_id ON upstream_exchanges(request_id);`); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("upstream_exchanges", "exchange_id", "TEXT NULL"); err != nil {
@@ -7463,10 +7475,22 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	if err := s.insertSemanticNodesTx(tx, obs.TraceID, nodes, now); err != nil {
 		return err
 	}
+	// One parse job per trace: the observation result updates the job that
+	// EnqueueParseJob queued (or creates it when a trace was parsed without
+	// one). Inserting a second row here made every parsed trace appear twice in
+	// parse_jobs and doubled the queue table with rows no worker ever claimed.
+	if _, err := s.execTx(tx, `
+		UPDATE parse_jobs
+		SET status = ?, attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END, last_error = '', updated_at = ?
+		WHERE trace_id = ?
+	`, string(obs.Status), now, obs.TraceID); err != nil {
+		return err
+	}
 	if _, err := s.execTx(tx, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
-		VALUES (?, ?, 1, ?, ?)
-	`, obs.TraceID, string(obs.Status), now, now); err != nil {
+		SELECT ?, ?, 1, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM parse_jobs WHERE trace_id = ?)
+	`, obs.TraceID, string(obs.Status), now, now, obs.TraceID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -7704,9 +7728,13 @@ func (s *Store) EnqueueParseJob(traceID string) error {
 		return errors.New("enqueue parse job: trace id is required")
 	}
 	now := time.Now().UTC()
+	// `(trace_id)` is unique, so re-enqueueing an existing trace resets that
+	// job to queued instead of piling up a second row.
 	_, err := s.db.Exec(`
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, 'queued', 0, ?, ?)
+		ON CONFLICT (trace_id) DO UPDATE
+		SET status = 'queued', attempts = 0, last_error = '', updated_at = excluded.updated_at
 	`, traceID, now, now)
 	return err
 }

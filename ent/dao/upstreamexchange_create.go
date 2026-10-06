@@ -51,6 +51,20 @@ func (_c *UpstreamExchangeCreate) SetNillableRequestAuditID(v *string) *Upstream
 	return _c
 }
 
+// SetRequestID sets the "request_id" field.
+func (_c *UpstreamExchangeCreate) SetRequestID(v string) *UpstreamExchangeCreate {
+	_c.mutation.SetRequestID(v)
+	return _c
+}
+
+// SetNillableRequestID sets the "request_id" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableRequestID(v *string) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetRequestID(*v)
+	}
+	return _c
+}
+
 // SetTraceID sets the "trace_id" field.
 func (_c *UpstreamExchangeCreate) SetTraceID(v string) *UpstreamExchangeCreate {
 	_c.mutation.SetTraceID(v)
@@ -351,6 +365,10 @@ func (_c *UpstreamExchangeCreate) createSpec() (*UpstreamExchange, *sqlgraph.Cre
 		_spec.SetField(upstreamexchange.FieldRequestAuditID, field.TypeString, value)
 		_node.RequestAuditID = value
 	}
+	if value, ok := _c.mutation.RequestID(); ok {
+		_spec.SetField(upstreamexchange.FieldRequestID, field.TypeString, value)
+		_node.RequestID = value
+	}
 	if value, ok := _c.mutation.TraceID(); ok {
 		_spec.SetField(upstreamexchange.FieldTraceID, field.TypeString, value)
 		_node.TraceID = value
@@ -496,6 +514,24 @@ func (u *UpstreamExchangeUpsert) UpdateRequestAuditID() *UpstreamExchangeUpsert 
 // ClearRequestAuditID clears the value of the "request_audit_id" field.
 func (u *UpstreamExchangeUpsert) ClearRequestAuditID() *UpstreamExchangeUpsert {
 	u.SetNull(upstreamexchange.FieldRequestAuditID)
+	return u
+}
+
+// SetRequestID sets the "request_id" field.
+func (u *UpstreamExchangeUpsert) SetRequestID(v string) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldRequestID, v)
+	return u
+}
+
+// UpdateRequestID sets the "request_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateRequestID() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldRequestID)
+	return u
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (u *UpstreamExchangeUpsert) ClearRequestID() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldRequestID)
 	return u
 }
 
@@ -868,6 +904,27 @@ func (u *UpstreamExchangeUpsertOne) UpdateRequestAuditID() *UpstreamExchangeUpse
 func (u *UpstreamExchangeUpsertOne) ClearRequestAuditID() *UpstreamExchangeUpsertOne {
 	return u.Update(func(s *UpstreamExchangeUpsert) {
 		s.ClearRequestAuditID()
+	})
+}
+
+// SetRequestID sets the "request_id" field.
+func (u *UpstreamExchangeUpsertOne) SetRequestID(v string) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetRequestID(v)
+	})
+}
+
+// UpdateRequestID sets the "request_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateRequestID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateRequestID()
+	})
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (u *UpstreamExchangeUpsertOne) ClearRequestID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearRequestID()
 	})
 }
 
@@ -1453,6 +1510,27 @@ func (u *UpstreamExchangeUpsertBulk) UpdateRequestAuditID() *UpstreamExchangeUps
 func (u *UpstreamExchangeUpsertBulk) ClearRequestAuditID() *UpstreamExchangeUpsertBulk {
 	return u.Update(func(s *UpstreamExchangeUpsert) {
 		s.ClearRequestAuditID()
+	})
+}
+
+// SetRequestID sets the "request_id" field.
+func (u *UpstreamExchangeUpsertBulk) SetRequestID(v string) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetRequestID(v)
+	})
+}
+
+// UpdateRequestID sets the "request_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateRequestID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateRequestID()
+	})
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (u *UpstreamExchangeUpsertBulk) ClearRequestID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearRequestID()
 	})
 }
 

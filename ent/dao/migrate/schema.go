@@ -961,6 +961,7 @@ var (
 		{Name: "id", Type: field.TypeString},
 		{Name: "response_id", Type: field.TypeString, Nullable: true},
 		{Name: "request_audit_id", Type: field.TypeString, Nullable: true},
+		{Name: "request_id", Type: field.TypeString, Nullable: true},
 		{Name: "trace_id", Type: field.TypeString, Nullable: true},
 		{Name: "exchange_id", Type: field.TypeString, Nullable: true},
 		{Name: "exchange_kind", Type: field.TypeString, Nullable: true},
@@ -986,37 +987,42 @@ var (
 			{
 				Name:    "upstreamexchange_response_id_started_at",
 				Unique:  false,
-				Columns: []*schema.Column{UpstreamExchangesColumns[1], UpstreamExchangesColumns[15]},
+				Columns: []*schema.Column{UpstreamExchangesColumns[1], UpstreamExchangesColumns[16]},
 			},
 			{
 				Name:    "upstreamexchange_request_audit_id_started_at",
 				Unique:  false,
-				Columns: []*schema.Column{UpstreamExchangesColumns[2], UpstreamExchangesColumns[15]},
+				Columns: []*schema.Column{UpstreamExchangesColumns[2], UpstreamExchangesColumns[16]},
 			},
 			{
-				Name:    "upstreamexchange_trace_id",
+				Name:    "upstreamexchange_request_id",
 				Unique:  false,
 				Columns: []*schema.Column{UpstreamExchangesColumns[3]},
 			},
 			{
-				Name:    "upstreamexchange_exchange_id",
+				Name:    "upstreamexchange_trace_id",
 				Unique:  false,
 				Columns: []*schema.Column{UpstreamExchangesColumns[4]},
 			},
 			{
+				Name:    "upstreamexchange_exchange_id",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[5]},
+			},
+			{
 				Name:    "upstreamexchange_parent_exchange_id",
 				Unique:  false,
-				Columns: []*schema.Column{UpstreamExchangesColumns[7]},
+				Columns: []*schema.Column{UpstreamExchangesColumns[8]},
 			},
 			{
 				Name:    "upstreamexchange_upstream_id_started_at",
 				Unique:  false,
-				Columns: []*schema.Column{UpstreamExchangesColumns[10], UpstreamExchangesColumns[15]},
+				Columns: []*schema.Column{UpstreamExchangesColumns[11], UpstreamExchangesColumns[16]},
 			},
 			{
 				Name:    "upstreamexchange_status_code_started_at",
 				Unique:  false,
-				Columns: []*schema.Column{UpstreamExchangesColumns[14], UpstreamExchangesColumns[15]},
+				Columns: []*schema.Column{UpstreamExchangesColumns[15], UpstreamExchangesColumns[16]},
 			},
 		},
 	}

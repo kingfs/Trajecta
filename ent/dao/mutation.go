@@ -26600,6 +26600,7 @@ type UpstreamExchangeMutation struct {
 	id                 *string
 	response_id        *string
 	request_audit_id   *string
+	request_id         *string
 	trace_id           *string
 	exchange_id        *string
 	exchange_kind      *string
@@ -26823,6 +26824,55 @@ func (m *UpstreamExchangeMutation) RequestAuditIDCleared() bool {
 func (m *UpstreamExchangeMutation) ResetRequestAuditID() {
 	m.request_audit_id = nil
 	delete(m.clearedFields, upstreamexchange.FieldRequestAuditID)
+}
+
+// SetRequestID sets the "request_id" field.
+func (m *UpstreamExchangeMutation) SetRequestID(s string) {
+	m.request_id = &s
+}
+
+// RequestID returns the value of the "request_id" field in the mutation.
+func (m *UpstreamExchangeMutation) RequestID() (r string, exists bool) {
+	v := m.request_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestID returns the old "request_id" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldRequestID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestID: %w", err)
+	}
+	return oldValue.RequestID, nil
+}
+
+// ClearRequestID clears the value of the "request_id" field.
+func (m *UpstreamExchangeMutation) ClearRequestID() {
+	m.request_id = nil
+	m.clearedFields[upstreamexchange.FieldRequestID] = struct{}{}
+}
+
+// RequestIDCleared returns if the "request_id" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) RequestIDCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldRequestID]
+	return ok
+}
+
+// ResetRequestID resets all changes to the "request_id" field.
+func (m *UpstreamExchangeMutation) ResetRequestID() {
+	m.request_id = nil
+	delete(m.clearedFields, upstreamexchange.FieldRequestID)
 }
 
 // SetTraceID sets the "trace_id" field.
@@ -27636,12 +27686,15 @@ func (m *UpstreamExchangeMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UpstreamExchangeMutation) Fields() []string {
-	fields := make([]string, 0, 17)
+	fields := make([]string, 0, 18)
 	if m.response_id != nil {
 		fields = append(fields, upstreamexchange.FieldResponseID)
 	}
 	if m.request_audit_id != nil {
 		fields = append(fields, upstreamexchange.FieldRequestAuditID)
+	}
+	if m.request_id != nil {
+		fields = append(fields, upstreamexchange.FieldRequestID)
 	}
 	if m.trace_id != nil {
 		fields = append(fields, upstreamexchange.FieldTraceID)
@@ -27700,6 +27753,8 @@ func (m *UpstreamExchangeMutation) Field(name string) (ent.Value, bool) {
 		return m.ResponseID()
 	case upstreamexchange.FieldRequestAuditID:
 		return m.RequestAuditID()
+	case upstreamexchange.FieldRequestID:
+		return m.RequestID()
 	case upstreamexchange.FieldTraceID:
 		return m.TraceID()
 	case upstreamexchange.FieldExchangeID:
@@ -27743,6 +27798,8 @@ func (m *UpstreamExchangeMutation) OldField(ctx context.Context, name string) (e
 		return m.OldResponseID(ctx)
 	case upstreamexchange.FieldRequestAuditID:
 		return m.OldRequestAuditID(ctx)
+	case upstreamexchange.FieldRequestID:
+		return m.OldRequestID(ctx)
 	case upstreamexchange.FieldTraceID:
 		return m.OldTraceID(ctx)
 	case upstreamexchange.FieldExchangeID:
@@ -27795,6 +27852,13 @@ func (m *UpstreamExchangeMutation) SetField(name string, value ent.Value) error 
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRequestAuditID(v)
+		return nil
+	case upstreamexchange.FieldRequestID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestID(v)
 		return nil
 	case upstreamexchange.FieldTraceID:
 		v, ok := value.(string)
@@ -27964,6 +28028,9 @@ func (m *UpstreamExchangeMutation) ClearedFields() []string {
 	if m.FieldCleared(upstreamexchange.FieldRequestAuditID) {
 		fields = append(fields, upstreamexchange.FieldRequestAuditID)
 	}
+	if m.FieldCleared(upstreamexchange.FieldRequestID) {
+		fields = append(fields, upstreamexchange.FieldRequestID)
+	}
 	if m.FieldCleared(upstreamexchange.FieldTraceID) {
 		fields = append(fields, upstreamexchange.FieldTraceID)
 	}
@@ -28029,6 +28096,9 @@ func (m *UpstreamExchangeMutation) ClearField(name string) error {
 	case upstreamexchange.FieldRequestAuditID:
 		m.ClearRequestAuditID()
 		return nil
+	case upstreamexchange.FieldRequestID:
+		m.ClearRequestID()
+		return nil
 	case upstreamexchange.FieldTraceID:
 		m.ClearTraceID()
 		return nil
@@ -28087,6 +28157,9 @@ func (m *UpstreamExchangeMutation) ResetField(name string) error {
 		return nil
 	case upstreamexchange.FieldRequestAuditID:
 		m.ResetRequestAuditID()
+		return nil
+	case upstreamexchange.FieldRequestID:
+		m.ResetRequestID()
 		return nil
 	case upstreamexchange.FieldTraceID:
 		m.ResetTraceID()

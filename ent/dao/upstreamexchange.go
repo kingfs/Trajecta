@@ -21,6 +21,8 @@ type UpstreamExchange struct {
 	ResponseID string `json:"response_id,omitempty"`
 	// RequestAuditID holds the value of the "request_audit_id" field.
 	RequestAuditID string `json:"request_audit_id,omitempty"`
+	// RequestID holds the value of the "request_id" field.
+	RequestID string `json:"request_id,omitempty"`
 	// TraceID holds the value of the "trace_id" field.
 	TraceID string `json:"trace_id,omitempty"`
 	// ExchangeID holds the value of the "exchange_id" field.
@@ -61,7 +63,7 @@ func (*UpstreamExchange) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case upstreamexchange.FieldSequenceIndex, upstreamexchange.FieldStatusCode:
 			values[i] = new(sql.NullInt64)
-		case upstreamexchange.FieldID, upstreamexchange.FieldResponseID, upstreamexchange.FieldRequestAuditID, upstreamexchange.FieldTraceID, upstreamexchange.FieldExchangeID, upstreamexchange.FieldExchangeKind, upstreamexchange.FieldExchangeRole, upstreamexchange.FieldParentExchangeID, upstreamexchange.FieldCassettePath, upstreamexchange.FieldUpstreamID, upstreamexchange.FieldRouteTarget, upstreamexchange.FieldModel, upstreamexchange.FieldEndpoint, upstreamexchange.FieldErrorText:
+		case upstreamexchange.FieldID, upstreamexchange.FieldResponseID, upstreamexchange.FieldRequestAuditID, upstreamexchange.FieldRequestID, upstreamexchange.FieldTraceID, upstreamexchange.FieldExchangeID, upstreamexchange.FieldExchangeKind, upstreamexchange.FieldExchangeRole, upstreamexchange.FieldParentExchangeID, upstreamexchange.FieldCassettePath, upstreamexchange.FieldUpstreamID, upstreamexchange.FieldRouteTarget, upstreamexchange.FieldModel, upstreamexchange.FieldEndpoint, upstreamexchange.FieldErrorText:
 			values[i] = new(sql.NullString)
 		case upstreamexchange.FieldStartedAt, upstreamexchange.FieldCompletedAt:
 			values[i] = new(sql.NullTime)
@@ -97,6 +99,12 @@ func (_m *UpstreamExchange) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field request_audit_id", values[i])
 			} else if value.Valid {
 				_m.RequestAuditID = value.String
+			}
+		case upstreamexchange.FieldRequestID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field request_id", values[i])
+			} else if value.Valid {
+				_m.RequestID = value.String
 			}
 		case upstreamexchange.FieldTraceID:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -229,6 +237,9 @@ func (_m *UpstreamExchange) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("request_audit_id=")
 	builder.WriteString(_m.RequestAuditID)
+	builder.WriteString(", ")
+	builder.WriteString("request_id=")
+	builder.WriteString(_m.RequestID)
 	builder.WriteString(", ")
 	builder.WriteString("trace_id=")
 	builder.WriteString(_m.TraceID)

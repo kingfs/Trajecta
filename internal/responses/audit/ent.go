@@ -107,6 +107,9 @@ func (a *EntAuditor) RecordUpstreamExchange(ctx context.Context, entry UpstreamE
 	if entry.RequestAuditID != "" {
 		create.SetRequestAuditID(entry.RequestAuditID)
 	}
+	if entry.RequestID != "" {
+		create.SetRequestID(entry.RequestID)
+	}
 	if entry.TraceID != "" {
 		create.SetTraceID(entry.TraceID)
 	}

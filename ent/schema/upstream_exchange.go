@@ -22,6 +22,10 @@ func (UpstreamExchange) Fields() []ent.Field {
 		field.String("id").NotEmpty().Immutable(),
 		field.String("response_id").Optional(),
 		field.String("request_audit_id").Optional(),
+		// RequestID is the recorder request id (prelude meta.request_id, equal to
+		// logs.request_id). TraceID predates it and stores the same value; it is
+		// kept so existing rows, queries and API responses keep working.
+		field.String("request_id").Optional(),
 		field.String("trace_id").Optional(),
 		field.String("exchange_id").Optional(),
 		field.String("exchange_kind").Optional(),
@@ -44,6 +48,7 @@ func (UpstreamExchange) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("response_id", "started_at"),
 		index.Fields("request_audit_id", "started_at"),
+		index.Fields("request_id"),
 		index.Fields("trace_id"),
 		index.Fields("exchange_id"),
 		index.Fields("parent_exchange_id"),

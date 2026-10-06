@@ -116,6 +116,7 @@ type UpstreamExchangeView struct {
 	ID               string
 	ResponseID       string
 	RequestAuditID   string
+	RequestID        string
 	TraceID          string
 	ExchangeID       string `json:"exchange_id,omitempty"`
 	ExchangeKind     string `json:"exchange_kind,omitempty"`
@@ -1028,6 +1029,15 @@ func executionEventView(record *dao.ExecutionEvent) ExecutionEventView {
 	}
 }
 
+func firstNonEmptyAudit(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func upstreamExchangeView(record *dao.UpstreamExchange) UpstreamExchangeView {
 	if record == nil {
 		return UpstreamExchangeView{}
@@ -1036,6 +1046,7 @@ func upstreamExchangeView(record *dao.UpstreamExchange) UpstreamExchangeView {
 		ID:               record.ID,
 		ResponseID:       record.ResponseID,
 		RequestAuditID:   record.RequestAuditID,
+		RequestID:        firstNonEmptyAudit(record.RequestID, record.TraceID),
 		TraceID:          record.TraceID,
 		ExchangeID:       record.ExchangeID,
 		ExchangeKind:     record.ExchangeKind,

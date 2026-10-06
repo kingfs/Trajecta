@@ -52,8 +52,12 @@ type Failure struct {
 }
 
 type UpstreamExchange struct {
-	ResponseID       string
-	RequestAuditID   string
+	ResponseID     string
+	RequestAuditID string
+	// RequestID is the recorder request id (prelude meta.request_id, the same
+	// value as logs.request_id). TraceID is the legacy column name for the same
+	// value; new code should read RequestID.
+	RequestID        string
 	TraceID          string
 	ExchangeID       string
 	ExchangeKind     string

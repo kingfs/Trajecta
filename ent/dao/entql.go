@@ -684,6 +684,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 		Fields: map[string]*sqlgraph.FieldSpec{
 			upstreamexchange.FieldResponseID:       {Type: field.TypeString, Column: upstreamexchange.FieldResponseID},
 			upstreamexchange.FieldRequestAuditID:   {Type: field.TypeString, Column: upstreamexchange.FieldRequestAuditID},
+			upstreamexchange.FieldRequestID:        {Type: field.TypeString, Column: upstreamexchange.FieldRequestID},
 			upstreamexchange.FieldTraceID:          {Type: field.TypeString, Column: upstreamexchange.FieldTraceID},
 			upstreamexchange.FieldExchangeID:       {Type: field.TypeString, Column: upstreamexchange.FieldExchangeID},
 			upstreamexchange.FieldExchangeKind:     {Type: field.TypeString, Column: upstreamexchange.FieldExchangeKind},
@@ -3402,6 +3403,11 @@ func (f *UpstreamExchangeFilter) WhereResponseID(p entql.StringP) {
 // WhereRequestAuditID applies the entql string predicate on the request_audit_id field.
 func (f *UpstreamExchangeFilter) WhereRequestAuditID(p entql.StringP) {
 	f.Where(p.Field(upstreamexchange.FieldRequestAuditID))
+}
+
+// WhereRequestID applies the entql string predicate on the request_id field.
+func (f *UpstreamExchangeFilter) WhereRequestID(p entql.StringP) {
+	f.Where(p.Field(upstreamexchange.FieldRequestID))
 }
 
 // WhereTraceID applies the entql string predicate on the trace_id field.

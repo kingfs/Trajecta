@@ -156,3 +156,36 @@ func TestEntAuditorRecordUpstreamExchangePersistsExchangeMetadata(t *testing.T) 
 		t.Fatalf("exchange metadata = %+v, want model/main_model_call/exchange_entry_1/4", record)
 	}
 }
+
+// TestEntAuditorRecordUpstreamExchangeNamesTheRequestID pins the accurately
+// named request id column. `trace_id` is the legacy name and holds the same
+// value (the recorder prelude meta.request_id, equal to logs.request_id), which
+// used to make a join on logs.trace_id return zero rows silently.
+func TestEntAuditorRecordUpstreamExchangeNamesTheRequestID(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	auditor := NewEntAuditor(client)
+
+	if err := auditor.RecordUpstreamExchange(ctx, UpstreamExchange{
+		ResponseID:     "resp_request_id",
+		RequestAuditID: "audit_request_id",
+		RequestID:      "1750000000000000000",
+		TraceID:        "1750000000000000000",
+		ExchangeID:     "exchange_request_id",
+	}); err != nil {
+		t.Fatalf("RecordUpstreamExchange() error = %v", err)
+	}
+
+	record, err := client.UpstreamExchange.Query().
+		Where(upstreamexchange.ExchangeIDEQ("exchange_request_id")).
+		Only(ctx)
+	if err != nil {
+		t.Fatalf("query exchange: %v", err)
+	}
+	if record.RequestID != "1750000000000000000" {
+		t.Fatalf("RequestID = %q, want the recorder request id", record.RequestID)
+	}
+	if record.TraceID != record.RequestID {
+		t.Fatalf("TraceID = %q, want the legacy column to keep the same value as RequestID %q", record.TraceID, record.RequestID)
+	}
+}

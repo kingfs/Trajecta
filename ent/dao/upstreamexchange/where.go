@@ -74,6 +74,11 @@ func RequestAuditID(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldEQ(FieldRequestAuditID, v))
 }
 
+// RequestID applies equality check predicate on the "request_id" field. It's identical to RequestIDEQ.
+func RequestID(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldRequestID, v))
+}
+
 // TraceID applies equality check predicate on the "trace_id" field. It's identical to TraceIDEQ.
 func TraceID(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldEQ(FieldTraceID, v))
@@ -297,6 +302,81 @@ func RequestAuditIDEqualFold(v string) predicate.UpstreamExchange {
 // RequestAuditIDContainsFold applies the ContainsFold predicate on the "request_audit_id" field.
 func RequestAuditIDContainsFold(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldRequestAuditID, v))
+}
+
+// RequestIDEQ applies the EQ predicate on the "request_id" field.
+func RequestIDEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldRequestID, v))
+}
+
+// RequestIDNEQ applies the NEQ predicate on the "request_id" field.
+func RequestIDNEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldRequestID, v))
+}
+
+// RequestIDIn applies the In predicate on the "request_id" field.
+func RequestIDIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldRequestID, vs...))
+}
+
+// RequestIDNotIn applies the NotIn predicate on the "request_id" field.
+func RequestIDNotIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldRequestID, vs...))
+}
+
+// RequestIDGT applies the GT predicate on the "request_id" field.
+func RequestIDGT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldRequestID, v))
+}
+
+// RequestIDGTE applies the GTE predicate on the "request_id" field.
+func RequestIDGTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldRequestID, v))
+}
+
+// RequestIDLT applies the LT predicate on the "request_id" field.
+func RequestIDLT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldRequestID, v))
+}
+
+// RequestIDLTE applies the LTE predicate on the "request_id" field.
+func RequestIDLTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldRequestID, v))
+}
+
+// RequestIDContains applies the Contains predicate on the "request_id" field.
+func RequestIDContains(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContains(FieldRequestID, v))
+}
+
+// RequestIDHasPrefix applies the HasPrefix predicate on the "request_id" field.
+func RequestIDHasPrefix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasPrefix(FieldRequestID, v))
+}
+
+// RequestIDHasSuffix applies the HasSuffix predicate on the "request_id" field.
+func RequestIDHasSuffix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasSuffix(FieldRequestID, v))
+}
+
+// RequestIDIsNil applies the IsNil predicate on the "request_id" field.
+func RequestIDIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldRequestID))
+}
+
+// RequestIDNotNil applies the NotNil predicate on the "request_id" field.
+func RequestIDNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldRequestID))
+}
+
+// RequestIDEqualFold applies the EqualFold predicate on the "request_id" field.
+func RequestIDEqualFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEqualFold(FieldRequestID, v))
+}
+
+// RequestIDContainsFold applies the ContainsFold predicate on the "request_id" field.
+func RequestIDContainsFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldRequestID, v))
 }
 
 // TraceIDEQ applies the EQ predicate on the "trace_id" field.
