@@ -3452,18 +3452,30 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 		name              string
 		firstStatus       int
 		firstBody         string
+		wantStatus        int
+		wantCode          string
 		wantRecordedError string
 	}{
 		{
+			// The local Responses runtime performs the request as an internal
+			// chat completion, so an upstream rejection is an upstream failure:
+			// the upstream status is preserved, exactly as the pass-through
+			// path reports it.
 			name:              "upstream_non_2xx",
 			firstStatus:       http.StatusBadGateway,
 			firstBody:         `{"error":{"message":"upstream unavailable"}}`,
+			wantStatus:        http.StatusBadGateway,
+			wantCode:          "upstream_error",
 			wantRecordedError: "chat completion request failed: status 502",
 		},
 		{
+			// A malformed upstream body is a decode failure in the runtime
+			// itself, not an upstream status, so it stays a 500.
 			name:              "invalid_json",
 			firstStatus:       http.StatusOK,
 			firstBody:         `{"id":`,
+			wantStatus:        http.StatusInternalServerError,
+			wantCode:          "server_error",
 			wantRecordedError: "decode chat completion response JSON",
 		},
 	}
@@ -3528,8 +3540,11 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 			}
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode != http.StatusInternalServerError {
-				t.Fatalf("first resp.StatusCode = %d, want 500; body=%s", resp.StatusCode, string(body))
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("first resp.StatusCode = %d, want %d; body=%s", resp.StatusCode, tt.wantStatus, string(body))
+			}
+			if !strings.Contains(string(body), `"code":"`+tt.wantCode+`"`) {
+				t.Fatalf("first resp body = %s, want code %q", string(body), tt.wantCode)
 			}
 
 			entries, err := waitForRecentEntries(st, 1, time.Second)

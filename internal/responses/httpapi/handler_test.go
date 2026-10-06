@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/chatclient"
 	"github.com/kingfs/Trajecta/internal/responses/protocol"
 	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
@@ -1008,6 +1010,82 @@ func TestCreateResponseRuntimeError(t *testing.T) {
 	}
 	assertError(t, rec, "server_error", "server_error")
 }
+
+// TestCreateResponseRuntimeUpstreamStatusIsPreserved pins the local runtime's
+// failure contract. The runtime performs the request as an internal
+// `/v1/chat/completions` call, so an upstream rejection is an upstream failure
+// and its status must reach the client. Every failure used to become a 500,
+// which hid whether the caller's request or the upstream was at fault and
+// disagreed with the pass-through path for the same condition.
+func TestCreateResponseRuntimeUpstreamStatusIsPreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantType   string
+		wantCode   string
+	}{
+		{
+			name:       "upstream 502",
+			err:        chatclient.HTTPError{StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway", Body: `{"error":{"message":"down"}}`},
+			wantStatus: http.StatusBadGateway,
+			wantType:   "server_error",
+			wantCode:   "upstream_error",
+		},
+		{
+			name:       "upstream 429",
+			err:        chatclient.HTTPError{StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Body: "slow down"},
+			wantStatus: http.StatusTooManyRequests,
+			wantType:   "rate_limit_error",
+			wantCode:   "rate_limit_exceeded",
+		},
+		{
+			name:       "upstream 400",
+			err:        chatclient.HTTPError{StatusCode: http.StatusBadRequest, Status: "400 Bad Request", Body: "bad"},
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantCode:   "upstream_rejected",
+		},
+		{
+			name:       "transport failure",
+			err:        &url.Error{Op: "Post", URL: "http://upstream/v1/chat/completions", Err: errors.New("connection refused")},
+			wantStatus: http.StatusBadGateway,
+			wantType:   "server_error",
+			wantCode:   "bad_gateway",
+		},
+		{
+			name:       "transport timeout",
+			err:        &url.Error{Op: "Post", URL: "http://upstream/v1/chat/completions", Err: timeoutError{}},
+			wantStatus: http.StatusGatewayTimeout,
+			wantType:   "server_error",
+			wantCode:   "upstream_timeout",
+		},
+		{
+			name:       "internal failure",
+			err:        errors.New("upstream failed"),
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "server_error",
+			wantCode:   "server_error",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			NewHandler(&fakeRuntime{createErr: tc.err}).
+				ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`)))
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			assertError(t, rec, tc.wantType, tc.wantCode)
+		})
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
 
 func TestCreateResponseRuntimeContextCanceledAuditsCancelled(t *testing.T) {
 	auditor := &fakeAuditor{}

@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/responses/audit"
+	"github.com/kingfs/Trajecta/internal/responses/chatclient"
 	"github.com/kingfs/Trajecta/internal/responses/protocol"
 	"github.com/kingfs/Trajecta/internal/responses/runtime"
 )
@@ -986,7 +989,51 @@ func writeRuntimeError(w http.ResponseWriter, err error) {
 		writeError(w, statusClientClosedRequest, "request cancelled", "server_error", "cancelled")
 		return
 	}
-	writeError(w, http.StatusInternalServerError, err.Error(), "server_error", "server_error")
+	status, errType, errCode := runtimeErrorClass(err)
+	writeError(w, status, err.Error(), errType, errCode)
+}
+
+// runtimeErrorClass maps a runtime failure onto the status and the error kind
+// the client sees. The local Responses runtime performs an internal
+// `/v1/chat/completions` call, so its failures are upstream failures: the
+// upstream status is preserved (a rejected request stays 4xx, a gateway failure
+// stays 5xx) and a transport failure becomes 502. Reporting every one of them
+// as 500 hid whether the caller's request or the upstream was at fault, and it
+// disagreed with the pass-through path, which preserves the upstream status for
+// the same condition. An unrecognised failure is still an internal 500.
+func runtimeErrorClass(err error) (int, string, string) {
+	var upstreamErr chatclient.HTTPError
+	if errors.As(err, &upstreamErr) && upstreamErr.StatusCode >= 400 && upstreamErr.StatusCode <= 599 {
+		errType, errCode := upstreamErrorKind(upstreamErr.StatusCode)
+		return upstreamErr.StatusCode, errType, errCode
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout, "server_error", "upstream_timeout"
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			return http.StatusGatewayTimeout, "server_error", "upstream_timeout"
+		}
+		return http.StatusBadGateway, "server_error", "bad_gateway"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return http.StatusGatewayTimeout, "server_error", "upstream_timeout"
+	}
+	return http.StatusInternalServerError, "server_error", "server_error"
+}
+
+// upstreamErrorKind names an upstream status for the OpenAI-shaped envelope.
+func upstreamErrorKind(status int) (string, string) {
+	switch {
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error", "rate_limit_exceeded"
+	case status >= 500:
+		return "server_error", "upstream_error"
+	default:
+		return "invalid_request_error", "upstream_rejected"
+	}
 }
 
 func runtimeErrorBody(err error) protocol.ErrorBody {
@@ -1017,10 +1064,11 @@ func runtimeErrorBody(err error) protocol.ErrorBody {
 			Code:    "unsupported_tool",
 		}
 	}
+	_, errType, errCode := runtimeErrorClass(err)
 	return protocol.ErrorBody{
 		Message: err.Error(),
-		Type:    "server_error",
-		Code:    "server_error",
+		Type:    errType,
+		Code:    errCode,
 	}
 }
 
