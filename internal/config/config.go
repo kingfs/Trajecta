@@ -361,6 +361,13 @@ func Load(path string) (*Config, error) {
 	if err := validateChaosRules(&cfg); err != nil {
 		return nil, err
 	}
+	// Neither trace.output_dir nor debug.output_dir names a directory. That is allowed (the
+	// SQLite default path is built from it, so an empty value means "next to the process"), but
+	// it decides where every cassette is written, and the only trace of it used to be the
+	// startup log line. Say it at load time instead.
+	if strings.TrimSpace(cfg.TraceOutputDir()) == "" {
+		slog.Warn("neither trace.output_dir nor debug.output_dir is set; recordings and the default SQLite database are written relative to the process working directory")
+	}
 	return &cfg, nil
 }
 

@@ -440,7 +440,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		}
 	}
 
-	rec := recorder.New(cfg.Debug.OutputDir, cfg.Debug.MaskKey, st)
+	// TraceOutputDir() resolves trace.output_dir with a debug.output_dir fallback, which is
+	// what the store, the default SQLite path and the startup log already use. Reading
+	// Debug.OutputDir directly here meant a configuration that set only trace.output_dir
+	// recorded into the process working directory: the cassettes and their index rows landed
+	// somewhere other than the configured directory, and a read-only working directory failed
+	// every request, because a recording error returns 500.
+	rec := recorder.New(cfg.TraceOutputDir(), cfg.Debug.MaskKey, st)
 	cm := chaos.New(cfg)
 	localLimiter := limit.New(limit.Config{
 		MaxConcurrent: cfg.Limits.MaxConcurrent,
