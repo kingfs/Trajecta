@@ -81,19 +81,74 @@ func postgresSchema() map[string]map[string]struct{} {
 	return out
 }
 
-// postgresSchemaReach returns the part of store.go that runs when the driver is
-// Postgres: the body of initSchema's Postgres branch plus the body of every
+// storePackageSource returns the concatenated source of every non-test file in
+// the store package, so a schema check does not depend on which file a
+// declaration happens to live in.
+func storePackageSource(t *testing.T) string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read internal/store: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		t.Fatal("no non-test Go files found in internal/store")
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		out.WriteString("\n// file: ")
+		out.WriteString(name)
+		out.WriteString("\n")
+		out.Write(data)
+	}
+	return out.String()
+}
+
+// postgresSchemaReach returns the part of the package that runs when the driver
+// is Postgres: the body of initSchema's Postgres branch plus the body of every
 // helper that branch calls. It is how the test proves that a hand-written SQLite
 // table also has a Postgres creator, instead of taking an allowlist entry's word
 // for it.
+//
+// It searches the whole package rather than one file: the store is split across
+// several files and the split moves with refactors, so a gate pinned to a
+// filename reports drift every time a declaration is relocated - which is a
+// false alarm about the schema and a real one about the gate.
 func postgresSchemaReach(t *testing.T, src string) string {
 	t.Helper()
-	start := strings.Index(src, `if s.driver == "postgres" {`)
-	end := strings.Index(src, "stmts := []string{")
+	// Anchor on initSchema itself: several functions branch on the driver, and a
+	// plain search for the first `if s.driver == "postgres" {` in the package
+	// finds whichever file sorts first, which made this reach a span covering
+	// unrelated files and let a missing Postgres creator pass unnoticed.
+	initSchemaSrc, ok := functionBody(src, "initSchema")
+	if !ok {
+		t.Fatal("cannot locate func (s *Store) initSchema in the store package")
+	}
+	// initSchema lives in one file, so its body must not span a file boundary in
+	// the concatenated source. It would if the anchor were wrong, or if
+	// functionBody's "up to the next func" slice ran past the end of the file,
+	// and either makes the branch boundaries meaningless.
+	if strings.Contains(initSchemaSrc, "// file: ") {
+		t.Fatal("initSchema's body spans a file boundary in the concatenated source, so its Postgres branch cannot be located reliably")
+	}
+	start := strings.Index(initSchemaSrc, `if s.driver == "postgres" {`)
+	end := strings.Index(initSchemaSrc, "stmts := []string{")
 	if start < 0 || end <= start {
 		t.Fatalf("cannot locate initSchema's Postgres branch (start=%d end=%d)", start, end)
 	}
-	branch := src[start:end]
+	branch := initSchemaSrc[start:end]
 	reach := branch
 	for _, match := range helperCallRe.FindAllStringSubmatch(branch, -1) {
 		body, ok := functionBody(src, match[1])
@@ -165,11 +220,7 @@ func TestSQLiteAndPostgresSchemasAgree(t *testing.T) {
 		"session_summaries",
 	}
 
-	source, err := os.ReadFile("store.go")
-	if err != nil {
-		t.Fatalf("read store.go: %v", err)
-	}
-	postgresReach := postgresSchemaReach(t, string(source))
+	postgresReach := postgresSchemaReach(t, storePackageSource(t))
 	handWritten := make(map[string]bool, len(handWrittenTables))
 	for _, table := range handWrittenTables {
 		handWritten[table] = true
