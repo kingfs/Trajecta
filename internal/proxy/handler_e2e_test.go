@@ -5789,22 +5789,41 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	}
 }
 
+// walkRecordedHTTPFiles walks a cassette directory and offers every `.http` file to visit, which
+// returns whether the walk should stop.
+//
+// It uses WalkDir rather than Walk on purpose: the recorder publishes each cassette through a
+// hidden `.cassette-rewrite-*` temporary file and renames it into place, so a directory listing
+// taken a moment ago can name an entry that is already gone. Walk lstats every entry it was told
+// about and fails the whole scan with ENOENT when that happens, which made recorded-output helpers
+// flaky under load; WalkDir reports the entry it read and never re-stats it. A vanished entry is
+// also skipped explicitly, so the helpers stay correct on filesystems where even the directory
+// read can race.
+func walkRecordedHTTPFiles(root string, visit func(path string) bool) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".http" {
+			return nil
+		}
+		if visit(path) {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+}
+
 func findRecordedHTTP(t *testing.T, root string) string {
 	t.Helper()
 
 	var found string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".http" {
-			return nil
-		}
+	err := walkRecordedHTTPFiles(root, func(path string) bool {
 		found = path
-		return filepath.SkipAll
+		return true
 	})
 	if err != nil {
 		t.Fatalf("Walk(%q) error = %v", root, err)
@@ -5822,28 +5841,22 @@ func waitForRecordedHTTPByEndpoint(t *testing.T, root string, endpoint string, t
 	var lastErr error
 	for {
 		var found string
-		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || filepath.Ext(path) != ".http" {
-				return nil
-			}
+		err := walkRecordedHTTPFiles(root, func(path string) bool {
 			content, readErr := os.ReadFile(path)
 			if readErr != nil {
 				lastErr = readErr
-				return nil
+				return false
 			}
 			parsed, parseErr := recordfile.ParsePrelude(content)
 			if parseErr != nil {
 				lastErr = parseErr
-				return nil
+				return false
 			}
 			if parsed.Header.Meta.Endpoint == endpoint {
 				found = path
-				return filepath.SkipAll
+				return true
 			}
-			return nil
+			return false
 		})
 		if err != nil {
 			t.Fatalf("Walk(%q) error = %v", root, err)
