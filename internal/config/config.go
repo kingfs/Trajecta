@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -361,6 +362,9 @@ func Load(path string) (*Config, error) {
 	if err := validateChaosRules(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateFiniteNumbers(&cfg); err != nil {
+		return nil, err
+	}
 	// Neither trace.output_dir nor debug.output_dir names a directory. That is allowed (the
 	// SQLite default path is built from it, so an empty value means "next to the process"), but
 	// it decides where every cassette is written, and the only trace of it used to be the
@@ -406,6 +410,75 @@ func validateChaosRules(cfg *Config) error {
 		}
 		if status := rule.StatusCode; status != 0 && (status < 100 || status > 999) {
 			return fmt.Errorf("%s status_code %d cannot be written by net/http; use 0 for the default (500) or a value between 100 and 999", where, status)
+		}
+	}
+	return nil
+}
+
+// validateFiniteNumbers rejects non-finite numbers for every float knob in the configuration.
+//
+// YAML spells them as `.nan`, `.inf` and `-.inf`, and a non-finite value slips through every rule
+// that is written as a comparison: `rate < 0 || rate > 1` is false for NaN, and the router's
+// non-positive-means-default rule (`v <= 0`) is false for NaN too. The value then reaches the hot
+// path, where it does not fail loudly but changes routing silently: weight and capacity_hint
+// divide a target's expected cost, so a NaN cost makes the cost comparison a non-total order and
+// the affected target wins against every other candidate, and the router snapshot can no longer
+// be marshalled for the Monitor (`json: unsupported value: NaN`). Load refuses the value instead.
+//
+// The walk is reflective so a new float field cannot be added without being covered; the reported
+// path uses the same yaml names the operator writes.
+func validateFiniteNumbers(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	return validateFiniteValue(reflect.ValueOf(cfg), "")
+}
+
+func validateFiniteValue(value reflect.Value, path string) error {
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if value.IsNil() {
+			return nil
+		}
+		return validateFiniteValue(value.Elem(), path)
+	case reflect.Struct:
+		typ := value.Type()
+		for i := 0; i < value.NumField(); i++ {
+			field := typ.Field(i)
+			if field.PkgPath != "" { // unexported
+				continue
+			}
+			name := field.Name
+			if tag := strings.Split(field.Tag.Get("yaml"), ",")[0]; tag != "" && tag != "-" {
+				name = tag
+			}
+			child := path
+			if child == "" {
+				child = name
+			} else {
+				child = child + "." + name
+			}
+			if err := validateFiniteValue(value.Field(i), child); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < value.Len(); i++ {
+			if err := validateFiniteValue(value.Index(i), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		iter := value.MapRange()
+		for iter.Next() {
+			if err := validateFiniteValue(iter.Value(), fmt.Sprintf("%s[%v]", path, iter.Key().Interface())); err != nil {
+				return err
+			}
+		}
+	case reflect.Float32, reflect.Float64:
+		number := value.Float()
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return fmt.Errorf("%s must be a finite number, got %v; YAML spells non-finite values as .nan, .inf or -.inf", path, number)
 		}
 	}
 	return nil

@@ -2395,8 +2395,16 @@ func allowUnknownModels(cfg config.UpstreamTargetConfig, fallback bool) bool {
 	return fallback
 }
 
+// defaultFloat applies the configuration convention that a non-positive number means "unset, use
+// the default".
+//
+// Non-finite values fall back too: Load rejects them in a config file, but a value can still
+// arrive from a stored row or a legacy import, and a NaN weight is not a harmless default here -
+// it divides the target's expected cost, which turns the cost comparison into a non-total order
+// (the affected target wins against every candidate) and makes the router snapshot un-marshallable
+// for the Monitor.
 func defaultFloat(v float64, fallback float64) float64 {
-	if v <= 0 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
 		return fallback
 	}
 	return v
