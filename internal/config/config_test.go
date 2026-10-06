@@ -1455,3 +1455,62 @@ func TestDatabaseDriverDefaultsToPostgres(t *testing.T) {
 		t.Fatalf("DatabaseDriver() = %q, want sqlite when it is named explicitly", got)
 	}
 }
+
+func TestServerTimeoutsLoadFromConfig(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, `
+server:
+  port: "8080"
+  read_timeout: 45s
+  write_timeout: 90s
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.ServerReadTimeout(); got != 45*time.Second {
+		t.Fatalf("ServerReadTimeout() = %v, want 45s", got)
+	}
+	if got := cfg.ServerWriteTimeout(); got != 90*time.Second {
+		t.Fatalf("ServerWriteTimeout() = %v, want 90s", got)
+	}
+}
+
+func TestServerTimeoutsDefaultToNoWriteDeadline(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, `
+server:
+  port: "8080"
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.ServerReadTimeout(); got != 5*time.Minute {
+		t.Fatalf("ServerReadTimeout() = %v, want 5m", got)
+	}
+	// No write deadline by default. `http.Server.WriteTimeout` covers the whole
+	// response write, not the gap between writes, so any fixed default truncates
+	// the responses this proxy exists to serve: a long completion, a streamed
+	// response, or the Monitor's SSE event stream.
+	if got := cfg.ServerWriteTimeout(); got != 0 {
+		t.Fatalf("ServerWriteTimeout() = %v, want 0 (no deadline)", got)
+	}
+}
+
+func TestServerTimeoutsHonourEnvOverrides(t *testing.T) {
+	t.Setenv("TRAJECTA_SERVER_READ_TIMEOUT", "11s")
+	t.Setenv("TRAJECTA_SERVER_WRITE_TIMEOUT", "12s")
+
+	cfg, err := Load(writeTempConfig(t, `
+server:
+  port: "8080"
+  read_timeout: 45s
+  write_timeout: 90s
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.ServerReadTimeout(); got != 11*time.Second {
+		t.Fatalf("ServerReadTimeout() = %v, want the env override 11s", got)
+	}
+	if got := cfg.ServerWriteTimeout(); got != 12*time.Second {
+		t.Fatalf("ServerWriteTimeout() = %v, want the env override 12s", got)
+	}
+}

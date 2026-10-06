@@ -176,15 +176,8 @@ func runServeWithConfig(configPath string) int {
 		go func() {
 			mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
 
-			addr := ":" + cfg.Monitor.Port
-			srv := &http.Server{
-				Addr:              addr,
-				Handler:           mux,
-				ReadHeaderTimeout: 10 * time.Second,
-				ReadTimeout:       30 * time.Second,
-				WriteTimeout:      2 * time.Minute,
-				IdleTimeout:       2 * time.Minute,
-			}
+			srv := newManagementHTTPServer(cfg, mux)
+			addr := srv.Addr
 			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
@@ -201,14 +194,7 @@ func runServeWithConfig(configPath string) int {
 	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute, &background)
 
 	addr := ":" + cfg.Server.Port
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       5 * time.Minute,
-		WriteTimeout:      5 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-	}
+	srv := newProxyHTTPServer(cfg, handler)
 
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -216,6 +202,43 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 	return 0
+}
+
+// newProxyHTTPServer builds the HTTP server that serves proxied model traffic.
+//
+// It carries no write deadline by default. `http.Server.WriteTimeout` spans the
+// whole response write rather than the gap between writes, so a fixed value
+// truncates every response that legitimately runs longer, which for this server
+// is the normal case: a proxied chat completion, the local Responses runtime's
+// SSE stream and a long reasoning turn all can. The client saw the connection
+// close mid-body with no protocol error it could interpret. What bounds a
+// request instead is the caller (the outbound upstream request carries the
+// incoming request context, so a cancelled SDK call cancels the upstream call)
+// plus the transport's dial and TLS timeouts. An operator that wants a hard cap
+// sets `server.write_timeout`.
+func newProxyHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + cfg.Server.Port,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.ServerReadTimeout(),
+		WriteTimeout:      cfg.ServerWriteTimeout(),
+		IdleTimeout:       2 * time.Minute,
+	}
+}
+
+// newManagementHTTPServer builds the Monitor/API/MCP server. It carries no write
+// deadline because `GET /api/events/stream` is a long-lived SSE response that a
+// fixed deadline closed on schedule.
+func newManagementHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + cfg.Monitor.Port,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 func buildResponsesFunctionExecutorManager(ctx context.Context, cfg *config.Config, traceStore *store.Store) (*functionexec.Manager, error) {

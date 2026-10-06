@@ -21,6 +21,11 @@ import (
 type Config struct {
 	Server struct {
 		Port string `yaml:"port"`
+		// ReadTimeout bounds reading one request, including its body.
+		ReadTimeout time.Duration `yaml:"read_timeout"`
+		// WriteTimeout bounds writing one response. Zero means no server-side
+		// write deadline; see Config.ServerWriteTimeout.
+		WriteTimeout time.Duration `yaml:"write_timeout"`
 	} `yaml:"server"`
 
 	Monitor struct {
@@ -393,6 +398,16 @@ func validateLimits(cfg *Config) error {
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("TRAJECTA_SERVER_PORT"); v != "" {
 		cfg.Server.Port = v
+	}
+	if v := os.Getenv("TRAJECTA_SERVER_READ_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.Server.ReadTimeout = parsed
+		}
+	}
+	if v := os.Getenv("TRAJECTA_SERVER_WRITE_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.Server.WriteTimeout = parsed
+		}
 	}
 	if v := os.Getenv("TRAJECTA_MONITOR_PORT"); v != "" {
 		cfg.Monitor.Port = v
@@ -856,6 +871,37 @@ func (c Config) AuthSessionTTL() time.Duration {
 		return c.Auth.SessionTTL
 	}
 	return 24 * time.Hour
+}
+
+// ServerReadTimeout bounds reading one request, including its body.
+func (c Config) ServerReadTimeout() time.Duration {
+	if c.Server.ReadTimeout > 0 {
+		return c.Server.ReadTimeout
+	}
+	return 5 * time.Minute
+}
+
+// ServerWriteTimeout is the server-side deadline for writing one response. Zero
+// means no deadline, which is the default.
+//
+// `http.Server.WriteTimeout` covers the whole response write, not the gap
+// between writes, so a fixed value truncates every response that legitimately
+// runs longer. That is the normal case here: the proxy forwards chat
+// completions and the local Responses runtime streams them, and neither has a
+// natural upper bound — a long reasoning or code-generation turn routinely
+// exceeds the five minutes this used to be capped at, and the client saw the
+// connection close mid-body with no protocol error it could interpret. What
+// still bounds a request is the caller: the outbound upstream request carries
+// the incoming request context, so a cancelled SDK call cancels the upstream
+// call, and the transport's dial and TLS timeouts bound a connection that never
+// establishes. Operators that want a hard cap (a public deployment protecting
+// against a client that reads slowly) can set `server.write_timeout` or
+// `TRAJECTA_SERVER_WRITE_TIMEOUT`.
+func (c Config) ServerWriteTimeout() time.Duration {
+	if c.Server.WriteTimeout > 0 {
+		return c.Server.WriteTimeout
+	}
+	return 0
 }
 
 func (c Config) TraceOutputDir() string {
