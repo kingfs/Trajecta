@@ -397,7 +397,7 @@ func readLimited(r io.Reader, maxBytes int) ([]byte, error) {
 
 func extractJSONRPCMessage(raw []byte) []byte {
 	trimmed := bytes.TrimSpace(raw)
-	if !bytes.HasPrefix(trimmed, []byte("event:")) && !bytes.HasPrefix(trimmed, []byte("data:")) {
+	if !looksLikeSSEEnvelope(trimmed) {
 		return trimmed
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
@@ -406,13 +406,53 @@ func extractJSONRPCMessage(raw []byte) []byte {
 	// finds no data: line and the SSE envelope is returned as if it were the JSON-RPC message, which
 	// then fails to decode.
 	scanner.Buffer(make([]byte, 0, 64*1024), len(trimmed)+1)
+
+	var data [][]byte
 	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if bytes.HasPrefix(line, []byte("data:")) {
-			return bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			// A blank line ends the event; only leading blank lines are skipped.
+			if len(data) > 0 {
+				break
+			}
+			continue
 		}
+		if bytes.HasPrefix(line, []byte(":")) {
+			continue // SSE comment, e.g. a keep-alive
+		}
+		field, value, found := bytes.Cut(line, []byte(":"))
+		if !found || !bytes.Equal(field, []byte("data")) {
+			continue // event:, id:, retry: and anything else are not the payload
+		}
+		data = append(data, bytes.TrimPrefix(value, []byte(" ")))
 	}
-	return trimmed
+	if len(data) == 0 {
+		return trimmed
+	}
+	// The SSE spec joins the data: lines of one event with newlines; a JSON-RPC response wrapped that
+	// way is only decodable once they are joined again.
+	return bytes.TrimSpace(bytes.Join(data, []byte("\n")))
+}
+
+// looksLikeSSEEnvelope reports whether the body starts with an SSE field rather than with the JSON-RPC
+// message itself. The check is deliberately limited to the start of the body: a plain JSON result whose
+// payload happens to contain a line starting with `data:` must be passed through untouched.
+func looksLikeSSEEnvelope(trimmed []byte) bool {
+	if len(trimmed) == 0 {
+		return false
+	}
+	if trimmed[0] == ':' {
+		return true // comment-only preamble
+	}
+	field, _, found := bytes.Cut(trimmed, []byte(":"))
+	if !found {
+		return false
+	}
+	switch string(field) {
+	case "data", "event", "id", "retry":
+		return true
+	}
+	return false
 }
 
 func outputFromMCPResult(server serverRuntime, toolName string, args map[string]any, result *mcpsdk.CallToolResult) Output {
