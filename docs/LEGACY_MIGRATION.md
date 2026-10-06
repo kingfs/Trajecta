@@ -231,7 +231,7 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 | --- | --- |
 | `logs.path` | trace 索引主键，也是 `logs` 的唯一路径来源 |
 | `upstream_exchanges.cassette_path` | 可选副本（可空） |
-| `overview_metric_bucket_members.path` | 概览指标的成员主键（按 path 增量维护，没有重建入口） |
+| `overview_metric_bucket_members.path` | 概览指标的成员主键（按 path 增量维护；重建入口是 `server db summary rebuild overview`，即 `Store.RebuildOverviewMetricBuckets`，它会从 `logs` 整表重算 `overview_metric_buckets` 与 `overview_metric_bucket_members`，见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)） |
 
 `logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 与 trace 的关联保持不变（`analysis_jobs` 按 `target_type`/`target_id`、`session_summaries` 按 `session_id` 关联，两者都不带 `trace_id`）；`request_audits.path`（HTTP 路径）、`semantic_nodes.path`（JSONPath）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
 
