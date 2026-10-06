@@ -324,3 +324,53 @@ func clearConfigInspectSourceEnv(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+// TestRedactURLLikeSharesTheSensitiveMarkerList pins the CLI redaction against
+// the marker list in internal/redaction.
+//
+// `config inspect` used to carry a private copy of that list which had lost
+// `credential`, `signature`, `sig`, `access_token` and `api_key`, so a URL whose
+// secret travelled in `?sig=` or `?credential=` was printed verbatim to stdout
+// and into CI logs while the recorder and the proxy masked the same value. The
+// two lists had also drifted the other way, which is why the shared list is the
+// union rather than either copy.
+func TestRedactURLLikeSharesTheSensitiveMarkerList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "sig was not redacted by the CLI copy",
+			raw:  "https://gateway.example.com/v1?sig=abc123",
+			want: "https://gateway.example.com/v1?sig=%3Credacted%3E",
+		},
+		{
+			name: "credential was not redacted by the CLI copy",
+			raw:  "https://gateway.example.com/v1?credential=abc123",
+			want: "https://gateway.example.com/v1?credential=%3Credacted%3E",
+		},
+		{
+			name: "signature was not redacted by the CLI copy",
+			raw:  "https://gateway.example.com/v1?signature=abc123",
+			want: "https://gateway.example.com/v1?signature=%3Credacted%3E",
+		},
+		{
+			name: "non sensitive parameters stay readable",
+			raw:  "https://gateway.example.com/v1?model=gpt-5&page=2",
+			want: "https://gateway.example.com/v1?model=gpt-5&page=2",
+		},
+		{
+			name: "userinfo password stays redacted",
+			raw:  "https://user:secret@gateway.example.com/v1",
+			want: "https://user:%3Credacted%3E@gateway.example.com/v1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := redactURLLike(tt.raw); got != tt.want {
+				t.Fatalf("redactURLLike(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}

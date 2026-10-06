@@ -26,6 +26,19 @@ func TestDisplayURLRedactsUserinfo(t *testing.T) {
 			raw:  "https://:secret@example.com/v1",
 			want: "https://REDACTED:REDACTED@example.com/v1",
 		},
+		{
+			// A gateway configured with the key as the URL username would
+			// otherwise have that key written into the cassette meta and the
+			// logs table in plain text.
+			name: "secret named in the username",
+			raw:  "https://api_key_abc@example.com/v1",
+			want: "https://REDACTED:REDACTED@example.com/v1",
+		},
+		{
+			name: "token named in the username",
+			raw:  "https://token@example.com/v1",
+			want: "https://REDACTED:REDACTED@example.com/v1",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -33,6 +46,26 @@ func TestDisplayURLRedactsUserinfo(t *testing.T) {
 				t.Fatalf("DisplayURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSensitiveURLParamMarkersAreTheSharedList guards the marker list that both
+// the recorder/proxy redaction and the CLI `config inspect` redaction consult.
+// The CLI used to keep a private copy that had lost five of these markers.
+func TestSensitiveURLParamMarkersAreTheSharedList(t *testing.T) {
+	for _, key := range []string{
+		"key", "api_key", "x-api-key", "token", "access_token", "refresh_token",
+		"secret", "client_secret", "password", "passwd", "credential",
+		"signature", "sig", "authorization", "Authorization", "auth",
+	} {
+		if !IsSensitiveURLParam(key) {
+			t.Errorf("IsSensitiveURLParam(%q) = false, want true", key)
+		}
+	}
+	for _, key := range []string{"", "  ", "model", "sslmode", "application_name", "page", "limit", "host", "dbname"} {
+		if IsSensitiveURLParam(key) {
+			t.Errorf("IsSensitiveURLParam(%q) = true, want false", key)
+		}
 	}
 }
 

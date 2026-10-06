@@ -40,6 +40,36 @@ func TestRedactDSN(t *testing.T) {
 			dsn:  "./logs/trajecta.sqlite3",
 			want: "./logs/trajecta.sqlite3",
 		},
+		{
+			// lib/pq accepts keyword parameters as URL query values, so a URL
+			// DSN can carry the password only in the query string. The password
+			// in the userinfo was already redacted while this copy stayed
+			// readable, and the DSN is printed by `db migrate` and logged at
+			// startup.
+			name: "postgres url password in query",
+			dsn:  "postgres://user@example.com:5432/traces?password=secret",
+			want: "postgres://user@example.com:5432/traces?password=<redacted>",
+		},
+		{
+			name: "postgres url password in userinfo and query",
+			dsn:  "postgres://user:secret@example.com:5432/traces?password=secret&sslmode=require",
+			want: "postgres://user:<redacted>@example.com:5432/traces?password=<redacted>&sslmode=require",
+		},
+		{
+			name: "postgres url other sensitive query keys",
+			dsn:  "postgres://user@example.com/traces?api_key=k&passwd=p",
+			want: "postgres://user@example.com/traces?api_key=<redacted>&passwd=<redacted>",
+		},
+		{
+			name: "postgres url keeps non sensitive query order and values",
+			dsn:  "postgres://user@example.com/traces?sslmode=require&application_name=trajecta",
+			want: "postgres://user@example.com/traces?sslmode=require&application_name=trajecta",
+		},
+		{
+			name: "keyword sslpassword",
+			dsn:  "host=localhost user=trace sslpassword=secret dbname=traces",
+			want: "host=localhost user=trace sslpassword=<redacted> dbname=traces",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

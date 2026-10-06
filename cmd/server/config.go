@@ -11,6 +11,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	appconfig "github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/redaction"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -724,14 +725,14 @@ func redactConfigInspectDSN(raw string) string {
 	return strings.ReplaceAll(redacted, "%3Credacted%3E", "<redacted>")
 }
 
+// shouldRedactKey reports whether a URL component carries a secret. It defers
+// to internal/redaction so the CLI and the recorder/proxy log redaction share
+// one marker list: a private copy here had lost `credential`, `signature`,
+// `sig`, `access_token` and `api_key`, so `?sig=` and `?credential=` were
+// printed verbatim by `config inspect` while the same value was masked
+// everywhere else that prints a URL.
 func shouldRedactKey(key string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(key))
-	for _, marker := range []string{"key", "token", "secret", "password", "passwd", "authorization", "auth"} {
-		if strings.Contains(normalized, marker) {
-			return true
-		}
-	}
-	return false
+	return redaction.IsSensitiveURLParam(key)
 }
 
 func configInspectDatabaseStorageRole(driver string) string {

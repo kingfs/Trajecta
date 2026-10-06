@@ -8,6 +8,13 @@ import (
 
 const redactedValue = "REDACTED"
 
+// sensitiveURLParamMarkers is the single marker list for URL and DSN
+// redaction. It is the union of what the recorder/proxy path and the CLI
+// `config inspect` path each used to carry privately, because the two copies
+// had drifted in both directions: the CLI copy was missing credential,
+// signature, sig, access_token and api_key, while this one was missing
+// authorization and auth. A match is deliberately broad: over-redacting a
+// diagnostic value is harmless, while a missing marker prints the secret.
 var sensitiveURLParamMarkers = []string{
 	"key",
 	"token",
@@ -19,6 +26,8 @@ var sensitiveURLParamMarkers = []string{
 	"sig",
 	"access_token",
 	"api_key",
+	"authorization",
+	"auth",
 }
 
 var metadataSecretPatterns = []*regexp.Regexp{
@@ -41,17 +50,22 @@ func DisplayURL(raw string) string {
 		return raw
 	}
 	if parsed.User != nil && parsed.Host != "" {
+		// The userinfo is a credential position: some gateways are configured
+		// with the API key as the URL username (`https://<key>@host/v1`, or a
+		// `user` that is really a token). Keep an ordinary username, because it
+		// helps identify the upstream, but never keep one that names a secret.
+		// This output is written into cassette meta and the logs table, so a
+		// userinfo secret would be recorded in plain text.
 		username := parsed.User.Username()
-		if username != "" {
-			parsed.User = url.UserPassword(username, redactedValue)
-		} else {
-			parsed.User = url.UserPassword(redactedValue, redactedValue)
+		if username == "" || IsSensitiveURLParam(username) {
+			username = redactedValue
 		}
+		parsed.User = url.UserPassword(username, redactedValue)
 	}
 	if parsed.RawQuery != "" {
 		query := parsed.Query()
 		for key := range query {
-			if isSensitiveURLParam(key) {
+			if IsSensitiveURLParam(key) {
 				query.Set(key, redactedValue)
 			}
 		}
@@ -98,7 +112,11 @@ func redactMetadataSecretMatch(match string) string {
 	return redactedValue
 }
 
-func isSensitiveURLParam(key string) bool {
+// IsSensitiveURLParam reports whether a query parameter name carries a secret.
+// It is exported so that every place which prints a URL or a DSN shares one
+// marker list: a second copy drifts, and the copy that omits a marker leaks the
+// value it was supposed to hide.
+func IsSensitiveURLParam(key string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(key))
 	if normalized == "" {
 		return false

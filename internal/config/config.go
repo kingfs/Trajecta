@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kingfs/Trajecta/internal/redaction"
 
 	"gopkg.in/yaml.v3"
 )
@@ -940,29 +943,74 @@ func (c Config) DatabaseDSN() string {
 	return ""
 }
 
+const redactedDSNValue = "<redacted>"
+
+// RedactDSN hides the credential in a database DSN before it is printed or
+// logged. Two shapes carry one: URL DSNs put it in the userinfo or in a query
+// parameter (lib/pq and the MySQL driver both accept keyword parameters as URL
+// query values, so `?password=` is a working configuration), and keyword DSNs
+// put it in a space-separated `key=value` field.
+//
+// Both the URL query keys and the keyword field keys are matched with
+// redaction.IsSensitiveURLParam so that this shares one marker list with the
+// URL redaction used by the recorder and the proxy logs. Matching only the
+// literal `password=`/`passwd=` spelling of one shape left the same secret
+// visible whenever it was spelled differently.
 func RedactDSN(dsn string) string {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return ""
 	}
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		return redactURLPassword(dsn)
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") || strings.HasPrefix(dsn, "mysql://") {
+		return redactURLDSN(dsn)
 	}
-	if strings.HasPrefix(dsn, "mysql://") {
-		return redactURLPassword(dsn)
-	}
-	if lowerDSN := strings.ToLower(dsn); strings.Contains(lowerDSN, "password=") || strings.Contains(lowerDSN, "passwd=") {
-		parts := strings.Fields(dsn)
-		for i, part := range parts {
-			lower := strings.ToLower(part)
-			if strings.HasPrefix(lower, "password=") || strings.HasPrefix(lower, "passwd=") {
-				key, _, _ := strings.Cut(part, "=")
-				parts[i] = key + "=<redacted>"
-			}
+	parts := strings.Fields(dsn)
+	changed := false
+	for i, part := range parts {
+		key, _, hasValue := strings.Cut(part, "=")
+		if !hasValue || !redaction.IsSensitiveURLParam(key) {
+			continue
 		}
-		return strings.Join(parts, " ")
+		parts[i] = key + "=" + redactedDSNValue
+		changed = true
 	}
-	return dsn
+	if !changed {
+		return dsn
+	}
+	return strings.Join(parts, " ")
+}
+
+// redactURLDSN redacts the userinfo password and every sensitive query
+// parameter of a URL DSN. The query is rewritten textually rather than through
+// url.Values so that a redacted DSN keeps the original parameter order and
+// escapes instead of being re-encoded.
+func redactURLDSN(dsn string) string {
+	redacted := redactURLPassword(dsn)
+	base, rawQuery, hasQuery := strings.Cut(redacted, "?")
+	if !hasQuery || rawQuery == "" {
+		return redacted
+	}
+	params := strings.Split(rawQuery, "&")
+	changed := false
+	for i, param := range params {
+		key, _, hasValue := strings.Cut(param, "=")
+		if !hasValue {
+			continue
+		}
+		decodedKey, err := url.QueryUnescape(key)
+		if err != nil {
+			decodedKey = key
+		}
+		if !redaction.IsSensitiveURLParam(decodedKey) {
+			continue
+		}
+		params[i] = key + "=" + redactedDSNValue
+		changed = true
+	}
+	if !changed {
+		return redacted
+	}
+	return base + "?" + strings.Join(params, "&")
 }
 
 func redactURLPassword(dsn string) string {
