@@ -1463,6 +1463,7 @@ server:
   port: "8080"
   read_timeout: 45s
   write_timeout: 90s
+  upstream_response_header_timeout: 25s
 `))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -1472,6 +1473,9 @@ server:
 	}
 	if got := cfg.ServerWriteTimeout(); got != 90*time.Second {
 		t.Fatalf("ServerWriteTimeout() = %v, want 90s", got)
+	}
+	if got := cfg.UpstreamResponseHeaderTimeout(); got != 25*time.Second {
+		t.Fatalf("UpstreamResponseHeaderTimeout() = %v, want 25s", got)
 	}
 }
 
@@ -1493,17 +1497,27 @@ server:
 	if got := cfg.ServerWriteTimeout(); got != 0 {
 		t.Fatalf("ServerWriteTimeout() = %v, want 0 (no deadline)", got)
 	}
+	// No bound on waiting for upstream response headers by default either. The
+	// proxy cannot tell a stuck upstream from a slow one, so a default would
+	// truncate a legitimate non-streaming reasoning call that spends minutes
+	// before its first byte; an operator bounds it with
+	// `server.upstream_response_header_timeout` instead.
+	if got := cfg.UpstreamResponseHeaderTimeout(); got != 0 {
+		t.Fatalf("UpstreamResponseHeaderTimeout() = %v, want 0 (no bound)", got)
+	}
 }
 
 func TestServerTimeoutsHonourEnvOverrides(t *testing.T) {
 	t.Setenv("TRAJECTA_SERVER_READ_TIMEOUT", "11s")
 	t.Setenv("TRAJECTA_SERVER_WRITE_TIMEOUT", "12s")
+	t.Setenv("TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT", "13s")
 
 	cfg, err := Load(writeTempConfig(t, `
 server:
   port: "8080"
   read_timeout: 45s
   write_timeout: 90s
+  upstream_response_header_timeout: 25s
 `))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -1513,6 +1527,9 @@ server:
 	}
 	if got := cfg.ServerWriteTimeout(); got != 12*time.Second {
 		t.Fatalf("ServerWriteTimeout() = %v, want the env override 12s", got)
+	}
+	if got := cfg.UpstreamResponseHeaderTimeout(); got != 13*time.Second {
+		t.Fatalf("UpstreamResponseHeaderTimeout() = %v, want the env override 13s", got)
 	}
 }
 

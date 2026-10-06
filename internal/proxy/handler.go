@@ -411,6 +411,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: cfg.UpstreamResponseHeaderTimeout(),
 		},
 	}
 

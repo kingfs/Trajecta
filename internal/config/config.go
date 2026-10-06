@@ -26,6 +26,10 @@ type Config struct {
 		// WriteTimeout bounds writing one response. Zero means no server-side
 		// write deadline; see Config.ServerWriteTimeout.
 		WriteTimeout time.Duration `yaml:"write_timeout"`
+		// UpstreamResponseHeaderTimeout bounds the wait for the response
+		// headers of a forwarded request. Zero means no bound; see
+		// Config.UpstreamResponseHeaderTimeout.
+		UpstreamResponseHeaderTimeout time.Duration `yaml:"upstream_response_header_timeout"`
 	} `yaml:"server"`
 
 	Monitor struct {
@@ -410,6 +414,7 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Server.Port, "TRAJECTA_SERVER_PORT")
 	envDuration(&cfg.Server.ReadTimeout, "TRAJECTA_SERVER_READ_TIMEOUT")
 	envDuration(&cfg.Server.WriteTimeout, "TRAJECTA_SERVER_WRITE_TIMEOUT")
+	envDuration(&cfg.Server.UpstreamResponseHeaderTimeout, "TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT")
 	envString(&cfg.Monitor.Port, "TRAJECTA_MONITOR_PORT")
 	envBool(&cfg.MCP.Enabled, "TRAJECTA_MCP_ENABLED")
 	envString(&cfg.MCP.Path, "TRAJECTA_MCP_PATH")
@@ -775,6 +780,26 @@ func (c Config) ServerReadTimeout() time.Duration {
 		return c.Server.ReadTimeout
 	}
 	return 5 * time.Minute
+}
+
+// UpstreamResponseHeaderTimeout is how long a forwarded request waits for the
+// upstream to start answering - the transport's ResponseHeaderTimeout, counted
+// from the end of the request write until the response headers arrive. Zero
+// means no bound, which is the default.
+//
+// The default is zero because this proxy cannot tell a stuck upstream from a
+// slow one: a non-streaming reasoning call can legitimately spend minutes
+// before its first byte, and the bounds the transport already has (dial, TLS
+// handshake, idle connection) are all blind to that wait. The cost of leaving it
+// unbounded is that an upstream which accepts the connection and then never
+// answers holds the client's request, its concurrency slot and its connection
+// until the client gives up. A deployment that would rather fail fast than hold
+// those resources sets `server.upstream_response_header_timeout` or
+// `TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT`; for a streaming call the
+// value only has to cover the time to first byte, not the time to the last
+// token, because the headers arrive before the body does.
+func (c Config) UpstreamResponseHeaderTimeout() time.Duration {
+	return c.Server.UpstreamResponseHeaderTimeout
 }
 
 // ServerWriteTimeout is the server-side deadline for writing one response. Zero
