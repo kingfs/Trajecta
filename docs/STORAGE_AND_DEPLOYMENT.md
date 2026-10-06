@@ -173,7 +173,7 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 | 类别 | 内容 | 说明 |
 | --- | --- | --- |
 | 可由 cassette 重算 | `logs` 索引、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等，`semantic_nodes` 可按 `trace_id` 清理重建 |
-| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新，但更新先进进程内队列（上限 256 条），由派生表读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.Close()` 会先 settle 队列再关闭句柄（`serve` 关闭路径本已显式 flush，其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。`Store.RebuildOverviewMetricBuckets` 已存在但当前没有 CLI 调用者，因此进程崩溃（未走到 `Close`）导致的漂移仍没有命令行修复入口 |
+| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新，但更新先进进程内队列（上限 256 条），由派生表读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.Close()` 会先 settle 队列再关闭句柄（`serve` 关闭路径本已显式 flush，其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移（进程崩溃未走到 `Close`、或历史版本留下的漂移）用 `server db summary rebuild overview` 修复，`OverviewMetricRebuildStats` 给出候选 logs 数与当前 bucket/member 行数，`--dry-run` 只报告不修改 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 
@@ -189,7 +189,10 @@ server analyze session --session-id <id>
 server analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
 server analyze refresh --all
 server db summary rebuild sessions [--session-id <id>]
+server db summary rebuild overview [--dry-run]
 ```
+
+`db summary rebuild overview` 从 `logs` 整表重算小时桶（`overview_metric_buckets` 与 `overview_metric_bucket_members`）：派生聚合是增量维护的，进程在 settle 队列之前退出就会与 logs 漂移，这是唯一的修复入口；输出候选 logs 数与重建前后的 bucket/member 行数，`--dry-run` 只报告漂移。
 
 `analyze batch` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器；`analyze refresh` 固定执行 reparse + scan（没有 `--reparse` / `--scan` 开关），另支持 `--repair-usage`、`--rewrite-cassette`、`--enqueue`、`--workers`、`--limit` 与同样的过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
 

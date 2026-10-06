@@ -254,6 +254,34 @@ func (s *Store) RefreshOverviewMetricBucketForPath(path string) error {
 	return tx.Commit()
 }
 
+// OverviewMetricRebuildStats describes what RebuildOverviewMetricBuckets reads and replaces.
+//
+// The bucket tables are maintained incrementally, so they can drift from the logs they
+// summarize (a process that died before settling its deferred queue, or a flush that failed
+// and was never retried). Comparing CandidateCount with the stored rows is how an operator
+// sees that drift before rebuilding, and running the same report afterwards shows it is gone.
+type OverviewMetricRebuildStats struct {
+	// CandidateCount is the number of client-visible log rows that contribute to a bucket.
+	CandidateCount int `json:"candidate_count"`
+	// Buckets and Members are the aggregate rows currently stored; a rebuild replaces both.
+	Buckets int `json:"buckets"`
+	Members int `json:"members"`
+}
+
+func (s *Store) OverviewMetricRebuildStats() (OverviewMetricRebuildStats, error) {
+	var stats OverviewMetricRebuildStats
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE ` + clientVisibleLogClause("")).Scan(&stats.CandidateCount); err != nil {
+		return stats, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_buckets`).Scan(&stats.Buckets); err != nil {
+		return stats, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_bucket_members`).Scan(&stats.Members); err != nil {
+		return stats, err
+	}
+	return stats, nil
+}
+
 func (s *Store) RebuildOverviewMetricBuckets() error {
 	rows, err := s.db.Query(`
 		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream

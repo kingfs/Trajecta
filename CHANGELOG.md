@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- `server db summary rebuild overview [--dry-run]` rebuilds `overview_metric_buckets` and `overview_metric_bucket_members` from `logs`. The hourly aggregates are maintained incrementally through a deferred queue, so a process that exited before settling it (or a flush that failed before the previous release) leaves them short of the logs they summarize; `Store.RebuildOverviewMetricBuckets` existed for that repair but had no caller, so there was no way to fix the drift. The command reports the candidate log count and the stored bucket/member rows before and after, and `--dry-run` reports the drift without touching it. `Store.OverviewMetricRebuildStats` provides those counters. Gate: `TestDBSummaryRebuildOverviewRepairsDriftSQLite` deletes a member row out of band, asserts the dry run reports the drift without repairing it, then asserts the rebuild restores both members and that the command is reachable from the root command.
+
 ### Changed
 
 - The semantic analysis persistence moved out of `internal/store/store.go` into two focused files: `internal/store/observation_store.go` (17 declarations, 533 lines) holds the Observation IR rows, their metadata blob, the findings the detectors raise and the queries the Monitor and MCP read them back through; `internal/store/job_store.go` (22 declarations, 396 lines) holds the two worker queues behind them - the parse jobs that turn a cassette into Observation IR and the analysis jobs that run the detectors over it - with their claim paths and state transitions. `store.go` drops from 5,811 to 4,843 lines, and no non-blank line present before the move is absent after it.
