@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -248,5 +249,71 @@ func TestAnthropicParserParsesNonStreamProviderError(t *testing.T) {
 	}
 	if len(obs.Response.Outputs) != 0 {
 		t.Fatalf("outputs = %+v", obs.Response.Outputs)
+	}
+}
+
+// TestAnthropicParserJoinsStreamedToolInputFragments pins that the fragments of
+// one streamed tool input are concatenated.
+//
+// content_block_start stores the tool input as a json.RawMessage, and the
+// accumulator read the current value back with a string type assertion, which
+// cannot succeed on a []byte. Every input_json_delta therefore replaced the
+// previous fragment instead of extending it, so a multi-fragment call recorded
+// only its tail. Anthropic splits any non-trivial input across several
+// fragments, so this was the common case rather than an edge case, and the
+// detectors that match on tool arguments never saw the whole command.
+func TestAnthropicParserJoinsStreamedToolInputFragments(t *testing.T) {
+	// The command is deliberately split so that no fragment on its own carries
+	// the dangerous text the analyser looks for.
+	body := joinSSE(
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[]}}`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_split","name":"Bash","input":{}}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"comm"}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"and\":\"rm -rf "}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"/ --no-preserve-root\"}"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":5,"output_tokens":6}}`,
+		`data: {"type":"message_stop"}`,
+	)
+	obs, err := NewAnthropicParser().Parse(t.Context(), ParseInput{
+		TraceID:      "trace-claude-split-tool-input",
+		Header:       anthropicTestHeader(true),
+		RequestBody:  []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":64}`),
+		ResponseBody: []byte(body),
+		IsStream:     true,
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Tools.Calls) != 1 {
+		t.Fatalf("tool calls = %+v", obs.Tools.Calls)
+	}
+	call := obs.Tools.Calls[0]
+	const wantArgs = `{"command":"rm -rf / --no-preserve-root"}`
+	if call.ArgsText != wantArgs {
+		t.Fatalf("ArgsText = %q, want %q (only the last fragment survived)", call.ArgsText, wantArgs)
+	}
+	if string(call.ArgsJSON) != wantArgs {
+		t.Fatalf("ArgsJSON = %q, want %q", call.ArgsJSON, wantArgs)
+	}
+	var decoded struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(call.ArgsJSON, &decoded); err != nil {
+		t.Fatalf("ArgsJSON is not valid JSON (%v): %s", err, call.ArgsJSON)
+	}
+	if decoded.Command != "rm -rf / --no-preserve-root" {
+		t.Fatalf("decoded command = %q", decoded.Command)
+	}
+	// The response node and the accumulated tool call must agree with the
+	// flattened tool view.
+	if len(obs.Stream.AccumulatedToolCalls) != 1 {
+		t.Fatalf("accumulated tool calls = %+v", obs.Stream.AccumulatedToolCalls)
+	}
+	if got := rawMessageFromMetadata(obs.Stream.AccumulatedToolCalls[0].Metadata, "input"); string(got) != wantArgs {
+		t.Fatalf("accumulated node input = %q, want %q", got, wantArgs)
+	}
+	if len(obs.Response.ToolCalls) != 1 {
+		t.Fatalf("response tool calls = %+v", obs.Response.ToolCalls)
 	}
 }

@@ -309,6 +309,10 @@ func parseAnthropicStream(body []byte, obs *TraceObservation) {
 		blockOrder       []int
 		textBuilder      strings.Builder
 		reasoningBuilder strings.Builder
+		// toolInputBuilders accumulates the input_json_delta fragments of each
+		// tool_use block. The fragments must be concatenated as text: they are
+		// pieces of one JSON document that only parses once complete.
+		toolInputBuilders = map[int]*strings.Builder{}
 	)
 	scanSSEData(body, func(data string) {
 		if data == "[DONE]" {
@@ -370,8 +374,22 @@ func parseAnthropicStream(body []byte, obs *TraceObservation) {
 				node.Text += delta
 				reasoningBuilder.WriteString(delta)
 			case "input_json_delta":
-				partial := stringField(deltaObj, "partial_json")
-				node.Metadata["input"] = json.RawMessage(metadataString(node.Metadata, "input") + partial)
+				// Anthropic streams the tool input as a sequence of
+				// partial_json fragments that concatenate into one JSON
+				// document. Reading the current value back with a string type
+				// assertion cannot work, because content_block_start stores it
+				// as a json.RawMessage ([]byte), so each fragment replaced the
+				// previous one and only the last survived: a multi-fragment
+				// call recorded a truncated fragment, and the detectors that
+				// match on tool arguments never saw the whole command.
+				if partial := stringField(deltaObj, "partial_json"); partial != "" {
+					builder := toolInputBuilders[idx]
+					if builder == nil {
+						builder = &strings.Builder{}
+						toolInputBuilders[idx] = builder
+					}
+					builder.WriteString(partial)
+				}
 			}
 		case "message_delta":
 			deltaObj, _ := decodeJSONObject(obj["delta"])
@@ -396,6 +414,17 @@ func parseAnthropicStream(body []byte, obs *TraceObservation) {
 		}
 		eventIndex++
 	})
+	// Publish the accumulated tool inputs before the nodes are turned into
+	// observations, so both the response nodes and the accumulated tool calls
+	// carry the whole JSON document.
+	for idx, builder := range toolInputBuilders {
+		if builder == nil || builder.Len() == 0 {
+			continue
+		}
+		if node := blockMap[idx]; node != nil && node.Metadata != nil {
+			node.Metadata["input"] = json.RawMessage(builder.String())
+		}
+	}
 	for _, idx := range blockOrder {
 		if node := blockMap[idx]; node != nil {
 			appendAnthropicResponseNodes([]SemanticNode{*node}, obs)
