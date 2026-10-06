@@ -33,7 +33,7 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 				"message": message,
 			},
 		}
-	case strings.HasPrefix(path, "/v1beta/") || strings.Contains(path, ":generateContent"):
+	case isGoogleGenerateContentPath(path):
 		payload = map[string]any{
 			"error": map[string]any{
 				"code":    statusCode,
@@ -56,6 +56,26 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 		return []byte(message)
 	}
 	return append(body, '\n')
+}
+
+// isGoogleGenerateContentPath matches the Google GenAI and Vertex native
+// request shapes. `:generateContent` alone is not enough: the streaming variant
+// is `:streamGenerateContent`, and `:countTokens`/`:embedContent` are the same
+// family, so a Google SDK would receive an OpenAI-shaped envelope it cannot
+// parse.
+func isGoogleGenerateContentPath(path string) bool {
+	if strings.HasPrefix(path, "/v1beta/") || strings.Contains(path, "/publishers/") {
+		return true
+	}
+	switch {
+	case strings.HasSuffix(path, ":generateContent"),
+		strings.HasSuffix(path, ":streamGenerateContent"),
+		strings.HasSuffix(path, ":countTokens"),
+		strings.HasSuffix(path, ":embedContent"),
+		strings.HasSuffix(path, ":batchEmbedContents"):
+		return true
+	}
+	return strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent")
 }
 
 func isAnthropicMessagesPath(path string) bool {
