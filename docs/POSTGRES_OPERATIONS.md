@@ -537,7 +537,7 @@ Postgres 的 `parse_jobs` 长期只有 `pkey(id)` 和 `(status, updated_at)` 两
 
 修法是把索引补进 ent schema（`ent/schema/parse_job.go` 的 `index.Fields("trace_id", "status")`）并配一条版本化迁移（`20260929090000_add_parse_jobs_trace_id_index`）。迁移里用 `CREATE INDEX IF NOT EXISTS`，18 MB、2.3 秒，因此可以先把索引手工建在实例上，之后迁移只是空操作。`trace_id` 打头也顺带覆盖 Monitor 的 `trace_id = ? AND status = ?`（两列都进 `Index Cond`），只按 `status` 的查询仍由原有的 `(status, updated_at)` 服务。
 
-这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store/store.go` 里抽出所有反引号语句中的 `CREATE INDEX … ON <表>(<列>)`，与迁移后数据库的 `pg_indexes` 逐形状（表 + 归一化后的列序列，忽略 `ASC`/`DESC`、partial 与唯一性）比对。
+这类缺口的发现方法不是看慢查询，而是把两套 schema 的索引形状对起来：从 `internal/store` 的 `sqlite_schema.go`（70 处）、`schema_bootstrap.go`（21 处）与 `overview.go`（2 处）里抽出所有反引号语句中的 `CREATE INDEX … ON <表>(<列>)`，与迁移后数据库的 `pg_indexes` 逐形状（表 + 归一化后的列序列，忽略 `ASC`/`DESC`、partial 与唯一性）比对。
 
 按这个方法复核过当前状态（SQLite 启动 schema 82 个形状，迁移后的 Postgres 87 个，`parsejob_trace_id_status` 等上一批补的形状两侧都在），剩下的差异都不影响能力，只是形状不同：
 
@@ -575,7 +575,7 @@ ORDER BY idx_scan, indexrelname;
 | `analysisrun_created_at_id` | `analysis_runs` | `ListAnalysisRuns("", "", "", limit)`（overview 的最近分析），原有两个索引都以 `trace_id` 或 `session_id` 打头 |
 | `tracefinding_severity_created_at` | `trace_findings` | `overviewHighRiskFindings` 的 `severity IN ('critical', 'high')`，原有索引都以 `trace_id` 打头 |
 
-`logs` 这一处最贵：`selected_upstream_id` 在 `internal/store/store.go` 里被十七个函数、二十多处等值或分组过滤命中（24 处 `= ?` / `<> ''` 谓词加 3 处 `GROUP BY`），而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
+`logs` 这一处最贵：`selected_upstream_id` 被 24 处 `= ?` / `<> ''` 谓词加 3 处 `GROUP BY` 命中，分布在 `internal/store/store.go`（4 处谓词）、`analytics.go`（11 处谓词 + 2 处 `GROUP BY`）与 `channel_store.go`（9 处谓词 + 1 处 `GROUP BY`）里，而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
 
 | 计划 | 执行时间 |
 | --- | --- |
@@ -676,7 +676,7 @@ ORDER BY tablename, indexname;
 
 ## Overview 观测汇总的实测
 
-Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refresh / 60s`），其中观测汇总的六个数在 2026-09 之前是 4 条独立语句，现在合并成 1 条（`internal/store/store.go` 的 `overviewObservation`）。同形合成表（250,000 行 `logs` / 200,000 行 `trace_observations` / 20,000 行 `parse_jobs`，`ANALYZE` 后三轮取最小）实测：
+Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refresh / 60s`），其中观测汇总的六个数在 2026-09 之前是 4 条独立语句，现在合并成 1 条（`internal/store/overview.go` 的 `overviewObservation`）。同形合成表（250,000 行 `logs` / 200,000 行 `trace_observations` / 20,000 行 `parse_jobs`，`ANALYZE` 后三轮取最小）实测：
 
 | 查询 | 计划 | 执行时间 |
 | --- | --- | --- |
@@ -904,7 +904,7 @@ session_summaries
 
 索引为 `session_summaries_last_seen (last_seen DESC, session_id DESC)` 与 `session_summaries_last_model (last_model)`。
 
-重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/store.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
+重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/overview.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
 
 两条派生表都不是写完 `logs` 就同步刷新的：写入路径只把受影响的 path、trace 与 session 记进一个进程内队列（`Store.markDerivedRefreshForPath` / `markDerivedRefreshForTrace`），队列达到上限（256 条）或调用 `Store.FlushDerivedRefresh()` 时才真正落库。读 `session_summaries` 的两个入口（`ListSessionPage`、`GetSession`）在任何查询之前先冲刷队列，所以 Monitor 看到的一定包含它之前完成的写入；`db summary rebuild sessions --dry-run` 用的 `SessionSummaryRebuildStats` 故意不冲刷，它要报告表里现存的漂移而不是先把漂移修好。冲刷按 session 去重重建一次 `session_summaries`，并把同一小时桶的增量合并成一次 `overview_metric_buckets` 更新，`overview_metric_bucket_members` 的删除与插入按绑定参数上限分批执行。`Sync`/`Rebuild` 在遍历结束后冲刷一次，所以 N 个同 session 的 cassette 只汇总一次而不是 N 次；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
 
