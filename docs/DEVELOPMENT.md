@@ -14,7 +14,7 @@
 | `task fmt:check` | `gofmt -l` 检查同样的目录，不改文件，有输出即失败 |
 | `task lint` | `golangci-lint run ./...` |
 | `task lint:vet` | `go vet ./...` |
-| `task test:short` | `go test -short ./...` |
+| `task test:short` | `go test -short ./...`；`-short` 会跳过所有 Postgres 门控集成用例（`TRAJECTA_TEST_POSTGRES_DSN` 已设置时同样跳过），用于不接数据库的快速验证 |
 | `task test` | `go test ./...` |
 | `task test:race` | `go test -race ./...` |
 | `task test:cover` | `go test -coverprofile=coverage.out ./...` |
@@ -63,7 +63,7 @@ task run
 
 ## 验证等级（quick / full / race / bench 各自跑什么）
 
-- `task check:quick` = `fmt:check` + `lint` + `test:short`：小范围代码改动的默认验证；`task check` 与它完全相同。
+- `task check:quick` = `fmt:check` + `lint` + `test:short`：小范围代码改动的默认验证；`task check` 与它完全相同。`test:short` 的 `-short` 只影响 Postgres 门控集成用例，其余单测与全量一致。
 - `task check:full` = `check:quick` + `test` + `test:e2e` + `test:race` + `build:all`：发布前或大范围改动。
 - `task test:race`：全套单元测试加 Go race detector；代理、路由、录制、存储或 streaming 改动必须补跑。
 - `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`unittest`，不依赖外部网络。
@@ -73,6 +73,14 @@ task run
 - `task test:codex-fixtures`：离线 Codex Responses fixture runner；fixture 清单、覆盖范围与 runner 契约见 [Codex Responses fixtures](../tests/fixtures/codex/README.md)。
 
 所有测试都不应依赖真实 provider 网络或真实 API key。
+
+### 出网护栏（`internal/testnet`）
+
+生产代码有多处 `if client == nil { client = http.DefaultClient }` 兜底（Responses HTTP client、Responses chat client、tokenize counter、MCP tool executor）。为防止「忘记注入 HTTP client 的测试真的发起外网请求」，这些包以及 `unittest` 用 `TestMain` 调 `testnet.InstallLoopbackGuard()`：它把 `http.DefaultTransport` 换成拒绝非 loopback 目标的 `testnet.GuardTransport`，命中时立刻返回 `testnet: outbound network access to "<host>" ... is blocked in tests`，而不是产生费用、状态污染或数分钟挂起。
+
+- 需要真实出网的少数套件（`tests/live`）有自己的 `TestMain` 范围之外，未安装该护栏；若某个默认套件确实要出网，用 `TRAJECTA_TEST_ALLOW_NETWORK=1 go test ...` 显式放开，不要把它写进默认测试环境。
+- 断言该护栏自身行为的用例在 `internal/testnet/guard_test.go`。
+- 新增「生产代码默认走 `http.DefaultClient`」的包时，应同时补上这个 `TestMain`。
 
 ## 前端开发与 UI 测试
 

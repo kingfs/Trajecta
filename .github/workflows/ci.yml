@@ -43,7 +43,7 @@ jobs:
 
     - name: Check Go formatting
       run: |
-        unformatted="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures)"
+        unformatted="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./tests ./web/monitor-ui/test-fixtures)"
         if [ -n "$unformatted" ]; then
           echo "These files need gofmt:"
           echo "$unformatted"

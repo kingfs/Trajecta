@@ -450,6 +450,9 @@ func TestEntStoreLatestResponseIDByConversation(t *testing.T) {
 }
 
 func TestEntStorePostgresPersistenceRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration test in short mode")
+	}
 	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")

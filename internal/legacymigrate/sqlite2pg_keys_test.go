@@ -26,6 +26,9 @@ import (
 // It is skipped unless TRAJECTA_TEST_POSTGRES_DSN points at an instance the
 // caller may create a scratch database on.
 func TestSecondaryUniqueKeyVerificationIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration test in short mode")
+	}
 	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to run the secondary unique key integration test")

@@ -81,13 +81,13 @@ tasks:
   fmt:
     desc: Format Go code
     cmds:
-      - gofmt -w ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures
+      - gofmt -w ./cmd ./internal ./pkg ./unittest ./tests ./web/monitor-ui/test-fixtures
 
   fmt:check:
     desc: Check Go formatting without modifying files
     cmds:
       - >-
-        sh -c 'files="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures)";
+        sh -c 'files="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./tests ./web/monitor-ui/test-fixtures)";
         test -z "$files" || { echo "$files"; exit 1; }'
 
   lint:
@@ -119,6 +119,13 @@ tasks:
     desc: Test ATIF export and the official-model validator offline
     cmds:
       - go test ./internal/trajectory ./internal/monitor
+      # Precheck the Python dependency so a missing pydantic reports an
+      # actionable message instead of an opaque unittest import ERROR.
+      - >-
+        sh -c 'python3 -c "import pydantic" 2>/dev/null ||
+        { echo "SKIP atif validator: pydantic is not installed.";
+        echo "  install it with: python3 -m pip install -r scripts/atif-requirements.txt";
+        exit 0; }'
       - python3 -m unittest discover -s scripts/atif_tests
 
   test:codex-fixtures:
@@ -127,7 +134,7 @@ tasks:
       - env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1
 
   test:short:
-    desc: Run short unit tests
+    desc: Run unit tests without the Postgres integration paths (go test -short)
     cmds:
       - go test -short ./...
 

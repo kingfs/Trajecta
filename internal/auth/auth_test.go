@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -453,6 +454,9 @@ func TestMigrateDatabaseDownPostgresRollbackUnsupported(t *testing.T) {
 }
 
 func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration test in short mode")
+	}
 	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
@@ -471,11 +475,21 @@ func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
 	defer st.Close()
 
 	ctx := context.Background()
-	username := "admin_" + strings.ReplaceAll(t.Name(), "/", "_")
+	// The DSN may point at a long-lived database, so the fixture must be unique
+	// per run and cleaned up afterwards; a fixed name collides on the second
+	// execution because users.username is UNIQUE.
+	username := fmt.Sprintf("admin_%s_%d", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
 	normalizedUsername := normalizeUsername(username)
 	if _, err := st.CreateUser(ctx, username, "change-me-123"); err != nil {
 		t.Fatalf("CreateUser(postgres) error = %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := st.DeleteUser(cleanupCtx, username); err != nil {
+			t.Logf("cleanup: DeleteUser(%q) error = %v", username, err)
+		}
+	})
 	if err := st.VerifyPassword(ctx, username, "change-me-123"); err != nil {
 		t.Fatalf("VerifyPassword(postgres) error = %v", err)
 	}

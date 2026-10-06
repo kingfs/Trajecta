@@ -26,6 +26,9 @@ import (
 // It is skipped unless TRAJECTA_TEST_POSTGRES_DSN points at an instance the
 // caller may create a scratch database on.
 func TestReconcileDerivedTraceIDsIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration test in short mode")
+	}
 	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to run the reconciliation integration test")
@@ -257,6 +260,9 @@ func TestDuplicateDeleteStatement(t *testing.T) {
 // from it any more. A row whose cassette exists nowhere is kept, because it may
 // be the only trace of that request.
 func TestReconcileSupersededIndexRowsIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Postgres integration test in short mode")
+	}
 	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to run the reconciliation integration test")
