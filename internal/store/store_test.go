@@ -7547,3 +7547,53 @@ func TestSyncIndexesLegacyFixedHeaderCassettes(t *testing.T) {
 		t.Fatalf("SessionID = %q, want legacy-sess", entry.SessionID)
 	}
 }
+
+// TestUpstreamModelCoverageTreatsModelCasingAsOneModel pins that the coverage list
+// identifies a model the way the rest of the index does.
+//
+// Model identity is case-insensitive throughout: routing lowercases a model to look
+// up a channel's declared models, the analytics filter compares with
+// LOWER(model) LIKE LOWER(?), and listLogModels and channelLogModels both report
+// SELECT DISTINCT LOWER(model). The coverage queries were the exception, grouping the
+// raw column, so one model recorded under two spellings became two rows that each
+// carried part of its count and could push a different model out of the top-N cut.
+func TestUpstreamModelCoverageTreatsModelCasingAsOneModel(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	writeModelLog(t, st, dir, "case-1.http", "gpt-5", "/v1/responses", "POST", "up-case", 200, 1, now.Add(-40*time.Minute))
+	writeModelLog(t, st, dir, "case-2.http", "gpt-5", "/v1/responses", "POST", "up-case", 200, 1, now.Add(-30*time.Minute))
+	writeModelLog(t, st, dir, "case-3.http", "zeta", "/v1/responses", "POST", "up-case", 200, 1, now.Add(-20*time.Minute))
+	// The most recent row spells gpt-5 differently, and it is the row the coverage
+	// list reports as the last model used.
+	writeModelLog(t, st, dir, "case-4.http", "GPT-5", "/v1/responses", "POST", "up-case", 200, 1, now.Add(-10*time.Minute))
+
+	since := now.Add(-time.Hour)
+	const limitModels = 2
+	models, lastModel, err := st.upstreamModelCoverage("up-case", limitModels, since, "")
+	if err != nil {
+		t.Fatalf("upstreamModelCoverage() error = %v", err)
+	}
+	if !reflect.DeepEqual(models, []string{"gpt-5", "zeta"}) {
+		t.Fatalf("models = %#v, want [gpt-5 zeta]; one model recorded twice must not fill the top-N cut", models)
+	}
+	if lastModel != "gpt-5" {
+		t.Fatalf("lastModel = %q, want gpt-5", lastModel)
+	}
+
+	batched, err := st.upstreamModelCoverageAll(limitModels, since, "")
+	if err != nil {
+		t.Fatalf("upstreamModelCoverageAll() error = %v", err)
+	}
+	if !reflect.DeepEqual(batched["up-case"].Models, models) {
+		t.Fatalf("batched models = %#v, want %#v", batched["up-case"].Models, models)
+	}
+	if batched["up-case"].LastModel != lastModel {
+		t.Fatalf("batched last model = %q, want %q", batched["up-case"].LastModel, lastModel)
+	}
+}

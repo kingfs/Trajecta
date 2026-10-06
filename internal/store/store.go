@@ -2461,10 +2461,10 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
 	rows, err := s.db.Query(`
-		SELECT model, COUNT(*) AS count
+		SELECT LOWER(model) AS model, COUNT(*) AS count
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
-		GROUP BY model
+		GROUP BY LOWER(model)
 		ORDER BY count DESC, model ASC
 		LIMIT ?
 	`, args...)
@@ -2489,7 +2489,7 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 	var lastModel string
 	lastModelArgs := append([]any{upstreamID}, whereArgs...)
 	if err := s.db.QueryRow(`
-		SELECT model
+		SELECT LOWER(model)
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
 		ORDER BY recorded_at DESC, trace_id DESC
@@ -2610,14 +2610,14 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 		FROM (
 			SELECT
 				selected_upstream_id,
-				model,
+				LOWER(model) AS model,
 				ROW_NUMBER() OVER (
 					PARTITION BY selected_upstream_id
-					ORDER BY COUNT(*) DESC, model ASC
+					ORDER BY COUNT(*) DESC, LOWER(model) ASC
 				) AS model_rank
 			FROM logs
 			WHERE selected_upstream_id <> '' AND model <> ''`+whereSQL+`
-			GROUP BY selected_upstream_id, model
+			GROUP BY selected_upstream_id, LOWER(model)
 		) ranked
 		WHERE model_rank <= ?
 		ORDER BY selected_upstream_id, model_rank
@@ -2649,7 +2649,7 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 		FROM (
 			SELECT
 				selected_upstream_id,
-				model,
+				LOWER(model) AS model,
 				ROW_NUMBER() OVER (
 					PARTITION BY selected_upstream_id
 					ORDER BY recorded_at DESC, trace_id DESC
