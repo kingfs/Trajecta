@@ -45,7 +45,7 @@ export TRAJECTA_TOKEN=llmtl_xxx
 | `/v1/detokenize` | `/detokenize` | vLLM 反分词 |
 | `/v1/models` | `/v1/models` | 聚合的 OpenAI-compatible 模型列表 |
 | `/v1/models/{id}` | `/v1/models/{id}` | 单模型详情（从聚合列表与模型 registry 合成，不转发上游）；id 大小写不敏感，两者都不命中时返回 404 `model_not_found` |
-| `/api/show`（Ollama） | `/api/show` | Ollama 模型详情（从聚合列表合成，不转发上游） |
+| `/api/show`（Ollama） | `/api/show` | Ollama 模型详情（从聚合列表与模型 registry 合成，不转发上游）；请求体按 Ollama 现行文档读 `model` 字段，同时兼容旧的 `name` 字段，两者都为空时 400 `missing_model`，模型不可路由且 registry 未命中时 404 `model_not_found`（错误体是 Ollama 的 `{"error":"<message>"}` 形状） |
 | `/v1/embeddings` | `/v1/embeddings` | 只被分类，不可路由：`pkg/llm.AdapterFor` 没有 embeddings adapter，路由判定的 `supportsPath` 因此永远返回 false |
 
 `/v1/models` 与 `/v1/models/{id}` 返回的是 OpenAI 模型对象，字段集会带上 `id`、`object: "model"`、`created` 与 `owned_by`：`created` 由 OpenAI 的模型 schema 要求（类型化客户端会校验它），而代理并不跟踪每个模型的发布时间，因此所有条目统一取固定值 `1735689600`（2025-01-01T00:00:00Z，`aggregatedModelCreatedAt`），让同一份配置的响应保持稳定。

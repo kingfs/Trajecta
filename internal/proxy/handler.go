@@ -46,8 +46,20 @@ type aggregatedModelListResponse struct {
 	Data   []aggregatedModelListEntry `json:"data"`
 }
 
+// ollamaShowRequest mirrors the request body POST /api/show accepts. Ollama's current API
+// documentation sends `{"model": "..."}` (its own ShowRequest moved from `name` to `model`), while
+// older clients still send `name`, so both are read and `model` wins when both are present.
 type ollamaShowRequest struct {
-	Name string `json:"name"`
+	Model string `json:"model"`
+	Name  string `json:"name"`
+}
+
+// modelName returns the model the caller asked about, preferring the documented `model` field.
+func (req ollamaShowRequest) modelName() string {
+	if model := strings.TrimSpace(req.Model); model != "" {
+		return model
+	}
+	return strings.TrimSpace(req.Name)
 }
 
 type aggregatedModelListEntry struct {
@@ -2320,9 +2332,16 @@ func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start 
 		writeProxyError(w, r, http.StatusBadRequest, "invalid_request_body", "invalid JSON body")
 		return
 	}
-	model := strings.TrimSpace(payload.Name)
+	model := payload.modelName()
 	if model == "" {
 		writeProxyError(w, r, http.StatusBadRequest, "missing_model", "missing model name")
+		return
+	}
+	if !h.modelDetailKnown(model) {
+		// Same rule as GET /v1/models/{id}: Ollama answers 404 for a model it does not have, and a
+		// synthesized manifest for a typo is indistinguishable from a real one. The error body stays
+		// the `{"error": "<message>"}` string shape proxyErrorEnvelope gives this endpoint.
+		writeProxyError(w, r, http.StatusNotFound, "model_not_found", fmt.Sprintf("model %q is not known to this proxy; GET /v1/models lists the models it can route", model))
 		return
 	}
 
