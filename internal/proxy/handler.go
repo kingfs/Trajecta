@@ -2239,6 +2239,30 @@ func modelsPathHasAction(cleanPath string) bool {
 	return idx >= 0 && idx < len(cleanPath)-1 && !strings.Contains(cleanPath[idx+1:], "/")
 }
 
+// modelDetailKnown reports whether the detail view has anything to say about a model: the proxy can
+// route it, or the model registry has metadata for it. The routable check is case-insensitive, like
+// every other model lookup in the router, and the registry check is the same exact lookup
+// newAggregatedModelListEntry uses to enrich the entry, so "known" means "the answer is meaningful"
+// rather than "the request parsed".
+func (h *Handler) modelDetailKnown(model string) bool {
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return false
+	}
+	if modelMetadataKnown(model) {
+		return true
+	}
+	if h == nil || h.router == nil {
+		return false
+	}
+	for _, catalogued := range h.router.AggregatedModels() {
+		if strings.ToLower(strings.TrimSpace(catalogued)) == key {
+			return true
+		}
+	}
+	return false
+}
+
 func isOllamaShowRequest(r *http.Request) bool {
 	if r == nil || r.Method != http.MethodPost {
 		return false
@@ -2259,6 +2283,13 @@ func pathClean(rawPath string) string {
 
 func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request, start time.Time) {
 	model := llm.ModelFromPath(r.URL.Path)
+	if !h.modelDetailKnown(model) {
+		// Answering 200 with a synthesized object made a typo indistinguishable from a real model,
+		// and the OpenAI clients treat an unknown id as 404 model_not_found, so the detail view
+		// refuses ids this deployment knows nothing about.
+		writeProxyError(w, r, http.StatusNotFound, "model_not_found", fmt.Sprintf("model %q is not known to this proxy; GET /v1/models lists the models it can route", model))
+		return
+	}
 	body, err := json.Marshal(newAggregatedModelListEntry(model))
 	if err != nil {
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model detail")

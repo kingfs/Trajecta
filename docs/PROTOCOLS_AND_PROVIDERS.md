@@ -27,7 +27,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 | `/v1/tokenize`、`/v1/detokenize` | `/tokenize`、`/detokenize` | vLLM 分词客户端 | `openai_compatible`（整个协议族） |
 | `/v1/models/{model}`、`/api/show` | 路径保持原样；由代理在路由前本地合成模型详情 | OpenAI 模型详情与 Ollama show 客户端 | 无（不选择上游） |
 
-`/v1/models` 是跨上游聚合的 OpenAI 兼容模型列表 endpoint，不是单上游透传；列表条目与 `/v1/models/{model}` 详情共用同一个构造器，因此都带 OpenAI 模型 schema 要求的 `created`（固定值，见 [代理使用示例](./PROXY_USAGE_EXAMPLES.md)）。
+`/v1/models` 是跨上游聚合的 OpenAI 兼容模型列表 endpoint，不是单上游透传；`/v1/models/{model}` 对可路由模型或 registry 命中的模型返回详情，其它 id 返回 404（错误码 `model_not_found`），不再为任意 id 合成模型对象；列表条目与 `/v1/models/{model}` 详情共用同一个构造器，因此都带 OpenAI 模型 schema 要求的 `created`（固定值，见 [代理使用示例](./PROXY_USAGE_EXAMPLES.md)）。
 
 各协议族的当前 endpoint 覆盖与 parser 覆盖：
 

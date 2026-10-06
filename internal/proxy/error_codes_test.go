@@ -349,6 +349,7 @@ var httpStatusNumbers = map[string]int{
 	"StatusBadRequest":            http.StatusBadRequest,
 	"StatusUnauthorized":          http.StatusUnauthorized,
 	"StatusRequestEntityTooLarge": http.StatusRequestEntityTooLarge,
+	"StatusNotFound":              http.StatusNotFound,
 	"StatusTooManyRequests":       http.StatusTooManyRequests,
 	"StatusInternalServerError":   http.StatusInternalServerError,
 	"StatusBadGateway":            http.StatusBadGateway,

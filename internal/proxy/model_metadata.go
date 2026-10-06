@@ -16,6 +16,14 @@ import (
 // which a per-process clock would not.
 const aggregatedModelCreatedAt = 1735689600 // 2025-01-01T00:00:00Z
 
+// modelMetadataKnown reports whether the model registry has metadata for this exact model name.
+// It is the same lookup newAggregatedModelListEntry enriches an entry from, so it lives beside it:
+// the detail view treats a model as known when it can route it or when this returns true.
+func modelMetadataKnown(model string) bool {
+	_, ok := llmspecs.Get(model)
+	return ok
+}
+
 func newAggregatedModelListEntry(model string) aggregatedModelListEntry {
 	entry := aggregatedModelListEntry{
 		ID:      model,

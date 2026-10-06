@@ -44,7 +44,7 @@ export TRAJECTA_TOKEN=llmtl_xxx
 | `/v1/tokenize` | `/tokenize` | vLLM 分词 |
 | `/v1/detokenize` | `/detokenize` | vLLM 反分词 |
 | `/v1/models` | `/v1/models` | 聚合的 OpenAI-compatible 模型列表 |
-| `/v1/models/{id}` | `/v1/models/{id}` | 单模型详情（从聚合列表合成，不转发上游） |
+| `/v1/models/{id}` | `/v1/models/{id}` | 单模型详情（从聚合列表与模型 registry 合成，不转发上游）；id 大小写不敏感，两者都不命中时返回 404 `model_not_found` |
 | `/api/show`（Ollama） | `/api/show` | Ollama 模型详情（从聚合列表合成，不转发上游） |
 | `/v1/embeddings` | `/v1/embeddings` | 只被分类，不可路由：`pkg/llm.AdapterFor` 没有 embeddings adapter，路由判定的 `supportsPath` 因此永远返回 false |
 
@@ -160,6 +160,7 @@ Trajecta 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求�
 | `request_body_too_large` | 413 | 请求体超过 `responses_server.max_request_body_bytes` |
 | `invalid_request_body` | 400 | 读取请求体失败，或请求体不是合法 JSON |
 | `missing_model` | 400 | 请求没有给出模型名 |
+| `model_not_found` | 404 | `GET /v1/models/{id}` 的 id 既不可路由、也不在模型 registry 里（详情视图不再为任意 id 合成模型对象） |
 | `invalid_api_key` | 401 | 代理入口的 `Authorization: Bearer <token>` 缺失或不匹配 |
 | `rate_limited` | 429 / 503 | 本地并发 limit 拒绝（429 事件 `limit.concurrency_rejected`；等待队列饱和时 503 事件 `limit.queue_saturated`） |
 | `retry_queue_saturated` | 503 | 上游重试等待队列饱和，放弃本次请求 |
