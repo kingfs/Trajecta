@@ -2333,3 +2333,67 @@ func TestRouterEarliestAvailabilityCoversTheModelBreaker(t *testing.T) {
 		t.Fatalf("EarliestAvailabilityFor() delay = %v, want a positive delay inside the 30s window", delay)
 	}
 }
+
+// TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen pins the
+// `routing.candidates` diagnostic invariant that health_state=open means the
+// candidate is not selectable. `canSelect` lazily promotes an elapsed open
+// window to probation, but `candidateDecision` read the raw field, so the first
+// request after a window elapsed recorded `health_state=open` together with
+// `selectable=true`, which reads as a contradiction to anyone triaging a
+// cassette (and to the live failover test).
+func TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	newTarget := func(openUntil time.Time) *Target {
+		return &Target{
+			ID:            "broken-openai",
+			RouteTargetID: "broken-openai:default",
+			ChannelID:     "broken-openai",
+			models:        map[string]struct{}{"deepseek-flash": {}},
+			healthState:   HealthOpen,
+			openUntil:     openUntil,
+			Upstream: upstream.ResolvedUpstream{
+				BaseURL:        "http://127.0.0.1:1/v1",
+				ProviderPreset: "openai",
+				ProtocolFamily: upstream.ProtocolFamilyOpenAICompatible,
+				APIType:        "chat_completions",
+				Mode:           "proxy",
+			},
+		}
+	}
+	target := newTarget(now.Add(-time.Second))
+
+	decision := target.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"})
+	if decision.FilterReason != "" {
+		t.Fatalf("fixture is not routable: filter_reason=%q supports_path=%v supports_model=%v supports_tools=%v",
+			decision.FilterReason, decision.SupportsPath, decision.SupportsModel, decision.SupportsTools)
+	}
+	if decision.HealthState == HealthOpen {
+		t.Fatalf("candidate reported health_state=%q with selectable=%v after the window elapsed at %s",
+			decision.HealthState, decision.Selectable, target.openUntil)
+	}
+	if !decision.Selectable {
+		t.Fatalf("selectable = false, want true after the window elapsed (health=%q reason=%q)",
+			decision.HealthState, decision.FilterReason)
+	}
+
+	// The monitor reads the snapshot, so it must not report a channel as open
+	// after the window that closed it has elapsed either.
+	if got := target.snapshot().HealthState; got == HealthOpen {
+		t.Fatalf("snapshot reported health_state=%q for an elapsed window", got)
+	}
+
+	// A window that is still live must stay open and unselectable.
+	live := newTarget(now.Add(time.Minute))
+	liveDecision := live.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"})
+	if liveDecision.HealthState != HealthOpen {
+		t.Fatalf("live window health_state = %q, want %q", liveDecision.HealthState, HealthOpen)
+	}
+	if liveDecision.Selectable {
+		t.Fatalf("live window selectable = true, want false")
+	}
+	if liveDecision.FilterReason != "target_open" {
+		t.Fatalf("live window filter_reason = %q, want target_open", liveDecision.FilterReason)
+	}
+}

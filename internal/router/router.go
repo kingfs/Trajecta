@@ -1547,6 +1547,10 @@ func (t *Target) inheritRuntimeState(old *Target) {
 func (t *Target) snapshot() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	// The monitor reads this snapshot to decide whether a channel is healthy.
+	// Reporting an elapsed window as still open would tell an operator to keep
+	// waiting for a channel that routing would already use again.
+	t.promoteAllElapsedWindowsLocked(time.Now())
 	models := make([]string, 0, len(t.models))
 	for model := range t.models {
 		models = append(models, model)
@@ -1611,12 +1615,44 @@ func (t *Target) snapshot() Snapshot {
 	}
 }
 
-func (t *Target) canSelect(now time.Time, model string) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+// promoteElapsedWindowsLocked moves every open circuit whose window has already
+// ended to probation, at both health scopes. Selection and the routing
+// diagnostics both need the same answer, so both call this rather than reading
+// the raw state.
+func (t *Target) promoteElapsedWindowsLocked(now time.Time, model string) {
+	t.promoteTargetWindowLocked(now)
+	if modelKey := strings.ToLower(strings.TrimSpace(model)); modelKey != "" {
+		t.promoteModelWindowLocked(now, modelKey)
+	}
+}
+
+// promoteAllElapsedWindowsLocked is the model-agnostic form used by the
+// snapshot the monitor reads, which reports every model's health at once.
+func (t *Target) promoteAllElapsedWindowsLocked(now time.Time) {
+	t.promoteTargetWindowLocked(now)
+	for modelKey := range t.modelHealth {
+		t.promoteModelWindowLocked(now, modelKey)
+	}
+}
+
+func (t *Target) promoteTargetWindowLocked(now time.Time) {
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.After(t.openUntil) {
 		t.healthState = HealthProbation
 	}
+}
+
+func (t *Target) promoteModelWindowLocked(now time.Time, modelKey string) {
+	if state := t.modelHealth[modelKey]; state != nil {
+		if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.After(state.openUntil) {
+			state.healthState = HealthProbation
+		}
+	}
+}
+
+func (t *Target) canSelect(now time.Time, model string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.promoteElapsedWindowsLocked(now, model)
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
 		return false
 	}
@@ -1625,11 +1661,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	}
 	modelKey := strings.ToLower(strings.TrimSpace(model))
 	if modelKey != "" {
-		state := t.modelHealth[modelKey]
-		if state != nil {
-			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.After(state.openUntil) {
-				state.healthState = HealthProbation
-			}
+		if state := t.modelHealth[modelKey]; state != nil {
 			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.Before(state.openUntil) {
 				return false
 			}
@@ -1644,6 +1676,13 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// An open window that has already elapsed is no longer open. `canSelect`
+	// promotes it lazily, and this diagnostic must apply the same promotion:
+	// otherwise the first request after a window ends records
+	// `health_state=open` next to `selectable=true`, which reads as a
+	// contradiction to anyone triaging the cassette.
+	t.promoteElapsedWindowsLocked(now, model)
 
 	decision := CandidateDecision{
 		ID:             t.ID,
