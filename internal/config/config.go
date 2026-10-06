@@ -358,7 +358,50 @@ func Load(path string) (*Config, error) {
 	if err := validateRouterEnums(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateChaosRules(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// validChaosActions lists the actions internal/proxy implements. The proxy matches the action
+// after internal/chaos normalizes it, and an action outside this set marks the rule as hit and
+// then falls through both branches: the request is forwarded to the upstream as if chaos were
+// disabled, which is the opposite of what the operator configured.
+var validChaosActions = map[string]struct{}{
+	"delay": {},
+	"error": {},
+}
+
+// validateChaosRules rejects fault-injection rules that cannot do what they say, the same way
+// Load rejects an unknown limit scope.
+//
+// `status_code` is checked against the range net/http accepts because the injected response is
+// written through the normal upstream path: `WriteHeader` panics outside 100..999, so the rule
+// that was meant to simulate a failing provider took the handler down and handed the client a
+// torn connection instead of an error. `rate` is documented as 0.0 to 1.0, and a value above 1
+// silently turned "inject on 2% of requests" into "inject on all of them".
+func validateChaosRules(cfg *Config) error {
+	for i, rule := range cfg.Chaos.Rules {
+		where := fmt.Sprintf("chaos.rules[%d]", i)
+		if model := strings.TrimSpace(rule.Model); model != "" && model != "*" {
+			where = fmt.Sprintf("chaos.rules[%d] (%s)", i, model)
+		}
+		action := strings.TrimSpace(rule.Action)
+		if action == "" {
+			return fmt.Errorf("%s has no action; use one of delay, error", where)
+		}
+		if _, ok := validChaosActions[strings.ToLower(action)]; !ok {
+			return fmt.Errorf("%s action %q is not supported; use one of delay, error", where, action)
+		}
+		if rule.Rate < 0 || rule.Rate > 1 {
+			return fmt.Errorf("%s rate %v is outside the documented range 0.0 to 1.0", where, rule.Rate)
+		}
+		if status := rule.StatusCode; status != 0 && (status < 100 || status > 999) {
+			return fmt.Errorf("%s status_code %d cannot be written by net/http; use 0 for the default (500) or a value between 100 and 999", where, status)
+		}
+	}
+	return nil
 }
 
 // validLimitScopes lists the scopes internal/proxy actually honours. An unknown

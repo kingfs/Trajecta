@@ -1748,6 +1748,13 @@ func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
 		t.Fatalf("Glob() error = %v", err)
 	}
 	paths := append([]string{filepath.Join("..", "..", "config", "config.yaml")}, examples...)
+	// The live harness configs are tracked and have to load too: a value the consumers cannot
+	// honour is a broken deployment, and the live suite is where it would show up late.
+	live, err := filepath.Glob(filepath.Join("..", "..", "tests", "live", "config", "*.yaml"))
+	if err != nil {
+		t.Fatalf("Glob(live) error = %v", err)
+	}
+	paths = append(paths, live...)
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -1763,6 +1770,98 @@ func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
 		if err := validateLimits(&cfg); err != nil {
 			t.Errorf("%s: %v", path, err)
 		}
+		if err := validateChaosRules(&cfg); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}
+
+// TestLoadRejectsChaosRulesFaultInjectionCannotHonour pins the load-time validation of the
+// fault-injection rules.
+//
+// The proxy matches a chaos action with an exact comparison after internal/chaos normalizes
+// it, so a value outside {delay, error} marked the rule as hit and then did nothing: the
+// request went to the upstream as if chaos were disabled, which the probe confirmed
+// (action "erorr" -> 200, upstream received the request). A rate above the documented 1.0
+// turned "inject on 2% of requests" into "inject on all of them", and a status_code outside
+// the range net/http accepts panicked inside WriteHeader - the probe got
+// `invalid WriteHeader code 1000` and the client saw EOF instead of an error response.
+// Load now rejects all three, while the accepted spellings keep working.
+func TestLoadRejectsChaosRulesFaultInjectionCannotHonour(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "unknown action",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - model: \"*\"\n      action: \"erorr\"\n",
+			wantErr: `chaos.rules[0] action "erorr" is not supported; use one of delay, error`,
+		},
+		{
+			name:    "missing action",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - model: gpt-5\n      rate: 1.0\n",
+			wantErr: "chaos.rules[0] (gpt-5) has no action; use one of delay, error",
+		},
+		{
+			name:    "rate above the documented range",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - action: error\n      rate: 2\n",
+			wantErr: "chaos.rules[0] rate 2 is outside the documented range 0.0 to 1.0",
+		},
+		{
+			name:    "negative rate",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - action: error\n      rate: -0.5\n",
+			wantErr: "chaos.rules[0] rate -0.5 is outside the documented range 0.0 to 1.0",
+		},
+		{
+			name:    "status code above what net/http writes",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - action: error\n      rate: 1.0\n      status_code: 1000\n",
+			wantErr: "chaos.rules[0] status_code 1000 cannot be written by net/http; use 0 for the default (500) or a value between 100 and 999",
+		},
+		{
+			name:    "status code below what net/http writes",
+			body:    "chaos:\n  enabled: true\n  rules:\n    - action: error\n      rate: 1.0\n      status_code: 99\n",
+			wantErr: "chaos.rules[0] status_code 99 cannot be written by net/http",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load() error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "mixed-case action and boundary values",
+			body: "chaos:\n  enabled: true\n  rules:\n    - model: \"*\"\n      rate: 1.0\n      action: \"ERROR\"\n      status_code: 503\n",
+		},
+		{
+			name: "delay rule without a status code",
+			body: "chaos:\n  enabled: true\n  rules:\n    - action: delay\n      rate: 0.5\n      delay: 250ms\n",
+		},
+		{
+			name: "error rule that defaults its status and message",
+			body: "chaos:\n  enabled: true\n  rules:\n    - action: error\n      rate: 0\n",
+		},
+		{
+			name: "rules that are present but not enabled",
+			body: "chaos:\n  enabled: false\n  rules:\n    - action: error\n      rate: 1.0\n",
+		},
+		{
+			name: "no chaos section at all",
+			body: "trace:\n  output_dir: /tmp/trajecta-chaos\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(writeTempConfig(t, tc.body)); err != nil {
+				t.Fatalf("Load() error = %v, want the rule accepted", err)
+			}
+		})
 	}
 }
 

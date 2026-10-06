@@ -2507,7 +2507,8 @@ func applyTransientAvailabilityHeaders(w http.ResponseWriter, delay time.Duratio
 // syntheticChaosResponse builds the upstream-shaped response used by the chaos
 // `error` action so the regular recording path can persist it.
 func syntheticChaosResponse(r *http.Request, selection *router.Selection, res chaos.Result) *http.Response {
-	body := proxyErrorEnvelope(r, res.StatusCode, "chaos_injected", res.Message)
+	statusCode := chaosStatusCode(res.StatusCode)
+	body := proxyErrorEnvelope(r, statusCode, "chaos_injected", res.Message)
 	header := http.Header{}
 	header.Set("Content-Type", proxyErrorContentType())
 	header.Set("Content-Length", strconv.Itoa(len(body)))
@@ -2519,12 +2520,25 @@ func syntheticChaosResponse(r *http.Request, selection *router.Selection, res ch
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
-		Status:        fmt.Sprintf("%d %s", res.StatusCode, http.StatusText(res.StatusCode)),
-		StatusCode:    res.StatusCode,
+		Status:        fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode)),
+		StatusCode:    statusCode,
 		Header:        header,
 		Body:          io.NopCloser(bytes.NewReader(body)),
 		ContentLength: int64(len(body)),
 	}
+}
+
+// chaosStatusCode keeps a fault-injection rule from taking the request handler down.
+// net/http panics on WriteHeader with a code outside 100..999, and the injected response is
+// written through the same path as a real upstream response, so `status_code: 1000` in a
+// chaos rule used to panic while serving the request and hand the client a torn connection
+// instead of an error. Load rejects such a rule, and this fallback covers a Config built in
+// code, where the same panic was one typo away.
+func chaosStatusCode(code int) int {
+	if code < 100 || code > 999 {
+		return http.StatusInternalServerError
+	}
+	return code
 }
 
 func chaosInjectedEvent(res chaos.Result, start time.Time) recorder.RecordEvent {
@@ -2535,7 +2549,7 @@ func chaosInjectedEvent(res chaos.Result, start time.Time) recorder.RecordEvent 
 		Attributes: map[string]interface{}{
 			"action":      res.Action,
 			"rule":        res.RuleDescription,
-			"http_status": res.StatusCode,
+			"http_status": chaosStatusCode(res.StatusCode),
 			"duration_ms": time.Since(start).Milliseconds(),
 		},
 	}

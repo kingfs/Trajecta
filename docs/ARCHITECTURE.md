@@ -45,7 +45,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
 - `internal/auth`：认证 user/token 与 JWT。
 - `internal/config`：YAML/env 配置装载（含 legacy bootstrap 输入）。
-- `internal/limit`：请求限流；`internal/redaction`：URL 与敏感参数脱敏；`internal/chaos`：配置驱动的故障注入（延迟/错误）。
+- `internal/limit`：请求限流；`internal/redaction`：URL 与敏感参数脱敏；`internal/chaos`：配置驱动的故障注入（`action` 取 `delay`/`error`，大小写不敏感；`rate` 必须在 0.0~1.0，`status_code` 必须是 0 或 100~999，否则 `Load` 报错而不让规则静默失效或让 `WriteHeader` panic）。
 - `pkg/recordfile`：V2/V3 cassette 解析与写入。
 - `pkg/replay`：测试回放 transport。
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。

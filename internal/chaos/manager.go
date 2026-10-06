@@ -44,7 +44,7 @@ func (m *Manager) Evaluate(modelName string) Result {
 			// 命中规则
 			res := Result{
 				ShouldInject:    true,
-				Action:          rule.Action,
+				Action:          normalizeAction(rule.Action),
 				Delay:           rule.Delay,
 				StatusCode:      rule.StatusCode,
 				Message:         rule.Message,
@@ -63,4 +63,14 @@ func (m *Manager) Evaluate(modelName string) Result {
 	}
 
 	return Result{ShouldInject: false}
+}
+
+// normalizeAction lowercases the configured action the way the router normalizes its
+// selection policies, so `Delay` or `ERROR` inject what the operator asked for instead of
+// marking the rule as hit and then doing nothing: the proxy matches the action with an exact
+// comparison, and an unrecognized value used to fall through both branches while the request
+// was forwarded as if chaos were off. Load rejects values this function does not recognize,
+// but a Config built in code still goes through here.
+func normalizeAction(action string) string {
+	return strings.ToLower(strings.TrimSpace(action))
 }
