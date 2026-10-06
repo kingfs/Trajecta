@@ -321,8 +321,14 @@ func TestMaskSecret(t *testing.T) {
 		value string
 		want  string
 	}{
-		{"TRAJECTA_DATABASE_DSN", "postgres://user:pw@host:5432/db?sslmode=disable", "postgres://user:***@host:5432/db?sslmode=disable"},
+		// The masked marker is internal/redaction's, so the CLI output and the
+		// recorder/observer output name a redacted value the same way.
+		{"TRAJECTA_DATABASE_DSN", "postgres://user:pw@host:5432/db?sslmode=disable", "postgres://user:REDACTED@host:5432/db?sslmode=disable"},
 		{"TRAJECTA_DATABASE_DSN", "postgres://host:5432/db", "postgres://host:5432/db"},
+		// A secret in the URL username and a secret query parameter were both
+		// printed in clear by the private implementation this replaced.
+		{"TRAJECTA_DATABASE_DSN", "postgres://apikey123@host:5432/db", "postgres://REDACTED:REDACTED@host:5432/db"},
+		{"TRAJECTA_DATABASE_DSN", "postgres://user:pw@host:5432/db?api_key=supersecret", "postgres://user:REDACTED@host:5432/db?api_key=REDACTED"},
 		{"LLM_TRACELAB_BOOTSTRAP_API_KEY", "sk-1234567890", "sk-1***90"},
 		{"TRAJECTA_BOOTSTRAP_API_KEY", "short", "***"},
 		{"TRAJECTA_TRACE_OUTPUT_DIR", "/app/data/traces", "/app/data/traces"},

@@ -158,7 +158,8 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 
 - `credential_selectable`、`credential_health_state` 与 `credential_filter_reason` 在 `router.CandidateDecision` 结构与 `candidateEventAttributes` 读取路径中存在，但生产代码没有任何赋值点（只有测试会赋值），因此事件中不会出现；它们当前是只读字段。
 - 禁止写入 cassette、日志、Monitor JSON 或 MCP 输出：API key、bearer token、OAuth access/refresh token、service-account JSON、自定义 auth header 值、完整 raw sticky key。
-- `redaction.DisplayURL` 会把 URL userinfo 中的密码替换为 `REDACTED`，并把名字含 `key`、`token`、`secret`、`password`、`passwd`、`credential`、`signature`、`sig`、`access_token`、`api_key` 的 query 参数值替换为 `REDACTED`。
+- `redaction.DisplayURL` 会把 URL userinfo 中的密码替换为 `REDACTED`，名字本身像密钥的 userinfo（`https://<key>@host`，或形如 `apikey123` 的用户名）也替换为 `REDACTED`，并把名字含 `key`、`token`、`secret`、`password`、`passwd`、`credential`、`signature`、`sig`、`access_token`、`api_key`、`authorization`、`auth`、`dsn` 的 query 参数值替换为 `REDACTED`。
+- `redaction.IsSensitiveURLParam` 是上面这份 marker 列表的唯一所有者：recorder/proxy、CLI `config inspect` 与 `legacymigrate.MaskSecret` 都走它。`MaskSecret` 对含 `://` 的值直接返回 `redaction.DisplayURL` 的结果，所以 CLI 诊断输出里的 DSN 掩码与运行期脱敏同为 `REDACTED`（旧实现自己判断 URL 并且只改密码段，会把 `?api_key=...` 原样打印出来）。
 - `redaction.SafeCredentialHint` 先做 metadata 脱敏再截断到 32 字符，值等于 `REDACTED` 时按空处理。
 - 渠道 API 返回值中的 `headers` 会对敏感 header 名（如 `Authorization`、`api-key`、`token` 类）掩码为 `***`；写路径接受 `{ "keep": true }` 表示保留原值，避免 UI 回传掩码覆盖真实密钥。
 - 渠道 API 始终不返回明文 API key，只返回 `api_key_hint` 与 `secret_storage_mode`；`base_url` 按配置原样返回，路由事件里的候选 base URL 才会做 URL 脱敏。

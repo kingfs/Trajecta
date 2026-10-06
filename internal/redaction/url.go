@@ -28,6 +28,9 @@ var sensitiveURLParamMarkers = []string{
 	"api_key",
 	"authorization",
 	"auth",
+	// A configuration key that names a DSN carries a credential too, and the CLI
+	// used to treat it as sensitive with a private list of its own.
+	"dsn",
 }
 
 var metadataSecretPatterns = []*regexp.Regexp{

@@ -57,6 +57,9 @@ func TestSensitiveURLParamMarkersAreTheSharedList(t *testing.T) {
 		"key", "api_key", "x-api-key", "token", "access_token", "refresh_token",
 		"secret", "client_secret", "password", "passwd", "credential",
 		"signature", "sig", "authorization", "Authorization", "auth",
+		// A configuration key that names a DSN, which the CLI treated as sensitive
+		// through a private list before it shared this one.
+		"dsn", "TRAJECTA_DATABASE_DSN",
 	} {
 		if !IsSensitiveURLParam(key) {
 			t.Errorf("IsSensitiveURLParam(%q) = false, want true", key)

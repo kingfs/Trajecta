@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/kingfs/Trajecta/internal/redaction"
 )
 
 // ComposeScan reports which environment-variable prefix a docker-compose file
@@ -82,67 +84,23 @@ func sortedKeys(values map[string]bool) []string {
 
 // MaskSecret hides the sensitive part of a configuration value so that
 // diagnostics can be pasted into an issue safely.
+//
+// Whether a key is sensitive, and how a URL or DSN is rewritten, are owned by
+// internal/redaction: a second implementation here had drifted from it, keeping a
+// secret that sits in the URL username and missing a secret query parameter
+// entirely, and it used a marker list that this file maintained separately.
 func MaskSecret(key, value string) string {
 	if value == "" {
 		return ""
 	}
-	if !looksSensitive(key) {
+	if !redaction.IsSensitiveURLParam(key) {
 		return value
 	}
-	if masked, ok := maskURLPassword(value); ok {
-		return masked
+	if strings.Contains(value, "://") {
+		return redaction.DisplayURL(value)
 	}
 	if len(value) <= 8 {
 		return "***"
 	}
 	return value[:4] + "***" + value[len(value)-2:]
-}
-
-func looksSensitive(key string) bool {
-	upper := strings.ToUpper(key)
-	for _, needle := range []string{"KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "DSN", "CREDENTIAL"} {
-		if strings.Contains(upper, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-// maskURLPassword rewrites the userinfo section of a URL-like DSN.
-func maskURLPassword(value string) (string, bool) {
-	scheme := -1
-	for i := 0; i+3 <= len(value); i++ {
-		if value[i:i+3] == "://" {
-			scheme = i
-			break
-		}
-	}
-	if scheme < 0 {
-		return "", false
-	}
-	at := -1
-	for i := scheme + 3; i < len(value); i++ {
-		if value[i] == '@' {
-			at = i
-			break
-		}
-		if value[i] == '/' {
-			break
-		}
-	}
-	if at < 0 {
-		return value, true
-	}
-	userinfo := value[scheme+3 : at]
-	colon := -1
-	for i := 0; i < len(userinfo); i++ {
-		if userinfo[i] == ':' {
-			colon = i
-			break
-		}
-	}
-	if colon < 0 {
-		return value[:scheme+3] + "***@" + value[at+1:], true
-	}
-	return value[:scheme+3] + userinfo[:colon] + ":***@" + value[at+1:], true
 }
