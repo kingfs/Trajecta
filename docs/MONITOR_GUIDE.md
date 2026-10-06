@@ -88,7 +88,7 @@ Trajecta 自身的事件收件箱：
 
 ### 追踪 `/traces`
 
-逐请求 trace 列表，支持过滤与分页，展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。
+逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。
 
 ### 审计 `/audit`
 

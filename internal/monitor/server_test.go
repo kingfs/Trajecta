@@ -5831,3 +5831,32 @@ func TestApplyLiveHealthToInspectCandidatesCoversTheModelBreaker(t *testing.T) {
 		t.Fatalf("candidate health = %+v, want selectable=true once the model window elapsed", upstreams[0].Health)
 	}
 }
+
+// TestParsePageSizeClampsToAServingBound pins that a page size read from the
+// query string cannot reach SQL unbounded.
+//
+// `page_size` is operator input that ends up in a LIMIT, so without a bound
+// `?page_size=100000000` asks the server to materialise that many rows.
+func TestParsePageSizeClampsToAServingBound(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "unset uses the default", raw: "", want: DefaultPageSize},
+		{name: "not a number uses the default", raw: "abc", want: DefaultPageSize},
+		{name: "zero uses the default", raw: "0", want: DefaultPageSize},
+		{name: "negative uses the default", raw: "-1", want: DefaultPageSize},
+		{name: "in range is honoured", raw: "37", want: 37},
+		{name: "the maximum is honoured", raw: "200", want: 200},
+		{name: "above the maximum is clamped", raw: "201", want: MaxPageSize},
+		{name: "an enormous value is clamped", raw: "100000000", want: MaxPageSize},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parsePageSize(tc.raw); got != tc.want {
+				t.Fatalf("parsePageSize(%q) = %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

@@ -4913,7 +4913,7 @@ func systemEventFilterFromRequest(r *http.Request, since time.Time) store.System
 		Query:    q.Get("q"),
 		Since:    since,
 		Page:     parseInt(q.Get("page"), 1),
-		PageSize: parseInt(q.Get("page_size"), 50),
+		PageSize: parsePageSize(q.Get("page_size")),
 	}
 }
 
@@ -4940,7 +4940,7 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
-		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		pageSize := parsePageSize(r.URL.Query().Get("page_size"))
 		filter := parseListFilter(r)
 		result, err := st.ListPage(page, pageSize, filter)
 		if err != nil {
@@ -4990,7 +4990,7 @@ func routingExchangeListAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
-		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		pageSize := parsePageSize(r.URL.Query().Get("page_size"))
 		filter := parseListFilter(r)
 		result, err := st.ListRoutingPage(page, pageSize, filter)
 		if err != nil {
@@ -5020,7 +5020,7 @@ func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
-		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		pageSize := parsePageSize(r.URL.Query().Get("page_size"))
 		filter := parseListFilter(r)
 		result, err := st.ListSessionPage(page, pageSize, filter)
 		if err != nil {
@@ -5744,7 +5744,7 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 
 func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (routingSummaryResponse, error) {
 	filter := store.ListFilter{Model: modelFilter}
-	pageSize := 200
+	pageSize := MaxPageSize
 	summary := routingSummaryResponse{}
 	failureReasons := map[string]int{}
 	selectedUpstreams := map[string]int{}
@@ -7203,6 +7203,32 @@ func writeSystemEventStreamMessage(w http.ResponseWriter, eventType string, noti
 		return
 	}
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
+}
+
+// Page-size bounds for every list endpoint. They are exported because the MCP
+// tool surface advertises the same contract over this API.
+const (
+	DefaultPageSize = 50
+	MaxPageSize     = 200
+)
+
+// parsePageSize reads a `page_size` query parameter, clamped to
+// [1, MaxPageSize].
+//
+// The value reaches a SQL LIMIT, so an unbounded one is a robustness problem
+// rather than a formatting detail: `page_size=100000000` made the server read
+// that many rows into memory, and a non-positive value relied on each store
+// method happening to substitute its own default. The clamp keeps the HTTP API
+// and the MCP tools on one contract.
+func parsePageSize(v string) int {
+	size := parseInt(v, DefaultPageSize)
+	if size < 1 {
+		return DefaultPageSize
+	}
+	if size > MaxPageSize {
+		return MaxPageSize
+	}
+	return size
 }
 
 func parseInt(v string, fallback int) int {

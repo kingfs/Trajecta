@@ -67,7 +67,7 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 
 ### Trace、Session 与 Upstream
 
-- `list_traces`：分页列出 trace；支持 `page`、`page_size`（上限 200）、`provider`、`model`、`q` 和 `observation`（`parsed`、`failed`、`queued`、`running`、`unparsed`）过滤。
+- `list_traces`：分页列出 trace；支持 `page`、`page_size`（上限 200）、`provider`、`model`、`q` 和 `observation`（`parsed`、`unsupported`、`failed`、`queued`、`running`、`unparsed`）过滤。
 - `get_trace`：按 `trace_id` 取单条 trace 详情，`include_raw` 时附带原始 HTTP request/response。
 - `list_sessions`：分页列出聚合后的 session；支持 `provider`、`model`、`q`。
 - `list_upstreams`：返回 upstream 分析；支持 `window`（`today`、`7d`、`30d`、`all`）与 `model`。

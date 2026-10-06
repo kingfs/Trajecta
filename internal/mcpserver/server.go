@@ -21,10 +21,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const defaultPage = 1
+
+// The page-size bounds are owned by the monitor API these tools call, so the
+// MCP contract cannot drift from the HTTP contract it is layered on.
 const (
-	defaultPage     = 1
-	defaultPageSize = 50
-	maxPageSize     = 200
+	defaultPageSize = monitor.DefaultPageSize
+	maxPageSize     = monitor.MaxPageSize
 )
 
 type Options struct {
@@ -37,7 +40,7 @@ type listTracesInput struct {
 	Provider          string `json:"provider,omitempty" jsonschema:"optional provider filter"`
 	Model             string `json:"model,omitempty" jsonschema:"optional model substring filter"`
 	Query             string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
-	ObservationStatus string `json:"observation,omitempty" jsonschema:"optional Observation IR status filter: parsed, failed, queued, running, or unparsed"`
+	ObservationStatus string `json:"observation,omitempty" jsonschema:"optional Observation IR status filter: parsed, unsupported, failed, queued, running, or unparsed"`
 }
 
 type getTraceInput struct {
