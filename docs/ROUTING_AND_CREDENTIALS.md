@@ -138,6 +138,7 @@ Provider 与探测：
 - 没有显式 `credentials` 且 `upstream.api_key` 非空时，该 inline key 被视为隐式 credential：`credential_id = default`、`route_target_id = <channel_id>:default`。
 - 没有显式 credentials 也没有 inline key 时，渠道仍会产生一个 route target，其 credential id 为 `default`。
 - `api_key` 应引用环境变量（例如 `$env:OPENAI_PRIMARY_API_KEY`），`id` 要稳定，因为它进入 route target identity 并可能出现在 cassette metadata 中。
+- `credentials[].enabled: false` 表示该 credential 不参与路由：router 在展开 route target 时跳过它（与 CLI `server provider probe` 选探测凭据时的规则一致）。若某个渠道声明的 credentials 全部被禁用，该渠道不产生任何 route target，`New()` 会以 `no enabled upstream targets configured` 失败，而**不会**回退到渠道级 `upstream.api_key`——否则被关掉的 key 会继续发流量。跳过的 credential 不会改变其余 credential 的索引，因此由索引生成的 `credential-N` 与 route target ID 保持稳定。
 - `credentials[].concurrency_limit` 目前只是配置字段，没有运行时消费者；实际并发限制由下方 limit scope 统一处理。
 
 ## Limit 与 scope

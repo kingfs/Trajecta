@@ -441,6 +441,17 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 			continue
 		}
 		for credIdx, credential := range credentials {
+			// A disabled credential takes no part in routing, the same way
+			// cmd/server/provider.go leaves one out when it picks the credential for a probe. A
+			// channel whose credentials are all disabled therefore contributes no route target at
+			// all, instead of falling back to the channel-level key, which would keep sending
+			// traffic through the key an operator just turned off. The entry is skipped in place
+			// rather than filtered out of the slice so the credential index - and with it the
+			// generated route target ID - stays stable when one of several credentials is
+			// disabled and the remaining targets keep the names their cassettes already use.
+			if credential.Enabled != nil && !*credential.Enabled {
+				continue
+			}
 			credentialID := credentialID(credential, credIdx)
 			resolvedForCredential := resolved
 			if strings.TrimSpace(credential.ApiKey) != "" {
@@ -2293,6 +2304,9 @@ func targetID(cfg config.UpstreamTargetConfig, idx int) string {
 	return fmt.Sprintf("upstream-%d", idx+1)
 }
 
+// explicitCredentials keeps every non-empty credential entry, including disabled ones: the caller
+// skips a disabled credential in place so the index used for a generated route target ID does not
+// shift.
 func explicitCredentials(credentials []config.CredentialConfig) []config.CredentialConfig {
 	out := make([]config.CredentialConfig, 0, len(credentials))
 	for _, credential := range credentials {
