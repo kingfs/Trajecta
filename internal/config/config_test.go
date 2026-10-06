@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1513,4 +1514,116 @@ server:
 	if got := cfg.ServerWriteTimeout(); got != 12*time.Second {
 		t.Fatalf("ServerWriteTimeout() = %v, want the env override 12s", got)
 	}
+}
+
+// TestUpstreamEnvFillsTheSingleUpstreamConfigWhenThereIsNoList covers the shape
+// the configuration had before the list existed: the legacy single `upstream`
+// block. Each TRAJECTA_UPSTREAM_* variable writes it as well as the first entry of
+// the list, and only the list half was covered by a test, so a refactor that
+// dropped the direct assignment passed every existing test.
+func TestUpstreamEnvFillsTheSingleUpstreamConfigWhenThereIsNoList(t *testing.T) {
+	t.Setenv("TRAJECTA_UPSTREAM_BASE_URL", "https://single.example.com/v1")
+	t.Setenv("TRAJECTA_UPSTREAM_API_KEY", "single-placeholder-key")
+	t.Setenv("TRAJECTA_UPSTREAM_MODE", "server")
+
+	cfg := Config{}
+	applyEnvOverrides(&cfg)
+
+	if cfg.Upstream.BaseURL != "https://single.example.com/v1" {
+		t.Fatalf("single upstream base_url = %q, want the env value", cfg.Upstream.BaseURL)
+	}
+	if cfg.Upstream.ApiKey != "single-placeholder-key" {
+		t.Fatalf("single upstream api_key = %q, want the env value", cfg.Upstream.ApiKey)
+	}
+	if cfg.Upstream.Mode != "server" {
+		t.Fatalf("single upstream mode = %q, want the env value", cfg.Upstream.Mode)
+	}
+	// With no configured list there is no entry to override, so none is invented.
+	if len(cfg.Upstreams) != 0 {
+		t.Fatalf("upstreams = %+v, want none", cfg.Upstreams)
+	}
+}
+
+// TestEnvOverridesIgnoreUnparsableValues pins the failure mode of the override
+// layer: a value that does not parse leaves the loaded value in place rather than
+// failing startup or zeroing the field.
+func TestEnvOverridesIgnoreUnparsableValues(t *testing.T) {
+	// These fields are anonymous structs, so they are set through the value rather
+	// than a composite literal.
+	var cfg Config
+	cfg.MCP.Enabled = true
+	cfg.Server.ReadTimeout = 7 * time.Second
+	cfg.Database.MaxOpenConns = 5
+	cfg.ProviderProbe.Timeout = 3 * time.Second
+	t.Setenv("TRAJECTA_MCP_ENABLED", "not-a-bool")
+	t.Setenv("TRAJECTA_SERVER_READ_TIMEOUT", "not-a-duration")
+	t.Setenv("TRAJECTA_DATABASE_MAX_OPEN_CONNS", "not-an-int")
+	t.Setenv("TRAJECTA_PROVIDER_PROBE_TIMEOUT", "12")
+
+	applyEnvOverrides(&cfg)
+
+	if !cfg.MCP.Enabled {
+		t.Fatal("MCP.Enabled = false, want the loaded true kept when the value does not parse")
+	}
+	if cfg.Server.ReadTimeout != 7*time.Second {
+		t.Fatalf("Server.ReadTimeout = %v, want the loaded value kept", cfg.Server.ReadTimeout)
+	}
+	if cfg.Database.MaxOpenConns != 5 {
+		t.Fatalf("Database.MaxOpenConns = %d, want the loaded value kept", cfg.Database.MaxOpenConns)
+	}
+	if cfg.ProviderProbe.Timeout != 3*time.Second {
+		t.Fatalf("ProviderProbe.Timeout = %v, want the loaded value kept", cfg.ProviderProbe.Timeout)
+	}
+}
+
+// TestApplyEnvOverridesKeepsItsSurfaceInOnePlace is a structural gate over the
+// override table.
+//
+// applyEnvOverrides is 58 variables. They used to be 58 near-identical blocks, and
+// the parsing rule for each type lived inside its own block, so a new variable
+// could invent a slightly different rule. Every read now goes through a typed
+// helper, and this asserts it stays that way, that no variable is applied twice,
+// and that the surface has not silently shrunk.
+func TestApplyEnvOverridesKeepsItsSurfaceInOnePlace(t *testing.T) {
+	source, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatalf("read config.go: %v", err)
+	}
+	body, ok := functionBodyForTest(string(source), "applyEnvOverrides")
+	if !ok {
+		t.Fatal("cannot locate applyEnvOverrides in config.go")
+	}
+	for _, direct := range []string{"os.Getenv(", "os.LookupEnv("} {
+		if strings.Contains(body, direct) {
+			t.Fatalf("applyEnvOverrides calls %s directly; every variable belongs in a typed helper so the parsing rule is shared", direct)
+		}
+	}
+	keys := regexp.MustCompile(`"(TRAJECTA_[A-Z0-9_]+)"`).FindAllStringSubmatch(body, -1)
+	seen := map[string]int{}
+	for _, match := range keys {
+		seen[match[1]]++
+	}
+	for key, count := range seen {
+		if count != 1 {
+			t.Fatalf("%s appears %d times, want once", key, count)
+		}
+	}
+	if len(seen) < 40 {
+		t.Fatalf("applyEnvOverrides handles %d variables, want at least 40; a removal this size should be deliberate", len(seen))
+	}
+}
+
+// functionBodyForTest returns the source of a top-level function, up to the next
+// top-level declaration.
+func functionBodyForTest(source, name string) (string, bool) {
+	marker := "func " + name + "("
+	start := strings.Index(source, marker)
+	if start < 0 {
+		return "", false
+	}
+	rest := source[start+len(marker):]
+	if next := strings.Index(rest, "\nfunc "); next >= 0 {
+		return rest[:next], true
+	}
+	return rest, true
 }

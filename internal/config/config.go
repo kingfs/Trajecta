@@ -395,281 +395,177 @@ func validateLimits(cfg *Config) error {
 	return nil
 }
 
+// applyEnvOverrides applies the TRAJECTA_* environment overrides on top of the
+// loaded configuration.
+//
+// Every variable is applied only when it is set and its value parses, so a
+// malformed value leaves the loaded or default value in place instead of failing
+// startup. Order is load-bearing where two variables write the same field, so the
+// calls are in the order the blocks were written: TRAJECTA_OUTPUT_DIR seeds both
+// output directories and TRAJECTA_TRACE_OUTPUT_DIR then overrides the trace one,
+// and the bootstrap-upstream variables extend one entry in turn. The surface is 58
+// variables, so each is one call rather than a near-identical block; the typed
+// helpers that follow hold the parsing rules.
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("TRAJECTA_SERVER_PORT"); v != "" {
-		cfg.Server.Port = v
+	envString(&cfg.Server.Port, "TRAJECTA_SERVER_PORT")
+	envDuration(&cfg.Server.ReadTimeout, "TRAJECTA_SERVER_READ_TIMEOUT")
+	envDuration(&cfg.Server.WriteTimeout, "TRAJECTA_SERVER_WRITE_TIMEOUT")
+	envString(&cfg.Monitor.Port, "TRAJECTA_MONITOR_PORT")
+	envBool(&cfg.MCP.Enabled, "TRAJECTA_MCP_ENABLED")
+	envString(&cfg.MCP.Path, "TRAJECTA_MCP_PATH")
+	envString(&cfg.Auth.DatabasePath, "TRAJECTA_AUTH_DATABASE_PATH")
+	envDuration(&cfg.Auth.SessionTTL, "TRAJECTA_AUTH_SESSION_TTL")
+	envString(&cfg.Database.Driver, "TRAJECTA_DATABASE_DRIVER")
+	envString(&cfg.Database.DSN, "TRAJECTA_DATABASE_DSN")
+	envInt(&cfg.Database.MaxOpenConns, "TRAJECTA_DATABASE_MAX_OPEN_CONNS")
+	envInt(&cfg.Database.MaxIdleConns, "TRAJECTA_DATABASE_MAX_IDLE_CONNS")
+	envBoolPtr(&cfg.Database.AutoMigrate, "TRAJECTA_DATABASE_AUTO_MIGRATE")
+	envBoolPtr(&cfg.Database.UseSessionSummaryRead, "TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ")
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROVIDER_PRESET", func(u *UpstreamConfig, v string) { u.ProviderPreset = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_TYPE", func(u *UpstreamConfig, v string) { u.APIType = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_MODE", func(u *UpstreamConfig, v string) { u.Mode = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROTOCOL_FAMILY", func(u *UpstreamConfig, v string) { u.ProtocolFamily = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_ROUTING_PROFILE", func(u *UpstreamConfig, v string) { u.RoutingProfile = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_VERSION", func(u *UpstreamConfig, v string) { u.APIVersion = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_DEPLOYMENT", func(u *UpstreamConfig, v string) { u.Deployment = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROJECT", func(u *UpstreamConfig, v string) { u.Project = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_LOCATION", func(u *UpstreamConfig, v string) { u.Location = v })
+	envUpstream(cfg, "TRAJECTA_UPSTREAM_MODEL_RESOURCE", func(u *UpstreamConfig, v string) { u.ModelResource = v })
+	envBootstrapUpstream(cfg, "TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
+	envBootstrapUpstream(cfg, "TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
+	envBool(&cfg.ProviderProbe.StartupFill, "TRAJECTA_PROVIDER_PROBE_STARTUP_FILL")
+	envDuration(&cfg.ProviderProbe.Timeout, "TRAJECTA_PROVIDER_PROBE_TIMEOUT")
+	envStringPair(&cfg.Debug.OutputDir, &cfg.Trace.OutputDir, "TRAJECTA_OUTPUT_DIR")
+	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
+	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
+	envString(&cfg.ResponsesServer.DefaultModel, "TRAJECTA_RESPONSES_DEFAULT_MODEL")
+	envBool(&cfg.ResponsesServer.ForceStore, "TRAJECTA_RESPONSES_FORCE_STORE")
+	envInt64(&cfg.ResponsesServer.MaxRequestBodyBytes, "TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES")
+	envString(&cfg.ResponsesServer.Path, "TRAJECTA_RESPONSES_PATH")
+	envBool(&cfg.ResponsesServer.AutoCompact, "TRAJECTA_RESPONSES_AUTO_COMPACT")
+	envInt(&cfg.ResponsesServer.CompactHistoryItemThreshold, "TRAJECTA_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD")
+	envBool(&cfg.ResponsesServer.FunctionExecutors.Enabled, "TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_ENABLED")
+	envDuration(&cfg.ResponsesServer.FunctionExecutors.Timeout, "TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT")
+	envInt(&cfg.ResponsesServer.FunctionExecutors.MaxResultBytes, "TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES")
+	envBool(&cfg.ResponsesServer.FunctionExecutors.Redaction.Arguments, "TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS")
+	envBool(&cfg.ResponsesServer.FunctionExecutors.Redaction.Output, "TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT")
+	envBool(&cfg.ResponsesServer.CodexCompat.Enabled, "TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED")
+	envList(&cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools, "TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS")
+	envBoolPtr(&cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent, "TRAJECTA_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT")
+	envBoolPtr(&cfg.ResponsesServer.CodexCompat.PreserveClientTools, "TRAJECTA_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS")
+	envAny(&cfg.ResponsesServer.CodexCompat.DefaultToolChoice, "TRAJECTA_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE")
+	envBool(&cfg.Tools.WebSearch.Enabled, "TRAJECTA_TOOLS_WEB_SEARCH_ENABLED")
+	envString(&cfg.Tools.WebSearch.Provider, "TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER")
+	envInt(&cfg.Tools.WebSearch.MaxResults, "TRAJECTA_TOOLS_WEB_SEARCH_MAX_RESULTS")
+	envString(&cfg.Tools.WebSearch.BaseURL, "TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL")
+	envInt(&cfg.Tools.WebSearch.TimeoutMS, "TRAJECTA_TOOLS_WEB_SEARCH_TIMEOUT_MS")
+	envString(&cfg.Tools.WebSearch.UserAgent, "TRAJECTA_TOOLS_WEB_SEARCH_USER_AGENT")
+	envBool(&cfg.Tools.MCP.Enabled, "TRAJECTA_TOOLS_MCP_ENABLED")
+	envInt(&cfg.Tools.MCP.DefaultTimeoutMS, "TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS")
+	envInt(&cfg.Tools.MCP.MaxResultBytes, "TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES")
+}
+
+// envString applies a non-empty value to a string field.
+func envString(target *string, key string) {
+	if v := os.Getenv(key); v != "" {
+		*target = v
 	}
-	if v := os.Getenv("TRAJECTA_SERVER_READ_TIMEOUT"); v != "" {
-		if parsed, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadTimeout = parsed
-		}
+}
+
+// envAny applies a non-empty value to a field declared as any, which is how the
+// optional Codex compatibility fields are typed.
+func envAny(target *any, key string) {
+	if v := os.Getenv(key); v != "" {
+		*target = v
 	}
-	if v := os.Getenv("TRAJECTA_SERVER_WRITE_TIMEOUT"); v != "" {
-		if parsed, err := time.ParseDuration(v); err == nil {
-			cfg.Server.WriteTimeout = parsed
-		}
+}
+
+// envStringPair applies one non-empty value to two string fields, which is how
+// TRAJECTA_OUTPUT_DIR seeds both output directories before the more specific
+// TRAJECTA_TRACE_OUTPUT_DIR overrides one of them.
+func envStringPair(first, second *string, key string) {
+	if v := os.Getenv(key); v != "" {
+		*first = v
+		*second = v
 	}
-	if v := os.Getenv("TRAJECTA_MONITOR_PORT"); v != "" {
-		cfg.Monitor.Port = v
-	}
-	if v := os.Getenv("TRAJECTA_MCP_ENABLED"); v != "" {
+}
+
+// envBool applies a value that must parse as a bool; one that does not is ignored,
+// leaving the loaded value in place.
+func envBool(target *bool, key string) {
+	if v := os.Getenv(key); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.MCP.Enabled = parsed
+			*target = parsed
 		}
 	}
-	if v := os.Getenv("TRAJECTA_MCP_PATH"); v != "" {
-		cfg.MCP.Path = v
-	}
-	if v := os.Getenv("TRAJECTA_AUTH_DATABASE_PATH"); v != "" {
-		cfg.Auth.DatabasePath = v
-	}
-	if v := os.Getenv("TRAJECTA_AUTH_SESSION_TTL"); v != "" {
-		if parsed, err := time.ParseDuration(v); err == nil {
-			cfg.Auth.SessionTTL = parsed
+}
+
+// envBoolPtr is envBool for an optional field, where unset and false differ. Each
+// call owns its parsed value, so no two fields share a pointer.
+func envBoolPtr(target **bool, key string) {
+	if v := os.Getenv(key); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			*target = &parsed
 		}
 	}
-	if v := os.Getenv("TRAJECTA_DATABASE_DRIVER"); v != "" {
-		cfg.Database.Driver = v
-	}
-	if v := os.Getenv("TRAJECTA_DATABASE_DSN"); v != "" {
-		cfg.Database.DSN = v
-	}
-	if v := os.Getenv("TRAJECTA_DATABASE_MAX_OPEN_CONNS"); v != "" {
+}
+
+// envInt applies a value that must parse as an int.
+func envInt(target *int, key string) {
+	if v := os.Getenv(key); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Database.MaxOpenConns = parsed
+			*target = parsed
 		}
 	}
-	if v := os.Getenv("TRAJECTA_DATABASE_MAX_IDLE_CONNS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Database.MaxIdleConns = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_DATABASE_AUTO_MIGRATE"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.Database.AutoMigrate = &parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.Database.UseSessionSummaryRead = &parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_BASE_URL"); v != "" {
-		cfg.Upstream.BaseURL = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.BaseURL = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_API_KEY"); v != "" {
-		cfg.Upstream.ApiKey = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.ApiKey = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_PROVIDER_PRESET"); v != "" {
-		cfg.Upstream.ProviderPreset = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.ProviderPreset = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_API_TYPE"); v != "" {
-		cfg.Upstream.APIType = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.APIType = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_MODE"); v != "" {
-		cfg.Upstream.Mode = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.Mode = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
-		cfg.Upstream.ProtocolFamily = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.ProtocolFamily = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_ROUTING_PROFILE"); v != "" {
-		cfg.Upstream.RoutingProfile = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.RoutingProfile = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_API_VERSION"); v != "" {
-		cfg.Upstream.APIVersion = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.APIVersion = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_DEPLOYMENT"); v != "" {
-		cfg.Upstream.Deployment = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.Deployment = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_PROJECT"); v != "" {
-		cfg.Upstream.Project = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.Project = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_LOCATION"); v != "" {
-		cfg.Upstream.Location = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.Location = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_UPSTREAM_MODEL_RESOURCE"); v != "" {
-		cfg.Upstream.ModelResource = v
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			upstream.ModelResource = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL"); v != "" {
-		ensureBootstrapUpstream(cfg)
-		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
-			upstream.BaseURL = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY"); v != "" {
-		ensureBootstrapUpstream(cfg)
-		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
-			upstream.ApiKey = v
-		})
-	}
-	if v := os.Getenv("TRAJECTA_PROVIDER_PROBE_STARTUP_FILL"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ProviderProbe.StartupFill = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_PROVIDER_PROBE_TIMEOUT"); v != "" {
-		if parsed, err := time.ParseDuration(v); err == nil {
-			cfg.ProviderProbe.Timeout = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_OUTPUT_DIR"); v != "" {
-		cfg.Debug.OutputDir = v
-		cfg.Trace.OutputDir = v
-	}
-	if v := os.Getenv("TRAJECTA_TRACE_OUTPUT_DIR"); v != "" {
-		cfg.Trace.OutputDir = v
-	}
-	if v := os.Getenv("TRAJECTA_MASK_KEY"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.Debug.MaskKey = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_DEFAULT_MODEL"); v != "" {
-		cfg.ResponsesServer.DefaultModel = v
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FORCE_STORE"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.ForceStore = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES"); v != "" {
+}
+
+// envInt64 applies a value that must parse as a 64-bit int.
+func envInt64(target *int64, key string) {
+	if v := os.Getenv(key); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.ResponsesServer.MaxRequestBodyBytes = parsed
+			*target = parsed
 		}
 	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_PATH"); v != "" {
-		cfg.ResponsesServer.Path = v
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_AUTO_COMPACT"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.AutoCompact = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.ResponsesServer.CompactHistoryItemThreshold = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_ENABLED"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.FunctionExecutors.Enabled = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT"); v != "" {
+}
+
+// envDuration applies a value that must parse as a Go duration.
+func envDuration(target *time.Duration, key string) {
+	if v := os.Getenv(key); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil {
-			cfg.ResponsesServer.FunctionExecutors.Timeout = parsed
+			*target = parsed
 		}
 	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.ResponsesServer.FunctionExecutors.MaxResultBytes = parsed
-		}
+}
+
+// envList applies a comma-separated list.
+func envList(target *[]string, key string) {
+	if v := os.Getenv(key); v != "" {
+		*target = splitCommaEnv(v)
 	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.FunctionExecutors.Redaction.Arguments = parsed
-		}
+}
+
+// envUpstream applies a value to the single-upstream configuration and to the
+// first entry of the upstream list, which is what the variables did as blocks: the
+// configuration carries both shapes, and an entry only exists once the list does.
+func envUpstream(cfg *Config, key string, assign func(*UpstreamConfig, string)) {
+	if v := os.Getenv(key); v != "" {
+		assign(&cfg.Upstream, v)
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			assign(upstream, v)
+		})
 	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.FunctionExecutors.Redaction.Output = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.CodexCompat.Enabled = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"); v != "" {
-		cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = splitCommaEnv(v)
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.CodexCompat.PreserveClientTools = &parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"); v != "" {
-		cfg.ResponsesServer.CodexCompat.DefaultToolChoice = v
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.Tools.WebSearch.Enabled = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER"); v != "" {
-		cfg.Tools.WebSearch.Provider = v
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_MAX_RESULTS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Tools.WebSearch.MaxResults = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL"); v != "" {
-		cfg.Tools.WebSearch.BaseURL = v
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_TIMEOUT_MS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Tools.WebSearch.TimeoutMS = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_WEB_SEARCH_USER_AGENT"); v != "" {
-		cfg.Tools.WebSearch.UserAgent = v
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_MCP_ENABLED"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.Tools.MCP.Enabled = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_MCP_DEFAULT_TIMEOUT_MS"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Tools.MCP.DefaultTimeoutMS = parsed
-		}
-	}
-	if v := os.Getenv("TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			cfg.Tools.MCP.MaxResultBytes = parsed
-		}
+}
+
+// envBootstrapUpstream is envUpstream for the variables that create the bootstrap
+// entry first, and only when no upstream is configured.
+func envBootstrapUpstream(cfg *Config, key string, assign func(*UpstreamConfig, string)) {
+	if v := os.Getenv(key); v != "" {
+		ensureBootstrapUpstream(cfg)
+		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
+			assign(upstream, v)
+		})
 	}
 }
 
