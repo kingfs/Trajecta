@@ -1084,7 +1084,8 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 	slotsByChannel := make(map[string][]time.Time, len(references))
 	bucketsByChannel := make(map[string]map[time.Time]*bucket, len(references))
 	for channelID, referenceTime := range references {
-		bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+		// UTC grid, see usageTrends: the lookups below use UTC-truncated recorded_at values.
+		bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 		slots := make([]time.Time, 0, bucketCount)
 		buckets := make(map[time.Time]*bucket, bucketCount)
 		for index := 0; index < bucketCount; index++ {

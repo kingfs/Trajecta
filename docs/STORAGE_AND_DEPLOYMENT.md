@@ -168,6 +168,7 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 ```
 
 - 运行时由 `serve` 内的两个 in-process worker 消费 `parse_jobs` 与 `analysis_jobs`（间隔 5s，批量分别为 10 与 5），没有外部队列。
+- Monitor 的按窗口聚合（channel/model/upstream 的 summary 与 timeline）都在 `internal/store` 内用 `recorded_at` 现算，不落表；这些桶网格一律按 **UTC 整点/整日**切分（`referenceTime.UTC().Truncate(bucketSize)`），因为 `recorded_at` 按 UTC 存储、且 `time.Time` 作为 map key 会带上 location——参考时间若落在本地时区，桶查找会全部落空并返回全零曲线。窗口参数（`window=1h|24h|7d|all|today`）的起点也由 `startOfUTCDay` 决定。
 - enqueue parse job 失败不会让请求失败（只记 warn）；cassette 写入失败会向上返回错误，是可观测的。
 
 | 类别 | 内容 | 说明 |
