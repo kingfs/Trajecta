@@ -35,8 +35,8 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 		provider = llm.ClassifyPath(path, "").Provider
 	}
 	var payload any
-	switch {
-	case provider == llm.ProviderAnthropic:
+	switch provider {
+	case llm.ProviderAnthropic:
 		payload = map[string]any{
 			"type": "error",
 			"error": map[string]any{
@@ -44,7 +44,7 @@ func proxyErrorEnvelope(r *http.Request, statusCode int, code, message string) [
 				"message": message,
 			},
 		}
-	case provider == llm.ProviderGoogleGenAI, provider == llm.ProviderVertexNative:
+	case llm.ProviderGoogleGenAI, llm.ProviderVertexNative:
 		payload = map[string]any{
 			"error": map[string]any{
 				"code":    statusCode,

@@ -315,10 +315,9 @@ func ReadPreludeFile(path string) (*ParsedPrelude, error) {
 
 	head := make([]byte, 0, preludeReadChunk)
 	head = append(head, first...)
-	for {
-		if isBlankPreludeLine(first) {
-			break
-		}
+	// `first` is loop-invariant: the prelude ends at the first blank line, which
+	// is either the line already read or one the loop reads below.
+	for !isBlankPreludeLine(first) {
 		next, readErr := reader.ReadBytes('\n')
 		if len(next) == 0 {
 			return nil, fmt.Errorf("prelude of %s has no terminating blank line: %w", path, ErrUnusablePrelude)
