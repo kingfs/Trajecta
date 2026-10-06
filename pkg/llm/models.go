@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// ModelListSentinel is the synthetic model name that stands for "this request
+// lists models" instead of naming one model. Callers that do have a request
+// path must prefer the model named in that path.
+const ModelListSentinel = "list_models"
+
 type modelListItem struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name,omitempty"`
@@ -20,7 +25,7 @@ type genericModelListEnvelope struct {
 
 func defaultModelListRequest() LLMRequest {
 	return LLMRequest{
-		Model: "list_models",
+		Model: ModelListSentinel,
 		Messages: []LLMMessage{{
 			Role: "user",
 			Content: []LLMContent{{

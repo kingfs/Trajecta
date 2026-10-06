@@ -80,16 +80,30 @@ func NormalizeEndpoint(rawPath string) string {
 		}
 	}
 	if strings.HasPrefix(clean, "/v1beta/models/") {
-		switch {
-		case strings.HasSuffix(clean, ":generateContent"):
+		if strings.HasSuffix(clean, ":generateContent") {
 			return "/v1beta/models:generateContent"
-		case strings.HasSuffix(clean, ":streamGenerateContent"):
-			return "/v1beta/models:streamGenerateContent"
-		default:
-			return "/v1beta/models"
 		}
+		if strings.HasSuffix(clean, ":streamGenerateContent") {
+			return "/v1beta/models:streamGenerateContent"
+		}
+		// Every other `:action` (countTokens, embedContent, …) keeps its name
+		// so it cannot be answered by the model catalog.
+		if action := modelsPathAction(clean); action != "" {
+			return "/v1beta/models:" + action
+		}
+		return "/v1beta/models"
 	}
 	if strings.HasPrefix(clean, "/v1/models/") {
+		if strings.HasSuffix(clean, ":generateContent") {
+			// The Vertex express short form: the model resource is `/models`.
+			return "/v1/publishers/models:generateContent"
+		}
+		if strings.HasSuffix(clean, ":streamGenerateContent") {
+			return "/v1/publishers/models:streamGenerateContent"
+		}
+		if action := modelsPathAction(clean); action != "" {
+			return "/v1/models:" + action
+		}
 		return "/v1/models"
 	}
 	for _, rule := range []struct {
@@ -119,6 +133,22 @@ func NormalizeEndpoint(rawPath string) string {
 		}
 	}
 	return clean
+}
+
+// modelsPathAction returns the `:action` suffix of a models path
+// (`/v1beta/models/gemini:countTokens` → `countTokens`), or "" when the path
+// carries no operation suffix. A suffixed path is an operation on one model,
+// never a listing, so it must not fall back to the catalog endpoints.
+func modelsPathAction(cleanPath string) string {
+	idx := strings.LastIndex(cleanPath, ":")
+	if idx < 0 || idx == len(cleanPath)-1 {
+		return ""
+	}
+	action := cleanPath[idx+1:]
+	if strings.ContainsAny(action, "/") {
+		return ""
+	}
+	return action
 }
 
 func detectProvider(endpoint string, upstreamBaseURL string) string {

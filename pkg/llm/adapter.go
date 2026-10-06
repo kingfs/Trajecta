@@ -75,8 +75,15 @@ func ParseRequestForPath(rawPath string, upstreamBaseURL string, body []byte) (L
 	if err != nil {
 		return LLMRequest{}, err
 	}
-	if req.Model == "" {
-		req.Model = ModelFromPath(rawPath)
+	// A path that names a model wins over the adapter's generic listing
+	// sentinel: `/v1beta/models/gemini-2.0-flash` reaches the model-list
+	// adapter because its endpoint normalizes to the catalog, and reporting the
+	// model as `list_models` then hides which model the request was about.
+	inferred := ModelFromPath(rawPath)
+	if req.Model == "" || (req.Model == ModelListSentinel && inferred != "") {
+		if inferred != "" {
+			req.Model = inferred
+		}
 	}
 	return req, nil
 }

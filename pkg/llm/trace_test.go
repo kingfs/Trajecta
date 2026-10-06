@@ -51,3 +51,66 @@ func TestModelFromPath(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-flash", ModelFromPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"))
 	assert.Equal(t, "", ModelFromPath("/v1/messages"))
 }
+
+// TestNormalizeEndpointKeepsModelsPathActions pins the model-path actions: a
+// `:generateContent`/`:countTokens` path is an operation on one model, so it
+// must never normalize to a listing endpoint. Normalizing it to `/v1/models`
+// made the proxy answer a generation call with the model catalog (HTTP 200).
+func TestNormalizeEndpointKeepsModelsPathActions(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/v1beta/models/gemini-2.0-flash:generateContent", want: "/v1beta/models:generateContent"},
+		{path: "/v1beta/models/gemini-2.0-flash:streamGenerateContent", want: "/v1beta/models:streamGenerateContent"},
+		{path: "/v1beta/models/gemini-2.0-flash:countTokens", want: "/v1beta/models:countTokens"},
+		{path: "/v1/models/deepseek-flash:generateContent", want: "/v1/publishers/models:generateContent"},
+		{path: "/v1/models/deepseek-flash:streamGenerateContent", want: "/v1/publishers/models:streamGenerateContent"},
+		{path: "/v1/models/deepseek-flash:countTokens", want: "/v1/models:countTokens"},
+		{path: "/v1/publishers/google/models/gemini:generateContent", want: "/v1/publishers/models:generateContent"},
+		// A bare listing still resolves to the catalog endpoint (the earlier
+		// `.../models` suffix rule), and so does a model path with no action.
+		{path: "/v1beta/models", want: "/v1/models"},
+		{path: "/v1beta/models/", want: "/v1/models"},
+		{path: "/v1/models", want: "/v1/models"},
+		{path: "/v1/models/deepseek-flash", want: "/v1/models"},
+	} {
+		if got := NormalizeEndpoint(tc.path); got != tc.want {
+			t.Errorf("NormalizeEndpoint(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
+// TestModelFromPathReadsTheActionForm confirms the model is still extracted from
+// a suffixed path, so a caller is told which model the operation named.
+func TestModelFromPathReadsTheActionForm(t *testing.T) {
+	if got := ModelFromPath("/v1beta/models/gemini-2.0-flash:countTokens"); got != "gemini-2.0-flash" {
+		t.Fatalf("ModelFromPath() = %q, want gemini-2.0-flash", got)
+	}
+	if got := ModelFromPath("/v1/models/deepseek-flash:generateContent"); got != "deepseek-flash" {
+		t.Fatalf("ModelFromPath() = %q, want deepseek-flash", got)
+	}
+}
+
+// TestParseRequestForPathPrefersTheModelInThePath keeps the diagnostic model
+// name honest. `/v1beta/models/gemini-2.0-flash` normalizes to the catalog
+// endpoint and reaches the model-list adapter, whose synthetic request names
+// the model `list_models`; a caller that reported that name would hide which
+// model the request was about.
+func TestParseRequestForPathPrefersTheModelInThePath(t *testing.T) {
+	req, err := ParseRequestForPath("/v1beta/models/gemini-2.0-flash", "", nil)
+	if err != nil {
+		t.Fatalf("ParseRequestForPath() error = %v", err)
+	}
+	if req.Model != "gemini-2.0-flash" {
+		t.Fatalf("req.Model = %q, want gemini-2.0-flash", req.Model)
+	}
+
+	listReq, err := ParseRequestForPath("/v1/models", "", nil)
+	if err != nil {
+		t.Fatalf("ParseRequestForPath() error = %v", err)
+	}
+	if listReq.Model != ModelListSentinel {
+		t.Fatalf("req.Model = %q, want %q for a real listing", listReq.Model, ModelListSentinel)
+	}
+}
