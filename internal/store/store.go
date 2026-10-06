@@ -10861,18 +10861,22 @@ func (s *Store) notifySystemEventChanged(event SystemEvent) {
 		Category: event.Category,
 		At:       time.Now().UTC(),
 	}
-	subs := make([]chan SystemEventNotification, 0, len(s.shared.eventSubs))
+	// The sends happen while eventMu is still held, and the unsubscribe closure
+	// closes the channel under that same mutex, so a send can never observe a
+	// closed channel. Publishing from a snapshot taken before the unlock races
+	// with close, and `select` treats a send on a closed channel as a ready
+	// case, so the non-blocking `default` branch does not protect it. That panic
+	// lands on the parse/reanalysis worker goroutines that call
+	// UpsertSystemEvent, and nothing in the repository recovers, so it would
+	// terminate the whole server. Each send is non-blocking, so holding the
+	// mutex across the loop stays O(subscribers) and cannot block on a reader.
 	for ch := range s.shared.eventSubs {
-		subs = append(subs, ch)
-	}
-	s.shared.eventMu.Unlock()
-
-	for _, ch := range subs {
 		select {
 		case ch <- notification:
 		default:
 		}
 	}
+	s.shared.eventMu.Unlock()
 }
 
 func systemEventForParseFailure(job ParseJobRecord) SystemEvent {

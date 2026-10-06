@@ -852,14 +852,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	irw := NewInstrumentedResponseWriter(w)
 
 	var (
-		lastErr       error
-		logInfo       *recorder.LogInfo
-		selection     *router.Selection
-		triedIDs      []string
-		retryAttempt  int
-		retryDeadline = start.Add(upstreamRetryBudget)
-		retryEvents   []recorder.RecordEvent
-		waitSlotHeld  bool
+		lastErr   error
+		logInfo   *recorder.LogInfo
+		selection *router.Selection
+		triedIDs  []string
+		// roundCandidateCount is the number of candidates available at the
+		// start of the current retry round. Every candidate that was available
+		// then must be attempted before the round gives up and backs off.
+		// selection.CandidateCount cannot be used for that test: the router
+		// recomputes it with the already-tried targets excluded, so it shrinks
+		// as the round progresses and the loop would stop after about half the
+		// candidates, never contacting the rest.
+		roundCandidateCount int
+		retryAttempt        int
+		retryDeadline       = start.Add(upstreamRetryBudget)
+		retryEvents         []recorder.RecordEvent
+		waitSlotHeld        bool
 	)
 	defer func() {
 		if waitSlotHeld {
@@ -873,6 +881,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var selErr error
 		if len(triedIDs) == 0 {
 			selection, selErr = h.router.SelectWithBody(r, bodyBytes)
+			if selErr == nil {
+				roundCandidateCount = selection.CandidateCount
+			}
 		} else {
 			selection, selErr = h.router.SelectWithExclusion(r, bodyBytes, triedIDs)
 		}
@@ -1011,7 +1022,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, reqErr.Error(), false))
 			h.closeLogFile(logInfo)
-			if len(triedIDs) >= selection.CandidateCount {
+			if len(triedIDs) >= roundCandidateCount {
 				delay := retryDelay(retryAttempt, nil, retryDeadline)
 				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, 0, reqErr.Error(), true))
 				if !sleepBeforeRetry(r.Context(), delay) {
@@ -1059,7 +1070,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, false))
 			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 			h.closeLogFile(logInfo)
-			if len(triedIDs) >= selection.CandidateCount {
+			if len(triedIDs) >= roundCandidateCount {
 				if !isTransientRetryStatus(resp.StatusCode) {
 					break
 				}
@@ -1709,7 +1720,13 @@ func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Tar
 	if bodyBytes != nil {
 		body = bytes.NewReader(bodyBytes)
 	}
-	outreq, err := http.NewRequestWithContext(context.Background(), original.Method, fullURL, body)
+	// Inherit the caller's context so that a cancelled or timed-out client
+	// request also cancels the upstream call. Using context.Background() here
+	// detached the two: an SDK timeout, a browser disconnect or a proxy-level
+	// server timeout left the outbound request running, pinning a handler
+	// goroutine, an upstream connection and the upstream's own token spend until
+	// the upstream chose to finish on its own.
+	outreq, err := http.NewRequestWithContext(original.Context(), original.Method, fullURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create outbound request: %w", err)
 	}

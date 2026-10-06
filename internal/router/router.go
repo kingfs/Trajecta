@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -102,7 +102,6 @@ type Router struct {
 	discoveryEnabled bool
 	costs            costConfig
 	store            *store.Store
-	random           *rand.Rand
 	sticky           *StickyBindingStore
 	stopCh           chan struct{}
 	stopOnce         sync.Once
@@ -383,7 +382,6 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
 		costs:            defaultCostConfig(),
 		store:            st,
-		random:           rand.New(rand.NewSource(time.Now().UnixNano())),
 		sticky:           NewStickyBindingStore(defaultStickyBindingTTL),
 		stopCh:           make(chan struct{}),
 	}
@@ -1186,13 +1184,17 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	if len(candidates) == 1 {
 		return candidates[0], r.expectedCost(candidates[0], req)
 	}
-	if r.random.Float64() < r.costs.Epsilon {
-		idx := r.random.Intn(len(candidates))
+	// math/rand/v2's package-level functions are safe for concurrent use
+	// (per-P state), which matters because selectTargets holds the router's
+	// read lock rather than an exclusive one, so several selectors run at once.
+	// A shared *rand.Rand here was a data race on the default policy.
+	if rand.Float64() < r.costs.Epsilon {
+		idx := rand.IntN(len(candidates))
 		return candidates[idx], r.expectedCost(candidates[idx], req)
 	}
 
-	aIdx := r.random.Intn(len(candidates))
-	bIdx := r.random.Intn(len(candidates) - 1)
+	aIdx := rand.IntN(len(candidates))
+	bIdx := rand.IntN(len(candidates) - 1)
 	if bIdx >= aIdx {
 		bIdx++
 	}
