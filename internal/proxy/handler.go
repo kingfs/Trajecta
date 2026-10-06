@@ -155,13 +155,20 @@ func (h *Handler) maxRequestBodyBytes() int64 {
 
 // writeRequestBodyError reports a request-body read failure with the status that
 // describes it: a body over the configured limit is 413, anything else is 400.
-func writeRequestBodyError(w http.ResponseWriter, err error) {
+//
+// The response carries the same protocol-shaped envelope as every other error the proxy
+// produces. `http.Error` was used here, so the one failure a client reaches by sending
+// too much - a base64 image input over `server.responses_max_request_body_bytes`, which is
+// the documented reason that limit exists - arrived as `text/plain` and each SDK raised a
+// parse error instead of the documented `request_too_large` / `INVALID_ARGUMENT` /
+// `invalid_request_error` body that names the cause.
+func writeRequestBodyError(w http.ResponseWriter, r *http.Request, err error) {
 	var maxBytesErr *http.MaxBytesError
 	if errors.As(err, &maxBytesErr) {
-		http.Error(w, "request body exceeds the configured limit", http.StatusRequestEntityTooLarge)
+		writeProxyError(w, r, http.StatusRequestEntityTooLarge, "request_body_too_large", "request body exceeds the configured limit")
 		return
 	}
-	http.Error(w, "Failed to read request body", http.StatusBadRequest)
+	writeProxyError(w, r, http.StatusBadRequest, "invalid_request_body", "Failed to read request body")
 }
 
 func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
@@ -839,7 +846,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// rejected without reading the body at all.
 	if limit := h.maxRequestBodyBytes(); limit > 0 {
 		if r.ContentLength > limit {
-			writeRequestBodyError(w, &http.MaxBytesError{Limit: limit})
+			writeRequestBodyError(w, r, &http.MaxBytesError{Limit: limit})
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -856,7 +863,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := readAndNormalizeRequestBody(r)
 	if err != nil {
 		slog.Error("Failed to read request body", "error", err)
-		writeRequestBodyError(w, err)
+		writeRequestBodyError(w, r, err)
 		return
 	}
 	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
@@ -2262,7 +2269,7 @@ func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request,
 func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeRequestBodyError(w, err)
+		writeRequestBodyError(w, r, err)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))

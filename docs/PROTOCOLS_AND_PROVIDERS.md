@@ -58,6 +58,19 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 各协议族在概念层的重叠（model、instructions、用户输入、工具定义、生成内容、tool calls、usage、streaming）与逐项差异（请求核心、响应核心、streaming 形态、tool 形态、usage 形态）、"识别不等于转换"的边界，以及由此产生的路由后果，见 [协议差异](./protocol-reference/protocol-differences.md)。
 
+### 代理自身错误的响应形态
+
+代理自己产生的错误（路由失败、上游传输失败、请求体超限、鉴权失败、限流）统一走 `internal/proxy/errors.go` 的包络，形态按入口 endpoint 的协议族选择，与 `pkg/llm.ClassifyPath` 的归类一致：
+
+| 入口协议族 | 形态 | 类型字段取值 |
+| --- | --- | --- |
+| OpenAI 兼容 | `{"error":{"message","type","code","param"}}` | 400/401/403/404/413 → `invalid_request_error`；429 → `rate_limit_error`；5xx → `api_error` |
+| Anthropic | `{"type":"error","error":{"type","message"}}` | 400 → `invalid_request_error`；401 → `authentication_error`；403 → `permission_error`；404 → `not_found_error`；413 → `request_too_large`；429 → `rate_limit_error`；503 → `overloaded_error`；500/502/504 → `api_error` |
+| Google GenAI / Vertex | `{"error":{"code","message","status"}}` | 400/413 → `INVALID_ARGUMENT`；401 → `UNAUTHENTICATED`；403 → `PERMISSION_DENIED`；404 → `NOT_FOUND`；429 → `RESOURCE_EXHAUSTED`；502/503 → `UNAVAILABLE`；504 → `DEADLINE_EXCEEDED`；500 → `INTERNAL`；其余 4xx 按调用方错误归类为 `INVALID_ARGUMENT`，其余 5xx 为 `INTERNAL` |
+| Ollama 兼容（`/api/show`） | `{"error":"<message>"}` | 该字段是字符串，Ollama 客户端按字符串反序列化 |
+
+未在表中列出的状态码按状态类别回退（4xx → 调用方错误、5xx → 服务端错误），不再一律回退到服务端错误。响应同时带 `X-Trajecta-Error-Source: proxy` 以区分代理自身错误与上游错误；上游返回的错误体原样透传，不被改写。
+
 ## Provider Preset 清单
 
 `internal/upstream/resolved.go` 的 `providerPresetRegistry` 当前有 25 个键；其中若干键的 spec 完全相同而互为别名，去重后为 20 个独立 provider。Monitor 通过 `GET /api/provider-presets` 暴露同一份矩阵。

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,166 @@ import (
 
 	"github.com/kingfs/Trajecta/pkg/llm"
 )
+
+// TestProxyErrorTypeMatchesTheDocumentedContract pins the `error.type` /
+// `error.status` value each family documents for the statuses the proxy answers with.
+//
+// The envelope's *shape* was pinned by the test above, but its *type* came from a
+// three-branch guess that answered several statuses with the server-fault value: an
+// Anthropic 401 said `api_error` (a credential problem described as a proxy fault), a
+// 413 said `api_error` even though the proxy's own body limit produced it, and Google's
+// 413 said `INTERNAL`. The type is what a caller reads in a log and what an SDK records
+// in its error object, so each one now carries the documented name for its status.
+func TestProxyErrorTypeMatchesTheDocumentedContract(t *testing.T) {
+	for _, tc := range []struct {
+		status    int
+		openai    string
+		anthropic string
+		google    string
+	}{
+		{status: http.StatusBadRequest, openai: "invalid_request_error", anthropic: "invalid_request_error", google: "INVALID_ARGUMENT"},
+		{status: http.StatusUnauthorized, openai: "invalid_request_error", anthropic: "authentication_error", google: "UNAUTHENTICATED"},
+		{status: http.StatusForbidden, openai: "invalid_request_error", anthropic: "permission_error", google: "PERMISSION_DENIED"},
+		{status: http.StatusNotFound, openai: "invalid_request_error", anthropic: "not_found_error", google: "NOT_FOUND"},
+		{status: http.StatusRequestEntityTooLarge, openai: "invalid_request_error", anthropic: "request_too_large", google: "INVALID_ARGUMENT"},
+		{status: http.StatusTooManyRequests, openai: "rate_limit_error", anthropic: "rate_limit_error", google: "RESOURCE_EXHAUSTED"},
+		{status: http.StatusInternalServerError, openai: "api_error", anthropic: "api_error", google: "INTERNAL"},
+		{status: http.StatusBadGateway, openai: "api_error", anthropic: "api_error", google: "UNAVAILABLE"},
+		{status: http.StatusServiceUnavailable, openai: "api_error", anthropic: "overloaded_error", google: "UNAVAILABLE"},
+		{status: http.StatusGatewayTimeout, openai: "api_error", anthropic: "api_error", google: "DEADLINE_EXCEEDED"},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			for _, fc := range []struct {
+				family, path, want string
+			}{
+				{family: "openai", path: "/v1/chat/completions", want: tc.openai},
+				{family: "anthropic", path: "/v1/messages", want: tc.anthropic},
+				{family: "google", path: "/v1beta/models/gemini-2.5-flash:generateContent", want: tc.google},
+			} {
+				t.Run(fc.family, func(t *testing.T) {
+					payload := decodeProxyErrorBody(t, proxyErrorEnvelope(httptest.NewRequest(http.MethodPost, fc.path, nil), tc.status, "proxy_error", "boom"))
+					if got := errorFieldOf(t, payload, fc.family); got != fc.want {
+						t.Fatalf("%s error type for status %d = %q, want %q (payload %#v)", fc.family, tc.status, got, fc.want, payload)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestRequestBodyErrorsCarryTheProtocolEnvelope pins the one failure a client reaches by
+// sending too much. The body limit did answer with `http.Error`, so a base64 image over
+// the configured limit - the case the limit exists for - returned `text/plain` and every
+// SDK failed to parse the response instead of reading the documented cause. The same
+// helper answers a body-read failure with 400, which is covered below through a reader
+// that fails mid-body.
+func TestRequestBodyErrorsCarryTheProtocolEnvelope(t *testing.T) {
+	const limit = 4096
+	handler, received, _ := newBodyLimitHandler(t, limit)
+	oversized := `{"model":"gpt-5","input":"` + strings.Repeat("x", limit*2) + `"}`
+
+	for _, tc := range []struct {
+		family, path, wantType string
+	}{
+		{family: "openai", path: "/v1/chat/completions", wantType: "invalid_request_error"},
+		{family: "anthropic", path: "/v1/messages", wantType: "request_too_large"},
+		{family: "google", path: "/v1beta/models/gemini-2.5-flash:generateContent", wantType: "INVALID_ARGUMENT"},
+	} {
+		t.Run(tc.family, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(oversized))
+			req.Header.Set("Content-Type", "application/json")
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status = %d, want 413 (body %q)", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+				t.Fatalf("Content-Type = %q, want application/json (body %q)", got, rec.Body.String())
+			}
+			payload := decodeProxyErrorBody(t, rec.Body.Bytes())
+			if got := errorFieldOf(t, payload, tc.family); got != tc.wantType {
+				t.Fatalf("%s error type = %q, want %q (payload %#v)", tc.family, got, tc.wantType, payload)
+			}
+			errObj, _ := payload["error"].(map[string]any)
+			if errObj["message"] != "request body exceeds the configured limit" {
+				t.Fatalf("message = %v, want the limit explanation", errObj["message"])
+			}
+		})
+	}
+	if len(*received) != 0 {
+		t.Fatalf("an oversized body reached the upstream: %v", *received)
+	}
+
+	// Ollama's surface carries the message in a string field, not in the OpenAI object.
+	t.Run("ollama", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/show", strings.NewReader(oversized))
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413 (body %q)", rec.Code, rec.Body.String())
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("the Ollama error body must hold `error` as a string: %v (%s)", err, rec.Body.String())
+		}
+		if payload["error"] != "request body exceeds the configured limit" {
+			t.Fatalf("error = %q, want the limit explanation", payload["error"])
+		}
+	})
+
+	// A body that fails mid-read is the 400 branch of the same helper.
+	t.Run("unreadable body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", failingReader{})
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 (body %q)", rec.Code, rec.Body.String())
+		}
+		payload := decodeProxyErrorBody(t, rec.Body.Bytes())
+		if got := payload["type"]; got != "error" {
+			t.Fatalf("payload = %#v, want the Anthropic envelope", payload)
+		}
+		errObj, _ := payload["error"].(map[string]any)
+		if errObj["type"] != "invalid_request_error" {
+			t.Fatalf("error.type = %v, want invalid_request_error", errObj["type"])
+		}
+	})
+}
+
+// failingReader fails on its first read, so the handler's body read returns a
+// non-MaxBytesError error.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+// decodeProxyErrorBody parses an error body, insisting it is JSON (the point of the
+// envelope) rather than plain text.
+func decodeProxyErrorBody(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("error body is not JSON: %v (%s)", err, body)
+	}
+	return payload
+}
+
+// errorFieldOf reads the family's own type field out of a decoded envelope.
+func errorFieldOf(t *testing.T, payload map[string]any, family string) string {
+	t.Helper()
+	errObj, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s envelope has no error object: %#v", family, payload)
+	}
+	field := "type"
+	if family == "google" {
+		field = "status"
+	}
+	value, _ := errObj[field].(string)
+	return value
+}
 
 // TestProxyErrorEnvelopeMatchesTheRequestEntrypoint pins the error body shape
 // per entrypoint. An OpenAI, Anthropic or Google SDK parses only its own error
@@ -106,13 +267,14 @@ func TestProxyErrorEnvelopeMatchesTheRequestEntrypoint(t *testing.T) {
 // SDK that can only parse its own error shape.
 func TestServeHTTPUnauthorizedUsesTheProtocolEnvelope(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		path string
-		body string
+		name     string
+		path     string
+		body     string
+		wantType string
 	}{
-		{name: "openai", path: "/v1/chat/completions", body: `"error"`},
-		{name: "anthropic", path: "/v1/messages", body: `"type"`},
-		{name: "google", path: "/v1beta/models/gemini:generateContent", body: `"status"`},
+		{name: "openai", path: "/v1/chat/completions", body: `"error"`, wantType: "invalid_request_error"},
+		{name: "anthropic", path: "/v1/messages", body: `"type"`, wantType: "authentication_error"},
+		{name: "google", path: "/v1beta/models/gemini:generateContent", body: `"status"`, wantType: "UNAUTHENTICATED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := &Handler{authVerifier: proxyTestVerifier{}}
@@ -135,6 +297,10 @@ func TestServeHTTPUnauthorizedUsesTheProtocolEnvelope(t *testing.T) {
 			}
 			if !strings.Contains(body, "Unauthorized") {
 				t.Fatalf("body = %s, want the reason `Unauthorized`", body)
+			}
+			payload := decodeProxyErrorBody(t, rec.Body.Bytes())
+			if got := errorFieldOf(t, payload, tc.name); got != tc.wantType {
+				t.Fatalf("%s error type = %q, want %q (payload %#v)", tc.name, got, tc.wantType, payload)
 			}
 		})
 	}
