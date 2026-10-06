@@ -171,6 +171,7 @@ func (p *ResponsePipeline) appendOpenAIChatEvent(jsonStr string) {
 			Delta struct {
 				Content          *string `json:"content"`
 				ReasoningContent *string `json:"reasoning_content"`
+				Reasoning        *string `json:"reasoning"`
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -189,8 +190,11 @@ func (p *ResponsePipeline) appendOpenAIChatEvent(jsonStr string) {
 		if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 			p.appendEvent("llm.output_text.delta", *choice.Delta.Content, nil)
 		}
-		if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-			p.appendEvent("llm.reasoning.delta", *choice.Delta.ReasoningContent, nil)
+		// `reasoning_content` is the DeepSeek/vLLM spelling and `reasoning` the OpenRouter one; the
+		// observation parser (pkg/observe) already accepts both, so recording only one of them left
+		// the cassette events disagreeing with the observation derived from the same bytes.
+		if reasoning := firstNonEmpty(derefString(choice.Delta.ReasoningContent), derefString(choice.Delta.Reasoning)); reasoning != "" {
+			p.appendEvent("llm.reasoning.delta", reasoning, nil)
 		}
 		for _, tc := range choice.Delta.ToolCalls {
 			p.appendEvent("llm.tool_call.delta", "", map[string]interface{}{

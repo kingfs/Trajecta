@@ -49,6 +49,7 @@ func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error)
 				Delta struct {
 					Content          *string `json:"content"`
 					ReasoningContent *string `json:"reasoning_content"`
+					Reasoning        *string `json:"reasoning"`
 					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
@@ -68,8 +69,11 @@ func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error)
 			if choice.Delta.Content != nil {
 				contentBuilder.WriteString(*choice.Delta.Content)
 			}
-			if choice.Delta.ReasoningContent != nil {
-				reasoningBuilder.WriteString(*choice.Delta.ReasoningContent)
+			// See the recorder: `reasoning` is the other spelling of `reasoning_content`, and
+			// pkg/observe accepts both, so dropping one here made the replay/render path disagree
+			// with the observation path for the same cassette.
+			if reasoning := firstNonEmpty(derefString(choice.Delta.ReasoningContent), derefString(choice.Delta.Reasoning)); reasoning != "" {
+				reasoningBuilder.WriteString(reasoning)
 			}
 			for _, tc := range choice.Delta.ToolCalls {
 				call := ensureToolCallByIndex(toolCallByIndex, tc.Index)

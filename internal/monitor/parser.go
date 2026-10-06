@@ -1148,11 +1148,14 @@ func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []T
 				Message struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
 				} `json:"message"`
 			} `json:"choices"`
 		}
 		if json.Unmarshal(data, &resp) == nil && len(resp.Choices) > 0 {
-			return resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent, nil
+			// `reasoning_content` is the DeepSeek/vLLM spelling and `reasoning` the OpenRouter one;
+			// pkg/observe accepts both, so the trace view must not drop the other spelling.
+			return resp.Choices[0].Message.Content, firstNonEmptyString(resp.Choices[0].Message.ReasoningContent, resp.Choices[0].Message.Reasoning), nil
 		}
 		return "", "", nil
 	}
@@ -1181,6 +1184,7 @@ func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []T
 				Delta struct {
 					Content          *string `json:"content"`
 					ReasoningContent *string `json:"reasoning_content"`
+					Reasoning        *string `json:"reasoning"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -1188,8 +1192,8 @@ func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []T
 			if c := chunk.Choices[0].Delta.Content; c != nil {
 				contentBuilder.WriteString(*c)
 			}
-			if r := chunk.Choices[0].Delta.ReasoningContent; r != nil {
-				reasoningBuilder.WriteString(*r)
+			if r := firstNonEmptyString(derefOptionalString(chunk.Choices[0].Delta.ReasoningContent), derefOptionalString(chunk.Choices[0].Delta.Reasoning)); r != "" {
+				reasoningBuilder.WriteString(r)
 			}
 		}
 	}
@@ -1653,4 +1657,25 @@ func formatInput(input interface{}) string {
 	default:
 		return marshalPretty(input)
 	}
+}
+
+// derefOptionalString returns the pointed-to string, or an empty string for a nil pointer. SSE deltas
+// carry optional fields, and OpenAI-compatible providers spell the reasoning field either
+// `reasoning_content` or `reasoning`, so the callers fold the alternatives with firstNonEmptyString.
+func derefOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// firstNonEmptyString returns the first non-empty value, which is how the trace view accepts both
+// spellings of the reasoning field instead of rendering an empty thinking block for one of them.
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
