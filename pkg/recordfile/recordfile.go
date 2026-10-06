@@ -16,7 +16,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -241,6 +243,94 @@ func ParsePrelude(content []byte) (*ParsedPrelude, error) {
 		Header:        header,
 		PayloadOffset: LegacyHeaderLen,
 	}, nil
+}
+
+// MaxPreludeBytes bounds how much of a cassette ReadPreludeFile will read and hold
+// while looking for the end of the prelude. A real prelude is a meta line plus one
+// line per event, so this is far above any recording the proxy produces; it exists so
+// a corrupt or truncated file cannot make a reader grow without limit.
+const MaxPreludeBytes = 8 << 20
+
+// preludeReadChunk is the read size ReadPreludeFile grows its buffer by.
+const preludeReadChunk = 32 << 10
+
+// ReadPreludeFile reads the prelude of the cassette at path and nothing else.
+//
+// A prelude-only caller - anything that wants the metadata, the recorded events or
+// the layout rather than the exchange itself - should not read the whole recording,
+// because a recording is as large as the upstream response body it holds. The
+// prelude sits at the start of the file, so this reads it in chunks and stops at the
+// blank line that terminates it.
+//
+// It requires that terminator rather than trusting ParsePrelude's success: a buffer
+// cut at a line boundary before the blank line parses without error and reports a
+// payload offset that is short, which would silently misplace every section a caller
+// extracts from it afterwards. A file that ends inside its prelude is an error.
+func ReadPreludeFile(path string) (*ParsedPrelude, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// The first line tells the two layouts apart. V3 and the pre-rename V3 magic
+	// start with a magic line and end the prelude with a blank line; the legacy
+	// layout is a fixed-size JSON header block with no terminator.
+	reader := bufio.NewReader(f)
+	first, err := reader.ReadBytes('\n')
+	if len(first) == 0 {
+		if err == nil {
+			err = io.ErrUnexpectedEOF
+		}
+		return nil, fmt.Errorf("read prelude of %s: %w", path, err)
+	}
+
+	if !isMagicLine(bytes.TrimSuffix(first, []byte("\n"))) {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		block := make([]byte, LegacyHeaderLen)
+		n, readErr := io.ReadFull(f, block)
+		if readErr != nil && readErr != io.ErrUnexpectedEOF {
+			return nil, fmt.Errorf("read legacy prelude of %s: %w", path, readErr)
+		}
+		if n < LegacyHeaderLen {
+			return nil, fmt.Errorf("prelude of %s ends before its %d-byte header block", path, LegacyHeaderLen)
+		}
+		return ParsePrelude(block)
+	}
+
+	head := make([]byte, 0, preludeReadChunk)
+	head = append(head, first...)
+	for {
+		if isBlankPreludeLine(first) {
+			break
+		}
+		next, readErr := reader.ReadBytes('\n')
+		if len(next) == 0 {
+			return nil, fmt.Errorf("prelude of %s has no terminating blank line", path)
+		}
+		head = append(head, next...)
+		if len(head) > MaxPreludeBytes {
+			return nil, fmt.Errorf("prelude of %s exceeds %d bytes without a terminator", path, MaxPreludeBytes)
+		}
+		if isBlankPreludeLine(next) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("prelude of %s has no terminating blank line", path)
+		}
+	}
+
+	return ParsePrelude(head)
+}
+
+// isBlankPreludeLine reports whether a prelude line is the empty line that ends the
+// prelude, in either line ending.
+func isBlankPreludeLine(line []byte) bool {
+	trimmed := bytes.TrimSuffix(line, []byte("\n"))
+	trimmed = bytes.TrimSuffix(trimmed, []byte("\r"))
+	return len(trimmed) == 0
 }
 
 func parseV3Prelude(content []byte) (*ParsedPrelude, error) {

@@ -1,6 +1,10 @@
 package recordfile
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -202,4 +206,131 @@ func TestFileMagicHelpers(t *testing.T) {
 	// Magic without the terminating newline is not yet a complete prelude.
 	assert.False(t, IsV3Prelude([]byte(FileMagic)))
 	assert.True(t, HasFileMagic([]byte(FileMagic)))
+}
+
+// TestReadPreludeFileReadsOnlyThePrelude is the point of the function: a caller that
+// wants the metadata must not pay for the recording. The body here is far larger
+// than the prelude, and the assertion is on the allocation, so a reader that went
+// back to reading the whole file fails it.
+func TestReadPreludeFileReadsOnlyThePrelude(t *testing.T) {
+	const bodySize = 8 << 20
+
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID:  "req-prelude-only",
+			Time:       time.Date(2026, 6, 22, 11, 0, 0, 0, time.UTC),
+			Model:      "gpt-5",
+			URL:        "/v1/chat/completions",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+		Layout: LayoutInfo{ReqHeaderLen: 10, ReqBodyLen: 20, ResHeaderLen: 10, ResBodyLen: bodySize},
+	}
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	path := dir + "/cassette.http"
+	body := bytes.Repeat([]byte("r"), bodySize)
+	require.NoError(t, os.WriteFile(path, append(append([]byte{}, prelude...), body...), 0o644))
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	parsed, err := ReadPreludeFile(path)
+	require.NoError(t, err)
+	runtime.ReadMemStats(&after)
+
+	want, err := ParsePrelude(prelude)
+	require.NoError(t, err)
+	assert.Equal(t, want.Header.Meta.RequestID, parsed.Header.Meta.RequestID)
+	assert.Equal(t, want.PayloadOffset, parsed.PayloadOffset)
+	assert.Equal(t, len(want.Events), len(parsed.Events))
+
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > bodySize/8 {
+		t.Fatalf("ReadPreludeFile allocated %.1f MiB for a %d MiB recording, want it to read only the prelude",
+			float64(allocated)/(1<<20), int64(bodySize)>>20)
+	}
+}
+
+// TestReadPreludeFileRejectsAnUnterminatedPrelude covers the reason the function
+// looks for the terminator itself instead of relying on ParsePrelude succeeding: a
+// file cut at a line boundary inside its prelude parses without error and reports a
+// short payload offset, which would misplace every section read from it afterwards.
+func TestReadPreludeFileRejectsAnUnterminatedPrelude(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta:    MetaData{RequestID: "req-truncated", Time: time.Now().UTC(), Model: "gpt-5"},
+	}
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+
+	// Cut at a line boundary: drop the terminating blank line and everything after.
+	lines := strings.SplitAfter(string(prelude), "\n")
+	require.Greater(t, len(lines), 2)
+	truncated := strings.Join(lines[:len(lines)-2], "")
+	require.False(t, strings.HasSuffix(truncated, "\n\n"))
+
+	path := t.TempDir() + "/truncated.http"
+	require.NoError(t, os.WriteFile(path, []byte(truncated), 0o644))
+
+	// ParsePrelude accepts it, which is exactly the hazard.
+	accepted, err := ParsePrelude([]byte(truncated))
+	require.NoError(t, err, "ParsePrelude is expected to accept a line-aligned truncation")
+	require.Less(t, accepted.PayloadOffset, int64(len(prelude)), "its payload offset is short, hence unusable")
+
+	if _, err := ReadPreludeFile(path); err == nil {
+		t.Fatal("ReadPreludeFile accepted a cassette whose prelude has no terminator")
+	}
+}
+
+func TestReadPreludeFileReadsAPreludeLargerThanOneChunk(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta:    MetaData{RequestID: "req-many-events", Time: time.Now().UTC(), Model: "gpt-5"},
+	}
+	events := make([]RecordEvent, 0, 4000)
+	for i := 0; i < 4000; i++ {
+		events = append(events, RecordEvent{
+			Type:    "routing.candidates",
+			Time:    header.Meta.Time,
+			Message: strings.Repeat("x", 40),
+		})
+	}
+	prelude, err := MarshalPrelude(header, events)
+	require.NoError(t, err)
+	require.Greater(t, len(prelude), preludeReadChunk, "the prelude must span several read chunks")
+
+	body := bytes.Repeat([]byte("r"), 1024)
+	path := t.TempDir() + "/multi-chunk.http"
+	require.NoError(t, os.WriteFile(path, append(append([]byte{}, prelude...), body...), 0o644))
+
+	parsed, err := ReadPreludeFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "req-many-events", parsed.Header.Meta.RequestID)
+	assert.Len(t, parsed.Events, len(events))
+	assert.Equal(t, int64(len(prelude)), parsed.PayloadOffset)
+}
+
+func TestReadPreludeFileReadsALegacyHeaderBlock(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V2",
+		Meta:    MetaData{RequestID: "req-legacy", Time: time.Now().UTC(), Model: "gpt-4"},
+	}
+	blob, err := json.Marshal(header)
+	require.NoError(t, err)
+	require.Less(t, len(blob), LegacyHeaderLen)
+
+	record := []byte("POST /v1/chat/completions HTTP/1.1\r\n\r\n{}")
+	headerBlock := make([]byte, LegacyHeaderLen)
+	copy(headerBlock, blob)
+	headerBlock[len(blob)] = '\n' // the legacy header block is the JSON line, padded
+	path := t.TempDir() + "/legacy.http"
+	require.NoError(t, os.WriteFile(path, append(headerBlock, record...), 0o644))
+
+	parsed, err := ReadPreludeFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "req-legacy", parsed.Header.Meta.RequestID)
+	assert.Equal(t, int64(LegacyHeaderLen), parsed.PayloadOffset)
 }

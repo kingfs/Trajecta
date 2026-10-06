@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -5858,5 +5859,58 @@ func TestParsePageSizeClampsToAServingBound(t *testing.T) {
 				t.Fatalf("parsePageSize(%q) = %d, want %d", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRoutingSummaryReadsPreludesNotWholeCassettes pins the cost model of the
+// summary. It walks every trace in its window, so reading each recording whole made
+// its cost grow with the size of every response body in the corpus: measured on 40
+// traces holding 2 MiB each, 80 MiB allocated and 20 ms, against 1.9 MiB and 3 ms
+// once only the prelude is read. The bound below is far above what reading preludes
+// costs and far below the corpus, so a return to reading whole recordings fails it
+// while the assertion stays stable.
+func TestRoutingSummaryReadsPreludesNotWholeCassettes(t *testing.T) {
+	const (
+		traces          = 12
+		bodyPerTrace    = 1 << 20
+		allocationLimit = 4 << 20
+	)
+
+	outputDir := t.TempDir()
+	body := strings.Repeat("x", bodyPerTrace)
+	for i := 0; i < traces; i++ {
+		writeRoutingSummaryTrace(t, outputDir, fmt.Sprintf("large-%03d.http", i), `{"input":"hello"}`, body,
+			[]recordfile.RecordEvent{
+				{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary"}},
+			})
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	rr := httptest.NewRecorder()
+	routingSummaryAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/routing/summary?window=all", nil))
+	runtime.ReadMemStats(&after)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var payload routingSummaryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ScannedTraces != traces {
+		t.Fatalf("ScannedTraces = %d, want %d; the summary must still see every trace", payload.ScannedTraces, traces)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocationLimit {
+		t.Fatalf("the summary allocated %.1f MiB over a %d MiB corpus, want it to read preludes rather than whole cassettes",
+			float64(allocated)/(1<<20), (traces*bodyPerTrace)>>20)
 	}
 }

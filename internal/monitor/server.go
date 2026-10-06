@@ -3695,12 +3695,12 @@ func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (
 	return summary, nil
 }
 
+// readRoutingPreludeEvents reads the routing events of one cassette. The summary
+// walks every trace in its window, so this reads the prelude alone: reading whole
+// recordings here made the cost of the summary grow with the size of every response
+// body in the corpus rather than with the number of traces.
 func readRoutingPreludeEvents(path string) ([]recordfile.RecordEvent, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	parsed, err := recordfile.ParsePrelude(content)
+	parsed, err := recordfile.ReadPreludeFile(path)
 	if err != nil {
 		return nil, err
 	}

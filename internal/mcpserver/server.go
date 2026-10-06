@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -478,11 +477,10 @@ func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallTool
 	if err != nil {
 		return nil, nil, err
 	}
-	content, err := os.ReadFile(entry.LogPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read trace cassette: %w", err)
-	}
-	parsed, err := recordfile.ParsePrelude(content)
+	// Only the prelude is needed: a cassette is as large as the response body it
+	// holds, so reading the whole recording here would make this tool's cost grow
+	// with the exchange rather than with the metadata it reports.
+	parsed, err := recordfile.ReadPreludeFile(entry.LogPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse trace prelude: %w", err)
 	}
@@ -584,16 +582,11 @@ func (a *serverAPI) queryStickyRouting(ctx context.Context, req *mcp.CallToolReq
 
 	var matches []stickyRoutingRow
 	for _, entry := range entries {
-		content, err := os.ReadFile(entry.LogPath)
+		// Only the prelude is needed; see queryRoutingDecisions.
+		parsed, err := recordfile.ReadPreludeFile(entry.LogPath)
 		if err != nil {
 			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: read cassette: %v", entry.ID, err))
-			continue
-		}
-		parsed, err := recordfile.ParsePrelude(content)
-		if err != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: parse prelude failed", entry.ID))
+			out.Errors = append(out.Errors, fmt.Sprintf("%s: read or parse cassette: %v", entry.ID, err))
 			continue
 		}
 		for _, event := range parsed.Events {
@@ -856,13 +849,10 @@ type routingEvidence struct {
 }
 
 func (a *serverAPI) traceRoutingEvidence(entry store.LogEntry) (routingEvidence, error) {
-	content, err := os.ReadFile(entry.LogPath)
+	// Only the prelude is needed; see queryRoutingDecisions.
+	parsed, err := recordfile.ReadPreludeFile(entry.LogPath)
 	if err != nil {
-		return routingEvidence{}, fmt.Errorf("read trace cassette %q: %w", entry.ID, err)
-	}
-	parsed, err := recordfile.ParsePrelude(content)
-	if err != nil {
-		return routingEvidence{}, fmt.Errorf("parse trace prelude %q: %w", entry.ID, err)
+		return routingEvidence{}, fmt.Errorf("read trace prelude %q: %w", entry.ID, err)
 	}
 	evidence := routingEvidence{}
 	for _, event := range parsed.Events {
