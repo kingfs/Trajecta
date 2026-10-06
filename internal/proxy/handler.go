@@ -1201,7 +1201,12 @@ func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.R
 		writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
 		return r, true
 	}
-	return r, false
+	// The decision landed on native pass-through, so this request is forwarded unchanged
+	// and must reach a target that serves the Responses API itself. Marking it keeps the
+	// selection - and the retry re-selection after a failing target - from choosing one
+	// that could only serve the path through the local Chat Completions translation,
+	// which would receive a Responses request it does not implement.
+	return router.WithNativeResponsesPathRequirement(r), false
 }
 
 // acquirePreSelectionLimit takes a rate-limit lease before target selection. It

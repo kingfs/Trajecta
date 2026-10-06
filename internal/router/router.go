@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -515,6 +516,47 @@ func sortTargets(targets []*Target) {
 	})
 }
 
+// nativeResponsesPathKey marks a request whose raw /v1/responses request the proxy has
+// decided to forward as-is, instead of answering it through the local Responses runtime.
+type nativeResponsesPathKey struct{}
+
+// WithNativeResponsesPathRequirement marks a request that must be served by a target which
+// speaks the Responses API itself, not by one that could only serve it through the local
+// Chat Completions translation.
+//
+// The proxy marks the request when its native-versus-local decision lands on pass-through.
+// The distinction matters because the two questions are different: "can this model be
+// served at all" is answered by ResolvedUpstream.SupportsEndpointForModel, which
+// deliberately accepts a Chat Completions backend for /v1/responses because the local
+// runtime can translate, while pass-through forwards the request unchanged - so such a
+// backend would receive a Responses request it does not implement. The mark survives into
+// the retry re-selection, so a target that fails cannot degrade into a protocol mismatch.
+func WithNativeResponsesPathRequirement(r *http.Request) *http.Request {
+	if r == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), nativeResponsesPathKey{}, true))
+}
+
+// requiresNativeResponsesPath reports whether this request is a marked pass-through of the
+// Responses create path.
+func requiresNativeResponsesPath(ctx context.Context, rawPath string) bool {
+	if ctx == nil {
+		return false
+	}
+	required, _ := ctx.Value(nativeResponsesPathKey{}).(bool)
+	return required && llm.NormalizeEndpoint(rawPath) == "/v1/responses"
+}
+
+// blockedByNativeResponsesRequirement reports whether a target has to be left out because
+// the request is a marked pass-through that this target cannot serve natively.
+func blockedByNativeResponsesRequirement(target *Target, model string, requireNativeResponses bool) bool {
+	if !requireNativeResponses || target == nil {
+		return false
+	}
+	return !target.Upstream.SupportsResponsesAPIForModel(model)
+}
+
 func (r *Router) Initialize() error {
 	if r == nil {
 		return nil
@@ -825,7 +867,7 @@ func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) 
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
-	candidates := r.candidatesForRequest(rawPath, model, features)
+	candidates := r.candidatesForRequest(rawPath, model, features, false)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.canSelect(now, model) {
@@ -842,7 +884,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
-	candidates := r.candidatesForRequest(rawPath, model, features)
+	candidates := r.candidatesForRequest(rawPath, model, features, false)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
@@ -908,12 +950,14 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 			found = true
 		}
 	}
+	requireNativeResponses := requiresNativeResponsesPath(req.Context(), rawPath)
 	for _, target := range targets {
 		if target == nil {
 			continue
 		}
-		decision := target.candidateDecision(rawPath, model, now, features)
-		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools {
+		decision := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
+		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools ||
+			blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 			continue
 		}
 		if decision.HealthState == HealthOpen {
@@ -940,8 +984,9 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	decision := r.buildDecisionTrace(rawPath, model, excludeIDs, features)
-	candidates := r.candidatesForRequest(rawPath, model, features)
+	requireNativeResponses := requiresNativeResponsesPath(req.Context(), rawPath)
+	decision := r.buildDecisionTrace(rawPath, model, excludeIDs, features, requireNativeResponses)
+	candidates := r.candidatesForRequest(rawPath, model, features, requireNativeResponses)
 	if len(candidates) == 0 {
 		return nil, &SelectionError{
 			Reason:   SelectionFailureNoSupportingTarget,
@@ -1039,7 +1084,7 @@ func targetAlias(target *Target, fallback string) string {
 	return fallback
 }
 
-func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string, features RequestFeatures) *DecisionTrace {
+func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string, features RequestFeatures, requireNativeResponses bool) *DecisionTrace {
 	decision := &DecisionTrace{
 		ModelName:      model,
 		Endpoint:       llm.NormalizeEndpoint(rawPath),
@@ -1054,7 +1099,7 @@ func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []s
 	}
 	now := time.Now()
 	for _, target := range r.targets {
-		candidate := target.candidateDecision(rawPath, model, now, features)
+		candidate := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
 		if _, excluded := excludeSet[target.ID]; excluded {
 			candidate.Excluded = true
 			candidate.Selectable = false
@@ -1208,11 +1253,12 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	return b, scoreB
 }
 
-func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures) []*Target {
+func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures, requireNativeResponses bool) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1225,7 +1271,8 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
 				continue
 			}
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1246,6 +1293,9 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			continue
 		}
 		if !supportsRequestFeatures(target, features) {
+			continue
+		}
+		if blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 			continue
 		}
 		if target.allowUnknownModels || model == "" || r.fallbackPolicy != FallbackReject {
@@ -1695,7 +1745,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	return true
 }
 
-func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures) CandidateDecision {
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures, requireNativeResponses bool) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1746,6 +1796,15 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 	if !decision.SupportsTools {
 		decision.Selectable = false
 		decision.FilterReason = "unsupported_tools"
+		return decision
+	}
+	// A marked pass-through needs the Responses surface itself. SupportsPath stays true:
+	// the target can serve the model on this path through the local runtime, it just
+	// cannot receive the request unchanged. The distinct reason says which of the two
+	// excluded it.
+	if blockedByNativeResponsesRequirement(t, model, requireNativeResponses) {
+		decision.Selectable = false
+		decision.FilterReason = "native_responses_required"
 		return decision
 	}
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
