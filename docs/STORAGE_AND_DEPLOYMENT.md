@@ -27,6 +27,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 
 - 第一段是该次请求命中的 upstream base URL 的 host（例如 `ai-api-gateway.app.baizhi.cloud`、`10.2.69.245:32080`），不是客户端访问的 host，也不是协议族。
 - `<model>` 直接来自请求/响应里的 model 名，**可以含 `/`**（例如 `feature/gpt-5.6-sol`、`dev/gpt-5.5`），此时目录会多一层；不要把中间那层当成固定的“环境/分组”维度。
+- `<model>` 与 site host 都先经 `tracePathSegment` 规范化再拼路径（`internal/recorder/recorder.go`）：`/` 保留（模型 slug 需要分层），空段、`.` 与 `..` 段被丢弃，控制字符被删除，`\` 改为 `_`，每段长度有上限。model 名来自请求体，是客户端可控输入；不做这一步时含 `..` 的 model 会经 `filepath.Join` 的清理逃出 `trace.output_dir`，含 NUL 的 model 会让 `os.MkdirAll` 以 `invalid argument` 失败并整条丢失 trace（只在日志里留一行 ERROR）。规范化只作用于路径，cassette 元数据与索引里的 model 名保持客户端原值。
 - 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
 - 文件名用录制进程的时刻（容器镜像通过 `TZ=UTC` 固定为 UTC）与纳秒，不保证与同目录内其它文件单调可比。
 - 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）、`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`：移动文件后必须同步这三列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -248,5 +250,107 @@ func TestUpdateLogFileEnqueuesParseJob(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].TraceID != entry.ID {
 		t.Fatalf("jobs = %+v, want trace %s", jobs, entry.ID)
+	}
+}
+
+// TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot pins that a
+// client-supplied model name cannot steer where the cassette is written.
+//
+// The model name is read from the request body and was joined into the trace
+// path raw, so `../../../../tmp/escape` escaped the trace root through
+// filepath.Join's cleaning and a NUL byte made os.MkdirAll fail with `invalid
+// argument`, which lost the trace entirely: no cassette, no index row, only an
+// ERROR line.
+func TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot(t *testing.T) {
+	cases := []struct {
+		name    string
+		model   string
+		wantSub string
+	}{
+		{name: "a plain model", model: "deepseek-flash", wantSub: "/deepseek-flash/"},
+		{name: "a nested model slug keeps its nesting", model: "qwen/qwen3.6-35b-a3b", wantSub: "/qwen/qwen3.6-35b-a3b/"},
+		{name: "a traversal attempt is flattened", model: "../../../../tmp/escape", wantSub: "/tmp/escape/"},
+		{name: "a bare parent is dropped", model: "..", wantSub: "/unknown-model/"},
+		{name: "an empty model", model: "", wantSub: "/unknown-model/"},
+		{name: "a dot component is dropped", model: "./model", wantSub: "/model/"},
+		{name: "a backslash is not a separator", model: "..\\..\\escape", wantSub: "/.._.._escape/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rec := New(dir, true, nil)
+			body := "{" + `"model":` + strconv.Quote(tc.model) + `,"messages":[]}`
+			req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString(body))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+			if err != nil {
+				t.Fatalf("PrepareLogFile(%q) error = %v", tc.model, err)
+			}
+			defer info.File.Close()
+
+			root, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				t.Fatalf("EvalSymlinks(%q) error = %v", dir, err)
+			}
+			resolved, err := filepath.EvalSymlinks(filepath.Dir(info.Path))
+			if err != nil {
+				t.Fatalf("EvalSymlinks(%q) error = %v", filepath.Dir(info.Path), err)
+			}
+			if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+				t.Fatalf("cassette dir %q is outside the trace root %q", resolved, root)
+			}
+			if !strings.Contains(info.Path, filepath.FromSlash(tc.wantSub)) {
+				t.Fatalf("cassette path %q does not contain %q", info.Path, tc.wantSub)
+			}
+			// The recorded metadata keeps what the client asked for.
+			if info.Header.Meta.Model != tc.model && tc.model != "" {
+				t.Fatalf("meta model = %q, want %q", info.Header.Meta.Model, tc.model)
+			}
+		})
+	}
+}
+
+// TestPrepareLogFileAcceptsAModelWithANULByte pins that the trace is recorded
+// rather than lost when the model name carries a byte the filesystem rejects.
+func TestPrepareLogFileAcceptsAModelWithANULByte(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, true, nil)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString("{\"model\":\"nulprobe\\u0000trajecta\",\"messages\":[]}"))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile(NUL model) error = %v, want the trace to be recorded", err)
+	}
+	defer info.File.Close()
+
+	if strings.ContainsRune(info.Path, 0) {
+		t.Fatalf("cassette path %q contains a NUL byte", info.Path)
+	}
+	if !strings.Contains(info.Path, "nulprobetrajecta") {
+		t.Fatalf("cassette path %q does not carry the model name", info.Path)
+	}
+}
+
+// TestTracePathSegmentBoundsAnOverLongModelName pins that a model name long
+// enough to exceed the filesystem limit cannot fail the mkdir.
+func TestTracePathSegmentBoundsAnOverLongModelName(t *testing.T) {
+	long := strings.Repeat("m", 5000)
+	got := tracePathSegment(long, 200)
+	if len(got) > 200 {
+		t.Fatalf("len(tracePathSegment(long)) = %d, want at most 200", len(got))
+	}
+	if got == "" {
+		t.Fatal("tracePathSegment(long) = empty, want a usable name")
+	}
+	if got := tracePathSegment(strings.Repeat("\x00", 8), 200); got != "unknown-model" {
+		t.Fatalf("tracePathSegment(control only) = %q, want unknown-model", got)
 	}
 }

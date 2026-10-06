@@ -10628,15 +10628,58 @@ func textPreview(text string, limit int) string {
 	return text[:cut]
 }
 
+// sqlSafeText makes a value storable in a Postgres text column.
+//
+// Invalid UTF-8 is replaced with U+FFFD, and so is a NUL byte, because Postgres
+// refuses to store one at all: `INSERT ... VALUES (E'a\000b')` fails with
+// `invalid byte sequence for encoding "UTF8": 0x00`. A request body or an
+// upstream error body can carry a NUL, and the values derived from them - the
+// model, the error text, a semantic node's text - then failed the insert that
+// records the trace, so the trace was lost rather than stored with one odd
+// character.
 func sqlSafeText(text string) string {
-	return strings.ToValidUTF8(text, "\uFFFD")
+	text = strings.ToValidUTF8(text, "\uFFFD")
+	if strings.IndexByte(text, 0) < 0 {
+		return text
+	}
+	return strings.ReplaceAll(text, "\x00", "\uFFFD")
 }
 
+// sqlSafeBytes makes a JSON document storable in a Postgres jsonb column.
+//
+// A raw NUL is replaced first, then the JSON escape json.Marshal emits for one:
+// Postgres rejects that too (`unsupported Unicode escape sequence: \u0000 cannot
+// be converted to text`), and replacing only the raw byte missed every NUL that
+// reached a jsonb column, because encoding a Go string turns it into `\u0000`
+// before the store ever sees the bytes. A literal backslash is escaped as `\\`,
+// so a `u0000` is a NUL escape only when the run of backslashes before it is
+// odd; an even run means the text after it is literal.
 func sqlSafeBytes(data []byte) []byte {
 	if len(data) == 0 {
 		return data
 	}
-	return []byte(sqlSafeText(string(data)))
+	data = []byte(sqlSafeText(string(data)))
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); {
+		if data[i] != '\\' {
+			out = append(out, data[i])
+			i++
+			continue
+		}
+		run := 0
+		for i+run < len(data) && data[i+run] == '\\' {
+			run++
+		}
+		if run%2 == 1 && i+run+5 <= len(data) && string(data[i+run:i+run+5]) == "u0000" {
+			out = append(out, data[i:i+run]...)
+			out = append(out, "uFFFD"...)
+			i += run + 5
+			continue
+		}
+		out = append(out, data[i:i+run]...)
+		i += run
+	}
+	return out
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {

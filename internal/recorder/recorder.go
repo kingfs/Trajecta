@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kingfs/Trajecta/internal/redaction"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
@@ -70,6 +71,60 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 	return r.PrepareLogFileWithOptions(req, PrepareOptions{SiteURL: siteURL})
 }
 
+// tracePathSegment turns an untrusted value into a path below the trace root.
+//
+// The model name is read from the request body, so it is client input on a
+// filesystem path, and it used to be joined in raw. A NUL byte made os.MkdirAll
+// fail with `invalid argument`, which lost the whole trace - the cassette was
+// never written and only an ERROR line remained - and a `..` component escaped
+// the trace root because filepath.Join cleans the result, so a request could
+// create directories anywhere the process can write.
+//
+// Slashes are kept because a model slug such as `qwen/qwen3.6-35b-a3b` nests
+// legitimately, but an empty, `.` or `..` component is path structure rather than
+// a name and is dropped, control characters and backslashes (a separator on
+// Windows) are removed, and the result is bounded so an over-long model name
+// cannot fail the mkdir with ENAMETOOLONG.
+func tracePathSegment(value string, limit int) string {
+	parts := strings.Split(value, "/")
+	safe := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Map(func(r rune) rune {
+			switch {
+			case r < 0x20, r == 0x7f:
+				return -1
+			case r == '\\':
+				return '_'
+			default:
+				return r
+			}
+		}, part)
+		part = strings.Trim(part, " ")
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		safe = append(safe, part)
+	}
+	if len(safe) == 0 {
+		return "unknown-model"
+	}
+	joined := strings.Join(safe, "/")
+	if limit > 0 && len(joined) > limit {
+		joined = joined[:limit]
+		// Truncating can leave a trailing separator or a partial rune, neither of
+		// which belongs in a path component.
+		joined = strings.TrimRight(joined, "/")
+		for joined != "" && !utf8.ValidString(joined) {
+			joined = joined[:len(joined)-1]
+		}
+		joined = strings.TrimRight(joined, "/")
+		if joined == "" {
+			return "unknown-model"
+		}
+	}
+	return joined
+}
+
 func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOptions) (*LogInfo, error) {
 	var bodyBytes []byte
 	if req.Body != nil {
@@ -115,8 +170,8 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 	semantics := llm.ClassifyHTTPRequest(req, opts.SiteURL)
 	dirPath := filepath.Join(
 		r.OutputDir,
-		siteHost,
-		modelName,
+		tracePathSegment(siteHost, 128),
+		tracePathSegment(modelName, 200),
 		now.Format("2006"),
 		now.Format("01"),
 		now.Format("02"),

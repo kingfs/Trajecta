@@ -7247,3 +7247,80 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// TestSQLSafeTextRemovesNULBytes pins the value-level defence for Postgres text
+// columns.
+//
+// Postgres cannot store a NUL byte in a text value - it fails the statement with
+// `invalid byte sequence for encoding "UTF8": 0x00`, verified against PostgreSQL
+// 17 - and a NUL can arrive in a request body or an upstream error body and end
+// up in a model name, an error text or a semantic node's text. Without this,
+// recording such a request failed instead of storing it.
+func TestSQLSafeTextRemovesNULBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain text is unchanged", in: "deepseek-flash", want: "deepseek-flash"},
+		{name: "empty stays empty", in: "", want: ""},
+		{name: "a NUL is replaced", in: "a\x00b", want: "a\uFFFDb"},
+		{name: "several NULs are replaced", in: "\x00a\x00", want: "\uFFFDa\uFFFD"},
+		{name: "invalid UTF-8 is still replaced", in: "a\xffb", want: "a\uFFFDb"},
+		{name: "NUL and invalid UTF-8 together", in: "a\x00\xff", want: "a\uFFFD\uFFFD"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sqlSafeText(tc.in)
+			if got != tc.want {
+				t.Fatalf("sqlSafeText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if strings.IndexByte(got, 0) >= 0 {
+				t.Fatalf("sqlSafeText(%q) = %q still contains a NUL byte", tc.in, got)
+			}
+		})
+	}
+}
+
+// TestSQLSafeBytesRemovesTheJSONNULEscape pins the same defence for jsonb
+// columns, where the NUL arrives escaped rather than raw.
+//
+// `json.Marshal` renders a NUL in a string as the six characters `\u0000`, and
+// Postgres rejects that in jsonb with `unsupported Unicode escape sequence`,
+// verified against PostgreSQL 17, so replacing only the raw byte left every NUL
+// that reached a jsonb column. A literal backslash is emitted as `\\`, so only an
+// odd run of backslashes before `u0000` marks the NUL escape: with an even run the
+// text after it is the literal characters `u0000`.
+func TestSQLSafeBytesRemovesTheJSONNULEscape(t *testing.T) {
+	// `\\` in these Go literals is one backslash byte. PostgreSQL 17 was used to
+	// confirm that the unrewritten forms below are the ones it refuses.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain JSON is unchanged", in: `{"model":"deepseek-flash"}`, want: `{"model":"deepseek-flash"}`},
+		{name: "empty stays empty", in: "", want: ""},
+		{name: "one backslash is the NUL escape", in: "{\"t\":\"a\\u0000b\"}", want: "{\"t\":\"a\\uFFFDb\"}"},
+		{name: "a raw NUL byte is replaced too", in: "{\"t\":\"a\x00b\"}", want: "{\"t\":\"a\uFFFDb\"}"},
+		{name: "two backslashes keep a literal u0000", in: "{\"t\":\"a\\\\u0000b\"}", want: "{\"t\":\"a\\\\u0000b\"}"},
+		{name: "three backslashes leave a NUL escape", in: "{\"t\":\"a\\\\\\u0000b\"}", want: "{\"t\":\"a\\\\\\uFFFDb\"}"},
+		{name: "no backslash means literal text", in: `{"t":"au0000b"}`, want: `{"t":"au0000b"}`},
+		{name: "a raw NUL inside an array is replaced", in: "[\"a\x00b\"]", want: "[\"a\uFFFDb\"]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(sqlSafeBytes([]byte(tc.in)))
+			if got != tc.want {
+				t.Fatalf("sqlSafeBytes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			// A NUL escape can only be asserted structurally - `\\u0000` contains
+			// the text `\u0000` without being an escape - so the check is that no raw
+			// NUL survives and that the escape does not survive unescaped, which the
+			// exact match above already pins case by case.
+			if strings.IndexByte(got, 0) >= 0 {
+				t.Fatalf("sqlSafeBytes(%q) = %q still contains a raw NUL byte", tc.in, got)
+			}
+		})
+	}
+}
