@@ -64,7 +64,7 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 		},
 	}
 	applyExchangeMetadata(input, &obs)
-	req, err := decodeJSONObject(input.RequestBody)
+	req, err := requestJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse anthropic messages request: %w", err)
 	}

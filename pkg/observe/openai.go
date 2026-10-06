@@ -147,7 +147,7 @@ func parseOpenAIModelListNodes(raw json.RawMessage) []SemanticNode {
 }
 
 func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceObservation, error) {
-	req, err := decodeJSONObject(input.RequestBody)
+	req, err := requestJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse openai chat request: %w", err)
 	}
@@ -207,7 +207,7 @@ func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceOb
 }
 
 func parseOpenAIResponsesObservation(input ParseInput, obs TraceObservation) (TraceObservation, error) {
-	req, err := decodeJSONObject(input.RequestBody)
+	req, err := requestJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse openai responses request: %w", err)
 	}
@@ -1077,6 +1077,21 @@ func parseNullableObjectNode(raw json.RawMessage, section string, path string, p
 		Text:           textFromRaw(raw),
 		Raw:            cloneRaw(raw),
 	}
+}
+
+// requestJSONObject decodes a request payload. A body-less request is real
+// client traffic -- Google's `models.get` is a plain `GET /v1beta/models/{model}`
+// -- and it carries no payload to parse, so its absence is not a parse failure.
+// An unparseable non-empty body is still an error. `entry.go` already applied
+// this rule; the protocol-specific request parsers did not, so replaying or
+// reanalysing such a trace failed with `parse gemini request: empty json` and
+// marked the whole reanalysis job failed.
+func requestJSONObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	obj, err := decodeJSONObject(raw)
+	if err != nil && len(raw) > 0 {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func decodeJSONObject(raw json.RawMessage) (map[string]json.RawMessage, error) {

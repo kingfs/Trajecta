@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
@@ -187,5 +188,77 @@ func geminiTestHeader(provider string, endpoint string, isStream bool) recordfil
 			Endpoint:  endpoint,
 		},
 		Layout: recordfile.LayoutInfo{IsStream: isStream},
+	}
+}
+
+// TestRequestParsersTolerateABodylessRequest pins real client traffic: Google's
+// `models.get` is a plain `GET /v1beta/models/{model}` with no body, and any
+// body-less request on a parsed path used to fail with
+// `parse gemini request: empty json`, which marked the whole reanalysis job
+// failed for that trace. An empty body means "no request payload", not
+// "unparseable request"; a non-empty unparseable body is still an error.
+func TestRequestParsersTolerateABodylessRequest(t *testing.T) {
+	registry := NewDefaultRegistry()
+	for _, tc := range []struct {
+		name    string
+		header  recordfile.RecordHeader
+		body    []byte
+		wantErr bool
+	}{
+		{
+			name:   "google models.get",
+			header: geminiTestHeader("google_genai", "/v1beta/models", false),
+		},
+		{
+			name:   "google generateContent",
+			header: geminiTestHeader("google_genai", "/v1beta/models:generateContent", false),
+		},
+		{
+			name:   "anthropic messages",
+			header: anthropicTestHeader(false),
+		},
+		{
+			name: "openai chat",
+			header: recordfile.RecordHeader{Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			}},
+		},
+		{
+			name: "openai responses",
+			header: recordfile.RecordHeader{Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationResponses,
+				Endpoint:  "/v1/responses",
+			}},
+		},
+		{
+			name:    "malformed google body still fails",
+			header:  geminiTestHeader("google_genai", "/v1beta/models:generateContent", false),
+			body:    []byte(`{"contents":`),
+			wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obs, err := registry.Parse(t.Context(), ParseInput{
+				TraceID:      "trace-bodyless-" + tc.name,
+				Header:       tc.header,
+				RequestBody:  tc.body,
+				ResponseBody: []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]}}]}`),
+			})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Parse() error = nil, want an error for a malformed non-empty body")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() with an empty request body error = %v, want no error", err)
+			}
+			if len(obs.Request.Nodes) != 0 {
+				t.Fatalf("request nodes = %d, want 0 for a body-less request", len(obs.Request.Nodes))
+			}
+		})
 	}
 }

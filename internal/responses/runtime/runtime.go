@@ -3067,13 +3067,25 @@ func inputFunctionCallToChatToolCall(item protocol.InputItem, index int) ChatToo
 
 func ledgerToChatMessages(items []LedgerItem) []ChatMessage {
 	messages := make([]ChatMessage, 0, len(items))
-	pendingToolCalls := []ChatToolCall{}
-	flushToolCalls := func() {
-		if len(pendingToolCalls) == 0 {
+	// One assistant turn can carry text and tool calls at once. They are
+	// buffered together and emitted as a single assistant message, because
+	// splitting them produces two consecutive assistant messages and puts the
+	// `tool` result after an assistant message that did not request it. A strict
+	// upstream rejects that shape, so a client-side function call could not be
+	// continued through the local runtime at all.
+	var pendingToolCalls []ChatToolCall
+	var pendingText []string
+	flushAssistant := func() {
+		if len(pendingToolCalls) == 0 && len(pendingText) == 0 {
 			return
 		}
-		messages = append(messages, ChatMessage{Role: "assistant", ToolCalls: pendingToolCalls})
+		message := ChatMessage{Role: "assistant", ToolCalls: pendingToolCalls}
+		if len(pendingText) > 0 {
+			message.Content = strings.Join(pendingText, "\n")
+		}
+		messages = append(messages, message)
 		pendingToolCalls = nil
+		pendingText = nil
 	}
 	for _, item := range items {
 		if item.Input != nil {
@@ -3083,7 +3095,7 @@ func ledgerToChatMessages(items []LedgerItem) []ChatMessage {
 			if item.Input.Type == "function_call" {
 				pendingToolCalls = append(pendingToolCalls, inputFunctionCallToChatToolCall(*item.Input, len(pendingToolCalls)))
 			} else {
-				flushToolCalls()
+				flushAssistant()
 				messages = append(messages, inputItemToChatMessage(*item.Input))
 			}
 			continue
@@ -3102,17 +3114,16 @@ func ledgerToChatMessages(items []LedgerItem) []ChatMessage {
 				},
 			})
 		case "message":
-			flushToolCalls()
-			messages = append(messages, ChatMessage{Role: "assistant", Content: contentPartsText(item.Output.Content)})
+			pendingText = append(pendingText, contentPartsText(item.Output.Content))
 		case "function_call_output":
-			flushToolCalls()
+			flushAssistant()
 			messages = append(messages, ChatMessage{Role: "tool", ToolCallID: item.Output.CallID, Content: toolOutputContent(item.Output.Output)})
 		case "summary":
-			flushToolCalls()
+			flushAssistant()
 			messages = append(messages, ChatMessage{Role: "system", Content: "Previous conversation summary:\n" + contentPartsText(item.Output.Content)})
 		}
 	}
-	flushToolCalls()
+	flushAssistant()
 	return messages
 }
 

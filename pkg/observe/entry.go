@@ -60,8 +60,8 @@ func (p entryParser) Parse(ctx context.Context, input ParseInput) (TraceObservat
 	}
 	applyExchangeMetadata(input, &obs)
 
-	req, err := decodeJSONObject(input.RequestBody)
-	if err != nil && len(input.RequestBody) > 0 {
+	req, err := requestJSONObject(input.RequestBody)
+	if err != nil {
 		return obs, fmt.Errorf("parse entry request: %w", err)
 	}
 	if model := stringField(req, "model"); model != "" {
