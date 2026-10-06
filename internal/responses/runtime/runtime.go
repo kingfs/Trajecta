@@ -309,6 +309,13 @@ type OutputTextDoneStreamSink interface {
 	OutputTextDone(done ResponseTextDone) error
 }
 
+// ReasoningTextStreamSink is implemented by writers that surface the model's
+// reasoning, matching the native `response.reasoning_text.*` events.
+type ReasoningTextStreamSink interface {
+	ReasoningTextDelta(delta ResponseReasoningTextDelta) error
+	ReasoningTextDone(done ResponseReasoningTextDone) error
+}
+
 type OutputItemStreamSink interface {
 	OutputItemDone(done ResponseOutputItemDone) error
 }
@@ -325,6 +332,20 @@ type ResponseTextDelta struct {
 }
 
 type ResponseTextDone struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Text         string
+}
+
+type ResponseReasoningTextDelta struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Delta        string
+}
+
+type ResponseReasoningTextDone struct {
 	OutputIndex  int
 	ItemID       string
 	ContentIndex int
@@ -477,10 +498,25 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		outputOffset := len(output)
 		functionStream := newFunctionCallStreamState(sink, outputOffset)
 		textStream := newMessageTextStreamState(sink, outputOffset, messageID)
+		reasoningStream := newReasoningTextStreamState(sink, outputOffset)
 		callCtx := withNextModelCallMetadata(ctx, role, responseID)
 		chatResp, err := streamer.ChatCompletionStream(callCtx, chatReq, func(event ChatStreamEvent) error {
 			if event.ChoiceIndex != 0 {
 				return nil
+			}
+			if event.ReasoningDelta != "" {
+				if err := sendInProgress(); err != nil {
+					return err
+				}
+				// The reasoning item precedes the message item in the final
+				// output, so shift the other streams once it appears.
+				if !reasoningStream.started {
+					textStream.outputIndex++
+					functionStream.outputOffset++
+				}
+				if err := reasoningStream.delta(event.ReasoningDelta); err != nil {
+					return err
+				}
 			}
 			if event.ContentDelta != "" {
 				if err := sendInProgress(); err != nil {
@@ -519,10 +555,13 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		if err := textStream.done(outputItems); err != nil {
 			return protocol.Response{}, err
 		}
+		if err := reasoningStream.done(firstReasoning(chatResp)); err != nil {
+			return protocol.Response{}, err
+		}
 		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors, req, model)
 		if !hasToolCalls || !allExecutable {
 			output = append(output, outputItems...)
-			resp := responseFromOutputWithID(responseID, req, model, output, usage)
+			resp := responseFromChat(responseID, req, model, output, usage, firstFinishReason(chatResp))
 			if r.shouldStore(req) {
 				if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
 					return protocol.Response{}, err
@@ -608,6 +647,127 @@ type messageTextStreamState struct {
 	text         strings.Builder
 	started      bool
 	doneSent     bool
+}
+
+type reasoningTextStreamState struct {
+	sink        ResponseStreamSink
+	reasoning   ReasoningTextStreamSink
+	contentSink ContentPartStreamSink
+	itemSink    OutputItemAddedStreamSink
+	outputSink  OutputItemStreamSink
+	outputIndex int
+	itemID      string
+	text        strings.Builder
+	started     bool
+	doneSent    bool
+}
+
+func newReasoningTextStreamState(sink ResponseStreamSink, outputIndex int) *reasoningTextStreamState {
+	out := &reasoningTextStreamState{
+		sink:        sink,
+		outputIndex: outputIndex,
+		itemID:      "rs_" + strconv.FormatInt(time.Now().UnixNano(), 36),
+	}
+	out.reasoning, _ = sink.(ReasoningTextStreamSink)
+	out.contentSink, _ = sink.(ContentPartStreamSink)
+	out.itemSink, _ = sink.(OutputItemAddedStreamSink)
+	out.outputSink, _ = sink.(OutputItemStreamSink)
+	return out
+}
+
+func (s *reasoningTextStreamState) delta(delta string) error {
+	if s == nil || delta == "" {
+		return nil
+	}
+	if err := s.start(); err != nil {
+		return err
+	}
+	s.text.WriteString(delta)
+	if s.reasoning != nil {
+		return s.reasoning.ReasoningTextDelta(ResponseReasoningTextDelta{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Delta:        delta,
+		})
+	}
+	return nil
+}
+
+func (s *reasoningTextStreamState) start() error {
+	if s.started {
+		return nil
+	}
+	s.started = true
+	item := protocol.OutputItem{
+		ID:      s.itemID,
+		Type:    "reasoning",
+		Status:  "in_progress",
+		Content: []protocol.ContentPart{{Type: "reasoning_text"}},
+	}
+	if s.itemSink != nil {
+		if err := s.itemSink.OutputItemAdded(ResponseOutputItemAdded{OutputIndex: s.outputIndex, Item: item}); err != nil {
+			return err
+		}
+	}
+	if s.contentSink != nil {
+		return s.contentSink.ContentPartAdded(ResponseContentPartAdded{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Part:         protocol.ContentPart{Type: "reasoning_text"},
+		})
+	}
+	return nil
+}
+
+func (s *reasoningTextStreamState) done(reasoning string) error {
+	if s == nil || s.doneSent {
+		return nil
+	}
+	if !s.started {
+		if strings.TrimSpace(reasoning) == "" {
+			return nil
+		}
+		if err := s.delta(reasoning); err != nil {
+			return err
+		}
+	}
+	s.doneSent = true
+	text := s.text.String()
+	part := protocol.ContentPart{Type: "reasoning_text", Text: text}
+	if s.reasoning != nil {
+		if err := s.reasoning.ReasoningTextDone(ResponseReasoningTextDone{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Text:         text,
+		}); err != nil {
+			return err
+		}
+	}
+	if s.contentSink != nil {
+		if err := s.contentSink.ContentPartDone(ResponseContentPartDone{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Part:         part,
+		}); err != nil {
+			return err
+		}
+	}
+	if s.outputSink != nil {
+		item := protocol.OutputItem{
+			ID:      s.itemID,
+			Type:    "reasoning",
+			Status:  "completed",
+			Content: []protocol.ContentPart{part},
+		}
+		if err := s.outputSink.OutputItemDone(ResponseOutputItemDone{OutputIndex: s.outputIndex, Item: item}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newMessageTextStreamState(sink ResponseStreamSink, outputIndex int, itemID string) *messageTextStreamState {
@@ -1330,7 +1490,7 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 			outputItems := chatToOutputItems(chatResp)
 			r.recordRequestedFunctionCalls(ctx, outputItems)
 			output = append(output, outputItems...)
-			return responseFromOutputWithID(responseID, req, model, output, usage), nil
+			return responseFromChat(responseID, req, model, output, usage, firstFinishReason(chatResp)), nil
 		}
 		if len(calls) == 0 {
 			return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
@@ -2729,11 +2889,36 @@ func firstNonEmptyString(values ...string) string {
 }
 
 func addChatUsage(left, right ChatUsage) ChatUsage {
-	return ChatUsage{
+	out := ChatUsage{
 		PromptTokens:     left.PromptTokens + right.PromptTokens,
 		CompletionTokens: left.CompletionTokens + right.CompletionTokens,
 		TotalTokens:      left.TotalTokens + right.TotalTokens,
 	}
+	if left.PromptTokensDetails != nil || right.PromptTokensDetails != nil {
+		out.PromptTokensDetails = &ChatTokensDetails{
+			CachedTokens: cachedTokens(left) + cachedTokens(right),
+		}
+	}
+	if left.CompletionTokensDetails != nil || right.CompletionTokensDetails != nil {
+		out.CompletionTokensDetails = &ChatTokensDetails{
+			ReasoningTokens: reasoningTokens(left) + reasoningTokens(right),
+		}
+	}
+	return out
+}
+
+func cachedTokens(usage ChatUsage) int {
+	if usage.PromptTokensDetails == nil {
+		return 0
+	}
+	return usage.PromptTokensDetails.CachedTokens
+}
+
+func reasoningTokens(usage ChatUsage) int {
+	if usage.CompletionTokensDetails == nil {
+		return 0
+	}
+	return usage.CompletionTokensDetails.ReasoningTokens
 }
 
 func requestInputItems(req protocol.CreateResponseRequest) []protocol.InputItem {
@@ -2952,22 +3137,150 @@ func normalizeChatMessages(messages []ChatMessage) []ChatMessage {
 	return out
 }
 
-func responseFromOutputWithID(id string, req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
-	return protocol.Response{
+// responseFromChat builds the local Responses envelope so that it carries the
+// same top-level fields the native pass-through returns. status/incomplete_details
+// are derived from the upstream finish_reason, and the echoed request fields let
+// clients (and the official SDKs) inspect the effective parameters.
+func responseFromChat(id string, req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage, finishReason string) protocol.Response {
+	now := time.Now().Unix()
+	status, incomplete := responseStatusFromFinishReason(finishReason)
+
+	envelope := protocol.Response{
 		ID:                 id,
 		Object:             "response",
-		CreatedAt:          time.Now().Unix(),
-		Status:             "completed",
+		CreatedAt:          now,
+		Status:             status,
 		Model:              model,
 		Output:             output,
 		PreviousResponseID: req.PreviousResponseID,
-		Usage: protocol.Usage{
-			InputTokens:  usage.PromptTokens,
-			OutputTokens: usage.CompletionTokens,
-			TotalTokens:  usage.TotalTokens,
-		},
-		Metadata: req.Metadata,
+		Usage:              responseUsage(usage),
+		Metadata:           metadataOrEmpty(req.Metadata),
+		// Mirrors the native envelope defaults.
+		Background:        false,
+		Error:             nil,
+		IncompleteDetails: incomplete,
+		ParallelToolCalls: true,
+		Reasoning:         map[string]any{},
+		Temperature:       defaultFloat(req.Temperature, 1),
+		TopP:              defaultFloat(req.TopP, 1),
+		ToolChoice:        defaultAny(req.ToolChoice, "auto"),
+		Text:              map[string]any{"format": map[string]any{"type": "text"}},
+		Truncation:        "disabled",
+		ServiceTier:       "default",
+		Tools:             []any{},
+		TopLogprobs:       intPtr(0),
 	}
+	if status == "completed" {
+		envelope.CompletedAt = &now
+	}
+	if req.MaxOutputTokens > 0 {
+		maxTokens := req.MaxOutputTokens
+		envelope.MaxOutputTokens = &maxTokens
+	}
+	if len(req.Tools) > 0 {
+		tools := make([]any, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			tools = append(tools, tool)
+		}
+		envelope.Tools = tools
+	}
+	if text := outputTextFromItems(output); text != "" {
+		envelope.OutputText = &text
+	}
+	return envelope
+}
+
+// responseStatusFromFinishReason maps the upstream Chat Completions finish
+// reason onto the Responses status contract. A `length` stop is a truncation and
+// must be reported as `incomplete` rather than `completed`; otherwise clients
+// treat an empty/partial answer as a normal terminal state.
+func responseStatusFromFinishReason(finishReason string) (string, *protocol.IncompleteDetails) {
+	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case "length":
+		return "incomplete", &protocol.IncompleteDetails{Reason: "max_output_tokens"}
+	case "content_filter":
+		return "incomplete", &protocol.IncompleteDetails{Reason: "content_filter"}
+	default:
+		return "completed", nil
+	}
+}
+
+func responseUsage(usage ChatUsage) protocol.Usage {
+	out := protocol.Usage{
+		InputTokens:  usage.PromptTokens,
+		OutputTokens: usage.CompletionTokens,
+		TotalTokens:  usage.TotalTokens,
+	}
+	inputDetails := protocol.InputTokensDetails{}
+	if usage.PromptTokensDetails != nil {
+		inputDetails.CachedTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	out.InputTokensDetails = &inputDetails
+	outputDetails := protocol.OutputTokenDetails{}
+	if usage.CompletionTokensDetails != nil {
+		outputDetails.ReasoningTokens = usage.CompletionTokensDetails.ReasoningTokens
+	}
+	out.OutputTokensDetails = &outputDetails
+	return out
+}
+
+func defaultFloat(value *float64, fallback float64) *float64 {
+	if value != nil {
+		return value
+	}
+	out := fallback
+	return &out
+}
+
+func defaultAny(value any, fallback any) any {
+	if value == nil {
+		return fallback
+	}
+	return value
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+// firstReasoning returns the upstream reasoning text of the first choice.
+func firstReasoning(chat ChatCompletionResponse) string {
+	if len(chat.Choices) == 0 {
+		return ""
+	}
+	return chat.Choices[0].Message.ReasoningContent
+}
+
+func metadataOrEmpty(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return map[string]any{}
+	}
+	return metadata
+}
+
+// outputTextFromItems concatenates the assistant message text, matching the
+// `output_text` convenience field the native envelope exposes.
+func outputTextFromItems(items []protocol.OutputItem) string {
+	var builder strings.Builder
+	for _, item := range items {
+		if item.Type != "message" {
+			continue
+		}
+		for _, part := range item.Content {
+			if part.Type == "output_text" {
+				builder.WriteString(part.Text)
+			}
+		}
+	}
+	return builder.String()
+}
+
+// firstFinishReason returns the finish reason of the first choice, if any.
+func firstFinishReason(chat ChatCompletionResponse) string {
+	if len(chat.Choices) == 0 {
+		return ""
+	}
+	return chat.Choices[0].FinishReason
 }
 
 func chatToOutputItems(chat ChatCompletionResponse) []protocol.OutputItem {
@@ -2980,6 +3293,21 @@ func chatToOutputItemsWithMessageID(chat ChatCompletionResponse, messageID strin
 		return output
 	}
 	msg := chat.Choices[0].Message
+	// The native envelope surfaces the model's reasoning as a leading
+	// `reasoning` item with `reasoning_text` content; mirror it so SDKs and the
+	// /v1/responses stream see the same shape in local mode.
+	if reasoning := strings.TrimSpace(msg.ReasoningContent); reasoning != "" {
+		status := "completed"
+		if strings.EqualFold(strings.TrimSpace(chat.Choices[0].FinishReason), "length") {
+			status = "incomplete"
+		}
+		output = append(output, protocol.OutputItem{
+			ID:      "rs_" + strconv.FormatInt(time.Now().UnixNano(), 36),
+			Type:    "reasoning",
+			Status:  status,
+			Content: []protocol.ContentPart{{Type: "reasoning_text", Text: reasoning}},
+		})
+	}
 	for i, call := range msg.ToolCalls {
 		callID := call.ID
 		if callID == "" {

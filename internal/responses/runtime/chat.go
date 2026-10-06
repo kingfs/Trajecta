@@ -67,6 +67,7 @@ type ChatStreamEvent struct {
 	ChoiceIndex    int
 	Role           string
 	ContentDelta   string
+	ReasoningDelta string
 	ToolCallDeltas []ChatStreamToolCallDelta
 	FinishReason   *string
 }
@@ -91,10 +92,11 @@ type ChatCompletionRequest struct {
 }
 
 type ChatMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []ChatToolCall `json:"tool_calls,omitempty"`
+	Role             string         `json:"role"`
+	Content          any            `json:"content,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
 type ChatTool struct {
@@ -133,7 +135,17 @@ type ChatToolCallFunction struct {
 }
 
 type ChatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                `json:"prompt_tokens"`
+	CompletionTokens        int                `json:"completion_tokens"`
+	TotalTokens             int                `json:"total_tokens"`
+	PromptTokensDetails     *ChatTokensDetails `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *ChatTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// ChatTokensDetails carries the upstream token breakdown (cached prompt tokens,
+// reasoning tokens) so the Responses envelope can report it like the native
+// pass-through does.
+type ChatTokensDetails struct {
+	CachedTokens    int `json:"cached_tokens,omitempty"`
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }

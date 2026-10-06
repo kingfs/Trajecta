@@ -321,17 +321,23 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 		return
 	}
 	entry := responsesaudit.UpstreamExchange{
-		RequestAuditID: requestAuditID,
-		TraceID:        logInfo.Header.Meta.RequestID,
-		CassettePath:   logInfo.Path,
-		UpstreamID:     logInfo.Header.Meta.SelectedUpstreamID,
-		RouteTarget:    logInfo.Header.Meta.SelectedUpstreamBaseURL,
-		Model:          logInfo.Header.Meta.Model,
-		Endpoint:       logInfo.Header.Meta.Endpoint,
-		StatusCode:     statusCode,
-		StartedAt:      startedAt,
-		CompletedAt:    completedAt,
-		ErrorText:      logInfo.Header.Meta.Error,
+		RequestAuditID:   requestAuditID,
+		RequestID:        logInfo.Header.Meta.RequestID,
+		TraceID:          logInfo.Header.Meta.RequestID,
+		CassettePath:     logInfo.Path,
+		UpstreamID:       logInfo.Header.Meta.SelectedUpstreamID,
+		RouteTarget:      logInfo.Header.Meta.SelectedUpstreamBaseURL,
+		Model:            logInfo.Header.Meta.Model,
+		Endpoint:         logInfo.Header.Meta.Endpoint,
+		StatusCode:       statusCode,
+		StartedAt:        startedAt,
+		CompletedAt:      completedAt,
+		ErrorText:        logInfo.Header.Meta.Error,
+		ExchangeID:       logInfo.Header.Meta.ExchangeID,
+		ExchangeKind:     logInfo.Header.Meta.ExchangeKind,
+		ExchangeRole:     logInfo.Header.Meta.ExchangeRole,
+		ParentExchangeID: logInfo.Header.Meta.ParentExchangeID,
+		SequenceIndex:    logInfo.Header.Meta.SequenceIndex,
 	}
 	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
 		entry.ExchangeKind = metadata.ExchangeKind
@@ -363,7 +369,7 @@ func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Req
 	localHandler, err := h.localResponsesHandler()
 	if err != nil {
 		slog.Error("Local Responses server unavailable", "path", r.URL.Path, "err", err)
-		http.Error(w, "Local Responses server unavailable: "+err.Error(), http.StatusBadGateway)
+		writeProxyError(w, r, http.StatusBadGateway, "local_responses_unavailable", "Local Responses server unavailable: "+err.Error())
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

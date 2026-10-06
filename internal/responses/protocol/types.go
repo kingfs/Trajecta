@@ -208,6 +208,9 @@ func (t Tool) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// Response mirrors the native Responses envelope. The local runtime fills the
+// same top-level fields the upstream pass-through returns so that SDKs see one
+// contract regardless of the routing strategy in effect.
 type Response struct {
 	ID                 string         `json:"id"`
 	Object             string         `json:"object"`
@@ -217,7 +220,30 @@ type Response struct {
 	Output             []OutputItem   `json:"output"`
 	PreviousResponseID string         `json:"previous_response_id,omitempty"`
 	Usage              Usage          `json:"usage"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
+	Metadata           map[string]any `json:"metadata"`
+
+	Background        bool               `json:"background"`
+	CompletedAt       *int64             `json:"completed_at"`
+	Error             any                `json:"error"`
+	IncompleteDetails *IncompleteDetails `json:"incomplete_details,omitempty"`
+	OutputText        *string            `json:"output_text"`
+	MaxOutputTokens   *int               `json:"max_output_tokens,omitempty"`
+	ParallelToolCalls bool               `json:"parallel_tool_calls"`
+	Reasoning         map[string]any     `json:"reasoning"`
+	Temperature       *float64           `json:"temperature,omitempty"`
+	Text              map[string]any     `json:"text,omitempty"`
+	ToolChoice        any                `json:"tool_choice,omitempty"`
+	Tools             []any              `json:"tools"`
+	TopLogprobs       *int               `json:"top_logprobs,omitempty"`
+	TopP              *float64           `json:"top_p,omitempty"`
+	Truncation        string             `json:"truncation,omitempty"`
+	ServiceTier       string             `json:"service_tier,omitempty"`
+}
+
+// IncompleteDetails explains why a response stopped early, mirroring the native
+// `incomplete_details` object (e.g. {"reason":"max_output_tokens"}).
+type IncompleteDetails struct {
+	Reason string `json:"reason"`
 }
 
 type OutputItem struct {
@@ -394,9 +420,21 @@ type ContentPart struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens         int                 `json:"input_tokens"`
+	InputTokensDetails  *InputTokensDetails `json:"input_tokens_details,omitempty"`
+	OutputTokens        int                 `json:"output_tokens"`
+	OutputTokensDetails *OutputTokenDetails `json:"output_tokens_details,omitempty"`
+	TotalTokens         int                 `json:"total_tokens"`
+}
+
+// InputTokensDetails mirrors the native prompt-token breakdown.
+type InputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// OutputTokenDetails mirrors the native completion-token breakdown.
+type OutputTokenDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 type ErrorResponse struct {

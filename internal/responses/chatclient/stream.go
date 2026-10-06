@@ -49,7 +49,7 @@ func emitChatStreamEvents(chunk chatCompletionStreamChunk, handle runtime.ChatSt
 		return nil
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.Content == nil && choice.Delta.Role == "" && len(choice.Delta.ToolCalls) == 0 && choice.FinishReason == nil {
+		if choice.Delta.Content == nil && choice.Delta.ReasoningContent == nil && choice.Delta.Role == "" && len(choice.Delta.ToolCalls) == 0 && choice.FinishReason == nil {
 			continue
 		}
 		event := runtime.ChatStreamEvent{
@@ -60,6 +60,9 @@ func emitChatStreamEvents(chunk chatCompletionStreamChunk, handle runtime.ChatSt
 		}
 		if choice.Delta.Content != nil {
 			event.ContentDelta = *choice.Delta.Content
+		}
+		if choice.Delta.ReasoningContent != nil {
+			event.ReasoningDelta = *choice.Delta.ReasoningContent
 		}
 		if err := handle(event); err != nil {
 			return fmt.Errorf("handle chat completion stream event: %w", err)
@@ -99,9 +102,10 @@ type chatStreamChunkChoice struct {
 }
 
 type chatStreamDelta struct {
-	Role      string               `json:"role"`
-	Content   *string              `json:"content"`
-	ToolCalls []chatStreamToolCall `json:"tool_calls"`
+	Role             string               `json:"role"`
+	Content          *string              `json:"content"`
+	ReasoningContent *string              `json:"reasoning_content"`
+	ToolCalls        []chatStreamToolCall `json:"tool_calls"`
 }
 
 type chatStreamToolCall struct {

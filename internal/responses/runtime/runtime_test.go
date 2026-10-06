@@ -384,7 +384,7 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	if resp.PreviousResponseID != "" {
 		t.Fatalf("previous_response_id = %q, want empty", resp.PreviousResponseID)
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{11, 7, 18} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -674,7 +674,7 @@ func TestRuntimeCreateStreamEmitsDeltasAndStoresFinalResponse(t *testing.T) {
 	if len(sink.completed) != 1 || sink.completed[0].ID != resp.ID {
 		t.Fatalf("completed events = %#v, want final response id %q", sink.completed, resp.ID)
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{3, 2, 5} {
 		t.Fatalf("usage = %#v, want chat usage", resp.Usage)
 	}
 	if len(resp.Output) != 1 || resp.Output[0].Content[0].Text != "Hello world" {
@@ -1004,7 +1004,7 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{17, 5, 22} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -1349,7 +1349,7 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 24, OutputTokens: 8, TotalTokens: 32}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{24, 8, 32} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
 	if len(resp.Output) != 3 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "web_search_call" || resp.Output[1].CallID != "call_search" || resp.Output[2].Type != "message" {
@@ -1830,7 +1830,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 22, OutputTokens: 7, TotalTokens: 29}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{22, 7, 29} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -3430,7 +3430,7 @@ func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
 	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[2].Content != `{"ok":true,"value":"42"}` {
 		t.Fatalf("server-side tool output message mismatch: %#v", secondMessages[2])
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 21, OutputTokens: 10, TotalTokens: 31}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{21, 10, 31} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -3734,7 +3734,7 @@ func TestRuntimeCreateExecutesHostedMCPToolLoop(t *testing.T) {
 	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_mcp_read" || !strings.Contains(toolContent, "read_file") || !strings.Contains(toolContent, "go.mod") {
 		t.Fatalf("second tool message mismatch: %#v", secondMessages[2])
 	}
-	if resp.Usage != (protocol.Usage{InputTokens: 28, OutputTokens: 10, TotalTokens: 38}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{28, 10, 38} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -4143,7 +4143,7 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 		t.Fatalf("second tool message content missing result: %q", toolContent)
 	}
 
-	if resp.Usage != (protocol.Usage{InputTokens: 30, OutputTokens: 10, TotalTokens: 40}) {
+	if got := tokenCounts(resp.Usage); got != [3]int{30, 10, 40} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
 	if len(resp.Output) != 2 {
@@ -4488,4 +4488,10 @@ func seedResponseForAutoCompactTest(t *testing.T, store Store, id string, model 
 	if err := store.Put(context.Background(), target, protocol.CreateResponseRequest{Input: "old question"}, inputs, target.Output); err != nil {
 		t.Fatalf("seed target response: %v", err)
 	}
+}
+
+// tokenCounts returns the three numeric usage fields so tests ignore the
+// detail breakdown objects the native envelope also carries.
+func tokenCounts(usage protocol.Usage) [3]int {
+	return [3]int{usage.InputTokens, usage.OutputTokens, usage.TotalTokens}
 }

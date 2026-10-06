@@ -483,6 +483,16 @@ func (s *auditedStreamSink) FunctionCallArgumentsDone(done runtime.ResponseFunct
 	return s.writer.FunctionCallArgumentsDone(done)
 }
 
+func (s *auditedStreamSink) ReasoningTextDelta(delta runtime.ResponseReasoningTextDelta) error {
+	s.start()
+	return s.writer.ReasoningTextDelta(delta)
+}
+
+func (s *auditedStreamSink) ReasoningTextDone(done runtime.ResponseReasoningTextDone) error {
+	s.start()
+	return s.writer.ReasoningTextDone(done)
+}
+
 func (s *auditedStreamSink) OutputItemAdded(added runtime.ResponseOutputItemAdded) error {
 	s.start()
 	return s.writer.OutputItemAdded(added)
@@ -531,7 +541,11 @@ func (s *streamWriter) writeResponse(resp protocol.Response) error {
 			return err
 		}
 	}
-	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
+	eventType := "response.completed"
+	if resp.Status == "incomplete" {
+		eventType = "response.incomplete"
+	}
+	return s.write(eventType, protocol.StreamEvent{Type: eventType, Response: &resp})
 }
 
 func (s *streamWriter) ResponseCreated(resp protocol.Response) error {
@@ -559,6 +573,30 @@ func (s *streamWriter) OutputTextDone(done runtime.ResponseTextDone) error {
 	contentIndex := done.ContentIndex
 	return s.write("response.output_text.done", protocol.StreamEvent{
 		Type:         "response.output_text.done",
+		OutputIndex:  &outputIndex,
+		ItemID:       done.ItemID,
+		ContentIndex: &contentIndex,
+		Text:         done.Text,
+	})
+}
+
+func (s *streamWriter) ReasoningTextDelta(delta runtime.ResponseReasoningTextDelta) error {
+	outputIndex := delta.OutputIndex
+	contentIndex := delta.ContentIndex
+	return s.write("response.reasoning_text.delta", protocol.StreamEvent{
+		Type:         "response.reasoning_text.delta",
+		OutputIndex:  &outputIndex,
+		ItemID:       delta.ItemID,
+		ContentIndex: &contentIndex,
+		Delta:        delta.Delta,
+	})
+}
+
+func (s *streamWriter) ReasoningTextDone(done runtime.ResponseReasoningTextDone) error {
+	outputIndex := done.OutputIndex
+	contentIndex := done.ContentIndex
+	return s.write("response.reasoning_text.done", protocol.StreamEvent{
+		Type:         "response.reasoning_text.done",
 		OutputIndex:  &outputIndex,
 		ItemID:       done.ItemID,
 		ContentIndex: &contentIndex,
@@ -630,7 +668,13 @@ func (s *streamWriter) OutputItemDone(done runtime.ResponseOutputItemDone) error
 }
 
 func (s *streamWriter) ResponseCompleted(resp protocol.Response) error {
-	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
+	// A truncated response must terminate with `response.incomplete` (matching
+	// the native stream) instead of claiming completion.
+	eventType := "response.completed"
+	if resp.Status == "incomplete" {
+		eventType = "response.incomplete"
+	}
+	return s.write(eventType, protocol.StreamEvent{Type: eventType, Response: &resp})
 }
 
 func (s *streamWriter) ResponseFailed(err error) error {
@@ -685,6 +729,33 @@ func (s *streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem
 				ItemID:       item.ID,
 				ContentIndex: &idx,
 				Part:         &part,
+			}); err != nil {
+				return err
+			}
+		}
+	} else if item.Type == "reasoning" {
+		// Native streams emit response.reasoning_text.delta/.done for the
+		// reasoning item; keep the local stream identical.
+		for contentIndex, part := range item.Content {
+			if part.Type != "reasoning_text" {
+				continue
+			}
+			idx := contentIndex
+			if err := s.write("response.reasoning_text.delta", protocol.StreamEvent{
+				Type:         "response.reasoning_text.delta",
+				OutputIndex:  &index,
+				ItemID:       item.ID,
+				ContentIndex: &idx,
+				Delta:        part.Text,
+			}); err != nil {
+				return err
+			}
+			if err := s.write("response.reasoning_text.done", protocol.StreamEvent{
+				Type:         "response.reasoning_text.done",
+				OutputIndex:  &index,
+				ItemID:       item.ID,
+				ContentIndex: &idx,
+				Text:         part.Text,
 			}); err != nil {
 				return err
 			}
