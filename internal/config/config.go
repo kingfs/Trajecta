@@ -342,6 +342,9 @@ func Load(path string) (*Config, error) {
 	if err := validateLimits(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateRouterEnums(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -395,6 +398,68 @@ func validateLimits(cfg *Config) error {
 	}
 	if scope == "header" && strings.TrimSpace(cfg.Limits.ChannelKeyHeader) == "" {
 		return fmt.Errorf("limits.scope %q requires limits.channel_key_header", scope)
+	}
+	return nil
+}
+
+// validSelectionPolicies lists the values internal/router honours for
+// router.selection.policy. The router normalizes an unknown value to p2c instead of
+// failing, so a misspelling silently picks a different selection algorithm; Load rejects it
+// the way it rejects an unknown limits.scope.
+var validSelectionPolicies = map[string]struct{}{
+	"p2c":             {},
+	"first_available": {},
+}
+
+// validMissingModelPolicies lists the values internal/router honours for
+// router.fallback.on_missing_model. `reject` is the strict value and every other string
+// takes the permissive branch, so a misspelled `reject` silently allows a model no upstream
+// declares instead of failing the request.
+var validMissingModelPolicies = map[string]struct{}{
+	"reject":   {},
+	"fallback": {},
+}
+
+// validModelDiscoveryModes lists the values internal/router honours for a target's
+// model_discovery. An unknown value is normalized to list_models, so a typo can switch the
+// upstream model discovery back on for an operator who meant to turn it off.
+var validModelDiscoveryModes = map[string]struct{}{
+	"list_models": {},
+	"static_only": {},
+	"disabled":    {},
+}
+
+// validateRouterEnums rejects routing values that no consumer recognises.
+//
+// The router reads these through normalizing helpers (normalizePolicy, normalizeFallback,
+// normalizeDiscoveryMode) that answer an unrecognised value with a default rather than an
+// error, because a request-time normalization has no way to report a configuration mistake.
+// At load time the mistake is still visible, and all three defaults differ from what the
+// operator wrote, so ignoring it would change behaviour without a word. An empty value stays
+// valid: it means "use the default".
+func validateRouterEnums(cfg *Config) error {
+	if value := strings.TrimSpace(cfg.Router.Selection.Policy); value != "" {
+		if _, ok := validSelectionPolicies[strings.ToLower(value)]; !ok {
+			return fmt.Errorf("router.selection.policy %q is not supported; use one of p2c, first_available", value)
+		}
+	}
+	if value := strings.TrimSpace(cfg.Router.Fallback.OnMissingModel); value != "" {
+		if _, ok := validMissingModelPolicies[strings.ToLower(value)]; !ok {
+			return fmt.Errorf("router.fallback.on_missing_model %q is not supported; use one of reject, fallback", value)
+		}
+	}
+	for i, target := range cfg.Upstreams {
+		value := strings.TrimSpace(target.ModelDiscovery)
+		if value == "" {
+			continue
+		}
+		if _, ok := validModelDiscoveryModes[strings.ToLower(value)]; !ok {
+			where := fmt.Sprintf("upstreams[%d]", i)
+			if id := strings.TrimSpace(target.ID); id != "" {
+				where = fmt.Sprintf("upstreams[%d] (%s)", i, id)
+			}
+			return fmt.Errorf("%s model_discovery %q is not supported; use one of list_models, static_only, disabled", where, value)
+		}
 	}
 	return nil
 }

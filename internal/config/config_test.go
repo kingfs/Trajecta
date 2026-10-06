@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRedactDSN(t *testing.T) {
@@ -1643,4 +1645,123 @@ func functionBodyForTest(source, name string) (string, bool) {
 		return rest[:next], true
 	}
 	return rest, true
+}
+
+// TestLoadRejectsRoutingValuesNoConsumerRecognises pins the routing values that used to be
+// accepted and then quietly replaced.
+//
+// The router reads these three fields through normalizing helpers that answer an
+// unrecognised value with a default, because a normalization running on the request path has
+// no way to report a configuration mistake. All three defaults differ from what the operator
+// wrote: `policy: first-availble` selects p2c, `on_missing_model: rejct` is not the strict
+// `reject` so it takes the permissive branch, and `model_discovery: static` turns upstream
+// discovery back on. Loading used to accept all three without a word, so the only way to
+// notice was to read the effective routing state. They now fail at load with the accepted
+// values in the message, the way an unknown limits.scope already did.
+func TestLoadRejectsRoutingValuesNoConsumerRecognises(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "selection policy",
+			body: "router:\n  selection:\n    policy: first-availble\n",
+			want: `router.selection.policy "first-availble" is not supported; use one of p2c, first_available`,
+		},
+		{
+			name: "missing model policy",
+			body: "router:\n  fallback:\n    on_missing_model: rejct\n",
+			want: `router.fallback.on_missing_model "rejct" is not supported; use one of reject, fallback`,
+		},
+		{
+			name: "target model discovery",
+			body: "upstreams:\n" +
+				"  - id: primary\n" +
+				"    model_discovery: static\n" +
+				"    upstream:\n" +
+				"      base_url: http://127.0.0.1:1/v1\n" +
+				"      api_key: k\n" +
+				"      provider_preset: openai\n",
+			want: `upstreams[0] (primary) model_discovery "static" is not supported; use one of list_models, static_only, disabled`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tc.body))
+			if err == nil {
+				t.Fatal("Load() accepted a value no consumer recognises")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load() error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	// The accepted values and an omitted value still load, and a target without an id is
+	// still located by its index.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "accepted values",
+			body: "router:\n  selection:\n    policy: first_available\n  fallback:\n    on_missing_model: fallback\n" +
+				"upstreams:\n  - id: primary\n    model_discovery: disabled\n",
+		},
+		{
+			name: "values omitted",
+			body: "router:\n  selection: {}\n  fallback: {}\nupstreams:\n  - id: primary\n",
+		},
+		{
+			name: "mixed case accepted",
+			body: "router:\n  selection:\n    policy: First_Available\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(writeTempConfig(t, tc.body)); err != nil {
+				t.Fatalf("Load() error = %v, want the configuration to load", err)
+			}
+		})
+	}
+
+	t.Run("target without id", func(t *testing.T) {
+		body := "upstreams:\n  - model_discovery: static\n"
+		_, err := Load(writeTempConfig(t, body))
+		if err == nil {
+			t.Fatal("Load() accepted an unrecognised model_discovery")
+		}
+		if !strings.Contains(err.Error(), `upstreams[0] model_discovery "static"`) {
+			t.Fatalf("Load() error = %v, want the target located by index", err)
+		}
+	})
+}
+
+// TestShippedConfigsUseKnownRoutingValues runs the routing-value check over every tracked
+// config file. The examples are loaded with environment references expanded only when their
+// variables exist, so the check decodes each file and applies the validation directly rather
+// than going through Load.
+func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
+	t.Parallel()
+
+	examples, err := filepath.Glob(filepath.Join("..", "..", "config", "examples", "*.yaml"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	paths := append([]string{filepath.Join("..", "..", "config", "config.yaml")}, examples...)
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		var cfg Config
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("Unmarshal(%s) error = %v", path, err)
+		}
+		if err := validateRouterEnums(&cfg); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+		if err := validateLimits(&cfg); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
 }

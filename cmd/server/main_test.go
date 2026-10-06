@@ -363,7 +363,7 @@ provider_probe:
 upstreams:
   - id: openai
     enabled: true
-    model_discovery: static
+    model_discovery: static_only
     static_models: [gpt-5, gpt-5-mini]
     upstream:
       base_url: https://user:upstream-url-secret@api.example.com/v1?token=url-token-secret
