@@ -281,11 +281,6 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	}
 	defer info.File.Close()
 
-	payload, err := os.ReadFile(info.Path)
-	if err != nil {
-		return err
-	}
-
 	events := recordfile.BuildEvents(info.Header)
 	if len(info.Events) > 0 {
 		events = append(events, info.Events...)
@@ -295,26 +290,21 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		return err
 	}
 
-	if err := info.File.Truncate(0); err != nil {
-		return err
-	}
-	if _, err := info.File.Seek(0, 0); err != nil {
-		return err
-	}
-	if _, err := info.File.Write(prelude); err != nil {
-		return err
-	}
-	if _, err := info.File.Write(payload); err != nil {
+	// The cassette is written record-first and the prelude can only be prepended
+	// once the exchange is complete, so finalising it means rewriting the file.
+	// Stream the record through a temporary file in the same directory and rename
+	// it over the original: a recording is as large as the response body it holds,
+	// and neither of those should have to fit in memory or be briefly visible as a
+	// truncated file.
+	requestHead, err := prependPrelude(info, prelude)
+	if err != nil {
 		return err
 	}
 
 	if r.store != nil {
-		fullContent := append(append([]byte{}, prelude...), payload...)
-		parsed, err := recordfile.ParsePrelude(fullContent)
-		if err != nil {
-			return err
-		}
-		grouping, err := store.ExtractGroupingInfo(fullContent, parsed)
+		// The grouping identifiers come from the request header block alone, which
+		// prependPrelude read back while the record was still available.
+		grouping, err := store.ExtractGroupingInfoFromRequestHeaders(requestHead)
 		if err != nil {
 			return err
 		}
@@ -330,4 +320,62 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	}
 
 	return nil
+}
+
+// prependPrelude rewrites the cassette at info.Path as prelude followed by the
+// record it already holds, and returns the request header block it read back on
+// the way. The record is copied with io.Copy through a temporary file in the same
+// directory and renamed into place, so the memory cost is the copy buffer rather
+// than the recording, and a reader sees either the previous complete file or the
+// new one instead of the truncated window a rewrite in place would expose.
+func prependPrelude(info *LogInfo, prelude []byte) ([]byte, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(info.Path), ".cassette-rewrite-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmp.Name()
+	discard := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	// os.CreateTemp creates the file 0600; a cassette keeps the permissions it was
+	// created with so a reader group does not lose access after finalisation.
+	if stat, statErr := os.Stat(info.Path); statErr == nil {
+		if chmodErr := tmp.Chmod(stat.Mode().Perm()); chmodErr != nil {
+			discard()
+			return nil, chmodErr
+		}
+	}
+
+	if _, err := tmp.Write(prelude); err != nil {
+		discard()
+		return nil, err
+	}
+	if _, err := info.File.Seek(0, io.SeekStart); err != nil {
+		discard()
+		return nil, err
+	}
+	if _, err := io.Copy(tmp, info.File); err != nil {
+		discard()
+		return nil, err
+	}
+
+	var requestHead []byte
+	if headLen := info.Header.Layout.ReqHeaderLen; headLen > 0 {
+		requestHead = make([]byte, headLen)
+		if _, err := tmp.ReadAt(requestHead, int64(len(prelude))); err != nil {
+			discard()
+			return nil, err
+		}
+	}
+
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	if err := os.Rename(tmpPath, info.Path); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, err
+	}
+	return requestHead, nil
 }

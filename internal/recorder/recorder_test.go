@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -353,4 +354,115 @@ func TestTracePathSegmentBoundsAnOverLongModelName(t *testing.T) {
 	if got := tracePathSegment(strings.Repeat("\x00", 8), 200); got != "unknown-model" {
 		t.Fatalf("tracePathSegment(control only) = %q, want unknown-model", got)
 	}
+}
+
+// TestUpdateLogFileStreamsTheRecordInsteadOfBufferingIt pins both halves of the
+// finalisation contract.
+//
+// A cassette is written record-first, so finalising it means prepending the prelude
+// and rewriting the file. That was done by reading the whole recording into memory
+// - and copying it again when a store was attached - which made the transient
+// allocation of one recorded exchange grow with the size of its response body: a
+// 16 MiB recording cost 32 MiB on its own and 80 MiB with a store. A recording is
+// as large as the upstream response, so that is a per-request memory spike the proxy
+// cannot bound. The record is now streamed through a temporary file, and this test
+// fails if finalisation starts allocating with the recording again.
+//
+// It also asserts the bytes survive: the finalised file must be the prelude
+// followed by exactly the record that was written, byte for byte.
+func TestUpdateLogFileStreamsTheRecordInsteadOfBufferingIt(t *testing.T) {
+	const recordSize = 8 << 20
+
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	rec := New(dir, false, st)
+
+	requestBody := []byte(`{"model":"gpt-5.4","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Session_id", "sess-stream")
+	req.Header.Set("X-Codex-Window-Id", "sess-stream:1")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+
+	// A response body large enough that buffering it shows up clearly against the
+	// bound below.
+	responseBody := bytes.Repeat([]byte("r"), recordSize)
+	responseHead := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")
+	response := append([]byte("\n"), responseHead...)
+	response = append(response, responseBody...)
+	if _, err := info.File.Write(response); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	info.Header.Meta.StatusCode = 200
+	info.Header.Layout.ResHeaderLen = int64(len(responseHead))
+	info.Header.Layout.ResBodyLen = int64(len(responseBody))
+
+	// The cassette as it stands before finalisation: request record first, no
+	// prelude. Finalisation may only prepend to this.
+	recordBefore, err := os.ReadFile(info.Path)
+	if err != nil {
+		t.Fatalf("read cassette before finalisation: %v", err)
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	if err := rec.UpdateLogFile(info); err != nil {
+		t.Fatalf("UpdateLogFile() error = %v", err)
+	}
+	runtime.ReadMemStats(&after)
+
+	// The old implementation allocated between four and five times the record size
+	// here. The bound is far enough above a copy buffer to be stable and far enough
+	// below the record to catch a return to buffering.
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > recordSize/4 {
+		t.Fatalf("UpdateLogFile allocated %.1f MiB for a %d MiB record, want it to stream the record rather than buffer it",
+			float64(allocated)/(1<<20), int64(recordSize)>>20)
+	}
+
+	finalised, err := os.ReadFile(info.Path)
+	if err != nil {
+		t.Fatalf("read finalised cassette: %v", err)
+	}
+	parsed, err := recordfile.ParsePrelude(finalised)
+	if err != nil {
+		t.Fatalf("ParsePrelude() error = %v", err)
+	}
+	if parsed.PayloadOffset <= 0 || parsed.PayloadOffset >= int64(len(finalised)) {
+		t.Fatalf("PayloadOffset = %d, want a prelude before the record", parsed.PayloadOffset)
+	}
+	gotRecord := finalised[parsed.PayloadOffset:]
+	if !bytes.Equal(gotRecord, recordBefore) {
+		t.Fatalf("finalisation changed the record: got %d bytes, want the %d that were there before (first difference at %d)",
+			len(gotRecord), len(recordBefore), firstDifference(gotRecord, recordBefore))
+	}
+
+	entry, err := st.GetByRequestID(info.Header.Meta.RequestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if entry.SessionID != "sess-stream" {
+		t.Fatalf("SessionID = %q, want sess-stream; grouping must survive the streaming rewrite", entry.SessionID)
+	}
+}
+
+func firstDifference(a, b []byte) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return min(len(a), len(b))
 }

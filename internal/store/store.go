@@ -8496,6 +8496,17 @@ func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (Grou
 	return extractGroupingInfoFromRequest(reqFull)
 }
 
+// ExtractGroupingInfoFromRequestHeaders derives the grouping identifiers from the
+// raw request header block alone - the bytes the request line and headers occupy,
+// ending at the blank line before the body. The recorder uses it while finalising a
+// cassette so it never has to hold a whole recording in memory to compute them.
+func ExtractGroupingInfoFromRequestHeaders(headers []byte) (GroupingInfo, error) {
+	if len(headers) == 0 {
+		return GroupingInfo{}, nil
+	}
+	return extractGroupingInfoFromRequest(headers)
+}
+
 // sanitizeDBText drops bytes that Postgres rejects in a text column. A cassette
 // is a byte-for-byte copy of what the upstream and the client exchanged, so a
 // recorded header value can contain a NUL byte (0x00) or invalid UTF-8; storing
