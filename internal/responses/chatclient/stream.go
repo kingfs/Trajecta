@@ -9,13 +9,16 @@ import (
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/responses/runtime"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // AggregateChatCompletionStreamWithCallback folds OpenAI-compatible Chat Completions SSE chunks into a final response,
 // calling handle as content deltas are decoded.
 func AggregateChatCompletionStreamWithCallback(r io.Reader, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// The reader is a live stream, so the bound is the shared constant rather than the body length; a
+	// smaller cap turns an upstream frame the recorder would have accepted into a failed translation.
+	scanner.Buffer(make([]byte, 0, 64*1024), recordfile.MaxStreamLineBytes)
 
 	acc := chatStreamAccumulator{
 		choices: make(map[int]*chatStreamChoice),

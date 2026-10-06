@@ -1040,8 +1040,10 @@ func parseAnthropicStreamOutput(data []byte) (string, string, []ContentBlock, []
 	)
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*1024)
+	// The body is in memory, so the bound follows it; the floor is what the recorder accepts, so a
+	// recorded frame is never dropped here (see recordfile.MaxStreamLineBytes).
+	scanner.Buffer(buf, max(len(data)+1, recordfile.MaxStreamLineBytes))
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1158,9 +1160,10 @@ func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []T
 	// Stream Logic
 	var contentBuilder, reasoningBuilder strings.Builder
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	// 增大 Buffer 防止单行过长
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 1024*1024)
+	// 单行可能很长（工具调用参数增量、base64 内容增量），上限跟随 body 长度，且不低于录制端的界限
+	// （见 recordfile.MaxStreamLineBytes）；上限小于录制端会导致已录制的帧被静默丢弃。
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, max(len(data)+1, recordfile.MaxStreamLineBytes))
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -1254,8 +1257,10 @@ func parseResponsesStreamOutput(data []byte) (string, string, []ContentBlock, []
 	)
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*1024)
+	// The body is in memory, so the bound follows it; the floor is what the recorder accepts, so a
+	// recorded frame is never dropped here (see recordfile.MaxStreamLineBytes).
+	scanner.Buffer(buf, max(len(data)+1, recordfile.MaxStreamLineBytes))
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

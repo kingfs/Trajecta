@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"sort"
 	"strings"
 )
@@ -419,8 +420,10 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 
 func newSSEScanner(body []byte) *bufio.Scanner {
 	scanner := bufio.NewScanner(bytes.NewReader(body))
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 1024*1024)
+	// The whole body is already in memory, so grow with it and never cap below what the recorder
+	// accepted: a shorter cap drops a frame silently (see recordfile.MaxStreamLineBytes).
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, max(len(body)+1, recordfile.MaxStreamLineBytes))
 	return scanner
 }
 

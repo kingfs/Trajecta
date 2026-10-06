@@ -260,6 +260,15 @@ var ErrUnusablePrelude = errors.New("cassette prelude is unusable")
 // a corrupt or truncated file cannot make a reader grow without limit.
 const MaxPreludeBytes = 8 << 20
 
+// MaxStreamLineBytes bounds one SSE line (one `data:` frame) while recording and while reading a
+// recorded stream back. The recorder has always accepted lines this large, so every reader has to
+// accept them too: a reader with a smaller cap silently drops a frame the recorder stored in full
+// (bufio.Scanner stops with ErrTooLong and the parsers do not check it), which shows up as empty
+// content and missing usage for a trace the proxy itself handled. Providers do emit frames above a
+// megabyte - a large tool-call argument delta or a base64 content delta - and widening the reader
+// bound is the only fix that keeps what was already written readable.
+const MaxStreamLineBytes = 4 << 20
+
 // preludeReadChunk is the read size ReadPreludeFile grows its buffer by.
 const preludeReadChunk = 32 << 10
 

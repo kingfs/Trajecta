@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 const openAIParserVersion = "0.1.0"
@@ -1230,7 +1231,7 @@ func cachedTokens(input ParseInput) int {
 func scanSSEData(body []byte, handle func(data string)) bool {
 	sawDone := false
 	scanner := bufio.NewScanner(bytes.NewReader(body))
-	scanner.Buffer(make([]byte, 0, 64*1024), max(len(body)+1, 1024*1024))
+	scanner.Buffer(make([]byte, 0, 64*1024), max(len(body)+1, recordfile.MaxStreamLineBytes))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {

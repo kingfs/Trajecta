@@ -81,7 +81,6 @@ func (p *ResponsePipeline) Events() []recordfile.RecordEvent {
 }
 
 func (p *ResponsePipeline) feedStream(chunk []byte) {
-	const maxStreamLineBytes = 4 * 1024 * 1024
 
 	if p.lineDiscarded {
 		if idx := bytes.IndexByte(chunk, '\n'); idx >= 0 {
@@ -93,7 +92,7 @@ func (p *ResponsePipeline) feedStream(chunk []byte) {
 	}
 
 	p.lineBuf = append(p.lineBuf, chunk...)
-	if len(p.lineBuf) > maxStreamLineBytes {
+	if len(p.lineBuf) > recordfile.MaxStreamLineBytes {
 		if idx := bytes.IndexByte(p.lineBuf, '\n'); idx == -1 {
 			p.lineBuf = p.lineBuf[:0]
 			p.lineDiscarded = true

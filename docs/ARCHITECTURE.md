@@ -103,6 +103,8 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 6. 一个分隔换行；
 7. 原始 HTTP 响应字节。
 
+单行 SSE 帧的上限由 `recordfile.MaxStreamLineBytes`（4 MiB）统一：录制端一直按这个界限接收，读取端（`pkg/llm` 的 stream 解析、`pkg/observe`、Monitor 的三个 stream parser、runtime 的 `chatclient`）都不得低于它，凡是手里已有完整 body 的读取端按 body 长度放宽。录制端接受的帧必须能被读取端完整读出——上限偏小的一侧会静默丢帧（`bufio.Scanner` 返回 `ErrTooLong`，而这些解析不检查 `scanner.Err()`），表现为 cassette 完整、但 Monitor 与派生元数据里的内容和 usage 缺失。
+
 读取端继续支持 legacy `LLM_PROXY_V2`（固定 2KB JSON header block），并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`。`LLM_PROXY_V3` 这个 meta header `version` 值是稳定的格式标识，刻意不随项目改名。cassette 保持人类可读；修改格式时先改 `pkg/recordfile`，再同步 recorder、monitor、replay。
 
 ## 存储边界
