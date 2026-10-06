@@ -62,6 +62,7 @@ continuation 与 input items：
 
 - `previous_response_id` 从 runtime store 加载历史 items 后继续对话，多轮只发增量 `input` 即可；store 复用同一实例时该 continuation 可跨 handler 重启。
 - 未配置 server-side executor 的普通 `function` tool 默认 client-owned：function schema 转给内部 Chat Completions，模型返回的 Chat `tool_calls[]` 保存为 Responses `function_call` output item，客户端后续通过 `previous_response_id` + `input[]` 里的 `function_call_output` 继续。
+- server-owned 执行（`responses_server.function_executors` 注册了同名 executor，或 provider 就绪的 hosted `web_search` / `mcp`）把模型请求的 `function_call` item 与其执行结果 `function_call_output` item **成对**写入 response output，`function_call` 在前；流式路径按同样顺序发出该 pair 的 `response.output_item.added` / `response.output_item.done`，因此流式 item 下标与最终 response 的 output 下标一致，每个被执行的 tool call 占两个 item。这与 `ledgerToChatMessages` 的重放规则一致（`function_call` → 带 `tool_calls` 的 assistant message，`function_call_output` → 与其配对的 `tool` message），所以含 server-side 工具调用的会话可以继续用 `previous_response_id` 续跑；只记录 `function_call_output` 会重放出没有前置 assistant 请求的孤立 `tool` message。
 - `store` 语义：`force_store=true` 时始终落库；否则 `store:false` 的请求不落库，未传 `store` 视为落库。
 
 流式：

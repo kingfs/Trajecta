@@ -2369,14 +2369,19 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	if got := [3]int{responsePayload.Usage.InputTokens, responsePayload.Usage.OutputTokens, responsePayload.Usage.TotalTokens}; got != [3]int{13, 6, 19} {
 		t.Fatalf("response usage = %#v, want accumulated 13/6/19", responsePayload.Usage)
 	}
-	if len(responsePayload.Output) != 2 {
-		t.Fatalf("response output len = %d, want 2: %#v", len(responsePayload.Output), responsePayload.Output)
+	// A server-executed call records the model's function_call item ahead of the
+	// output the executor produced.
+	if len(responsePayload.Output) != 3 {
+		t.Fatalf("response output len = %d, want 3 (function_call + web_search_call + message): %#v", len(responsePayload.Output), responsePayload.Output)
 	}
-	if got := responsePayload.Output[0]; got.Type != "web_search_call" || got.Status != "completed" {
-		t.Fatalf("first response output = %#v, want completed web_search_call", got)
+	if got := responsePayload.Output[0]; got.Type != "function_call" || got.Status != "completed" || got.CallID != "call_search" || got.Name != "web_search" {
+		t.Fatalf("first response output = %#v, want completed function_call call_search", got)
 	}
-	if got := responsePayload.Output[1]; got.Type != "message" || got.Content[0].Text != "Mock search says replay cassettes keep tests deterministic." {
-		t.Fatalf("second response output = %#v, want final assistant message", got)
+	if got := responsePayload.Output[1]; got.Type != "web_search_call" || got.Status != "completed" || got.CallID != "call_search" {
+		t.Fatalf("second response output = %#v, want completed web_search_call", got)
+	}
+	if got := responsePayload.Output[2]; got.Type != "message" || got.Content[0].Text != "Mock search says replay cassettes keep tests deterministic." {
+		t.Fatalf("third response output = %#v, want final assistant message", got)
 	}
 
 	entries, err := waitForRecentEntries(st, 2, time.Second)
@@ -2526,8 +2531,11 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 	if !strings.Contains(content, `"source":"configured"`) {
 		t.Fatalf("tool message content = %q, want configured output", content)
 	}
-	if len(responsePayload.Output) != 2 || responsePayload.Output[0].Type != "function_call_output" {
-		t.Fatalf("response output = %#v, want function_call_output + final message", responsePayload.Output)
+	if len(responsePayload.Output) != 3 ||
+		responsePayload.Output[0].Type != "function_call" || responsePayload.Output[0].CallID != "call_lookup" || responsePayload.Output[0].Arguments != `{"q":"codex"}` ||
+		responsePayload.Output[1].Type != "function_call_output" || responsePayload.Output[1].CallID != "call_lookup" ||
+		responsePayload.Output[2].Type != "message" {
+		t.Fatalf("response output = %#v, want function_call + function_call_output + final message", responsePayload.Output)
 	}
 }
 
@@ -2646,15 +2654,17 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 			t.Fatalf("tool message content = %q, want %s", content, want)
 		}
 	}
-	if len(responsePayload.Output) != 2 || responsePayload.Output[0].Type != "function_call_output" {
-		t.Fatalf("response output = %#v, want function_call_output + final message", responsePayload.Output)
+	if len(responsePayload.Output) != 3 ||
+		responsePayload.Output[0].Type != "function_call" || responsePayload.Output[0].CallID != "call_external_lookup" || responsePayload.Output[0].Name != "lookup_external" ||
+		responsePayload.Output[1].Type != "function_call_output" || responsePayload.Output[1].CallID != "call_external_lookup" {
+		t.Fatalf("response output = %#v, want function_call + function_call_output + final message", responsePayload.Output)
 	}
-	output, _ := responsePayload.Output[0].Output.(string)
+	output, _ := responsePayload.Output[1].Output.(string)
 	if !strings.Contains(output, `"source":"external_command"`) {
-		t.Fatalf("function_call_output output = %#v, want external command stdout", responsePayload.Output[0].Output)
+		t.Fatalf("function_call_output output = %#v, want external command stdout", responsePayload.Output[1].Output)
 	}
-	if responsePayload.Output[1].Type != "message" || len(responsePayload.Output[1].Content) == 0 || responsePayload.Output[1].Content[0].Text != "External lookup completed." {
-		t.Fatalf("final response output = %#v, want final assistant message", responsePayload.Output[1])
+	if responsePayload.Output[2].Type != "message" || len(responsePayload.Output[2].Content) == 0 || responsePayload.Output[2].Content[0].Text != "External lookup completed." {
+		t.Fatalf("final response output = %#v, want final assistant message", responsePayload.Output[2])
 	}
 }
 
@@ -3231,8 +3241,19 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 			t.Fatalf("stream body missing deferred event %q:\n%s", event, streamBody)
 		}
 	}
-	if strings.Contains(streamBody, "response.function_call_arguments.delta") {
-		t.Fatalf("stream body unexpectedly used incremental argument deltas after fallback:\n%s", streamBody)
+	// The deferred envelope renders the `function_call` output item as a single
+	// `response.function_call_arguments.delta` carrying the whole argument
+	// string, plus its `done`: it is not a fragment stream. Pinning the count is
+	// what keeps the fallback non-incremental, since fragmenting the arguments
+	// would show up as extra delta events.
+	if got := strings.Count(streamBody, "event: response.function_call_arguments.delta\n"); got != 1 {
+		t.Fatalf("argument delta events = %d, want exactly 1 complete delta after fallback:\n%s", got, streamBody)
+	}
+	if got := strings.Count(streamBody, "event: response.function_call_arguments.done\n"); got != 1 {
+		t.Fatalf("argument done events = %d, want exactly 1 after fallback:\n%s", got, streamBody)
+	}
+	if !strings.Contains(streamBody, `"delta":"{\"query\":\"llm trajecta\"}"`) {
+		t.Fatalf("argument delta does not carry the complete forced query after fallback:\n%s", streamBody)
 	}
 	if !strings.Contains(streamBody, `"type":"web_search_call"`) ||
 		!strings.Contains(streamBody, `"call_id":"call_search_forced"`) ||

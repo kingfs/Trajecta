@@ -981,13 +981,20 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Output != nil {
-		t.Fatalf("output item added = %#v, want started function_call_output call_lookup without output", sink.outputAdded)
+	// A server-executed call streams the model's function_call item and then the
+	// executor's function_call_output item, so the live item sequence matches the
+	// stored turn.
+	if len(sink.outputAdded) != 2 ||
+		sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` ||
+		sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Output != nil {
+		t.Fatalf("output item added = %#v, want function_call then started function_call_output for call_lookup", sink.outputAdded)
 	}
-	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" {
-		t.Fatalf("output item done = %#v, want function_call_output call_lookup", sink.outputDone)
+	if len(sink.outputDone) != 2 ||
+		sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.CallID != "call_lookup" ||
+		sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.CallID != "call_lookup" {
+		t.Fatalf("output item done = %#v, want function_call then function_call_output for call_lookup", sink.outputDone)
 	}
-	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
 		t.Fatalf("text deltas = %#v", sink.deltas)
 	}
 	wantEvents := []string{
@@ -995,6 +1002,8 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_text.delta",
@@ -1007,14 +1016,17 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	if got := tokenCounts(resp.Usage); got != [3]int{17, 5, 22} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
-	if len(resp.Output) != 2 {
-		t.Fatalf("output len = %d, want function_call_output + final message: %#v", len(resp.Output), resp.Output)
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want function_call + function_call_output + final message: %#v", len(resp.Output), resp.Output)
 	}
-	if resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" {
+	if resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[0].Arguments != `{"q":"codex"}` {
 		t.Fatalf("first output = %#v", resp.Output[0])
 	}
-	if resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Lookup complete." {
+	if resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_lookup" {
 		t.Fatalf("second output = %#v", resp.Output[1])
+	}
+	if resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Lookup complete." {
+		t.Fatalf("third output = %#v", resp.Output[2])
 	}
 	stored, ok, err := store.Get(context.Background(), resp.ID)
 	if err != nil || !ok {
@@ -1145,23 +1157,35 @@ func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.
 	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_summarize" {
 		t.Fatalf("function argument done = %#v, want lookup then summarize", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 2 {
-		t.Fatalf("output item added = %#v, want two started items", sink.outputAdded)
+	if len(sink.outputAdded) != 4 {
+		t.Fatalf("output item added = %#v, want function_call plus started output for lookup and summarize", sink.outputAdded)
 	}
-	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "in_progress" {
-		t.Fatalf("first output item added = %#v, want started lookup", sink.outputAdded[0])
+	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call lookup", sink.outputAdded[0])
 	}
-	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.CallID != "call_summarize" || sink.outputAdded[1].Item.Status != "in_progress" {
-		t.Fatalf("second output item added = %#v, want started summarize", sink.outputAdded[1])
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("second output item added = %#v, want started lookup", sink.outputAdded[1])
 	}
-	if len(sink.outputDone) != 2 {
-		t.Fatalf("output item done = %#v, want two completed items", sink.outputDone)
+	if sink.outputAdded[2].OutputIndex != 2 || sink.outputAdded[2].Item.Type != "function_call" || sink.outputAdded[2].Item.Status != "completed" || sink.outputAdded[2].Item.CallID != "call_summarize" || sink.outputAdded[2].Item.Arguments != `{"text":"trace"}` {
+		t.Fatalf("third output item added = %#v, want completed function_call summarize", sink.outputAdded[2])
 	}
-	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
-		t.Fatalf("first output item done = %#v, want completed lookup", sink.outputDone[0])
+	if sink.outputAdded[3].OutputIndex != 3 || sink.outputAdded[3].Item.Type != "function_call_output" || sink.outputAdded[3].Item.CallID != "call_summarize" || sink.outputAdded[3].Item.Status != "in_progress" {
+		t.Fatalf("fourth output item added = %#v, want started summarize", sink.outputAdded[3])
 	}
-	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.CallID != "call_summarize" || sink.outputDone[1].Item.Status != "completed" {
-		t.Fatalf("second output item done = %#v, want completed summarize", sink.outputDone[1])
+	if len(sink.outputDone) != 4 {
+		t.Fatalf("output item done = %#v, want function_call plus completed output for lookup and summarize", sink.outputDone)
+	}
+	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
+		t.Fatalf("first output item done = %#v, want completed function_call lookup", sink.outputDone[0])
+	}
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.CallID != "call_lookup" || sink.outputDone[1].Item.Status != "completed" {
+		t.Fatalf("second output item done = %#v, want completed lookup", sink.outputDone[1])
+	}
+	if sink.outputDone[2].OutputIndex != 2 || sink.outputDone[2].Item.Type != "function_call" || sink.outputDone[2].Item.CallID != "call_summarize" || sink.outputDone[2].Item.Status != "completed" {
+		t.Fatalf("third output item done = %#v, want completed function_call summarize", sink.outputDone[2])
+	}
+	if sink.outputDone[3].OutputIndex != 3 || sink.outputDone[3].Item.Type != "function_call_output" || sink.outputDone[3].Item.CallID != "call_summarize" || sink.outputDone[3].Item.Status != "completed" {
+		t.Fatalf("fourth output item done = %#v, want completed summarize", sink.outputDone[3])
 	}
 	wantEvents := []string{
 		"response.created",
@@ -1175,6 +1199,10 @@ func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.
 		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_text.delta",
 		"response.output_text.delta",
 		"response.completed",
@@ -1182,14 +1210,17 @@ func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if len(resp.Output) != 3 {
-		t.Fatalf("output len = %d, want two tool outputs + final message: %#v", len(resp.Output), resp.Output)
+	if len(resp.Output) != 5 {
+		t.Fatalf("output len = %d, want function_call/output pairs + final message: %#v", len(resp.Output), resp.Output)
 	}
-	if resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_summarize" {
-		t.Fatalf("tool output order mismatch: %#v", resp.Output)
+	if resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[0].Arguments != `{"q":"codex"}` || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_lookup" {
+		t.Fatalf("lookup output order mismatch: %#v", resp.Output[:2])
 	}
-	if resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Both complete." {
-		t.Fatalf("final output = %#v, want final message", resp.Output[2])
+	if resp.Output[2].Type != "function_call" || resp.Output[2].CallID != "call_summarize" || resp.Output[2].Arguments != `{"text":"trace"}` || resp.Output[3].Type != "function_call_output" || resp.Output[3].CallID != "call_summarize" {
+		t.Fatalf("summarize output order mismatch: %#v", resp.Output[2:4])
+	}
+	if resp.Output[4].Type != "message" || resp.Output[4].Content[0].Text != "Both complete." {
+		t.Fatalf("final output = %#v, want final message", resp.Output[4])
 	}
 	if len(events.events) != 6 {
 		t.Fatalf("execution events len = %d, want two requested plus two started/completed pairs: %#v", len(events.events), events.events)
@@ -1323,13 +1354,16 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_search" {
 		t.Fatalf("function argument done = %#v, want lookup then web_search", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 2 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.CallID != "call_search" {
-		t.Fatalf("output item added = %#v, want lookup then web_search", sink.outputAdded)
+	if len(sink.outputAdded) != 4 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("output item added = %#v, want function_call plus started lookup output", sink.outputAdded)
 	}
-	if len(sink.outputDone) != 2 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[1].Item.Type != "web_search_call" || sink.outputDone[1].Item.Status != "completed" {
-		t.Fatalf("output item done = %#v, want completed lookup then completed web_search", sink.outputDone)
+	if sink.outputAdded[2].Item.Type != "function_call" || sink.outputAdded[2].Item.CallID != "call_search" || sink.outputAdded[2].Item.Status != "completed" || sink.outputAdded[2].Item.Arguments != `{"query":"llm trajecta"}` || sink.outputAdded[3].Item.Type != "web_search_call" || sink.outputAdded[3].Item.CallID != "call_search" || sink.outputAdded[3].Item.Status != "in_progress" {
+		t.Fatalf("output item added = %#v, want function_call plus started web_search", sink.outputAdded[2:])
 	}
-	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Mixed " || sink.deltas[1].Delta != "complete." {
+	if len(sink.outputDone) != 4 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.Status != "completed" || sink.outputDone[2].Item.Type != "function_call" || sink.outputDone[2].Item.CallID != "call_search" || sink.outputDone[2].Item.Status != "completed" || sink.outputDone[3].Item.Type != "web_search_call" || sink.outputDone[3].Item.Status != "completed" {
+		t.Fatalf("output item done = %#v, want completed function_call/output pairs for lookup and web_search", sink.outputDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 4 || sink.deltas[0].Delta != "Mixed " || sink.deltas[1].Delta != "complete." {
 		t.Fatalf("text deltas = %#v", sink.deltas)
 	}
 	wantEvents := []string{
@@ -1338,6 +1372,10 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_item.added",
@@ -1352,11 +1390,11 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 	if got := tokenCounts(resp.Usage); got != [3]int{24, 8, 32} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
-	if len(resp.Output) != 3 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "web_search_call" || resp.Output[1].CallID != "call_search" || resp.Output[2].Type != "message" {
-		t.Fatalf("output = %#v, want lookup output, web_search_call, final message", resp.Output)
+	if len(resp.Output) != 5 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_lookup" || resp.Output[2].Type != "function_call" || resp.Output[2].CallID != "call_search" || resp.Output[3].Type != "web_search_call" || resp.Output[3].CallID != "call_search" || resp.Output[4].Type != "message" {
+		t.Fatalf("output = %#v, want lookup function_call/output, web_search function_call/web_search_call, final message", resp.Output)
 	}
-	if resp.Output[2].Content[0].Text != "Mixed complete." {
-		t.Fatalf("final output = %#v, want Mixed complete.", resp.Output[2])
+	if resp.Output[4].Content[0].Text != "Mixed complete." {
+		t.Fatalf("final output = %#v, want Mixed complete.", resp.Output[4])
 	}
 	if len(events.events) != 6 {
 		t.Fatalf("execution events len = %d, want requested/started/completed for both tools: %#v", len(events.events), events.events)
@@ -1459,24 +1497,36 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_search" {
 		t.Fatalf("function argument done = %#v, want lookup then web_search", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 2 {
-		t.Fatalf("output item added = %#v, want started lookup and web_search", sink.outputAdded)
+	if len(sink.outputAdded) != 4 {
+		t.Fatalf("output item added = %#v, want function_call plus started output for lookup and web_search", sink.outputAdded)
 	}
-	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "in_progress" {
-		t.Fatalf("first output item added = %#v, want started lookup", sink.outputAdded[0])
+	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call lookup", sink.outputAdded[0])
 	}
-	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.CallID != "call_search" || sink.outputAdded[1].Item.Status != "in_progress" {
-		t.Fatalf("second output item added = %#v, want started web_search", sink.outputAdded[1])
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("second output item added = %#v, want started lookup", sink.outputAdded[1])
 	}
-	if len(sink.outputDone) != 2 {
+	if sink.outputAdded[2].OutputIndex != 2 || sink.outputAdded[2].Item.Type != "function_call" || sink.outputAdded[2].Item.CallID != "call_search" || sink.outputAdded[2].Item.Status != "completed" || sink.outputAdded[2].Item.Arguments != `{"query":"llm trajecta"}` {
+		t.Fatalf("third output item added = %#v, want completed function_call web_search", sink.outputAdded[2])
+	}
+	if sink.outputAdded[3].OutputIndex != 3 || sink.outputAdded[3].Item.Type != "web_search_call" || sink.outputAdded[3].Item.CallID != "call_search" || sink.outputAdded[3].Item.Status != "in_progress" {
+		t.Fatalf("fourth output item added = %#v, want started web_search", sink.outputAdded[3])
+	}
+	if len(sink.outputDone) != 4 {
 		t.Fatalf("output item done = %#v, want completed lookup and failed web_search", sink.outputDone)
 	}
-	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
-		t.Fatalf("first output item done = %#v, want completed lookup", sink.outputDone[0])
+	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
+		t.Fatalf("first output item done = %#v, want completed function_call lookup", sink.outputDone[0])
 	}
-	failed := sink.outputDone[1].Item
-	if sink.outputDone[1].OutputIndex != 1 || failed.Type != "web_search_call" || failed.CallID != "call_search" || failed.Status != "failed" {
-		t.Fatalf("second output item done = %#v, want failed web_search", sink.outputDone[1])
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.CallID != "call_lookup" || sink.outputDone[1].Item.Status != "completed" {
+		t.Fatalf("second output item done = %#v, want completed lookup", sink.outputDone[1])
+	}
+	if sink.outputDone[2].OutputIndex != 2 || sink.outputDone[2].Item.Type != "function_call" || sink.outputDone[2].Item.CallID != "call_search" || sink.outputDone[2].Item.Status != "completed" {
+		t.Fatalf("third output item done = %#v, want completed function_call web_search", sink.outputDone[2])
+	}
+	failed := sink.outputDone[3].Item
+	if sink.outputDone[3].OutputIndex != 3 || failed.Type != "web_search_call" || failed.CallID != "call_search" || failed.Status != "failed" {
+		t.Fatalf("fourth output item done = %#v, want failed web_search", sink.outputDone[3])
 	}
 	if got := failed.Action["query"]; got != "llm trajecta" {
 		t.Fatalf("failed web_search query = %#v", got)
@@ -1490,6 +1540,10 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_item.added",
@@ -1571,17 +1625,25 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFail
 		"response.function_call_arguments.done",
 		"response.output_item.added",
 		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 	}
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if len(sink.outputAdded) != 1 || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" {
-		t.Fatalf("output item added = %#v, want started call_lookup", sink.outputAdded)
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Arguments != `{"secret":"do-not-leak"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call call_lookup", sink.outputAdded[0])
 	}
-	if len(sink.outputDone) != 1 {
-		t.Fatalf("output item done = %#v, want one failed item", sink.outputDone)
+	if sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_lookup" {
+		t.Fatalf("second output item added = %#v, want started call_lookup output", sink.outputAdded[1])
 	}
-	done := sink.outputDone[0].Item
+	if len(sink.outputDone) != 2 {
+		t.Fatalf("output item done = %#v, want function_call plus one failed item", sink.outputDone)
+	}
+	if sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_lookup" {
+		t.Fatalf("first output item done = %#v, want completed function_call call_lookup", sink.outputDone[0])
+	}
+	done := sink.outputDone[1].Item
 	if done.Type != "function_call_output" || done.Status != "failed" || done.CallID != "call_lookup" || done.Name != "lookup" {
 		t.Fatalf("failed output item = %#v, want failed lookup call output", done)
 	}
@@ -1661,24 +1723,36 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForSecondFunctionToolExecut
 	if len(client.streamReqs) != 1 {
 		t.Fatalf("stream requests = %d, want only failed tool-call round", len(client.streamReqs))
 	}
-	if len(sink.outputAdded) != 2 {
-		t.Fatalf("output item added = %#v, want started lookup and summarize", sink.outputAdded)
+	if len(sink.outputAdded) != 4 {
+		t.Fatalf("output item added = %#v, want function_call plus started output for lookup and summarize", sink.outputAdded)
 	}
-	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "in_progress" {
-		t.Fatalf("first output item added = %#v, want started lookup", sink.outputAdded[0])
+	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call lookup", sink.outputAdded[0])
 	}
-	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.CallID != "call_summarize" || sink.outputAdded[1].Item.Status != "in_progress" {
-		t.Fatalf("second output item added = %#v, want started summarize", sink.outputAdded[1])
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("second output item added = %#v, want started lookup", sink.outputAdded[1])
 	}
-	if len(sink.outputDone) != 2 {
+	if sink.outputAdded[2].OutputIndex != 2 || sink.outputAdded[2].Item.Type != "function_call" || sink.outputAdded[2].Item.CallID != "call_summarize" || sink.outputAdded[2].Item.Status != "completed" || sink.outputAdded[2].Item.Arguments != `{"text":"trace"}` {
+		t.Fatalf("third output item added = %#v, want completed function_call summarize", sink.outputAdded[2])
+	}
+	if sink.outputAdded[3].OutputIndex != 3 || sink.outputAdded[3].Item.Type != "function_call_output" || sink.outputAdded[3].Item.CallID != "call_summarize" || sink.outputAdded[3].Item.Status != "in_progress" {
+		t.Fatalf("fourth output item added = %#v, want started summarize", sink.outputAdded[3])
+	}
+	if len(sink.outputDone) != 4 {
 		t.Fatalf("output item done = %#v, want completed lookup and failed summarize", sink.outputDone)
 	}
-	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
-		t.Fatalf("first output item done = %#v, want completed lookup", sink.outputDone[0])
+	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
+		t.Fatalf("first output item done = %#v, want completed function_call lookup", sink.outputDone[0])
 	}
-	failed := sink.outputDone[1].Item
-	if sink.outputDone[1].OutputIndex != 1 || failed.Type != "function_call_output" || failed.CallID != "call_summarize" || failed.Name != "summarize" || failed.Status != "failed" {
-		t.Fatalf("second output item done = %#v, want failed summarize", sink.outputDone[1])
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.CallID != "call_lookup" || sink.outputDone[1].Item.Status != "completed" {
+		t.Fatalf("second output item done = %#v, want completed lookup", sink.outputDone[1])
+	}
+	if sink.outputDone[2].OutputIndex != 2 || sink.outputDone[2].Item.Type != "function_call" || sink.outputDone[2].Item.CallID != "call_summarize" || sink.outputDone[2].Item.Status != "completed" {
+		t.Fatalf("third output item done = %#v, want completed function_call summarize", sink.outputDone[2])
+	}
+	failed := sink.outputDone[3].Item
+	if sink.outputDone[3].OutputIndex != 3 || failed.Type != "function_call_output" || failed.CallID != "call_summarize" || failed.Name != "summarize" || failed.Status != "failed" {
+		t.Fatalf("fourth output item done = %#v, want failed summarize", sink.outputDone[3])
 	}
 	if failed.Output != nil || strings.Contains(toJSONForTest(t, failed), "sensitive-output") {
 		t.Fatalf("failed output item leaked output: %#v", failed)
@@ -1689,6 +1763,10 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForSecondFunctionToolExecut
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_item.added",
@@ -1804,16 +1882,22 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "web_search_call" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_search" {
-		t.Fatalf("output item added = %#v, want started web_search_call call_search", sink.outputAdded)
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_search" || sink.outputAdded[0].Item.Arguments != `{"query":"llm trace replay"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call call_search", sink.outputAdded[0])
 	}
-	if got := sink.outputAdded[0].Item.Action["query"]; got != "llm trace replay" {
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_search" {
+		t.Fatalf("second output item added = %#v, want started web_search_call call_search", sink.outputAdded[1])
+	}
+	if got := sink.outputAdded[1].Item.Action["query"]; got != "llm trace replay" {
 		t.Fatalf("output item added query = %#v", got)
 	}
-	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "web_search_call" || sink.outputDone[0].Item.CallID != "call_search" {
-		t.Fatalf("output item done = %#v, want web_search_call call_search", sink.outputDone)
+	if len(sink.outputDone) != 2 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_search" {
+		t.Fatalf("first output item done = %#v, want completed function_call call_search", sink.outputDone[0])
 	}
-	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "web_search_call" || sink.outputDone[1].Item.CallID != "call_search" {
+		t.Fatalf("second output item done = %#v, want web_search_call call_search", sink.outputDone[1])
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
 		t.Fatalf("text deltas = %#v", sink.deltas)
 	}
 	wantEvents := []string{
@@ -1821,6 +1905,8 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_text.delta",
@@ -1833,21 +1919,24 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if got := tokenCounts(resp.Usage); got != [3]int{22, 7, 29} {
 		t.Fatalf("usage = %#v", resp.Usage)
 	}
-	if len(resp.Output) != 2 {
-		t.Fatalf("output len = %d, want web_search_call + final message: %#v", len(resp.Output), resp.Output)
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want function_call + web_search_call + final message: %#v", len(resp.Output), resp.Output)
 	}
-	if resp.Output[0].Type != "web_search_call" || resp.Output[0].CallID != "call_search" {
+	if resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_search" || resp.Output[0].Arguments != `{"query":"llm trace replay"}` {
 		t.Fatalf("first output = %#v", resp.Output[0])
 	}
-	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
+	if resp.Output[1].Type != "web_search_call" || resp.Output[1].CallID != "call_search" {
+		t.Fatalf("second output = %#v", resp.Output[1])
+	}
+	if got := resp.Output[1].Action["query"]; got != "llm trace replay" {
 		t.Fatalf("web_search action query = %#v", got)
 	}
-	if got := resp.Output[0].Action["result_count"]; got != 1 {
+	if got := resp.Output[1].Action["result_count"]; got != 1 {
 		t.Fatalf("web_search action result_count = %#v", got)
 	}
-	sources, ok := resp.Output[0].Action["sources"].([]map[string]any)
+	sources, ok := resp.Output[1].Action["sources"].([]map[string]any)
 	if !ok || len(sources) != 1 {
-		t.Fatalf("web_search action sources = %#v, want one summarized source", resp.Output[0].Action["sources"])
+		t.Fatalf("web_search action sources = %#v, want one summarized source", resp.Output[1].Action["sources"])
 	}
 	if sources[0]["title"] != "Trajecta docs" || sources[0]["url"] != "https://example.test/docs" {
 		t.Fatalf("web_search action source identity = %#v", sources[0])
@@ -1856,8 +1945,8 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if !strings.HasPrefix(snippet, "Record and replay LLM API traffic.") || len([]rune(snippet)) > 283 {
 		t.Fatalf("web_search action source snippet = %q, want safe summary", snippet)
 	}
-	if resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Use cassettes." {
-		t.Fatalf("second output = %#v", resp.Output[1])
+	if resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Use cassettes." {
+		t.Fatalf("third output = %#v", resp.Output[2])
 	}
 	if len(events.events) != 3 {
 		t.Fatalf("execution events len = %d, want requested/started/completed: %#v", len(events.events), events.events)
@@ -1941,6 +2030,8 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForHostedWebSearchProviderF
 		"response.function_call_arguments.done",
 		"response.output_item.added",
 		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 	}
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
@@ -1948,10 +2039,19 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForHostedWebSearchProviderF
 	if len(provider.queries) != 1 || provider.queries[0].Text != "llm trace replay" {
 		t.Fatalf("provider queries = %#v, want llm trace replay", provider.queries)
 	}
-	if len(sink.outputDone) != 1 {
-		t.Fatalf("output item done = %#v, want one failed item", sink.outputDone)
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_search" || sink.outputAdded[0].Item.Arguments != `{"query":"llm trace replay"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call call_search", sink.outputAdded[0])
 	}
-	done := sink.outputDone[0].Item
+	if sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_search" {
+		t.Fatalf("second output item added = %#v, want started web_search_call call_search", sink.outputAdded[1])
+	}
+	if len(sink.outputDone) != 2 {
+		t.Fatalf("output item done = %#v, want function_call plus one failed item", sink.outputDone)
+	}
+	if sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_search" {
+		t.Fatalf("first output item done = %#v, want completed function_call call_search", sink.outputDone[0])
+	}
+	done := sink.outputDone[1].Item
 	if done.Type != "web_search_call" || done.Status != "failed" || done.CallID != "call_search" {
 		t.Fatalf("failed output item = %#v, want failed web_search_call call_search", done)
 	}
@@ -2692,13 +2792,19 @@ func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinu
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
 		t.Fatalf("function done = %#v, want full arguments", sink.functionDone)
 	}
-	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" {
-		t.Fatalf("output item added = %#v, want started function_call_output call_lookup", sink.outputAdded)
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Arguments != `{"q":"codex"}` {
+		t.Fatalf("first output item added = %#v, want completed function_call call_lookup", sink.outputAdded[0])
 	}
-	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" || !reflect.DeepEqual(sink.outputDone[0].Item.Output, map[string]any{"answer": "42"}) {
-		t.Fatalf("output item done = %#v, want completed function_call_output call_lookup", sink.outputDone)
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_lookup" {
+		t.Fatalf("second output item added = %#v, want started function_call_output call_lookup", sink.outputAdded[1])
 	}
-	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
+	if len(sink.outputDone) != 2 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_lookup" {
+		t.Fatalf("first output item done = %#v, want completed function_call call_lookup", sink.outputDone[0])
+	}
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.CallID != "call_lookup" || !reflect.DeepEqual(sink.outputDone[1].Item.Output, map[string]any{"answer": "42"}) {
+		t.Fatalf("second output item done = %#v, want completed function_call_output call_lookup", sink.outputDone[1])
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
 		t.Fatalf("text deltas = %#v, want final streamed text after tool output", sink.deltas)
 	}
 	wantEvents := []string{
@@ -2708,6 +2814,8 @@ func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinu
 		"response.function_call_arguments.done",
 		"response.output_item.added",
 		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
 		"response.output_text.delta",
 		"response.output_text.delta",
 		"response.completed",
@@ -2715,8 +2823,8 @@ func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinu
 	if !reflect.DeepEqual(sink.events, wantEvents) {
 		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
-	if len(resp.Output) != 2 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Lookup complete." {
-		t.Fatalf("final output = %#v, want function output + final message", resp.Output)
+	if len(resp.Output) != 3 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_lookup" || resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Lookup complete." {
+		t.Fatalf("final output = %#v, want function call + function output + final message", resp.Output)
 	}
 	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
 		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
@@ -2857,16 +2965,22 @@ func TestRuntimeCreateStreamAutoCompactsHostedWebSearchExecutesAndContinuesStrea
 			if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
 				t.Fatalf("function done = %#v, want full web_search arguments", sink.functionDone)
 			}
-			if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "web_search_call" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_search" {
-				t.Fatalf("output item added = %#v, want started web_search_call call_search", sink.outputAdded)
+			if len(sink.outputAdded) != 2 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_search" || sink.outputAdded[0].Item.Arguments != `{"query":"llm trace replay"}` {
+				t.Fatalf("first output item added = %#v, want completed function_call call_search", sink.outputAdded[0])
 			}
-			if got := sink.outputAdded[0].Item.Action["query"]; got != "llm trace replay" {
+			if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_search" {
+				t.Fatalf("second output item added = %#v, want started web_search_call call_search", sink.outputAdded[1])
+			}
+			if got := sink.outputAdded[1].Item.Action["query"]; got != "llm trace replay" {
 				t.Fatalf("output item added query = %#v", got)
 			}
-			if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "web_search_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_search" {
-				t.Fatalf("output item done = %#v, want completed web_search_call call_search", sink.outputDone)
+			if len(sink.outputDone) != 2 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_search" {
+				t.Fatalf("first output item done = %#v, want completed function_call call_search", sink.outputDone[0])
 			}
-			if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
+			if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.Type != "web_search_call" || sink.outputDone[1].Item.Status != "completed" || sink.outputDone[1].Item.CallID != "call_search" {
+				t.Fatalf("second output item done = %#v, want completed web_search_call call_search", sink.outputDone[1])
+			}
+			if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
 				t.Fatalf("text deltas = %#v, want final streamed text after web_search", sink.deltas)
 			}
 			wantEvents := []string{
@@ -2876,6 +2990,8 @@ func TestRuntimeCreateStreamAutoCompactsHostedWebSearchExecutesAndContinuesStrea
 				"response.function_call_arguments.done",
 				"response.output_item.added",
 				"response.output_item.done",
+				"response.output_item.added",
+				"response.output_item.done",
 				"response.output_text.delta",
 				"response.output_text.delta",
 				"response.completed",
@@ -2883,8 +2999,8 @@ func TestRuntimeCreateStreamAutoCompactsHostedWebSearchExecutesAndContinuesStrea
 			if !reflect.DeepEqual(sink.events, wantEvents) {
 				t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 			}
-			if len(resp.Output) != 2 || resp.Output[0].Type != "web_search_call" || resp.Output[0].CallID != "call_search" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Use cassettes." {
-				t.Fatalf("final output = %#v, want web_search_call + final message", resp.Output)
+			if len(resp.Output) != 3 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_search" || resp.Output[1].Type != "web_search_call" || resp.Output[1].CallID != "call_search" || resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Use cassettes." {
+				t.Fatalf("final output = %#v, want function_call + web_search_call + final message", resp.Output)
 			}
 			if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
 				t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
@@ -3433,13 +3549,19 @@ func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
 	if got := tokenCounts(resp.Usage); got != [3]int{21, 10, 31} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
-	if len(resp.Output) != 2 {
-		t.Fatalf("output len = %d, want function_call_output + final message: %#v", len(resp.Output), resp.Output)
+	// A server-executed call records the model's function_call item in front of
+	// the function_call_output the executor produced, exactly like the
+	// client-executed path, so the stored turn is a valid transcript.
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want function_call + function_call_output + final message: %#v", len(resp.Output), resp.Output)
 	}
-	if got := resp.Output[0]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_lookup" || got.Name != "lookup" {
+	if got := resp.Output[0]; got.Type != "function_call" || got.Status != "completed" || got.CallID != "call_lookup" || got.Name != "lookup" || got.Arguments != `{"q":"codex"}` {
+		t.Fatalf("unexpected function_call: %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_lookup" || got.Name != "lookup" {
 		t.Fatalf("unexpected function_call_output: %#v", got)
 	}
-	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "The server-side lookup result is ready." {
+	if got := resp.Output[2]; got.Type != "message" || got.Content[0].Text != "The server-side lookup result is ready." {
 		t.Fatalf("unexpected final message: %#v", got)
 	}
 	if len(events.events) != 2 {
@@ -3737,13 +3859,16 @@ func TestRuntimeCreateExecutesHostedMCPToolLoop(t *testing.T) {
 	if got := tokenCounts(resp.Usage); got != [3]int{28, 10, 38} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
-	if len(resp.Output) != 2 {
-		t.Fatalf("output len = %d, want mcp output + final message: %#v", len(resp.Output), resp.Output)
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want function_call + mcp output + final message: %#v", len(resp.Output), resp.Output)
 	}
-	if got := resp.Output[0]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_mcp_read" || got.Name != "mcp_call" {
+	if got := resp.Output[0]; got.Type != "function_call" || got.Status != "completed" || got.CallID != "call_mcp_read" || got.Name != "mcp_call" || got.Arguments != `{"server_label":"workspace","tool":"read_file","arguments":{"path":"go.mod"}}` {
+		t.Fatalf("unexpected mcp function_call item: %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_mcp_read" || got.Name != "mcp_call" {
 		t.Fatalf("unexpected mcp output item: %#v", got)
 	}
-	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "The module file was read." {
+	if got := resp.Output[2]; got.Type != "message" || got.Content[0].Text != "The module file was read." {
 		t.Fatalf("unexpected final message: %#v", got)
 	}
 	if len(events.events) != 2 || events.events[0].Status != "started" || events.events[1].Status != "completed" {
@@ -3927,17 +4052,23 @@ func TestRuntimeCreateStreamExecutesHostedMCPToolLoop(t *testing.T) {
 	if len(client.streamReqs) != 2 {
 		t.Fatalf("stream chat calls = %d, want mcp tool loop and final text", len(client.streamReqs))
 	}
-	if len(sink.outputAdded) != 1 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_mcp_read" {
-		t.Fatalf("output added = %#v, want started mcp function_call_output", sink.outputAdded)
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].Item.Type != "function_call" || sink.outputAdded[0].Item.Status != "completed" || sink.outputAdded[0].Item.CallID != "call_mcp_read" || sink.outputAdded[0].Item.Arguments != callArguments {
+		t.Fatalf("first output added = %#v, want completed mcp function_call", sink.outputAdded[0])
 	}
-	if len(sink.outputDone) != 1 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_mcp_read" {
-		t.Fatalf("output done = %#v, want completed mcp function_call_output", sink.outputDone)
+	if sink.outputAdded[1].Item.Type != "function_call_output" || sink.outputAdded[1].Item.Status != "in_progress" || sink.outputAdded[1].Item.CallID != "call_mcp_read" {
+		t.Fatalf("second output added = %#v, want started mcp function_call_output", sink.outputAdded[1])
 	}
-	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Read " || sink.deltas[1].Delta != "complete." {
+	if len(sink.outputDone) != 2 || sink.outputDone[0].Item.Type != "function_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_mcp_read" {
+		t.Fatalf("first output done = %#v, want completed mcp function_call", sink.outputDone[0])
+	}
+	if sink.outputDone[1].Item.Type != "function_call_output" || sink.outputDone[1].Item.Status != "completed" || sink.outputDone[1].Item.CallID != "call_mcp_read" {
+		t.Fatalf("second output done = %#v, want completed mcp function_call_output", sink.outputDone[1])
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Read " || sink.deltas[1].Delta != "complete." {
 		t.Fatalf("text deltas = %#v, want final text after mcp", sink.deltas)
 	}
-	if len(resp.Output) != 2 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_mcp_read" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Read complete." {
-		t.Fatalf("final output = %#v, want mcp output and final message", resp.Output)
+	if len(resp.Output) != 3 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_mcp_read" || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_mcp_read" || resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Read complete." {
+		t.Fatalf("final output = %#v, want mcp function_call/output and final message", resp.Output)
 	}
 	completed := findExecutionEvent(events.events, "response.tool_call", "completed")
 	if completed == nil || completed.DetailsJSON["executor"] != "hosted:mcp" || completed.DetailsJSON["server_id"] != "srv_workspace" || completed.DetailsJSON["server_label"] != "workspace" || completed.DetailsJSON["server_url"] != mcpServer.URL || completed.DetailsJSON["stream"] != true || completed.DetailsJSON["status"] != "completed" {
@@ -4146,13 +4277,16 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if got := tokenCounts(resp.Usage); got != [3]int{30, 10, 40} {
 		t.Fatalf("usage mismatch: %#v", resp.Usage)
 	}
-	if len(resp.Output) != 2 {
-		t.Fatalf("output len = %d, want 2: %#v", len(resp.Output), resp.Output)
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want 3: %#v", len(resp.Output), resp.Output)
 	}
-	if got := resp.Output[0]; got.Type != "web_search_call" || got.Status != "completed" || got.CallID != "call_search" {
+	if got := resp.Output[0]; got.Type != "function_call" || got.Status != "completed" || got.CallID != "call_search" || got.Name != "web_search" || got.Arguments != `{"query":"llm trace replay"}` {
+		t.Fatalf("unexpected web_search function_call: %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "web_search_call" || got.Status != "completed" || got.CallID != "call_search" {
 		t.Fatalf("unexpected web_search output: %#v", got)
 	}
-	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
+	if got := resp.Output[1].Action["query"]; got != "llm trace replay" {
 		t.Fatalf("web_search action query = %#v", got)
 	}
 	if len(events.events) != 2 {
@@ -4167,7 +4301,7 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if events.events[1].DetailsJSON["call_id"] != "call_search" || events.events[1].DetailsJSON["query"] != "llm trace replay" || events.events[1].DetailsJSON["result_count"] != 1 {
 		t.Fatalf("completed event details mismatch: %#v", events.events[1].DetailsJSON)
 	}
-	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "Use cassettes for deterministic replay." {
+	if got := resp.Output[2]; got.Type != "message" || got.Content[0].Text != "Use cassettes for deterministic replay." {
 		t.Fatalf("unexpected final message: %#v", got)
 	}
 

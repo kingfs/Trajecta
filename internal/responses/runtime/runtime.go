@@ -585,10 +585,21 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		}
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 		for _, call := range calls {
-			outputIndex := len(output)
 			if err := sendInProgress(); err != nil {
 				return protocol.Response{}, err
 			}
+			// The model's `function_call` item goes in front of the output the
+			// executor produced, in the stream and in the stored turn alike.
+			callItem := functionCallOutputItem(call)
+			callIndex := len(output)
+			if err := streamOutputItemAdded(sink, callIndex, callItem); err != nil {
+				return protocol.Response{}, err
+			}
+			if err := streamOutputItemDone(sink, callIndex, callItem); err != nil {
+				return protocol.Response{}, err
+			}
+			output = append(output, callItem)
+			outputIndex := len(output)
 			if err := streamOutputItemAdded(sink, outputIndex, startedToolOutputItem(call)); err != nil {
 				return protocol.Response{}, err
 			}
@@ -904,6 +915,28 @@ func firstMessageOutputItem(outputItems []protocol.OutputItem, fallbackID string
 		return item, true
 	}
 	return protocol.OutputItem{}, false
+}
+
+// functionCallOutputItem is the `function_call` item that a server-executed
+// tool call must record and stream ahead of its `function_call_output`.
+//
+// The client-executed path already puts the model's `function_call` items in the
+// response output (they come from chatToOutputItems), and the local runtime's own
+// transcript replay needs them: ledgerToChatMessages turns a `function_call` into
+// an assistant message carrying tool_calls and a `function_call_output` into the
+// matching `tool` message. Recording only the output left the stored turn with a
+// `tool` message whose requesting assistant message was absent, which a strict
+// upstream rejects, so a conversation could not be continued after any
+// server-executed tool call.
+func functionCallOutputItem(call executableToolCall) protocol.OutputItem {
+	return protocol.OutputItem{
+		ID:        "fc_" + call.call.ID,
+		Type:      "function_call",
+		Status:    "completed",
+		CallID:    call.call.ID,
+		Name:      call.call.Function.Name,
+		Arguments: call.call.Function.Arguments,
+	}
 }
 
 func startedToolOutputItem(call executableToolCall) protocol.OutputItem {
@@ -1507,6 +1540,9 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 
 		for _, call := range calls {
+			// Record the `function_call` the model asked for before the output it
+			// produced, so the stored turn stays a valid transcript.
+			output = append(output, functionCallOutputItem(call))
 			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{
 				ResponseID:     responseID,
 				ConversationID: conversationID,
