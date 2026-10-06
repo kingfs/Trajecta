@@ -2,10 +2,17 @@ import { startTransition, useEffect, useState } from "react";
 import { requestJSON } from "../lib/api";
 
 export function useJSON(url, deps = []) {
-  const [state, setState] = useState({ loading: true, data: null, error: "" });
+  // A falsy url parks the hook: nothing is requested and the state stays idle.
+  // Callers use it to wait for a parent resource before firing sub-resources.
+  const enabled = typeof url === "string" && url !== "";
+  const [state, setState] = useState({ loading: enabled, data: null, error: "" });
   const requestKey = JSON.stringify([url, ...deps]);
 
   useEffect(() => {
+    if (!enabled) {
+      setState({ loading: false, data: null, error: "" });
+      return undefined;
+    }
     let cancelled = false;
     const controller = new AbortController();
     const requestURL = url;
@@ -36,7 +43,7 @@ export function useJSON(url, deps = []) {
       cancelled = true;
       controller.abort();
     };
-  }, [requestKey, url]);
+  }, [requestKey, url, enabled]);
 
   return state;
 }

@@ -7,6 +7,7 @@ import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import {
   buildFailureContexts,
   buildFailureDelta,
@@ -25,6 +26,7 @@ import {
 
 export function SessionDetailPage() {
   const { sessionID = "" } = useParams();
+  const { t } = useI18n();
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
   const [jobNotice, setJobNotice] = useState(null);
@@ -59,11 +61,11 @@ export function SessionDetailPage() {
       setExportNotice({
         tone: warnings ? "danger" : "green",
         text: warnings
-          ? `Downloaded with ${warnings} data warnings. Review extra.warnings in the file for missing results, incomplete streams, or unsupported records.`
-          : "Trajectory downloaded. One complete session per JSONL line.",
+          ? t("sessionDetail.exportWarnings", { count: warnings })
+          : t("sessionDetail.exportDone"),
       });
     } catch (error) {
-      setExportNotice({ tone: "danger", text: error.message || "Unable to export trajectory" });
+      setExportNotice({ tone: "danger", text: error.message || t("sessionDetail.exportError") });
     } finally {
       if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setExportBusy(false);
@@ -75,10 +77,10 @@ export function SessionDetailPage() {
     setJobNotice(null);
     try {
       const response = await postJSON(apiPaths.sessionReanalyze(sessionID), { mode: "async", reparse: true, scan: true });
-      setJobNotice({ tone: "green", text: `Session analysis refresh job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      setJobNotice({ tone: "green", text: t("sessionDetail.refreshJobNotice", { id: response.job?.id || "-", status: response.job?.status || "queued" }) });
       setTab("analysis");
     } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
     } finally {
       setJobBusy(false);
     }
@@ -89,7 +91,7 @@ export function SessionDetailPage() {
       <header className="topbar detail-topbar">
         <div className="detail-title-block">
           <div className="detail-heading-row">
-            <h1>{summary?.last_model || "session detail"}</h1>
+            <h1>{summary?.last_model || t("sessionDetail.sessionFallback")}</h1>
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone="accent">{summary?.session_source || "session"}</InlineTag>
               {(summary?.providers || []).map((provider) => (
@@ -98,39 +100,39 @@ export function SessionDetailPage() {
             </div>
           </div>
           <div className="detail-meta-strip">
-            <DetailMetaPill label="session" value={summary?.session_id || sessionID} mono />
-            <DetailMetaPill label="first seen" value={formatDateTime(summary?.first_seen)} />
-            <DetailMetaPill label="last seen" value={formatDateTime(summary?.last_seen)} />
-            <DetailMetaPill label="requests" value={summary?.request_count ?? 0} />
-            <DetailMetaPill label="success" value={`${Number(summary?.success_rate ?? 0).toFixed(1)}%`} />
+            <DetailMetaPill label={t("sessionDetail.metaSession")} value={summary?.session_id || sessionID} mono />
+            <DetailMetaPill label={t("sessionDetail.firstSeen")} value={formatDateTime(summary?.first_seen)} />
+            <DetailMetaPill label={t("sessionDetail.lastSeen")} value={formatDateTime(summary?.last_seen)} />
+            <DetailMetaPill label={t("common.requests")} value={summary?.request_count ?? 0} />
+            <DetailMetaPill label={t("common.success")} value={`${Number(summary?.success_rate ?? 0).toFixed(1)}%`} />
           </div>
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/sessions" title="Back to sessions" aria-label="Back to sessions">
+            <Link className="icon-button" to="/sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
               <HomeIcon />
             </Link>
             <button className="ghost-button" type="button" disabled={exportBusy || !detail.data} onClick={exportTrajectory}>
-              {exportBusy ? "Exporting…" : "Export trajectory (ATIF)"}
+              {exportBusy ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
             </button>
             <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
-              {jobBusy ? "Queueing" : "Refresh analysis"}
+              {jobBusy ? t("analysis.queueing") : t("sessionDetail.refreshAnalysis")}
             </button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label="ttft" value={summary?.avg_ttft ?? 0} icon="total" />
-            <TokenBadge label="tokens" value={summary?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
-            <TokenBadge label="failed" value={summary?.failed_request ?? 0} icon="cached" />
+            <TokenBadge label={t("common.tokens")} value={summary?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
+            <TokenBadge label={t("common.failed")} value={summary?.failed_request ?? 0} icon="cached" />
           </div>
         </div>
       </header>
 
-      {exportNotice ? <EmptyState title="Trajectory export" detail={exportNotice.text} tone={exportNotice.tone} compact /> : null}
+      {exportNotice ? <EmptyState title={t("sessionDetail.trajectoryExport")} detail={exportNotice.text} tone={exportNotice.tone} compact /> : null}
 
-      {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
+      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
-      {detail.error ? <EmptyState title="Unable to load session detail" detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title="Loading session detail" detail="Resolving timeline, breakdown, and grouped traces for this session." /> : null}
+      {detail.error ? <EmptyState title={t("sessionDetail.loadError")} detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title={t("sessionDetail.loading")} detail={t("sessionDetail.loadingDetail")} /> : null}
 
       {detail.data ? (
         <>
@@ -139,28 +141,28 @@ export function SessionDetailPage() {
             <section className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Failure surface</p>
-                  <h2>Session health</h2>
+                  <p className="eyebrow">{t("sessionDetail.failureSurface")}</p>
+                  <h2>{t("sessionDetail.sessionHealth")}</h2>
                 </div>
               </div>
               <div className="hero-grid hero-grid-compact">
-                <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
-                <StatCard label="Success" value={summary?.success_request ?? 0} />
-                <StatCard label="Streams" value={summary?.stream_count ?? 0} />
-                <StatCard label="Duration" value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${formatDuration(summary?.total_duration_ms ?? 0)} total`} title={`${summary?.total_duration_ms ?? 0} ms`} />
+                <StatCard label={t("common.failed")} value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
+                <StatCard label={t("common.success")} value={summary?.success_request ?? 0} />
+                <StatCard label={t("sessionDetail.streams")} value={summary?.stream_count ?? 0} />
+                <StatCard label={t("sessionDetail.duration")} value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${formatDuration(summary?.total_duration_ms ?? 0)} total`} title={`${summary?.total_duration_ms ?? 0} ms`} />
               </div>
             </section>
             <section className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Distribution</p>
-                  <h2>Models and endpoints</h2>
+                  <p className="eyebrow">{t("sessionDetail.distribution")}</p>
+                  <h2>{t("sessionDetail.modelsAndEndpoints")}</h2>
                 </div>
               </div>
               <div className="session-breakdown-grid">
-                <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
-                <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
-                <BreakdownList title="Failure reasons" items={breakdown?.failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} />
+                <BreakdownList title={t("sessionDetail.models")} items={breakdown?.models || []} formatter={(item) => item.label} />
+                <BreakdownList title={t("sessionDetail.endpoints")} items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+                <BreakdownList title={t("sessionDetail.failureReasons")} items={breakdown?.failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} />
               </div>
             </section>
           </div>
@@ -171,8 +173,8 @@ export function SessionDetailPage() {
         <section className="panel timeline-panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Session timeline</p>
-              <h2>Request sequence</h2>
+              <p className="eyebrow">{t("sessionDetail.sessionTimeline")}</p>
+              <h2>{t("sessionDetail.requestSequence")}</h2>
             </div>
           </div>
           <div className="timeline-list">
@@ -184,7 +186,7 @@ export function SessionDetailPage() {
                 <div className="timeline-card">
                   <div className="timeline-head">
                     <div>
-                      <strong>{item.model || "unknown-model"}</strong>
+                      <strong>{item.model || t("sessionDetail.unknownModel")}</strong>
                       <span>{formatDateTime(item.time)}</span>
                     </div>
                     <span className="timeline-badge">{item.is_stream ? "stream" : "request"}</span>
@@ -206,12 +208,12 @@ export function SessionDetailPage() {
                       className="ghost-button"
                       to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "conversation", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
                     >
-                      Timeline
+                      {t("requests.timeline")}
                     </Link>
                     <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
-                      Raw
+                      {t("requests.raw")}
                     </Link>
-                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title="View trace" aria-label="View trace">
+                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
                       <ViewIcon />
                     </Link>
                   </div>
@@ -221,68 +223,68 @@ export function SessionDetailPage() {
           </div>
         </section>
       ) : detail.data && tab === "timeline" ? (
-        <EmptyState title="No session timeline" detail="This session does not yet have a timeline of recorded requests." />
+        <EmptyState title={t("sessionDetail.noTimeline")} detail={t("sessionDetail.noTimelineDetail")} />
       ) : null}
 
       {detail.data && tab === "timeline" && failureContexts.length ? (
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Failure context</p>
-              <h2>Requests around each failure</h2>
+              <p className="eyebrow">{t("sessionDetail.failureContext")}</p>
+              <h2>{t("sessionDetail.requestsAroundFailure")}</h2>
             </div>
           </div>
           <div className="failure-context-list">
             {failureContexts.map((context) => (
               <article key={context.current.trace_id} className="failure-context-card">
                 <div className="failure-context-head">
-                  <strong>{context.current.model || "unknown-model"}</strong>
+                  <strong>{context.current.model || t("sessionDetail.unknownModel")}</strong>
                   <span>{formatDateTime(context.current.time)}</span>
                 </div>
                 <p className="failure-context-summary">{buildFailureSummary(context)}</p>
                 <div className="failure-context-strip">
-                  {context.previous ? <FailureContextNode label="Before" item={context.previous} tone="default" sessionID={summary?.session_id || sessionID} /> : null}
+                  {context.previous ? <FailureContextNode label={t("sessionDetail.before")} item={context.previous} tone="default" sessionID={summary?.session_id || sessionID} /> : null}
                   <FailureContextNode
-                    label="Failed"
+                    label={t("common.failed")}
                     item={context.current}
                     tone="danger"
                     sessionID={summary?.session_id || sessionID}
                     delta={buildFailureDelta(context.previous, context.current)}
                     detail={context.current.error || buildFailureDetail(context.current)}
                   />
-                  {context.next ? <FailureContextNode label="After" item={context.next} tone="accent" sessionID={summary?.session_id || sessionID} /> : null}
+                  {context.next ? <FailureContextNode label={t("sessionDetail.after")} item={context.next} tone="accent" sessionID={summary?.session_id || sessionID} /> : null}
                 </div>
               </article>
             ))}
           </div>
         </section>
       ) : detail.data && tab === "timeline" ? (
-        <EmptyState title="No failure context" detail="This session has no failed requests, so no adjacent context needs review." />
+        <EmptyState title={t("sessionDetail.noFailureContext")} detail={t("sessionDetail.noFailureContextDetail")} />
       ) : null}
 
       {detail.data && tab === "traces" ? (
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Session traces</p>
-              <h2>{traceFilter === "failed" ? "Failed request list" : "Grouped request list"}</h2>
+              <p className="eyebrow">{t("sessionDetail.sessionTraces")}</p>
+              <h2>{traceFilter === "failed" ? t("sessionDetail.failedRequestList") : t("sessionDetail.groupedRequestList")}</h2>
             </div>
             <div className="panel-head-actions">
-              <div className="view-toggle" role="tablist" aria-label="Session trace filter">
+              <div className="view-toggle" role="tablist" aria-label={t("sessionDetail.traceFilterLabel")}>
                 <button className={traceFilter === "all" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("all")}>
-                  All
+                  {t("sessionDetail.all")}
                 </button>
                 <button className={traceFilter === "failed" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("failed")}>
-                  Failed only
+                  {t("sessionDetail.failedOnly")}
                 </button>
               </div>
               <span className="session-filter-count">
-                {visibleTraces.length} / {traces.length} traces
+                {t("sessionDetail.traceCount", { visible: visibleTraces.length, total: traces.length })}
               </span>
             </div>
           </div>
           {traceFilter === "failed" && visibleTraces.length === 0 ? (
-            <EmptyState title="No failed traces" detail="This session has no failed requests under the current filter." />
+            <EmptyState title={t("sessionDetail.noFailedTraces")} detail={t("sessionDetail.noFailedTracesDetail")} />
           ) : (
             <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures groupSessionFailures />
           )}
@@ -297,15 +299,16 @@ export function SessionDetailPage() {
 }
 
 function SessionTabs({ tab, setTab, analysisCount = 0, failedCount = 0 }) {
+  const { t } = useI18n();
   const tabs = [
-    { id: "timeline", label: "Timeline", detail: "Request sequence" },
-    { id: "traces", label: "Traces", detail: "HTTP exchanges" },
-    { id: "audit", label: "Audit", detail: `${failedCount} failed` },
-    { id: "performance", label: "Performance", detail: "Latency and tokens" },
-    { id: "analysis", label: "Analysis", detail: `${analysisCount} run${analysisCount === 1 ? "" : "s"}` },
+    { id: "timeline", label: t("requests.timeline"), detail: t("sessionDetail.requestSequence") },
+    { id: "traces", label: t("nav.traces"), detail: t("sessionDetail.httpExchanges") },
+    { id: "audit", label: t("nav.audit"), detail: t("sessionDetail.failedCount", { count: failedCount }) },
+    { id: "performance", label: t("sessionDetail.tabPerformance"), detail: t("sessionDetail.latencyAndTokens") },
+    { id: "analysis", label: t("nav.analysis"), detail: t(analysisCount === 1 ? "sessionDetail.runCountOne" : "sessionDetail.runCount", { count: analysisCount }) },
   ];
   return (
-    <section className="session-tab-strip" aria-label="Session views">
+    <section className="session-tab-strip" aria-label={t("sessionDetail.sessionViews")}>
       {tabs.map((item) => (
         <button key={item.id} className={tab === item.id ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab(item.id)}>
           <strong>{item.label}</strong>
@@ -317,15 +320,16 @@ function SessionTabs({ tab, setTab, analysisCount = 0, failedCount = 0 }) {
 }
 
 function SessionAuditPanel({ failedCount, traces, sessionID }) {
+  const { t } = useI18n();
   const failed = traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300);
   return (
     <section className="panel audit-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Session audit</p>
-          <h2>Risk entry points</h2>
+          <p className="eyebrow">{t("sessionDetail.sessionAudit")}</p>
+          <h2>{t("sessionDetail.riskEntryPoints")}</h2>
         </div>
-        <InlineTag tone={failedCount ? "danger" : "green"}>{failedCount} failed</InlineTag>
+        <InlineTag tone={failedCount ? "danger" : "green"}>{t("sessionDetail.failedCount", { count: failedCount })}</InlineTag>
       </div>
       {failed.length ? (
         <div className="finding-list">
@@ -333,7 +337,7 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
             <article key={trace.id} className="finding-card">
               <div className="finding-card-head">
                 <div>
-                  <strong>{trace.model || "unknown-model"}</strong>
+                  <strong>{trace.model || t("sessionDetail.unknownModel")}</strong>
                   <span>{formatDateTime(trace.time)}</span>
                 </div>
                 <div className="trace-tag-group">
@@ -342,56 +346,58 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
                 </div>
               </div>
               <div className="action-group action-group-start">
-                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "audit", "failure")}>Audit</Link>
-                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "raw", "response")}>Raw</Link>
+                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "audit", "failure")}>{t("nav.audit")}</Link>
+                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "raw", "response")}>{t("requests.raw")}</Link>
               </div>
             </article>
           ))}
         </div>
       ) : (
-        <EmptyState title="No failed traces" detail="No failed trace entry points are present in this session." compact />
+        <EmptyState title={t("sessionDetail.noFailedTraces")} detail={t("sessionDetail.noAuditFailuresDetail")} compact />
       )}
     </section>
   );
 }
 
 function SessionPerformancePanel({ performance }) {
+  const { t } = useI18n();
   if (!performance) {
-    return <EmptyState title="No performance data" detail="This session does not have aggregate performance metrics." />;
+    return <EmptyState title={t("sessionDetail.noPerformanceData")} detail={t("sessionDetail.noPerformanceDataDetail")} />;
   }
   return (
     <section className="panel performance-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Session performance</p>
-          <h2>Latency and tokens</h2>
+          <p className="eyebrow">{t("sessionDetail.sessionPerformance")}</p>
+          <h2>{t("sessionDetail.latencyAndTokens")}</h2>
         </div>
       </div>
       <section className="hero-grid">
-        <StatCard label="Requests" value={performance.request_count || 0} />
-        <StatCard label="Success" value={`${Number(performance.success_rate || 0).toFixed(1)}%`} accent="accent-green" />
-        <StatCard label="Duration" value={formatDuration(performance.duration_ms || 0, { precise: true })} />
+        <StatCard label={t("common.requests")} value={performance.request_count || 0} />
+        <StatCard label={t("common.success")} value={`${Number(performance.success_rate || 0).toFixed(1)}%`} accent="accent-green" />
+        <StatCard label={t("sessionDetail.duration")} value={formatDuration(performance.duration_ms || 0, { precise: true })} />
         <StatCard label="TTFT" value={formatDuration(performance.ttft_ms || 0, { precise: true })} />
-        <StatCard label="Tokens / sec" value={Number(performance.tokens_per_sec || 0).toFixed(2)} accent="accent-gold" />
-        <StatCard label="Cache" value={`${Number(performance.cache_ratio || 0).toFixed(1)}%`} />
+        <StatCard label={t("sessionDetail.tokensPerSec")} value={Number(performance.tokens_per_sec || 0).toFixed(2)} accent="accent-gold" />
+        <StatCard label={t("sessionDetail.cache")} value={`${Number(performance.cache_ratio || 0).toFixed(1)}%`} />
       </section>
       <div className="detail-meta-strip">
-        <DetailMetaPill label="total tokens" value={formatTokenCount(performance.total_tokens || 0)} />
-        <DetailMetaPill label="input" value={formatTokenCount(performance.prompt_tokens || 0)} />
-        <DetailMetaPill label="output" value={formatTokenCount(performance.completion_tokens || 0)} />
-        <DetailMetaPill label="cached" value={formatTokenCount(performance.cached_tokens || 0)} />
+        <DetailMetaPill label={t("sessionDetail.totalTokens")} value={formatTokenCount(performance.total_tokens || 0)} />
+        <DetailMetaPill label={t("sessionDetail.input")} value={formatTokenCount(performance.prompt_tokens || 0)} />
+        <DetailMetaPill label={t("sessionDetail.output")} value={formatTokenCount(performance.completion_tokens || 0)} />
+        <DetailMetaPill label={t("sessionDetail.cached")} value={formatTokenCount(performance.cached_tokens || 0)} />
       </div>
     </section>
   );
 }
 
 function SessionAnalysisPanel({ analysis }) {
+  const { t } = useI18n();
   return (
     <section className="panel analysis-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Session learning</p>
-          <h2>Analysis runs</h2>
+          <p className="eyebrow">{t("sessionDetail.sessionLearning")}</p>
+          <h2>{t("sessionDetail.analysisRuns")}</h2>
         </div>
       </div>
       {analysis.length ? (
@@ -408,21 +414,22 @@ function SessionAnalysisPanel({ analysis }) {
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="input" value={run.input_ref || "-"} mono />
-                <DetailMetaPill label="created" value={formatDateTime(run.created_at)} />
+                <DetailMetaPill label={t("sessionDetail.input")} value={run.input_ref || "-"} mono />
+                <DetailMetaPill label={t("common.created")} value={formatDateTime(run.created_at)} />
               </div>
               <pre className="code-block">{JSON.stringify(run.output || {}, null, 2)}</pre>
             </article>
           ))}
         </div>
       ) : (
-        <EmptyState title="No analysis runs" detail="Run analyze session --session-id to persist a deterministic session summary." compact />
+        <EmptyState title={t("analysis.noRuns")} detail={t("sessionDetail.noAnalysisRunsDetail")} compact />
       )}
     </section>
   );
 }
 
 function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
+  const { t } = useI18n();
   const focus = tone === "danger" ? "failure" : "";
   const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
   const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "conversation", tone === "danger" ? "timeline_error" : "timeline");
@@ -435,7 +442,7 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
         <InlineTag tone={tone === "danger" ? "danger" : tone === "accent" ? "accent" : "default"}>{formatEndpointTag(item.endpoint)}</InlineTag>
         <InlineTag>{item.status_code}</InlineTag>
       </div>
-      <strong>{item.model || "unknown-model"}</strong>
+      <strong>{item.model || t("sessionDetail.unknownModel")}</strong>
       <span>{formatDateTime(item.time)}</span>
       <span>duration {formatDuration(item.duration_ms)}</span>
       <span>tokens {formatTokenCount(item.total_tokens)}</span>
@@ -449,12 +456,12 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
       {detail ? <div className="failure-node-detail">{detail}</div> : null}
       <div className="action-group action-group-start">
         <Link className="ghost-button" to={timelineLink}>
-          Timeline
+          {t("requests.timeline")}
         </Link>
         <Link className="ghost-button" to={rawLink}>
-          Raw
+          {t("requests.raw")}
         </Link>
-        <Link className="icon-button" to={traceLink} title="View trace" aria-label="View trace">
+        <Link className="icon-button" to={traceLink} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
           <ViewIcon />
         </Link>
       </div>

@@ -8,6 +8,7 @@ import { RequestList } from "../components/monitor/RequestList";
 import { RoutingFailureTimeline } from "../components/monitor/RoutingFailureTimeline";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import {
   buildRoutingLink,
   buildTraceLink,
@@ -31,6 +32,7 @@ import {
 
 export function UpstreamDetailPage() {
   const { upstreamID = "" } = useParams();
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeUpstreamWindow(searchParams.get("window"));
   const modelValue = searchParams.get("model") || "";
@@ -80,7 +82,7 @@ export function UpstreamDetailPage() {
       <header className="topbar detail-topbar">
         <div className="detail-title-block">
           <div className="detail-heading-row">
-            <h1>{target?.id || upstreamID || "upstream detail"}</h1>
+            <h1>{target?.id || upstreamID || t("upstreamDetail.upstreamFallback")}</h1>
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
               <InlineTag tone="accent">{target?.provider_preset || "custom"}</InlineTag>
@@ -88,22 +90,22 @@ export function UpstreamDetailPage() {
             </div>
           </div>
           <div className="detail-meta-strip">
-            <DetailMetaPill label="base url" value={target?.base_url || "-"} mono />
-            <DetailMetaPill label="last seen" value={formatDateTime(target?.last_seen)} />
-            <DetailMetaPill label="requests" value={target?.request_count ?? 0} />
-            <DetailMetaPill label="success" value={`${Number(target?.success_rate || 0).toFixed(1)}%`} />
+            <DetailMetaPill label={t("upstreamDetail.baseUrl")} value={target?.base_url || "-"} mono />
+            <DetailMetaPill label={t("upstreamDetail.lastSeen")} value={formatDateTime(target?.last_seen)} />
+            <DetailMetaPill label={t("common.requests")} value={target?.request_count ?? 0} />
+            <DetailMetaPill label={t("common.success")} value={`${Number(target?.success_rate || 0).toFixed(1)}%`} />
           </div>
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to={buildRoutingLink(windowValue, modelValue)} title="Back to routing" aria-label="Back to routing">
+            <Link className="icon-button" to={buildRoutingLink(windowValue, modelValue)} title={t("upstreamDetail.backToRouting")} aria-label={t("upstreamDetail.backToRouting")}>
               <HomeIcon />
             </Link>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label="ttft" value={target?.avg_ttft ?? 0} icon="total" />
-            <TokenBadge label="tokens" value={target?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
-            <TokenBadge label="failed" value={target?.failed_request ?? 0} icon="cached" />
+            <TokenBadge label={t("common.tokens")} value={target?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
+            <TokenBadge label={t("common.failed")} value={target?.failed_request ?? 0} icon="cached" />
           </div>
         </div>
       </header>
@@ -111,11 +113,11 @@ export function UpstreamDetailPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Analytics filters</p>
-            <h2>Window and model</h2>
+            <p className="eyebrow">{t("upstreamDetail.analyticsFilters")}</p>
+            <h2>{t("upstreamDetail.windowAndModel")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Upstream detail window">
+            <div className="view-toggle" role="tablist" aria-label={t("upstreamDetail.windowLabel")}>
               {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button
                   key={window}
@@ -136,9 +138,9 @@ export function UpstreamDetailPage() {
             name="model"
             value={modelDraft}
             onChange={(event) => setModelDraft(event.target.value)}
-            placeholder="Filter detail by model"
+            placeholder={t("upstreamDetail.filterByModel")}
           />
-          <button className="ghost-button" type="submit">Apply</button>
+          <button className="ghost-button" type="submit">{t("common.apply")}</button>
           <button
             className="ghost-button"
             type="button"
@@ -149,40 +151,40 @@ export function UpstreamDetailPage() {
               setSearchParams(next);
             }}
           >
-            Reset
+            {t("common.reset")}
           </button>
         </form>
       </section>
 
-      {detail.error ? <EmptyState title="Unable to load upstream detail" detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title="Loading upstream detail" detail="Fetching routing health, model catalog, recent failures, and latest traces." /> : null}
+      {detail.error ? <EmptyState title={t("upstreamDetail.loadError")} detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title={t("upstreamDetail.loading")} detail={t("upstreamDetail.loadingDetail")} /> : null}
 
       {detail.data ? (
         <div className="detail-grid detail-grid-compact">
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Traffic summary</p>
-                <h2>Routing health</h2>
+                <p className="eyebrow">{t("upstreamDetail.trafficSummary")}</p>
+                <h2>{t("upstreamDetail.routingHealth")}</h2>
               </div>
             </div>
             <div className="hero-grid hero-grid-compact">
-              <StatCard label="Requests" value={target?.request_count ?? 0} />
-              <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
-              <StatCard label="Inflight" value={target?.inflight ?? 0} />
-              <StatCard label="Capacity" value={formatCapacity(target?.weight, target?.capacity_hint)} />
+              <StatCard label={t("common.requests")} value={target?.request_count ?? 0} />
+              <StatCard label={t("common.failed")} value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
+              <StatCard label={t("upstreamDetail.inflight")} value={target?.inflight ?? 0} />
+              <StatCard label={t("providers.capacity")} value={formatCapacity(target?.weight, target?.capacity_hint)} />
             </div>
           </section>
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Router health</p>
-                <h2>Decision signals</h2>
+                <p className="eyebrow">{t("upstreamDetail.routerHealth")}</p>
+                <h2>{t("upstreamDetail.decisionSignals")}</h2>
               </div>
             </div>
             <div className="session-breakdown-grid">
               <section className="breakdown-card">
-                <div className="breakdown-title">Health state</div>
+                <div className="breakdown-title">{t("upstreamDetail.healthState")}</div>
                 <div className="routing-summary-stack">
                   <strong className="trace-model-name">{formatHealthLabel(target?.health_state)}</strong>
                   <div className="trace-tag-group">
@@ -193,20 +195,20 @@ export function UpstreamDetailPage() {
                 </div>
               </section>
               <section className="breakdown-card">
-                <div className="breakdown-title">Live metrics</div>
+                <div className="breakdown-title">{t("upstreamDetail.liveMetrics")}</div>
                 <div className="detail-meta-strip">
-                  <DetailMetaPill label="error" value={formatRatio(target?.error_rate)} />
-                  <DetailMetaPill label="timeout" value={formatRatio(target?.timeout_rate)} />
+                  <DetailMetaPill label={t("upstreamDetail.error")} value={formatRatio(target?.error_rate)} />
+                  <DetailMetaPill label={t("upstreamDetail.timeout")} value={formatRatio(target?.timeout_rate)} />
                   <DetailMetaPill label="ttft" value={formatDuration(target?.ttft_fast_ms || target?.avg_ttft || 0)} />
-                  <DetailMetaPill label="latency" value={formatDuration(target?.latency_fast_ms || 0)} />
-                  <DetailMetaPill label="refresh" value={target?.last_refresh_status || "unknown"} />
+                  <DetailMetaPill label={t("upstreamDetail.latency")} value={formatDuration(target?.latency_fast_ms || 0)} />
+                  <DetailMetaPill label={t("upstreamDetail.refresh")} value={target?.last_refresh_status || "unknown"} />
                 </div>
               </section>
               <section className="breakdown-card">
-                <div className="breakdown-title">Threshold checks</div>
+                <div className="breakdown-title">{t("upstreamDetail.thresholdChecks")}</div>
                 <div className="breakdown-list">
                   <div className="breakdown-row">
-                    <span className="breakdown-label">error rate</span>
+                    <span className="breakdown-label">{t("upstreamDetail.errorRate")}</span>
                     <div className="trace-tag-group">
                       <InlineTag tone={metricThresholdTone(resolveThresholdState(target?.error_rate, thresholds?.error_rate_degraded, thresholds?.error_rate_open))}>
                         {resolveThresholdState(target?.error_rate, thresholds?.error_rate_degraded, thresholds?.error_rate_open)}
@@ -215,7 +217,7 @@ export function UpstreamDetailPage() {
                     </div>
                   </div>
                   <div className="breakdown-row">
-                    <span className="breakdown-label">timeout rate</span>
+                    <span className="breakdown-label">{t("upstreamDetail.timeoutRate")}</span>
                     <div className="trace-tag-group">
                       <InlineTag tone={metricThresholdTone(resolveThresholdState(target?.timeout_rate, thresholds?.timeout_rate_degraded, thresholds?.timeout_rate_open))}>
                         {resolveThresholdState(target?.timeout_rate, thresholds?.timeout_rate_degraded, thresholds?.timeout_rate_open)}
@@ -224,7 +226,7 @@ export function UpstreamDetailPage() {
                     </div>
                   </div>
                   <div className="breakdown-row">
-                    <span className="breakdown-label">ttft ratio</span>
+                    <span className="breakdown-label">{t("upstreamDetail.ttftRatio")}</span>
                     <div className="trace-tag-group">
                       <InlineTag tone={metricThresholdTone(resolveThresholdState(computeTTFTRatio(target), thresholds?.ttft_degraded_ratio, null))}>
                         {resolveThresholdState(computeTTFTRatio(target), thresholds?.ttft_degraded_ratio, null)}
@@ -233,8 +235,8 @@ export function UpstreamDetailPage() {
                     </div>
                   </div>
                   <div className="breakdown-row">
-                    <span className="breakdown-label">router gates</span>
-                    <strong>{thresholds?.failure_threshold ?? 0} failures · open {thresholds?.open_window || "-"}</strong>
+                    <span className="breakdown-label">{t("upstreamDetail.routerGates")}</span>
+                    <strong>{t("upstreamDetail.routerGateValue", { failures: thresholds?.failure_threshold ?? 0, window: thresholds?.open_window || "-" })}</strong>
                   </div>
                 </div>
               </section>
@@ -243,27 +245,27 @@ export function UpstreamDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Distribution</p>
-                <h2>Models and endpoints</h2>
+                <p className="eyebrow">{t("upstreamDetail.distribution")}</p>
+                <h2>{t("upstreamDetail.modelsAndEndpoints")}</h2>
               </div>
             </div>
             <div className="session-breakdown-grid">
-              <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
-              <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+              <BreakdownList title={t("upstreamDetail.models")} items={breakdown?.models || []} formatter={(item) => item.label} />
+              <BreakdownList title={t("upstreamDetail.endpoints")} items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
             </div>
           </section>
           <section className="panel" id="models">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Model catalog</p>
-                <h2>Full routing surface</h2>
+                <p className="eyebrow">{t("upstreamDetail.modelCatalog")}</p>
+                <h2>{t("upstreamDetail.fullRoutingSurface")}</h2>
               </div>
               <div className="panel-head-actions">
                 <span className="session-filter-count">
-                  {visibleCatalogModels.length} / {catalogModels.length} indexed
+                  {t("upstreamDetail.indexedCount", { visible: visibleCatalogModels.length, total: catalogModels.length })}
                 </span>
                 <span className="session-filter-count">
-                  {visibleRecentModels.length} / {recentModels.length} recent
+                  {t("upstreamDetail.recentCount", { visible: visibleRecentModels.length, total: recentModels.length })}
                 </span>
               </div>
             </div>
@@ -273,27 +275,27 @@ export function UpstreamDetailPage() {
                 type="search"
                 value={catalogQuery}
                 onChange={(event) => setCatalogQuery(event.target.value)}
-                placeholder="Search model names"
+                placeholder={t("upstreamDetail.searchModels")}
               />
             </form>
             <div className="session-breakdown-grid">
               <section className="breakdown-card">
-                <div className="breakdown-title">Recently routed models</div>
+                <div className="breakdown-title">{t("upstreamDetail.recentlyRoutedModels")}</div>
                 {visibleRecentModels.length ? (
                   <div className="model-catalog-list">
                     {visibleRecentModels.map((model) => (
                       <div key={`recent-${model}`} className="model-catalog-row" title={model}>
                         <strong>{model}</strong>
-                        {target?.last_model === model ? <InlineTag tone="accent">last</InlineTag> : null}
+                        {target?.last_model === model ? <InlineTag tone="accent">{t("upstreamDetail.lastTag")}</InlineTag> : null}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <EmptyState title="No recent models" detail="No recently routed model names match this filter." compact />
+                  <EmptyState title={t("upstreamDetail.noRecentModels")} detail={t("upstreamDetail.noRecentModelsDetail")} compact />
                 )}
               </section>
               <section className="breakdown-card">
-                <div className="breakdown-title">Indexed models</div>
+                <div className="breakdown-title">{t("upstreamDetail.indexedModels")}</div>
                 {visibleCatalogModels.length ? (
                   <div className="model-catalog-list">
                     {visibleCatalogModels.map((model) => (
@@ -303,7 +305,7 @@ export function UpstreamDetailPage() {
                     ))}
                   </div>
                 ) : (
-                  <EmptyState title="No indexed models" detail="No catalog model names match this filter." compact />
+                  <EmptyState title={t("upstreamDetail.noIndexedModels")} detail={t("upstreamDetail.noIndexedModelsDetail")} compact />
                 )}
               </section>
             </div>
@@ -314,22 +316,22 @@ export function UpstreamDetailPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Failure trend</p>
-            <h2>Time-bucketed failures</h2>
+            <p className="eyebrow">{t("upstreamDetail.failureTrend")}</p>
+            <h2>{t("upstreamDetail.timeBucketedFailures")}</h2>
           </div>
         </div>
         {failureTimeline.length ? (
           <RoutingFailureTimeline items={failureTimeline} />
         ) : (
-          <EmptyState title="No failure timeline" detail="No time-bucketed failures are available for this upstream in the current window." />
+          <EmptyState title={t("upstreamDetail.noFailureTimeline")} detail={t("upstreamDetail.noFailureTimelineDetail")} />
         )}
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Recent failures</p>
-            <h2>Latest failed traces</h2>
+            <p className="eyebrow">{t("upstreamDetail.recentFailures")}</p>
+            <h2>{t("upstreamDetail.latestFailedTraces")}</h2>
           </div>
         </div>
         {timeline.length ? (
@@ -341,25 +343,25 @@ export function UpstreamDetailPage() {
                   <InlineTag tone="accent">{formatEndpointTag(failure.endpoint)}</InlineTag>
                   {failure.reason ? <InlineTag>{formatFailureReason(failure.reason)}</InlineTag> : null}
                 </div>
-                <strong>{failure.model || "unknown-model"}</strong>
+                <strong>{failure.model || t("upstreamDetail.unknownModel")}</strong>
                 <span>{formatDateTime(failure.recorded_at)}</span>
                 {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
               </Link>
             ))}
           </div>
         ) : (
-          <EmptyState title="No recent failures" detail="This upstream does not have recent failed traces in the current analytics window." />
+          <EmptyState title={t("upstreamDetail.noRecentFailures")} detail={t("upstreamDetail.noRecentFailuresDetail")} />
         )}
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Recent requests</p>
-            <h2>Latest routed traces</h2>
+            <p className="eyebrow">{t("upstreamDetail.recentRequests")}</p>
+            <h2>{t("upstreamDetail.latestRoutedTraces")}</h2>
           </div>
         </div>
-        {traces.length ? <RequestList items={traces} focusFailures /> : <EmptyState title="No routed traces" detail="No trace records are currently linked to this upstream for the selected filters." />}
+        {traces.length ? <RequestList items={traces} focusFailures /> : <EmptyState title={t("upstreamDetail.noRoutedTraces")} detail={t("upstreamDetail.noRoutedTracesDetail")} />}
       </section>
     </div>
   );

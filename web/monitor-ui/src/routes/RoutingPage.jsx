@@ -79,7 +79,7 @@ export function RoutingPage() {
     <div className="shell shell-list">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Routing decisions</p>
+          <p className="eyebrow">{t("routing.decisions")}</p>
           <h1>{t("routing.title")}</h1>
         </div>
         <div className="topbar-meta">
@@ -91,14 +91,14 @@ export function RoutingPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Gateway routing</p>
-            <h2>Workspace</h2>
+            <p className="eyebrow">{t("routing.gateway")}</p>
+            <h2>{t("routing.workspace")}</h2>
           </div>
         </div>
-        <div className="view-toggle routing-mode-toggle" role="tablist" aria-label="Routing workspace">
+        <div className="view-toggle routing-mode-toggle" role="tablist" aria-label={t("routing.workspaceLabel")}>
           {ROUTING_TABS.map((tab) => (
             <button key={tab} className={activeTab === tab ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setTab(tab)}>
-              {routingTabLabel(tab)}
+              {routingTabLabel(tab, t)}
             </button>
           ))}
         </div>
@@ -113,7 +113,7 @@ export function RoutingPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Decision log</p>
+                <p className="eyebrow">{t("routing.decisionLog")}</p>
                 <h2>{t("routing.recent")}</h2>
               </div>
               <div className="panel-head-actions">
@@ -129,7 +129,7 @@ export function RoutingPage() {
             <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
           <input className="filter-input" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
           <input className="filter-input" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
-          <select className="filter-input" name="routing_status" aria-label="Routing status" value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
+          <select className="filter-input" name="routing_status" aria-label={t("routing.statusLabel")} value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
             <option value="">{t("routing.anyStatus")}</option>
             <option value="success">{t("routing.statusSuccess")}</option>
             <option value="error">{t("routing.statusError")}</option>
@@ -166,20 +166,21 @@ function normalizeRoutingTab(value) {
   return ROUTING_TABS.includes(value) ? value : "decisions";
 }
 
-function routingTabLabel(tab) {
+function routingTabLabel(tab, t) {
   switch (tab) {
     case "settings":
-      return "Settings";
+      return t("routing.tabSettings");
     case "aliases":
-      return "Aliases";
+      return t("routing.tabAliases");
     case "inspect":
-      return "Inspector";
+      return t("routing.tabInspector");
     default:
-      return "Decisions";
+      return t("routing.tabDecisions");
   }
 }
 
 function RoutingSettingsPanel() {
+  const { t } = useI18n();
   const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", missing_model_policy: "reject" });
   const [status, setStatus] = useState({ loading: true, error: "", saved: false });
 
@@ -219,44 +220,45 @@ function RoutingSettingsPanel() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">System policy</p>
-          <h2>Routing settings</h2>
+          <p className="eyebrow">{t("routing.systemPolicy")}</p>
+          <h2>{t("routing.settings")}</h2>
         </div>
-        {status.saved ? <InlineTag tone="green">Saved</InlineTag> : null}
+        {status.saved ? <InlineTag tone="green">{t("routing.saved")}</InlineTag> : null}
       </div>
-      {status.error ? <EmptyState title="Routing settings API unavailable" detail={status.error} compact /> : null}
+      {status.error ? <EmptyState title={t("routing.settingsUnavailable")} detail={status.error} compact /> : null}
       <form className="filter-bar routing-filter-bar" onSubmit={save}>
         <label className="filter-label">
-          Responses strategy
+          {t("routing.responsesStrategy")}
           <select className="filter-input" value={settings.responses_strategy || "auto"} onChange={(event) => update("responses_strategy", event.target.value)}>
-            <option value="auto">auto — native responses first, local server fallback</option>
-            <option value="prefer_native">prefer_native — native responses first (same as auto)</option>
-            <option value="prefer_local_server">prefer_local_server — local responses server first, native fallback</option>
-            <option value="native_only">native_only — native responses upstream only</option>
-            <option value="local_server_only">local_server_only — local responses server only (needs a chat completions upstream)</option>
+            <option value="auto">{t("routing.strategyAuto")}</option>
+            <option value="prefer_native">{t("routing.strategyPreferNative")}</option>
+            <option value="prefer_local_server">{t("routing.strategyPreferLocalServer")}</option>
+            <option value="native_only">{t("routing.strategyNativeOnly")}</option>
+            <option value="local_server_only">{t("routing.strategyLocalServerOnly")}</option>
           </select>
         </label>
         <label className="filter-label">
-          Selection policy
+          {t("routing.selectionPolicy")}
           <select className="filter-input" value={settings.selection_policy || "p2c"} onChange={(event) => update("selection_policy", event.target.value)}>
             <option value="p2c">p2c</option>
             <option value="first_available">first_available</option>
           </select>
         </label>
         <label className="filter-label">
-          Missing model
+          {t("routing.missingModel")}
           <select className="filter-input" value={settings.missing_model_policy || "reject"} onChange={(event) => update("missing_model_policy", event.target.value)}>
             <option value="reject">reject</option>
             <option value="fallback">fallback</option>
           </select>
         </label>
-        <button className="ghost-button" type="submit">Save</button>
+        <button className="ghost-button" type="submit">{t("common.save")}</button>
       </form>
     </section>
   );
 }
 
 function ModelAliasesPanel() {
+  const { t } = useI18n();
   const [refreshTick, setRefreshTick] = useState(0);
   const aliases = useJSON(apiPaths.modelAliases, [refreshTick]);
   const [form, setForm] = useState({ alias: "", target_model: "", channel_id: "" });
@@ -332,7 +334,7 @@ function ModelAliasesPanel() {
       const checked = await validateAlias(form);
       setValidation({ loading: false, data: checked, error: "" });
       if (!checked.valid) {
-        setSubmitError("Resolve alias validation errors before saving.");
+        setSubmitError(t("routing.resolveValidationErrors"));
         return;
       }
       await postJSON(apiPaths.modelAliases, form);
@@ -368,7 +370,7 @@ function ModelAliasesPanel() {
       const checked = await validateAlias(editForm);
       setEditValidation({ loading: false, data: checked, error: "" });
       if (!checked.valid) {
-        setSubmitError("Resolve alias validation errors before saving.");
+        setSubmitError(t("routing.resolveValidationErrors"));
         return;
       }
       await patchJSON(apiPaths.modelAlias(editID), editForm);
@@ -385,17 +387,17 @@ function ModelAliasesPanel() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Model resolution</p>
-          <h2>Model aliases</h2>
+          <p className="eyebrow">{t("routing.modelResolution")}</p>
+          <h2>{t("routing.modelAliases")}</h2>
         </div>
-        <InlineTag>{formatCount(items.length)} aliases</InlineTag>
+        <InlineTag>{t("routing.aliasCount", { count: formatCount(items.length) })}</InlineTag>
       </div>
-      {aliases.error ? <EmptyState title="Model aliases API unavailable" detail={aliases.error} compact /> : null}
+      {aliases.error ? <EmptyState title={t("routing.aliasesUnavailable")} detail={aliases.error} compact /> : null}
       <form className="filter-bar routing-filter-bar" onSubmit={create}>
-        <input className="filter-input" placeholder="Alias, e.g. abc" value={form.alias} onChange={(event) => update("alias", event.target.value)} />
-        <input className="filter-input" placeholder="Target model, e.g. gpt-5.5" value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
-        <input className="filter-input" placeholder="Optional channel" value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
-        <button className="ghost-button" type="submit" disabled={createDisabled}>Create</button>
+        <input className="filter-input" placeholder={t("routing.aliasPlaceholder")} value={form.alias} onChange={(event) => update("alias", event.target.value)} />
+        <input className="filter-input" placeholder={t("routing.targetModelPlaceholder")} value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
+        <input className="filter-input" placeholder={t("routing.optionalChannel")} value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
+        <button className="ghost-button" type="submit" disabled={createDisabled}>{t("routing.create")}</button>
       </form>
       <AliasValidationMessages state={validation} />
       {submitError ? <p className="event-message">{submitError}</p> : null}
@@ -405,38 +407,39 @@ function ModelAliasesPanel() {
             <section className="breakdown-card" key={item.id || `${item.alias}:${item.channel_id}:${item.target_model}`}>
               {editID === item.id && editForm ? (
                 <form className="routing-summary-stack" onSubmit={saveEdit}>
-                  <div className="breakdown-title">Edit alias</div>
-                  <input className="filter-input" placeholder="Alias" value={editForm.alias} onChange={(event) => updateEdit("alias", event.target.value)} />
-                  <input className="filter-input" placeholder="Target model" value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
-                  <input className="filter-input" placeholder="Optional channel" value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
-                  <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> enabled</label>
+                  <div className="breakdown-title">{t("routing.editAlias")}</div>
+                  <input className="filter-input" placeholder={t("routing.alias")} value={editForm.alias} onChange={(event) => updateEdit("alias", event.target.value)} />
+                  <input className="filter-input" placeholder={t("routing.targetModel")} value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
+                  <input className="filter-input" placeholder={t("routing.optionalChannel")} value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
+                  <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> {t("routing.enabled")}</label>
                   <AliasValidationMessages state={editValidation} compact />
                   <div className="trace-tag-group">
-                    <button className="ghost-button" type="submit" disabled={editDisabled}>Save</button>
-                    <button className="ghost-button" type="button" onClick={cancelEdit}>Cancel</button>
+                    <button className="ghost-button" type="submit" disabled={editDisabled}>{t("common.save")}</button>
+                    <button className="ghost-button" type="button" onClick={cancelEdit}>{t("providers.cancel")}</button>
                   </div>
                 </form>
               ) : (
                 <div className="routing-summary-stack">
-                  <div className="breakdown-title">{item.channel_id || "global"}</div>
-                  <strong className="trace-model-name">{item.alias} to {item.target_model}</strong>
+                  <div className="breakdown-title">{item.channel_id || t("routing.global")}</div>
+                  <strong className="trace-model-name">{t("routing.aliasTo", { alias: item.alias, target: item.target_model })}</strong>
                   <div className="trace-tag-group">
-                    <InlineTag tone={item.enabled === false ? "gold" : "green"}>{item.enabled === false ? "disabled" : "enabled"}</InlineTag>
+                    <InlineTag tone={item.enabled === false ? "gold" : "green"}>{item.enabled === false ? t("routing.disabled") : t("routing.enabled")}</InlineTag>
                     {item.source ? <InlineTag>{item.source}</InlineTag> : null}
                   </div>
                   {item.description ? <span className="trace-subline">{item.description}</span> : null}
-                  <button className="ghost-button" type="button" onClick={() => startEdit(item)}>Edit</button>
+                  <button className="ghost-button" type="button" onClick={() => startEdit(item)}>{t("routing.edit")}</button>
                 </div>
               )}
             </section>
           ))}
         </div>
-      ) : !aliases.error ? <EmptyState title="No aliases configured" detail="Create aliases here once the backend API is enabled." compact /> : null}
+      ) : !aliases.error ? <EmptyState title={t("routing.noAliases")} detail={t("routing.noAliasesDetail")} compact /> : null}
     </section>
   );
 }
 
 function RouteInspectorPanel() {
+  const { t } = useI18n();
   const [form, setForm] = useState({ endpoint: "responses", model: "", stream: false, tools: false });
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -456,8 +459,8 @@ function RouteInspectorPanel() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Dry run</p>
-          <h2>Route inspector</h2>
+          <p className="eyebrow">{t("routing.dryRun")}</p>
+          <h2>{t("routing.routeInspector")}</h2>
         </div>
       </div>
       <form className="filter-bar routing-filter-bar" onSubmit={inspect}>
@@ -466,62 +469,63 @@ function RouteInspectorPanel() {
           <option value="responses">responses</option>
           <option value="anthropic_messages">anthropic_messages</option>
         </select>
-        <input className="filter-input" placeholder="Model" value={form.model} onChange={(event) => update("model", event.target.value)} />
-        <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> stream</label>
-        <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> tools</label>
-        <button className="ghost-button" type="submit">Inspect</button>
+        <input className="filter-input" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
+        <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> {t("routing.stream")}</label>
+        <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>
+        <button className="ghost-button" type="submit">{t("routing.inspect")}</button>
       </form>
-      {error ? <EmptyState title="Route inspector API unavailable" detail={error} compact /> : null}
+      {error ? <EmptyState title={t("routing.inspectorUnavailable")} detail={error} compact /> : null}
       {result ? <RouteInspectorResult result={result} /> : null}
-      {!result && !error ? <EmptyState title="No dry run yet" detail="Submit endpoint and model to preview the planned route." compact /> : null}
+      {!result && !error ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
     </section>
   );
 }
 
 function RouteInspectorResult({ result }) {
+  const { t } = useI18n();
   const plan = result?.result?.plan || {};
   const candidates = Array.isArray(result?.result?.candidates) ? result.result.candidates : [];
   const hasPlan = Boolean(plan.execution_mode || plan.selected_candidate_id || plan.upstream_endpoint || plan.upstream_model);
   return (
     <div className="routing-summary-stack">
-      {result.error ? <EmptyState title="No executable route" detail={result.error} tone="danger" compact /> : null}
+      {result.error ? <EmptyState title={t("routing.noExecutableRoute")} detail={result.error} tone="danger" compact /> : null}
       {hasPlan ? (
         <div className="session-breakdown-grid">
           <section className="breakdown-card">
-            <div className="breakdown-title">Execution</div>
+            <div className="breakdown-title">{t("routing.execution")}</div>
             <strong className="trace-model-name">{formatInspectValue(plan.execution_mode)}</strong>
-            <span className="trace-subline">{formatInspectValue(plan.reason || "selected")}</span>
+            <span className="trace-subline">{formatInspectValue(plan.reason || t("routing.selected"))}</span>
           </section>
           <section className="breakdown-card">
-            <div className="breakdown-title">Upstream</div>
+            <div className="breakdown-title">{t("routing.upstream")}</div>
             <strong className="trace-model-name">{formatInspectValue(plan.upstream_endpoint)}</strong>
             <span className="trace-subline mono">{formatInspectValue(plan.upstream_model)}</span>
           </section>
           <section className="breakdown-card">
-            <div className="breakdown-title">Selected target</div>
+            <div className="breakdown-title">{t("routing.selectedTarget")}</div>
             <strong className="trace-model-name">{formatInspectValue(plan.selected_route_target_id || plan.selected_candidate_id)}</strong>
-            <span className="trace-subline mono">channel {formatInspectValue(plan.selected_channel_id)}</span>
+            <span className="trace-subline mono">{t("routing.channelLabel", { value: formatInspectValue(plan.selected_channel_id) })}</span>
           </section>
           <section className="breakdown-card">
-            <div className="breakdown-title">Request model</div>
+            <div className="breakdown-title">{t("routing.requestModel")}</div>
             <strong className="trace-model-name">{formatInspectValue(plan.requested_model || result?.request?.model)}</strong>
-            <span className="trace-subline">{formatCount(plan.resolved_model_candidates?.length || 0)} resolved candidate(s)</span>
+            <span className="trace-subline">{t("routing.resolvedCandidates", { count: formatCount(plan.resolved_model_candidates?.length || 0) })}</span>
           </section>
         </div>
       ) : null}
       {plan.resolved_model_candidates?.length ? (
         <section className="breakdown-card">
-          <div className="breakdown-title">Resolved models</div>
+          <div className="breakdown-title">{t("routing.resolvedModels")}</div>
           <div className="routing-candidate-list">
             {plan.resolved_model_candidates.map((candidate, index) => (
               <article className="routing-candidate-card routing-candidate-card-active" key={`${candidate.channel_id || "global"}-${candidate.model}-${index}`}>
                 <div className="routing-candidate-head">
                   <div>
-                    <strong>{candidate.model || "unknown model"}</strong>
-                    <span className="trace-subline mono">{candidate.alias ? `alias ${candidate.alias}` : candidate.source || "request"}</span>
+                    <strong>{candidate.model || t("routing.unknownModel")}</strong>
+                    <span className="trace-subline mono">{candidate.alias ? t("routing.aliasPrefix", { alias: candidate.alias }) : candidate.source || "request"}</span>
                   </div>
                   <div className="trace-tag-group">
-                    {candidate.channel_id ? <InlineTag tone="accent">{candidate.channel_id}</InlineTag> : <InlineTag>global</InlineTag>}
+                    {candidate.channel_id ? <InlineTag tone="accent">{candidate.channel_id}</InlineTag> : <InlineTag>{t("routing.global")}</InlineTag>}
                     {candidate.source ? <InlineTag>{candidate.source}</InlineTag> : null}
                   </div>
                 </div>
@@ -532,7 +536,7 @@ function RouteInspectorResult({ result }) {
       ) : null}
       {candidates.length ? <RouteInspectorCandidates candidates={candidates} selectedID={plan.selected_candidate_id} /> : null}
       <details className="breakdown-card">
-        <summary className="breakdown-title">Raw inspector response</summary>
+        <summary className="breakdown-title">{t("routing.rawInspectorResponse")}</summary>
         <pre className="trace-json-block">{JSON.stringify(result, null, 2)}</pre>
       </details>
     </div>
@@ -540,9 +544,10 @@ function RouteInspectorResult({ result }) {
 }
 
 function RouteInspectorCandidates({ candidates, selectedID }) {
+  const { t } = useI18n();
   return (
     <section className="breakdown-card">
-      <div className="breakdown-title">Candidate reasons</div>
+      <div className="breakdown-title">{t("routing.candidateReasons")}</div>
       <div className="routing-candidate-list">
         {candidates.map((candidate, index) => {
           const selected = candidate.selectable && candidate.candidate_id === selectedID;
@@ -550,19 +555,19 @@ function RouteInspectorCandidates({ candidates, selectedID }) {
             <article className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"} key={`${candidate.candidate_id || "candidate"}-${candidate.execution_mode}-${candidate.upstream_endpoint}-${index}`}>
               <div className="routing-candidate-head">
                 <div>
-                  <strong>{candidate.route_target_id || candidate.candidate_id || "unknown target"}</strong>
-                  <span className="trace-subline mono">{formatInspectValue(candidate.execution_mode)} via {formatInspectValue(candidate.upstream_endpoint)}</span>
+                  <strong>{candidate.route_target_id || candidate.candidate_id || t("routing.unknownTarget")}</strong>
+                  <span className="trace-subline mono">{t("routing.viaEndpoint", { mode: formatInspectValue(candidate.execution_mode), endpoint: formatInspectValue(candidate.upstream_endpoint) })}</span>
                 </div>
                 <div className="trace-tag-group">
-                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{selected ? "selected" : candidate.selectable ? "selectable" : "filtered"}</InlineTag>
+                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{selected ? t("routing.selected") : candidate.selectable ? t("routing.selectable") : t("routing.filtered")}</InlineTag>
                   <InlineTag>{formatInspectValue(candidate.reason)}</InlineTag>
                   {candidate.channel_id ? <InlineTag tone="accent">{candidate.channel_id}</InlineTag> : null}
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMeta label="model" value={candidate.upstream_model || "-"} mono />
-                <DetailMeta label="rank" value={candidate.rank ?? "-"} />
-                <DetailMeta label="candidate" value={candidate.candidate_id || "-"} mono />
+                <DetailMeta label={t("routing.model")} value={candidate.upstream_model || "-"} mono />
+                <DetailMeta label={t("routing.rank")} value={candidate.rank ?? "-"} />
+                <DetailMeta label={t("routing.candidate")} value={candidate.candidate_id || "-"} mono />
               </div>
             </article>
           );
@@ -582,6 +587,7 @@ function DetailMeta({ label, value, mono = false }) {
 }
 
 function AliasValidationMessages({ state, compact = false }) {
+  const { t } = useI18n();
   const data = state?.data;
   const errors = Array.isArray(data?.errors) ? data.errors : [];
   const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
@@ -590,12 +596,12 @@ function AliasValidationMessages({ state, compact = false }) {
   }
   return (
     <div className={compact ? "routing-summary-stack" : "routing-summary-stack"}>
-      {state.loading ? <p className="trace-subline">Validating alias...</p> : null}
-      {state.error ? <p className="event-message">Alias validation unavailable: {state.error}</p> : null}
+      {state.loading ? <p className="trace-subline">{t("routing.validatingAlias")}</p> : null}
+      {state.error ? <p className="event-message">{t("routing.validationUnavailable", { error: state.error })}</p> : null}
       {errors.map((error) => <p className="event-message" key={error}>{error}</p>)}
       {warnings.map((warning) => (
         <p className="trace-subline" key={`${warning.code}:${warning.message}`}>
-          Warning {warning.code}: {warning.message}
+          {t("routing.validationWarning", { code: warning.code, message: warning.message })}
         </p>
       ))}
     </div>
@@ -746,7 +752,7 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Credential routing</p>
+          <p className="eyebrow">{t("routing.credentialRouting")}</p>
           <h2>{t("routing.credentialSummary")}</h2>
         </div>
         <div className="trace-tag-group">

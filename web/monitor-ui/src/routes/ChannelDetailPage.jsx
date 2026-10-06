@@ -8,6 +8,7 @@ import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
@@ -15,6 +16,7 @@ export function ProviderDetailPage() {
   const { providerID = "", channelID = "" } = useParams();
   const effectiveProviderID = providerID || channelID;
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
@@ -60,7 +62,7 @@ export function ProviderDetailPage() {
       if (err.payload?.provider_probe) {
         setLastProbe(err.payload);
       }
-      setActionError(formatProbeActionError(err));
+      setActionError(formatProbeActionError(err, t));
       reload();
     } finally {
       setBusy("");
@@ -78,7 +80,7 @@ export function ProviderDetailPage() {
       setLastProbe(null);
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to apply provider probe suggestions.");
+      setActionError(err.message || t("channelDetail.applyProbeError"));
     } finally {
       setBusy("");
     }
@@ -90,7 +92,7 @@ export function ProviderDetailPage() {
       await patchJSON(apiPaths.provider(effectiveProviderID), { enabled });
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to update provider.");
+      setActionError(err.message || t("channelDetail.updateProviderError"));
     } finally {
       setBusy("");
     }
@@ -103,7 +105,7 @@ export function ProviderDetailPage() {
       setEditOpen(false);
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to save provider.");
+      setActionError(err.message || t("channelDetail.saveProviderError"));
     } finally {
       setBusy("");
     }
@@ -115,13 +117,13 @@ export function ProviderDetailPage() {
       await patchJSON(apiPaths.providerModel(effectiveProviderID, model), { enabled });
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to update model.");
+      setActionError(err.message || t("channelDetail.updateModelError"));
     } finally {
       setBusy("");
     }
   };
   const deleteProvider = async () => {
-    if (!window.confirm(`Delete provider ${provider.name || effectiveProviderID}? Configured models for this provider will also be removed.`)) {
+    if (!window.confirm(t("providers.deleteConfirm", { name: provider.name || effectiveProviderID }))) {
       return;
     }
     setBusy("delete-provider");
@@ -130,13 +132,13 @@ export function ProviderDetailPage() {
       await deleteJSON(apiPaths.provider(effectiveProviderID));
       navigate("/providers");
     } catch (err) {
-      setActionError(err.message || "Unable to delete provider.");
+      setActionError(err.message || t("channelDetail.deleteProviderError"));
     } finally {
       setBusy("");
     }
   };
   const deleteModel = async (model) => {
-    if (!window.confirm(`Delete model ${model} from this provider?`)) {
+    if (!window.confirm(t("channelDetail.deleteModelConfirm", { model }))) {
       return;
     }
     setBusy(`delete:${model}`);
@@ -145,7 +147,7 @@ export function ProviderDetailPage() {
       await deleteJSON(apiPaths.providerModel(effectiveProviderID, model));
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to delete model.");
+      setActionError(err.message || t("channelDetail.deleteModelError"));
     } finally {
       setBusy("");
     }
@@ -163,7 +165,7 @@ export function ProviderDetailPage() {
       setModelDraft("");
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to add model.");
+      setActionError(err.message || t("channelDetail.addModelError"));
     } finally {
       setBusy("");
     }
@@ -178,7 +180,7 @@ export function ProviderDetailPage() {
       await patchJSON(apiPaths.providerModelsBatch(effectiveProviderID), { models, enabled });
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to update models.");
+      setActionError(err.message || t("channelDetail.updateModelsError"));
     } finally {
       setBusy("");
     }
@@ -191,7 +193,7 @@ export function ProviderDetailPage() {
           <div className="detail-heading-row">
             <h1>{provider.name || effectiveProviderID}</h1>
             <div className="trace-tag-group detail-tag-group">
-              <InlineTag tone={provider.enabled ? "green" : "default"}>{provider.enabled ? "enabled" : "disabled"}</InlineTag>
+              <InlineTag tone={provider.enabled ? "green" : "default"}>{provider.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>
               <InlineTag tone={provider.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(provider.source)}</InlineTag>
               <InlineTag tone="accent">{provider.provider_preset || "custom"}</InlineTag>
               {provider.secret_storage_mode ? <InlineTag tone={provider.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{provider.secret_storage_mode}</InlineTag> : null}
@@ -199,25 +201,25 @@ export function ProviderDetailPage() {
             </div>
           </div>
           <div className="detail-meta-strip">
-            <DetailMetaPill label="config source" value={providerSourceLabel(provider.source)} />
-            <DetailMetaPill label="api type" value={provider.api_type || "-"} />
-            <DetailMetaPill label="mode" value={provider.mode || "-"} />
-            <DetailMetaPill label="base url" value={provider.base_url || "-"} mono />
-            <DetailMetaPill label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
-            <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
-            <DetailMetaPill label="tokens" value={formatCount(summary.total_tokens)} />
-            {summary.missing_usage_request ? <DetailMetaPill label="missing usage" value={formatCount(summary.missing_usage_request)} /> : null}
+            <DetailMetaPill label={t("channelDetail.configSource")} value={providerSourceLabel(provider.source)} />
+            <DetailMetaPill label={t("providers.apiType")} value={provider.api_type || "-"} />
+            <DetailMetaPill label={t("channelDetail.mode")} value={provider.mode || "-"} />
+            <DetailMetaPill label={t("channelDetail.baseUrl")} value={provider.base_url || "-"} mono />
+            <DetailMetaPill label={t("channelDetail.models")} value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
+            <DetailMetaPill label={t("common.requests")} value={formatCount(summary.request_count)} />
+            <DetailMetaPill label={t("common.tokens")} value={formatCount(summary.total_tokens)} />
+            {summary.missing_usage_request ? <DetailMetaPill label={t("channelDetail.missingUsage")} value={formatCount(summary.missing_usage_request)} /> : null}
           </div>
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/providers" title="Back to providers" aria-label="Back to providers">
+            <Link className="icon-button" to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
               <HomeIcon />
             </Link>
-            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title="Probe provider" aria-label="Probe provider"><ProbeIcon /></button>
-            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title="Edit provider" aria-label="Edit provider"><EditIcon /></button>
-            <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title="Delete provider" aria-label="Delete provider"><DeleteIcon /></button>
-            <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label="Provider enabled" />
+            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
+            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></button>
+            <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
+            <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
           </div>
           <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
         </div>
@@ -226,11 +228,11 @@ export function ProviderDetailPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Analytics</p>
-            <h2>Provider usage</h2>
+            <p className="eyebrow">{t("channelDetail.analytics")}</p>
+            <h2>{t("channelDetail.providerUsage")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Provider detail window">
+            <div className="view-toggle" role="tablist" aria-label={t("channelDetail.windowLabel")}>
               {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
@@ -240,18 +242,18 @@ export function ProviderDetailPage() {
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">
-          <StatCard label="Requests" value={formatCount(summary.request_count)} />
-          <StatCard label="Errors" value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
-          <StatCard label="Success" value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
+          <StatCard label={t("common.requests")} value={formatCount(summary.request_count)} />
+          <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
+          <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+          <StatCard label={t("common.success")} value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
         </div>
       </section>
 
-      {actionError ? <EmptyState title="Provider action failed" detail={actionError} tone="danger" /> : null}
-      {detail.error ? <EmptyState title="Unable to load provider" detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title="Loading provider" detail="Collecting provider configuration, models, and usage." /> : null}
+      {actionError ? <EmptyState title={t("channelDetail.actionFailed")} detail={actionError} tone="danger" /> : null}
+      {detail.error ? <EmptyState title={t("channelDetail.loadError")} detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title={t("channelDetail.loading")} detail={t("channelDetail.loadingDetail")} /> : null}
       {detail.data?.secret_storage_mode === "plaintext-local" ? (
-        <EmptyState title="Local plaintext secret storage" detail="API keys and secret headers are redacted in Monitor responses, but currently stored in the local SQLite database without encryption." tone="danger" />
+        <EmptyState title={t("channelDetail.plaintextStorage")} detail={t("channelDetail.plaintextStorageDetail")} tone="danger" />
       ) : null}
       {lastProbe?.provider_probe ? (
         <ProviderProbeSuggestionPanel
@@ -279,8 +281,8 @@ export function ProviderDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Trend</p>
-                <h2>Token and request buckets</h2>
+                <p className="eyebrow">{t("channelDetail.trend")}</p>
+                <h2>{t("channelDetail.tokenRequestBuckets")}</h2>
               </div>
             </div>
             <SingleUsageCharts items={trends} />
@@ -289,16 +291,16 @@ export function ProviderDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Models</p>
-                <h2>Model routing and usage</h2>
-                <p className="trace-subline">Enable allows new requests through this provider; it does not start a model process. Discovery does not enable models.</p>
-                {!provider.enabled ? <p className="trace-subline">Provider disabled: all model routes are blocked. Model selections are preserved.</p> : null}
+                <p className="eyebrow">{t("nav.models")}</p>
+                <h2>{t("channelDetail.modelRoutingUsage")}</h2>
+                <p className="trace-subline">{t("channelDetail.enableHint")}</p>
+                {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
               </div>
             </div>
             <form className="filter-bar" onSubmit={addModel}>
-              <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder="Add model manually" />
-              <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
-              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable discovered (${formatCount(discoveredDisabledModels.length)})`}</button>
+              <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
+              <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</button>
+              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
             </form>
             <div className="provider-model-card-grid">
               {modelsUsage.length ? modelsUsage.map((model) => (
@@ -311,15 +313,15 @@ export function ProviderDetailPage() {
                   onToggle={() => setModelEnabled(model.model, !model.enabled)}
                   onDelete={() => deleteModel(model.model)}
                 />
-              )) : <EmptyState title="No models" detail="Probe or manually configure models for this provider." compact />}
+              )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
             </div>
           </section>
 
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Discovery</p>
-                <h2>Recent probes</h2>
+                <p className="eyebrow">{t("channelDetail.discovery")}</p>
+                <h2>{t("channelDetail.recentProbes")}</h2>
               </div>
             </div>
             {probeRuns.length ? (
@@ -327,15 +329,15 @@ export function ProviderDetailPage() {
                 {probeRuns.map((run) => <ProbeRunCard key={run.id} item={run} />)}
               </div>
             ) : (
-              <EmptyState title="No probe runs" detail="Run a provider probe to record discovery status and troubleshooting context." />
+              <EmptyState title={t("channelDetail.noProbeRuns")} detail={t("channelDetail.noProbeRunsDetail")} />
             )}
           </section>
 
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Failures</p>
-                <h2>Recent failed traces</h2>
+                <p className="eyebrow">{t("channelDetail.failures")}</p>
+                <h2>{t("channelDetail.recentFailedTraces")}</h2>
               </div>
             </div>
             {failures.length ? (
@@ -346,14 +348,14 @@ export function ProviderDetailPage() {
                       <InlineTag tone="danger">{failure.status_code}</InlineTag>
                       {failure.reason ? <InlineTag>{failure.reason}</InlineTag> : null}
                     </div>
-                    <strong>{failure.model || "unknown-model"}</strong>
+                    <strong>{failure.model || t("channelDetail.unknownModel")}</strong>
                     <span>{formatDateTime(failure.recorded_at)}</span>
                     {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
                   </Link>
                 ))}
               </div>
             ) : (
-              <EmptyState title="No recent failures" detail="This provider has no failed trace in the selected window." />
+              <EmptyState title={t("channelDetail.noRecentFailures")} detail={t("channelDetail.noRecentFailuresDetail")} />
             )}
           </section>
         </>
@@ -363,6 +365,7 @@ export function ProviderDetailPage() {
 }
 
 function EditProviderDialog({ provider, form, presetData, saving, onChange, onReset, onClose, onSave }) {
+  const { t } = useI18n();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const updateForm = (key, value) => {
@@ -378,28 +381,28 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
       <form className="nav-modal provider-edit-modal" onSubmit={submit}>
         <div className="nav-modal-head">
           <div>
-            <p className="eyebrow">Configuration</p>
-            <h2>Edit provider</h2>
+            <p className="eyebrow">{t("providers.configuration")}</p>
+            <h2>{t("channelDetail.editProvider")}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>x</button>
         </div>
         <div className="provider-form provider-form-modal">
-          <label>Name<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
-          <label>Provider preset<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="provider-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
-          <label className="provider-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? `keep ${provider.api_key_hint}` : "unchanged"} /></label>
-          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+          <label>{t("providers.name")}<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
+          <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label className="provider-form-wide">{t("providers.baseURL")}<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
+          <label className="provider-form-wide">{t("providers.apiKey")}<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
+          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
-        <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
+        <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</button>
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
           </div>
         ) : null}
         <div className="nav-modal-actions">
-          <button className="ghost-button" type="button" onClick={onReset}>Reset</button>
-          <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Save changes"}</button>
+          <button className="ghost-button" type="button" onClick={onReset}>{t("common.reset")}</button>
+          <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
+          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? t("common.saving") : t("channelDetail.saveChanges")}</button>
         </div>
       </form>
     </div>,
@@ -408,6 +411,7 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
 }
 
 function ProbeRunCard({ item }) {
+  const { t } = useI18n();
   const failed = item.status !== "success";
   return (
     <div className={failed ? "provider-probe-card provider-probe-card-failed" : "provider-probe-card"}>
@@ -420,8 +424,8 @@ function ProbeRunCard({ item }) {
         <span>{formatDateTime(item.completed_at || item.started_at)}</span>
       </div>
       <div className="provider-probe-meta">
-        <span>{formatCount(item.discovered_count)} discovered</span>
-        <span>{formatCount(item.enabled_count)} enabled</span>
+        <span>{t("channelDetail.discoveredCount", { count: formatCount(item.discovered_count) })}</span>
+        <span>{t("channelDetail.enabledCount", { count: formatCount(item.enabled_count) })}</span>
         <span>{formatDuration(item.duration_ms)}</span>
       </div>
       {item.endpoint ? <div className="provider-probe-endpoint">{item.endpoint}</div> : null}
@@ -432,14 +436,15 @@ function ProbeRunCard({ item }) {
 }
 
 function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
+  const { t } = useI18n();
   const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
   const warnings = Array.isArray(report.warnings) ? report.warnings : [];
   return (
     <section className="panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Provider detection</p>
-          <h2>Probe suggestions</h2>
+          <p className="eyebrow">{t("providers.detection")}</p>
+          <h2>{t("providers.probeSuggestions")}</h2>
         </div>
         <div className="trace-tag-group">
           <InlineTag tone={report.status === "detected" ? "green" : report.status === "error" ? "danger" : "gold"}>{report.status || "unknown"}</InlineTag>
@@ -447,19 +452,20 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
         </div>
       </div>
       <div className="detail-meta-strip">
-        <Metric label="api type" value={report.suggested_api_type || "-"} />
-        <Metric label="protocol" value={report.suggested_protocol_family || "-"} />
-        <Metric label="capabilities" value={capabilities.length ? capabilities.join(", ") : "-"} />
+        <Metric label={t("providers.apiType")} value={report.suggested_api_type || "-"} />
+        <Metric label={t("providers.protocol")} value={report.suggested_protocol_family || "-"} />
+        <Metric label={t("providers.capabilities")} value={capabilities.length ? capabilities.join(", ") : "-"} />
       </div>
       {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
       <div className="provider-form-actions">
-        <button className="ghost-button active" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? "Applying" : "Apply suggestions"}</button>
+        <button className="ghost-button active" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? t("providers.applying") : t("providers.applySuggestions")}</button>
       </div>
     </section>
   );
 }
 
 function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onDelete }) {
+  const { t } = useI18n();
   const summary = item.summary || {};
   const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
   const canDelete = item.source !== "trace";
@@ -468,25 +474,25 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
       <div className="provider-model-card-head">
         <div>
           <strong>{item.model}</strong>
-          <span>{isDiscoveredDisabled ? "discovered, disabled" : modelSourceLabel(item.source)}</span>
+          <span>{isDiscoveredDisabled ? t("channelDetail.discoveredDisabled") : modelSourceLabel(item.source)}</span>
         </div>
         <div className="action-group">
-          {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} /> : <span>History only — add model to configure routing</span>}
+          {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={t("channelDetail.modelEnabled", { model: item.model })} /> : <span>{t("channelDetail.historyOnly")}</span>}
           {canDelete ? (
-            <button className="icon-button" type="button" onClick={onDelete} disabled={deleting} title="Delete model" aria-label={`Delete ${item.model}`}>
+            <button className="icon-button" type="button" onClick={onDelete} disabled={deleting} title={t("channelDetail.deleteModel")} aria-label={t("channelDetail.deleteModelAria", { model: item.model })}>
               <DeleteIcon />
             </button>
           ) : null}
         </div>
       </div>
       <div className="trace-tag-group">
-        <InlineTag tone={item.enabled ? "green" : "default"}>{item.source === "trace" ? "history only" : item.enabled ? "enabled" : "disabled"}</InlineTag>
-        {item.enabled && !providerEnabled ? <InlineTag tone="gold">blocked: provider disabled</InlineTag> : null}
+        <InlineTag tone={item.enabled ? "green" : "default"}>{item.source === "trace" ? t("channelDetail.historyOnlyTag") : item.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>
+        {item.enabled && !providerEnabled ? <InlineTag tone="gold">{t("channelDetail.blockedProviderDisabled")}</InlineTag> : null}
       </div>
       <div className="model-market-metrics model-market-metrics-compact">
         <Metric label="req" value={formatCount(summary.request_count)} />
         <Metric label="err" value={formatCount(summary.failed_request)} danger={Number(summary.failed_request || 0) > 0} />
-        <Metric label="tok" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
+        <Metric label="tok" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
       </div>
     </div>
   );
@@ -544,12 +550,12 @@ function Metric({ label, value, detail = "", danger = false }) {
   );
 }
 
-function usageCoverageDetail(missing) {
+function usageCoverageDetail(missing, t = (key, values) => `${values?.count || 0} missing usage`) {
   const count = Number(missing || 0);
-  return count > 0 ? `${formatCount(count)} missing usage` : "";
+  return count > 0 ? t("providers.missingUsage", { count: formatCount(count) }) : "";
 }
 
-function formatProbeActionError(err) {
+function formatProbeActionError(err, t = (key) => key) {
   const payload = err?.payload || {};
   const parts = [];
   if (payload.failure_reason) {
@@ -561,7 +567,7 @@ function formatProbeActionError(err) {
   if (payload.retry_hint) {
     parts.push(payload.retry_hint);
   }
-  return parts.join(" · ") || "Probe failed.";
+  return parts.join(" · ") || t("channelDetail.probeFailed");
 }
 
 function emptyEditForm() {

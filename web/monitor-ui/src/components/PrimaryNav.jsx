@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
-import { apiPaths, apiURL, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "../lib/api";
+import { apiPaths, apiURL, postJSON, requestJSON, streamSystemEvents } from "../lib/api";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 
@@ -56,11 +56,14 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
     refresh();
     const onRefresh = () => refresh();
     window.addEventListener("trajecta:events-refresh", onRefresh);
-    if (typeof window.EventSource !== "undefined") {
-      const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
-      const streamURL = token ? `${apiPaths.eventsStream}?access_token=${encodeURIComponent(token)}` : apiPaths.eventsStream;
-      source = new window.EventSource(streamURL);
-      const handleStream = (event) => {
+    // The stream carries the JWT in an Authorization header (see
+    // streamSystemEvents): putting it in the query string leaked it into every
+    // reverse-proxy access log.
+    source = streamSystemEvents({
+      onEvent: (event) => {
+        if (event.event !== "system_event.summary" && event.event !== "system_event.updated") {
+          return;
+        }
         try {
           const payload = JSON.parse(event.data || "{}");
           setEventSummary((current) => ({
@@ -70,17 +73,15 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
         } catch {
           refresh();
         }
-      };
-      source.addEventListener("system_event.summary", handleStream);
-      source.addEventListener("system_event.updated", handleStream);
-      source.onerror = () => refresh();
-    }
+      },
+      onError: () => refresh(),
+    });
     timer = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
       window.removeEventListener("trajecta:events-refresh", onRefresh);
       if (source) {
-        source.close();
+        source();
       }
       window.clearInterval(timer);
     };

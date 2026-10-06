@@ -5,6 +5,7 @@ import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadg
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import {
   buildRoutingDecisionSummary,
   buildProviderLink,
@@ -40,6 +41,7 @@ import {
 
 export function TraceDetailPage() {
   const { traceID = "" } = useParams();
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
@@ -48,10 +50,14 @@ export function TraceDetailPage() {
   const [derivedRefreshTick, setDerivedRefreshTick] = useState(0);
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
-  const raw = useJSON(apiPaths.traceRaw(traceID), [traceID, tab === "raw" ? "raw" : "summary"]);
-  const observation = useJSON(apiPaths.traceObservation(traceID), [traceID, tab === "protocol" ? "protocol" : "idle", derivedRefreshTick]);
-  const findings = useJSON(apiPaths.traceFindings(traceID), [traceID, tab === "audit" ? "audit" : "idle", derivedRefreshTick]);
-  const performance = useJSON(apiPaths.tracePerformance(traceID), [traceID, tab === "performance" ? "performance" : "idle"]);
+  // The sub-resources all live under the same trace: when the main lookup fails
+  // (an unknown id returns 404) there is nothing to load, so they stay parked
+  // instead of firing four more doomed requests at the backend.
+  const traceExists = Boolean(detail.data);
+  const raw = useJSON(traceExists ? apiPaths.traceRaw(traceID) : null, [traceID, tab === "raw" ? "raw" : "summary"]);
+  const observation = useJSON(traceExists ? apiPaths.traceObservation(traceID) : null, [traceID, tab === "protocol" ? "protocol" : "idle", derivedRefreshTick]);
+  const findings = useJSON(traceExists ? apiPaths.traceFindings(traceID) : null, [traceID, tab === "audit" ? "audit" : "idle", derivedRefreshTick]);
+  const performance = useJSON(traceExists ? apiPaths.tracePerformance(traceID) : null, [traceID, tab === "performance" ? "performance" : "idle"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
@@ -118,11 +124,11 @@ export function TraceDetailPage() {
       const response = await postJSON(path, payload);
       setJobNotice({
         tone: response.job?.status === "failed" ? "danger" : "green",
-        text: `${labelTraceAction(action)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`,
+        text: `${labelTraceAction(action, t)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`,
       });
       setDerivedRefreshTick((value) => value + 1);
     } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+      setJobNotice({ tone: "danger", text: `${labelTraceAction(action, t)} failed: ${error.message || "request failed"}` });
     } finally {
       setJobBusy("");
     }
@@ -140,7 +146,7 @@ export function TraceDetailPage() {
       <header className="topbar detail-topbar">
         <div className="detail-title-block">
           <div className="detail-heading-row">
-            <h1>{header?.model || "trace detail"}</h1>
+            <h1>{header?.model || t("traceDetail.traceFallback")}</h1>
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone="accent">{formatEndpointTag(header?.endpoint || header?.operation)}</InlineTag>
               <InlineTag>{formatProviderTag(header?.provider)}</InlineTag>
@@ -149,40 +155,40 @@ export function TraceDetailPage() {
                   <InlineTag tone="green">{selectedUpstreamProviderPreset || compactUpstreamID(selectedUpstreamID)}</InlineTag>
                 </span>
               ) : null}
-              {detail.data?.header?.layout?.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+              {detail.data?.header?.layout?.is_stream ? <InlineTag tone="gold">{t("routing.stream")}</InlineTag> : null}
               <InlineTag tone={header?.status_code >= 200 && header?.status_code < 300 ? "green" : "danger"}>{header?.status_code || 0}</InlineTag>
             </div>
           </div>
           <div className="detail-meta-strip">
-            {session?.session_id ? <DetailMetaPill label="session" value={session.session_id} mono /> : null}
-            <DetailMetaPill label="time" value={formatDateTime(header?.time)} />
-            <DetailMetaPill label="endpoint" value={header?.endpoint || header?.url || "-"} />
-            <DetailMetaPill label="duration" value={formatDuration(header?.duration_ms || 0, { precise: true })} />
+            {session?.session_id ? <DetailMetaPill label={t("traceDetail.metaSession")} value={session.session_id} mono /> : null}
+            <DetailMetaPill label={t("traceDetail.metaTime")} value={formatDateTime(header?.time)} />
+            <DetailMetaPill label={t("traceDetail.metaEndpoint")} value={header?.endpoint || header?.url || "-"} />
+            <DetailMetaPill label={t("sessions.duration")} value={formatDuration(header?.duration_ms || 0, { precise: true })} />
             <DetailMetaPill label="ttft" value={formatDuration(header?.ttft_ms || 0, { precise: true })} />
-            <DetailMetaPill label="rate" value={formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)} />
-            <DetailMetaPill label="request id" value={header?.request_id || "-"} mono />
+            <DetailMetaPill label={t("traceDetail.metaRate")} value={formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)} />
+            <DetailMetaPill label={t("traceDetail.metaRequestID")} value={header?.request_id || "-"} mono />
           </div>
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to={backLink} title={fromSessionID ? "Back to session" : "Back to list"} aria-label={fromSessionID ? "Back to session" : "Back to list"}>
+            <Link className="icon-button" to={backLink} title={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")} aria-label={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")}>
               <HomeIcon />
             </Link>
             {session?.session_id ? (
-              <Link className="icon-button" to={`/sessions/${encodeURIComponent(session.session_id)}`} title="View session" aria-label="View session">
+              <Link className="icon-button" to={`/sessions/${encodeURIComponent(session.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
                 <StackIcon />
               </Link>
             ) : null}
-            <button className="icon-button" type="button" onClick={downloadTrace} title="Download .http" aria-label="Download trace">
+            <button className="icon-button" type="button" onClick={downloadTrace} title={t("traceDetail.downloadHttp")} aria-label={t("requests.downloadTrace")}>
               <DownloadIcon />
             </button>
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
-            <button className="ghost-button" type="button" disabled={jobBusy === "repair"} onClick={() => runTraceAction("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
-              {jobBusy === "repair" ? "Repairing" : "Repair stats"}
+            <button className="ghost-button" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceAction("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
+              {jobBusy === "repair" ? t("traceDetail.repairing") : t("traceDetail.repairStats")}
             </button>
-            <button className="ghost-button active" type="button" disabled={jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
-              {jobBusy === "reanalyze" ? "Reanalyzing" : "Reanalyze"}
+            <button className="ghost-button active" type="button" disabled={!traceExists || jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
+              {jobBusy === "reanalyze" ? t("traceDetail.reanalyzing") : t("traceDetail.reanalyze")}
             </button>
           </div>
           <div className="detail-toolbar-tokens">
@@ -194,7 +200,7 @@ export function TraceDetailPage() {
         </div>
       </header>
 
-      {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
+      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
       {failureSummary ? (
         <section
@@ -203,7 +209,7 @@ export function TraceDetailPage() {
         >
           <div className="trace-failure-head">
             <div>
-              <p className="eyebrow">Failure summary</p>
+              <p className="eyebrow">{t("traceDetail.failureSummary")}</p>
               <h2>{failureSummary.title}</h2>
             </div>
             <InlineTag tone="danger">{header?.status_code || 0}</InlineTag>
@@ -211,21 +217,21 @@ export function TraceDetailPage() {
           <p className="trace-failure-summary">{failureSummary.summary}</p>
           <div className="trace-failure-meta">
             <span>{header?.endpoint || header?.url || "-"}</span>
-            <span>duration {formatDuration(header?.duration_ms || 0, { precise: true })}</span>
+            <span>{t("sessions.duration")} {formatDuration(header?.duration_ms || 0, { precise: true })}</span>
             <span>ttft {formatDuration(header?.ttft_ms || 0, { precise: true })}</span>
-            <span>tokens {formatTokenCount(usage?.total_tokens || 0)}</span>
-            <span>rate {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
+            <span>{t("traceDetail.tokensLabel")} {formatTokenCount(usage?.total_tokens || 0)}</span>
+            <span>{t("traceDetail.metaRate")} {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
           </div>
           <div className="trace-failure-actions">
             <button className={tab === "conversation" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("conversation", "timeline_error")}>
-              Open Conversation
+              {t("traceDetail.openConversation")}
             </button>
             <button className={tab === "raw" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("raw", "response")}>
-              Open Raw Protocol
+              {t("traceDetail.openRawProtocol")}
             </button>
             {session?.session_id ? (
               <Link className="ghost-button" to={`/sessions/${encodeURIComponent(session.session_id)}`}>
-                Back to Session
+                {t("traceDetail.backToSession")}
               </Link>
             ) : null}
           </div>
@@ -237,49 +243,49 @@ export function TraceDetailPage() {
         <section className="panel trace-reading-panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Reading guide</p>
-              <h2>Trace inspector</h2>
+              <p className="eyebrow">{t("traceDetail.readingGuide")}</p>
+              <h2>{t("traceDetail.traceInspector")}</h2>
             </div>
             {responsesAuditLink ? (
               <div className="panel-head-actions">
                 <Link className="ghost-button active" to={responsesAuditLink}>
-                  Responses audit
+                  {t("traceDetail.responsesAudit")}
                 </Link>
               </div>
             ) : null}
           </div>
           <div className="trace-reading-grid">
             <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("conversation")}>
-              <strong>Routing & Conversation</strong>
-              <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : `${timelineCount} event record${timelineCount > 1 ? "s" : ""}`}</span>
-              <p>Route selection, prompt messages, final output, and timeline events.</p>
+              <strong>{t("traceDetail.cardConversation")}</strong>
+              <span>{conversation ? t(messageCount > 1 ? "traceDetail.capturedMessages" : "traceDetail.capturedMessagesOne", { count: messageCount }) : t(timelineCount > 1 ? "traceDetail.eventRecords" : "traceDetail.eventRecordsOne", { count: timelineCount })}</span>
+              <p>{t("traceDetail.cardConversationDetail")}</p>
             </button>
             <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("protocol")}>
-              <strong>Protocol</strong>
-              <span>Observation IR</span>
-              <p>Provider semantic nodes, normalized types, JSON paths, and raw payloads.</p>
+              <strong>{t("audit.protocol")}</strong>
+              <span>{t("traceDetail.observationIR")}</span>
+              <p>{t("traceDetail.cardProtocolDetail")}</p>
             </button>
             <button className={tab === "audit" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("audit")}>
-              <strong>Audit</strong>
-              <span>Deterministic findings</span>
-              <p>Dangerous tool calls, credential leaks, safety findings, and evidence paths.</p>
+              <strong>{t("nav.audit")}</strong>
+              <span>{t("traceDetail.deterministicFindings")}</span>
+              <p>{t("traceDetail.cardAuditDetail")}</p>
             </button>
             <button className={tab === "performance" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("performance")}>
-              <strong>Performance</strong>
-              <span>Latency and token speed</span>
-              <p>Latency, TTFT, token throughput, cache ratio, status, and routing context.</p>
+              <strong>{t("traceDetail.performanceTitle")}</strong>
+              <span>{t("traceDetail.latencyAndTokenSpeed")}</span>
+              <p>{t("traceDetail.cardPerformanceDetail")}</p>
             </button>
             <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("raw")}>
-              <strong>Raw</strong>
-              <span>Original HTTP exchange</span>
-              <p>Exact request and response bytes, headers, and provider payloads.</p>
+              <strong>{t("requests.raw")}</strong>
+              <span>{t("traceDetail.originalHttpExchange")}</span>
+              <p>{t("traceDetail.cardRawDetail")}</p>
             </button>
           </div>
         </section>
       ) : null}
 
-      {detail.error ? <EmptyState title="Unable to load trace detail" detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title="Loading trace detail" detail="Resolving timeline, routing, payload, and tool information for this trace." /> : null}
+      {detail.error ? <EmptyState title={t("traceDetail.loadError")} detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title={t("traceDetail.loading")} detail={t("traceDetail.loadingDetail")} /> : null}
 
       {tab === "conversation" && detail.data ? (
         <div className="detail-grid">
@@ -287,44 +293,44 @@ export function TraceDetailPage() {
             <section className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{routePlan ? "Route plan" : "Routing decision"}</p>
-                  <h2>{selectedRouteIdentity ? "Selected route target" : "Routing failure"}</h2>
+                  <p className="eyebrow">{routePlan ? t("traceDetail.routePlan") : t("traceDetail.routingDecision")}</p>
+                  <h2>{selectedRouteIdentity ? t("traceDetail.selectedRouteTarget") : t("traceDetail.routingFailure")}</h2>
                 </div>
                 <div className="panel-head-actions">
                   {selectedChannelID ? (
                     <Link className="ghost-button active" to={buildProviderLink(selectedChannelID)}>
-                      Open Channel
+                      {t("traceDetail.openChannel")}
                     </Link>
                   ) : null}
                   {selectedUpstreamID ? (
                     <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
-                      Open Upstream
+                      {t("traceDetail.openUpstream")}
                     </Link>
                   ) : null}
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="route target" value={selectedRouteIdentity || "-"} mono />
-                <DetailMetaPill label="channel" value={selectedChannelID || "-"} mono />
-                {routePlan?.selectedUpstreamID ? <DetailMetaPill label="upstream" value={routePlan.selectedUpstreamID} mono /> : null}
-                {routingDecision.selectedCredentialID && !routePlan ? <DetailMetaPill label="credential" value={routingDecision.selectedCredentialID} mono /> : null}
-                {routingDecision.selectedCredentialHint && !routePlan ? <DetailMetaPill label="hint" value={routingDecision.selectedCredentialHint} mono /> : null}
-                <DetailMetaPill label="provider" value={selectedUpstreamProviderPreset || "-"} />
-                {routePlan ? <DetailMetaPill label="entrypoint" value={routePlan.clientEntrypoint || "-"} /> : null}
-                {routePlan ? <DetailMetaPill label="mode" value={formatRoutePlanValue(routePlan.executionMode)} /> : null}
-                {routePlan ? <DetailMetaPill label="strategy" value={formatRoutePlanValue(routePlan.strategy || routingPolicy)} /> : <DetailMetaPill label="policy" value={routingPolicy || "-"} />}
-                {!routePlan ? <DetailMetaPill label="score" value={formatRoutingScore(routingScore)} /> : null}
-                <DetailMetaPill label="candidates" value={routePlan ? routePlan.candidateSummary.length : routingCandidateCount || 0} />
-                {(routePlan?.failureReason || routingFailureReason) ? <DetailMetaPill label="failure" value={formatFailureReason(routePlan?.failureReason || routingFailureReason)} /> : null}
+                <DetailMetaPill label={t("traceDetail.metaRouteTarget")} value={selectedRouteIdentity || "-"} mono />
+                <DetailMetaPill label={t("traceDetail.metaChannel")} value={selectedChannelID || "-"} mono />
+                {routePlan?.selectedUpstreamID ? <DetailMetaPill label={t("traceDetail.metaUpstream")} value={routePlan.selectedUpstreamID} mono /> : null}
+                {routingDecision.selectedCredentialID && !routePlan ? <DetailMetaPill label={t("traceDetail.metaCredential")} value={routingDecision.selectedCredentialID} mono /> : null}
+                {routingDecision.selectedCredentialHint && !routePlan ? <DetailMetaPill label={t("traceDetail.metaHint")} value={routingDecision.selectedCredentialHint} mono /> : null}
+                <DetailMetaPill label={t("providers.providerFallback")} value={selectedUpstreamProviderPreset || "-"} />
+                {routePlan ? <DetailMetaPill label={t("traceDetail.metaEntrypoint")} value={routePlan.clientEntrypoint || "-"} /> : null}
+                {routePlan ? <DetailMetaPill label={t("traceDetail.metaMode")} value={formatRoutePlanValue(routePlan.executionMode)} /> : null}
+                {routePlan ? <DetailMetaPill label={t("traceDetail.metaStrategy")} value={formatRoutePlanValue(routePlan.strategy || routingPolicy)} /> : <DetailMetaPill label={t("traceDetail.metaPolicy")} value={routingPolicy || "-"} />}
+                {!routePlan ? <DetailMetaPill label={t("traceDetail.metaScore")} value={formatRoutingScore(routingScore)} /> : null}
+                <DetailMetaPill label={t("traceDetail.metaCandidates")} value={routePlan ? routePlan.candidateSummary.length : routingCandidateCount || 0} />
+                {(routePlan?.failureReason || routingFailureReason) ? <DetailMetaPill label={t("traceDetail.metaFailure")} value={formatFailureReason(routePlan?.failureReason || routingFailureReason)} /> : null}
               </div>
               {routePlan ? (
-                <RoutePlanSummary plan={routePlan} selectedUpstreamBaseURL={selectedUpstreamBaseURL} selectedUpstreamProviderPreset={selectedUpstreamProviderPreset} InlineTag={InlineTag} />
+                <RoutePlanSummary plan={routePlan} selectedUpstreamBaseURL={selectedUpstreamBaseURL} selectedUpstreamProviderPreset={selectedUpstreamProviderPreset} InlineTag={InlineTag} t={t} />
               ) : (
                 <div className="routing-summary-grid">
                   <section className="breakdown-card">
-                    <div className="breakdown-title">{selectedRouteIdentity ? "Resolved route target" : "Failure class"}</div>
+                    <div className="breakdown-title">{selectedRouteIdentity ? t("traceDetail.resolvedRouteTarget") : t("traceDetail.failureClass")}</div>
                     <div className="routing-summary-stack">
-                      <strong className="trace-model-name">{selectedRouteIdentity || formatFailureReason(routingFailureReason) || "routing failure"}</strong>
+                      <strong className="trace-model-name">{selectedRouteIdentity || formatFailureReason(routingFailureReason) || t("traceDetail.routingFailure")}</strong>
                       <span className="trace-subline mono">{selectedUpstreamBaseURL || "-"}</span>
                       {selectedRouteIdentity || routingPolicy ? (
                         <div className="trace-tag-group">
@@ -336,7 +342,7 @@ export function TraceDetailPage() {
                     </div>
                   </section>
                   <section className="breakdown-card">
-                    <div className="breakdown-title">Decision explanation</div>
+                    <div className="breakdown-title">{t("traceDetail.decisionExplanation")}</div>
                     <div className="routing-summary-stack">
                       <span className="trace-subline">
                         {buildRoutingDecisionSummary({
@@ -355,12 +361,12 @@ export function TraceDetailPage() {
                 <div className="routing-summary-grid">
                   {routingDecision.stickyBreaks.length ? (
                     <section className="breakdown-card">
-                      <div className="breakdown-title">Sticky credential break</div>
+                      <div className="breakdown-title">{t("traceDetail.stickyCredentialBreak")}</div>
                       <div className="routing-summary-stack">
                         {routingDecision.stickyBreaks.map((event, index) => (
                           <div className="credential-break-row" key={`sticky-break-${index}`}>
                             <div className="trace-tag-group">
-                              <InlineTag tone="danger">break</InlineTag>
+                              <InlineTag tone="danger">{t("traceDetail.breakTag")}</InlineTag>
                               {event.channelID ? <InlineTag>{event.channelID}</InlineTag> : null}
                               {event.credentialID ? <InlineTag tone="gold">{event.credentialID}</InlineTag> : null}
                             </div>
@@ -375,42 +381,42 @@ export function TraceDetailPage() {
                   ) : null}
                   {selectedUpstreamHealth ? (
                     <section className="breakdown-card">
-                      <div className="breakdown-title">Upstream health at review time</div>
+                      <div className="breakdown-title">{t("traceDetail.upstreamHealthAtReview")}</div>
                       <div className="routing-summary-stack">
                         <div className="trace-tag-group">
                           <InlineTag tone={healthTone(selectedUpstreamHealth.health_state)}>{formatHealthLabel(selectedUpstreamHealth.health_state)}</InlineTag>
                           <InlineTag tone={metricThresholdTone(resolveThresholdState(selectedUpstreamHealth.error_rate, selectedUpstreamHealth.health_thresholds?.error_rate_degraded, selectedUpstreamHealth.health_thresholds?.error_rate_open))}>
-                            error {resolveThresholdState(selectedUpstreamHealth.error_rate, selectedUpstreamHealth.health_thresholds?.error_rate_degraded, selectedUpstreamHealth.health_thresholds?.error_rate_open)}
+                            {t("traceDetail.errorLabel")} {resolveThresholdState(selectedUpstreamHealth.error_rate, selectedUpstreamHealth.health_thresholds?.error_rate_degraded, selectedUpstreamHealth.health_thresholds?.error_rate_open)}
                           </InlineTag>
                           <InlineTag tone={metricThresholdTone(resolveThresholdState(selectedUpstreamHealth.timeout_rate, selectedUpstreamHealth.health_thresholds?.timeout_rate_degraded, selectedUpstreamHealth.health_thresholds?.timeout_rate_open))}>
-                            timeout {resolveThresholdState(selectedUpstreamHealth.timeout_rate, selectedUpstreamHealth.health_thresholds?.timeout_rate_degraded, selectedUpstreamHealth.health_thresholds?.timeout_rate_open)}
+                            {t("traceDetail.timeoutLabel")} {resolveThresholdState(selectedUpstreamHealth.timeout_rate, selectedUpstreamHealth.health_thresholds?.timeout_rate_degraded, selectedUpstreamHealth.health_thresholds?.timeout_rate_open)}
                           </InlineTag>
                         </div>
                         <span className="trace-subline">{buildTraceUpstreamHealthSummary(selectedUpstreamHealth)}</span>
                         <div className="detail-meta-strip">
-                          <DetailMetaPill label="error" value={formatRatio(selectedUpstreamHealth.error_rate)} />
-                          <DetailMetaPill label="timeout" value={formatRatio(selectedUpstreamHealth.timeout_rate)} />
+                          <DetailMetaPill label={t("traceDetail.errorLabel")} value={formatRatio(selectedUpstreamHealth.error_rate)} />
+                          <DetailMetaPill label={t("traceDetail.timeoutLabel")} value={formatRatio(selectedUpstreamHealth.timeout_rate)} />
                           <DetailMetaPill label="ttft" value={formatDuration(selectedUpstreamHealth.ttft_fast_ms || 0)} />
-                          <DetailMetaPill label="latency" value={formatDuration(selectedUpstreamHealth.latency_fast_ms || 0)} />
+                          <DetailMetaPill label={t("traceDetail.latencyLabel")} value={formatDuration(selectedUpstreamHealth.latency_fast_ms || 0)} />
                         </div>
                       </div>
                     </section>
                   ) : null}
                 </div>
               ) : null}
-              <RoutingDecisionPanel decision={routingDecision} InlineTag={InlineTag} CodeBlock={CodeBlock} showCandidates={!routePlan} />
+              <RoutingDecisionPanel decision={routingDecision} InlineTag={InlineTag} CodeBlock={CodeBlock} showCandidates={!routePlan} t={t} />
             </section>
           ) : null}
-          {upstreamCalls.length ? <RelatedUpstreamCallsPanel calls={upstreamCalls} currentTraceID={traceID} fromSessionID={fromSessionID || session?.session_id || ""} /> : null}
+          {upstreamCalls.length ? <RelatedUpstreamCallsPanel calls={upstreamCalls} currentTraceID={traceID} fromSessionID={fromSessionID || session?.session_id || ""} t={t} /> : null}
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{hasConversation(detail.data) ? "Conversation" : "Payload"}</p>
-                <h2>{hasConversation(detail.data) ? "Request and response" : "Request / response body"}</h2>
+                <p className="eyebrow">{hasConversation(detail.data) ? t("traceDetail.conversation") : t("traceDetail.payload")}</p>
+                <h2>{hasConversation(detail.data) ? t("traceDetail.requestAndResponse") : t("traceDetail.requestResponseBody")}</h2>
               </div>
               <label className="wrap-toggle">
                 <input type="checkbox" checked={renderMarkdown} onChange={(event) => setRenderMarkdown(event.target.checked)} />
-                Render markdown
+                {t("traceDetail.renderMarkdown")}
               </label>
             </div>
             {hasConversation(detail.data) ? (
@@ -425,10 +431,11 @@ export function TraceDetailPage() {
                     CodeBlock={CodeBlock}
                     InlineTag={InlineTag}
                     MessageContent={MessageContent}
+                    t={t}
                   />
                 ))}
                 {detail.data.ai_reasoning ? (
-                  <CollapsibleCard title="Reasoning" subtitle="assistant reasoning" defaultOpen={false}>
+                  <CollapsibleCard title={t("traceDetail.reasoning")} subtitle={t("traceDetail.assistantReasoning")} defaultOpen={false}>
                     <CodeBlock value={detail.data.ai_reasoning} />
                   </CollapsibleCard>
                 ) : null}
@@ -436,20 +443,20 @@ export function TraceDetailPage() {
                   <article className="message-card message-assistant">
                     <div className="message-meta">
                       <span className="role-pill">assistant</span>
-                      <span className="message-kind">final output</span>
+                      <span className="message-kind">{t("traceDetail.finalOutput")}</span>
                     </div>
                     <MessageContent value={detail.data.ai_content} format="markdown" renderMarkdown={renderMarkdown} className="message-body" />
                   </article>
                 ) : null}
                 {detail.data.tool_calls?.length ? (
-                  <CollapsibleCard title="Tool Calls" subtitle={`${detail.data.tool_calls.length} call(s)`} defaultOpen={false}>
+                  <CollapsibleCard title={t("traceDetail.toolCalls")} subtitle={t("traceDetail.callCount", { count: detail.data.tool_calls.length })} defaultOpen={false}>
                     {detail.data.tool_calls.map((call) => (
-                      <ToolCallView key={call.id || call.function?.name} call={call} match={findDeclaredToolForCall(call, declaredTools)} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+                      <ToolCallView key={call.id || call.function?.name} call={call} match={findDeclaredToolForCall(call, declaredTools)} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
                     ))}
                   </CollapsibleCard>
                 ) : null}
                 {detail.data.ai_blocks?.length ? (
-                  <CollapsibleCard title="Output Blocks" subtitle={`${detail.data.ai_blocks.length} block(s)`} defaultOpen={false}>
+                  <CollapsibleCard title={t("traceDetail.outputBlocks")} subtitle={t("traceDetail.blockCount", { count: detail.data.ai_blocks.length })} defaultOpen={false}>
                     {detail.data.ai_blocks.map((block, index) => (
                       <BlockView key={`${block.kind}-${index}`} block={block} CodeBlock={CodeBlock} />
                     ))}
@@ -457,11 +464,11 @@ export function TraceDetailPage() {
                 ) : null}
               </div>
             ) : (
-              <PayloadSummary raw={raw} CodeBlock={CodeBlock} />
+              <PayloadSummary raw={raw} CodeBlock={CodeBlock} t={t} />
             )}
           </section>
-          <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} />
-          {hasDeclaredToolsTab ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
+          <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
+          {hasDeclaredToolsTab ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} /> : null}
         </div>
       ) : null}
 
@@ -472,24 +479,25 @@ export function TraceDetailPage() {
           InlineTag={InlineTag}
           busy={jobBusy === "reanalyze"}
           onRefresh={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
+          t={t}
         />
       ) : null}
-      {tab === "audit" ? <AuditPanel findings={findings} InlineTag={InlineTag} CodeBlock={CodeBlock} /> : null}
-      {tab === "performance" ? <PerformancePanel performance={performance} /> : null}
-      {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
+      {tab === "audit" ? <AuditPanel findings={findings} InlineTag={InlineTag} CodeBlock={CodeBlock} t={t} /> : null}
+      {tab === "performance" ? <PerformancePanel performance={performance} t={t} /> : null}
+      {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} t={t} /> : null}
     </div>
   );
 }
 
-function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessionID = "" }) {
+function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessionID = "", t }) {
   return (
     <section className="panel related-upstream-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Related upstream calls</p>
-          <h2>{calls.length} child call{calls.length === 1 ? "" : "s"}</h2>
+          <p className="eyebrow">{t("traceDetail.relatedUpstreamCalls")}</p>
+          <h2>{t(calls.length === 1 ? "traceDetail.childCallsOne" : "traceDetail.childCalls", { count: calls.length })}</h2>
         </div>
-        <InlineTag tone="gold">lineage</InlineTag>
+        <InlineTag tone="gold">{t("traceDetail.lineage")}</InlineTag>
       </div>
       <div className="related-upstream-list">
         {calls.map((call, index) => {
@@ -500,35 +508,35 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
             <article key={traceID || `${call.exchange_kind || "call"}-${index}`} className="related-upstream-card">
               <div className="related-upstream-main">
                 <div>
-                  <strong className="trace-model-name">{call.model || "unknown-model"}</strong>
+                  <strong className="trace-model-name">{call.model || t("traceDetail.unknownModel")}</strong>
                   <span className="trace-subline mono">{traceID || call.cassette_path || "-"}</span>
                 </div>
                 <div className="trace-tag-group">
-                  <InlineTag tone={failed ? "danger" : "green"}>{statusCode || (failed ? "error" : "ok")}</InlineTag>
-                  <InlineTag tone={call.exchange_kind === "model" ? "gold" : "default"}>{exchangeLabel(call.exchange_role || call.exchange_kind || "model")}</InlineTag>
+                  <InlineTag tone={failed ? "danger" : "green"}>{statusCode || (failed ? t("traceDetail.errorLabel") : t("traceDetail.statusOk"))}</InlineTag>
+                  <InlineTag tone={call.exchange_kind === "model" ? "gold" : "default"}>{exchangeLabel(call.exchange_role || call.exchange_kind || "model", t)}</InlineTag>
                   <InlineTag tone="accent">{formatEndpointTag(call.endpoint || call.operation)}</InlineTag>
                   <InlineTag>{formatProviderTag(call.provider)}</InlineTag>
                   {call.selected_upstream_id || call.upstream_id || call.route_target ? <InlineTag tone="green">{call.selected_upstream_id || call.upstream_id || call.route_target}</InlineTag> : null}
                 </div>
               </div>
               <div className="detail-meta-strip related-upstream-meta">
-                <DetailMetaPill label="sequence" value={formatSequence(call.sequence_index)} />
-                <DetailMetaPill label="duration" value={formatDuration(call.duration_ms || 0, { precise: true })} />
+                <DetailMetaPill label={t("traceDetail.metaSequence")} value={formatSequence(call.sequence_index)} />
+                <DetailMetaPill label={t("sessions.duration")} value={formatDuration(call.duration_ms || 0, { precise: true })} />
                 <DetailMetaPill label="ttft" value={formatDuration(call.ttft_ms || 0, { precise: true })} />
-                {call.response_id ? <DetailMetaPill label="response" value={call.response_id} mono /> : null}
-                {call.request_audit_id ? <DetailMetaPill label="audit" value={call.request_audit_id} mono /> : null}
-                {call.parent_exchange_id ? <DetailMetaPill label="parent" value={call.parent_exchange_id} mono /> : null}
+                {call.response_id ? <DetailMetaPill label={t("traceDetail.metaResponse")} value={call.response_id} mono /> : null}
+                {call.request_audit_id ? <DetailMetaPill label={t("traceDetail.metaAudit")} value={call.request_audit_id} mono /> : null}
+                {call.parent_exchange_id ? <DetailMetaPill label={t("traceDetail.metaParent")} value={call.parent_exchange_id} mono /> : null}
               </div>
               {call.error_text ? <pre className="timeline-message responses-audit-error">{call.error_text}</pre> : null}
               <div className="related-upstream-actions">
                 {traceID && traceID !== currentTraceID ? (
                   <Link className="ghost-button active" to={buildTraceLink(traceID, "requests", fromSessionID, "", failed ? "failure" : "")}>
-                    Open child trace
+                    {t("traceDetail.openChildTrace")}
                   </Link>
                 ) : null}
                 {traceID ? (
                   <Link className="ghost-button" to={buildTraceLink(traceID, "requests", fromSessionID, "raw", failed ? "response" : "")}>
-                    Raw
+                    {t("requests.raw")}
                   </Link>
                 ) : null}
               </div>
@@ -540,7 +548,7 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
   );
 }
 
-function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
+function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) {
   const [selectedToolName, setSelectedToolName] = useState(() => tools[0]?.name || "");
   const [schemaToolName, setSchemaToolName] = useState("");
 
@@ -564,8 +572,8 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Declared tools</p>
-            <h2>Request tools</h2>
+            <p className="eyebrow">{t("traceDetail.declaredTools")}</p>
+            <h2>{t("traceDetail.requestTools")}</h2>
           </div>
         </div>
         {tools.length ? (
@@ -584,12 +592,12 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
                     }}
                   >
                     <div className="tool-list-item-head">
-                      <strong>{tool.name || `tool ${index + 1}`}</strong>
-                      <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? `${count} call${count > 1 ? "s" : ""}` : "not invoked"}</InlineTag>
+                      <strong>{tool.name || t("traceDetail.toolFallback", { index: index + 1 })}</strong>
+                      <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? t(count > 1 ? "traceDetail.toolCallCount" : "traceDetail.toolCallCountOne", { count }) : t("traceDetail.notInvoked")}</InlineTag>
                     </div>
                     <div className="tool-list-item-meta">
-                      <span>{tool.source || tool.type || "tool"}</span>
-                      <span>{tool.description || "Click to inspect the tool definition."}</span>
+                      <span>{tool.source || tool.type || t("traceDetail.toolLabel")}</span>
+                      <span>{tool.description || t("traceDetail.toolClickHint")}</span>
                     </div>
                   </button>
                 );
@@ -600,54 +608,54 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
                 <>
                   <div className="tool-detail-header">
                     <div>
-                      <p className="eyebrow">Tool overview</p>
+                      <p className="eyebrow">{t("traceDetail.toolOverview")}</p>
                       <h3>{selectedTool.name}</h3>
                     </div>
                     <div className="trace-tag-group">
-                      <InlineTag tone="accent">{selectedTool.source || selectedTool.type || "tool"}</InlineTag>
+                      <InlineTag tone="accent">{selectedTool.source || selectedTool.type || t("traceDetail.toolLabel")}</InlineTag>
                       <InlineTag tone={selectedToolCalls.length ? "green" : "default"}>
-                        {selectedToolCalls.length ? `${selectedToolCalls.length} matched call${selectedToolCalls.length > 1 ? "s" : ""}` : "unused"}
+                        {selectedToolCalls.length ? t(selectedToolCalls.length > 1 ? "traceDetail.matchedCalls" : "traceDetail.matchedCallsOne", { count: selectedToolCalls.length }) : t("traceDetail.unused")}
                       </InlineTag>
                     </div>
                   </div>
-                  <p className="tool-description">{selectedTool.description || "No description"}</p>
+                  <p className="tool-description">{selectedTool.description || t("traceDetail.noDescription")}</p>
                   <div className="tool-detail-actions">
                     <button className="ghost-button" onClick={() => setSchemaToolName(selectedTool.name)}>
-                      View Definition
+                      {t("traceDetail.viewDefinition")}
                     </button>
                   </div>
                   {selectedToolCalls.length ? (
                     <section className="breakdown-card">
-                      <div className="breakdown-title">Call arguments</div>
+                      <div className="breakdown-title">{t("traceDetail.callArguments")}</div>
                       {selectedToolCalls.map((call, index) => (
-                        <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+                        <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
                       ))}
                     </section>
                   ) : (
-                    <EmptyState title="Tool not invoked" detail="This request declared the tool but did not execute a matching call." compact />
+                    <EmptyState title={t("traceDetail.toolNotInvoked")} detail={t("traceDetail.toolNotInvokedDetail")} compact />
                   )}
                 </>
               ) : null}
             </div>
           </div>
         ) : (
-          <EmptyState title="No declared tools" detail="This request did not include tool definitions in its captured payload." />
+          <EmptyState title={t("traceDetail.noDeclaredTools")} detail={t("traceDetail.noDeclaredToolsDetail")} />
         )}
       </section>
       {schemaTool ? (
         <div className="tool-modal-backdrop" role="presentation" onClick={() => setSchemaToolName("")}>
-          <div className="tool-modal" role="dialog" aria-modal="true" aria-label={`${schemaTool.name} definition`} onClick={(event) => event.stopPropagation()}>
+          <div className="tool-modal" role="dialog" aria-modal="true" aria-label={t("traceDetail.toolDefinitionAria", { name: schemaTool.name })} onClick={(event) => event.stopPropagation()}>
             <div className="tool-modal-head">
               <div>
-                <p className="eyebrow">Tool definition</p>
+                <p className="eyebrow">{t("traceDetail.toolDefinition")}</p>
                 <h3>{schemaTool.name}</h3>
               </div>
-              <button className="icon-button" onClick={() => setSchemaToolName("")} aria-label="Close tool definition">
+              <button className="icon-button" onClick={() => setSchemaToolName("")} aria-label={t("traceDetail.closeToolDefinition")}>
                 <span className="tool-modal-close">x</span>
               </button>
             </div>
             <div className="trace-tag-group">
-              <InlineTag tone="accent">{schemaTool.source || schemaTool.type || "tool"}</InlineTag>
+              <InlineTag tone="accent">{schemaTool.source || schemaTool.type || t("traceDetail.toolLabel")}</InlineTag>
               <InlineTag>{buildToolSchemaSummary(schemaTool.parameters)}</InlineTag>
             </div>
             {schemaTool.description ? <p className="tool-description">{schemaTool.description}</p> : null}
@@ -659,25 +667,25 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
   );
 }
 
-function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefresh }) {
+function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefresh, t }) {
   if (observation.error) {
     return (
       <section className="panel protocol-panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Observation IR</p>
-            <h2>Protocol</h2>
+            <p className="eyebrow">{t("traceDetail.observationIR")}</p>
+            <h2>{t("audit.protocol")}</h2>
           </div>
           <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
-            {busy ? "Refreshing" : "Refresh analysis"}
+            {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
           </button>
         </div>
-        <EmptyState title="Protocol observation unavailable" detail={observation.error} tone="danger" compact />
+        <EmptyState title={t("traceDetail.protocolUnavailable")} detail={observation.error} tone="danger" compact />
       </section>
     );
   }
   if (observation.loading && !observation.data) {
-    return <EmptyState title="Loading protocol observation" detail="Reading derived semantic nodes for this trace." />;
+    return <EmptyState title={t("traceDetail.loadingProtocol")} detail={t("traceDetail.loadingProtocolDetail")} />;
   }
   const summary = observation.data?.summary;
   const tree = observation.data?.tree || [];
@@ -686,14 +694,14 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
       <section className="panel protocol-panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Observation IR</p>
-            <h2>Protocol</h2>
+            <p className="eyebrow">{t("traceDetail.observationIR")}</p>
+            <h2>{t("audit.protocol")}</h2>
           </div>
           <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
-            {busy ? "Refreshing" : "Refresh analysis"}
+            {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
           </button>
         </div>
-        <EmptyState title="No protocol observation" detail="Refresh analysis for this trace to rebuild derived protocol data." compact />
+        <EmptyState title={t("traceDetail.noProtocolObservation")} detail={t("traceDetail.noProtocolObservationDetail")} compact />
       </section>
     );
   }
@@ -701,60 +709,60 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
     <section className="panel protocol-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Observation IR</p>
-          <h2>Protocol</h2>
+          <p className="eyebrow">{t("traceDetail.observationIR")}</p>
+          <h2>{t("audit.protocol")}</h2>
         </div>
         <div className="trace-tag-group">
-          <InlineTag tone={summary?.status === "parsed" ? "green" : "gold"}>{summary?.status || "unknown"}</InlineTag>
-          <InlineTag>{summary?.parser || "parser"}</InlineTag>
-          <InlineTag>{summary?.provider || "provider"}</InlineTag>
+          <InlineTag tone={summary?.status === "parsed" ? "green" : "gold"}>{summary?.status || t("traceDetail.unknownStatus")}</InlineTag>
+          <InlineTag>{summary?.parser || t("traceDetail.parser")}</InlineTag>
+          <InlineTag>{summary?.provider || t("providers.providerFallback")}</InlineTag>
         </div>
         <button className="ghost-button" type="button" disabled={busy} onClick={onRefresh}>
-          {busy ? "Refreshing" : "Refresh analysis"}
+          {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
         </button>
       </div>
       <div className="detail-meta-strip">
-        <DetailMetaPill label="model" value={summary?.model || "-"} />
-        <DetailMetaPill label="operation" value={summary?.operation || "-"} />
-        <DetailMetaPill label="parser" value={`${summary?.parser || "-"} ${summary?.parser_version || ""}`.trim()} />
+        <DetailMetaPill label={t("traceDetail.metaModel")} value={summary?.model || "-"} />
+        <DetailMetaPill label={t("traceDetail.metaOperation")} value={summary?.operation || "-"} />
+        <DetailMetaPill label={t("traceDetail.parser")} value={`${summary?.parser || "-"} ${summary?.parser_version || ""}`.trim()} />
       </div>
       {summary?.warnings ? (
-        <CollapsibleCard title="Parser warnings" subtitle="tolerant parse notes" defaultOpen={false}>
+        <CollapsibleCard title={t("traceDetail.parserWarnings")} subtitle={t("traceDetail.tolerantParseNotes")} defaultOpen={false}>
           <CodeBlock value={JSON.stringify(summary.warnings, null, 2)} />
         </CollapsibleCard>
       ) : null}
       {tree.length ? (
         <div className="semantic-tree">
           {tree.map((node) => (
-            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
           ))}
         </div>
       ) : (
-        <EmptyState title="No semantic nodes" detail="The parser completed without persisted semantic nodes." compact />
+        <EmptyState title={t("traceDetail.noSemanticNodes")} detail={t("traceDetail.noSemanticNodesDetail")} compact />
       )}
     </section>
   );
 }
 
-function SemanticNodeView({ node, CodeBlock, InlineTag }) {
+function SemanticNodeView({ node, CodeBlock, InlineTag, t }) {
   const hasChildren = Boolean(node.children?.length);
   const raw = node.raw ? JSON.stringify(node.raw, null, 2) : "";
   const body = (
     <>
       {node.text_preview ? <p className="semantic-node-preview">{node.text_preview}</p> : null}
       <div className="detail-meta-strip semantic-node-meta">
-        <DetailMetaPill label="path" value={node.path || "-"} mono />
-        <DetailMetaPill label="index" value={node.index ?? 0} />
+        <DetailMetaPill label={t("traceDetail.metaPath")} value={node.path || "-"} mono />
+        <DetailMetaPill label={t("traceDetail.metaIndex")} value={node.index ?? 0} />
       </div>
       {raw ? (
-        <CollapsibleCard title="Raw node" subtitle={node.path || node.id} defaultOpen={false}>
+        <CollapsibleCard title={t("traceDetail.rawNode")} subtitle={node.path || node.id} defaultOpen={false}>
           <CodeBlock value={raw} />
         </CollapsibleCard>
       ) : null}
       {hasChildren ? (
         <div className="semantic-children">
           {node.children.map((child) => (
-            <SemanticNodeView key={child.id} node={child} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+            <SemanticNodeView key={child.id} node={child} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
           ))}
         </div>
       ) : null}
@@ -764,11 +772,11 @@ function SemanticNodeView({ node, CodeBlock, InlineTag }) {
     <article className="semantic-node">
       <div className="semantic-node-head">
         <div>
-          <strong>{node.normalized_type || node.provider_type || "node"}</strong>
+          <strong>{node.normalized_type || node.provider_type || t("traceDetail.nodeFallback")}</strong>
           <span className="mono">{node.id}</span>
         </div>
         <div className="trace-tag-group">
-          <InlineTag tone="accent">{node.provider_type || "provider"}</InlineTag>
+          <InlineTag tone="accent">{node.provider_type || t("providers.providerFallback")}</InlineTag>
           {node.role ? <InlineTag>{node.role}</InlineTag> : null}
         </div>
       </div>
@@ -777,22 +785,22 @@ function SemanticNodeView({ node, CodeBlock, InlineTag }) {
   );
 }
 
-function AuditPanel({ findings, InlineTag, CodeBlock }) {
+function AuditPanel({ findings, InlineTag, CodeBlock, t }) {
   if (findings.error) {
-    return <EmptyState title="Unable to load findings" detail={findings.error} tone="danger" />;
+    return <EmptyState title={t("audit.loadFindingsError")} detail={findings.error} tone="danger" />;
   }
   if (findings.loading && !findings.data) {
-    return <EmptyState title="Loading findings" detail="Reading deterministic audit findings for this trace." />;
+    return <EmptyState title={t("audit.loadingFindings")} detail={t("traceDetail.loadingFindingsDetail")} />;
   }
   const items = Array.isArray(findings.data?.items) ? findings.data.items : Array.isArray(findings.data) ? findings.data : [];
   return (
     <section className="panel audit-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Deterministic audit</p>
-          <h2>Findings</h2>
+          <p className="eyebrow">{t("traceDetail.deterministicAudit")}</p>
+          <h2>{t("overview.findings")}</h2>
         </div>
-        <InlineTag tone={items.length ? "danger" : "green"}>{items.length} finding{items.length === 1 ? "" : "s"}</InlineTag>
+        <InlineTag tone={items.length ? "danger" : "green"}>{t(items.length === 1 ? "traceDetail.findingCountOne" : "traceDetail.findingCount", { count: items.length })}</InlineTag>
       </div>
       {items.length ? (
         <div className="finding-list">
@@ -809,17 +817,17 @@ function AuditPanel({ findings, InlineTag, CodeBlock }) {
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="detector" value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
-                <DetailMetaPill label="confidence" value={Number(finding.confidence || 0).toFixed(2)} />
-                <DetailMetaPill label="node" value={finding.node_id || "-"} mono />
-                <DetailMetaPill label="evidence" value={finding.evidence_path || "-"} mono />
+                <DetailMetaPill label={t("traceDetail.metaDetector")} value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
+                <DetailMetaPill label={t("traceDetail.metaConfidence")} value={Number(finding.confidence || 0).toFixed(2)} />
+                <DetailMetaPill label={t("traceDetail.metaNode")} value={finding.node_id || "-"} mono />
+                <DetailMetaPill label={t("traceDetail.metaEvidence")} value={finding.evidence_path || "-"} mono />
               </div>
               {finding.evidence_excerpt ? <CodeBlock value={finding.evidence_excerpt} /> : null}
             </article>
           ))}
         </div>
       ) : (
-        <EmptyState title="No findings" detail="No deterministic audit findings are stored for this trace." compact />
+        <EmptyState title={t("audit.noFindings")} detail={t("traceDetail.noFindingsDetail")} compact />
       )}
     </section>
   );
@@ -867,65 +875,65 @@ function formatSequence(value) {
   return `#${value}`;
 }
 
-function exchangeLabel(value = "") {
+function exchangeLabel(value = "", t) {
   switch (String(value || "").trim()) {
     case "primary_model_call":
-      return "Model";
+      return t("traceDetail.exchangeModel");
     case "client_request":
-      return "Request";
+      return t("traceDetail.exchangeRequest");
     case "upstream_model_call":
     case "model_call":
-      return "Model";
+      return t("traceDetail.exchangeModel");
     case "model":
-      return "Model";
+      return t("traceDetail.exchangeModel");
     case "entry":
-      return "Request";
+      return t("traceDetail.exchangeRequest");
     default:
-      return value || "Model";
+      return value || t("traceDetail.exchangeModel");
   }
 }
 
-function PerformancePanel({ performance }) {
+function PerformancePanel({ performance, t }) {
   if (performance.error) {
-    return <EmptyState title="Unable to load performance" detail={performance.error} tone="danger" />;
+    return <EmptyState title={t("traceDetail.loadPerformanceError")} detail={performance.error} tone="danger" />;
   }
   if (performance.loading && !performance.data) {
-    return <EmptyState title="Loading performance" detail="Reading trace-level latency and token metrics." />;
+    return <EmptyState title={t("traceDetail.loadingPerformance")} detail={t("traceDetail.loadingPerformanceDetail")} />;
   }
   const perf = performance.data?.performance;
   if (!perf) {
-    return <EmptyState title="No performance data" detail="This trace does not have indexed performance metrics." />;
+    return <EmptyState title={t("traceDetail.noPerformanceData")} detail={t("traceDetail.noPerformanceDataDetail")} />;
   }
   return (
     <section className="panel performance-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Runtime metrics</p>
-          <h2>Performance</h2>
+          <p className="eyebrow">{t("traceDetail.runtimeMetrics")}</p>
+          <h2>{t("traceDetail.performanceTitle")}</h2>
         </div>
       </div>
       <section className="hero-grid">
-        <StatCard label="Duration" value={formatDuration(perf.duration_ms || 0, { precise: true })} />
+        <StatCard label={t("traceDetail.duration")} value={formatDuration(perf.duration_ms || 0, { precise: true })} />
         <StatCard label="TTFT" value={formatDuration(perf.ttft_ms || 0, { precise: true })} />
-        <StatCard label="Tokens / sec" value={Number(perf.tokens_per_sec || 0).toFixed(2)} accent="accent-green" />
-        <StatCard label="Cache" value={`${Number(perf.cache_ratio || 0).toFixed(1)}%`} accent="accent-gold" />
+        <StatCard label={t("traceDetail.tokensPerSec")} value={Number(perf.tokens_per_sec || 0).toFixed(2)} accent="accent-green" />
+        <StatCard label={t("traceDetail.cache")} value={`${Number(perf.cache_ratio || 0).toFixed(1)}%`} accent="accent-gold" />
       </section>
       <div className="detail-meta-strip">
-        <DetailMetaPill label="status" value={perf.status_code || 0} />
-        <DetailMetaPill label="total tokens" value={formatTokenCount(perf.total_tokens || 0)} />
-        <DetailMetaPill label="input" value={formatTokenCount(perf.prompt_tokens || 0)} />
-        <DetailMetaPill label="output" value={formatTokenCount(perf.completion_tokens || 0)} />
-        <DetailMetaPill label="cached" value={formatTokenCount(perf.cached_tokens || 0)} />
-        <DetailMetaPill label="stream" value={perf.is_stream ? "yes" : "no"} />
-        <DetailMetaPill label="upstream" value={perf.selected_upstream_id || "-"} mono />
-        <DetailMetaPill label="policy" value={perf.routing_policy || "-"} />
+        <DetailMetaPill label={t("traceDetail.metaStatus")} value={perf.status_code || 0} />
+        <DetailMetaPill label={t("traceDetail.totalTokens")} value={formatTokenCount(perf.total_tokens || 0)} />
+        <DetailMetaPill label={t("traceDetail.input")} value={formatTokenCount(perf.prompt_tokens || 0)} />
+        <DetailMetaPill label={t("traceDetail.output")} value={formatTokenCount(perf.completion_tokens || 0)} />
+        <DetailMetaPill label={t("traceDetail.cached")} value={formatTokenCount(perf.cached_tokens || 0)} />
+        <DetailMetaPill label={t("routing.stream")} value={perf.is_stream ? t("traceDetail.yes") : t("traceDetail.no")} />
+        <DetailMetaPill label={t("traceDetail.metaUpstream")} value={perf.selected_upstream_id || "-"} mono />
+        <DetailMetaPill label={t("traceDetail.metaPolicy")} value={perf.routing_policy || "-"} />
       </div>
       {perf.provider_error ? <pre className="trace-failure-detail">{perf.provider_error}</pre> : null}
     </section>
   );
 }
 
-function RawProtocolPanel({ raw, focusTarget = "" }) {
+function RawProtocolPanel({ raw, focusTarget = "", t }) {
   const [wrap, setWrap] = useState(false);
   const requestRef = useRef(null);
   const responseRef = useRef(null);
@@ -941,33 +949,33 @@ function RawProtocolPanel({ raw, focusTarget = "" }) {
   }, [focusTarget]);
 
   if (raw.error) {
-    return <EmptyState title="Unable to load raw protocol" detail={raw.error} tone="danger" />;
+    return <EmptyState title={t("traceDetail.loadRawError")} detail={raw.error} tone="danger" />;
   }
   if (raw.loading && !raw.data) {
-    return <EmptyState title="Loading raw protocol" detail="Fetching the original request and response exchange for this trace." />;
+    return <EmptyState title={t("traceDetail.loadingRaw")} detail={t("traceDetail.loadingRawDetail")} />;
   }
 
   return (
     <section className="panel raw-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Raw HTTP exchange</p>
-          <h2>Request / Response</h2>
+          <p className="eyebrow">{t("traceDetail.rawHttpExchange")}</p>
+          <h2>{t("traceDetail.requestResponse")}</h2>
         </div>
         <label className="wrap-toggle">
           <input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} />
-          Wrap lines
+          {t("traceDetail.wrapLines")}
         </label>
       </div>
       <div className="raw-grid">
-        <ProtocolColumn ref={requestRef} title="Request" value={raw.data?.request_protocol || ""} wrap={wrap} focused={focusTarget === "request"} />
-        <ProtocolColumn ref={responseRef} title="Response" value={raw.data?.response_protocol || ""} wrap={wrap} focused={focusTarget === "response"} />
+        <ProtocolColumn ref={requestRef} title={t("traceDetail.request")} value={raw.data?.request_protocol || ""} wrap={wrap} focused={focusTarget === "request"} />
+        <ProtocolColumn ref={responseRef} title={t("traceDetail.response")} value={raw.data?.response_protocol || ""} wrap={wrap} focused={focusTarget === "response"} />
       </div>
     </section>
   );
 }
 
-function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
+function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
   const panelRef = useRef(null);
   const focusPath = focusTarget === "timeline_error" ? findFirstTimelineErrorPath(events) : [];
 
@@ -979,15 +987,15 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
   }, [focusTarget]);
 
   if (!events.length) {
-    return <EmptyState title="No timeline events" detail="This trace does not include a structured llm event timeline." />;
+    return <EmptyState title={t("traceDetail.noTimelineEvents")} detail={t("traceDetail.noTimelineEventsDetail")} />;
   }
 
   return (
     <section ref={panelRef} className={focusTarget === "timeline" ? "panel timeline-panel timeline-panel-focused" : "panel timeline-panel"}>
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Provider timeline</p>
-          <h2>Unified llm event stream</h2>
+          <p className="eyebrow">{t("traceDetail.providerTimeline")}</p>
+          <h2>{t("traceDetail.unifiedEventStream")}</h2>
         </div>
       </div>
       <div className="timeline-list">
@@ -999,12 +1007,12 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
             <div className="timeline-card">
               <div className="timeline-head">
                 <div>
-                  <strong>{event.type || "event"}</strong>
+                  <strong>{event.type || t("traceDetail.eventFallback")}</strong>
                   <span>{formatDateTime(event.time)}</span>
                 </div>
-                <span className="timeline-badge">{event.is_stream ? "stream" : "record"}</span>
+                <span className="timeline-badge">{event.is_stream ? t("routing.stream") : t("traceDetail.recordTag")}</span>
               </div>
-              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} focusPath={focusPath} InlineTag={InlineTag} /> : null}
+              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} focusPath={focusPath} InlineTag={InlineTag} t={t} /> : null}
               {!event.timeline_items?.length && event.message ? <div className="timeline-message">{event.message}</div> : null}
               {event.attributes ? <CodeBlock value={JSON.stringify(event.attributes, null, 2)} /> : null}
             </div>
@@ -1015,15 +1023,15 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
   );
 }
 
-function RoutePlanSummary({ plan, selectedUpstreamBaseURL = "", selectedUpstreamProviderPreset = "", InlineTag }) {
+function RoutePlanSummary({ plan, selectedUpstreamBaseURL = "", selectedUpstreamProviderPreset = "", InlineTag, t }) {
   const selectedID = plan.selectedRouteTargetID || plan.selectedUpstreamID || "";
   const modelAliased = Boolean(plan.requestedModel && plan.upstreamModel && plan.requestedModel !== plan.upstreamModel);
   return (
     <div className="routing-summary-grid">
       <section className="breakdown-card">
-        <div className="breakdown-title">{selectedID ? "Resolved route target" : "Failure class"}</div>
+        <div className="breakdown-title">{selectedID ? t("traceDetail.resolvedRouteTarget") : t("traceDetail.failureClass")}</div>
         <div className="routing-summary-stack">
-          <strong className="trace-model-name">{selectedID || formatFailureReason(plan.failureReason) || "routing failure"}</strong>
+          <strong className="trace-model-name">{selectedID || formatFailureReason(plan.failureReason) || t("traceDetail.routingFailure")}</strong>
           <span className="trace-subline mono">{plan.upstreamEndpoint || selectedUpstreamBaseURL || "-"}</span>
           <div className="trace-tag-group">
             {selectedUpstreamProviderPreset ? <InlineTag tone="accent">{selectedUpstreamProviderPreset}</InlineTag> : null}
@@ -1034,36 +1042,36 @@ function RoutePlanSummary({ plan, selectedUpstreamBaseURL = "", selectedUpstream
         </div>
       </section>
       <section className="breakdown-card">
-        <div className="breakdown-title">Model mapping</div>
+        <div className="breakdown-title">{t("traceDetail.modelMapping")}</div>
         <div className="routing-summary-stack">
           <div className="detail-meta-strip">
-            <DetailMetaPill label="requested" value={plan.requestedModel || "-"} mono />
-            <DetailMetaPill label="upstream" value={plan.upstreamModel || "-"} mono />
+            <DetailMetaPill label={t("traceDetail.metaRequested")} value={plan.requestedModel || "-"} mono />
+            <DetailMetaPill label={t("traceDetail.metaUpstream")} value={plan.upstreamModel || "-"} mono />
           </div>
           {modelAliased ? (
             <div className="trace-tag-group">
-              <InlineTag tone="gold">alias rewrite</InlineTag>
+              <InlineTag tone="gold">{t("traceDetail.aliasRewrite")}</InlineTag>
               <span className="trace-subline mono">{plan.requestedModel} {"->"} {plan.upstreamModel}</span>
             </div>
           ) : (
-            <span className="trace-subline">Requested and upstream model names match.</span>
+            <span className="trace-subline">{t("traceDetail.modelNamesMatch")}</span>
           )}
         </div>
       </section>
       <section className="breakdown-card">
-        <div className="breakdown-title">Execution</div>
+        <div className="breakdown-title">{t("routing.execution")}</div>
         <div className="routing-summary-stack">
           <div className="detail-meta-strip">
-            <DetailMetaPill label="entrypoint" value={plan.clientEntrypoint || "-"} />
-            <DetailMetaPill label="mode" value={formatRoutePlanValue(plan.executionMode)} />
-            <DetailMetaPill label="endpoint" value={plan.upstreamEndpoint || "-"} />
-            <DetailMetaPill label="strategy" value={formatRoutePlanValue(plan.strategy)} />
+            <DetailMetaPill label={t("traceDetail.metaEntrypoint")} value={plan.clientEntrypoint || "-"} />
+            <DetailMetaPill label={t("traceDetail.metaMode")} value={formatRoutePlanValue(plan.executionMode)} />
+            <DetailMetaPill label={t("traceDetail.metaEndpoint")} value={plan.upstreamEndpoint || "-"} />
+            <DetailMetaPill label={t("traceDetail.metaStrategy")} value={formatRoutePlanValue(plan.strategy)} />
           </div>
         </div>
       </section>
       {plan.failureReason ? (
         <section className="breakdown-card">
-          <div className="breakdown-title">Failure reason</div>
+          <div className="breakdown-title">{t("traceDetail.failureReason")}</div>
           <div className="routing-summary-stack">
             <strong>{formatFailureReason(plan.failureReason)}</strong>
             {plan.reason && plan.reason !== plan.failureReason ? <span className="trace-subline">{formatFailureReason(plan.reason)}</span> : null}
@@ -1072,24 +1080,24 @@ function RoutePlanSummary({ plan, selectedUpstreamBaseURL = "", selectedUpstream
       ) : null}
       {plan.candidateSummary.length ? (
         <section className="breakdown-card route-plan-candidates">
-          <div className="breakdown-title">Candidate summary</div>
+          <div className="breakdown-title">{t("traceDetail.candidateSummary")}</div>
           <div className="routing-candidate-list routing-candidate-list-compact">
             {plan.candidateSummary.map((candidate, index) => (
               <article key={`${candidate.route_target_id || candidate.id || "candidate"}-${index}`} className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"}>
                 <div className="routing-candidate-head">
                   <div>
-                    <strong>{candidate.route_target_id || candidate.id || "unknown target"}</strong>
+                    <strong>{candidate.route_target_id || candidate.id || t("routing.unknownTarget")}</strong>
                     {candidate.channel_id ? <span className="trace-subline mono">{candidate.channel_id}</span> : null}
                   </div>
                   <div className="trace-tag-group">
                     {candidate.api_type ? <InlineTag tone="accent">{candidate.api_type}</InlineTag> : null}
                     {candidate.mode ? <InlineTag>{candidate.mode}</InlineTag> : null}
-                    <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? "selectable" : candidate.filter_reason || "filtered"}</InlineTag>
+                    <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? t("routing.selectable") : candidate.filter_reason || t("routing.filtered")}</InlineTag>
                   </div>
                 </div>
                 <div className="detail-meta-strip">
-                  <DetailMetaPill label="path" value={candidate.supports_path ? "yes" : "no"} />
-                  <DetailMetaPill label="model" value={candidate.supports_model ? "yes" : "no"} />
+                  <DetailMetaPill label={t("traceDetail.metaPath")} value={candidate.supports_path ? t("traceDetail.yes") : t("traceDetail.no")} />
+                  <DetailMetaPill label={t("traceDetail.metaModel")} value={candidate.supports_model ? t("traceDetail.yes") : t("traceDetail.no")} />
                 </div>
               </article>
             ))}
@@ -1100,7 +1108,7 @@ function RoutePlanSummary({ plan, selectedUpstreamBaseURL = "", selectedUpstream
   );
 }
 
-function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates = true }) {
+function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates = true, t }) {
   if (!decision || (!decision.candidates.length && !decision.events.length)) {
     return null;
   }
@@ -1109,8 +1117,8 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates =
     <section className="routing-decision-panel">
       <div className="routing-decision-head">
         <div>
-          <div className="breakdown-title">Decision trace</div>
-          <strong>{selectedID ? `Selected ${selectedID}` : decision.failureReason ? formatFailureReason(decision.failureReason) : "Routing events"}</strong>
+          <div className="breakdown-title">{t("traceDetail.decisionTrace")}</div>
+          <strong>{selectedID ? t("traceDetail.selectedTarget", { target: selectedID }) : decision.failureReason ? formatFailureReason(decision.failureReason) : t("traceDetail.routingEvents")}</strong>
         </div>
         <div className="trace-tag-group">
           {decision.policy ? <InlineTag>{decision.policy}</InlineTag> : null}
@@ -1126,32 +1134,32 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates =
             <article key={`${candidate.id || "candidate"}-${index}`} className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"}>
               <div className="routing-candidate-head">
                 <div>
-                  <strong>{candidate.route_target_id || candidate.id || "unknown target"}</strong>
+                  <strong>{candidate.route_target_id || candidate.id || t("routing.unknownTarget")}</strong>
                   <span className="trace-subline mono">{candidate.base_url || "-"}</span>
                 </div>
                 <div className="trace-tag-group">
                   {candidate.provider_preset ? <InlineTag tone="accent">{candidate.provider_preset}</InlineTag> : null}
                   {candidate.channel_id ? <InlineTag>{candidate.channel_id}</InlineTag> : null}
                   {candidate.credential_id ? <InlineTag tone="gold">{candidate.credential_id}</InlineTag> : null}
-                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? "selectable" : candidate.filter_reason || "filtered"}</InlineTag>
+                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? t("routing.selectable") : candidate.filter_reason || t("routing.filtered")}</InlineTag>
                   {candidate.health_state ? <InlineTag tone={healthTone(candidate.health_state)}>{formatHealthLabel(candidate.health_state)}</InlineTag> : null}
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="priority" value={candidate.priority ?? "-"} />
-                <DetailMetaPill label="weight" value={candidate.weight ?? "-"} />
-                <DetailMetaPill label="path" value={candidate.supports_path ? "yes" : "no"} />
-                <DetailMetaPill label="model" value={candidate.supports_model ? "yes" : "no"} />
-                {candidate.credential_hint ? <DetailMetaPill label="hint" value={candidate.credential_hint} mono /> : null}
+                <DetailMetaPill label={t("traceDetail.metaPriority")} value={candidate.priority ?? "-"} />
+                <DetailMetaPill label={t("traceDetail.metaWeight")} value={candidate.weight ?? "-"} />
+                <DetailMetaPill label={t("traceDetail.metaPath")} value={candidate.supports_path ? t("traceDetail.yes") : t("traceDetail.no")} />
+                <DetailMetaPill label={t("traceDetail.metaModel")} value={candidate.supports_model ? t("traceDetail.yes") : t("traceDetail.no")} />
+                {candidate.credential_hint ? <DetailMetaPill label={t("traceDetail.metaHint")} value={candidate.credential_hint} mono /> : null}
               </div>
             </article>
           ))}
         </div>
       ) : showCandidates ? (
-        <EmptyState title="No candidate detail" detail="This trace has routing events but no candidate list." compact />
+        <EmptyState title={t("traceDetail.noCandidateDetail")} detail={t("traceDetail.noCandidateDetailText")} compact />
       ) : null}
       {decision.events.length ? (
-        <CollapsibleCard title="Routing event payloads" subtitle={`${decision.events.length} event(s)`} defaultOpen={false}>
+        <CollapsibleCard title={t("traceDetail.routingEventPayloads")} subtitle={t("traceDetail.eventCount", { count: decision.events.length })} defaultOpen={false}>
           <CodeBlock value={JSON.stringify(decision.events, null, 2)} />
         </CollapsibleCard>
       ) : null}
@@ -1159,17 +1167,17 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates =
   );
 }
 
-function TimelineTree({ items, focusPath = [], InlineTag }) {
+function TimelineTree({ items, focusPath = [], InlineTag, t }) {
   return (
     <div className="timeline-tree">
       {items.map((item, index) => (
-        <TimelineNode key={buildTimelineNodeKey(item, index)} nodeKey={buildTimelineNodeKey(item, index)} item={item} depth={0} focusPath={focusPath} InlineTag={InlineTag} />
+        <TimelineNode key={buildTimelineNodeKey(item, index)} nodeKey={buildTimelineNodeKey(item, index)} item={item} depth={0} focusPath={focusPath} InlineTag={InlineTag} t={t} />
       ))}
     </div>
   );
 }
 
-function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag }) {
+function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag, t }) {
   const nodeRef = useRef(null);
   const hasChildren = Boolean(item.children?.length);
   const hasDetails = Boolean(item.body && item.body !== item.summary);
@@ -1189,9 +1197,9 @@ function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag
     return (
       <div ref={nodeRef} className={className}>
         <div className="timeline-node-leaf">
-          <TimelineNodeHeading item={item} />
+          <TimelineNodeHeading item={item} t={t} />
           {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
-          {item.status === "error" ? <InlineTag tone="danger">error</InlineTag> : null}
+          {item.status === "error" ? <InlineTag tone="danger">{t("traceDetail.errorLabel")}</InlineTag> : null}
         </div>
         {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
       </div>
@@ -1201,16 +1209,16 @@ function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag
   return (
     <details ref={nodeRef} className={className} open={(depth === 0 && hasChildren) || focusedBranch}>
       <summary className="timeline-node-summary">
-        <TimelineNodeHeading item={item} />
+        <TimelineNodeHeading item={item} t={t} />
         {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
-        {item.status === "error" ? <InlineTag tone="danger">error</InlineTag> : null}
+        {item.status === "error" ? <InlineTag tone="danger">{t("traceDetail.errorLabel")}</InlineTag> : null}
       </summary>
       {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
       {hasDetails ? <pre className="timeline-node-body">{item.body}</pre> : null}
       {hasChildren ? (
         <div className="timeline-children">
           {item.children.map((child, index) => (
-            <TimelineNode key={buildTimelineNodeKey(child, index)} nodeKey={buildTimelineNodeKey(child, index)} item={child} depth={depth + 1} focusPath={focusPath} InlineTag={InlineTag} />
+            <TimelineNode key={buildTimelineNodeKey(child, index)} nodeKey={buildTimelineNodeKey(child, index)} item={child} depth={depth + 1} focusPath={focusPath} InlineTag={InlineTag} t={t} />
           ))}
         </div>
       ) : null}
@@ -1218,11 +1226,11 @@ function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag
   );
 }
 
-function TimelineNodeHeading({ item }) {
+function TimelineNodeHeading({ item, t }) {
   return (
     <div className="timeline-node-heading">
-      <span className="timeline-node-kind">{formatTimelineKind(item.kind)}</span>
-      <strong className="timeline-node-title">{formatTimelineTitle(item)}</strong>
+      <span className="timeline-node-kind">{formatTimelineKind(item.kind, t)}</span>
+      <strong className="timeline-node-title">{formatTimelineTitle(item, t)}</strong>
     </div>
   );
 }
@@ -1307,19 +1315,19 @@ function normalizeStickyBreak(attrs = {}) {
   };
 }
 
-function PayloadSummary({ raw, CodeBlock }) {
+function PayloadSummary({ raw, CodeBlock, t }) {
   const requestBody = extractHTTPBody(raw.data?.request_protocol || "");
   const responseBody = extractHTTPBody(raw.data?.response_protocol || "");
 
   return (
     <div className="payload-grid">
       <section className="payload-card">
-        <div className="protocol-head">Request body</div>
-        <CodeBlock value={formatBodyForDisplay(requestBody)} />
+        <div className="protocol-head">{t("traceDetail.requestBody")}</div>
+        <CodeBlock value={formatBodyForDisplay(requestBody, t)} />
       </section>
       <section className="payload-card">
-        <div className="protocol-head">Response body</div>
-        <CodeBlock value={formatBodyForDisplay(responseBody)} />
+        <div className="protocol-head">{t("traceDetail.responseBody")}</div>
+        <CodeBlock value={formatBodyForDisplay(responseBody, t)} />
       </section>
     </div>
   );
@@ -1334,7 +1342,7 @@ const ProtocolColumn = React.forwardRef(function ProtocolColumn({ title, value, 
   );
 });
 
-function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleCard, CodeBlock, InlineTag, MessageContent }) {
+function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleCard, CodeBlock, InlineTag, MessageContent, t }) {
   const alignClass = message.role === "assistant" ? "message-assistant" : message.role === "tool" ? "message-tool" : "message-user";
   const isCollapsible = message.message_type === "tool_use" || message.message_type === "tool_result";
   const toolSummary = buildToolMessageSummary(message, declaredTools);
@@ -1349,8 +1357,8 @@ function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleC
         <span className="message-kind">{message.message_type || "message"}</span>
         {callID ? (
           <>
-            <span className="message-call-id">call id {callID}</span>
-            <a className="message-jump-link" href={`#${toolCallAnchor(callID)}`}>call</a>
+            <span className="message-call-id">{t("traceDetail.callID", { id: callID })}</span>
+            <a className="message-jump-link" href={`#${toolCallAnchor(callID)}`}>{t("traceDetail.callLink")}</a>
           </>
         ) : null}
       </div>
@@ -1359,11 +1367,11 @@ function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleC
         <MessageContent value={message.content} format={message.content_format} renderMarkdown={renderMarkdown} className="message-body" />
       ) : null}
       {message.tool_calls?.length ? message.tool_calls.map((call) => (
-        <ToolCallView key={call.id || call.function?.name} call={call} match={findDeclaredToolForCall(call, declaredTools)} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+        <ToolCallView key={call.id || call.function?.name} call={call} match={findDeclaredToolForCall(call, declaredTools)} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
       )) : null}
       {message.blocks?.length ? message.blocks.map((block, index) => <BlockView key={`${block.kind}-${index}`} block={block} CodeBlock={CodeBlock} />) : null}
       {!message.content && !message.tool_calls?.length && !message.blocks?.length ? (
-        <div className="tool-message-placeholder">No structured payload was captured for this tool event.</div>
+        <div className="tool-message-placeholder">{t("traceDetail.noStructuredPayload")}</div>
       ) : null}
     </article>
   );
@@ -1379,18 +1387,18 @@ function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleC
   );
 }
 
-function ToolCallView({ call, match = null, CodeBlock, InlineTag }) {
+function ToolCallView({ call, match = null, CodeBlock, InlineTag, t }) {
   const callID = call.id || "";
   return (
     <div id={callID ? toolCallAnchor(callID) : undefined} className="tool-call-box">
       <div className="tool-call-head">
-        <div className="tool-call-title">{call.function?.name || "tool"}</div>
-        {match?.name ? <InlineTag tone="accent">declared</InlineTag> : null}
+        <div className="tool-call-title">{call.function?.name || t("traceDetail.toolLabel")}</div>
+        {match?.name ? <InlineTag tone="accent">{t("traceDetail.declared")}</InlineTag> : null}
       </div>
       {callID ? (
         <div className="tool-call-meta">
-          call id {callID}
-          <a className="message-jump-link" href={`#${toolOutputAnchor(callID)}`}>output</a>
+          {t("traceDetail.callID", { id: callID })}
+          <a className="message-jump-link" href={`#${toolOutputAnchor(callID)}`}>{t("traceDetail.output")}</a>
         </div>
       ) : null}
       <CodeBlock value={call.function?.arguments || "{}"} />
@@ -1431,10 +1439,10 @@ function extractHTTPBody(value = "") {
   return value.slice(index + separator.length);
 }
 
-function formatBodyForDisplay(value = "") {
+function formatBodyForDisplay(value = "", t) {
   const trimmed = String(value || "").trim();
   if (!trimmed) {
-    return "(empty)";
+    return t("traceDetail.emptyBody");
   }
   try {
     return JSON.stringify(JSON.parse(trimmed), null, 2);
@@ -1443,28 +1451,28 @@ function formatBodyForDisplay(value = "") {
   }
 }
 
-function formatTimelineKind(kind = "") {
+function formatTimelineKind(kind = "", t) {
   switch (kind) {
     case "message":
-      return "message";
+      return t("traceDetail.kindMessage");
     case "tool_call":
-      return "tool call";
+      return t("traceDetail.kindToolCall");
     case "tool_response":
-      return "tool response";
+      return t("traceDetail.kindToolResponse");
     case "thinking":
-      return "thinking";
+      return t("traceDetail.kindThinking");
     case "output":
-      return "output";
+      return t("traceDetail.kindOutput");
     default:
-      return kind || "item";
+      return kind || t("traceDetail.kindItem");
   }
 }
 
-function formatTimelineTitle(item = {}) {
+function formatTimelineTitle(item = {}, t) {
   if (item.kind === "message") {
-    return item.label || item.role || "Message";
+    return item.label || item.role || t("traceDetail.messageTitle");
   }
-  return item.name || item.label || formatTimelineKind(item.kind);
+  return item.name || item.label || formatTimelineKind(item.kind, t);
 }
 
 function buildTimelineNodeKey(item = {}, index = 0) {
@@ -1506,14 +1514,14 @@ function hasConversation(detail) {
   );
 }
 
-function labelTraceAction(action) {
+function labelTraceAction(action, t) {
   switch (action) {
     case "repair":
-      return "Stats repair";
+      return t("traceDetail.statsRepair");
     case "reanalyze":
-      return "Analysis refresh";
+      return t("traceDetail.analysisRefresh");
     default:
-      return "Analysis";
+      return t("nav.analysis");
   }
 }
 

@@ -133,3 +133,86 @@ export async function downloadBlob(path) {
 export function listItems(payload) {
   return Array.isArray(payload?.items) ? payload.items : [];
 }
+
+// streamSystemEvents subscribes to the monitor SSE stream. EventSource cannot
+// send an Authorization header, which used to force the JWT into the query
+// string (?access_token=...) where reverse proxies log it. This reader uses
+// fetch + ReadableStream instead, so the token travels in a header only.
+export function streamSystemEvents(handlers = {}) {
+  const controller = new AbortController();
+  const { onEvent, onError } = handlers;
+  let stopped = false;
+
+  const dispatch = (rawEvent) => {
+    if (typeof onEvent !== "function") {
+      return;
+    }
+    let eventName = "";
+    const dataLines = [];
+    for (const line of rawEvent.split("\n")) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).replace(/^ /, ""));
+      }
+    }
+    if (dataLines.length > 0) {
+      onEvent({ event: eventName, data: dataLines.join("\n") });
+    }
+  };
+
+  const read = async () => {
+    const response = await fetch(apiPaths.eventsStream, {
+      headers: { ...monitorAuthHeaders(), Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`event stream failed: ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let separator = buffer.indexOf("\n\n");
+      while (separator >= 0) {
+        const rawEvent = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        if (rawEvent.trim() !== "") {
+          dispatch(rawEvent);
+        }
+        separator = buffer.indexOf("\n\n");
+      }
+    }
+  };
+
+  const start = () => {
+    if (stopped) {
+      return;
+    }
+    read()
+      .catch((err) => {
+        if (stopped || controller.signal.aborted) {
+          return;
+        }
+        if (typeof onError === "function") {
+          onError(err);
+        }
+      })
+      .then(() => {
+        if (!stopped) {
+          setTimeout(start, 5000);
+        }
+      });
+  };
+  start();
+
+  return () => {
+    stopped = true;
+    controller.abort();
+  };
+}
