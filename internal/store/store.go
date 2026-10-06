@@ -5737,25 +5737,15 @@ func (s *Store) Sync() error {
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		inputs, err := readCassetteIndexInputs(path)
 		if err != nil {
-			return err
-		}
-
-		parsed, err := recordfile.ParsePrelude(content)
-		if err != nil {
-			if shouldSkipIncompleteRecord(content, err) {
+			if cassetteIsFragment(path, err) {
 				return nil
 			}
-			return fmt.Errorf("parse %s: %w", path, err)
+			return fmt.Errorf("index %s: %w", path, err)
 		}
 
-		grouping, err := ExtractGroupingInfo(content, parsed)
-		if err != nil {
-			return fmt.Errorf("extract grouping %s: %w", path, err)
-		}
-
-		return s.upsertLogWithGrouping(path, parsed.Header, grouping)
+		return s.upsertLogWithGrouping(path, inputs.Parsed.Header, inputs.Grouping)
 	})
 	// The index rows written before a walk failure are already committed, so the
 	// deferred derived refreshes run either way; a derived-table failure is
@@ -5791,38 +5781,114 @@ func (s *Store) loadFreshness() (map[string]freshnessRecord, error) {
 	return freshness, rows.Err()
 }
 
-func shouldSkipIncompleteRecord(content []byte, err error) bool {
-	if err == nil {
-		return false
+// httpRequestMethodPrefixes are the request lines a cassette that was written before
+// its prelude can start with. Such a file is an in-progress recording, not a corrupt
+// one, so indexers skip it instead of failing the walk.
+var httpRequestMethodPrefixes = [][]byte{
+	[]byte("GET "),
+	[]byte("POST "),
+	[]byte("PUT "),
+	[]byte("PATCH "),
+	[]byte("DELETE "),
+	[]byte("HEAD "),
+	[]byte("OPTIONS "),
+}
+
+// maxRequestHeaderBlock bounds the request header block a reader will allocate from
+// the file's own metadata. A real header block is a few hundred bytes; the bound stops
+// a corrupt ReqHeaderLen claiming an arbitrary size.
+const maxRequestHeaderBlock = 1 << 20
+
+// cassetteIndexInputs is what indexing one cassette needs from it: the prelude and the
+// grouping identifiers derived from the request header block.
+type cassetteIndexInputs struct {
+	Parsed   *recordfile.ParsedPrelude
+	Grouping GroupingInfo
+}
+
+// readCassetteIndexInputs reads the prelude of the cassette at path and the request
+// header block the grouping identifiers come from, without reading the record.
+//
+// Both index entry points used to read the whole file for this. A cassette is as large
+// as the response body it holds, so on a corpus of recordings that made indexing cost
+// grow with the bytes stored rather than with the number of traces.
+//
+// Grouping deliberately comes from the request header block alone, which is what the
+// recorder uses when it indexes a recording as it finalises it. Deriving it from the
+// whole request instead made the result depend on which path indexed the row, because
+// the header parser keeps scanning past the blank line and will read a body line as a
+// header if it looks like one.
+func readCassetteIndexInputs(path string) (cassetteIndexInputs, error) {
+	parsed, err := recordfile.ReadPreludeFile(path)
+	if err != nil {
+		return cassetteIndexInputs{}, err
 	}
 
-	trimmed := bytes.TrimSpace(content)
+	headerLen := parsed.Header.Layout.ReqHeaderLen
+	if headerLen <= 0 {
+		return cassetteIndexInputs{Parsed: parsed}, nil
+	}
+	if headerLen > maxRequestHeaderBlock {
+		headerLen = maxRequestHeaderBlock
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return cassetteIndexInputs{}, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(parsed.PayloadOffset, io.SeekStart); err != nil {
+		return cassetteIndexInputs{}, err
+	}
+
+	// A record that is cut short is indexed from the bytes that are there, which is
+	// what extracting a section and clamping it to the file length used to do.
+	header := make([]byte, headerLen)
+	n, readErr := io.ReadFull(f, header)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		return cassetteIndexInputs{}, readErr
+	}
+
+	grouping, err := ExtractGroupingInfoFromRequestHeaders(header[:n])
+	if err != nil {
+		return cassetteIndexInputs{}, err
+	}
+	return cassetteIndexInputs{Parsed: parsed, Grouping: grouping}, nil
+}
+
+// cassetteIsFragment reports whether a cassette that failed to parse is a fragment an
+// indexer skips rather than an error: a blank file, a bare HTTP record whose prelude has
+// not been written yet, or a prelude recordfile has already classified as unusable. It
+// reads a bounded prefix for that decision rather than the whole file.
+func cassetteIsFragment(path string, cause error) bool {
+	if cause == nil {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	head := make([]byte, 1024)
+	n, _ := f.Read(head)
+	if n <= 0 {
+		return true
+	}
+	trimmed := bytes.TrimSpace(head[:n])
 	if len(trimmed) == 0 {
 		return true
 	}
 
-	if recordfile.HasFileMagic(trimmed) {
-		errText := err.Error()
-		return strings.Contains(errText, "failed to read prelude") ||
-			strings.Contains(errText, "missing v3 meta line") ||
-			strings.Contains(errText, "invalid v3")
+	if errors.Is(cause, recordfile.ErrUnusablePrelude) {
+		return true
 	}
 
-	httpMethods := [][]byte{
-		[]byte("GET "),
-		[]byte("POST "),
-		[]byte("PUT "),
-		[]byte("PATCH "),
-		[]byte("DELETE "),
-		[]byte("HEAD "),
-		[]byte("OPTIONS "),
-	}
-	for _, method := range httpMethods {
+	for _, method := range httpRequestMethodPrefixes {
 		if bytes.HasPrefix(trimmed, method) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -8491,11 +8557,6 @@ func boolValue(v any) bool {
 	}
 }
 
-func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (GroupingInfo, error) {
-	reqFull, _, _, _ := recordfile.ExtractSections(content, parsed)
-	return extractGroupingInfoFromRequest(reqFull)
-}
-
 // ExtractGroupingInfoFromRequestHeaders derives the grouping identifiers from the
 // raw request header block alone - the bytes the request line and headers occupy,
 // ending at the blank line before the body. The recorder uses it while finalising a
@@ -9580,24 +9641,14 @@ func (s *Store) backfillGrouping() error {
 	}
 
 	for _, path := range paths {
-		content, err := os.ReadFile(path)
+		inputs, err := readCassetteIndexInputs(path)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || cassetteIsFragment(path, err) {
 				continue
 			}
 			return err
 		}
-		parsed, err := recordfile.ParsePrelude(content)
-		if err != nil {
-			if shouldSkipIncompleteRecord(content, err) {
-				continue
-			}
-			return err
-		}
-		grouping, err := ExtractGroupingInfo(content, parsed)
-		if err != nil {
-			return err
-		}
+		grouping := inputs.Grouping
 		if _, err := s.db.Exec(
 			`UPDATE logs SET session_id = ?, session_source = ?, window_id = ?, client_request_id = ? WHERE path = ?`,
 			grouping.SessionID,

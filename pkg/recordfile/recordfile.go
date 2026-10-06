@@ -245,6 +245,15 @@ func ParsePrelude(content []byte) (*ParsedPrelude, error) {
 	}, nil
 }
 
+// ErrUnusablePrelude marks a cassette whose prelude magic is present but whose
+// prelude cannot be used: the file ends inside it, or a prelude line cannot be
+// parsed. Callers that index a corpus treat it as a recording still in progress and
+// skip the file instead of failing, which is what the substring matching on the error
+// text used to express. It is deliberately not returned for a legacy file whose fixed
+// header block is malformed, because that is a corrupt recording rather than an
+// unfinished one.
+var ErrUnusablePrelude = errors.New("cassette prelude is unusable")
+
 // MaxPreludeBytes bounds how much of a cassette ReadPreludeFile will read and hold
 // while looking for the end of the prelude. A real prelude is a meta line plus one
 // line per event, so this is far above any recording the proxy produces; it exists so
@@ -282,7 +291,7 @@ func ReadPreludeFile(path string) (*ParsedPrelude, error) {
 		if err == nil {
 			err = io.ErrUnexpectedEOF
 		}
-		return nil, fmt.Errorf("read prelude of %s: %w", path, err)
+		return nil, fmt.Errorf("read prelude of %s: %w: %w", path, err, ErrUnusablePrelude)
 	}
 
 	if !isMagicLine(bytes.TrimSuffix(first, []byte("\n"))) {
@@ -295,6 +304,10 @@ func ReadPreludeFile(path string) (*ParsedPrelude, error) {
 			return nil, fmt.Errorf("read legacy prelude of %s: %w", path, readErr)
 		}
 		if n < LegacyHeaderLen {
+			// Deliberately not ErrUnusablePrelude: a file this short is not a recording
+			// still being written, because a recording being written arrives without a
+			// prelude and starts with its request line. It is a corrupt file, and the
+			// indexers report it rather than skipping it silently.
 			return nil, fmt.Errorf("prelude of %s ends before its %d-byte header block", path, LegacyHeaderLen)
 		}
 		return ParsePrelude(block)
@@ -308,21 +321,27 @@ func ReadPreludeFile(path string) (*ParsedPrelude, error) {
 		}
 		next, readErr := reader.ReadBytes('\n')
 		if len(next) == 0 {
-			return nil, fmt.Errorf("prelude of %s has no terminating blank line", path)
+			return nil, fmt.Errorf("prelude of %s has no terminating blank line: %w", path, ErrUnusablePrelude)
 		}
 		head = append(head, next...)
 		if len(head) > MaxPreludeBytes {
-			return nil, fmt.Errorf("prelude of %s exceeds %d bytes without a terminator", path, MaxPreludeBytes)
+			return nil, fmt.Errorf("prelude of %s exceeds %d bytes without a terminator: %w", path, MaxPreludeBytes, ErrUnusablePrelude)
 		}
 		if isBlankPreludeLine(next) {
 			break
 		}
 		if readErr != nil {
-			return nil, fmt.Errorf("prelude of %s has no terminating blank line", path)
+			return nil, fmt.Errorf("prelude of %s has no terminating blank line: %w", path, ErrUnusablePrelude)
 		}
 	}
 
-	return ParsePrelude(head)
+	// Only the V3 prelude is wrapped: a malformed legacy header block is a corrupt
+	// recording, not an unfinished one.
+	if parsed, err := ParsePrelude(head); err != nil {
+		return nil, fmt.Errorf("parse prelude of %s: %w: %w", path, err, ErrUnusablePrelude)
+	} else {
+		return parsed, nil
+	}
 }
 
 // isBlankPreludeLine reports whether a prelude line is the empty line that ends the

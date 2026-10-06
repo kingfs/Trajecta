@@ -3,7 +3,9 @@ package recordfile
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -333,4 +335,53 @@ func TestReadPreludeFileReadsALegacyHeaderBlock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "req-legacy", parsed.Header.Meta.RequestID)
 	assert.Equal(t, int64(LegacyHeaderLen), parsed.PayloadOffset)
+}
+
+// TestReadPreludeFileMarksUnusablePreludesTypesTheContractTheCallersRelyOn. The
+// indexers skip a recording whose prelude is not usable yet instead of failing their
+// walk, and they decide that with errors.Is rather than by matching error text. A
+// malformed legacy header block is deliberately not marked: that is a corrupt
+// recording, and the indexer must report it rather than skip it silently.
+func TestReadPreludeFileMarksUnusablePreludes(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta:    MetaData{RequestID: "req-unusable", Time: time.Now().UTC(), Model: "gpt-5"},
+	}
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+
+	lines := strings.SplitAfter(string(prelude), "\n")
+	require.Greater(t, len(lines), 3)
+	unterminated := strings.Join(lines[:len(lines)-2], "")
+	require.False(t, strings.HasSuffix(unterminated, "\n\n"))
+
+	legacyBlock := make([]byte, LegacyHeaderLen)
+	copy(legacyBlock, `{"version":"LLM_PROXY_V2"`)
+	legacyBlock[len(`{"version":"LLM_PROXY_V2"`)] = '\n'
+
+	cases := []struct {
+		name     string
+		content  []byte
+		unusable bool
+	}{
+		{name: "empty file", content: nil, unusable: true},
+		// A blank file carries no prelude magic at all, so it is not this sentinel's
+		// business; the indexers recognise it as a fragment by inspecting the file.
+		{name: "blank file", content: []byte("\n\n"), unusable: false},
+		{name: "unterminated v3 prelude", content: []byte(unterminated), unusable: true},
+		{name: "magic without a meta line", content: []byte(FileMagic + "\n"), unusable: true},
+		{name: "legacy block cut short", content: []byte(`{"version":"LLM_PROXY_V2"}`), unusable: false},
+		{name: "malformed legacy header block", content: legacyBlock, unusable: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "cassette.http")
+			require.NoError(t, os.WriteFile(path, tc.content, 0o644))
+
+			_, err := ReadPreludeFile(path)
+			require.Error(t, err)
+			assert.Equal(t, tc.unusable, errors.Is(err, ErrUnusablePrelude), "error = %v", err)
+		})
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -3611,6 +3612,13 @@ func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 	incompletePath := filepath.Join(dir, "in-progress.http")
 	if err := os.WriteFile(incompletePath, []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", incompletePath, err)
+	}
+
+	// A blank file and a file holding only part of a legacy header block were skipped
+	// before the bounded reader as well; the reader must not turn them into failures.
+	blankPath := filepath.Join(dir, "blank.http")
+	if err := os.WriteFile(blankPath, []byte("\n\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", blankPath, err)
 	}
 
 	validPath := filepath.Join(dir, "complete.http")
@@ -7322,5 +7330,220 @@ func TestSQLSafeBytesRemovesTheJSONNULEscape(t *testing.T) {
 				t.Fatalf("sqlSafeBytes(%q) = %q still contains a raw NUL byte", tc.in, got)
 			}
 		})
+	}
+}
+
+// writeLargeCassetteForTest writes a V3 cassette whose response body is large, so a
+// reader that takes the whole file is visible against the recording's body.
+func writeLargeCassetteForTest(t testing.TB, dir, name, sessionID string, bodyBytes int) string {
+	t.Helper()
+
+	requestHeaders := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nSession-Id: " + sessionID + "\r\n\r\n"
+	requestBody := `{"model":"gpt-test"}`
+	responseHeaders := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	responseBody := strings.Repeat("x", bodyBytes)
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID: name, Time: time.Now().UTC(), Model: "gpt-test",
+			URL: "/v1/chat/completions", Method: http.MethodPost, StatusCode: http.StatusOK,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64(requestHeaders),
+			ReqBodyLen:   len64(requestBody),
+			ResHeaderLen: len64(responseHeaders),
+			ResBodyLen:   len64(responseBody),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	content := string(prelude) + requestHeaders + requestBody + "\n" + responseHeaders + responseBody
+	path := filepath.Join(dir, name+".http")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	return path
+}
+
+// TestSyncReadsPreludesAndRequestHeadersNotWholeCassettes pins the cost model of
+// indexing. Sync() used to read every new or changed cassette in full to reach its
+// prelude and the request headers it derives the grouping from, so indexing a corpus
+// cost as much as the bytes stored: measured over 24 traces holding 1 MiB each,
+// 24.5 MiB allocated against 1.2 MiB once only the prelude and the header block are
+// read. The bound is far above the latter and far below the corpus.
+func TestSyncReadsPreludesAndRequestHeadersNotWholeCassettes(t *testing.T) {
+	const (
+		traces          = 24
+		bodyPerTrace    = 1 << 20
+		allocationLimit = 6 << 20
+	)
+
+	dir := t.TempDir()
+	for i := 0; i < traces; i++ {
+		writeLargeCassetteForTest(t, dir, fmt.Sprintf("large-%03d", i), fmt.Sprintf("sess-%03d", i), bodyPerTrace)
+	}
+
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	runtime.ReadMemStats(&after)
+
+	entries, err := st.ListRecent(traces + 5)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(entries) != traces {
+		t.Fatalf("len(entries) = %d, want %d; the corpus must still be indexed in full", len(entries), traces)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocationLimit {
+		t.Fatalf("Sync() allocated %.1f MiB over a %d MiB corpus, want it to read preludes rather than whole recordings",
+			float64(allocated)/(1<<20), (traces*bodyPerTrace)>>20)
+	}
+}
+
+// TestIndexingDerivesGroupingFromRequestHeadersAlone pins the invariant that the
+// grouping identifiers come from the request header block and nothing else.
+//
+// The header parser keeps scanning past the blank line, so deriving grouping from the
+// whole request let a body line that looks like a header be read as one. That made the
+// indexed grouping depend on which path indexed the row: the recorder has always used
+// the header block alone, while Sync() used the whole request. A body carrying
+// `Session-Id` now yields the same grouping from both.
+func TestIndexingDerivesGroupingFromRequestHeadersAlone(t *testing.T) {
+	dir := t.TempDir()
+
+	// The request carries no Session-Id of its own; its grouping comes from the Codex
+	// window header. The body then tries to look like a header line.
+	requestHeaders := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nX-Codex-Window-Id: window-7:3\r\n\r\n"
+	requestBody := "{\"model\":\"gpt-5\"}\r\nSession-Id: injected-from-body\r\n"
+	responseHeaders := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	responseBody := `{}`
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID: "req-body-injection", Time: time.Now().UTC(), Model: "gpt-5",
+			URL: "/v1/responses", Method: http.MethodPost, StatusCode: http.StatusOK,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64(requestHeaders),
+			ReqBodyLen:   len64(requestBody),
+			ResHeaderLen: len64(responseHeaders),
+			ResBodyLen:   len64(responseBody),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	path := filepath.Join(dir, "body-injection.http")
+	content := string(prelude) + requestHeaders + requestBody + "\n" + responseHeaders + responseBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	inputs, err := readCassetteIndexInputs(path)
+	if err != nil {
+		t.Fatalf("readCassetteIndexInputs() error = %v", err)
+	}
+	if inputs.Grouping.SessionID != "window-7" {
+		t.Fatalf("SessionID = %q, want window-7 from the Codex window header", inputs.Grouping.SessionID)
+	}
+	if inputs.Grouping.SessionSource != "header.x_codex_window_id" {
+		t.Fatalf("SessionSource = %q, want header.x_codex_window_id", inputs.Grouping.SessionSource)
+	}
+
+	// The recorder derives grouping from the header block alone; both paths must agree.
+	fromHeaders, err := ExtractGroupingInfoFromRequestHeaders([]byte(requestHeaders))
+	if err != nil {
+		t.Fatalf("ExtractGroupingInfoFromRequestHeaders() error = %v", err)
+	}
+	if fromHeaders != inputs.Grouping {
+		t.Fatalf("indexing paths disagree: recorder path = %+v, Sync path = %+v", fromHeaders, inputs.Grouping)
+	}
+
+	// And Sync() itself must record the same thing.
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-body-injection")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if entry.SessionID != "window-7" {
+		t.Fatalf("indexed SessionID = %q, want window-7", entry.SessionID)
+	}
+}
+
+// TestSyncIndexesLegacyFixedHeaderCassettes covers the legacy layout through the
+// bounded reader: its header block is a fixed 2KB JSON line rather than a terminated
+// prelude, and it must still be indexed with the grouping its request headers carry.
+func TestSyncIndexesLegacyFixedHeaderCassettes(t *testing.T) {
+	dir := t.TempDir()
+
+	requestHeaders := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nSession-Id: legacy-sess\r\n\r\n"
+	requestBody := `{"model":"gpt-test"}`
+	responseHeaders := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	responseBody := `{}`
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V2",
+		Meta: recordfile.MetaData{
+			RequestID: "legacy-fixed", Time: time.Now().UTC(), Model: "gpt-test",
+			URL: "/v1/chat/completions", Method: http.MethodPost, StatusCode: http.StatusOK,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64(requestHeaders),
+			ReqBodyLen:   len64(requestBody),
+			ResHeaderLen: len64(responseHeaders),
+			ResBodyLen:   len64(responseBody),
+		},
+	}
+	block, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	headerBlock := make([]byte, recordfile.LegacyHeaderLen)
+	copy(headerBlock, block)
+	headerBlock[len(block)] = '\n'
+
+	path := filepath.Join(dir, "legacy.http")
+	content := string(headerBlock) + requestHeaders + requestBody + "\n" + responseHeaders + responseBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	entry, err := st.GetByRequestID("legacy-fixed")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if entry.SessionID != "legacy-sess" {
+		t.Fatalf("SessionID = %q, want legacy-sess", entry.SessionID)
 	}
 }
