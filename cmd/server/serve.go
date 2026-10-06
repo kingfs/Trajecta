@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/auth"
@@ -172,17 +174,17 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 
+	var managementSrv *http.Server
 	if cfg.Monitor.Port != "" {
-		go func() {
-			mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
-
-			srv := newManagementHTTPServer(cfg, mux)
+		mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
+		managementSrv = newManagementHTTPServer(cfg, mux)
+		go func(srv *http.Server) {
 			addr := srv.Addr
 			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
 			}
-		}()
+		}(managementSrv)
 	}
 
 	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore, functionExecutorManager)
@@ -196,12 +198,56 @@ func runServeWithConfig(configPath string) int {
 	addr := ":" + cfg.Server.Port
 	srv := newProxyHTTPServer(cfg, handler)
 
+	// SIGTERM/SIGINT drain the in-flight requests before the deferred cleanup runs.
+	// Without this the process died on the first signal: http.Server never stopped
+	// accepting, the request that was being proxied was cut mid-stream, and every
+	// deferred step below - settling the derived read models, closing the store,
+	// stopping the parse and analysis workers - was skipped, so a recording that had
+	// been written but not yet finalised with its prelude stayed unusable. A second
+	// signal ends the process immediately, which is what an operator reaching for a
+	// stuck shutdown expects.
+	shutdownCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	go func() {
+		<-shutdownCtx.Done()
+		stopSignals()
+		slog.Info("Shutdown signal received, draining in-flight requests", "timeout", gracefulShutdownTimeout)
+		gracefulShutdown(gracefulShutdownTimeout, srv, managementSrv)
+	}()
+
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
 		return 1
 	}
 	return 0
+}
+
+// gracefulShutdownTimeout bounds how long a drain may take. The container's own grace
+// period is the outer bound: a stream that legitimately runs longer than this is cut
+// here, and one that runs longer than the grace period is killed by the runtime.
+const gracefulShutdownTimeout = 30 * time.Second
+
+// gracefulShutdown stops each server from accepting new connections and waits for the
+// requests already in flight to finish, up to timeout. Anything still running when the
+// timeout expires is dropped, so a stuck upstream cannot hold the process open.
+func gracefulShutdown(timeout time.Duration, servers ...*http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, srv := range servers {
+		if srv == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(srv *http.Server) {
+			defer wg.Done()
+			if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+				slog.Warn("HTTP server shutdown did not complete cleanly", "addr", srv.Addr, "error", err)
+			}
+		}(srv)
+	}
+	wg.Wait()
 }
 
 // newProxyHTTPServer builds the HTTP server that serves proxied model traffic.

@@ -204,6 +204,7 @@ server db summary rebuild sessions [--session-id <id>]
 ## 故障处理
 
 - **cassette 写入失败**：recorder 向上返回错误，不会静默吞掉；此时该请求不会出现在索引中。
+- **收到 SIGTERM / SIGINT**：`serve` 先停止接受新连接并排空在飞行中的请求（最长 30 秒），然后才走既有的清理路径——冲刷派生读模型队列（`Store.FlushDerivedRefresh`）、关闭 store、停止 parse 与 analysis worker。飞行中的请求会被完整服务到结束，所以它正在写的 cassette 仍会被补上前导：cassette 是 record-first 写的，若在补前导之前被杀，文件既不是 V3 也没有 V2 的定长头，只能被索引跳过，等于这笔录制（连同已经付过的上游费用）丢失。超过 30 秒仍未结束的请求会被丢弃；再收到一个信号立即结束进程。
 - **parse failed**：`parse_jobs.last_error` 记录失败；trace 仍出现在列表里，Monitor 显示 Raw 可用、Protocol 不可用、Audit 可能未运行。用 `analyze reparse --trace-id` 重试。
 - **analysis failed**：`analysis_jobs.last_error` 记录失败；Monitor 显示 Protocol 可用、Audit 部分可用。用 `analyze reanalyze` / `analyze scan` 重试。
 - **enqueue 失败**：只记录 warning，不影响 trace list 与客户端请求。
