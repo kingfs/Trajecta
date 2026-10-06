@@ -69,6 +69,8 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 | Google GenAI / Vertex | `{"error":{"code","message","status"}}` | 400/413 → `INVALID_ARGUMENT`；401 → `UNAUTHENTICATED`；403 → `PERMISSION_DENIED`；404 → `NOT_FOUND`；429 → `RESOURCE_EXHAUSTED`；502/503 → `UNAVAILABLE`；504 → `DEADLINE_EXCEEDED`；500 → `INTERNAL`；其余 4xx 按调用方错误归类为 `INVALID_ARGUMENT`，其余 5xx 为 `INTERNAL` |
 | Ollama 兼容（`/api/show`） | `{"error":"<message>"}` | 该字段是字符串，Ollama 客户端按字符串反序列化 |
 
+代理自身产生的错误不会使用 `http.Error` 之类的纯文本响应：HTTP SDK 只解析各自的错误形态，纯文本会把可读的失败变成客户端解析错误。本地应答的 endpoint（`/v1/messages/count_tokens`、`/v1/models`、`/v1/models/{id}`、`/api/show`）同样走这套包络。`internal/proxy` 的结构性门禁 `TestProxyErrorsNeverFallBackToPlainText` 会扫描源码，发现新的 `http.Error` 调用即失败。
+
 未在表中列出的状态码按状态类别回退（4xx → 调用方错误、5xx → 服务端错误），不再一律回退到服务端错误。响应同时带 `X-Trajecta-Error-Source: proxy` 以区分代理自身错误与上游错误；上游返回的错误体原样透传，不被改写。
 
 ## Provider Preset 清单

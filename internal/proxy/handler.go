@@ -2012,14 +2012,14 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	retryEvents []recorder.RecordEvent,
 ) {
 	if h == nil || h.recorder == nil {
-		http.Error(irw, "count_tokens recording unavailable", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "count_tokens recording unavailable")
 		return
 	}
 
 	inputTokens := estimateAnthropicCountTokensInput(bodyBytes)
 	responseBody, err := json.Marshal(map[string]int{"input_tokens": inputTokens})
 	if err != nil {
-		http.Error(irw, "failed to build count_tokens response", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to build count_tokens response")
 		return
 	}
 	responseBody = append(responseBody, '\n')
@@ -2040,7 +2040,7 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, opts, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare synthetic count_tokens log file", "err", err)
-		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to record count_tokens response")
 		return
 	}
 
@@ -2052,21 +2052,21 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
 		slog.Error("Failed to write synthetic count_tokens separator", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
-		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to record count_tokens response")
 		return
 	}
 	nHead, err := logInfo.File.Write(headerBuf.Bytes())
 	if err != nil {
 		slog.Error("Failed to write synthetic count_tokens response header", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
-		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to record count_tokens response")
 		return
 	}
 	nBody, err := logInfo.File.Write(responseBody)
 	if err != nil {
 		slog.Error("Failed to write synthetic count_tokens response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
-		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to record count_tokens response")
 		return
 	}
 
@@ -2251,7 +2251,7 @@ func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request,
 	model := llm.ModelFromPath(r.URL.Path)
 	body, err := json.Marshal(newAggregatedModelListEntry(model))
 	if err != nil {
-		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model detail")
 		return
 	}
 	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
@@ -2276,18 +2276,18 @@ func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start 
 
 	var payload ollamaShowRequest
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		writeProxyError(w, r, http.StatusBadRequest, "invalid_request_body", "invalid JSON body")
 		return
 	}
 	model := strings.TrimSpace(payload.Name)
 	if model == "" {
-		http.Error(w, "missing model name", http.StatusBadRequest)
+		writeProxyError(w, r, http.StatusBadRequest, "missing_model", "missing model name")
 		return
 	}
 
 	body, err := json.Marshal(newAggregatedModelListEntry(model))
 	if err != nil {
-		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model detail")
 		return
 	}
 	h.serveSyntheticModelJSON(w, r, start, body, "/api/show", bodyBytes, []recorder.RecordEvent{
@@ -2316,7 +2316,7 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		http.Error(w, "failed to marshal model list", http.StatusInternalServerError)
+		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model list")
 		return
 	}
 	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
@@ -2333,7 +2333,7 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request, start time.Time, body []byte, endpoint string, requestBody []byte, events []recorder.RecordEvent) {
 	if h == nil || h.recorder == nil {
-		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
+		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "Internal Logging Error")
 		return
 	}
 
@@ -2342,7 +2342,7 @@ func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request
 	}, requestBody)
 	if err != nil {
 		slog.Error("Failed to prepare synthetic model-info log file", "err", err)
-		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
+		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "Internal Logging Error")
 		return
 	}
 	logInfo.Events = append(logInfo.Events, events...)

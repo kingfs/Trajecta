@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -169,6 +171,41 @@ func errorFieldOf(t *testing.T, payload map[string]any, family string) string {
 	}
 	value, _ := errObj[field].(string)
 	return value
+}
+
+// TestProxyErrorsNeverFallBackToPlainText is a structural gate over the package.
+//
+// Every error the proxy produces must carry the protocol-shaped envelope: the official
+// SDKs parse only their own error shape, and `http.Error` writes `text/plain`, which turns
+// a readable failure into a client-side parse error. That single mistake has been the root
+// cause of three separate defects here - the 401 entrypoint, the response to an oversized
+// request body, and the locally answered count_tokens and model endpoints - so the
+// invariant is asserted over the source rather than one call site at a time, and a new
+// call site cannot quietly reintroduce it.
+func TestProxyErrorsNeverFallBackToPlainText(t *testing.T) {
+	for _, dir := range []string{".", "../responses/httpapi"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			source, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatalf("read %s: %v", filepath.Join(dir, name), err)
+			}
+			for i, line := range strings.Split(string(source), "\n") {
+				if !strings.Contains(line, "http.Error(") {
+					continue
+				}
+				t.Errorf("%s:%d answers with http.Error, which writes text/plain; use writeProxyError so the client can parse the failure:\n\t%s",
+					filepath.Join(dir, name), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
 }
 
 // TestProxyErrorEnvelopeMatchesTheRequestEntrypoint pins the error body shape
