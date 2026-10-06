@@ -355,7 +355,9 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		}
 		return 0
 	case "down":
-		fmt.Fprintln(os.Stderr, appDBMigrateDownUnsupportedMessage)
+		// The caller (RunE) turns a non-zero code plus direction=down into a
+		// cliExitError carrying this message; printing here duplicated the line
+		// in text mode and prepended bare text to the JSON envelope.
 		return 2
 	default:
 		fmt.Fprintf(os.Stderr, "unknown db migrate direction %q\n", opts.direction)
@@ -694,6 +696,23 @@ func runDBSecretStatusWithOptions(opts dbSecretOptions) int {
 	return 0
 }
 
+// writeSecretKeyFile writes the exported local secret key with 0600 permissions
+// even when the destination already exists.
+func writeSecretKeyFile(path string, key []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(key); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
 func runDBSecretExportWithOptions(opts dbSecretOptions) int {
 	st, closeStore, code := openTraceStoreForCommand(opts.configPath)
 	if code != 0 {
@@ -706,7 +725,11 @@ func runDBSecretExportWithOptions(opts dbSecretOptions) int {
 		return 1
 	}
 	if strings.TrimSpace(opts.outPath) != "" {
-		if err := os.WriteFile(opts.outPath, key, 0o600); err != nil {
+		// os.WriteFile only applies perm when it creates the file, so a
+		// pre-existing 0644 backup (touch + umask 022 is the common operator
+		// habit) would keep its mode and expose the master key. Open with 0600
+		// and chmod explicitly afterwards.
+		if err := writeSecretKeyFile(opts.outPath, key); err != nil {
 			slog.Error("Write local secret key export failed", "path", opts.outPath, "error", err)
 			return 1
 		}
