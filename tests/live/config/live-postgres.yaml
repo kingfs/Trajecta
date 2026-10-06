@@ -1,0 +1,115 @@
+# Live functional-test configuration (production-shaped: Postgres + real upstream).
+#
+# Secrets are referenced through $env: so this file is safe to keep in the repo.
+server:
+  port: "8080"
+
+monitor:
+  port: "8081"
+
+mcp:
+  enabled: true
+  path: "/mcp"
+
+auth:
+  session_ttl: 24h
+
+database:
+  driver: "postgres"
+  dsn: "$env:TRAJECTA_DATABASE_DSN"
+  max_open_conns: 16
+  max_idle_conns: 8
+  auto_migrate: true
+
+trace:
+  output_dir: "/app/data/traces"
+
+responses_server:
+  default_model: "deepseek-flash"
+  force_store: true
+  auto_compact: true
+  compact_history_item_threshold: 80
+  adopt_channel_model_profiles: true
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: []
+    inject_when_tools_absent: false
+    preserve_client_tools: true
+    default_tool_choice: "auto"
+  function_executors:
+    enabled: false
+
+tools:
+  web_search:
+    enabled: false
+    provider: "disabled"
+  mcp:
+    enabled: false
+    servers: []
+
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+# Three logical breakpoints over two base URLs. The OpenAI-compatible base
+# serves both chat completions and native responses; the Anthropic base serves
+# /v1/messages.
+upstreams:
+  - id: "baizhi-openai"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: ["deepseek-flash"]
+    upstream:
+      base_url: "$env:TRAJECTA_LIVE_CHAT_BASE"
+      api_key: "$env:TRAJECTA_LIVE_API_KEY"
+      provider_preset: "openai"
+      api_type: "chat_completions"
+      mode: "proxy"
+      capabilities:
+        chat_completions: true
+        responses: true
+        models: true
+        tool_calling: true
+      model_capabilities:
+        deepseek-flash:
+          chat_completions: true
+          responses: true
+          tool_calling: true
+
+  - id: "baizhi-anthropic"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: ["deepseek-flash"]
+    upstream:
+      base_url: "$env:TRAJECTA_LIVE_MESSAGES_BASE"
+      api_key: "$env:TRAJECTA_LIVE_API_KEY"
+      provider_preset: "anthropic"
+      protocol_family: "anthropic_messages"
+      api_type: "messages"
+      mode: "proxy"
+      capabilities:
+        chat_completions: false
+        models: true
+        tool_calling: true
+
+debug:
+  output_dir: "/app/data/traces"
+  mask_key: true
+
+chaos:
+  enabled: false
+  rules: []

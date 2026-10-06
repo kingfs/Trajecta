@@ -1,0 +1,108 @@
+# Chaos / fault-injection configuration: same stack as live-sqlite.yaml but with
+# chaos.enabled=true and a deterministic (rate=1.0) delay rule, on ports
+# 18092/18093. Used by tests/live fault-injection checks.
+#
+# Secrets are referenced through $env: so this file is safe to keep in the repo.
+server:
+  port: "18092"
+
+monitor:
+  port: "18093"
+
+mcp:
+  enabled: true
+  path: "/mcp"
+
+auth:
+  session_ttl: 24h
+
+database:
+  driver: "sqlite"
+  dsn: ""
+  max_open_conns: 4
+  max_idle_conns: 4
+  auto_migrate: true
+
+trace:
+  output_dir: "$env:TRAJECTA_LIVE_CHAOS_DIR"
+
+responses_server:
+  default_model: "deepseek-flash"
+  force_store: true
+  auto_compact: true
+  codex_compat:
+    enabled: false
+  function_executors:
+    enabled: false
+
+tools:
+  web_search:
+    enabled: false
+    provider: "disabled"
+  mcp:
+    enabled: false
+    servers: []
+
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "baizhi-openai"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: ["deepseek-flash"]
+    upstream:
+      base_url: "$env:TRAJECTA_LIVE_CHAT_BASE"
+      api_key: "$env:TRAJECTA_LIVE_API_KEY"
+      provider_preset: "openai"
+      api_type: "chat_completions"
+      mode: "proxy"
+      capabilities:
+        chat_completions: true
+        responses: true
+        models: true
+        tool_calling: true
+      model_capabilities:
+        deepseek-flash:
+          chat_completions: true
+          responses: true
+          tool_calling: true
+
+  - id: "baizhi-anthropic"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: ["deepseek-flash"]
+    upstream:
+      base_url: "$env:TRAJECTA_LIVE_MESSAGES_BASE"
+      api_key: "$env:TRAJECTA_LIVE_API_KEY"
+      provider_preset: "anthropic"
+      protocol_family: "anthropic_messages"
+      api_type: "messages"
+      mode: "proxy"
+      capabilities:
+        chat_completions: false
+        models: true
+        tool_calling: true
+
+debug:
+  output_dir: "$env:TRAJECTA_LIVE_CHAOS_DIR"
+  mask_key: true
+
+chaos:
+  enabled: true
+  rules:
+    - model: "deepseek-flash"
+      rate: 1.0
+      action: "error"
+      status_code: 503
+      message: "chaos-injected-503"
