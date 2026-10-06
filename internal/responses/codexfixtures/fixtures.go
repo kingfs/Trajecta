@@ -377,6 +377,9 @@ func validateStreamEvents(name string) error {
 		return err
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// Fixture lines are bounded by the file we just read, not by bufio's 64 KiB default: a long
+	// single-line stream event would otherwise stop the scan and be reported as a missing event.
+	scanner.Buffer(make([]byte, 0, 64*1024), len(data)+1)
 	lineNumber := 0
 	var completed bool
 	for scanner.Scan() {
