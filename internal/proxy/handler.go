@@ -138,6 +138,32 @@ func ensureStreamOptions(req *http.Request) {
 	_, _ = readAndNormalizeRequestBody(req)
 }
 
+// maxRequestBodyBytes is the finite guard against an unbounded request body that the
+// proxy buffers on the forwarding path. It reports the configured limit, or zero when
+// the handler has no configuration, in which case the caller applies no bound.
+//
+// The local Responses runtime bounds its own reads through
+// responses/httpapi.WithMaxBodyBytes, but the body the proxy buffers before routing is
+// read here, and that read had no bound at all: a client could make the proxy allocate
+// as much memory as it cared to send.
+func (h *Handler) maxRequestBodyBytes() int64 {
+	if h == nil || h.cfg == nil {
+		return 0
+	}
+	return h.cfg.ResponsesMaxRequestBodyBytes()
+}
+
+// writeRequestBodyError reports a request-body read failure with the status that
+// describes it: a body over the configured limit is 413, anything else is 400.
+func writeRequestBodyError(w http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		http.Error(w, "request body exceeds the configured limit", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "Failed to read request body", http.StatusBadRequest)
+}
+
 func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
 	if req.Body == nil {
 		return nil, nil
@@ -761,6 +787,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	normalizeClientEntrypoint(r)
 
+	// Bound the request body before anything reads it, so every path that reads it -
+	// the buffer the routing decision needs, the pass-through transport and the
+	// locally answered endpoints - is finite. A declared size over the limit is
+	// rejected without reading the body at all.
+	if limit := h.maxRequestBodyBytes(); limit > 0 {
+		if r.ContentLength > limit {
+			writeRequestBodyError(w, &http.MaxBytesError{Limit: limit})
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+	}
+
 	if h.serveEntrypointShortcuts(w, r, start) {
 		return
 	}
@@ -772,7 +810,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := readAndNormalizeRequestBody(r)
 	if err != nil {
 		slog.Error("Failed to read request body", "error", err)
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		writeRequestBodyError(w, err)
 		return
 	}
 	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
@@ -2166,7 +2204,7 @@ func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request,
 func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		writeRequestBodyError(w, err)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
