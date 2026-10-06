@@ -74,7 +74,11 @@ type Config struct {
 
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
-		MaskKey   bool   `yaml:"mask_key"`
+		// MaskKey replaces the credential-carrying request headers with placeholders
+		// before the exchange is written to disk. It defaults to true (see Load); set
+		// it to false to record the original values, which puts live credentials in
+		// the cassette.
+		MaskKey bool `yaml:"mask_key"`
 	} `yaml:"debug"`
 
 	// 新增 Chaos 配置
@@ -330,7 +334,16 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var cfg Config
+	// Masking is on unless the configuration says otherwise. SECURITY.md, README.md and
+	// README_EN.md all document `debug.mask_key` as defaulting to true, but the zero value of
+	// the field is false, so a configuration that simply omitted the key recorded the
+	// client's Authorization, api-key, x-api-key and x-goog-api-key headers verbatim - in a
+	// file that is written to disk, kept next to the database and routinely committed as test
+	// data. Seeding the field before the YAML is decoded keeps an explicit
+	// `mask_key: false` (or TRAJECTA_MASK_KEY=false) authoritative while an omitted key now
+	// means the documented default.
+	cfg := Config{}
+	cfg.Debug.MaskKey = true
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}

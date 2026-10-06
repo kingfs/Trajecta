@@ -466,3 +466,63 @@ func firstDifference(a, b []byte) int {
 	}
 	return min(len(a), len(b))
 }
+
+// TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest pins the security
+// property SECURITY.md, README.md and README_EN.md promise: with masking on, the credential
+// headers are replaced with placeholders in the recorded request while the request that
+// continues to the upstream keeps the real values (the recorder restores them after the dump).
+//
+// Nothing tested this before, which is how `debug.mask_key` could default to false in
+// config.Load for as long as it did while three documents described the opposite.
+func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, true, nil)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	secrets := map[string]string{
+		"Authorization":  "Bearer sk-live-secret",
+		"api-key":        "live-api-key-secret",
+		"x-api-key":      "live-x-api-key-secret",
+		"x-goog-api-key": "live-goog-api-key-secret",
+	}
+	for name, value := range secrets {
+		req.Header.Set(name, value)
+	}
+	// A header that names no credential must survive: over-redacting the whole request would
+	// make the recording useless for diagnosing what the client actually sent.
+	req.Header.Set("X-Keep-Me", "keep-me-visible")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	if err := info.File.Close(); err != nil {
+		t.Fatalf("close cassette error = %v", err)
+	}
+	cassette, err := os.ReadFile(info.Path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", info.Path, err)
+	}
+	recorded := string(cassette)
+	if !strings.Contains(recorded, "Bearer fake-key-logging") || !strings.Contains(recorded, "fake-key-logging") {
+		t.Fatalf("cassette does not carry the masking placeholder:\n%s", recorded)
+	}
+	for name, value := range secrets {
+		if strings.Contains(recorded, value) {
+			t.Fatalf("%s was written to the cassette verbatim (%q); the recording is on disk", name, value)
+		}
+	}
+	if !strings.Contains(recorded, "keep-me-visible") {
+		t.Fatalf("a non-credential header was dropped from the recording:\n%s", recorded)
+	}
+	// The forwarded request still carries the real credentials.
+	for name, value := range secrets {
+		if got := req.Header.Get(name); got != value {
+			t.Fatalf("live request header %s = %q, want %q: masking must not rewrite the outgoing request", name, got, value)
+		}
+	}
+}

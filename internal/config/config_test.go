@@ -1765,3 +1765,43 @@ func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
 		}
 	}
 }
+
+// TestMaskKeyDefaultsToTheDocumentedValue pins the documented default of debug.mask_key.
+//
+// SECURITY.md, README.md and README_EN.md all say the recorder masks the credential-carrying
+// request headers "with the default debug.mask_key: true", but the field's zero value is
+// false, so a configuration that omitted the key recorded the client's Authorization,
+// api-key, x-api-key and x-goog-api-key headers verbatim into a cassette on disk. The default
+// is now what the documents promise, an explicit value still wins, and the environment
+// override still beats the file.
+func TestMaskKeyDefaultsToTheDocumentedValue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		env  string
+		want bool
+	}{
+		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-mask\n", want: true},
+		{name: "empty debug section", body: "debug: {}\n", want: true},
+		{name: "explicitly true", body: "debug:\n  mask_key: true\n", want: true},
+		{name: "explicitly false", body: "debug:\n  mask_key: false\n", want: false},
+		{name: "env false overrides the default", body: "debug: {}\n", env: "false", want: false},
+		{name: "env false overrides the file", body: "debug:\n  mask_key: true\n", env: "false", want: false},
+		{name: "env true overrides the file", body: "debug:\n  mask_key: false\n", env: "true", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env == "" {
+				t.Setenv("TRAJECTA_MASK_KEY", "")
+			} else {
+				t.Setenv("TRAJECTA_MASK_KEY", tc.env)
+			}
+			cfg, err := Load(writeTempConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Debug.MaskKey != tc.want {
+				t.Fatalf("Debug.MaskKey = %v, want %v", cfg.Debug.MaskKey, tc.want)
+			}
+		})
+	}
+}
