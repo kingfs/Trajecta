@@ -858,6 +858,48 @@ func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte
 	return false
 }
 
+// EarliestAvailabilityFor reports the earliest moment at which a target that
+// structurally supports this request may leave its open circuit. It lets a
+// caller tell the client when to retry instead of reporting a configuration
+// problem when the real cause is a temporarily open breaker.
+func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.Time, bool) {
+	if r == nil || req == nil {
+		return time.Time{}, false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	model := features.ModelName
+	now := time.Now()
+
+	r.mu.RLock()
+	targets := append([]*Target(nil), r.targets...)
+	r.mu.RUnlock()
+
+	var earliest time.Time
+	found := false
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		decision := target.candidateDecision(rawPath, model, now, features)
+		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools {
+			continue
+		}
+		target.mu.Lock()
+		state := target.healthState
+		openUntil := target.openUntil
+		target.mu.Unlock()
+		if state != HealthOpen || openUntil.IsZero() || !openUntil.After(now) {
+			continue
+		}
+		if !found || openUntil.Before(earliest) {
+			earliest = openUntil
+			found = true
+		}
+	}
+	return earliest, found
+}
+
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
 func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
 	rawPath := req.URL.Path

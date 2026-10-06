@@ -1506,7 +1506,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
@@ -3295,7 +3295,7 @@ func modelAliasDetailAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func routingInspectAPIHandler(st *store.Store) http.HandlerFunc {
+func routingInspectAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -3320,6 +3320,7 @@ func routingInspectAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		applyLiveHealthToInspectCandidates(upstreams, rtr)
 		result, planErr := routeplan.Plan(planReq, upstreams)
 		resp := routingInspectResponse{Request: req, RefreshedAt: time.Now().UTC()}
 		if planErr != nil {
@@ -3834,6 +3835,73 @@ func routingInspectPlanInput(st *store.Store, req routingInspectRequest, setting
 		HasTools:                req.Tools,
 		Stream:                  req.Stream,
 	}, upstreams, nil
+}
+
+// applyLiveHealthToInspectCandidates overlays the router's live health onto the
+// statically loaded candidates so the inspector previews the same decision the
+// proxy would actually take (circuit breakers, degraded state, …).
+func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate, rtr *router.Router) {
+	if rtr == nil || len(upstreams) == 0 {
+		return
+	}
+	snapshots := rtr.Snapshots()
+	if len(snapshots) == 0 {
+		return
+	}
+	byID := make(map[string]router.Snapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.ID != "" {
+			byID[snapshot.ID] = snapshot
+		}
+		if snapshot.RouteTargetID != "" {
+			byID[snapshot.RouteTargetID] = snapshot
+		}
+	}
+	now := time.Now()
+	for i := range upstreams {
+		snapshot, ok := byID[upstreams[i].ID]
+		if !ok {
+			continue
+		}
+		health := &routeplan.CandidateHealth{
+			HealthState: snapshot.HealthState,
+			Selectable:  inspectHealthSelectable(snapshot, now),
+		}
+		if !snapshot.OpenUntil.IsZero() {
+			openUntil := snapshot.OpenUntil
+			health.OpenUntil = &openUntil
+		}
+		if !health.Selectable {
+			if health.OpenUntil != nil && health.OpenUntil.After(now) {
+				health.Reason = routeplan.ReasonTargetCircuitOpen
+			} else {
+				health.Reason = routeplan.ReasonTargetUnhealthy
+			}
+		}
+		upstreams[i].Health = health
+	}
+}
+
+// probationInflightLimitMirror mirrors router.probationInflightLimit: a
+// probation target serves one in-flight request at a time.
+const probationInflightLimitMirror int64 = 1
+
+// inspectHealthSelectable mirrors the router's canSelect health rules.
+func inspectHealthSelectable(snapshot router.Snapshot, now time.Time) bool {
+	if !snapshot.Enabled {
+		return false
+	}
+	switch snapshot.HealthState {
+	case router.HealthOpen:
+		if snapshot.OpenUntil.IsZero() || now.Before(snapshot.OpenUntil) {
+			return false
+		}
+	case router.HealthProbation:
+		if snapshot.Inflight >= probationInflightLimitMirror {
+			return false
+		}
+	}
+	return true
 }
 
 func routingInspectEntrypoint(value string) (routeplan.ClientEntrypoint, error) {

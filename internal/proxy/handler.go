@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -110,6 +111,20 @@ type responsesRouteDecision struct {
 	nativePresent   bool
 	localAvailable  bool
 	rejectReason    string
+	// retryAfter is non-zero when the rejection is transient because every
+	// capable upstream is inside an open circuit window.
+	retryAfter      time.Duration
+	blockedByHealth bool
+}
+
+// failureReason maps the decision onto the router's selection failure vocabulary
+// so traces, monitor filters and clients see `all_targets_open` instead of a
+// generic "no supporting target".
+func (d responsesRouteDecision) failureReason() string {
+	if d.blockedByHealth {
+		return router.SelectionFailureAllTargetsOpen
+	}
+	return router.SelectionFailureNoSupportingTarget
 }
 
 type proxyRoutingSettings struct {
@@ -440,7 +455,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		if logInfo, ok := r.Context().Value(logInfoContextKey).(*recorder.LogInfo); ok && logInfo != nil {
 			logInfo.Header.Meta.Error = err.Error()
 		}
-		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
+		writeProxyError(w, r, http.StatusBadGateway, "upstream_transport_error", "Proxy Error: "+err.Error())
 	}
 
 	responsesPath := cfg.ResponsesServerPath()
@@ -770,7 +785,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Message: "no upstream targets are configured; add a provider in Monitor",
 		}
 		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
-		http.Error(w, selectErr.Error(), http.StatusBadGateway)
+		writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
 		return
 	}
 
@@ -783,6 +798,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
 		decision := h.responsesRoutingDecision(r, bodyBytes)
+		// A closed circuit window is transient, not a configuration problem:
+		// wait out the breaker (bounded by the upstream retry budget) and
+		// re-evaluate once instead of failing the request in milliseconds.
+		if decision.rejectReason != "" && decision.retryAfter > 0 {
+			// Cap the wait by the same budget the chat path uses so a long
+			// breaker window cannot stall a request indefinitely.
+			wait := decision.retryAfter
+			if wait > upstreamRetryBudget {
+				wait = upstreamRetryBudget
+			}
+			if !sleepBeforeRetry(r.Context(), wait) && r.Context().Err() != nil {
+				return
+			}
+			decision = h.responsesRoutingDecision(r, bodyBytes)
+		}
 		if decision.useLocal {
 			r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
 			h.serveLocalResponsesWithBody(w, r, bodyBytes)
@@ -790,13 +820,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if decision.rejectReason != "" {
 			selectErr := &router.SelectionError{
-				Reason:  router.SelectionFailureNoSupportingTarget,
+				Reason:  decision.failureReason(),
 				Message: decision.rejectReason,
 			}
+			applyTransientAvailabilityHeaders(w, decision.retryAfter, decision.blockedByHealth)
 			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
 				routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
 			})
-			http.Error(w, selectErr.Error(), http.StatusBadGateway)
+			writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
 			return
 		}
 	}
@@ -806,7 +837,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if rejectReason != limit.RejectNone {
 				statusCode, eventType := limitRejectionHTTP(rejectReason)
 				h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
-				http.Error(w, http.StatusText(statusCode), statusCode)
+				writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
 				return
 			}
 			if lease != nil {
@@ -849,7 +880,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						retryEvents = append(retryEvents, retryEvent("routing.retry_queue_saturated", retryAttempt, 0, "", 0, "all_targets_open", false))
 						slog.Warn("Upstream retry wait queue saturated")
 						h.recordSelectionFailureWithBody(r, start, http.StatusServiceUnavailable, selErr, bodyBytes, retryEvents)
-						http.Error(w, "Proxy overloaded: upstream retry wait queue saturated", http.StatusServiceUnavailable)
+						writeProxyError(w, r, http.StatusServiceUnavailable, "retry_queue_saturated", "Proxy overloaded: upstream retry wait queue saturated")
 						return
 					}
 					waitSlotHeld = true
@@ -876,7 +907,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes, retryEvents)
-				http.Error(w, selErr.Error(), http.StatusBadGateway)
+				writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selErr), selErr.Error())
 				return
 			}
 			lastErr = selErr
@@ -889,7 +920,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					h.router.Release(selection)
 					statusCode, eventType := limitRejectionHTTP(rejectReason)
 					h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
-					http.Error(w, http.StatusText(statusCode), statusCode)
+					writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
 					return
 				}
 				if lease != nil {
@@ -942,6 +973,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if chaosRes.ShouldInject {
 			if chaosRes.Action == "delay" {
 				time.Sleep(chaosRes.Delay)
+			}
+			if chaosRes.Action == "error" {
+				// Fault injection: answer with a synthetic upstream response so
+				// the exchange is still recorded and the failure is visible in
+				// the trace list, instead of silently passing through.
+				logInfo.Header.Meta.Error = redaction.MetadataText(chaosRes.Message)
+				logInfo.Events = append(logInfo.Events, chaosInjectedEvent(chaosRes, start))
+				slog.Warn("Chaos error injected",
+					"model", selection.Request.ModelName,
+					"status", chaosRes.StatusCode,
+					"rule", chaosRes.RuleDescription,
+				)
+				h.writeUpstreamResponse(irw, syntheticChaosResponse(r, selection, chaosRes), logInfo, selection, start, r, retryEvents)
+				return
 			}
 		}
 
@@ -1048,10 +1093,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 	// Record the failure with a fresh log file (previous attempt logs were already
 	// closed by closeLogFile in the retry loop).
+	retryAfter, blockedByHealth := h.transientAvailability(r, bodyBytes)
+	applyTransientAvailabilityHeaders(w, retryAfter, blockedByHealth)
 	if h.recorder != nil {
 		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes, retryEvents)
 	}
-	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
+	writeProxyError(w, r, http.StatusBadGateway, "upstream_error", "Proxy Error: "+lastErr.Error())
 }
 
 func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) responsesRouteDecision {
@@ -1067,7 +1114,7 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 			return decision
 		}
 		if nativePresent {
-			decision.rejectReason = "native Responses upstream exists but is not selectable for this request"
+			h.decorateWithHealthHint(r, bodyBytes, "native Responses upstream exists but is not selectable for this request", &decision)
 			return decision
 		}
 		if localAvailable {
@@ -1086,18 +1133,43 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 		if nativeAvailable {
 			return decision
 		}
-		decision.rejectReason = "responses_strategy native_only requires a matching native Responses upstream"
+		h.decorateWithHealthHint(r, bodyBytes, "responses_strategy native_only requires a matching native Responses upstream", &decision)
 		return decision
 	case routeplan.ResponsesStrategyLocalServerOnly:
 		if localAvailable {
 			decision.useLocal = true
 			return decision
 		}
-		decision.rejectReason = "responses_strategy local_server_only requires a matching chat completions backend"
+		h.decorateWithHealthHint(r, bodyBytes, "responses_strategy local_server_only requires a matching chat completions backend", &decision)
 		return decision
 	}
-	decision.rejectReason = "no matching Responses route is available for the requested model and strategy"
+	h.decorateWithHealthHint(r, bodyBytes, "no matching Responses route is available for the requested model and strategy", &decision)
 	return decision
+}
+
+// decorateWithHealthHint rewrites a rejection caused by an open circuit into a
+// transient-availability message and records how long the caller should wait.
+// Without it a tripped breaker reads like a configuration error, which sends
+// operators looking in the wrong place.
+func (h *Handler) decorateWithHealthHint(r *http.Request, bodyBytes []byte, reason string, decision *responsesRouteDecision) {
+	decision.rejectReason = reason
+	if h == nil || h.router == nil {
+		return
+	}
+	availableAt, ok := h.router.EarliestAvailabilityFor(r, bodyBytes)
+	if !ok {
+		return
+	}
+	delay := time.Until(availableAt)
+	if delay < 0 {
+		delay = 0
+	}
+	decision.blockedByHealth = true
+	decision.retryAfter = delay
+	decision.rejectReason = fmt.Sprintf(
+		"%s: all upstream targets capable of this request are temporarily unavailable (circuit open, health_state=open); retry in %s",
+		reason, delay.Round(time.Second),
+	)
 }
 
 func (h *Handler) responsesStrategy(ctx context.Context) routeplan.ResponsesStrategy {
@@ -2155,10 +2227,11 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 		return
 	}
 
-	body := []byte("Proxy Error: " + selectErr.Error() + "\n")
+	body := proxyErrorEnvelope(r, statusCode, reason, selectErr.Error())
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode)))
-	headerBuf.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	headerBuf.WriteString("Content-Type: " + proxyErrorContentType() + "\r\n")
 	headerBuf.WriteString("X-Content-Type-Options: nosniff\r\n")
+	headerBuf.WriteString("X-Trajecta-Error-Source: proxy\r\n")
 	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
 	headerBuf.WriteString("\r\n")
 
@@ -2208,6 +2281,74 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 
 	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
 		slog.Error("Failed to update selection-failure log file", "path", logInfo.Path, "err", err)
+	}
+}
+
+// transientAvailability reports how long a caller should wait when the failure
+// was caused by open circuit breakers rather than by missing configuration.
+func (h *Handler) transientAvailability(r *http.Request, bodyBytes []byte) (time.Duration, bool) {
+	if h == nil || h.router == nil {
+		return 0, false
+	}
+	availableAt, ok := h.router.EarliestAvailabilityFor(r, bodyBytes)
+	if !ok {
+		return 0, false
+	}
+	delay := time.Until(availableAt)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
+}
+
+// applyTransientAvailabilityHeaders tells the client when a failed request may
+// be retried and that the cause is routing health, not its own payload.
+func applyTransientAvailabilityHeaders(w http.ResponseWriter, delay time.Duration, blockedByHealth bool) {
+	if w == nil || !blockedByHealth {
+		return
+	}
+	seconds := int(math.Ceil(delay.Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.Header().Set("X-Trajecta-Health", "open")
+}
+
+// syntheticChaosResponse builds the upstream-shaped response used by the chaos
+// `error` action so the regular recording path can persist it.
+func syntheticChaosResponse(r *http.Request, selection *router.Selection, res chaos.Result) *http.Response {
+	body := proxyErrorEnvelope(r, res.StatusCode, "chaos_injected", res.Message)
+	header := http.Header{}
+	header.Set("Content-Type", proxyErrorContentType())
+	header.Set("Content-Length", strconv.Itoa(len(body)))
+	header.Set("X-Trajecta-Chaos", "injected")
+	if selection != nil && selection.Target.ID != "" {
+		header.Set("X-Trajecta-Upstream-Id", selection.Target.ID)
+	}
+	return &http.Response{
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Status:        fmt.Sprintf("%d %s", res.StatusCode, http.StatusText(res.StatusCode)),
+		StatusCode:    res.StatusCode,
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+}
+
+func chaosInjectedEvent(res chaos.Result, start time.Time) recorder.RecordEvent {
+	return recorder.RecordEvent{
+		Type:    "chaos.injected",
+		Time:    time.Now().UTC(),
+		Message: redaction.MetadataText(res.Message),
+		Attributes: map[string]interface{}{
+			"action":      res.Action,
+			"rule":        res.RuleDescription,
+			"http_status": res.StatusCode,
+			"duration_ms": time.Since(start).Milliseconds(),
+		},
 	}
 }
 

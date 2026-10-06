@@ -2366,7 +2366,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 		t.Fatalf("second chat tool content missing mock result: %q", toolContent)
 	}
 
-	if responsePayload.Usage != (protocol.Usage{InputTokens: 13, OutputTokens: 6, TotalTokens: 19}) {
+	if got := [3]int{responsePayload.Usage.InputTokens, responsePayload.Usage.OutputTokens, responsePayload.Usage.TotalTokens}; got != [3]int{13, 6, 19} {
 		t.Fatalf("response usage = %#v, want accumulated 13/6/19", responsePayload.Usage)
 	}
 	if len(responsePayload.Output) != 2 {
@@ -5180,6 +5180,14 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the inference call blocks; the router's model discovery during
+		// NewHandler() must be answered immediately (otherwise the test waits
+		// out the discovery HTTP timeout).
+		if isModelDiscoveryRequest(r) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gpt-5","object":"model"}]}`)
+			return
+		}
 		<-releaseUpstream
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
@@ -5278,6 +5286,14 @@ func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the inference call blocks; the router's model discovery during
+		// NewHandler() must be answered immediately (otherwise the test waits
+		// out the discovery HTTP timeout).
+		if isModelDiscoveryRequest(r) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gpt-5","object":"model"}]}`)
+			return
+		}
 		<-releaseUpstream
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
@@ -5377,6 +5393,14 @@ func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the inference call blocks; the router's model discovery during
+		// NewHandler() must be answered immediately (otherwise the test waits
+		// out the discovery HTTP timeout).
+		if isModelDiscoveryRequest(r) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gpt-5","object":"model"}]}`)
+			return
+		}
 		<-releaseUpstream
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
@@ -5483,6 +5507,14 @@ func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the inference call blocks; the router's model discovery during
+		// NewHandler() must be answered immediately (otherwise the test waits
+		// out the discovery HTTP timeout).
+		if isModelDiscoveryRequest(r) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gpt-5","object":"model"}]}`)
+			return
+		}
 		<-releaseUpstream
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
@@ -5814,4 +5846,10 @@ func routePlanAttrsFromPrelude(t *testing.T, parsed *recordfile.ParsedPrelude) m
 	}
 	t.Fatalf("routing.route_plan event missing: %+v", parsed.Events)
 	return nil
+}
+
+// isModelDiscoveryRequest reports whether the request is the router's model
+// discovery probe, which tests must never block.
+func isModelDiscoveryRequest(r *http.Request) bool {
+	return strings.Contains(r.URL.Path, "/models")
 }

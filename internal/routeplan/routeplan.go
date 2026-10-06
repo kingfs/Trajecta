@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 type ClientEntrypoint string
@@ -53,6 +54,9 @@ const (
 	ReasonStrategyDisallowsNativeResponses = "strategy_disallows_native_responses"
 	ReasonStrategyDisallowsChatFallback    = "strategy_disallows_chat_fallback"
 	ReasonNoCandidate                      = "no_route_candidate"
+	ReasonTargetUnhealthy                  = "target_unhealthy"
+	ReasonTargetCircuitOpen                = "target_circuit_open"
+	ReasonAllTargetsOpen                   = "all_targets_open"
 )
 
 var ErrNoRoute = errors.New("no route plan")
@@ -90,6 +94,20 @@ type UpstreamCandidate struct {
 	// models. A nil field means "not declared", so the channel-level flag
 	// applies; keys are matched case-insensitively.
 	ModelCapabilities map[string]ModelCapabilities
+	// Health is the live runtime health reported by the router. Nil means
+	// "unknown" (a purely structural plan), in which case health is not
+	// applied and the plan stays configuration-only.
+	Health *CandidateHealth
+}
+
+// CandidateHealth is the live availability of one upstream candidate as
+// reported by the router. It is what makes a plan reflect circuit breakers and
+// per-model health instead of only the static capability matrix.
+type CandidateHealth struct {
+	HealthState string     `json:"health_state,omitempty"`
+	Selectable  bool       `json:"selectable"`
+	Reason      string     `json:"reason,omitempty"`
+	OpenUntil   *time.Time `json:"open_until,omitempty"`
 }
 
 // ModelCapabilities declares the protocol surfaces a single model supports on
@@ -162,6 +180,11 @@ type PlanCandidate struct {
 	Selectable       bool             `json:"selectable"`
 	Reason           string           `json:"reason,omitempty"`
 	Rank             int              `json:"rank"`
+	// Health mirrors the runtime health used to decide Selectable so a caller
+	// can explain why a structurally capable candidate was filtered out.
+	HealthState string     `json:"health_state,omitempty"`
+	CircuitOpen bool       `json:"circuit_open,omitempty"`
+	AvailableAt *time.Time `json:"available_at,omitempty"`
 }
 
 type Result struct {
@@ -204,7 +227,14 @@ func Plan(req Request, upstreams []UpstreamCandidate) (Result, error) {
 
 	selected, ok := firstSelectable(candidates)
 	if !ok {
-		return Result{Candidates: candidates}, &NoRouteError{Reason: ReasonNoCandidate, Candidates: candidates}
+		reason := ReasonNoCandidate
+		for _, candidate := range candidates {
+			if candidate.Reason == ReasonTargetCircuitOpen || candidate.Reason == ReasonTargetUnhealthy {
+				reason = ReasonAllTargetsOpen
+				break
+			}
+		}
+		return Result{Candidates: candidates}, &NoRouteError{Reason: reason, Candidates: candidates}
 	}
 	return Result{Plan: routePlanFromCandidate(req, selected, candidates), Candidates: candidates}, nil
 }
@@ -253,6 +283,7 @@ func planForEndpoint(req Request, upstreams []UpstreamCandidate, mode ExecutionM
 			plan.Selectable = true
 			plan.Reason = ReasonSelected
 		}
+		applyCandidateHealth(&plan, upstream, time.Now())
 		plans = append(plans, plan)
 	}
 	return plans
@@ -305,9 +336,37 @@ func responsesPlans(req Request, upstreams []UpstreamCandidate, mode ExecutionMo
 			plan.Selectable = true
 			plan.Reason = ReasonSelected
 		}
+		applyCandidateHealth(&plan, upstream, time.Now())
 		plans = append(plans, plan)
 	}
 	return plans
+}
+
+// applyCandidateHealth downgrades a structurally selectable candidate when the
+// live router reports it as unavailable (open circuit, exhausted probation, …).
+func applyCandidateHealth(plan *PlanCandidate, upstream UpstreamCandidate, now time.Time) {
+	if plan == nil || upstream.Health == nil {
+		return
+	}
+	health := upstream.Health
+	plan.HealthState = health.HealthState
+	if health.OpenUntil != nil && health.OpenUntil.After(now) {
+		plan.CircuitOpen = true
+		until := *health.OpenUntil
+		plan.AvailableAt = &until
+	}
+	if health.Selectable || !plan.Selectable {
+		return
+	}
+	plan.Selectable = false
+	switch {
+	case plan.CircuitOpen:
+		plan.Reason = ReasonTargetCircuitOpen
+	case health.Reason != "":
+		plan.Reason = health.Reason
+	default:
+		plan.Reason = ReasonTargetUnhealthy
+	}
 }
 
 func markDisallowed(existing []PlanCandidate, req Request, upstreams []UpstreamCandidate, mode ExecutionMode, endpoint UpstreamEndpoint, reason string) []PlanCandidate {

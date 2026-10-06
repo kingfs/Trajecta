@@ -5743,7 +5743,7 @@ func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 		t.Fatalf("UpsertModelAlias() error = %v", err)
 	}
 
-	handler := routingInspectAPIHandler(st)
+	handler := routingInspectAPIHandler(st, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(`{"endpoint":"responses","model":"coder"}`))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
