@@ -68,6 +68,7 @@ continuation 与 input items：
 流式：
 
 - `stream:true` 返回 `text/event-stream`，最小事件序列为 `response.created`、`response.in_progress`、`response.output_item.added`、`response.content_part.added`、`response.output_text.delta*`、`response.output_text.done`、`response.content_part.done`、`response.output_item.done`、`response.completed`。本地 SSE writer 不写 `data: [DONE]` 哨兵；只有内部上游 Chat Completions SSE 的 `[DONE]` 会被读取端消费。
+- 内部 chat 请求与转发路径的 usage 语义一致：流式（下游 `stream: true`）时 runtime 会带上 `stream_options: {"include_usage": true}`，因为 OpenAI-compatible 上游只在被要求时才在流里补 usage chunk（转发热路径的 `injectStreamOptions` 做的是同一件事）；非流式请求不带该字段。`response.completed` 里的 `usage` 直接取上游 chat 响应的 usage，不做本地估算，所以请求上游 usage 是拿到真实数字的前提。
 - 简单文本输出是真实增量转发：边读内部 Chat Completions SSE，边输出 `response.output_text.delta`，完成后存储完整 response。`internal/responses/chatclient` 会把上游 SSE 聚合为内部 `ChatCompletionResponse`（文本 delta、function tool call delta、usage trailer）。普通 function tool 参数分片输出 `response.function_call_arguments.delta/done`；已注册 function executor、provider 就绪的 hosted `web_search` / `web_search_preview` 和 hosted `mcp` 的 stream tool loop 会输出 started 态 `response.output_item.added` 与完成/失败态 `response.output_item.done`，把 tool output 注入下一轮内部 Chat Completions，再继续最终文本 delta；tool_call events 会标记 `stream=true`。
 - 未知 hosted 工具、非平凡 `tool_choice`、不支持的组合以及部分 auto compact 组合在写出 SSE 和调用上游之前返回包装的 `ErrIncrementalStreamUnsupported`，HTTP 层记录 `response.stream` fallback event 后转入 deferred SSE envelope。
 - 已写出 SSE 之后的 runtime 错误会尽量追加最小 `response.failed` SSE，并保留 `response.stream` failed audit。

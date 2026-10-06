@@ -2250,7 +2250,7 @@ func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any
 
 func chatCompletionRequestWithHostedTools(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, hostedTools hostedToolSet, budget ContextBudget) ChatCompletionRequest {
 	tools := responseToolsToChatToolsWithHostedTools(req.Tools, hostedTools)
-	return ChatCompletionRequest{
+	chat := ChatCompletionRequest{
 		Model:       model,
 		Messages:    responseInputToMessages(req, history, inputItems),
 		Tools:       tools,
@@ -2260,6 +2260,10 @@ func chatCompletionRequestWithHostedTools(req protocol.CreateResponseRequest, mo
 		TopP:        req.TopP,
 		Stream:      req.Stream,
 	}
+	if chat.Stream {
+		chat.StreamOptions = &ChatStreamOptions{IncludeUsage: true}
+	}
+	return chat
 }
 
 func compactChatRequest(model string, history []LedgerItem) ChatCompletionRequest {

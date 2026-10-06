@@ -89,6 +89,18 @@ type ChatCompletionRequest struct {
 	Temperature *float64      `json:"temperature,omitempty"`
 	TopP        *float64      `json:"top_p,omitempty"`
 	Stream      bool          `json:"stream,omitempty"`
+	// StreamOptions asks the upstream to report usage inside the stream. OpenAI-compatible servers
+	// only send the usage chunk when `stream_options.include_usage` is set, and the Responses payload
+	// reports usage from this chat response, so a streaming translation has to opt in exactly like
+	// the proxy's pass-through path does (`injectStreamOptions`); without it a streamed
+	// `/v1/responses` answered by the local runtime reported zero usage while the same deployment
+	// reported the upstream's numbers through a native pass-through.
+	StreamOptions *ChatStreamOptions `json:"stream_options,omitempty"`
+}
+
+// ChatStreamOptions mirrors OpenAI's `stream_options` request object.
+type ChatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type ChatMessage struct {
