@@ -112,6 +112,12 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		}
 		out[traceID] = meta
 	}
+	// A mid-iteration error (a dropped connection, a decode failure) has to surface: without this the
+	// caller marks every trace missing from the short result as `unparsed`, which reads like a fact.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
