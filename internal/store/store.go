@@ -4533,7 +4533,12 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
 		predicates = append(predicates, tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300), tracelog.ErrorTextEQ(""))
-	case "error":
+	case "error", "failed":
+		// "failed" is the same alias the session read path accepts, so a client that learned it from
+		// /api/sessions gets the same filtering here instead of the unfiltered list. The "error"
+		// definition also covers a trace that reported 2xx and then recorded an error text (a stream
+		// that broke mid-way), which the session-level rule - derived from the status counters the
+		// session list shows - intentionally does not.
 		predicates = append(predicates, tracelog.Or(tracelog.StatusCodeLT(200), tracelog.StatusCodeGTE(300), tracelog.ErrorTextNEQ("")))
 	}
 	if filter.MinDurationMs > 0 {
@@ -4767,7 +4772,9 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
 		clauses = append(clauses, `(`+column("status_code")+` >= 200 AND `+column("status_code")+` < 300 AND `+column("error_text")+` = '')`)
-	case "error":
+	case "error", "failed":
+		// Same vocabulary as the ent predicates above and as the session read path: "failed" aliases
+		// "error" instead of being silently ignored, which used to return the unfiltered list.
 		clauses = append(clauses, `(`+column("status_code")+` < 200 OR `+column("status_code")+` >= 300 OR `+column("error_text")+` != '')`)
 	}
 	if filter.MinDurationMs > 0 {
