@@ -401,6 +401,11 @@ func extractJSONRPCMessage(raw []byte) []byte {
 		return trimmed
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+	// The message was already size-checked by the caller (readLimited against maxResultBytes), so the
+	// line bound follows the buffer. Without it bufio.Scanner stops at its 64 KiB default, the loop
+	// finds no data: line and the SSE envelope is returned as if it were the JSON-RPC message, which
+	// then fails to decode.
+	scanner.Buffer(make([]byte, 0, 64*1024), len(trimmed)+1)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if bytes.HasPrefix(line, []byte("data:")) {
