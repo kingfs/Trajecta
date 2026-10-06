@@ -2,6 +2,7 @@ package observe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -73,12 +74,59 @@ func (r *Registry) Select(input ParseInput) (Parser, bool) {
 	return nil, false
 }
 
+// ErrNoParser reports that the registry holds no parser for an exchange's
+// provider and operation.
+//
+// It is not a malformed payload. The exchange can be perfectly well-formed
+// traffic for an operation this build does not parse, so callers must not record
+// it as a parse failure; see ParseStatusUnsupported and UnsupportedObservation.
+var ErrNoParser = errors.New("observe: no parser for the exchange")
+
+// NoParserError names the exchange ErrNoParser was reported for.
+type NoParserError struct {
+	Provider  string
+	Operation string
+	Endpoint  string
+}
+
+func (e NoParserError) Error() string {
+	return fmt.Sprintf("observe: no parser for provider=%q operation=%q endpoint=%q", e.Provider, e.Operation, e.Endpoint)
+}
+
+// Is makes errors.Is(err, ErrNoParser) report true.
+func (e NoParserError) Is(target error) bool { return target == ErrNoParser }
+
 func (r *Registry) Parse(ctx context.Context, input ParseInput) (TraceObservation, error) {
 	parser, ok := r.Select(input)
 	if !ok {
-		return TraceObservation{}, fmt.Errorf("observe: no parser for provider=%q operation=%q endpoint=%q", input.Header.Meta.Provider, input.Header.Meta.Operation, input.Header.Meta.Endpoint)
+		return TraceObservation{}, NoParserError{
+			Provider:  input.Header.Meta.Provider,
+			Operation: input.Header.Meta.Operation,
+			Endpoint:  input.Header.Meta.Endpoint,
+		}
 	}
 	return parser.Parse(ctx, input)
+}
+
+// UnsupportedObservation is the observation recorded for an exchange this build
+// has no parser for: a successful, non-failed outcome that keeps the exchange's
+// metadata and explains itself through a warning.
+func UnsupportedObservation(input ParseInput) TraceObservation {
+	meta := input.Header.Meta
+	obs := TraceObservation{
+		TraceID:   input.TraceID,
+		Provider:  meta.Provider,
+		Operation: meta.Operation,
+		Endpoint:  meta.Endpoint,
+		Model:     meta.Model,
+		Status:    ParseStatusUnsupported,
+	}
+	applyExchangeMetadata(input, &obs)
+	obs.Warnings = append(obs.Warnings, ParseWarning{
+		Code:    "no_parser",
+		Message: fmt.Sprintf("no parser for provider=%q operation=%q endpoint=%q; the exchange is recorded but not parsed", meta.Provider, meta.Operation, meta.Endpoint),
+	})
+	return obs
 }
 
 func applyExchangeMetadata(input ParseInput, obs *TraceObservation) {

@@ -155,6 +155,8 @@ code  code_result  file  image  citation  safety  usage  error  unknown
 
 Registry 默认顺序是 entry → openai → anthropic → gemini，取第一个 `CanParse` 为真的 parser；四个 parser 版本都是 `0.1.0`。
 
+没有任何 parser 命中时，`observe.Registry.Parse` 返回 `observe.NoParserError`（满足 `errors.Is(err, observe.ErrNoParser)`），`observeworker.ReparseTrace` 不把它当成解析失败，而是落库一条 `Status = unsupported` 的 observation 并附带 `no_parser` warning：这类 exchange（例如没有 parser 的 `/v1/embeddings`）本身是合法流量，记成 `failed` 会让 parse job 永久失败、后续每次对该 trace 的重分析都重复失败。Monitor 的 observation 状态过滤在 `parsed`/`failed`/`queued`/`running` 之外也接受 `unsupported`。
+
 ### Entry / 客户端可见交换
 
 `NewEntryParser` 在 `input.ExchangeKind == "entry"` 或 prelude `input.Header.Meta.ExchangeKind == "entry"` 时命中。它记录入口侧原始节点（`client_request`、`client_response`、`client_response_stream`，`NormalizedType=unknown`）；Responses SSE 走 Responses 流式解析。模型、operation、status、usage 与 exchange 元数据来自 cassette prelude 和请求体。

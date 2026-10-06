@@ -131,7 +131,7 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		mergeExchangeMetadata(&exchange, indexed)
 	}
 	applyExchangeFallbacks(&exchange, entry.LogPath)
-	return registry.Parse(ctx, observe.ParseInput{
+	input := observe.ParseInput{
 		TraceID:          entry.ID,
 		CassettePath:     entry.LogPath,
 		Header:           parsed.Header,
@@ -145,7 +145,16 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		SequenceIndex:    exchange.SequenceIndex,
 		RequestAuditID:   exchange.RequestAuditID,
 		ResponseID:       exchange.ResponseID,
-	})
+	}
+	obs, err := registry.Parse(ctx, input)
+	if errors.Is(err, observe.ErrNoParser) {
+		// The exchange is well-formed traffic for an operation this build does not
+		// parse, for example /v1/embeddings. Recording it as a failed observation
+		// would fail the parse job and every later reanalysis of the trace, for a
+		// payload nothing is wrong with; record it as unsupported instead.
+		return observe.UnsupportedObservation(input), nil
+	}
+	return obs, err
 }
 
 func mergeExchangeMetadata(dst *recordfile.MetaData, src recordfile.MetaData) {

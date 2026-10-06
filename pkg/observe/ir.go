@@ -20,6 +20,13 @@ import (
 const (
 	ParseStatusParsed ParseStatus = "parsed"
 
+	// ParseStatusUnsupported marks an exchange this build has no parser for. It
+	// is deliberately distinct from a parse failure: the exchange is well-formed
+	// traffic for an operation the parser set does not cover (an embeddings call,
+	// for example), so recording it as failed would leave a permanent failed
+	// observation that every later reanalysis of the trace repeats.
+	ParseStatusUnsupported ParseStatus = "unsupported"
+
 	NodeInstruction      NormalizedType = "instruction"
 	NodeMessage          NormalizedType = "message"
 	NodeText             NormalizedType = "text"

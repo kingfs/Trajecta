@@ -10286,7 +10286,7 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
-	case "parsed", "failed", "queued", "running":
+	case "parsed", "failed", "queued", "running", "unsupported":
 		status := strings.ToLower(strings.TrimSpace(filter.ObservationStatus))
 		predicates = append(predicates, predicate.TraceLog(func(s *entsql.Selector) {
 			obs := entsql.Table("trace_observations")
@@ -10673,7 +10673,7 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		args = append(args, "%"+escapeLike(upstream)+"%")
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
-	case "parsed", "failed", "queued", "running":
+	case "parsed", "failed", "queued", "running", "unsupported":
 		clauses = append(clauses, `(
 			EXISTS (SELECT 1 FROM trace_observations o WHERE o.trace_id = `+outerTraceColumn+` AND o.status = ?) OR
 			EXISTS (SELECT 1 FROM parse_jobs p WHERE p.trace_id = `+outerTraceColumn+` AND p.status = ?)
