@@ -4739,15 +4739,15 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		args = append(args, provider)
 	}
 	if model := strings.TrimSpace(filter.Model); model != "" {
-		clauses = append(clauses, `LOWER(`+column("model")+`) LIKE LOWER(?)`)
+		clauses = append(clauses, `LOWER(`+column("model")+`) LIKE LOWER(?) ESCAPE '\'`)
 		args = append(args, "%"+escapeLike(model)+"%")
 	}
 	if endpoint := strings.TrimSpace(filter.Endpoint); endpoint != "" {
-		clauses = append(clauses, `LOWER(`+column("endpoint")+`) LIKE LOWER(?)`)
+		clauses = append(clauses, `LOWER(`+column("endpoint")+`) LIKE LOWER(?) ESCAPE '\'`)
 		args = append(args, "%"+escapeLike(endpoint)+"%")
 	}
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
-		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?)`)
+		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?) ESCAPE '\'`)
 		args = append(args, "%"+escapeLike(upstream)+"%")
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
