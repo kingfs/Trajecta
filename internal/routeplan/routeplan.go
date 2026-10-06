@@ -56,6 +56,7 @@ const (
 	ReasonNoCandidate                      = "no_route_candidate"
 	ReasonTargetUnhealthy                  = "target_unhealthy"
 	ReasonTargetCircuitOpen                = "target_circuit_open"
+	ReasonModelCircuitOpen                 = "model_circuit_open"
 	ReasonAllTargetsOpen                   = "all_targets_open"
 )
 
@@ -108,6 +109,10 @@ type CandidateHealth struct {
 	Selectable  bool       `json:"selectable"`
 	Reason      string     `json:"reason,omitempty"`
 	OpenUntil   *time.Time `json:"open_until,omitempty"`
+	// ModelHealthState and ModelOpenUntil describe the per-model breaker, which
+	// opens independently of the channel-level HealthState above.
+	ModelHealthState string     `json:"model_health_state,omitempty"`
+	ModelOpenUntil   *time.Time `json:"model_open_until,omitempty"`
 }
 
 // ModelCapabilities declares the protocol surfaces a single model supports on
@@ -185,6 +190,9 @@ type PlanCandidate struct {
 	HealthState string     `json:"health_state,omitempty"`
 	CircuitOpen bool       `json:"circuit_open,omitempty"`
 	AvailableAt *time.Time `json:"available_at,omitempty"`
+	// ModelHealthState is the per-model breaker that filtered this candidate
+	// when the channel-level HealthState still reads healthy.
+	ModelHealthState string `json:"model_health_state,omitempty"`
 }
 
 type Result struct {
@@ -229,8 +237,11 @@ func Plan(req Request, upstreams []UpstreamCandidate) (Result, error) {
 	if !ok {
 		reason := ReasonNoCandidate
 		for _, candidate := range candidates {
-			if candidate.Reason == ReasonTargetCircuitOpen || candidate.Reason == ReasonTargetUnhealthy {
+			switch candidate.Reason {
+			case ReasonTargetCircuitOpen, ReasonTargetUnhealthy, ReasonModelCircuitOpen:
 				reason = ReasonAllTargetsOpen
+			}
+			if reason == ReasonAllTargetsOpen {
 				break
 			}
 		}
@@ -350,9 +361,15 @@ func applyCandidateHealth(plan *PlanCandidate, upstream UpstreamCandidate, now t
 	}
 	health := upstream.Health
 	plan.HealthState = health.HealthState
+	plan.ModelHealthState = health.ModelHealthState
 	if health.OpenUntil != nil && health.OpenUntil.After(now) {
 		plan.CircuitOpen = true
 		until := *health.OpenUntil
+		plan.AvailableAt = &until
+	}
+	if health.ModelOpenUntil != nil && health.ModelOpenUntil.After(now) &&
+		(plan.AvailableAt == nil || health.ModelOpenUntil.Before(*plan.AvailableAt)) {
+		until := *health.ModelOpenUntil
 		plan.AvailableAt = &until
 	}
 	if health.Selectable || !plan.Selectable {
@@ -362,6 +379,9 @@ func applyCandidateHealth(plan *PlanCandidate, upstream UpstreamCandidate, now t
 	switch {
 	case plan.CircuitOpen:
 		plan.Reason = ReasonTargetCircuitOpen
+	case health.Reason == ReasonModelCircuitOpen ||
+		(health.ModelOpenUntil != nil && health.ModelOpenUntil.After(now)):
+		plan.Reason = ReasonModelCircuitOpen
 	case health.Reason != "":
 		plan.Reason = health.Reason
 	default:

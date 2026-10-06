@@ -5761,3 +5761,73 @@ func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 		t.Fatalf("inspect plan = %+v, want responses_server deepseek-chat", resp.Result.Plan)
 	}
 }
+
+// TestApplyLiveHealthToInspectCandidatesCoversTheModelBreaker pins the inspect
+// overlay against the per-model breaker. The channel-level snapshot stays
+// `healthy` when only one model trips its own breaker, so an overlay that reads
+// just HealthState previews `selectable=true` while the proxy refuses the same
+// request with `no_supporting_target`.
+func TestApplyLiveHealthToInspectCandidatesCoversTheModelBreaker(t *testing.T) {
+	openUntil := time.Now().Add(30 * time.Second)
+	upstreams := []routeplan.UpstreamCandidate{
+		{
+			ID:                      "single-model",
+			RouteTargetID:           "single-model",
+			ChannelID:               "single-model",
+			Enabled:                 true,
+			Models:                  []string{"deepseek-flash"},
+			SupportsChatCompletions: true,
+		},
+	}
+
+	applyLiveHealthToInspectCandidates(upstreams, nil, "deepseek-flash")
+	if upstreams[0].Health != nil {
+		t.Fatalf("no router should leave the candidate without live health, got %+v", upstreams[0].Health)
+	}
+
+	snapshot := router.Snapshot{
+		ID:            "single-model",
+		RouteTargetID: "single-model",
+		ChannelID:     "single-model",
+		Enabled:       true,
+		HealthState:   router.HealthHealthy,
+		ModelHealth: map[string]router.ModelHealthSnapshot{
+			"deepseek-flash": {HealthState: router.HealthOpen, OpenUntil: openUntil, ErrorRate: 0.51},
+		},
+	}
+	applyInspectSnapshot(upstreams, 0, snapshot, "deepseek-flash", time.Now())
+
+	health := upstreams[0].Health
+	if health == nil {
+		t.Fatalf("overlay did not set candidate health")
+	}
+	if health.Selectable {
+		t.Fatalf("candidate health = %+v, want selectable=false for an open model breaker", health)
+	}
+	if health.Reason != routeplan.ReasonModelCircuitOpen {
+		t.Fatalf("health.Reason = %q, want %q", health.Reason, routeplan.ReasonModelCircuitOpen)
+	}
+	if health.ModelHealthState != router.HealthOpen {
+		t.Fatalf("health.ModelHealthState = %q, want %q", health.ModelHealthState, router.HealthOpen)
+	}
+	if health.ModelOpenUntil == nil || !health.ModelOpenUntil.Equal(openUntil) {
+		t.Fatalf("health.ModelOpenUntil = %v, want %v", health.ModelOpenUntil, openUntil)
+	}
+
+	// A model whose breaker has already elapsed must not be filtered.
+	upstreams[0].Health = nil
+	expired := router.Snapshot{
+		ID:            "single-model",
+		RouteTargetID: "single-model",
+		ChannelID:     "single-model",
+		Enabled:       true,
+		HealthState:   router.HealthHealthy,
+		ModelHealth: map[string]router.ModelHealthSnapshot{
+			"deepseek-flash": {HealthState: router.HealthOpen, OpenUntil: time.Now().Add(-time.Second)},
+		},
+	}
+	applyInspectSnapshot(upstreams, 0, expired, "deepseek-flash", time.Now())
+	if !upstreams[0].Health.Selectable {
+		t.Fatalf("candidate health = %+v, want selectable=true once the model window elapsed", upstreams[0].Health)
+	}
+}

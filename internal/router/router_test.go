@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -2255,5 +2256,80 @@ func TestRouterPerModelCapabilitiesDriveEndpointEligibility(t *testing.T) {
 	chatAsBackendBody := []byte(`{"model":"chat-model","input":"hello"}`)
 	if !rtr.HasSelectableCandidateWithBody(responsesReq("chat-model"), chatAsBackendBody) {
 		t.Fatalf("chat-model should be eligible as a local Responses backend")
+	}
+}
+
+// TestRouterEarliestAvailabilityCoversTheModelBreaker pins the per-model
+// breaker. A model's own failure EWMA can open while the channel-level state is
+// still healthy, and the earlier implementation only inspected the target
+// scope: the caller then reported "no target supports this request" instead of
+// "retry in Ns", pointing operators at their configuration.
+func TestRouterEarliestAvailabilityCoversTheModelBreaker(t *testing.T) {
+	chatEnabled := true
+	responsesEnabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "single-model",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"deepseek-flash"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: &chatEnabled,
+						Responses:       &responsesEnabled,
+					},
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	cfg.Router.Selection.FailureThreshold = 3
+	cfg.Router.Selection.OpenWindow = 30 * time.Second
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	body := []byte(`{"model":"deepseek-flash","input":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	features := RequestFeatures{ModelName: "deepseek-flash"}
+
+	if _, ok := rtr.EarliestAvailabilityFor(req, body); ok {
+		t.Fatalf("EarliestAvailabilityFor() reported an outage on a healthy router")
+	}
+
+	target := rtr.targets[0]
+	costs := defaultCostConfig()
+	// One 502 leaves the model degraded but selectable; the second crosses the
+	// 0.35 open error-rate threshold while the channel stays healthy.
+	for i := 0; i < 2; i++ {
+		target.onStart(features)
+		target.onFinish(features, Outcome{StatusCode: http.StatusBadGateway, DurationMs: 50}, costs, 3, 30*time.Second)
+	}
+
+	if state := target.snapshot().HealthState; state == HealthOpen {
+		t.Fatalf("target health = %q, want the channel to stay healthy so this test covers the model scope", state)
+	}
+	chatReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	if rtr.HasSelectableCandidateWithBody(chatReq, body) {
+		t.Fatalf("HasSelectableCandidateWithBody() = true, want the open model breaker to filter the candidate")
+	}
+	if rtr.HasSelectableNativeResponsesCandidateWithBody(req, body) {
+		t.Fatalf("HasSelectableNativeResponsesCandidateWithBody() = true, want the open model breaker to filter the candidate")
+	}
+
+	availableAt, ok := rtr.EarliestAvailabilityFor(req, body)
+	if !ok {
+		t.Fatalf("EarliestAvailabilityFor() = false, want the open model breaker to be reported")
+	}
+	delay := time.Until(availableAt)
+	if delay <= 0 || delay > 30*time.Second {
+		t.Fatalf("EarliestAvailabilityFor() delay = %v, want a positive delay inside the 30s window", delay)
 	}
 }

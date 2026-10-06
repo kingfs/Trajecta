@@ -102,3 +102,69 @@ func TestPlanWithoutHealthKeepsStaticDecision(t *testing.T) {
 		t.Fatalf("candidate without health must stay selectable: %#v", result.Candidates[0])
 	}
 }
+
+// TestPlanMarksOpenModelBreakerUnselectable covers the per-model breaker: it
+// opens on one model's own failure EWMA while the channel-level health stays
+// healthy, so a plan that only reads HealthState would keep selecting it.
+func TestPlanMarksOpenModelBreakerUnselectable(t *testing.T) {
+	modelOpenUntil := time.Now().Add(30 * time.Second)
+	result, err := Plan(healthChatRequest(), []UpstreamCandidate{
+		healthCandidate("single-model", &CandidateHealth{
+			HealthState:      "healthy",
+			Selectable:       false,
+			Reason:           ReasonModelCircuitOpen,
+			ModelHealthState: "open",
+			ModelOpenUntil:   &modelOpenUntil,
+		}),
+	})
+	if err == nil {
+		t.Fatalf("Plan() error = nil, want all targets open")
+	}
+	var noRoute *NoRouteError
+	if !errors.As(err, &noRoute) {
+		t.Fatalf("Plan() error = %v, want NoRouteError", err)
+	}
+	if noRoute.Reason != ReasonAllTargetsOpen {
+		t.Fatalf("NoRouteError.Reason = %q, want %q so the caller reports a transient outage", noRoute.Reason, ReasonAllTargetsOpen)
+	}
+	candidate := result.Candidates[0]
+	if candidate.Selectable {
+		t.Fatalf("candidate %+v still selectable with an open model breaker", candidate)
+	}
+	if candidate.Reason != ReasonModelCircuitOpen {
+		t.Fatalf("candidate.Reason = %q, want %q", candidate.Reason, ReasonModelCircuitOpen)
+	}
+	if candidate.ModelHealthState != "open" {
+		t.Fatalf("candidate.ModelHealthState = %q, want open", candidate.ModelHealthState)
+	}
+	if candidate.AvailableAt == nil || !candidate.AvailableAt.Equal(modelOpenUntil) {
+		t.Fatalf("candidate.AvailableAt = %v, want the model breaker's open_until %v", candidate.AvailableAt, modelOpenUntil)
+	}
+}
+
+// TestPlanPrefersTheTargetBreakerOverTheModelBreaker keeps the reason stable
+// when both scopes are open: the channel-wide outage is the broader cause.
+func TestPlanPrefersTheTargetBreakerOverTheModelBreaker(t *testing.T) {
+	targetOpenUntil := time.Now().Add(5 * time.Second)
+	modelOpenUntil := time.Now().Add(40 * time.Second)
+	result, err := Plan(healthChatRequest(), []UpstreamCandidate{
+		healthCandidate("both-open", &CandidateHealth{
+			HealthState:      "open",
+			Selectable:       false,
+			OpenUntil:        &targetOpenUntil,
+			ModelHealthState: "open",
+			ModelOpenUntil:   &modelOpenUntil,
+		}),
+	})
+	if err == nil {
+		t.Fatalf("Plan() error = nil, want all targets open")
+	}
+	candidate := result.Candidates[0]
+	if candidate.Reason != ReasonTargetCircuitOpen {
+		t.Fatalf("candidate.Reason = %q, want %q", candidate.Reason, ReasonTargetCircuitOpen)
+	}
+	// The caller waits for the soonest recovery, so the target window wins.
+	if candidate.AvailableAt == nil || !candidate.AvailableAt.Equal(targetOpenUntil) {
+		t.Fatalf("candidate.AvailableAt = %v, want the earlier target window %v", candidate.AvailableAt, targetOpenUntil)
+	}
+}

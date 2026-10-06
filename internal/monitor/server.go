@@ -3320,7 +3320,7 @@ func routingInspectAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		applyLiveHealthToInspectCandidates(upstreams, rtr)
+		applyLiveHealthToInspectCandidates(upstreams, rtr, planReq.RequestedModel)
 		result, planErr := routeplan.Plan(planReq, upstreams)
 		resp := routingInspectResponse{Request: req, RefreshedAt: time.Now().UTC()}
 		if planErr != nil {
@@ -3840,7 +3840,7 @@ func routingInspectPlanInput(st *store.Store, req routingInspectRequest, setting
 // applyLiveHealthToInspectCandidates overlays the router's live health onto the
 // statically loaded candidates so the inspector previews the same decision the
 // proxy would actually take (circuit breakers, degraded state, …).
-func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate, rtr *router.Router) {
+func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate, rtr *router.Router, model string) {
 	if rtr == nil || len(upstreams) == 0 {
 		return
 	}
@@ -3863,6 +3863,13 @@ func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate,
 		if !ok {
 			continue
 		}
+		applyInspectSnapshot(upstreams, i, snapshot, model, now)
+	}
+}
+
+// applyInspectSnapshot projects one router snapshot onto one candidate.
+func applyInspectSnapshot(upstreams []routeplan.UpstreamCandidate, i int, snapshot router.Snapshot, model string, now time.Time) {
+	{
 		health := &routeplan.CandidateHealth{
 			HealthState: snapshot.HealthState,
 			Selectable:  inspectHealthSelectable(snapshot, now),
@@ -3871,7 +3878,22 @@ func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate,
 			openUntil := snapshot.OpenUntil
 			health.OpenUntil = &openUntil
 		}
-		if !health.Selectable {
+		// The per-model breaker opens on that model's own failure EWMA even
+		// while the channel-level state stays healthy, so it has to be overlaid
+		// separately or the inspector previews a selection the proxy refuses.
+		if modelState, ok := snapshot.ModelHealth[strings.ToLower(strings.TrimSpace(model))]; ok {
+			health.ModelHealthState = modelState.HealthState
+			if !modelState.OpenUntil.IsZero() {
+				modelOpenUntil := modelState.OpenUntil
+				health.ModelOpenUntil = &modelOpenUntil
+			}
+			if modelState.HealthState == router.HealthOpen &&
+				!modelState.OpenUntil.IsZero() && now.Before(modelState.OpenUntil) {
+				health.Selectable = false
+				health.Reason = routeplan.ReasonModelCircuitOpen
+			}
+		}
+		if !health.Selectable && health.Reason == "" {
 			if health.OpenUntil != nil && health.OpenUntil.After(now) {
 				health.Reason = routeplan.ReasonTargetCircuitOpen
 			} else {

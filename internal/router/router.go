@@ -208,6 +208,18 @@ type Snapshot struct {
 	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
 	OpenUntil         time.Time `json:"open_until,omitempty"`
 	Models            []string  `json:"models"`
+	// ModelHealth carries the per-model breakers, keyed by lower-cased model
+	// name. The target-level HealthState above stays healthy when only a single
+	// model trips its own breaker, so a reader that wants to explain a
+	// `model_open` filter needs this map.
+	ModelHealth map[string]ModelHealthSnapshot `json:"model_health,omitempty"`
+}
+
+// ModelHealthSnapshot is the per-model breaker state at snapshot time.
+type ModelHealthSnapshot struct {
+	HealthState string    `json:"health_state"`
+	OpenUntil   time.Time `json:"open_until,omitempty"`
+	ErrorRate   float64   `json:"error_rate,omitempty"`
 }
 
 type Selection struct {
@@ -314,12 +326,18 @@ type CandidateDecision struct {
 	Priority               int     `json:"priority"`
 	Weight                 float64 `json:"weight"`
 	HealthState            string  `json:"health_state,omitempty"`
-	SupportsPath           bool    `json:"supports_path"`
-	SupportsModel          bool    `json:"supports_model"`
-	SupportsTools          bool    `json:"supports_tools"`
-	Excluded               bool    `json:"excluded,omitempty"`
-	Selectable             bool    `json:"selectable"`
-	FilterReason           string  `json:"filter_reason,omitempty"`
+	// ModelHealthState and ModelOpenUntil carry the per-model breaker that
+	// `model_open`/`model_probation_full` filter on. Without them the decision
+	// lists look healthy while the model itself is filtered out, and a reader
+	// cannot tell a configuration problem from an open model circuit.
+	ModelHealthState string     `json:"model_health_state,omitempty"`
+	ModelOpenUntil   *time.Time `json:"model_open_until,omitempty"`
+	SupportsPath     bool       `json:"supports_path"`
+	SupportsModel    bool       `json:"supports_model"`
+	SupportsTools    bool       `json:"supports_tools"`
+	Excluded         bool       `json:"excluded,omitempty"`
+	Selectable       bool       `json:"selectable"`
+	FilterReason     string     `json:"filter_reason,omitempty"`
 }
 
 type StickyDecision struct {
@@ -859,9 +877,15 @@ func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte
 }
 
 // EarliestAvailabilityFor reports the earliest moment at which a target that
-// structurally supports this request may leave its open circuit. It lets a
+// structurally supports this request may become selectable again. It lets a
 // caller tell the client when to retry instead of reporting a configuration
 // problem when the real cause is a temporarily open breaker.
+//
+// Both breaker scopes count. A target-level circuit covers every model on the
+// channel, while the per-model breaker opens after EWMAs of that model's own
+// failures cross the threshold even though the channel as a whole still looks
+// healthy; only consulting the target scope made a model-scoped rejection read
+// as "no target supports this request".
 func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.Time, bool) {
 	if r == nil || req == nil {
 		return time.Time{}, false
@@ -877,6 +901,15 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 
 	var earliest time.Time
 	found := false
+	consider := func(openUntil time.Time) {
+		if openUntil.IsZero() || !openUntil.After(now) {
+			return
+		}
+		if !found || openUntil.Before(earliest) {
+			earliest = openUntil
+			found = true
+		}
+	}
 	for _, target := range targets {
 		if target == nil {
 			continue
@@ -885,16 +918,14 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools {
 			continue
 		}
-		target.mu.Lock()
-		state := target.healthState
-		openUntil := target.openUntil
-		target.mu.Unlock()
-		if state != HealthOpen || openUntil.IsZero() || !openUntil.After(now) {
-			continue
+		if decision.HealthState == HealthOpen {
+			target.mu.Lock()
+			openUntil := target.openUntil
+			target.mu.Unlock()
+			consider(openUntil)
 		}
-		if !found || openUntil.Before(earliest) {
-			earliest = openUntil
-			found = true
+		if decision.ModelHealthState == HealthOpen && decision.ModelOpenUntil != nil {
+			consider(*decision.ModelOpenUntil)
 		}
 	}
 	return earliest, found
@@ -1525,6 +1556,24 @@ func (t *Target) snapshot() Snapshot {
 	if health == "" {
 		health = HealthHealthy
 	}
+	var modelHealth map[string]ModelHealthSnapshot
+	if len(t.modelHealth) > 0 {
+		modelHealth = make(map[string]ModelHealthSnapshot, len(t.modelHealth))
+		for model, state := range t.modelHealth {
+			if state == nil {
+				continue
+			}
+			stateHealth := state.healthState
+			if stateHealth == "" {
+				stateHealth = HealthHealthy
+			}
+			modelHealth[model] = ModelHealthSnapshot{
+				HealthState: stateHealth,
+				OpenUntil:   state.openUntil,
+				ErrorRate:   state.errorRate,
+			}
+		}
+	}
 	return Snapshot{
 		ID:                t.ID,
 		RouteTargetID:     t.RouteTargetID,
@@ -1558,6 +1607,7 @@ func (t *Target) snapshot() Snapshot {
 		LastRefreshError:  t.lastRefreshError,
 		OpenUntil:         t.openUntil,
 		Models:            models,
+		ModelHealth:       modelHealth,
 	}
 }
 
@@ -1613,6 +1663,15 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
 	}
+	if modelKey := strings.ToLower(strings.TrimSpace(model)); modelKey != "" {
+		if state := t.modelHealth[modelKey]; state != nil {
+			decision.ModelHealthState = state.healthState
+			if !state.openUntil.IsZero() {
+				openUntil := state.openUntil
+				decision.ModelOpenUntil = &openUntil
+			}
+		}
+	}
 	if !decision.SupportsPath {
 		decision.Selectable = false
 		decision.FilterReason = "unsupported_path"
@@ -1644,6 +1703,9 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.Before(state.openUntil) {
 				decision.Selectable = false
 				decision.FilterReason = "model_open"
+				if decision.ModelHealthState == "" {
+					decision.ModelHealthState = state.healthState
+				}
 				return decision
 			}
 			if state.healthState == HealthProbation && t.inflight >= probationInflightLimit {

@@ -763,7 +763,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !auth.RequestAuthorized(r, h.authVerifier) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		// The proxy surface is consumed by LLM SDKs, so the rejection must use
+		// the protocol error envelope; a bare text/plain "Unauthorized" is the
+		// first failure a misconfigured SDK hits and it cannot be parsed.
+		writeProxyError(w, r, http.StatusUnauthorized, "invalid_api_key", "Unauthorized")
 		return
 	}
 
@@ -1167,7 +1170,7 @@ func (h *Handler) decorateWithHealthHint(r *http.Request, bodyBytes []byte, reas
 	decision.blockedByHealth = true
 	decision.retryAfter = delay
 	decision.rejectReason = fmt.Sprintf(
-		"%s: all upstream targets capable of this request are temporarily unavailable (circuit open, health_state=open); retry in %s",
+		"%s: every upstream channel capable of this request is temporarily unavailable (circuit open, does not support this request right now); retry in %s",
 		reason, delay.Round(time.Second),
 	)
 }
@@ -2036,8 +2039,19 @@ func isOpenAIModelDetailRequest(r *http.Request) bool {
 	if r == nil || r.Method != http.MethodGet {
 		return false
 	}
+	// `/v1/models/{model}:generateContent` is an operation on one model, not a
+	// retrieve-model call, so an action suffix disqualifies the detail view.
+	if modelsPathHasAction(pathClean(r.URL.Path)) {
+		return false
+	}
 	model := llm.ModelFromPath(r.URL.Path)
 	return strings.HasPrefix(pathClean(r.URL.Path), "/v1/models/") && model != ""
+}
+
+// modelsPathHasAction reports whether a models path carries a `:action` suffix.
+func modelsPathHasAction(cleanPath string) bool {
+	idx := strings.LastIndex(cleanPath, ":")
+	return idx >= 0 && idx < len(cleanPath)-1 && !strings.Contains(cleanPath[idx+1:], "/")
 }
 
 func isOllamaShowRequest(r *http.Request) bool {
