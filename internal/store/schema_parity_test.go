@@ -144,7 +144,10 @@ func postgresSchemaReach(t *testing.T, src string) string {
 		t.Fatal("initSchema's body spans a file boundary in the concatenated source, so its Postgres branch cannot be located reliably")
 	}
 	start := strings.Index(initSchemaSrc, `if s.driver == "postgres" {`)
-	end := strings.Index(initSchemaSrc, "stmts := []string{")
+	// The branch ends where initSchema starts applying the SQLite schema, whose
+	// statement list moved to sqlite_schema.go, so the marker is the assignment
+	// rather than the literal.
+	end := strings.Index(initSchemaSrc, "\n\tstmts := ")
 	if start < 0 || end <= start {
 		t.Fatalf("cannot locate initSchema's Postgres branch (start=%d end=%d)", start, end)
 	}
