@@ -20,15 +20,19 @@ import (
 func newTestClient(t *testing.T, filename string) *openai.Client {
 	t.Helper() // 标记为辅助函数，报错时显示调用者的行号
 
-	// 1. 检查文件是否存在，如果不存在则跳过测试
-	// 这对协作者很友好，避免因为缺少本地录制文件而导致测试挂红
+	// 1. 录制文件是这套 SDK 端到端覆盖的唯一载体，缺失时必须失败而不是静默
+	// skip：这两个用例是仓库里仅有的「真实 go-openai 驱动 pkg/replay」链路，
+	// skip 会让覆盖在无人察觉的情况下归零。
 	path := filepath.Join("testdata", filename)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skipf("Replay file not found: %s, skipping test.", path)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("Replay file %s is required by %s: %v", path, t.Name(), err)
 	}
 
-	// 2. 初始化 Replay Transport
+	// 2. 初始化 Replay Transport。严格请求匹配默认关闭（V2 cassette 的请求体与
+	// 当前 SDK 发送的字段并不逐字节相同），但这里断言请求至少打在录制过的
+	// method + path 上，避免 SDK 换 endpoint 后仍然全绿。
 	tr := replay.NewTransport(path)
+	tr.RequestMatcher = replay.MatchRecordedRequestPath
 
 	// 3. 配置 Client
 	config := openai.DefaultConfig("fake-api-key")
