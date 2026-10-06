@@ -35,14 +35,30 @@ func TestLiveBatchReanalyze(t *testing.T) {
 
 	var parsed struct {
 		Job *struct {
-			ID     json.Number `json:"id"`
-			Status string      `json:"status"`
-			Steps  []string    `json:"steps"`
+			ID        json.Number `json:"id"`
+			Status    string      `json:"status"`
+			Steps     []string    `json:"steps"`
+			CreatedAt string      `json:"created_at"`
 		} `json:"job"`
 	}
 	decodeJSON(t, res.Body, &parsed)
 	if parsed.Job == nil {
 		t.Fatalf("batch reanalyze: no job in response: %s", truncate(string(res.Body), 400))
+	}
+	// Scope the assertion below to the jobs this batch created. The job list is
+	// global and the database is shared across runs, so a historical failed job
+	// from an earlier experiment would otherwise fail this test forever even
+	// though the trace it names reanalyzes successfully today.
+	batchCreatedAt, err := time.Parse(time.RFC3339Nano, parsed.Job.CreatedAt)
+	if err != nil {
+		t.Fatalf("batch reanalyze: job created_at %q is not RFC3339: %v", parsed.Job.CreatedAt, err)
+	}
+	isOwnJob := func(createdAt string) bool {
+		ts, err := time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			return false
+		}
+		return !ts.Before(batchCreatedAt)
 	}
 
 	// Wait for the job list to settle: every child must reach a terminal state.
@@ -54,9 +70,10 @@ func TestLiveBatchReanalyze(t *testing.T) {
 		}
 		var jobs struct {
 			Items []struct {
-				ID     json.Number `json:"id"`
-				Status string      `json:"status"`
-				Steps  []string    `json:"steps"`
+				ID        json.Number `json:"id"`
+				Status    string      `json:"status"`
+				Steps     []string    `json:"steps"`
+				CreatedAt string      `json:"created_at"`
 			} `json:"items"`
 		}
 		decodeJSON(t, list.Body, &jobs)
@@ -66,13 +83,22 @@ func TestLiveBatchReanalyze(t *testing.T) {
 		}
 		pending := 0
 		failed := 0
+		seen := 0
 		for _, job := range jobs.Items {
+			if !isOwnJob(job.CreatedAt) {
+				continue
+			}
+			seen++
 			switch job.Status {
 			case "queued", "running", "pending":
 				pending++
 			case "failed", "error":
 				failed++
 			}
+		}
+		if seen == 0 {
+			time.Sleep(time.Second)
+			continue
 		}
 		if failed > 0 {
 			t.Errorf("analysis jobs: %d job(s) failed: %s", failed, truncate(string(list.Body), 600))
