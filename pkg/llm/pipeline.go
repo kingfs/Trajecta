@@ -316,7 +316,9 @@ func (p *ResponsePipeline) appendGenerateContentEvent(jsonStr string, parseStrea
 			Content       struct {
 				Role  string `json:"role"`
 				Parts []struct {
-					Text string `json:"text"`
+					Text         string              `json:"text"`
+					Thought      bool                `json:"thought"`
+					FunctionCall *GeminiFunctionCall `json:"functionCall"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -331,9 +333,26 @@ func (p *ResponsePipeline) appendGenerateContentEvent(jsonStr string, parseStrea
 	}
 	for _, candidate := range chunk.Candidates {
 		for _, part := range candidate.Content.Parts {
-			if part.Text != "" {
+			role := firstNonEmpty(candidate.Content.Role, "model")
+			switch {
+			case part.FunctionCall != nil:
+				// The observation parser records these as tool-call nodes; the recorder used to drop
+				// them because the part only carried `text`.
+				p.appendEvent("llm.tool_call.delta", "", map[string]interface{}{
+					"id":        "",
+					"type":      "function",
+					"name":      part.FunctionCall.Name,
+					"arguments": part.FunctionCall.argsText(),
+					"role":      role,
+				})
+			case part.Thought:
+				// `thought: true` is the Gemini spelling of a reasoning delta.
+				if part.Text != "" {
+					p.appendEvent("llm.reasoning.delta", part.Text, map[string]interface{}{"role": role})
+				}
+			case part.Text != "":
 				p.appendEvent("llm.output_text.delta", part.Text, map[string]interface{}{
-					"role": firstNonEmpty(candidate.Content.Role, "model"),
+					"role": role,
 				})
 			}
 		}

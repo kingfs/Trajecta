@@ -185,6 +185,7 @@ Registry 默认顺序是 entry → openai → anthropic → gemini，取第一�
 - `Part` 类型识别顺序为 `text`、`inlineData`、`fileData`、`functionCall`、`functionResponse`、`executableCode`、`codeExecutionResult`、`toolCall`、`toolResponse`，以及布尔 `thought`；无可识别键时为 `part`/`unknown`。
 - 归一：`thought`→`reasoning`，`inlineData`→`image`，`fileData`→`file`，`functionCall`→`tool_call`，`functionResponse`→`tool_result`，`executableCode`→`code`，`codeExecutionResult`→`code_result`，`toolCall`→`server_tool_call`，`toolResponse`→`server_tool_result`。
 - `safetyRatings`、`promptFeedback` 收成 `safety` 节点；`candidates[].finishReason` 被记录并参与 safety 汇总。
+- 同一份字节的另外两个读取端（解析/记录用的 `pkg/llm`，以及 Monitor 的装饰视图）按同一规则区分 `Part` 种类：`thought: true` 进 reasoning（解析结果里是 `thinking` 内容、cassette 里是 `llm.reasoning.delta`），`functionCall` 进 tool call（解析结果是带紧凑 JSON 参数文本的 `LLMToolCall`、cassette 里是 `llm.tool_call.delta`），其余 `text` 才是 `llm.output_text.delta`；只读 `text` 会把思维链当成答案并丢掉工具调用。
 
 ### OpenAI-compatible
 

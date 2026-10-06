@@ -350,12 +350,14 @@ func (a vertexGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 
 func parseGenerateContentStreamResponse(body []byte, parseStreamError func(string) (map[string]any, bool)) (LLMResponse, error) {
 	var (
-		contentBuilder strings.Builder
-		role           = "model"
-		finishReason   string
-		safetyAll      []LLMSafetyRating
-		promptFeedback map[string]any
-		streamError    map[string]any
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCalls        []LLMToolCall
+		role             = "model"
+		finishReason     string
+		safetyAll        []LLMSafetyRating
+		promptFeedback   map[string]any
+		streamError      map[string]any
 	)
 
 	scanner := newSSEScanner(body)
@@ -385,7 +387,20 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 				finishReason = candidate.FinishReason
 			}
 			for _, part := range candidate.Content.Parts {
-				if part.Text != "" {
+				switch {
+				case part.FunctionCall != nil:
+					// A Gemini stream sends a whole tool call in one part, unlike the OpenAI-compatible
+					// delta stream; treat it as complete rather than accumulating arguments.
+					toolCalls = append(toolCalls, LLMToolCall{
+						Type:     "function",
+						Name:     part.FunctionCall.Name,
+						ArgsText: part.FunctionCall.argsText(),
+					})
+				case part.Thought:
+					// `thought: true` marks internal reasoning; pkg/observe records it as a reasoning
+					// node, so folding its text into the answer content made the readers disagree.
+					reasoningBuilder.WriteString(part.Text)
+				case part.Text != "":
 					contentBuilder.WriteString(part.Text)
 				}
 			}
@@ -398,7 +413,7 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 		}
 	}
 
-	resp := singleCandidateResponse(contentBuilder.String(), "", nil, streamError)
+	resp := singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls, streamError)
 	if len(resp.Candidates) > 0 {
 		resp.Candidates[0].Role = role
 		if finishReason != "" {

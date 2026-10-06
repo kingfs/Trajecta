@@ -1,9 +1,30 @@
 package llm
 
+import "encoding/json"
+
 // ========== Google Gemini generateContent 映射 ==========
 
 type GeminiPart struct {
 	Text string `json:"text,omitempty"`
+	// Thought marks a part that carries the model's internal reasoning instead of answer text.
+	Thought bool `json:"thought,omitempty"`
+	// FunctionCall carries a complete tool call: Gemini sends the name and an argument object in one
+	// part, unlike the OpenAI-compatible stream which sends arguments incrementally.
+	FunctionCall *GeminiFunctionCall `json:"functionCall,omitempty"`
+}
+
+type GeminiFunctionCall struct {
+	Name string          `json:"name,omitempty"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// argsText renders the argument object the way the OpenAI-compatible surface spells it: a compact JSON
+// string, so one cassette shape covers every protocol family.
+func (call *GeminiFunctionCall) argsText() string {
+	if call == nil || len(call.Args) == 0 {
+		return ""
+	}
+	return marshalCompactString(call.Args)
 }
 
 type GeminiContent struct {
@@ -243,12 +264,32 @@ func fromGenerateContentResponse(resp GeminiResponse) LLMResponse {
 		c := &resp.Candidates[i]
 
 		content := getContentSlice()
+		toolCalls := make([]LLMToolCall, 0, len(c.Content.Parts))
 		for j := range c.Content.Parts {
 			p := &c.Content.Parts[j]
-			content = append(content, LLMContent{
-				Type: "text",
-				Text: p.Text,
-			})
+			switch {
+			case p.FunctionCall != nil:
+				// Gemini delivers a whole call in one part. Dropping it here (the part only carried
+				// `text` before) left the parsed response and the cassette events without the tool
+				// call while the observation parser recorded one.
+				toolCalls = append(toolCalls, LLMToolCall{
+					Type:     "function",
+					Name:     p.FunctionCall.Name,
+					ArgsText: p.FunctionCall.argsText(),
+				})
+			case p.Thought:
+				// The observation parser classifies `thought` parts as reasoning nodes; mapping them
+				// to "text" made the same bytes read as answer text everywhere else.
+				content = append(content, LLMContent{
+					Type: "thinking",
+					Text: p.Text,
+				})
+			default:
+				content = append(content, LLMContent{
+					Type: "text",
+					Text: p.Text,
+				})
+			}
 		}
 
 		safety := make([]LLMSafetyRating, 0, len(c.SafetyRatings))
@@ -267,6 +308,7 @@ func fromGenerateContentResponse(resp GeminiResponse) LLMResponse {
 			Index:        i,
 			Role:         c.Content.Role,
 			Content:      content,
+			ToolCalls:    toolCalls,
 			FinishReason: c.FinishReason,
 			Extensions: map[string]any{
 				"safety_ratings": safety,

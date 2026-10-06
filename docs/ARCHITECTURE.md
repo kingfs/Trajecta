@@ -72,7 +72,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 11. Monitor 的会话轨迹导出用 `internal/trajectory` 从该会话的客户端可见 cassette 重建 ATIF-v1.8 JSONL（不调用模型、不修改 cassette）。
 12. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
 
-Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`、`routing.selection`、`routing.filtered`、`routing.retry_candidate`、`routing.failure`）写入 cassette prelude，并被 Monitor/MCP 用于 trace 详情、路由排障和失败聚类。同一份 OpenAI 兼容字节有三个读取端（记录端 `pkg/llm` 的 pipeline、replay/解析端 `pkg/llm` 的 stream 解析、Monitor trace 视图 `internal/monitor`），它们与观测解析端 `pkg/observe` 一样都把 reasoning 字段的两种拼写 `delta.reasoning_content`（DeepSeek/vLLM）与 `delta.reasoning`（OpenRouter）折叠为「先 reasoning_content，后 reasoning」；只认其中一种会让 cassette 事件、解析结果与观测 IR 对同一份字节给出不同答案。
+Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`、`routing.selection`、`routing.filtered`、`routing.retry_candidate`、`routing.failure`）写入 cassette prelude，并被 Monitor/MCP 用于 trace 详情、路由排障和失败聚类。同一份 OpenAI 兼容字节有三个读取端（记录端 `pkg/llm` 的 pipeline、replay/解析端 `pkg/llm` 的 stream 解析、Monitor trace 视图 `internal/monitor`），它们与观测解析端 `pkg/observe` 一样都把 reasoning 字段的两种拼写 `delta.reasoning_content`（DeepSeek/vLLM）与 `delta.reasoning`（OpenRouter）折叠为「先 reasoning_content，后 reasoning」；只认其中一种会让 cassette 事件、解析结果与观测 IR 对同一份字节给出不同答案。Gemini/Vertex 的 `Part` 同理：`thought: true` 是 reasoning，`functionCall` 是一次完整工具调用（参数是对象），其余 `text` 才是输出文本；三端都按这个规则分类。
 
 ## 协议边界
 
