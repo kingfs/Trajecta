@@ -147,3 +147,29 @@ Trajecta 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求�
 4. 用 [协议参考](./protocol-reference/README.md) 判断是否协议族不匹配。
 
 相关文档：接入与凭据管理见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，协议族与 provider preset 见 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md)。
+
+## 客户端可见的错误码
+
+代理的失败响应是 JSON envelope（`writeProxyError`，`internal/proxy/errors.go`），其中 `code` 字段是客户端要分支处理的稳定标识。下表是**完整**集合：转发路径上每个 `writeProxyError` 调用点的字面量，加上 `router.SelectionFailureReason` 可能透传的每个选择失败原因（`internal/router/router.go` 的 `SelectionFailure*` 常量）。`TestClientVisibleErrorCodesAreDocumented` 逐行比对代码与下表，因此新增或删除错误码而不更新文档会让测试失败。
+
+<!-- trajecta:client-error-codes:start -->
+| 错误码 | HTTP 状态 | 含义 |
+| --- | --- | --- |
+| `request_body_too_large` | 413 | 请求体超过 `responses_server.max_request_body_bytes` |
+| `invalid_request_body` | 400 | 读取请求体失败，或请求体不是合法 JSON |
+| `missing_model` | 400 | 请求没有给出模型名 |
+| `invalid_api_key` | 401 | 代理入口的 `Authorization: Bearer <token>` 缺失或不匹配 |
+| `rate_limited` | 429 / 503 | 本地并发 limit 拒绝（429 事件 `limit.concurrency_rejected`；等待队列饱和时 503 事件 `limit.queue_saturated`） |
+| `retry_queue_saturated` | 503 | 上游重试等待队列饱和，放弃本次请求 |
+| `no_supporting_target` | 502 | 没有任何 target 能为该模型与 endpoint 提供服务 |
+| `all_targets_open` | 502 | 全部候选 target 都处于熔断打开窗口 |
+| `all_targets_excluded` | 502 | 路由决策排除了所有候选 |
+| `nil_request` | 502 | 选择器收到空请求（内部调用路径） |
+| `unknown` | 502 | 选择失败但没有更具体的归因 |
+| `upstream_error` | 502 | 上游返回错误（报文里是最后一次失败的错误文本） |
+| `upstream_transport_error` | 502 | 转发到上游时的传输层错误 |
+| `local_responses_unavailable` | 502 | `/v1/responses` 需要本地 runtime 但它不可用 |
+| `internal_error` | 500 | 代理内部错误（记录 cassette 失败、序列化失败等） |
+<!-- trajecta:client-error-codes:end -->
+
+转发失败同时会在 cassette 的 routing 事件里记录对应的 `reason` / 事件类型，因此同一个失败既能按上面的 `code` 处理，也能在 Monitor 的 Routing / Events 视图里追因。
