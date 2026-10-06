@@ -44,7 +44,7 @@ func (c Config) ContextBudgetForModel(model string) ResolvedModelProfile {
 	}
 	for i := range c.ModelProfiles {
 		profile := c.ModelProfiles[i].normalized()
-		if profile.Name == "" || profile.Name != model {
+		if profile.Name == "" || !strings.EqualFold(profile.Name, model) {
 			continue
 		}
 		return resolved.withProfile(profile)
@@ -80,9 +80,13 @@ func (p ModelProfile) normalized() ModelProfile {
 	return p
 }
 
+// wildcardMatch matches a model-name pattern (`*`, `?`) case-insensitively. Model names are
+// compared case-insensitively throughout routing, so a profile must not silently stop applying when
+// a client spells the same model differently; internal/config.MatchResponsesModelProfile (what the
+// CLI reports) implements the same rule, and the proxy's parity gate compares the two.
 func wildcardMatch(pattern, value string) bool {
-	pattern = strings.TrimSpace(pattern)
-	value = strings.TrimSpace(value)
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	value = strings.ToLower(strings.TrimSpace(value))
 	if pattern == "" {
 		return false
 	}

@@ -1314,6 +1314,15 @@ func (c Config) ResponsesCodexCompatConfig() ResponsesCodexCompatConfig {
 	return cfg
 }
 
+// MatchResponsesModelProfile reports the responses_server.model_profiles entry that applies to a
+// model: `name` first, then `pattern`.
+//
+// Both are matched case-insensitively, like every other model-name comparison in routing (a target
+// that declares `gpt-4o` serves `GPT-4O`). The alternative - case-sensitive profiles - meant that the
+// same model reached a different context window, compaction threshold and upstream_model rewrite
+// depending on how the client spelled it, while the request itself routed to the very same target.
+// `responses_server.model_profiles[].name` is still an exact match in the sense that it has to name
+// the whole model; it is not a prefix or a substring match.
 func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMatch {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -1321,7 +1330,7 @@ func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMa
 	}
 	profiles := c.ResponsesModelProfiles()
 	for idx, profile := range profiles {
-		if profile.Name == "" || profile.Name != model {
+		if profile.Name == "" || !strings.EqualFold(profile.Name, model) {
 			continue
 		}
 		return ResponsesModelProfileMatch{
@@ -1347,9 +1356,13 @@ func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMa
 	return ResponsesModelProfileMatch{Index: -1, Source: "none"}
 }
 
+// wildcardMatchString matches a model-name pattern (`*`, `?`) case-insensitively, mirroring the
+// case-insensitive model-name comparisons used by routing and by the local Responses runtime
+// (internal/responses/runtime). Keep the two implementations in step: the proxy's parity gate
+// compares what this reports with what the runtime resolves for the same model.
 func wildcardMatchString(pattern string, value string) bool {
-	pattern = strings.TrimSpace(pattern)
-	value = strings.TrimSpace(value)
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	value = strings.ToLower(strings.TrimSpace(value))
 	if pattern == "" {
 		return false
 	}

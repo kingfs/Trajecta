@@ -767,27 +767,31 @@ func responsesRuntimeModelProfiles(cfg *config.Config, st *store.Store) ([]respo
 		if model == "" || cfg.MatchResponsesModelProfile(model).Matched {
 			continue
 		}
+		// Profile matching is case-insensitive, so the duplicate check has to be too: two channel
+		// models that differ only in case would otherwise both become profiles, and the first one
+		// would win silently instead of being reported as the conflict it is.
+		key := strings.ToLower(model)
 		profile := channelModelRuntimeProfile(record)
-		if existing, ok := byModel[model]; ok {
+		if existing, ok := byModel[key]; ok {
 			if !sameRuntimeModelProfile(existing, profile) {
-				delete(byModel, model)
-				conflicted[model] = struct{}{}
+				delete(byModel, key)
+				conflicted[key] = struct{}{}
 			}
 			continue
 		}
-		if _, conflict := conflicted[model]; conflict {
+		if _, conflict := conflicted[key]; conflict {
 			continue
 		}
-		byModel[model] = profile
+		byModel[key] = profile
 	}
 	for _, record := range adopted {
-		model := strings.TrimSpace(record.Model)
-		profile, ok := byModel[model]
+		key := strings.ToLower(strings.TrimSpace(record.Model))
+		profile, ok := byModel[key]
 		if !ok {
 			continue
 		}
 		out = append(out, profile)
-		delete(byModel, model)
+		delete(byModel, key)
 	}
 	return out, nil
 }
