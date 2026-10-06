@@ -562,3 +562,196 @@ var sqliteSchemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS toolcallaudit_tool_name_status_created_at ON tool_call_audits(tool_name, status, created_at);`,
 	`CREATE INDEX IF NOT EXISTS toolcallaudit_status_created_at ON tool_call_audits(status, created_at);`,
 }
+
+// applySQLiteSchemaUpgrades brings an existing SQLite database up to the
+// schema the DDL list expects: the additive column and index steps that follow
+// the CREATE TABLE statements, plus the schema-status row the monitor reads.
+//
+// Every step must stay idempotent, because this runs on every startup against
+// a database that already has most of them, and the order is the order the
+// columns were introduced.
+func (s *Store) applySQLiteSchemaUpgrades() error {
+	if err := s.ensureColumn("logs", "trace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("execution_events", "request_audit_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS executionevent_request_audit_id_occurred_at ON execution_events(request_audit_id, occurred_at)`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "operation", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "endpoint", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "session_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "window_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureLogExchangeColumns(); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_base_url", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_provider_preset", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_policy", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_score", "REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_candidate_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "request_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE upstream_exchanges SET request_id = trace_id WHERE request_id IS NULL AND trace_id IS NOT NULL`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_request_id ON upstream_exchanges(request_id);`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_kind", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_role", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "parent_exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "sequence_index", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "request_audit_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_parent_exchange_id ON upstream_exchanges(parent_exchange_id)`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("analysis_jobs", "request_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "api_type", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "capabilities_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "max_output_tokens", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "compact_history_item_threshold", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "upstream_model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_adoption_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureSessionSummariesSchema(); err != nil {
+		return err
+	}
+	if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
+		return err
+	}
+	if err := s.backfillTraceIDs(); err != nil {
+		return err
+	}
+	if err := s.ensureLogsDatetimeTable(); err != nil {
+		return err
+	}
+	postColumnStmts := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS logs_trace_id_key ON logs(trace_id);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_recorded_at ON logs(recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_model_recorded_at ON logs(model, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_id_recorded_at ON logs(session_id, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_recorded_trace ON logs(session_id, recorded_at DESC, trace_id DESC) WHERE session_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS tracelog_request_id ON logs(request_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_trace ON parse_jobs(status, trace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC);`,
+	}
+	for _, stmt := range postColumnStmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if err := s.ensureEntCompatibleTables(); err != nil {
+		return err
+	}
+	if err := s.backfillSemantics(); err != nil {
+		return err
+	}
+	if err := s.backfillGrouping(); err != nil {
+		return err
+	}
+	if err := s.ensureHotpathIndexes(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`INSERT INTO app_schema_status (namespace, version, mode, source, updated_at)
+		VALUES ('application', 1, 'schema-init', 'internal/store raw DDL startup initialization', CURRENT_TIMESTAMP)
+		ON CONFLICT(namespace) DO UPDATE SET
+			version = excluded.version,
+			mode = excluded.mode,
+			source = excluded.source,
+			updated_at = excluded.updated_at`); err != nil {
+		return err
+	}
+	return nil
+}
