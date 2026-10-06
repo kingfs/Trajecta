@@ -63,7 +63,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 2. proxy 归一化入口 endpoint，并按请求路径与上游配置识别协议族。
 3. routeplan/router 依据入口、模型、能力与 `responses_strategy` 选择 route target，并记录决策与候选。
 4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。
-5. 请求转发到上游，响应以流式或非流式返回 client。
+5. 请求转发到上游，响应以流式或非流式返回 client。转发路径自己写响应体（不经 `httputil.ReverseProxy` 的拷贝），所以「流式响应逐次 flush」这条契约由它承担：流式（或长度未知）的响应每写一次就 flush 一次，否则小于服务端输出缓冲的写入会被攒着，client 在 handler 返回前收不到任何东西——连响应头都收不到，`stream: true` 就退化成「最后一个 token 之后一次性收到完整回答」，首字节时间等于总时长。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 与 `llm.*` timeline 事件。
 8. application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。

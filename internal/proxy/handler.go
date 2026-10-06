@@ -348,6 +348,28 @@ func (rw *InstrumentedResponseWriter) Flush() {
 		f.Flush()
 	}
 }
+
+// flushAfterWrite flushes the response after every write it forwards.
+//
+// The forwarding path writes the upstream body itself instead of handing the response to
+// httputil.ReverseProxy, so the flush contract that a streamed response depends on is
+// this code's to keep: the server buffers a write that is smaller than its output buffer
+// rather than sending it, which for a stream means the client receives nothing - not even
+// the response headers - until the handler returns or the buffer fills. A streamed chat
+// completion is exactly the case where that is fatal: `stream: true` would deliver the
+// whole answer at once, after the last token, with a time to first byte equal to the
+// total duration.
+type flushAfterWrite struct {
+	w *InstrumentedResponseWriter
+}
+
+func (f flushAfterWrite) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if n > 0 {
+		f.w.Flush()
+	}
+	return n, err
+}
 func (rw *InstrumentedResponseWriter) GetMetrics() (int, int64, int64) {
 	return rw.statusCode, rw.bytesWritten, rw.ttft
 }
@@ -1883,9 +1905,16 @@ func (h *Handler) writeUpstreamResponse(
 		}
 	}
 
-	// Write status code then body.
+	// Write status code then body. A streamed response, and any response whose length is
+	// not known in advance, is flushed after every write so each event reaches the client
+	// as the upstream produces it - the same rule httputil.ReverseProxy applies when it
+	// owns the copy.
 	irw.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(irw, resp.Body); err != nil && err != io.EOF {
+	var bodyWriter io.Writer = irw
+	if isStream || resp.ContentLength < 0 {
+		bodyWriter = flushAfterWrite{w: irw}
+	}
+	if _, err := io.Copy(bodyWriter, resp.Body); err != nil && err != io.EOF {
 		logInfo.Header.Meta.Error = "failed to copy response body: " + err.Error()
 	}
 
