@@ -2165,6 +2165,17 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	if stream, ok := payload["stream"].(bool); ok {
 		features.Stream = stream
 	}
+	// Google's generateContent family signals streaming in the request line
+	// (`:streamGenerateContent`), not in the body, and the proxy answers it by streaming: it is
+	// the same signal upstream.BuildURL uses to add `alt=sse` to the upstream URL. Reading only
+	// the body counted a streaming Gemini request as non-streaming, which put it in the
+	// non-streaming inflight bucket and estimated its decode cost from the empty default.
+	if !features.Stream {
+		switch llm.NormalizeEndpoint(rawPath) {
+		case "/v1beta/models:streamGenerateContent", "/v1/publishers/models:streamGenerateContent":
+			features.Stream = true
+		}
+	}
 	if tools, ok := payload["tools"].([]any); ok && len(tools) > 0 {
 		features.HasTools = true
 	}
@@ -2182,10 +2193,24 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	if _, ok := payload["response_format"]; ok {
 		features.HasStructuredOutput = true
 	}
+	maxTokensSet := false
 	for _, key := range []string{"max_output_tokens", "max_completion_tokens", "max_tokens"} {
 		if value, ok := parseNumber(payload[key]); ok && value > 0 {
 			features.MaxTokens = value
+			maxTokensSet = true
 			break
+		}
+	}
+	// The Google generateContent family carries the output cap at
+	// `generationConfig.maxOutputTokens` (pkg/llm.GeminiGenerationConfig). The cap feeds the
+	// decode-cost estimate, so missing it costed every Gemini request at the 512-token default
+	// and could route it by a cost it does not have. The top-level OpenAI and Anthropic keys
+	// stay authoritative when a body carries both.
+	if !maxTokensSet {
+		if generationConfig, ok := payload["generationConfig"].(map[string]any); ok {
+			if value, ok := parseNumber(generationConfig["maxOutputTokens"]); ok && value > 0 {
+				features.MaxTokens = value
+			}
 		}
 	}
 	return features
