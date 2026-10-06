@@ -333,7 +333,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				APIType:           channel.APIType,
 				Mode:              channel.Mode,
 				Capabilities:      capabilities,
-				ModelCapabilities: channelModelCapabilities(models, aliases, channel.ID),
+				ModelCapabilities: ChannelModelCapabilities(models, aliases, channel.ID),
 				ProtocolFamily:    channel.ProtocolFamily,
 				RoutingProfile:    channel.RoutingProfile,
 				APIVersion:        channel.APIVersion,
@@ -846,7 +846,17 @@ func normalizeModels(models []string) []string {
 // aliases, to the per-model capability overrides declared on the channel model
 // profile. Models whose profile declares no capability stay out of the map so
 // that they keep falling back to the channel-level api_type and capabilities.
-func channelModelCapabilities(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]config.UpstreamCapabilitiesConfig {
+// ChannelModelCapabilities is the projection the forwarding path reads: it maps every
+// client-facing model name on the channel, its aliases included, to the per-model capability
+// overrides declared on the channel model profile. An alias name carries the capabilities of
+// its target row, and models whose profile declares no capability stay out of the map so that
+// they keep falling back to the channel-level api_type and capabilities.
+//
+// It is exported because the Monitor routing inspector has to describe a request the way the
+// forwarding path will act on it: the router keys these overrides by the model name in the
+// client request, so an alias that shadows a declared model name has to be resolved here
+// rather than looked up under the shadowed row's own declaration.
+func ChannelModelCapabilities(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]config.UpstreamCapabilitiesConfig {
 	if len(models) == 0 {
 		return nil
 	}

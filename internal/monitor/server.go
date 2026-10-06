@@ -1167,25 +1167,6 @@ type inspectCapabilities struct {
 	toolCalling       bool
 }
 
-func inspectModelCapabilities(model store.ChannelModelRecord) (routeplan.ModelCapabilities, bool) {
-	caps := routeplan.ModelCapabilities{
-		SupportsChatCompletions: inspectCapabilityBool(model.SupportsChatCompletions),
-		SupportsResponses:       inspectCapabilityBool(model.SupportsResponses),
-	}
-	if caps.SupportsChatCompletions == nil && caps.SupportsResponses == nil {
-		return routeplan.ModelCapabilities{}, false
-	}
-	return caps, true
-}
-
-func inspectCapabilityBool(value *int) *bool {
-	if value == nil {
-		return nil
-	}
-	enabled := *value != 0
-	return &enabled
-}
-
 func parseBoolQuery(value string, fallback bool) bool {
 	if strings.TrimSpace(value) == "" {
 		return fallback

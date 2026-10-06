@@ -1354,18 +1354,15 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := st.ListModelAliases("", true)
+	if err != nil {
+		return nil, err
+	}
 	modelsByChannel := map[string][]string{}
-	modelCapsByChannel := map[string]map[string]routeplan.ModelCapabilities{}
+	recordsByChannel := map[string][]store.ChannelModelRecord{}
 	for _, model := range models {
 		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
-		caps, ok := inspectModelCapabilities(model)
-		if !ok {
-			continue
-		}
-		if modelCapsByChannel[model.ChannelID] == nil {
-			modelCapsByChannel[model.ChannelID] = map[string]routeplan.ModelCapabilities{}
-		}
-		modelCapsByChannel[model.ChannelID][strings.ToLower(strings.TrimSpace(model.Model))] = caps
+		recordsByChannel[model.ChannelID] = append(recordsByChannel[model.ChannelID], model)
 	}
 	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
 	for _, channel := range channels {
@@ -1382,10 +1379,30 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 			SupportsResponses:         caps.responses,
 			SupportsAnthropicMessages: caps.anthropicMessages,
 			SupportsToolCalling:       caps.toolCalling,
-			ModelCapabilities:         modelCapsByChannel[channel.ID],
+			ModelCapabilities:         inspectModelCapabilities(recordsByChannel[channel.ID], aliases, channel.ID),
 		})
 	}
 	return out, nil
+}
+
+// inspectModelCapabilities converts the per-model overrides into the shape the planner reads. It
+// calls the same projection the forwarding path uses - the router keys the overrides by the model
+// name in the client request, so an alias name carries its target row's capabilities and a model
+// that declares none is absent, leaving the channel-level flags in charge.
+func inspectModelCapabilities(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]routeplan.ModelCapabilities {
+	projected := channel.ChannelModelCapabilities(models, aliases, channelID)
+	if len(projected) == 0 {
+		return nil
+	}
+	out := make(map[string]routeplan.ModelCapabilities, len(projected))
+	for model, caps := range projected {
+		out[model] = routeplan.ModelCapabilities{
+			SupportsChatCompletions: caps.ChatCompletions,
+			SupportsResponses:       caps.Responses,
+			SupportsToolCalling:     caps.ToolCalling,
+		}
+	}
+	return out
 }
 
 func upstreamCapabilitiesFromChannel(record store.ChannelConfigRecord) inspectCapabilities {
@@ -1445,11 +1462,6 @@ func upstreamCapabilitiesFromChannel(record store.ChannelConfigRecord) inspectCa
 	}
 	return caps
 }
-
-// inspectModelCapabilities converts a channel model profile's capability
-// columns into the per-model overrides the route planner understands. Models
-// without any declared capability are reported as absent so the planner keeps
-// using the channel-level flags.
 
 func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelConfigRecord) store.ChannelConfigRecord {
 	record := existing
