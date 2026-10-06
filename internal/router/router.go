@@ -1447,7 +1447,13 @@ func (r *Router) persistRefreshWrites(st *store.Store, writes []refreshWrite) er
 func (r *Router) rebuildCatalog() {
 	catalog := make(map[string][]*Target)
 	for _, target := range r.targets {
-		for model := range target.models {
+		// Each target's model set is read under that target's own lock. The refresh
+		// path replaces it with setRefreshResult while holding only that lock, so
+		// reading it here while holding only the router's lock would be a data race on
+		// a plain map - one Go escalates to "concurrent map read and map write", which
+		// takes the process down. The lock order (router lock, then target lock) is the
+		// one expectedCost and selectTargets already use.
+		for _, model := range target.modelNames() {
 			catalog[model] = append(catalog[model], target)
 		}
 	}
@@ -1457,6 +1463,20 @@ func (r *Router) rebuildCatalog() {
 		})
 	}
 	r.modelToTargets = catalog
+}
+
+// modelNames returns a copy of the target's model set. The caller must not already
+// hold t.mu. It exists for callers that iterate the models while holding the router's
+// lock: the copy is taken under the target's lock, so it cannot race with the refresh
+// path that replaces the set.
+func (t *Target) modelNames() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	models := make([]string, 0, len(t.models))
+	for model := range t.models {
+		models = append(models, model)
+	}
+	return models
 }
 
 func (t *Target) setRefreshResult(models []string, status string, refreshErr error, failureThreshold int64, openWindow time.Duration, costs costConfig) {
