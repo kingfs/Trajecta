@@ -62,7 +62,12 @@ Trajecta 自身的事件收件箱：
 
 ### 会话 `/sessions`
 
-按 session 聚合最近 50 个会话，展示健康度、成功率、模型、模型服务商、流式标记与耗时。session ID 的抽取顺序为：
+按 session 聚合最近 50 个会话，展示健康度、成功率、模型、模型服务商、流式标记与耗时。
+
+- 过滤语义：`provider` 匹配会话使用过的任一 provider；`model` 与搜索框 `q` 匹配会话中**任一**请求（因此一个「先 `gpt-alpha`、后 `claude-beta`」的会话按 `gpt-alpha` 也能查到）；`status` 是**会话级**判断——`success` 表示该会话没有任何失败请求（非 2xx），`failed` / `error` 表示至少有一个，与列表展示的 `success_request` / `failed_request` 计数同源。
+- `database.use_session_summary_read`（`TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）打开后，会话列表改由派生读模型 `session_summaries` 提供；该模型只保存会话的最后一个模型、provider 列表与请求计数，因此无法表达「任一请求命中」的 `model` / `q` 过滤，这两类过滤始终走日志路径。两个读路径对同一过滤条件必须给出相同结果，门禁 `TestSessionFiltersAgreeAcrossReadPaths` 会同时跑两条路径并逐项比对。
+
+session ID 的抽取顺序为：
 
 1. `Session-Id` / `Session_id`
 2. `X-Claude-Code-Session-Id`

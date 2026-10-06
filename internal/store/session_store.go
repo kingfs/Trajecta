@@ -184,8 +184,16 @@ func (s *Store) insertSessionSummaryFromLogsSQL(whereSQL string) string {
 	`
 }
 
+// sessionSummaryFilterSupported reports whether the summary row can answer the filter with exactly
+// the semantics the log-derived path gives it. The row stores the session's last model, its provider
+// list and its request counters, so a filter on the model or a free-text query - both of which the
+// log path answers for *any* request of the session - cannot be expressed from it: a session that
+// used the filtered model first and another model last would be missing from the summary answer.
+// Those filters stay on the log path so the canary read switch never changes what is listed.
 func sessionSummaryFilterSupported(filter ListFilter) bool {
-	return strings.TrimSpace(filter.Endpoint) == "" &&
+	return strings.TrimSpace(filter.Model) == "" &&
+		strings.TrimSpace(filter.Query) == "" &&
+		strings.TrimSpace(filter.Endpoint) == "" &&
 		strings.TrimSpace(filter.SelectedUpstream) == "" &&
 		strings.TrimSpace(filter.ObservationStatus) == "" &&
 		!filter.MissingUsage &&
@@ -331,8 +339,20 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 		}
 	}
 
-	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
+	// The list shows session-level counters, and both read paths derive them from the 2xx status
+	// codes of the session's requests: success_request counts 2xx, failed_request counts everything
+	// else. The status filter is session-level for the same reason, so it must not go through the
+	// shared log clause, which would select a session that merely contains one matching request.
+	sessionFilter := filter
+	sessionFilter.Status = ""
+	whereSQL, whereArgs := buildLogFilterClause(sessionFilter, "s")
 	sessionWhere := andSQL(`s.session_id <> ''`, clientVisibleLogClause("s"))
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+	case "success":
+		sessionWhere = andSQL(sessionWhere, `NOT EXISTS (SELECT 1 FROM logs f WHERE f.session_id = s.session_id AND `+clientVisibleLogClause("f")+` AND f.status_code NOT BETWEEN 200 AND 299)`)
+	case "failed", "error":
+		sessionWhere = andSQL(sessionWhere, `EXISTS (SELECT 1 FROM logs f WHERE f.session_id = s.session_id AND `+clientVisibleLogClause("f")+` AND f.status_code NOT BETWEEN 200 AND 299)`)
+	}
 	sessionWhere = andSQL(sessionWhere, whereSQL)
 	sessionIDs, total, err := s.listSessionPageIDs(sessionWhere, whereArgs, page, pageSize)
 	if err != nil {
