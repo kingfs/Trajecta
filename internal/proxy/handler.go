@@ -1560,7 +1560,9 @@ func requestModelFromBody(r *http.Request, bodyBytes []byte) string {
 			return strings.TrimSpace(parsed.Model)
 		}
 	}
-	return ""
+	// Fallback for entrypoints no adapter covers: the route-plan event must still
+	// name the model the client asked for.
+	return llm.ModelFromBody(bodyBytes)
 }
 
 func hasRoutePlanEvent(events []recorder.RecordEvent) bool {

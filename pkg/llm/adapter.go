@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type Adapter interface {
@@ -56,6 +57,26 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 func AdapterForPath(rawPath string, upstreamBaseURL string) (Adapter, error) {
 	semantics := ClassifyPath(rawPath, upstreamBaseURL)
 	return AdapterFor(semantics.Provider, semantics.Endpoint)
+}
+
+// ModelFromBody reads the top-level `model` field of a JSON request body.
+//
+// It is the fallback for endpoints no adapter covers. Without it such a request
+// has no model at all as far as routing is concerned, so a failure to route an
+// /v1/embeddings call reports model "" even though the client named one, which
+// is not actionable for whoever has to read the error. A body that is empty, not
+// JSON, or not a JSON object yields "".
+func ModelFromBody(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Model)
 }
 
 func ParseRequest(provider string, endpoint string, body []byte) (LLMRequest, error) {

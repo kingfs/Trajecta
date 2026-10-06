@@ -328,3 +328,32 @@ func TestParseProviderErrorResponses(t *testing.T) {
 		})
 	}
 }
+
+// TestModelFromBody covers the fallback used for endpoints no adapter covers.
+//
+// An /v1/embeddings request names its model like every other request, but no
+// adapter parses that endpoint, so without this fallback routing reports the
+// model as "" and the error cannot be acted on.
+func TestModelFromBody(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "embeddings body", body: `{"model":"bge-m3","input":"hello"}`, want: "bge-m3"},
+		{name: "padded value", body: `{"model":"  bge-m3  "}`, want: "bge-m3"},
+		{name: "no model field", body: `{"input":"hello"}`, want: ""},
+		{name: "empty model", body: `{"model":""}`, want: ""},
+		{name: "non string model", body: `{"model":42}`, want: ""},
+		{name: "empty body", body: ``, want: ""},
+		{name: "invalid json", body: `{"model":`, want: ""},
+		{name: "not an object", body: `["bge-m3"]`, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelFromBody([]byte(tc.body)); got != tc.want {
+				t.Fatalf("ModelFromBody(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}

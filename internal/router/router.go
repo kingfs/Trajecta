@@ -2089,7 +2089,11 @@ func requestModel(rawPath string, body []byte) string {
 	if llm.NormalizeEndpoint(rawPath) == "/v1/models" {
 		return "list_models"
 	}
-	return ""
+	// No adapter covers this endpoint, so the body is read directly. Without this
+	// fallback an /v1/embeddings request is reported as `model ""`, which hides
+	// the model the client actually asked for from the routing error and the
+	// decision trace.
+	return llm.ModelFromBody(body)
 }
 
 func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {

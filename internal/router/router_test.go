@@ -92,6 +92,41 @@ func TestRouterAllowsEmptyStartupConfig(t *testing.T) {
 	}
 }
 
+// TestRouterSelectionFailureNamesTheRequestedModelForUncoveredEndpoint pins
+// that a routing failure for an endpoint no adapter covers still names the model
+// the client asked for.
+//
+// /v1/embeddings is classified and recorded but never routed, so it always fails
+// here. The model used to be lost because it is read through an adapter and no
+// adapter covers the endpoint, which turned the failure into
+// `model "" for endpoint "/v1/embeddings"` for a request that plainly said
+// which model it wanted.
+func TestRouterSelectionFailureNamesTheRequestedModelForUncoveredEndpoint(t *testing.T) {
+	rtr, err := New(&config.Config{}, nil)
+	if err != nil {
+		t.Fatalf("New(empty) error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize(empty) error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/embeddings", strings.NewReader(`{"model":"bge-m3","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatal("Select(embeddings) error = nil, want no supporting target")
+	}
+	if SelectionFailureReason(err) != SelectionFailureNoSupportingTarget {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureNoSupportingTarget)
+	}
+	if !strings.Contains(err.Error(), `model "bge-m3"`) {
+		t.Fatalf("Select(embeddings) error = %q, want it to name the requested model", err)
+	}
+}
+
 func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
