@@ -216,7 +216,7 @@ TraceID          string `json:"trace_id,omitempty"`
 
 - `logs`：cassette trace 索引，带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`（`ent/schema/trace_log.go`，字符串列 `NOT NULL DEFAULT ''`，`sequence_index` 为 `NOT NULL DEFAULT 0`）。
 - `trace_observations`：观测 IR 索引，带 `exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；**没有** `exchange_id` 列（`ent/schema/trace_observation.go`、`ent/postgres-migrations/20260625123000_add_trace_observation_exchange_fields.up.sql`）。
-- `upstream_exchanges`：Responses server-mode 的 model exchange 明细，带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index` 这些同名 nullable 列（`ent/schema/upstream_exchange.go`）。
+- `upstream_exchanges`：Responses server-mode 的 model exchange 明细，带 `exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index` 这些同名 nullable 列（`ent/schema/upstream_exchange.go`）。行内 `request_id` 与 `trace_id` 同值（recorder prelude `meta.request_id` = `logs.request_id`）；`trace_id` 是历史命名，按名连接 `logs.trace_id`（UUID）会静默返回 0 行，可靠连接键是 `cassette_path = logs.path` 或 `request_id = logs.request_id`。
 - `request_audits`：entry/client_request 的根；读模型用 `syntheticEntryExchange` 合成 `exchange_id="entry:"+request_audit_id`、`exchange_kind=entry`、`exchange_role=client_request`、`sequence_index=0`。
 - `execution_events` 与 `tool_call_audits`：生命周期事件与工具调用审计。
 
