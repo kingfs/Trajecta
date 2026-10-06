@@ -173,7 +173,7 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 | 类别 | 内容 | 说明 |
 | --- | --- | --- |
 | 可由 cassette 重算 | `logs` 索引、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等，`semantic_nodes` 可按 `trace_id` 清理重建 |
-| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新，但更新先进进程内队列（上限 256 条），由派生表读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.RebuildOverviewMetricBuckets` 已存在但当前没有 CLI 调用者，因此没有等价的命令行重建入口 |
+| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新，但更新先进进程内队列（上限 256 条），由派生表读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.Close()` 会先 settle 队列再关闭句柄（`serve` 关闭路径本已显式 flush，其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。`Store.RebuildOverviewMetricBuckets` 已存在但当前没有 CLI 调用者，因此进程崩溃（未走到 `Close`）导致的漂移仍没有命令行修复入口 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 

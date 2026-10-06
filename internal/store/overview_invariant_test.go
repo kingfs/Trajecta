@@ -193,3 +193,119 @@ func readOverviewMemberSums(t *testing.T, st *Store) map[string]overviewMetricBu
 	}
 	return out
 }
+
+// TestCloseSettlesTheDeferredDerivedQueue pins the shutdown half of the derived refresh.
+//
+// The queues in storeShared are process-local, so whatever is still queued when the database
+// handle goes away is gone: the buckets can then only be corrected by rebuilding them from
+// the index, and nothing calls that rebuild in normal operation. serve flushes on its own
+// shutdown path, but every other store caller - the analyze and db commands that repair usage
+// or re-index a trace - only closes the store, so a repair committed the index row and left
+// the overview aggregate showing the previous numbers forever.
+func TestCloseSettlesTheDeferredDerivedQueue(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	at := time.Date(2026, 7, 5, 8, 15, 0, 0, time.UTC)
+	recordPath := filepath.Join(dir, "close-settles.http")
+	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+	header.Meta.RequestID = "req-close-settles"
+	header.Meta.Time = at
+	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
+	header.Meta.Method = http.MethodPost
+	header.Meta.StatusCode = http.StatusOK
+	header.Meta.Model = "gpt-close-settles"
+	header.Meta.ExchangeKind = "entry"
+	header.Usage.TotalTokens = 42
+	if err := os.WriteFile(recordPath, closeSettlesPrelude(t, header), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
+	}
+	// Deliberately no flush: the queue is what a close has to settle.
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	// Close is idempotent, so a defer next to an explicit close is harmless.
+	if err := st.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() after close error = %v", err)
+	}
+	defer reopened.Close()
+	bucket := readOverviewMetricBucketForTest(t, reopened, at.Truncate(time.Hour))
+	if bucket.requestCount != 1 || bucket.totalTokens != 42 {
+		t.Fatalf("bucket after close = %+v, want the contribution the log row owed", bucket)
+	}
+}
+
+func closeSettlesPrelude(t *testing.T, header recordfile.RecordHeader) []byte {
+	t.Helper()
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	return prelude
+}
+
+// TestFailedDerivedRefreshStaysQueued pins the other half: a refresh that fails must keep its
+// work, because the queue is the only record that the aggregate is owed an update. Dropping
+// it left the buckets short until somebody rebuilt them from the index, which no command did.
+func TestFailedDerivedRefreshStaysQueued(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	at := time.Date(2026, 7, 5, 9, 15, 0, 0, time.UTC)
+	recordPath := filepath.Join(dir, "refresh-fails.http")
+	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+	header.Meta.RequestID = "req-refresh-fails"
+	header.Meta.Time = at
+	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
+	header.Meta.Method = http.MethodPost
+	header.Meta.StatusCode = http.StatusOK
+	header.Meta.Model = "gpt-refresh-fails"
+	header.Meta.ExchangeKind = "entry"
+	header.Usage.TotalTokens = 17
+	if err := os.WriteFile(recordPath, closeSettlesPrelude(t, header), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
+	}
+
+	// Break the refresh, then let a flush try and fail.
+	if _, err := st.db.Exec(`DROP TABLE overview_metric_bucket_members`); err != nil {
+		t.Fatalf("DROP TABLE error = %v", err)
+	}
+	st.flushDerivedRefresh()
+	if got := deferredDerivedQueueSizeForTest(st); got == 0 {
+		t.Fatal("a failed refresh dropped its work; the aggregate keeps the old numbers forever")
+	}
+
+	// Repair the schema: the retry must now apply the work the queue kept.
+	if err := st.ensureOverviewMetricBucketsSchema(); err != nil {
+		t.Fatalf("ensureOverviewMetricBucketsSchema() error = %v", err)
+	}
+	st.flushDerivedRefresh()
+	bucket := readOverviewMetricBucketForTest(t, st, at.Truncate(time.Hour))
+	if bucket.requestCount != 1 || bucket.totalTokens != 17 {
+		t.Fatalf("bucket after retry = %+v, want the queued contribution applied", bucket)
+	}
+}
+
+func deferredDerivedQueueSizeForTest(st *Store) int {
+	st.shared.derivedMu.Lock()
+	defer st.shared.derivedMu.Unlock()
+	return st.shared.derivedQueueSizeLocked()
+}

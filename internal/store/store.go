@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -79,6 +80,9 @@ type Store struct {
 	secrets               *secretBox
 	useSessionSummaryRead bool
 	shared                *storeShared
+	// closed makes Close idempotent, so an explicit close next to a deferred one does
+	// not flush or close the handle twice.
+	closed atomic.Bool
 }
 
 // storeShared keeps the state that every Store view of the same database must
@@ -1868,10 +1872,23 @@ func normalizeSQLiteFilePath(dbPath string) string {
 	return dbPath
 }
 
+// Close settles the derived read models and then closes the database handle.
+//
+// The deferred derived queues are process-local: once the handle is gone, whatever is still
+// queued can only come back by rebuilding the derived tables from the index, and nothing
+// calls that rebuild in normal operation. `serve` flushes explicitly on its shutdown path,
+// but every other caller of this store (the analyze and db commands) only closes it, and a
+// command that repaired usage or re-indexed a trace would otherwise commit the index row and
+// leave the overview buckets and session summaries showing the old numbers forever. Flushing
+// here covers all of them and is a no-op when the queue is empty.
+//
+// Close is idempotent: the second call does nothing, so a defer next to an explicit close
+// does not flush a closed handle.
 func (s *Store) Close() error {
-	if s == nil {
+	if s == nil || !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	s.flushDerivedRefresh()
 	if s.client != nil {
 		return s.client.Close()
 	}
@@ -2807,14 +2824,71 @@ func (s *Store) flushDerivedRefresh() {
 	if len(traces) > 0 {
 		resolvedPaths, resolvedSessions, err := s.resolveDeferredTraceRefs(traces)
 		if err != nil {
+			// The traces could not be resolved to paths and sessions, so their refresh is
+			// still owed: put them back rather than dropping them.
 			fmt.Fprintf(os.Stderr, "trajecta: resolve deferred derived refresh failed: %v\n", err)
+			s.requeueDerivedTraces(traces)
 		} else {
 			paths = dedupeNonEmptyStrings(append(paths, resolvedPaths...))
 			sessions = dedupeNonEmptyStrings(append(sessions, resolvedSessions...))
 		}
 	}
-	s.refreshOverviewMetricBucketsBestEffort(paths)
-	s.refreshSessionSummariesBestEffort(sessions...)
+	if !s.refreshOverviewMetricBucketsBestEffort(paths) {
+		s.requeueDerivedPaths(paths)
+	}
+	if failed := s.refreshSessionSummariesBestEffort(sessions...); len(failed) > 0 {
+		s.requeueDerivedSessions(failed)
+	}
+}
+
+// requeueDerived* put work back on the deferred queue after a failed refresh. The work is
+// keyed by path/session in a set, so a concurrent writer that already re-queued the same
+// entry costs nothing, and the next flush (a reader, or a write that crosses the queue limit)
+// retries it. Losing the entry instead would leave the derived table permanently wrong,
+// because the queue is the only record that the aggregate is owed an update.
+func (s *Store) requeueDerivedPaths(paths []string) {
+	s.requeueDerived(func(shared *storeShared) {
+		ensureDerivedQueuesLocked(shared)
+		for _, path := range paths {
+			if path = strings.TrimSpace(path); path != "" {
+				shared.derivedPaths[path] = struct{}{}
+			}
+		}
+	})
+}
+
+func (s *Store) requeueDerivedTraces(traceIDs []string) {
+	s.requeueDerived(func(shared *storeShared) {
+		ensureDerivedQueuesLocked(shared)
+		for _, traceID := range traceIDs {
+			if traceID = strings.TrimSpace(traceID); traceID != "" {
+				shared.derivedTraces[traceID] = struct{}{}
+			}
+		}
+	})
+}
+
+func (s *Store) requeueDerivedSessions(sessionIDs []string) {
+	s.requeueDerived(func(shared *storeShared) {
+		ensureDerivedQueuesLocked(shared)
+		for _, sessionID := range sessionIDs {
+			if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+				shared.derivedSessions[sessionID] = struct{}{}
+			}
+		}
+	})
+}
+
+func (s *Store) requeueDerived(apply func(shared *storeShared)) {
+	if s == nil || s.shared == nil {
+		return
+	}
+	// A transaction-scoped view shares the queue, and the queue is process state rather than
+	// transaction state, so requeueing through such a view is safe.
+	shared := s.shared
+	shared.derivedMu.Lock()
+	apply(shared)
+	shared.derivedMu.Unlock()
 }
 
 func (s *Store) resolveDeferredTraceRefs(traceIDs []string) ([]string, []string, error) {

@@ -156,13 +156,20 @@ func (s *Store) ensureOverviewMetricBucketsSchema() error {
 	return nil
 }
 
-func (s *Store) refreshOverviewMetricBucketsBestEffort(paths []string) {
+// refreshOverviewMetricBucketsBestEffort reports whether the refresh was applied. A
+// failure is printed and returned so the caller can keep the work queued: the deferred queue
+// is the only record that these paths still owe the buckets an update, and dropping it would
+// leave the aggregate permanently short (nothing calls RebuildOverviewMetricBuckets in
+// normal operation).
+func (s *Store) refreshOverviewMetricBucketsBestEffort(paths []string) bool {
 	if len(paths) == 0 {
-		return
+		return true
 	}
 	if err := s.refreshOverviewMetricBuckets(paths); err != nil {
 		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric buckets failed: %v\n", err)
+		return false
 	}
+	return true
 }
 
 // refreshOverviewMetricBuckets rebuilds the hourly bucket contribution of a set

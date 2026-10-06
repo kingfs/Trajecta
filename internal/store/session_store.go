@@ -64,8 +64,11 @@ func (s *Store) sessionIDForPath(path string) string {
 	return sessionID
 }
 
-func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
+// refreshSessionSummariesBestEffort returns the sessions whose summary could not be
+// rebuilt, so the caller can keep them queued instead of losing the update.
+func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) []string {
 	seen := map[string]struct{}{}
+	var failed []string
 	for _, sessionID := range sessionIDs {
 		sessionID = strings.TrimSpace(sessionID)
 		if sessionID == "" {
@@ -77,8 +80,10 @@ func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
 		seen[sessionID] = struct{}{}
 		if err := s.RebuildSessionSummary(sessionID); err != nil {
 			fmt.Fprintf(os.Stderr, "trajecta: refresh session summary %q failed: %v\n", sessionID, err)
+			failed = append(failed, sessionID)
 		}
 	}
+	return failed
 }
 
 func (s *Store) RebuildSessionSummary(sessionID string) error {
