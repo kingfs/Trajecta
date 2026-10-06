@@ -1368,13 +1368,18 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 	for _, channel := range channels {
 		caps := upstreamCapabilitiesFromChannel(channel)
 		out = append(out, routeplan.UpstreamCandidate{
-			ID:                        channel.ID,
-			RouteTargetID:             channel.ID,
-			ChannelID:                 channel.ID,
-			Enabled:                   channel.Enabled,
-			Priority:                  channel.Priority,
-			Weight:                    channel.Weight,
-			Models:                    modelsByChannel[channel.ID],
+			ID:            channel.ID,
+			RouteTargetID: channel.ID,
+			ChannelID:     channel.ID,
+			Enabled:       channel.Enabled,
+			Priority:      channel.Priority,
+			Weight:        channel.Weight,
+			Models:        modelsByChannel[channel.ID],
+			// Pass the row verbatim: the channel projection always sends an explicit
+			// allow_unknown_models pointer, so the router's "single configured target" fallback
+			// (allowUnknownModels in internal/router) never applies to a database-managed target and
+			// the inspector must not invent it either.
+			AllowUnknownModels:        channel.AllowUnknownModels,
 			SupportsChatCompletions:   caps.chatCompletions,
 			SupportsResponses:         caps.responses,
 			SupportsAnthropicMessages: caps.anthropicMessages,

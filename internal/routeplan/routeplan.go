@@ -80,13 +80,18 @@ type ResolvedModelCandidate struct {
 }
 
 type UpstreamCandidate struct {
-	ID                        string
-	RouteTargetID             string
-	ChannelID                 string
-	Enabled                   bool
-	Priority                  int
-	Weight                    float64
-	Models                    []string
+	ID            string
+	RouteTargetID string
+	ChannelID     string
+	Enabled       bool
+	Priority      int
+	Weight        float64
+	Models        []string
+	// AllowUnknownModels mirrors the upstream's allow_unknown_models setting: the target serves
+	// models it does not declare. The forwarding path decides this in Target.supportsModelLocked
+	// and otherwise rejects a model that is not in the target's model set, so the planner needs the
+	// same fact to describe the same decision.
+	AllowUnknownModels        bool
 	SupportsChatCompletions   bool
 	SupportsResponses         bool
 	SupportsAnthropicMessages bool
@@ -410,10 +415,16 @@ func basePlanCandidate(upstream UpstreamCandidate, mode ExecutionMode, endpoint 
 	}
 }
 
-// modelMatches reports whether the request resolves to a model on this
-// upstream and returns the matched model name so per-model capabilities can be
-// resolved. When the request carries no resolved model candidates every model
-// is considered a match and the matched model is empty.
+// modelMatches reports whether the request resolves to a model on this upstream and returns the
+// matched model name so per-model capabilities can be resolved. When the request carries no
+// resolved model candidates every model is considered a match and the matched model is empty.
+//
+// A model the upstream does not declare matches only when UpstreamCandidate.AllowUnknownModels is
+// set, which is the rule Target.supportsModelLocked applies on the forwarding path. The previous
+// fallback - "an upstream that declares no models serves every model" - described neither setting:
+// a database channel always sends an explicit allow_unknown_models value, and the strict default is
+// to reject an undeclared model even when the model set happens to be empty because discovery has
+// not run yet. That made the inspector disagree with the proxy in both directions.
 func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) (string, bool) {
 	if len(req.ResolvedModelCandidates) == 0 {
 		return "", true
@@ -433,20 +444,21 @@ func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) 
 		if model == "" {
 			continue
 		}
-		if len(models) == 0 {
-			if plan != nil {
-				plan.UpstreamModel = candidate.Model
-			}
-			return candidate.Model, true
-		}
 		if _, ok := models[model]; ok {
-			if plan != nil {
-				plan.UpstreamModel = candidate.Model
-			}
-			return candidate.Model, true
+			return matchedUpstreamModel(candidate, plan), true
+		}
+		if upstream.AllowUnknownModels {
+			return matchedUpstreamModel(candidate, plan), true
 		}
 	}
 	return "", false
+}
+
+func matchedUpstreamModel(candidate ResolvedModelCandidate, plan *PlanCandidate) string {
+	if plan != nil {
+		plan.UpstreamModel = candidate.Model
+	}
+	return candidate.Model
 }
 
 func supportsEndpoint(upstream UpstreamCandidate, endpoint UpstreamEndpoint, model string) bool {
