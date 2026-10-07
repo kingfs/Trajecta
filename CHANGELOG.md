@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-07
+
 ### Added
 - The aggregated model list is now gated against routability. `GET /v1/models` is answered by the proxy itself (`serveAggregatedModelList`), so its ids are the proxy's own claim about what it can serve; `TestAggregatedModelListOnlyNamesRoutableModels` asserts that the target disabled in its fixture contributes no id (an SDK that enumerates the list must not be handed a model that the same proxy answers with a 502) and that every advertised id is answered with 200 by `/v1/chat/completions`. `Router.AggregatedModels` reads every target in `r.targets` without an `Enabled` check, so the list is correct because `buildTargets` drops disabled targets before they ever reach the snapshot; the gate covers that dependency. Injection: removing the `if !enabled { continue }` in `buildTargets` fails it with `catalog advertises "model-disabled", which only the disabled target declares`.
 
@@ -614,6 +616,7 @@ READMEs were rewritten as project landing pages.
 - The project was named llm-tracelab.
 
 [Unreleased]: https://github.com/kingfs/Trajecta/compare/v2.1.1...HEAD
+[2.2.0]: https://github.com/kingfs/Trajecta/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/kingfs/Trajecta/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/kingfs/Trajecta/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/kingfs/Trajecta/compare/v2.0.0...v2.0.1
