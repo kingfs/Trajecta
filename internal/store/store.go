@@ -104,7 +104,7 @@ type storeShared struct {
 	claimMu sync.Mutex
 
 	// derivedMu guards the deferred derived-table queues; derivedFlushMu
-	// serializes the flushes themselves. See markDerivedRefreshForPath.
+	// serializes the flushes themselves. See markSessionSummariesRefresh.
 	derivedMu       sync.Mutex
 	derivedFlushMu  sync.Mutex
 	derivedTraces   map[string]struct{}
@@ -2396,9 +2396,8 @@ func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModel
 	return tx.Commit()
 }
 
-// UpsertLogWithGrouping indexes one cassette. The derived read models
-// (session_summaries and the overview metric buckets) are deferred; see
-// markDerivedRefreshForPath.
+// UpsertLogWithGrouping indexes one cassette. The only derived read model left,
+// session_summaries, is deferred; see markSessionSummariesRefresh.
 func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
 	return s.upsertLogWithGrouping(path, header, grouping)
 }
