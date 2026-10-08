@@ -223,6 +223,12 @@ func runServeWithConfig(configPath string) int {
 	// never dropped for the sake of latency.
 	handler.StartFinalizeWorkers()
 
+	// The derived read models (session summaries) are rebuilt by a background
+	// flusher rather than by whichever read happens to arrive next. The write path
+	// already defers that rebuild because it costs about as much as the rest of the
+	// recording; without this the cost simply moved to a page render.
+	traceStore.StartDerivedRefresh()
+
 	addr := ":" + cfg.Server.Port
 	srv := newProxyHTTPServer(cfg, handler)
 

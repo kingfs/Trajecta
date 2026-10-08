@@ -109,6 +109,17 @@ type storeShared struct {
 	derivedFlushMu  sync.Mutex
 	derivedTraces   map[string]struct{}
 	derivedSessions map[string]struct{}
+	// derivedAsync is set by StartDerivedRefresh and moves the queue off the read
+	// path: while it is set a background goroutine is the only consumer, and a
+	// reader answers from whatever the read model already holds instead of paying
+	// for a whole-session rebuild. Until it is set - the default, and what every
+	// test and CLI command keeps - a reader applies the queue itself, so a read is
+	// immediately consistent with the write that preceded it.
+	derivedAsync     atomic.Bool
+	derivedSignal    chan struct{}
+	derivedStop      chan struct{}
+	derivedStartOnce sync.Once
+	derivedStopOnce  sync.Once
 	// derivedLimit overrides derivedQueueLimit when positive; tests use it to
 	// observe the bound without writing the default number of recordings.
 	derivedLimit int
@@ -1125,7 +1136,7 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 		outputDir:             outputDir,
 		dbPath:                dbPath,
 		driver:                driver,
-		shared:                &storeShared{},
+		shared:                &storeShared{derivedSignal: make(chan struct{}, 1)},
 		secrets:               secrets,
 		useSessionSummaryRead: opts.UseSessionSummaryRead,
 	}
@@ -1738,6 +1749,9 @@ func (s *Store) Close() error {
 	if s == nil || !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	// Stop the background flusher first, then drain: a flush racing the close
+	// would otherwise fail against a closed pool and requeue work nobody consumes.
+	s.StopDerivedRefresh()
 	s.flushDerivedRefresh()
 	if s.db != nil && s.db.readDB != nil {
 		// The read pool has no ent client of its own, so it is only closed here.
@@ -2613,6 +2627,7 @@ func (s *Store) markSessionSummariesRefresh(sessionIDs ...string) {
 	}
 	over := shared.derivedQueueSizeLocked() >= shared.derivedQueueLimitLocked()
 	shared.derivedMu.Unlock()
+	s.signalDerivedRefresh()
 	if over {
 		s.flushDerivedRefresh()
 	}
@@ -2635,6 +2650,7 @@ func (s *Store) markDerivedRefreshForTrace(traceID string) {
 	shared.derivedTraces[traceID] = struct{}{}
 	over := shared.derivedQueueSizeLocked() >= shared.derivedQueueLimitLocked()
 	shared.derivedMu.Unlock()
+	s.signalDerivedRefresh()
 	if over {
 		s.flushDerivedRefresh()
 	}
@@ -2663,9 +2679,10 @@ func (s *Store) FlushDerivedRefresh() {
 
 // flushDerivedRefresh applies every deferred derived-table refresh, best-effort:
 // the index rows are already committed, so a failure is reported and never
-// returned, exactly like the per-file refresh it replaces. Callers that read the
-// derived tables call this first, which is what keeps the read models consistent
-// for every consumer while the write path stays cheap.
+// returned, exactly like the per-file refresh it replaces. A failed refresh is
+// requeued, and whoever flushes next applies it; with the background flusher
+// running (see StartDerivedRefresh) that is the next tick, which is why the
+// retry no longer depends on a read arriving.
 func (s *Store) flushDerivedRefresh() {
 	if s == nil || s.shared == nil || s.db == nil {
 		return

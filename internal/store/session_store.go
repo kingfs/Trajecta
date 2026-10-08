@@ -326,10 +326,12 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
-	// The summary read path is a derived read model, so it observes every
-	// deferred write before it answers; the log-derived fallback below does not
-	// need it but is cheap to keep behind the same barrier.
-	s.flushDerivedRefresh()
+	// The summary read path is a derived read model. In a served process the
+	// background flusher keeps it current and this is a no-op, so a page render
+	// does not pay for a whole-session rebuild; a test or CLI caller that never
+	// started the flusher applies the deferred writes here and answers from a read
+	// model consistent with the write that preceded it.
+	s.flushDerivedBeforeRead()
 	if page < 1 {
 		page = 1
 	}
@@ -472,7 +474,7 @@ func (s *Store) listSessionPageIDs(sessionWhere string, whereArgs []any, page in
 }
 
 func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
-	s.flushDerivedRefresh()
+	s.flushDerivedBeforeRead()
 	if s.useSessionSummaryRead {
 		summary, err := s.getSessionFromSummary(sessionID)
 		if err == nil {
