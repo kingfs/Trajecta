@@ -3834,7 +3834,7 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.TotalTraces != 5 || payload.ScannedTraces != 5 || payload.EventfulTraces != 4 || payload.LegacyOrMissingEvents != 1 || payload.ParseErrors != 0 {
+	if payload.TotalTraces != 5 || payload.ScannedTraces != 5 || payload.EventfulTraces != 4 || payload.LegacyOrMissingEvents != 1 {
 		t.Fatalf("summary counters = %+v", payload)
 	}
 	assertCountItem(t, payload.FailureReasons, "all_excluded", 1)

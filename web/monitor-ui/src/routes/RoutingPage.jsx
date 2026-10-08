@@ -709,7 +709,6 @@ function normalizeCredentialRoutingSummary(payload) {
   return {
     eventfulTraces: Number(payload?.eventful_traces || 0),
     missingEvents: Number(payload?.legacy_or_missing_events || 0),
-    parseErrors: Number(payload?.parse_errors || 0),
     routeTargets,
     channels,
     credentials,
@@ -759,7 +758,6 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
           <InlineTag>{windowValue}</InlineTag>
           <InlineTag tone={summary.eventfulTraces ? "green" : "default"}>{t("routing.eventful", { count: formatCount(summary.eventfulTraces) })}</InlineTag>
           {summary.missingEvents ? <InlineTag tone="gold">{t("routing.legacyMissing", { count: formatCount(summary.missingEvents) })}</InlineTag> : null}
-          {summary.parseErrors ? <InlineTag tone="danger">{t("routing.parseErrors", { count: formatCount(summary.parseErrors) })}</InlineTag> : null}
         </div>
       </div>
       <div className="hero-grid hero-grid-compact">

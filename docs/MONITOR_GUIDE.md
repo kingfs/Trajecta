@@ -148,7 +148,7 @@ session ID 的抽取顺序为：
 - Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
 - Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未声明模型的可路由性也按同一条规则判断：只有渠道的 `allow_unknown_models` 为真时才会规划出路由，否则候选会以 `model_not_matched` 被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
 
-摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。响应里仍保留 `parse_errors` 字段只为兼容旧前端：这个端点已不解析任何文件，该字段恒为 0，不代表解析失败数。
+摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。该端点不解析任何文件，所以响应里没有解析失败计数，页面也不再显示这一项。
 
 ### 分析 `/analysis`
 

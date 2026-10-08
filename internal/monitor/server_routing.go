@@ -18,26 +18,20 @@ import (
 )
 
 type routingSummaryResponse struct {
-	Window                string    `json:"window"`
-	Model                 string    `json:"model,omitempty"`
-	RefreshedAt           time.Time `json:"refreshed_at"`
-	TotalTraces           int       `json:"total_traces"`
-	ScannedTraces         int       `json:"scanned_traces"`
-	EventfulTraces        int       `json:"eventful_traces"`
-	LegacyOrMissingEvents int       `json:"legacy_or_missing_events"`
-	// ParseErrors is retained for response compatibility and is always zero. It
-	// counted cassettes whose prelude could not be read, back when this summary
-	// opened every cassette in its window; the summary now aggregates the routing
-	// columns on `logs` and parses nothing, so a prelude that cannot be read no
-	// longer has any bearing on it. The UI still renders the value it is sent.
-	ParseErrors          int                       `json:"parse_errors"`
-	FailureReasons       []sessionCountItem        `json:"failure_reasons"`
-	SelectedUpstreams    []sessionCountItem        `json:"selected_upstreams"`
-	SelectedRouteTargets []sessionCountItem        `json:"selected_route_targets"`
-	SelectedChannels     []sessionCountItem        `json:"selected_channels"`
-	SelectedCredentials  []sessionCountItem        `json:"selected_credentials"`
-	StickyStatuses       []sessionCountItem        `json:"sticky_statuses"`
-	StickyBreaks         routingStickyBreakSummary `json:"sticky_breaks"`
+	Window                string                    `json:"window"`
+	Model                 string                    `json:"model,omitempty"`
+	RefreshedAt           time.Time                 `json:"refreshed_at"`
+	TotalTraces           int                       `json:"total_traces"`
+	ScannedTraces         int                       `json:"scanned_traces"`
+	EventfulTraces        int                       `json:"eventful_traces"`
+	LegacyOrMissingEvents int                       `json:"legacy_or_missing_events"`
+	FailureReasons        []sessionCountItem        `json:"failure_reasons"`
+	SelectedUpstreams     []sessionCountItem        `json:"selected_upstreams"`
+	SelectedRouteTargets  []sessionCountItem        `json:"selected_route_targets"`
+	SelectedChannels      []sessionCountItem        `json:"selected_channels"`
+	SelectedCredentials   []sessionCountItem        `json:"selected_credentials"`
+	StickyStatuses        []sessionCountItem        `json:"sticky_statuses"`
+	StickyBreaks          routingStickyBreakSummary `json:"sticky_breaks"`
 }
 
 type routingStickyBreakSummary struct {
