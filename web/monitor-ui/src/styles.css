@@ -3849,3 +3849,137 @@ a:focus-visible {
     height: 6px;
   }
 }
+
+/* System page (admin diagnostics). The page reuses the trace table shell and
+   only overrides its column template per table. */
+.system-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0 18px;
+}
+
+.system-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--panel-soft);
+  min-width: 0;
+}
+
+.system-fact > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.system-fact > strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.system-fact-warn {
+  border-color: var(--gold);
+}
+
+.system-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.system-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.system-subhead h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.system-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+.system-statement {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+}
+
+.system-longest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.system-warnings {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-chip);
+  background: var(--panel-soft);
+}
+
+.system-warnings ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.system-table .system-statement {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.system-table--relations .system-table-head,
+.system-table--relations .system-row {
+  grid-template-columns: minmax(0, 2.2fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr);
+}
+
+.system-table--indexes .system-table-head,
+.system-table--indexes .system-row {
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(70px, 0.6fr) minmax(110px, 0.9fr) minmax(80px, 0.7fr);
+}
+
+.system-table--tables .system-table-head,
+.system-table--tables .system-row {
+  grid-template-columns: minmax(0, 1.8fr) repeat(4, minmax(64px, 0.6fr)) minmax(64px, 0.6fr) minmax(90px, 0.8fr) minmax(80px, 0.7fr);
+}
+
+.system-table--slow .system-table-head,
+.system-table--slow .system-row {
+  grid-template-columns: minmax(140px, 0.9fr) minmax(70px, 0.5fr) minmax(80px, 0.5fr) minmax(0, 3fr);
+}
+
+.system-row-warn {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.08), transparent);
+}
+
+.system-row-warn:hover {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.14), rgba(30, 41, 59, 0.36));
+}
+
+/* Wide statistic tables scroll sideways on a narrow viewport instead of
+   reflowing into rows whose cells no longer sit under their header. */
+.system-table {
+  overflow-x: auto;
+}
+
+.system-table .system-table-head,
+.system-table .system-row {
+  min-width: 660px;
+}

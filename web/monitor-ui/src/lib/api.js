@@ -8,6 +8,9 @@ export const apiPaths = {
   authPassword: "/api/auth/password",
   authTokens: "/api/auth/tokens",
   overview: "/api/overview",
+  systemRuntime: "/api/system/runtime",
+  systemDatabase: "/api/system/db",
+  systemSlowQueries: "/api/system/slow-queries",
   events: "/api/events",
   eventsSummary: "/api/events/summary",
   eventsStream: "/api/events/stream",
@@ -32,7 +35,15 @@ export const apiPaths = {
   traceReanalyze: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reanalyze`,
   sessions: "/api/sessions",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
-  sessionTrajectory: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/trajectory`,
+  // The trajectory endpoint caps the default view (about 500 traces) and can
+  // stream the complete session as NDJSON instead of buffering it.
+  sessionTrajectory: (sessionID, { full = false, stream = false } = {}) => {
+    const params = new URLSearchParams();
+    if (full) params.set("full", "1");
+    if (stream) params.set("stream", "1");
+    const query = params.toString();
+    return `/api/sessions/${encodeURIComponent(sessionID)}/trajectory${query ? `?${query}` : ""}`;
+  },
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
   model: (model) => `/api/models/${encodeURIComponent(model)}`,

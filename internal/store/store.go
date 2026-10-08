@@ -14,12 +14,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,7 +45,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/upstreamtarget"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/pkg/llm"
-	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
@@ -68,8 +69,6 @@ type Stats struct {
 	FailedRequest  int
 	SuccessRate    float64
 }
-
-const overviewMetricBucketSize = time.Hour
 
 type Store struct {
 	db                    *rebindingDB
@@ -108,7 +107,6 @@ type storeShared struct {
 	// serializes the flushes themselves. See markDerivedRefreshForPath.
 	derivedMu       sync.Mutex
 	derivedFlushMu  sync.Mutex
-	derivedPaths    map[string]struct{}
 	derivedTraces   map[string]struct{}
 	derivedSessions map[string]struct{}
 	// derivedLimit overrides derivedQueueLimit when positive; tests use it to
@@ -132,12 +130,28 @@ const statsCacheTTL = 15 * time.Second
 type DatabaseOptions struct {
 	AutoMigrate           bool
 	UseSessionSummaryRead bool
+	// ReadMaxOpenConns, ReadMaxIdleConns and ReadStatementTimeout configure a
+	// second connection pool for read-only statements. Zero leaves every
+	// statement on the single pool, which is what the tests and SQLite use.
+	//
+	// The proxy and the Monitor share one process. A cold page on the Monitor
+	// can run for tens of seconds on this deployment's rotational disk (a 30-day
+	// Overview measured 14 s), and with one small pool those reads hold every
+	// connection the proxy needs to persist what it just recorded. Two pools
+	// bound that damage to the Monitor.
+	ReadMaxOpenConns     int
+	ReadMaxIdleConns     int
+	ReadStatementTimeout time.Duration
 }
 
 type rebindingDB struct {
 	*sql.DB
 	tx     *sql.Tx
 	driver string
+	// readDB, when non-nil, serves statements that only read. See
+	// isReadOnlyStatement for exactly which ones qualify; everything else, and
+	// everything inside a transaction, stays on the write pool.
+	readDB *sql.DB
 }
 
 // ErrNestedTransaction reports an attempt to open a second, independent
@@ -179,7 +193,7 @@ func (db *rebindingDB) QueryContext(ctx context.Context, query string, args ...a
 	if db.tx != nil {
 		return db.tx.QueryContext(ctx, db.rebind(query), args...)
 	}
-	return db.DB.QueryContext(ctx, db.rebind(query), args...)
+	return db.queryPool(query).QueryContext(ctx, db.rebind(query), args...)
 }
 
 func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
@@ -190,7 +204,64 @@ func (db *rebindingDB) QueryRowContext(ctx context.Context, query string, args .
 	if db.tx != nil {
 		return db.tx.QueryRowContext(ctx, db.rebind(query), args...)
 	}
-	return db.DB.QueryRowContext(ctx, db.rebind(query), args...)
+	return db.queryPool(query).QueryRowContext(ctx, db.rebind(query), args...)
+}
+
+// queryPool picks the connection pool for a statement issued outside a
+// transaction. Only statements that cannot write go to the read pool.
+func (db *rebindingDB) queryPool(query string) *sql.DB {
+	if db.readDB != nil && isReadOnlyStatement(query) {
+		return db.readDB
+	}
+	return db.DB
+}
+
+// isReadOnlyStatement reports whether a statement is unambiguously a read.
+//
+// The rule is deliberately narrow: only a statement whose first keyword is
+// SELECT or VALUES is a read. Everything else - INSERT, UPDATE, DELETE, WITH,
+// DDL, PRAGMA, and anything this function does not recognise - goes to the write
+// pool, because sending a write to the read pool would be a silent behaviour
+// change and sending a read to the write pool only costs it the read timeout.
+//
+// Two shapes make the narrow rule necessary rather than merely cautious:
+//
+//   - The job claims are `UPDATE ... RETURNING` executed through Query: their
+//     first keyword is UPDATE. Their row lock is a `SELECT ... FOR UPDATE SKIP
+//     LOCKED` subquery inside that UPDATE, so no bare locking SELECT exists to
+//     misroute - but if one is ever added, it must be routed by hand.
+//   - A data-modifying CTE starts with WITH, so WITH is never treated as a read.
+func isReadOnlyStatement(query string) bool {
+	rest := strings.TrimLeft(query, " \t\r\n")
+	for {
+		switch {
+		case strings.HasPrefix(rest, "--"):
+			end := strings.IndexByte(rest, '\n')
+			if end < 0 {
+				return false
+			}
+			rest = strings.TrimLeft(rest[end+1:], " \t\r\n")
+			continue
+		case strings.HasPrefix(rest, "/*"):
+			end := strings.Index(rest[2:], "*/")
+			if end < 0 {
+				return false
+			}
+			rest = strings.TrimLeft(rest[2+end+2:], " \t\r\n")
+			continue
+		}
+		break
+	}
+	keyword := rest
+	if idx := strings.IndexAny(keyword, " \t\r\n(;"); idx >= 0 {
+		keyword = keyword[:idx]
+	}
+	switch strings.ToUpper(keyword) {
+	case "SELECT", "VALUES":
+		return true
+	default:
+		return false
+	}
 }
 
 func (db *rebindingDB) rebind(query string) string {
@@ -806,7 +877,7 @@ func (s *Store) GetModelCatalog(model string) (ModelCatalogRecord, error) {
 	return modelCatalogRecordFromEnt(row), nil
 }
 
-func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int, bucketSize time.Duration, bucketCount int) (UpstreamDetail, error) {
+func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int, bucketSize time.Duration, bucketCount int, loc *time.Location) (UpstreamDetail, error) {
 	if traceLimit <= 0 {
 		traceLimit = 50
 	}
@@ -897,9 +968,9 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	} else if !latestTime.IsZero() {
 		referenceTime = latestTime.UTC()
 	}
-	// UTC grid: the slots are looked up by UTC-truncated recorded_at values, and a time.Time map key
-	// carries its location, so a local-time bucket start would never match.
-	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	// The grid and the per-row lookups both go through bucketSlot: a time.Time map
+	// key carries its location, so aligning only one side would never match.
+	bucketStart := bucketSlot(referenceTime, bucketSize, loc).Add(-time.Duration(bucketCount-1) * bucketSize)
 	buckets := make(map[time.Time]int, bucketCount)
 	failureTimelineArgs := append([]any{upstreamID}, whereArgs...)
 	timelineRows, err := s.db.Query(`
@@ -921,7 +992,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 		if err != nil {
 			return UpstreamDetail{}, err
 		}
-		slot := recordedTime.UTC().Truncate(bucketSize)
+		slot := bucketSlot(recordedTime, bucketSize, loc)
 		if slot.Before(bucketStart) {
 			continue
 		}
@@ -1042,9 +1113,14 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 	if maxIdleConns > 0 {
 		db.SetMaxIdleConns(maxIdleConns)
 	}
+	readDB, err := openReadPool(driver, dsn, dbPath, outputDir, opts)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 
 	st := &Store{
-		db:                    &rebindingDB{DB: db, driver: driver},
+		db:                    &rebindingDB{DB: db, driver: driver, readDB: readDB},
 		client:                dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
 		outputDir:             outputDir,
 		dbPath:                dbPath,
@@ -1091,7 +1167,11 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 	if !migrationTableExists {
 		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `server db migrate up` with the same config before starting with database.auto_migrate=false")
 	}
-	for _, table := range []string{"session_summaries", "overview_metric_buckets", "overview_metric_bucket_members"} {
+	// The tables a served process needs beyond what ent's own schema creates.
+	// `overview_metric_buckets` and `overview_metric_bucket_members` used to be
+	// checked here; they are no longer written or read, so a database that still
+	// has them, and one that never did, both serve.
+	for _, table := range []string{"session_summaries"} {
 		var exists bool
 		if err := s.db.QueryRow(`SELECT EXISTS (
 			SELECT 1
@@ -1104,7 +1184,83 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 			return fmt.Errorf("postgres application schema is missing %s; run `server db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
 		}
 	}
+	// `loadObservationMetadata` reads one parse job per trace id without a
+	// newest-row subquery, which is only correct while trace_id is unique. Refuse
+	// to serve rather than quietly return a job chosen by row order.
+	for _, index := range []string{"parsejob_trace_id_unique"} {
+		var exists bool
+		if err := s.db.QueryRow(`SELECT EXISTS (
+			SELECT 1
+			FROM pg_indexes
+			WHERE schemaname = current_schema() AND indexname = ?
+		)`, index).Scan(&exists); err != nil {
+			return fmt.Errorf("check postgres %s migration: %w", index, err)
+		}
+		if !exists {
+			return fmt.Errorf("postgres application schema is missing the index %s; run `server db migrate up` to apply ent/postgres-migrations before enabling service traffic", index)
+		}
+	}
 	return nil
+}
+
+// openReadPool opens the second, read-only pool when the caller asked for a
+// different size or a statement timeout. It returns nil to mean "use the write
+// pool", which keeps SQLite and every test on the single-pool behaviour.
+//
+// The pool is only useful on Postgres: SQLite serialises writers at the file
+// level, so a second pool there would add contention rather than remove it.
+func openReadPool(driver string, dsn string, dbPath string, outputDir string, opts DatabaseOptions) (*sql.DB, error) {
+	if driver != "postgres" {
+		return nil, nil
+	}
+	if opts.ReadMaxOpenConns <= 0 && opts.ReadStatementTimeout <= 0 {
+		return nil, nil
+	}
+	readDSN := dsn
+	if opts.ReadStatementTimeout > 0 {
+		// lib/pq takes statement_timeout as a connection option, which the server
+		// applies to every statement on the connection. `options` is the
+		// server-side form and does not depend on pq parsing the value.
+		var err error
+		readDSN, err = dsnWithConnectionOption(dsn, "statement_timeout", strconv.FormatInt(opts.ReadStatementTimeout.Milliseconds(), 10))
+		if err != nil {
+			return nil, err
+		}
+	}
+	readDB, err := openObservedDatabase("postgres", readDSN)
+	if err != nil {
+		return nil, fmt.Errorf("open postgres read pool: %w", err)
+	}
+	if opts.ReadMaxOpenConns > 0 {
+		readDB.SetMaxOpenConns(opts.ReadMaxOpenConns)
+	}
+	if opts.ReadMaxIdleConns > 0 {
+		readDB.SetMaxIdleConns(opts.ReadMaxIdleConns)
+	} else if opts.ReadMaxOpenConns > 0 {
+		readDB.SetMaxIdleConns(opts.ReadMaxOpenConns)
+	}
+	// Fail at startup rather than on the first Monitor request. The database is
+	// already required to be reachable for the write pool.
+	if err := readDB.Ping(); err != nil {
+		_ = readDB.Close()
+		return nil, fmt.Errorf("connect postgres read pool: %w", err)
+	}
+	return readDB, nil
+}
+
+// dsnWithConnectionOption adds or replaces one libpq connection option. It keeps
+// the rest of the DSN byte for byte so a URL that only differs by one option
+// still points at the same server, and it leaves a DSN without an option it
+// cannot parse untouched rather than guessing.
+func dsnWithConnectionOption(dsn string, key string, value string) (string, error) {
+	parsed, err := url.Parse(dsn)
+	if err != nil || parsed.Scheme == "" {
+		return "", fmt.Errorf("postgres read pool needs a URL DSN to apply %s; got %q", key, config.RedactDSN(dsn))
+	}
+	query := parsed.Query()
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
 
 func (s *Store) ping() error {
@@ -1141,7 +1297,7 @@ func openStoreDatabase(outputDir string, driver string, dsn string) (*sql.DB, st
 				return nil, "", "", err
 			}
 		}
-		db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+		db, err := openObservedDatabase("sqlite", sqliteDSN(dbPath))
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -1150,7 +1306,7 @@ func openStoreDatabase(outputDir string, driver string, dsn string) (*sql.DB, st
 		if strings.TrimSpace(dsn) == "" {
 			return nil, "", "", errors.New("postgres store dsn is required")
 		}
-		db, err := sql.Open("postgres", dsn)
+		db, err := openObservedDatabase("postgres", dsn)
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -1583,6 +1739,10 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.flushDerivedRefresh()
+	if s.db != nil && s.db.readDB != nil {
+		// The read pool has no ent client of its own, so it is only closed here.
+		defer func() { _ = s.db.readDB.Close() }()
+	}
 	if s.client != nil {
 		return s.client.Close()
 	}
@@ -2229,15 +2389,18 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	return s.upsertLogWithGrouping(path, header, grouping)
 }
 
-func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
+// upsertLogWithGroupingTraceID indexes one cassette and returns the trace id it
+// belongs to, so a caller that discovers a cassette the write path never saw can
+// enqueue the parse job that the write path would have enqueued.
+func (s *Store) upsertLogWithGroupingTraceID(path string, header recordfile.RecordHeader, grouping GroupingInfo) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	traceID, err := s.lookupOrCreateTraceID(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	previousSessionID := s.sessionIDForPath(path)
 
@@ -2268,8 +2431,9 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 			request_audit_id, response_id,
 			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
+			route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -2315,7 +2479,12 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 			routing_policy=excluded.routing_policy,
 			routing_score=excluded.routing_score,
 			routing_candidate_count=excluded.routing_candidate_count,
-			routing_failure_reason=excluded.routing_failure_reason
+			routing_failure_reason=excluded.routing_failure_reason,
+			route_target_id=excluded.route_target_id,
+			channel_id=excluded.channel_id,
+			credential_id=excluded.credential_id,
+			sticky_status=excluded.sticky_status,
+			sticky_previous_upstream_id=excluded.sticky_previous_upstream_id
 	`,
 		sanitizeDBText(path),
 		sanitizeDBText(traceID),
@@ -2363,14 +2532,28 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Meta.RoutingScore,
 		header.Meta.RoutingCandidateCount,
 		sanitizeDBText(header.Meta.RoutingFailureReason),
+		sanitizeDBText(header.Meta.RouteTargetID),
+		sanitizeDBText(header.Meta.ChannelID),
+		sanitizeDBText(header.Meta.CredentialID),
+		sanitizeDBText(header.Meta.StickyStatus),
+		sanitizeDBText(header.Meta.StickyPreviousUpstreamID),
 	)
 
 	if err != nil {
-		return err
+		return "", err
 	}
 	s.invalidateStatsCache()
-	s.markDerivedRefreshForPath(path, previousSessionID, grouping.SessionID)
-	return s.upsertSystemEventsForLog(traceID, header, grouping)
+	s.markSessionSummariesRefresh(previousSessionID, grouping.SessionID)
+	if err := s.upsertSystemEventsForLog(traceID, header, grouping); err != nil {
+		return "", err
+	}
+	return traceID, nil
+}
+
+// upsertLogWithGrouping indexes one cassette and discards the trace id.
+func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
+	_, err := s.upsertLogWithGroupingTraceID(path, header, grouping)
+	return err
 }
 
 func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error {
@@ -2406,23 +2589,23 @@ func (shared *storeShared) derivedQueueLimitLocked() int {
 	return derivedQueueLimit
 }
 
-// markDerivedRefreshForPath defers the derived-table work for one indexed
-// recording. Both derived tables are rebuilt from whole sessions and hour
-// buckets, and they are read models: doing that work inside the recording path
-// cost about as much as the rest of the write (measured on the SQLite harness)
-// and it repeated the whole-session aggregate once per request of that session.
-// The work is applied by flushDerivedRefresh, which every reader calls first.
-func (s *Store) markDerivedRefreshForPath(path string, sessionIDs ...string) {
+// markSessionSummariesRefresh defers the derived-table work for one indexed
+// recording. The session summary is rebuilt from a whole session and is a read
+// model: doing that work inside the recording path cost about as much as the rest
+// of the write (measured on the SQLite harness) and it repeated the whole-session
+// aggregate once per request of that session. The work is applied by
+// flushDerivedRefresh, which every reader calls first.
+//
+// The recording's path used to be queued here too, for the Overview's hourly
+// bucket aggregate. The Overview reads the log rows directly instead, so the
+// aggregate is gone and only the session remains.
+func (s *Store) markSessionSummariesRefresh(sessionIDs ...string) {
 	if s == nil || s.shared == nil {
 		return
 	}
-	path = strings.TrimSpace(path)
 	shared := s.shared
 	shared.derivedMu.Lock()
 	ensureDerivedQueuesLocked(shared)
-	if path != "" {
-		shared.derivedPaths[path] = struct{}{}
-	}
 	for _, sessionID := range sessionIDs {
 		if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
 			shared.derivedSessions[sessionID] = struct{}{}
@@ -2436,8 +2619,8 @@ func (s *Store) markDerivedRefreshForPath(path string, sessionIDs ...string) {
 }
 
 // markDerivedRefreshForTrace defers the derived-table work for a trace whose
-// metric columns changed. Resolving the trace to its path and session is part of
-// the flush, so an update no longer pays two extra point queries per call.
+// metric columns changed. Resolving the trace to its session is part of the
+// flush, so an update does not pay an extra point query per call.
 func (s *Store) markDerivedRefreshForTrace(traceID string) {
 	if s == nil || s.shared == nil {
 		return
@@ -2458,9 +2641,6 @@ func (s *Store) markDerivedRefreshForTrace(traceID string) {
 }
 
 func ensureDerivedQueuesLocked(shared *storeShared) {
-	if shared.derivedPaths == nil {
-		shared.derivedPaths = map[string]struct{}{}
-	}
 	if shared.derivedTraces == nil {
 		shared.derivedTraces = map[string]struct{}{}
 	}
@@ -2470,7 +2650,7 @@ func ensureDerivedQueuesLocked(shared *storeShared) {
 }
 
 func (shared *storeShared) derivedQueueSizeLocked() int {
-	return len(shared.derivedPaths) + len(shared.derivedTraces) + len(shared.derivedSessions)
+	return len(shared.derivedTraces) + len(shared.derivedSessions)
 }
 
 // FlushDerivedRefresh applies every deferred derived-table refresh now. Every
@@ -2504,31 +2684,25 @@ func (s *Store) flushDerivedRefresh() {
 	defer shared.derivedFlushMu.Unlock()
 
 	shared.derivedMu.Lock()
-	paths := sortedKeys(shared.derivedPaths)
 	traces := sortedKeys(shared.derivedTraces)
 	sessions := sortedKeys(shared.derivedSessions)
-	shared.derivedPaths = map[string]struct{}{}
 	shared.derivedTraces = map[string]struct{}{}
 	shared.derivedSessions = map[string]struct{}{}
 	shared.derivedMu.Unlock()
-	if len(paths) == 0 && len(traces) == 0 && len(sessions) == 0 {
+	if len(traces) == 0 && len(sessions) == 0 {
 		return
 	}
 
 	if len(traces) > 0 {
-		resolvedPaths, resolvedSessions, err := s.resolveDeferredTraceRefs(traces)
+		resolvedSessions, err := s.resolveDeferredTraceRefs(traces)
 		if err != nil {
-			// The traces could not be resolved to paths and sessions, so their refresh is
-			// still owed: put them back rather than dropping them.
+			// The traces could not be resolved to sessions, so their refresh is still
+			// owed: put them back rather than dropping them.
 			fmt.Fprintf(os.Stderr, "trajecta: resolve deferred derived refresh failed: %v\n", err)
 			s.requeueDerivedTraces(traces)
 		} else {
-			paths = dedupeNonEmptyStrings(append(paths, resolvedPaths...))
 			sessions = dedupeNonEmptyStrings(append(sessions, resolvedSessions...))
 		}
-	}
-	if !s.refreshOverviewMetricBucketsBestEffort(paths) {
-		s.requeueDerivedPaths(paths)
 	}
 	if failed := s.refreshSessionSummariesBestEffort(sessions...); len(failed) > 0 {
 		s.requeueDerivedSessions(failed)
@@ -2540,17 +2714,6 @@ func (s *Store) flushDerivedRefresh() {
 // entry costs nothing, and the next flush (a reader, or a write that crosses the queue limit)
 // retries it. Losing the entry instead would leave the derived table permanently wrong,
 // because the queue is the only record that the aggregate is owed an update.
-func (s *Store) requeueDerivedPaths(paths []string) {
-	s.requeueDerived(func(shared *storeShared) {
-		ensureDerivedQueuesLocked(shared)
-		for _, path := range paths {
-			if path = strings.TrimSpace(path); path != "" {
-				shared.derivedPaths[path] = struct{}{}
-			}
-		}
-	})
-}
-
 func (s *Store) requeueDerivedTraces(traceIDs []string) {
 	s.requeueDerived(func(shared *storeShared) {
 		ensureDerivedQueuesLocked(shared)
@@ -2585,8 +2748,7 @@ func (s *Store) requeueDerived(apply func(shared *storeShared)) {
 	shared.derivedMu.Unlock()
 }
 
-func (s *Store) resolveDeferredTraceRefs(traceIDs []string) ([]string, []string, error) {
-	paths := make([]string, 0, len(traceIDs))
+func (s *Store) resolveDeferredTraceRefs(traceIDs []string) ([]string, error) {
 	sessions := make([]string, 0, len(traceIDs))
 	for _, chunk := range chunkStrings(traceIDs, storeSQLParamChunk) {
 		rows, err := s.db.Query(`
@@ -2595,162 +2757,24 @@ func (s *Store) resolveDeferredTraceRefs(traceIDs []string) ([]string, []string,
 			WHERE trace_id IN (`+placeholders(len(chunk))+`)
 		`, stringArgs(chunk)...)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for rows.Next() {
 			var path, sessionID string
 			if err := rows.Scan(&path, &sessionID); err != nil {
 				rows.Close()
-				return nil, nil, err
+				return nil, err
 			}
-			paths = append(paths, path)
+			_ = path
 			sessions = append(sessions, sessionID)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		rows.Close()
 	}
-	return paths, sessions, nil
-}
-
-func (s *Store) refreshOverviewMetricBuckets(paths []string) error {
-	paths = dedupeNonEmptyStrings(paths)
-	if len(paths) == 0 {
-		return nil
-	}
-
-	contributions := map[string]overviewMetricContribution{}
-	previous := map[string]overviewMetricContribution{}
-	for _, chunk := range chunkStrings(paths, storeSQLParamChunk) {
-		args := stringArgs(chunk)
-
-		rows, err := s.db.Query(`
-			SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
-			FROM logs
-			WHERE path IN (`+placeholders(len(chunk))+`) AND `+clientVisibleLogClause("")+`
-		`, args...)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			contribution, err := s.scanOverviewMetricContribution(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			contributions[contribution.Path] = contribution
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-
-		rows, err = s.db.Query(`
-			SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-				total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
-			FROM overview_metric_bucket_members
-			WHERE path IN (`+placeholders(len(chunk))+`)
-		`, args...)
-		if err != nil {
-			return err
-		}
-		var bucketStart any
-		for rows.Next() {
-			var member overviewMetricContribution
-			if err := rows.Scan(
-				&member.Path,
-				&bucketStart,
-				&member.BucketSizeSeconds,
-				&member.RequestCount,
-				&member.SuccessRequest,
-				&member.FailedRequest,
-				&member.TotalTokens,
-				&member.TTFTSum,
-				&member.TTFTCount,
-				&member.DurationSum,
-				&member.DurationCount,
-				&member.StreamCount,
-			); err != nil {
-				rows.Close()
-				return err
-			}
-			parsed, err := timeParseValue(bucketStart)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			member.BucketStart = parsed.UTC()
-			previous[member.Path] = member
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	deltas := map[string]overviewMetricContribution{}
-	for _, member := range previous {
-		member.RequestCount = -member.RequestCount
-		member.SuccessRequest = -member.SuccessRequest
-		member.FailedRequest = -member.FailedRequest
-		member.TotalTokens = -member.TotalTokens
-		member.TTFTSum = -member.TTFTSum
-		member.TTFTCount = -member.TTFTCount
-		member.DurationSum = -member.DurationSum
-		member.DurationCount = -member.DurationCount
-		member.StreamCount = -member.StreamCount
-		addOverviewMetricContributionDelta(deltas, member)
-	}
-	for _, contribution := range contributions {
-		addOverviewMetricContributionDelta(deltas, contribution)
-	}
-	// Deterministic write order keeps concurrent rebuilds and test failures
-	// reproducible; the deltas are independent additions either way.
-	for _, key := range sortedKeys(deltas) {
-		if err := s.addOverviewMetricBucketTx(tx, deltas[key]); err != nil {
-			return err
-		}
-	}
-	for _, chunk := range chunkStrings(paths, storeSQLParamChunk) {
-		if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members WHERE path IN (`+placeholders(len(chunk))+`)`, stringArgs(chunk)...); err != nil {
-			return err
-		}
-	}
-	if err := s.insertOverviewMetricMembersTx(tx, contributions); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func addOverviewMetricContributionDelta(deltas map[string]overviewMetricContribution, contribution overviewMetricContribution) {
-	key := overviewMetricBucketKey(contribution)
-	current, ok := deltas[key]
-	if !ok {
-		current = overviewMetricContribution{
-			BucketStart:       contribution.BucketStart.UTC(),
-			BucketSizeSeconds: contribution.BucketSizeSeconds,
-		}
-	}
-	current.RequestCount += contribution.RequestCount
-	current.SuccessRequest += contribution.SuccessRequest
-	current.FailedRequest += contribution.FailedRequest
-	current.TotalTokens += contribution.TotalTokens
-	current.TTFTSum += contribution.TTFTSum
-	current.TTFTCount += contribution.TTFTCount
-	current.DurationSum += contribution.DurationSum
-	current.DurationCount += contribution.DurationCount
-	current.StreamCount += contribution.StreamCount
-	deltas[key] = current
+	return sessions, nil
 }
 
 func dedupeNonEmptyStrings(values []string) []string {
@@ -2804,6 +2828,19 @@ func (s *Store) Sync() error {
 		return err
 	}
 
+	// Sync is the recovery path: it is the only thing that indexes a cassette the
+	// write path did not finish, whether because the process was down when the
+	// file appeared or because the store was unavailable when the proxy tried to
+	// record it. It is therefore also the only place that can notice a trace that
+	// is indexed but was never queued for parsing, which is what leaves a trace
+	// showing as "unparsed" forever in the Monitor.
+	//
+	// Both counters are reported rather than acted on beyond that: a fragment
+	// cannot be repaired (see cassetteIsFragment) and deleting it would destroy
+	// the only copy of the exchange, so it is the operator's call.
+	var enqueued int
+	var fragments []string
+
 	walkErr := filepath.Walk(s.outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -2825,17 +2862,43 @@ func (s *Store) Sync() error {
 		inputs, err := readCassetteIndexInputs(path)
 		if err != nil {
 			if cassetteIsFragment(path, err) {
+				fragments = append(fragments, path)
 				return nil
 			}
 			return fmt.Errorf("index %s: %w", path, err)
 		}
 
-		return s.upsertLogWithGrouping(path, inputs.Parsed.Header, inputs.Grouping)
+		traceID, err := s.upsertLogWithGroupingTraceID(path, inputs.Parsed.Header, inputs.Grouping)
+		if err != nil {
+			return err
+		}
+		// Best effort: a parse job that cannot be queued must not stop the walk,
+		// because the index row is the part every list and filter depends on. The
+		// next pass retries, since a failed enqueue leaves the file no fresher.
+		if err := s.EnqueueParseJob(traceID); err != nil {
+			slog.Warn("Trace parse job enqueue failed during sync", "path", path, "trace_id", traceID, "error", err)
+		} else {
+			enqueued++
+		}
+		return nil
 	})
 	// The index rows written before a walk failure are already committed, so the
 	// deferred derived refreshes run either way; a derived-table failure is
 	// reported and never masks the walk error.
 	s.flushDerivedRefresh()
+	if enqueued > 0 {
+		slog.Info("Trace index sync queued parse jobs for newly indexed cassettes", "count", enqueued)
+	}
+	if len(fragments) > 0 {
+		sample := fragments
+		if len(sample) > 5 {
+			sample = sample[:5]
+		}
+		slog.Warn("Cassette files are incomplete and were skipped",
+			"count", len(fragments),
+			"sample", sample,
+			"reason", "a recording is written record-first and only becomes readable once its prelude is prepended; a file that still starts with the HTTP request line lost its metadata when the process was killed mid-recording")
+	}
 	return walkErr
 }
 
@@ -3242,109 +3305,6 @@ func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
 	return logEntryFromTraceLog(row), nil
 }
 
-// insertSemanticNodesTx writes a trace's semantic nodes in parameter-bounded
-// multi-row statements. The row-by-row loop it replaces issued one INSERT per
-// node, and a session reanalysis flattens hundreds of them into one call.
-func (s *Store) insertSemanticNodesTx(tx *sql.Tx, traceID string, nodes []observe.FlatSemanticNode, now time.Time) error {
-	if len(nodes) == 0 {
-		return nil
-	}
-	// (trace_id, node_id) is unique, so a batch that repeats a node id would fail
-	// the whole statement. observationFlatNodes already folds the non-empty ids
-	// first-wins, so this is the safety net for the empty ids it keeps: the last
-	// one wins and the batch always sends one row per key.
-	unique := make([]observe.FlatSemanticNode, 0, len(nodes))
-	at := make(map[string]int, len(nodes))
-	for _, row := range nodes {
-		if index, ok := at[row.Node.ID]; ok {
-			unique[index] = row
-			continue
-		}
-		at[row.Node.ID] = len(unique)
-		unique = append(unique, row)
-	}
-	safeTraceID := sqlSafeText(traceID)
-	const nodeColumns = 14
-	rowsPerStatement := storeSQLParamChunk / nodeColumns
-	valueRow := "(" + placeholders(nodeColumns) + ")"
-	for start := 0; start < len(unique); start += rowsPerStatement {
-		end := start + rowsPerStatement
-		if end > len(unique) {
-			end = len(unique)
-		}
-		chunk := unique[start:end]
-		values := make([]string, 0, len(chunk))
-		args := make([]any, 0, len(chunk)*nodeColumns)
-		for _, row := range chunk {
-			nodeJSON, err := json.Marshal(row.Node.JSON)
-			if err != nil {
-				return err
-			}
-			rawJSON, err := json.Marshal(row.Node.Raw)
-			if err != nil {
-				return err
-			}
-			values = append(values, valueRow)
-			args = append(args, safeTraceID, sqlSafeText(row.Node.ID), sqlSafeText(row.ParentID), sqlSafeText(row.Node.ProviderType), string(row.Node.NormalizedType), sqlSafeText(row.Node.Role),
-				sqlSafeText(row.Node.Path), row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(sqlSafeBytes(nodeJSON)), string(sqlSafeBytes(rawJSON)), "", now)
-		}
-		if _, err := s.execTx(tx, `
-			INSERT INTO semantic_nodes (
-				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
-				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
-			) VALUES `+strings.Join(values, ", "), args...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, error) {
-	rows, err := s.db.Query(`
-		SELECT node_id, parent_node_id, provider_type, normalized_type, role, path,
-			node_index, depth, text_preview, json, raw
-		FROM semantic_nodes
-		WHERE trace_id = ?
-		ORDER BY depth ASC, node_index ASC, id ASC
-	`, traceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []observe.FlatSemanticNode
-	for rows.Next() {
-		var row observe.FlatSemanticNode
-		var normalized string
-		var nodeJSON, rawJSON string
-		if err := rows.Scan(
-			&row.Node.ID,
-			&row.ParentID,
-			&row.Node.ProviderType,
-			&normalized,
-			&row.Node.Role,
-			&row.Node.Path,
-			&row.Node.Index,
-			&row.Depth,
-			&row.Node.Text,
-			&nodeJSON,
-			&rawJSON,
-		); err != nil {
-			return nil, err
-		}
-		row.Node.ParentID = row.ParentID
-		row.Node.NormalizedType = observe.NormalizedType(normalized)
-		if nodeJSON != "" && nodeJSON != "null" {
-			row.Node.JSON = json.RawMessage(nodeJSON)
-		}
-		if rawJSON != "" && rawJSON != "null" {
-			row.Node.Raw = json.RawMessage(rawJSON)
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) GetTraceExchangeMetadata(traceID string) (recordfile.MetaData, error) {
 	var meta recordfile.MetaData
 	var logKind, logRole, logParent string
@@ -3503,6 +3463,41 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 		return out, nil
 	}
 
+	// The three id lists below are OR'ed together over the same parent, so the
+	// unit that can be split is the parent set, not the individual lists: cutting
+	// the lists separately would build a chunk that ORs a request_audit_id from one
+	// group with a response_id from another and match unrelated rows.
+	//
+	// Each parent contributes at most one id per list, so a chunk of
+	// storeSQLParamChunk/3 parents cannot exceed the bind-parameter budget. Before
+	// this, a session with enough traces - the largest here has 10,107 - built a
+	// single statement with three times that many parameters and the driver
+	// rejected it outright.
+	const perParentParams = 3
+	chunkSize := storeSQLParamChunk / perParentParams
+	if chunkSize < 1 {
+		chunkSize = 1
+	}
+	for start := 0; start < len(parents); start += chunkSize {
+		end := start + chunkSize
+		if end > len(parents) {
+			end = len(parents)
+		}
+		if err := s.listChildExchangesChunk(out, parents[start:end]); err != nil {
+			return nil, err
+		}
+	}
+	for _, children := range out {
+		if err := s.populateObservationMetadata(children); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// listChildExchangesChunk loads the model-kind exchanges one chunk of parents
+// owns and appends them to out, keyed by the parent they belong to.
+func (s *Store) listChildExchangesChunk(out map[string][]LogEntry, parents []LogEntry) error {
 	parentByAudit := make(map[string]string, len(parents))
 	parentByExchange := make(map[string]string, len(parents))
 	parentByResponse := make(map[string]string, len(parents))
@@ -3524,7 +3519,7 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 		}
 	}
 	if len(auditArgs) == 0 && len(exchangeArgs) == 0 && len(responseArgs) == 0 {
-		return out, nil
+		return nil
 	}
 
 	var clauses []string
@@ -3557,14 +3552,14 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 		ORDER BY sequence_index ASC, recorded_at ASC, trace_id ASC
 	`, args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		entry, err := scanEntry(rows)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		parentID := parentByAudit[strings.TrimSpace(entry.Header.Meta.RequestAuditID)]
 		if parentID == "" {
@@ -3578,15 +3573,7 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 		}
 		out[parentID] = append(out[parentID], entry)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, children := range out {
-		if err := s.populateObservationMetadata(children); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return rows.Err()
 }
 
 // Stats summarizes the traces the filter selects, the same rows ListPage and
@@ -4322,26 +4309,6 @@ func scanCountItems(rows *sql.Rows) ([]CountItem, error) {
 		out = append(out, item)
 	}
 	return out, rows.Err()
-}
-
-func dedupeFlatSemanticNodes(nodes []observe.FlatSemanticNode) []observe.FlatSemanticNode {
-	if len(nodes) < 2 {
-		return nodes
-	}
-	out := make([]observe.FlatSemanticNode, 0, len(nodes))
-	seen := make(map[string]struct{}, len(nodes))
-	for _, node := range nodes {
-		if node.Node.ID == "" {
-			out = append(out, node)
-			continue
-		}
-		if _, ok := seen[node.Node.ID]; ok {
-			continue
-		}
-		seen[node.Node.ID] = struct{}{}
-		out = append(out, node)
-	}
-	return out
 }
 
 func textPreview(text string, limit int) string {

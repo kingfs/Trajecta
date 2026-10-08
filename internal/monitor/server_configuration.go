@@ -459,7 +459,7 @@ func modelListAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
-		todaySince := startOfUTCDay(time.Now().UTC())
+		todaySince := startOfDisplayDay(time.Now())
 		items, err := st.ListModelCatalogAnalytics(since, todaySince)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -515,7 +515,7 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
-		detail, err := st.GetModelDetailAnalytics(model, since, startOfUTCDay(time.Now().UTC()), bucketSize, bucketCount)
+		detail, err := st.GetModelDetailAnalytics(model, since, startOfDisplayDay(time.Now()), bucketSize, bucketCount, DisplayLocation())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
@@ -900,7 +900,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 			// so it keeps its own query, and a failed grouped pass falls back to
 			// the per-channel path the same way.
 			summaries, summariesErr := st.GetChannelUsageSummaries(since)
-			trends, trendsErr := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount)
+			trends, trendsErr := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount, DisplayLocation())
 			channelSummary := func(channelID string) store.UsageSummaryRecord {
 				if summariesErr == nil {
 					return summaries[channelID]
@@ -917,7 +917,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 						return series
 					}
 				}
-				series, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount)
+				series, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount, DisplayLocation())
 				if err != nil {
 					return nil
 				}
@@ -1683,7 +1683,7 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 		routingFailures := routingFailureSummaryView{}
 		if st != nil {
 			bucketSize, bucketCount := routingFailureBucketSpec(windowLabel)
-			analytics, err := st.GetRoutingFailureAnalytics(since, modelFilter, 5, 5, bucketSize, bucketCount)
+			analytics, err := st.GetRoutingFailureAnalytics(since, modelFilter, 5, 5, bucketSize, bucketCount, DisplayLocation())
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query routing failures: " + err.Error()})
 				return
@@ -1723,7 +1723,7 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
 		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
 		bucketSize, bucketCount := routingFailureBucketSpec(windowLabel)
-		detail, err := st.GetUpstreamDetail(upstreamID, since, modelFilter, 50, bucketSize, bucketCount)
+		detail, err := st.GetUpstreamDetail(upstreamID, since, modelFilter, 50, bucketSize, bucketCount, DisplayLocation())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "upstream not found"})

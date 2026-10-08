@@ -288,7 +288,7 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 	if summary, err := st.GetChannelUsageSummary(channelID, since); err == nil {
 		item.Summary = usageSummaryViewFromRecord(summary)
 	}
-	if trends, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount); err == nil {
+	if trends, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount, DisplayLocation()); err == nil {
 		item.Trends = usageTrendViews(trends)
 	}
 	if !includeDetail {

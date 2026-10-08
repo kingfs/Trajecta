@@ -81,6 +81,11 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{AnalysisJobsColumns[2], AnalysisJobsColumns[3], AnalysisJobsColumns[10]},
 			},
+			{
+				Name:    "analysisjob_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisJobsColumns[10], AnalysisJobsColumns[0]},
+			},
 		},
 	}
 	// AnalysisRunsColumns holds the columns for the "analysis_runs" table.
@@ -630,42 +635,6 @@ var (
 			},
 		},
 	}
-	// SemanticNodesColumns holds the columns for the "semantic_nodes" table.
-	SemanticNodesColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt, Increment: true},
-		{Name: "trace_id", Type: field.TypeString},
-		{Name: "node_id", Type: field.TypeString},
-		{Name: "parent_node_id", Type: field.TypeString, Default: ""},
-		{Name: "provider_type", Type: field.TypeString, Default: ""},
-		{Name: "normalized_type", Type: field.TypeString, Default: ""},
-		{Name: "role", Type: field.TypeString, Default: ""},
-		{Name: "path", Type: field.TypeString, Default: ""},
-		{Name: "node_index", Type: field.TypeInt, Default: 0},
-		{Name: "depth", Type: field.TypeInt, Default: 0},
-		{Name: "text_preview", Type: field.TypeString, Default: ""},
-		{Name: "json", Type: field.TypeString, Default: ""},
-		{Name: "raw", Type: field.TypeString, Default: ""},
-		{Name: "raw_ref", Type: field.TypeString, Default: ""},
-		{Name: "created_at", Type: field.TypeTime},
-	}
-	// SemanticNodesTable holds the schema information for the "semantic_nodes" table.
-	SemanticNodesTable = &schema.Table{
-		Name:       "semantic_nodes",
-		Columns:    SemanticNodesColumns,
-		PrimaryKey: []*schema.Column{SemanticNodesColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "semanticnode_trace_id_node_id",
-				Unique:  true,
-				Columns: []*schema.Column{SemanticNodesColumns[1], SemanticNodesColumns[2]},
-			},
-			{
-				Name:    "semanticnode_trace_id_depth_node_index",
-				Unique:  false,
-				Columns: []*schema.Column{SemanticNodesColumns[1], SemanticNodesColumns[9], SemanticNodesColumns[8]},
-			},
-		},
-	}
 	// SystemEventsColumns holds the columns for the "system_events" table.
 	SystemEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -810,9 +779,14 @@ var (
 				Columns: []*schema.Column{TraceFindingsColumns[1], TraceFindingsColumns[4], TraceFindingsColumns[3]},
 			},
 			{
-				Name:    "tracefinding_severity_created_at",
+				Name:    "tracefinding_severity_created_at_id",
 				Unique:  false,
-				Columns: []*schema.Column{TraceFindingsColumns[4], TraceFindingsColumns[13]},
+				Columns: []*schema.Column{TraceFindingsColumns[4], TraceFindingsColumns[13], TraceFindingsColumns[0]},
+			},
+			{
+				Name:    "tracefinding_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{TraceFindingsColumns[13], TraceFindingsColumns[0]},
 			},
 		},
 	}
@@ -864,6 +838,11 @@ var (
 		{Name: "routing_score", Type: field.TypeFloat64, Default: 0},
 		{Name: "routing_candidate_count", Type: field.TypeInt, Default: 0},
 		{Name: "routing_failure_reason", Type: field.TypeString, Default: ""},
+		{Name: "route_target_id", Type: field.TypeString, Default: ""},
+		{Name: "channel_id", Type: field.TypeString, Default: ""},
+		{Name: "credential_id", Type: field.TypeString, Default: ""},
+		{Name: "sticky_status", Type: field.TypeString, Default: ""},
+		{Name: "sticky_previous_upstream_id", Type: field.TypeString, Default: ""},
 	}
 	// LogsTable holds the schema information for the "logs" table.
 	LogsTable = &schema.Table{
@@ -890,16 +869,6 @@ var (
 				Name:    "tracelog_request_id",
 				Unique:  false,
 				Columns: []*schema.Column{LogsColumns[5]},
-			},
-			{
-				Name:    "tracelog_request_audit_id_recorded_at",
-				Unique:  false,
-				Columns: []*schema.Column{LogsColumns[32], LogsColumns[6]},
-			},
-			{
-				Name:    "tracelog_exchange_kind_recorded_at",
-				Unique:  false,
-				Columns: []*schema.Column{LogsColumns[38], LogsColumns[6]},
 			},
 			{
 				Name:    "tracelog_parent_exchange_id",
@@ -1110,7 +1079,6 @@ var (
 		ResponsesTable,
 		ResponseItemsTable,
 		ScoresTable,
-		SemanticNodesTable,
 		SystemEventsTable,
 		ToolCallAuditsTable,
 		TraceFindingsTable,
@@ -1195,10 +1163,6 @@ func init() {
 	ScoresTable.Annotation = &entsql.Annotation{
 		Table:          "scores",
 		IncrementStart: func(i int) *int { return &i }(25769803776),
-	}
-	SemanticNodesTable.Annotation = &entsql.Annotation{
-		Table:          "semantic_nodes",
-		IncrementStart: func(i int) *int { return &i }(98784247808),
 	}
 	SystemEventsTable.Annotation = &entsql.Annotation{
 		Table:          "system_events",

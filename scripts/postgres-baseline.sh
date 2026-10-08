@@ -128,8 +128,6 @@ WHERE c.relkind = 'r'
   AND c.relname IN (
     'logs',
     'session_summaries',
-    'overview_metric_buckets',
-    'overview_metric_bucket_members',
     'trace_observations',
     'parse_jobs',
     'system_events',
@@ -140,6 +138,8 @@ WHERE c.relkind = 'r'
     'upstream_exchanges'
   )
 ORDER BY pg_total_relation_size(c.oid) DESC;
+
+\echo '  note: the removed derived tables overview_metric_buckets / overview_metric_bucket_members are reported separately in section 9 when they still exist'
 
 \echo ''
 \echo '================================================================================'
@@ -162,8 +162,6 @@ FROM pg_stat_user_tables
 WHERE relname IN (
   'logs',
   'session_summaries',
-  'overview_metric_buckets',
-  'overview_metric_bucket_members',
   'trace_observations',
   'parse_jobs',
   'system_events',
@@ -192,8 +190,6 @@ JOIN pg_index i ON i.indexrelid = s.indexrelid
 WHERE s.relname IN (
   'logs',
   'session_summaries',
-  'overview_metric_buckets',
-  'overview_metric_bucket_members',
   'trace_observations',
   'parse_jobs',
   'system_events',
@@ -322,6 +318,10 @@ SELECT
   (SELECT MAX(updated_at) FROM session_summaries) AS summary_max_updated_at,
   (SELECT MIN(updated_at) FROM session_summaries) AS summary_min_updated_at;
 
+\echo '  legacy derived tables (skipped when absent):'
+SELECT to_regclass('overview_metric_buckets') IS NOT NULL AS has_overview_buckets \gset
+\if :has_overview_buckets
+\echo '  note: overview_metric_buckets still exists but is no longer written or read (Overview reads logs live); dropping it is an operator decision'
 SELECT
   COUNT(*) AS bucket_count,
   MIN(bucket_start) AS first_bucket,
@@ -329,14 +329,24 @@ SELECT
   SUM(request_count) AS bucket_requests,
   SUM(success_request) AS bucket_success,
   SUM(failed_request) AS bucket_failed,
-  SUM(total_tokens) AS bucket_tokens
+  SUM(total_tokens) AS bucket_tokens,
+  pg_size_pretty(pg_total_relation_size('overview_metric_buckets')) AS total_size
 FROM overview_metric_buckets;
+\else
+\echo '  skipped: overview_metric_buckets absent (removed derived table; Overview now reads logs live)'
+\endif
 
+SELECT to_regclass('overview_metric_bucket_members') IS NOT NULL AS has_overview_members \gset
+\if :has_overview_members
 SELECT
   COUNT(*) AS member_count,
   MIN(updated_at) AS first_member_update,
-  MAX(updated_at) AS last_member_update
+  MAX(updated_at) AS last_member_update,
+  pg_size_pretty(pg_total_relation_size('overview_metric_bucket_members')) AS total_size
 FROM overview_metric_bucket_members;
+\else
+\echo '  skipped: overview_metric_bucket_members absent (removed derived table; Overview now reads logs live)'
+\endif
 
 \echo ''
 \echo '================================================================================'

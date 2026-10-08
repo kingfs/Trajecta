@@ -26,6 +26,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
+	"github.com/kingfs/Trajecta/internal/recorder"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/routeplan"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -1095,8 +1096,12 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	if payload.Items[0].Operation != "chat.completions" {
 		t.Fatalf("operation = %q, want chat.completions", payload.Items[0].Operation)
 	}
-	if payload.Items[0].Observation.Status != "unparsed" {
-		t.Fatalf("observation = %+v, want unparsed", payload.Items[0].Observation)
+	// "queued", not "unparsed": syncStore indexes these fixtures through Store.Sync,
+	// which is also the recovery path for a cassette the write path never finished,
+	// so it queues the parse job the write path would have queued. A trace whose
+	// parse job exists is queued rather than unparsed.
+	if payload.Items[0].Observation.Status != "queued" {
+		t.Fatalf("observation = %+v, want queued", payload.Items[0].Observation)
 	}
 }
 
@@ -1155,8 +1160,10 @@ func TestListAPIHandlerFiltersByObservationStatus(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if len(payload.Items) != 1 || payload.Items[0].Observation.Status != "unparsed" {
-		t.Fatalf("payload = %+v, want one unparsed trace", payload.Items)
+	// The filter asks for traces with no observation row, and the reported status
+	// comes from the parse job Sync queued for it.
+	if len(payload.Items) != 1 || payload.Items[0].Observation.Status != "queued" {
+		t.Fatalf("payload = %+v, want one trace with no observation, reported as queued", payload.Items)
 	}
 }
 
@@ -3639,7 +3646,7 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 		}
 	}
 
-	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
+	now := startOfDisplayDay(time.Now()).Add(2 * time.Hour)
 	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
 		ID:                "openai-primary",
 		BaseURL:           "https://api.openai.com/v1",
@@ -3727,7 +3734,7 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 		}
 	}
 
-	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
+	now := startOfDisplayDay(time.Now()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "gpt-5", "no_supporting_target")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "gemini-2.5-flash", "no_supporting_target")
@@ -3773,33 +3780,38 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	outputDir := t.TempDir()
 	reqBody := `{"input":"hello"}`
 	resBody := `{"output_text":"done"}`
+	// One decision per request: the summary reads the routing facts the index row
+	// carries, and a row holds one value per fact, so the fixtures describe what a
+	// single request records rather than every event a retry sequence emits.
 	writeRoutingSummaryTrace(t, outputDir, "selected.http", reqBody, resBody, []recordfile.RecordEvent{
-		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary"}},
-		{Type: "routing.sticky.miss", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "miss", "sticky_key_fingerprint": "sha256:aaa"}},
-		{Type: "routing.sticky.bind", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "bind", "upstream_id": "openai-primary"}},
+		{Type: "routing.selection", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary"}},
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"upstream_id": "openai-primary", "route_target_id": "openai-primary:cred-a",
+			"channel_id": "openai-primary", "credential_id": "cred-a",
+		}},
+		{Type: "routing.sticky.hit", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "hit", "upstream_id": "openai-primary"}},
 	})
 	writeRoutingSummaryTrace(t, outputDir, "filtered.http", reqBody, resBody, []recordfile.RecordEvent{
 		{Type: "routing.filtered", Time: time.Date(2026, 4, 18, 8, 1, 0, 0, time.UTC), Attributes: map[string]interface{}{"routing_failure_reason": "all_excluded"}},
-		{Type: "routing.retry_queue_saturated", Time: time.Date(2026, 4, 18, 8, 1, 0, 0, time.UTC)},
 	})
 	writeRoutingSummaryTrace(t, outputDir, "sticky-break.http", reqBody, resBody, []recordfile.RecordEvent{
-		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openrouter-fallback"}},
-		{Type: "routing.filtered", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"routing_failure_reason": "no_support"}},
-		{Type: "routing.sticky.hit", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "hit", "upstream_id": "openai-primary"}},
-		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "break", "previous_upstream_id": "openai-primary", "upstream_id": "openrouter-fallback"}},
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"upstream_id": "openrouter-fallback", "route_target_id": "openrouter-fallback:default",
+			"channel_id": "openrouter-fallback", "credential_id": "default",
+		}},
+		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"sticky_status": "break", "previous_upstream_id": "openai-primary", "upstream_id": "openrouter-fallback",
+			"route_target_id": "openrouter-fallback:default", "channel_id": "openrouter-fallback", "credential_id": "default",
+		}},
 	})
 	writeRoutingSummaryTrace(t, outputDir, "credential.http", reqBody, resBody, []recordfile.RecordEvent{
-		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 3, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary", "route_target_id": "openai-primary:cred-a", "channel_id": "openai-primary", "credential_id": "cred-a"}},
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 3, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"upstream_id": "openai-primary", "route_target_id": "openai-primary:cred-a",
+			"channel_id": "openai-primary", "credential_id": "cred-a",
+		}},
 		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 3, 0, 0, time.UTC), Attributes: map[string]interface{}{
-			"sticky_status":            "break",
-			"previous_upstream_id":     "openai-primary",
-			"upstream_id":              "openai-primary",
-			"previous_route_target_id": "openai-primary:cred-old",
-			"route_target_id":          "openai-primary:cred-a",
-			"previous_channel_id":      "openai-primary",
-			"channel_id":               "openai-primary",
-			"previous_credential_id":   "cred-old",
-			"credential_id":            "cred-a",
+			"sticky_status": "break", "previous_upstream_id": "openai-primary", "upstream_id": "openai-primary",
+			"route_target_id": "openai-primary:cred-a", "channel_id": "openai-primary", "credential_id": "cred-a",
 		}},
 	})
 	writeLegacyRoutingSummaryTrace(t, outputDir, "legacy.http", reqBody, resBody)
@@ -3826,15 +3838,12 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 		t.Fatalf("summary counters = %+v", payload)
 	}
 	assertCountItem(t, payload.FailureReasons, "all_excluded", 1)
-	assertCountItem(t, payload.FailureReasons, "no_support", 1)
-	assertCountItem(t, payload.FailureReasons, "retry_queue_saturated", 1)
 	assertCountItem(t, payload.SelectedUpstreams, "openai-primary", 2)
 	assertCountItem(t, payload.SelectedUpstreams, "openrouter-fallback", 1)
-	assertCountItem(t, payload.SelectedRouteTargets, "openai-primary:cred-a", 1)
-	assertCountItem(t, payload.SelectedChannels, "openai-primary", 1)
-	assertCountItem(t, payload.SelectedCredentials, "cred-a", 1)
-	assertCountItem(t, payload.StickyStatuses, "miss", 1)
-	assertCountItem(t, payload.StickyStatuses, "bind", 1)
+	assertCountItem(t, payload.SelectedRouteTargets, "openai-primary:cred-a", 2)
+	assertCountItem(t, payload.SelectedRouteTargets, "openrouter-fallback:default", 1)
+	assertCountItem(t, payload.SelectedChannels, "openai-primary", 2)
+	assertCountItem(t, payload.SelectedCredentials, "cred-a", 2)
 	assertCountItem(t, payload.StickyStatuses, "hit", 1)
 	assertCountItem(t, payload.StickyStatuses, "break", 2)
 	if payload.StickyBreaks.Total != 2 {
@@ -3843,12 +3852,18 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	assertCountItem(t, payload.StickyBreaks.PreviousUpstreams, "openai-primary", 2)
 	assertCountItem(t, payload.StickyBreaks.NextUpstreams, "openrouter-fallback", 1)
 	assertCountItem(t, payload.StickyBreaks.NextUpstreams, "openai-primary", 1)
-	assertCountItem(t, payload.StickyBreaks.PreviousRouteTargets, "openai-primary:cred-old", 1)
+	assertCountItem(t, payload.StickyBreaks.NextRouteTargets, "openrouter-fallback:default", 1)
 	assertCountItem(t, payload.StickyBreaks.NextRouteTargets, "openai-primary:cred-a", 1)
-	assertCountItem(t, payload.StickyBreaks.PreviousChannels, "openai-primary", 1)
 	assertCountItem(t, payload.StickyBreaks.NextChannels, "openai-primary", 1)
-	assertCountItem(t, payload.StickyBreaks.PreviousCredentials, "cred-old", 1)
 	assertCountItem(t, payload.StickyBreaks.NextCredentials, "cred-a", 1)
+	// The previous-side identity is fed by previous_route_target_id and friends,
+	// which no producer writes: a sticky event carries the identity of the target
+	// being switched to, not the one being left. The previous upstream is
+	// reported because it has a real attribute; the rest are structurally empty
+	// and kept only for response-shape compatibility.
+	if len(payload.StickyBreaks.PreviousRouteTargets) != 0 || len(payload.StickyBreaks.PreviousChannels) != 0 || len(payload.StickyBreaks.PreviousCredentials) != 0 {
+		t.Fatalf("previous-side identity should be empty, got %+v", payload.StickyBreaks)
+	}
 }
 
 func TestRoutingSummaryAPIHandlerRejectsWriteMethods(t *testing.T) {
@@ -3922,7 +3937,7 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 		}
 	}
 
-	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
+	now := startOfDisplayDay(time.Now()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "/v1/responses", "gpt-5", 200, "")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "/v1/chat/completions", "gpt-5", 503, "upstream overloaded")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, "")
@@ -5107,7 +5122,10 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 	}
 }
 
-func TestTraceObservationAPIHandlerReturnsObservationTree(t *testing.T) {
+// TestTraceObservationAPIHandlerParsesCassetteOnDemand pins the behaviour the
+// node table used to provide: opening a trace that no worker has parsed yet still
+// returns its tree, because the handler rebuilds it from the cassette.
+func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
 	if err != nil {
@@ -5115,23 +5133,24 @@ func TestTraceObservationAPIHandlerReturnsObservationTree(t *testing.T) {
 	}
 	defer st.Close()
 
-	logPath := filepath.Join(outputDir, "trace-observation.http")
-	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	resBody := `{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`
+	header := buildRecordHeader("/v1/responses", false, reqBody, resBody)
+	header.Meta.RequestID = "req-observation"
+	header.Meta.Provider = "openai_compatible"
+	header.Meta.Operation = "responses"
+	header.Meta.Endpoint = "/v1/responses"
+	header.Meta.Model = "gpt-5.1"
+	header.Usage = recordfile.UsageInfo{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
-	header := recordfile.RecordHeader{
-		Version: "LLM_PROXY_V3",
-		Meta: recordfile.MetaData{
-			RequestID:  "req-observation",
-			Time:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
-			Model:      "gpt-5.1",
-			Provider:   "openai_compatible",
-			Operation:  "responses",
-			Endpoint:   "/v1/responses",
-			URL:        "/v1/responses",
-			Method:     "POST",
-			StatusCode: 200,
-		},
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	logPath := filepath.Join(outputDir, "trace-observation.http")
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
 	if err := st.UpsertLog(logPath, header); err != nil {
 		t.Fatalf("UpsertLog() error = %v", err)
@@ -5140,32 +5159,10 @@ func TestTraceObservationAPIHandlerReturnsObservationTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByRequestID() error = %v", err)
 	}
-	obs := observe.TraceObservation{
-		TraceID:       entry.ID,
-		Provider:      "openai_compatible",
-		Operation:     "responses",
-		Model:         "gpt-5.1",
-		Parser:        "openai",
-		ParserVersion: "0.1.0",
-		Status:        observe.ParseStatusParsed,
-		Response: observe.ObservationResponse{
-			Nodes: []observe.SemanticNode{{
-				ID:             "node-root",
-				ProviderType:   "message",
-				NormalizedType: observe.NodeMessage,
-				Path:           "$.output[0]",
-				Children: []observe.SemanticNode{{
-					ID:             "node-child",
-					ProviderType:   "output_text",
-					NormalizedType: observe.NodeText,
-					Path:           "$.output[0].content[0]",
-					Text:           "hello",
-				}},
-			}},
-		},
-	}
-	if err := st.SaveObservation(obs); err != nil {
-		t.Fatalf("SaveObservation() error = %v", err)
+	// Deliberately no SaveObservation and no worker run: this is the path a trace
+	// takes before anything has parsed it.
+	if _, err := st.GetObservationSummary(entry.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetObservationSummary() error = %v, want no stored observation", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
@@ -5178,18 +5175,29 @@ func TestTraceObservationAPIHandlerReturnsObservationTree(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.Summary.Parser != "openai" || payload.Summary.Status != "parsed" {
+	if payload.Summary.Status != string(observe.ParseStatusParsed) || payload.Summary.Parser != "openai" {
 		t.Fatalf("summary = %+v", payload.Summary)
 	}
-	if len(payload.Tree) != 1 || len(payload.Tree[0].Children) != 1 {
-		t.Fatalf("tree = %+v", payload.Tree)
+	if len(payload.Tree) == 0 {
+		t.Fatalf("tree is empty: %+v", payload)
 	}
-	if payload.Tree[0].Children[0].TextPreview != "hello" {
-		t.Fatalf("child preview = %q", payload.Tree[0].Children[0].TextPreview)
+	var foundText bool
+	for _, node := range payload.Nodes {
+		if node.NormalizedType == string(observe.NodeText) && node.TextPreview == "hello" {
+			foundText = true
+			break
+		}
+	}
+	if !foundText {
+		t.Fatalf("text node missing in %+v", payload.Nodes)
 	}
 }
 
-func TestTraceObservationAPIHandlerReturnsNotFoundBeforeReparse(t *testing.T) {
+// TestTraceObservationAPIHandlerReportsUnreadableCassette replaces the old
+// "404 until reparse" case. The detail view no longer waits for a stored
+// observation, but it does need a cassette it can read, so a file that is not a
+// cassette is reported as a server-side parse failure with the reason.
+func TestTraceObservationAPIHandlerReportsUnreadableCassette(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
 	if err != nil {
@@ -5226,8 +5234,11 @@ func TestTraceObservationAPIHandlerReturnsNotFoundBeforeReparse(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
 	rr := httptest.NewRecorder()
 	traceAPIHandler(st, nil).ServeHTTP(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "prelude") {
+		t.Fatalf("body = %s, want the prelude read error", rr.Body.String())
 	}
 }
 
@@ -5482,6 +5493,11 @@ func writeRoutingSummaryTrace(t *testing.T, outputDir string, name string, reqBo
 	header.Meta.RequestID = name
 	header.Meta.Model = "gpt-5"
 	events := append(recordfile.BuildEvents(header), routingEvents...)
+	// The routing summary reads the indexed row, not the cassette, so the fixture
+	// has to run the same derivation the recorder runs when it finalises a
+	// recording. Doing it here rather than hand-setting the header fields keeps
+	// this fixture honest about the path that fills them in production.
+	recorder.ApplyRoutingDetailFromEvents(events, &header.Meta)
 	prelude, err := recordfile.MarshalPrelude(header, events)
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)

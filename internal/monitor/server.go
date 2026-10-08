@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
@@ -379,7 +380,39 @@ type RouteOptions struct {
 	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
 	ResponsesFunctionExecutorStore   *store.Store
 	ResponsesFunctionExecutorManager *functionexec.Manager
+	// Location anchors the day-based windows and the calendar buckets. A nil
+	// value keeps whatever SetDisplayLocation was last given, which defaults to
+	// Asia/Shanghai.
+	Location *time.Location
+	// DebugPprofEnabled mounts net/http/pprof on this mux under /debug/pprof/.
+	// It is off by default (debug.pprof_enabled); when it is off the /debug/
+	// prefix answers 404 instead of falling through to the SPA index, so the
+	// switch has an observable off state.
+	DebugPprofEnabled bool
 }
+
+// displayLocation anchors every day-based window ("today") and every calendar
+// bucket boundary in the Monitor.
+//
+// Those windows used to be computed in UTC, which is only correct for an
+// operator at UTC+0: for the deployment this serves, "today" started at 08:00
+// local and the first eight hours of the operator's day were reported under
+// yesterday. The default is therefore a real timezone rather than UTC, and the
+// config layer falls back to the default rather than to UTC when the setting is
+// unset or unparseable.
+var displayLocation = time.UTC
+
+// SetDisplayLocation sets the zone used for day-based windows. Passing nil
+// leaves the current value in place, so callers that have no configuration can
+// keep the default instead of silently reverting to UTC.
+func SetDisplayLocation(loc *time.Location) {
+	if loc != nil {
+		displayLocation = loc
+	}
+}
+
+// DisplayLocation reports the zone the day-based windows are computed in.
+func DisplayLocation() *time.Location { return displayLocation }
 
 func WithResponsesFunctionExecutorPersistence(st *store.Store) ResponsesFunctionExecutorStateOption {
 	return func(s *ResponsesFunctionExecutorState) {
@@ -562,6 +595,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	SetDisplayLocation(opt.Location)
 	monitorVerifier := opt.MonitorAuthVerifier
 	if monitorVerifier == nil {
 		monitorVerifier = opt.AuthVerifier
@@ -630,6 +664,19 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
+	// The system page is admin-only: it exposes process internals, the database
+	// statistics and (when armed) statement text.
+	mux.HandleFunc("/api/system/runtime", monitorAdminRequired(systemRuntimeAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/system/db", monitorAdminRequired(systemDatabaseAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/system/slow-queries", monitorAdminRequired(systemSlowQueriesAPIHandler(st), monitorVerifier))
+	// pprof is mounted on the Monitor mux; see registerPprofHandlers.
+	if opt.DebugPprofEnabled {
+		registerPprofHandlers(mux)
+	} else {
+		mux.HandleFunc("/debug/", func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+	}
 	mux.Handle("/", appHandler())
 }
 
@@ -1485,7 +1532,7 @@ func parseUpstreamWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "today", "", "24h":
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour)
 	case "30d":
@@ -1493,7 +1540,7 @@ func parseUpstreamWindow(value string) (string, time.Time) {
 	case "all":
 		return "all", time.Time{}
 	default:
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	}
 }
 
@@ -1501,7 +1548,7 @@ func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "today", "", "24h":
-		return "today", startOfUTCDay(now), time.Hour, 24
+		return "today", startOfDisplayDay(now), time.Hour, 24
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour), 12 * time.Hour, 14
 	case "30d":
@@ -1509,7 +1556,7 @@ func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
 	case "all":
 		return "all", time.Time{}, 24 * time.Hour, 14
 	default:
-		return "today", startOfUTCDay(now), time.Hour, 24
+		return "today", startOfDisplayDay(now), time.Hour, 24
 	}
 }
 
@@ -1517,7 +1564,7 @@ func parseAnalyticsWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "today", "", "24h":
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour)
 	case "30d":
@@ -1525,13 +1572,14 @@ func parseAnalyticsWindow(value string) (string, time.Time) {
 	case "all":
 		return "all", time.Time{}
 	default:
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	}
 }
 
-func startOfUTCDay(now time.Time) time.Time {
-	year, month, day := now.UTC().Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+// startOfDisplayDay is midnight of now's calendar day in the display timezone.
+func startOfDisplayDay(now time.Time) time.Time {
+	year, month, day := now.In(displayLocation).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, displayLocation)
 }
 
 func serveEmbeddedIndex(distFS fs.FS, w http.ResponseWriter, r *http.Request) {
@@ -1745,6 +1793,7 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 		windowLabel, since, bucketSize, bucketCount := parseOverviewWindow(r.URL.Query().Get("window"))
 		dashboard, err := st.Overview(store.OverviewOptions{
 			Since:       since,
+			Location:    DisplayLocation(),
 			BucketSize:  bucketSize,
 			BucketCount: bucketCount,
 			Limit:       5,
@@ -1784,7 +1833,7 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
-			handleTraceObservation(w, st, entry)
+			handleTraceObservation(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "performance" && r.Method == http.MethodGet:
@@ -1853,27 +1902,49 @@ func requestMode(mode string, fallback string) string {
 	return mode
 }
 
-func handleTraceObservation(w http.ResponseWriter, st *store.Store, entry store.LogEntry) {
-	summary, err := st.GetObservationSummary(entry.ID)
+// handleTraceObservation answers the protocol view of one trace.
+//
+// The node tree is parsed from the cassette on demand rather than read from the
+// database. Storing it cost ~240 rows and ~1.4 MB per trace - 98% of the
+// database's bytes - to serve this one view, and every re-analysis rewrote it.
+// The cassette is already the source of truth for detail, so this reads it, which
+// costs one sequential read of a file the operator is explicitly asking about.
+//
+// The stored summary is still used when it exists, so the view keeps reporting
+// the parse that the worker recorded; a trace that was never parsed falls back to
+// a live parse instead of the old "run analyze reparse first" dead end.
+func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	observation, err := observeworker.ReparseTrace(r.Context(), st, nil, entry.ID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace observation not found; run analyze reparse first"})
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace cassette not found"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	nodes, err := st.ListSemanticNodes(entry.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+
+	summary := observationSummaryView{
+		TraceID:       observation.TraceID,
+		Parser:        observation.Parser,
+		ParserVersion: observation.ParserVersion,
+		Status:        string(observation.Status),
+		Provider:      observation.Provider,
+		Operation:     observation.Operation,
+		Model:         observation.Model,
+		Summary:       store.ObservationSummaryJSON(observation),
+		Warnings:      observation.Warnings,
 	}
-	tree := observe.RebuildNodeTree(nodes)
+	if stored, storedErr := st.GetObservationSummary(entry.ID); storedErr == nil {
+		summary = observationSummaryFromStore(stored)
+	}
+
+	nodes := observe.FlattenObservationNodes(observation)
 	payload := observationDetailResponse{
 		ID:      entry.ID,
-		Summary: observationSummaryFromStore(summary),
+		Summary: summary,
 		Nodes:   observationNodeViewsFromFlat(nodes),
-		Tree:    observationNodeViewsFromTree(tree, 0),
+		Tree:    observationNodeViewsFromTree(observation.Response.Nodes, 0),
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -2085,22 +2156,6 @@ func incrementStringCount(counts map[string]int, value string) {
 		return
 	}
 	counts[value]++
-}
-
-func stringAttr(attrs map[string]interface{}, key string) string {
-	if len(attrs) == 0 {
-		return ""
-	}
-	value, ok := attrs[key]
-	if !ok {
-		return ""
-	}
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	default:
-		return strings.TrimSpace(fmt.Sprint(v))
-	}
 }
 
 func countMapToItems(counts map[string]int) []sessionCountItem {

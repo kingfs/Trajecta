@@ -107,7 +107,17 @@ type TraceLog struct {
 	RoutingCandidateCount int `json:"routing_candidate_count,omitempty"`
 	// RoutingFailureReason holds the value of the "routing_failure_reason" field.
 	RoutingFailureReason string `json:"routing_failure_reason,omitempty"`
-	selectValues         sql.SelectValues
+	// RouteTargetID holds the value of the "route_target_id" field.
+	RouteTargetID string `json:"route_target_id,omitempty"`
+	// ChannelID holds the value of the "channel_id" field.
+	ChannelID string `json:"channel_id,omitempty"`
+	// CredentialID holds the value of the "credential_id" field.
+	CredentialID string `json:"credential_id,omitempty"`
+	// StickyStatus holds the value of the "sticky_status" field.
+	StickyStatus string `json:"sticky_status,omitempty"`
+	// StickyPreviousUpstreamID holds the value of the "sticky_previous_upstream_id" field.
+	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
+	selectValues             sql.SelectValues
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -121,7 +131,7 @@ func (*TraceLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case tracelog.FieldModTimeNs, tracelog.FieldFileSize, tracelog.FieldStatusCode, tracelog.FieldDurationMs, tracelog.FieldTtftMs, tracelog.FieldContentLength, tracelog.FieldPromptTokens, tracelog.FieldCompletionTokens, tracelog.FieldTotalTokens, tracelog.FieldCachedTokens, tracelog.FieldReqHeaderLen, tracelog.FieldReqBodyLen, tracelog.FieldResHeaderLen, tracelog.FieldResBodyLen, tracelog.FieldSequenceIndex, tracelog.FieldRoutingCandidateCount:
 			values[i] = new(sql.NullInt64)
-		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldRequestAuditID, tracelog.FieldResponseID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldExchangeID, tracelog.FieldExchangeKind, tracelog.FieldExchangeRole, tracelog.FieldParentExchangeID, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason:
+		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldRequestAuditID, tracelog.FieldResponseID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldExchangeID, tracelog.FieldExchangeKind, tracelog.FieldExchangeRole, tracelog.FieldParentExchangeID, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason, tracelog.FieldRouteTargetID, tracelog.FieldChannelID, tracelog.FieldCredentialID, tracelog.FieldStickyStatus, tracelog.FieldStickyPreviousUpstreamID:
 			values[i] = new(sql.NullString)
 		case tracelog.FieldRecordedAt:
 			values[i] = new(sql.NullTime)
@@ -416,6 +426,36 @@ func (_m *TraceLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.RoutingFailureReason = value.String
 			}
+		case tracelog.FieldRouteTargetID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field route_target_id", values[i])
+			} else if value.Valid {
+				_m.RouteTargetID = value.String
+			}
+		case tracelog.FieldChannelID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field channel_id", values[i])
+			} else if value.Valid {
+				_m.ChannelID = value.String
+			}
+		case tracelog.FieldCredentialID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field credential_id", values[i])
+			} else if value.Valid {
+				_m.CredentialID = value.String
+			}
+		case tracelog.FieldStickyStatus:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field sticky_status", values[i])
+			} else if value.Valid {
+				_m.StickyStatus = value.String
+			}
+		case tracelog.FieldStickyPreviousUpstreamID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field sticky_previous_upstream_id", values[i])
+			} else if value.Valid {
+				_m.StickyPreviousUpstreamID = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -586,6 +626,21 @@ func (_m *TraceLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("routing_failure_reason=")
 	builder.WriteString(_m.RoutingFailureReason)
+	builder.WriteString(", ")
+	builder.WriteString("route_target_id=")
+	builder.WriteString(_m.RouteTargetID)
+	builder.WriteString(", ")
+	builder.WriteString("channel_id=")
+	builder.WriteString(_m.ChannelID)
+	builder.WriteString(", ")
+	builder.WriteString("credential_id=")
+	builder.WriteString(_m.CredentialID)
+	builder.WriteString(", ")
+	builder.WriteString("sticky_status=")
+	builder.WriteString(_m.StickyStatus)
+	builder.WriteString(", ")
+	builder.WriteString("sticky_previous_upstream_id=")
+	builder.WriteString(_m.StickyPreviousUpstreamID)
 	builder.WriteByte(')')
 	return builder.String()
 }

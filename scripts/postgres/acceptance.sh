@@ -16,9 +16,11 @@
 #   * the parse_jobs trace_id probe uses its index, the dedup statement from
 #     migration 20261006000000 still plans as an anti join (written as
 #     `NOT IN (subquery)` PostgreSQL keeps a SubPlan and rescans the grouped ids
-#     once per row as soon as they stop fitting the hash budget), and the
-#     semantic_nodes anti-join still plans as a Merge Anti Join (the column
-#     statistics override from migration 20260929100000 is what keeps it there)
+#     once per row as soon as they stop fitting the hash budget), and -- only
+#     while the legacy table still exists -- the semantic_nodes anti-join still
+#     plans as a Merge Anti Join (the column statistics override from migration
+#     20260929100000 is what keeps it there; the check is skipped once the
+#     operator has dropped semantic_nodes)
 #   * a reconcile dry run reports no superseded row and no pending prune
 #   * the monitor API logs in, lists traces and serves one detail document
 #
@@ -149,7 +151,7 @@ else
   warn "parse_jobs absent in this schema, skipped"
 fi
 
-section "6) semantic_nodes statistics and anti-join plan"
+section "6) semantic_nodes statistics and anti-join plan (legacy, only while the table still exists)"
 if table_exists semantic_nodes; then
   STATS=$(psql_scalar "SELECT coalesce((SELECT attoptions[1] FROM pg_attribute WHERE attrelid = 'semantic_nodes'::regclass AND attname = 'trace_id'), '(none)')")
   case "$STATS" in
@@ -165,7 +167,7 @@ if table_exists semantic_nodes; then
   note "sampled orphans (TABLESAMPLE SYSTEM (0.01)) = $(psql_scalar "SELECT count(*) FROM (SELECT d.trace_id FROM semantic_nodes d TABLESAMPLE SYSTEM (0.01) WHERE NOT EXISTS (SELECT 1 FROM logs l WHERE l.trace_id = d.trace_id)) s")"
   note "(rows whose trace_id has no logs entry are kept by design when no legacy trace maps to them)"
 else
-  warn "semantic_nodes absent in this schema, skipped"
+  note "semantic_nodes absent in this schema (removed derived table); statistics and anti-join checks skipped"
 fi
 
 section "7) reconcile dry run"

@@ -206,11 +206,15 @@ func sessionSummaryFilterSupported(filter ListFilter) bool {
 }
 
 func (s *Store) listSessionPageFromSummaries(page int, pageSize int, filter ListFilter) (SessionPageResult, bool, error) {
-	var summaryRows int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaryRows); err != nil {
+	// EXISTS rather than COUNT(*): this only asks whether the table has any row at
+	// all, and on a large install the count has to visit every row of the summary
+	// table just to answer it. The count below is the one the page needs for its
+	// total, and it is filtered.
+	var hasSummaries bool
+	if err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM session_summaries)`).Scan(&hasSummaries); err != nil {
 		return SessionPageResult{}, false, err
 	}
-	if summaryRows == 0 {
+	if !hasSummaries {
 		return SessionPageResult{}, false, nil
 	}
 

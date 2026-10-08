@@ -111,7 +111,7 @@ func BenchmarkSyncSingleSessionVault(b *testing.B) {
 		if err := st.Reset(); err != nil {
 			b.Fatal(err)
 		}
-		for _, table := range []string{"overview_metric_bucket_members", "overview_metric_buckets", "session_summaries"} {
+		for _, table := range []string{"session_summaries"} {
 			if _, err := st.db.Exec(`DELETE FROM ` + table); err != nil {
 				b.Fatal(err)
 			}
@@ -273,7 +273,7 @@ func BenchmarkChannelUsageAnalytics(b *testing.B) {
 				if _, err := st.GetChannelUsageSummary(channelID, since); err != nil {
 					b.Fatal(err)
 				}
-				if _, err := st.GetChannelUsageTrends(channelID, since, time.Hour, 24); err != nil {
+				if _, err := st.GetChannelUsageTrends(channelID, since, time.Hour, 24, nil); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -285,7 +285,7 @@ func BenchmarkChannelUsageAnalytics(b *testing.B) {
 			if _, err := st.GetChannelUsageSummaries(since); err != nil {
 				b.Fatal(err)
 			}
-			if _, err := st.GetChannelUsageTrendsBatch(since, time.Hour, 24); err != nil {
+			if _, err := st.GetChannelUsageTrendsBatch(since, time.Hour, 24, nil); err != nil {
 				b.Fatal(err)
 			}
 		}

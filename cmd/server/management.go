@@ -66,6 +66,9 @@ func newManagementMuxWithFunctionExecutorManager(
 	if functionExecutorManager != nil {
 		functionExecutorConfig = functionExecutorManager.Config()
 	}
+	// The slow-query ring is off unless debug.slow_query_threshold is positive;
+	// arming it here keeps the switch in one place next to the pprof switch.
+	store.SetSlowQueryThreshold(cfg.DebugSlowQueryThreshold())
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
 		Router:                           rtr,
 		ChannelService:                   channel.NewService(traceStore).WithReadOnly(configHasExplicitCredentials(cfg)),
@@ -77,6 +80,8 @@ func newManagementMuxWithFunctionExecutorManager(
 		ResponsesFunctionExecutors:       functionExecutorConfig,
 		ResponsesFunctionExecutorStore:   traceStore,
 		ResponsesFunctionExecutorManager: functionExecutorManager,
+		Location:                         cfg.MonitorLocation(),
+		DebugPprofEnabled:                cfg.DebugPprofEnabled(),
 	})
 	return mux
 }

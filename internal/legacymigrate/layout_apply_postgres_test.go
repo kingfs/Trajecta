@@ -64,10 +64,8 @@ func TestPostgresPathIndex(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE TABLE logs (path character varying PRIMARY KEY, trace_id character varying NOT NULL)`,
 		`CREATE TABLE upstream_exchanges (id bigserial PRIMARY KEY, cassette_path character varying)`,
-		`CREATE TABLE overview_metric_bucket_members (path character varying PRIMARY KEY, bucket_id character varying)`,
 		`INSERT INTO logs (path, trace_id) VALUES ('/app/data/traces/a/2026/01/02/x.http', 'trace-a')`,
 		`INSERT INTO upstream_exchanges (cassette_path) VALUES ('/app/data/traces/a/2026/01/02/x.http')`,
-		`INSERT INTO overview_metric_bucket_members (path, bucket_id) VALUES ('/app/data/traces/a/2026/01/02/x.http', 'b1')`,
 		`INSERT INTO logs (path, trace_id) VALUES ('/app/data/traces/taken/2026/01/02/y.http', 'trace-taken')`,
 	} {
 		if _, err := scratch.ExecContext(ctx, statement); err != nil {
@@ -87,7 +85,7 @@ func TestPostgresPathIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CountRefs() error = %v", err)
 	}
-	if refs != (PathRefs{Logs: 1, Exchanges: 1, OverviewMembers: 1}) {
+	if refs != (PathRefs{Logs: 1, Exchanges: 1}) {
 		t.Fatalf("CountRefs() = %+v, want one row in each table", refs)
 	}
 
@@ -95,8 +93,8 @@ func TestPostgresPathIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MovePath() error = %v", err)
 	}
-	if refs.Rows() != 3 {
-		t.Fatalf("MovePath() = %+v, want three repointed rows", refs)
+	if refs.Rows() != 2 {
+		t.Fatalf("MovePath() = %+v, want two repointed rows", refs)
 	}
 	var traceID string
 	if err := scratch.QueryRowContext(ctx, `SELECT trace_id FROM logs WHERE path = $1`, newPath).Scan(&traceID); err != nil {
@@ -106,8 +104,7 @@ func TestPostgresPathIndex(t *testing.T) {
 		t.Fatalf("trace_id = %q, want it preserved", traceID)
 	}
 	for table, column := range map[string]string{
-		"upstream_exchanges":             "cassette_path",
-		"overview_metric_bucket_members": "path",
+		"upstream_exchanges": "cassette_path",
 	} {
 		var count int
 		if err := scratch.QueryRowContext(ctx, fmt.Sprintf(`SELECT count(*) FROM %s WHERE %s = $1`, table, column), newPath).Scan(&count); err != nil {
@@ -131,7 +128,7 @@ func TestPostgresPathIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CountRefs() after conflict error = %v", err)
 	}
-	if rows != 0 || refs != (PathRefs{Logs: 1, Exchanges: 1, OverviewMembers: 1}) {
+	if rows != 0 || refs != (PathRefs{Logs: 1, Exchanges: 1}) {
 		t.Fatalf("a failed move changed rows: conflict rows = %d, refs = %+v", rows, refs)
 	}
 }

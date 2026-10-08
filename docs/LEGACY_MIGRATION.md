@@ -77,11 +77,12 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 - **幂等**：每行用 `INSERT ... ON CONFLICT DO NOTHING` 写入，主键或其它唯一键已存在的行会被跳过并计入 `duplicate`，可以反复执行。
 - **只写交集列**：只迁移 SQLite 与 Postgres 都存在的列。Postgres 侧 `NOT NULL` 且无默认值、而旧表没有的列会让该表进入 `blocked` 状态并打印列名；确认可以用占位值填充时加 `--fill-missing-required`。
+- **目标库没有的表整张跳过**：合并逐表读目标库的 `information_schema`（`targetTableColumns`），目标库不存在的表会以 `status: skipped`（`reason: target table does not exist in Postgres`）跳过，不计入失败。注意 `semantic_nodes` 与 `overview_metric_buckets` / `overview_metric_bucket_members` 仍由历史迁移创建（`20260622130545_add_runtime_store_tables`、`20260703110000_add_overview_metric_buckets`，没有 drop 迁移），所以新建 Postgres 库仍有这三张表，旧库的对应行照常被复制与校验；只有运维按 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 手工 `DROP TABLE` 之后，它们才会变成「目标库没有的表」而被跳过，旧行只留在归档的 `*.sqlite3.migrated` 里。
 - **时间戳**：旧库里的时间列存在四种历史编码——raw SQL 的 RFC3339Nano（`2025-12-23T12:17:14.088863521Z`）、SQLite 驱动写入的 `time.Time.String()`（`2026-05-15 01:54:55.069380977 +0000 UTC`）、带单调时钟后缀的同一格式（`... m=+0.095068526`）、以及 `CURRENT_TIMESTAMP` 的 `2026-01-02 03:04:05`。四者都会解析为 UTC；Postgres 的 `timestamptz` 精确到微秒，纳秒部分由 Postgres 四舍五入。
 - **布尔**：旧库用 `numeric` 存布尔，`0/1`、`true/false`、`yes/no`、`t/f` 都能转换。
 - **自增主键**：Postgres 的 identity 列由数据库生成，值按源数据写入；写完一张表后，工具会把对应序列推进到不小于 `MAX(列)`，且**绝不回退**（例如 `channel_models` 的 `START WITH 47244640256` 不会被拉低）。
 - **源库记账表跳过**：`schema_migrations`、`app_schema_status` 属于源库自身的迁移记账，不迁移。
-- **迁移后校验**：每张表写完后会把源库主键流式取出，逐个确认在 Postgres 中存在；缺失数不为 0 时以退出码 1 结束。`--verify-only` 只做这项校验而不写任何数据（`sqlite archive` 的归档闸门就是它）。插入用的是 `ON CONFLICT DO NOTHING`，任何唯一键命中都会跳过该行，所以校验也按同一语义比对：先比 Postgres 主键，未命中的行再比该表的**其它唯一键**（完整、非部分、非表达式索引，主键优先）。通过次级唯一键命中的行计入 `alt_key_matched` 并在报告中单独列出（例如服务已用自增主键建过同一 `username` / `token_hash` / `(upstream_id, model)`，旧行因此带着旧代理主键），不算缺失；只有**任何**唯一键都不命中的行才计入 `missing_keys`。`logs` 的唯一键 `trace_id` 让 `layout apply` 改写过 `logs.path` 的库也能对账。校验分两遍：第一遍只流式取主键列（命中主键索引，代价与只看主键时相同），只有主键未命中的行才回查次级唯一键的列。这样即使表上还有别的唯一索引（例如 `semantic_nodes` 除主键 `id` 外还有 `(trace_id, node_id)`），也不会因为要一次取出所有键列的并集而失去覆盖索引、退化成全表扫描；除主键外没有任何可用唯一键时，仍以复制阶段的行数记账作为闸门。
+- **迁移后校验**：每张表写完后会把源库主键流式取出，逐个确认在 Postgres 中存在；缺失数不为 0 时以退出码 1 结束。`--verify-only` 只做这项校验而不写任何数据（`sqlite archive` 的归档闸门就是它）。插入用的是 `ON CONFLICT DO NOTHING`，任何唯一键命中都会跳过该行，所以校验也按同一语义比对：先比 Postgres 主键，未命中的行再比该表的**其它唯一键**（完整、非部分、非表达式索引，主键优先）。通过次级唯一键命中的行计入 `alt_key_matched` 并在报告中单独列出（例如服务已用自增主键建过同一 `username` / `token_hash` / `(upstream_id, model)`，旧行因此带着旧代理主键），不算缺失；只有**任何**唯一键都不命中的行才计入 `missing_keys`。`logs` 的唯一键 `trace_id` 让 `layout apply` 改写过 `logs.path` 的库也能对账。校验分两遍：第一遍只流式取主键列（命中主键索引，代价与只看主键时相同），只有主键未命中的行才回查次级唯一键的列。这样即使表上还有别的唯一索引（例如 `parse_jobs` 除主键 `id` 外还有唯一索引 `(trace_id)`），也不会因为要一次取出所有键列的并集而失去覆盖索引、退化成全表扫描；除主键外没有任何可用唯一键时，仍以复制阶段的行数记账作为闸门。
 - **并发**：表之间按外键依赖分波并行（当前 schema 里唯一的外键是 `api_tokens.user_tokens → users.id`），行按批（`--batch-size`，默认 500）插入；批内出现数据异常或唯一键冲突时，该批会退化为逐行隔离，只把真正失败的行计入 `failed`。
 
 常用参数：`--table` / `--skip-table`（可重复）、`--batch-size`、`--jobs`、`--sqlite`（显式指定库文件，可重复）、`--sqlite-open auto|ro|immutable|rw`。
@@ -133,7 +134,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 ./trajecta upgrade sqlite archive --tolerate-snapshot-drift --apply
 ```
 
-该开关只豁免 `upstream_targets`、`upstream_models` 这两张表，并在报告里单独打印 `tolerated` 计数（`upgrade db --verify-only` 同样支持），其余每张权威表（`logs`、`parse_jobs`、`semantic_nodes`、`trace_observations`、`users`、`api_tokens` 等）仍逐主键严格校验；任何权威表缺键时依旧拒绝归档。它比 `--force` 更可取：`--force` 会取消全部校验。
+该开关只豁免 `upstream_targets`、`upstream_models` 这两张表，并在报告里单独打印 `tolerated` 计数（`upgrade db --verify-only` 同样支持），其余每张权威表（`logs`、`parse_jobs`、`trace_observations`、`semantic_nodes`（仍存在时）、`users`、`api_tokens` 等）仍逐主键严格校验；任何权威表缺键时依旧拒绝归档。它比 `--force` 更可取：`--force` 会取消全部校验。
 
 ## 一键执行：`trajecta upgrade`
 
@@ -190,7 +191,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | 某表 `failed > 0` | 单行数据无法转换（类型、超长、非法 JSON 等） | 查看打印的失败样本；修正源库行或先手动导入，再重跑（幂等） |
 | `missing keys > 0` | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
 | `missing keys > 0` 且**只在** `upstream_targets` / `upstream_models` | 服务已按当前配置/探测结果重写了这两张运行时快照表，旧行被替换而非丢失 | 确认缺失键都在这两张表内后，用 `--tolerate-snapshot-drift` 归档；报告会打印 `tolerated` 计数 |
-| `missing keys > 0` 出现在 `logs` / `parse_jobs` / `semantic_nodes` / `trace_observations` 等权威表 | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
+| `missing keys > 0` 出现在 `logs` / `parse_jobs` / `trace_observations` / `semantic_nodes`（仍存在时）等权威表 | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
 | `unable to open database file (14)` | 文件系统不允许只读打开 | 使用默认 `auto`（会回退 `immutable`）或显式 `--sqlite-open immutable` |
 | `prelude_unterminated` / `layout_mismatch` | 录制被中断，前言没有空行或长度不自洽 | 用 `--tolerate-partial` 降级为 warning，或删除该录制后重建索引 |
 | compose 里旧前缀变量被忽略 | 二进制只读 `TRAJECTA_*` | 同步更新 `docker-compose.yml` 的 `environment:` |
@@ -225,15 +226,16 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 ./trajecta layout apply --plan plan.json --apply --only-model deepseek-flash
 ```
 
-每个 move 都是「重命名文件 + 在同一个事务里改写索引中指向它的每一行」，索引行只有三列存 cassette 路径：
+每个 move 都是「重命名文件 + 在同一个事务里改写索引中指向它的每一行」，索引行只有两列存 cassette 路径：
 
 | 列 | 说明 |
 | --- | --- |
 | `logs.path` | trace 索引主键，也是 `logs` 的唯一路径来源 |
 | `upstream_exchanges.cassette_path` | 可选副本（可空） |
-| `overview_metric_bucket_members.path` | 概览指标的成员主键（按 path 增量维护；重建入口是 `server db summary rebuild overview`，即 `Store.RebuildOverviewMetricBuckets`，它会从 `logs` 整表重算 `overview_metric_buckets` 与 `overview_metric_bucket_members`，见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)） |
 
-`logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 与 trace 的关联保持不变（`analysis_jobs` 按 `target_type`/`target_id`、`session_summaries` 按 `session_id` 关联，两者都不带 `trace_id`）；`request_audits.path`（HTTP 路径）、`semantic_nodes.path`（JSONPath）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
+`overview_metric_bucket_members` 仍由历史迁移创建（除非运维手工 `DROP`），但已不再被读取或维护，所以 `layout apply` 不改写它的 `path`（`cmd/trajecta/layout_apply.go`、`internal/legacymigrate/layout_apply.go` 当前只处理上面两列）；该表里遗留的旧路径不会再被使用，删表也不会让命令报错。
+
+`logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_runs`、`system_events` 与 trace 的关联保持不变（`analysis_jobs` 按 `target_type`/`target_id`、`session_summaries` 按 `session_id` 关联，两者都不带 `trace_id`）；`request_audits.path`（HTTP 路径）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
 
 安全语义：
 
@@ -248,7 +250,7 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 
 ## 派生表的 trace id 修复
 
-合并之前如果已经用新版本服务跑过一轮索引，`logs.trace_id` 会按 cassette 重算，而旧库的派生表（`trace_observations`、`parse_jobs`、`semantic_nodes` 等）仍然带着旧索引记录的 recorder id。插入用的是 `ON CONFLICT DO NOTHING`，所以同 path 的旧 `logs` 行会被跳过 —— 旧行本身没有丢，但派生表里的 id 与 `logs.trace_id` 不再相等，按 id 关联的过滤（例如 Monitor 的 observation status）只会看到服务重算出来的那一份，旧的那一份既不展示也不再参与统计。
+合并之前如果已经用新版本服务跑过一轮索引，`logs.trace_id` 会按 cassette 重算，而旧库的派生表（`trace_observations`、`parse_jobs`、`semantic_nodes`（仍存在时）等）仍然带着旧索引记录的 recorder id。插入用的是 `ON CONFLICT DO NOTHING`，所以同 path 的旧 `logs` 行会被跳过 —— 旧行本身没有丢，但派生表里的 id 与 `logs.trace_id` 不再相等，按 id 关联的过滤（例如 Monitor 的 observation status）只会看到服务重算出来的那一份，旧的那一份既不展示也不再参与统计。
 
 `trajecta upgrade db --reconcile-derived-trace-ids` 修复这种状态。它需要旧库来还原 id → path 的映射，归档后的 `*.sqlite3.migrated` 也可以直接传给 `--sqlite`：
 
@@ -311,7 +313,7 @@ COMMIT;
 
 要点：
 
-- 另外两张表也存 cassette 路径：`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`。含旧前缀时同样要改写；先分别统计，为 0 才只需改 `logs.path`。
+- 另一张表也存 cassette 路径：`upstream_exchanges.cassette_path`。含旧前缀时同样要改写；先统计它，为 0 才只需改 `logs.path`。`overview_metric_bucket_members.path` 也存路径，但该表已不被读取或维护（它仍由历史迁移创建，除非手工 `DROP`），所以 `layout apply` 不再改写它。
 - 改写前先落一份 `trace_id,path` 回滚清单，回滚就是反向 `replace`；也要先查新路径是否已被既有行占用。
 - 旧根里可能有索引没收录的 `.http`（旧索引没收，或索引重建过）。它们会被复制进 vault，但**不会**自动获得索引行：`layout plan` 只整理布局、不为文件建索引，`migrate --rebuild-index` 会重新生成 `trace_id`，不能用于已有数据。
 - 导入后这些行与其它行没有区别（前缀统一、能被 API 打开）；它们不会有 Observation/findings，除非另行重解析。

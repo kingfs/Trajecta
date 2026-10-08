@@ -27,7 +27,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -581,33 +580,6 @@ func (f TraverseScore) Traverse(ctx context.Context, q dao.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *dao.ScoreQuery", q)
 }
 
-// The SemanticNodeFunc type is an adapter to allow the use of ordinary function as a Querier.
-type SemanticNodeFunc func(context.Context, *dao.SemanticNodeQuery) (dao.Value, error)
-
-// Query calls f(ctx, q).
-func (f SemanticNodeFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
-	if q, ok := q.(*dao.SemanticNodeQuery); ok {
-		return f(ctx, q)
-	}
-	return nil, fmt.Errorf("unexpected query type %T. expect *dao.SemanticNodeQuery", q)
-}
-
-// The TraverseSemanticNode type is an adapter to allow the use of ordinary function as Traverser.
-type TraverseSemanticNode func(context.Context, *dao.SemanticNodeQuery) error
-
-// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
-func (f TraverseSemanticNode) Intercept(next dao.Querier) dao.Querier {
-	return next
-}
-
-// Traverse calls f(ctx, q).
-func (f TraverseSemanticNode) Traverse(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.SemanticNodeQuery); ok {
-		return f(ctx, q)
-	}
-	return fmt.Errorf("unexpected query type %T. expect *dao.SemanticNodeQuery", q)
-}
-
 // The SystemEventFunc type is an adapter to allow the use of ordinary function as a Querier.
 type SystemEventFunc func(context.Context, *dao.SystemEventQuery) (dao.Value, error)
 
@@ -890,8 +862,6 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.ResponseItemQuery, predicate.ResponseItem, responseitem.OrderOption]{typ: dao.TypeResponseItem, tq: q}, nil
 	case *dao.ScoreQuery:
 		return &query[*dao.ScoreQuery, predicate.Score, score.OrderOption]{typ: dao.TypeScore, tq: q}, nil
-	case *dao.SemanticNodeQuery:
-		return &query[*dao.SemanticNodeQuery, predicate.SemanticNode, semanticnode.OrderOption]{typ: dao.TypeSemanticNode, tq: q}, nil
 	case *dao.SystemEventQuery:
 		return &query[*dao.SystemEventQuery, predicate.SystemEvent, systemevent.OrderOption]{typ: dao.TypeSystemEvent, tq: q}, nil
 	case *dao.ToolCallAuditQuery:

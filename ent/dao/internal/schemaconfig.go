@@ -25,7 +25,6 @@ type SchemaConfig struct {
 	Response         string // Response table.
 	ResponseItem     string // ResponseItem table.
 	Score            string // Score table.
-	SemanticNode     string // SemanticNode table.
 	SystemEvent      string // SystemEvent table.
 	ToolCallAudit    string // ToolCallAudit table.
 	TraceFinding     string // TraceFinding table.

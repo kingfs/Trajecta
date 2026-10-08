@@ -91,8 +91,12 @@ SELECT 'logs_total', count(*)::text FROM logs
 UNION ALL SELECT 'under_data_root', count(*)::text FROM logs WHERE path LIKE '$TRAJECTA_OPS_DATA_ROOT/%'
 UNION ALL SELECT 'under_legacy_root', count(*)::text FROM logs WHERE path LIKE '$TRAJECTA_OPS_LEGACY_ROOT/%'
 UNION ALL SELECT 'outside_known_roots', count(*)::text FROM logs WHERE path NOT LIKE '$TRAJECTA_OPS_DATA_ROOT/%' AND path NOT LIKE '$TRAJECTA_OPS_LEGACY_ROOT/%'
-UNION ALL SELECT 'upstream_exchanges', count(*)::text FROM upstream_exchanges
-UNION ALL SELECT 'overview_bucket_members', (SELECT count(*)::text FROM overview_metric_bucket_members)" | sed 's/^/  /'
+UNION ALL SELECT 'upstream_exchanges', count(*)::text FROM upstream_exchanges" | sed 's/^/  /'
+if table_exists overview_metric_bucket_members; then
+  note "overview_metric_bucket_members (legacy, no longer written or read): $(psql_scalar "SELECT count(*) FROM overview_metric_bucket_members") rows"
+else
+  note "overview_metric_bucket_members absent (removed derived table), skipped"
+fi
 PRESENT=0
 MISSING=0
 while IFS= read -r path; do

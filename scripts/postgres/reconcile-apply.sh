@@ -117,8 +117,9 @@ SELECT 'logs_total', count(*)::text FROM logs
 UNION ALL SELECT 'trace_observations_without_trace', count(*)::text FROM trace_observations d WHERE NOT EXISTS (SELECT 1 FROM logs l WHERE l.trace_id = d.trace_id)
 UNION ALL SELECT 'parse_jobs_without_trace', count(*)::text FROM parse_jobs d WHERE NOT EXISTS (SELECT 1 FROM logs l WHERE l.trace_id = d.trace_id)
 UNION ALL SELECT 'trace_findings_without_trace', count(*)::text FROM trace_findings d WHERE NOT EXISTS (SELECT 1 FROM logs l WHERE l.trace_id = d.trace_id)
-UNION ALL SELECT 'semantic_nodes_dead_tuples', coalesce((SELECT n_dead_tup::text FROM pg_stat_user_tables WHERE relname = 'semantic_nodes'), '(none)')
+UNION ALL SELECT 'semantic_nodes_dead_tuples_legacy', coalesce((SELECT n_dead_tup::text FROM pg_stat_user_tables WHERE relname = 'semantic_nodes'), '(absent)')
 UNION ALL SELECT 'parse_jobs_dead_tuples', coalesce((SELECT n_dead_tup::text FROM pg_stat_user_tables WHERE relname = 'parse_jobs'), '(none)')" | sed 's/^/  /'
+note "semantic_nodes is a legacy table no longer written or read; report '(absent)' once it has been dropped"
 note "run scripts/postgres/vacuum-after-repair.sh next: the repair leaves dead tuples and stale statistics behind"
 
 summary

@@ -39,38 +39,10 @@ var sqliteSchemaStatements = []string{
 		);`,
 	`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model);`,
-	`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
-			bucket_start datetime NOT NULL,
-			bucket_size_seconds INTEGER NOT NULL,
-			request_count INTEGER NOT NULL DEFAULT 0,
-			success_request INTEGER NOT NULL DEFAULT 0,
-			failed_request INTEGER NOT NULL DEFAULT 0,
-			total_tokens INTEGER NOT NULL DEFAULT 0,
-			ttft_sum INTEGER NOT NULL DEFAULT 0,
-			ttft_count INTEGER NOT NULL DEFAULT 0,
-			duration_sum INTEGER NOT NULL DEFAULT 0,
-			duration_count INTEGER NOT NULL DEFAULT 0,
-			stream_count INTEGER NOT NULL DEFAULT 0,
-			updated_at datetime NOT NULL,
-			PRIMARY KEY (bucket_start, bucket_size_seconds)
-		);`,
-	`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start);`,
-	`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
-			path TEXT PRIMARY KEY,
-			bucket_start datetime NOT NULL,
-			bucket_size_seconds INTEGER NOT NULL,
-			request_count INTEGER NOT NULL DEFAULT 0,
-			success_request INTEGER NOT NULL DEFAULT 0,
-			failed_request INTEGER NOT NULL DEFAULT 0,
-			total_tokens INTEGER NOT NULL DEFAULT 0,
-			ttft_sum INTEGER NOT NULL DEFAULT 0,
-			ttft_count INTEGER NOT NULL DEFAULT 0,
-			duration_sum INTEGER NOT NULL DEFAULT 0,
-			duration_count INTEGER NOT NULL DEFAULT 0,
-			stream_count INTEGER NOT NULL DEFAULT 0,
-			updated_at datetime NOT NULL
-		);`,
-	`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds);`,
+	// The Overview's hourly bucket aggregate is not created. It was written on
+	// every recording and read by nothing - Overview() queries the log rows
+	// directly - so an existing database keeps its two tables untouched and a new
+	// one never grows them.
 	`CREATE TABLE IF NOT EXISTS logs (
 			path TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -115,7 +87,12 @@ var sqliteSchemaStatements = []string{
 			routing_policy TEXT NOT NULL DEFAULT '',
 			routing_score REAL NOT NULL DEFAULT 0,
 			routing_candidate_count INTEGER NOT NULL DEFAULT 0,
-			routing_failure_reason TEXT NOT NULL DEFAULT ''
+			routing_failure_reason TEXT NOT NULL DEFAULT '',
+			route_target_id TEXT NOT NULL DEFAULT '',
+			channel_id TEXT NOT NULL DEFAULT '',
+			credential_id TEXT NOT NULL DEFAULT '',
+			sticky_status TEXT NOT NULL DEFAULT '',
+			sticky_previous_upstream_id TEXT NOT NULL DEFAULT ''
 		);`,
 	`CREATE TABLE IF NOT EXISTS upstream_targets (
 			id TEXT PRIMARY KEY,
@@ -328,25 +305,10 @@ var sqliteSchemaStatements = []string{
 			updated_at datetime NOT NULL
 		);`,
 	`CREATE INDEX IF NOT EXISTS idx_trace_observations_status ON trace_observations(status, updated_at DESC);`,
-	`CREATE TABLE IF NOT EXISTS semantic_nodes (
-			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			trace_id TEXT NOT NULL,
-			node_id TEXT NOT NULL,
-			parent_node_id TEXT NOT NULL DEFAULT '',
-			provider_type TEXT NOT NULL DEFAULT '',
-			normalized_type TEXT NOT NULL DEFAULT '',
-			role TEXT NOT NULL DEFAULT '',
-			path TEXT NOT NULL DEFAULT '',
-			node_index INTEGER NOT NULL DEFAULT 0,
-			depth INTEGER NOT NULL DEFAULT 0,
-			text_preview TEXT NOT NULL DEFAULT '',
-			json TEXT NOT NULL DEFAULT '',
-			raw TEXT NOT NULL DEFAULT '',
-			raw_ref TEXT NOT NULL DEFAULT '',
-			created_at datetime NOT NULL
-		);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS semantic_nodes_trace_node_key ON semantic_nodes(trace_id, node_id);`,
-	`CREATE INDEX IF NOT EXISTS idx_semantic_nodes_trace_depth ON semantic_nodes(trace_id, depth, node_index);`,
+	// The semantic node tree is parsed from the cassette when a trace is opened
+	// rather than stored. The table held ~240 rows and ~1.4 MB per trace and was
+	// rewritten by every re-analysis; an existing database keeps the table and its
+	// rows untouched, so reclaiming the space is an explicit operator step.
 	`CREATE TABLE IF NOT EXISTS trace_findings (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL,
@@ -365,6 +327,11 @@ var sqliteSchemaStatements = []string{
 		);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS trace_findings_trace_finding_key ON trace_findings(trace_id, finding_id);`,
 	`CREATE INDEX IF NOT EXISTS idx_trace_findings_trace_severity ON trace_findings(trace_id, severity, category);`,
+	// The findings list orders by (created_at DESC, id DESC) with no equality
+	// filter, and the Overview's high-risk panel looks up one severity at a time
+	// in that same order. The Postgres migration 20261009090000 adds the same
+	// pair, and drops the (severity, created_at) index the CASE ordering made
+	// unusable - SQLite never had that one.
 	`CREATE TABLE IF NOT EXISTS analysis_runs (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -625,6 +592,21 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("logs", "route_target_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "channel_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "credential_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "sticky_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "sticky_previous_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("upstream_exchanges", "request_id", "TEXT NULL"); err != nil {
 		return err
 	}
@@ -704,9 +686,6 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 		return err
 	}
 	if err := s.ensureSessionSummariesSchema(); err != nil {
-		return err
-	}
-	if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
 		return err
 	}
 	if err := s.backfillTraceIDs(); err != nil {

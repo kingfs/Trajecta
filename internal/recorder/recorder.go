@@ -57,14 +57,44 @@ type Recorder struct {
 	OutputDir string
 	MaskKey   bool
 	store     *store.Store
+	finalizer *asyncFinalizer
 }
 
 func New(outputDir string, maskKey bool, st *store.Store) *Recorder {
-	return &Recorder{
+	r := &Recorder{
 		OutputDir: outputDir,
 		MaskKey:   maskKey,
 		store:     st,
 	}
+	r.finalizer = newAsyncFinalizer(r.UpdateLogFile, DefaultFinalizeWorkers, DefaultFinalizeQueueDepth)
+	return r
+}
+
+// SubmitLogFile finalises a completed recording on the background finalize
+// queue and returns as soon as it is queued, so the proxy's request goroutine
+// does not wait for the cassette rewrite. A full queue finalises inline instead
+// of dropping the recording, so the return value still reports a real failure.
+//
+// The recording must not be touched after this call: ownership passes to the
+// worker, exactly as it did to the synchronous call this replaces.
+func (r *Recorder) SubmitLogFile(info *LogInfo) error {
+	if r == nil {
+		return nil
+	}
+	if r.finalizer == nil {
+		return r.UpdateLogFile(info)
+	}
+	return r.finalizer.submit(info)
+}
+
+// StartFinalizeWorkers starts the background finalizers. Nothing is queued
+// before this call: SubmitLogFile falls back to the inline path until then, so a
+// caller that never starts them keeps today's behaviour.
+func (r *Recorder) StartFinalizeWorkers() {
+	if r == nil || r.finalizer == nil {
+		return
+	}
+	r.finalizer.start()
 }
 
 func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, error) {
@@ -275,6 +305,92 @@ func requestAuditIDFromRequest(req *http.Request) string {
 	return id
 }
 
+// ApplyRoutingDetailFromEvents mirrors the routing facts the Monitor's routing
+// summary aggregates out of the prelude events and into the meta header.
+//
+// The summary used to get those facts by opening every cassette in its window and
+// parsing the prelude, at one random seek per trace - measured at 57 ms on the
+// deployment's rotational disk, which made the default "today" window take 49 s.
+// The events remain the durable, replayable record; this copies the handful of
+// values the summary groups by into the indexed row. The proxy fills in the
+// columns it already knows (the selected upstream and the failure reason) and
+// this only supplies them when it did not.
+//
+// A request can emit several routing events - one selection per retry attempt, a
+// sticky decision, a filter rejection - but the row holds one value each. The
+// last event that carries a value wins, so the recorded facts describe the
+// outcome the request finished with rather than an attempt it abandoned. That is
+// a deliberate narrowing: the summary now reports one decision per request
+// instead of counting every event, which is also why it no longer counts a
+// request twice when `routing.selection` and `routing.selected` agree.
+func ApplyRoutingDetailFromEvents(events []RecordEvent, meta *MetaData) {
+	if meta == nil {
+		return
+	}
+	for _, event := range events {
+		switch {
+		case event.Type == "routing.selection" || event.Type == "routing.selected":
+			// The meta header already carries the dispatched upstream when the
+			// proxy wrote it; this is the reconstruction path used when a row is
+			// rebuilt from the cassette alone.
+			setIfEmpty(&meta.SelectedUpstreamID, eventStringAttr(event.Attributes, "upstream_id"))
+			setLastNonEmpty(&meta.RouteTargetID, eventStringAttr(event.Attributes, "route_target_id"))
+			setLastNonEmpty(&meta.ChannelID, eventStringAttr(event.Attributes, "channel_id"))
+			setLastNonEmpty(&meta.CredentialID, eventStringAttr(event.Attributes, "credential_id"))
+		case event.Type == "routing.filtered":
+			setIfEmpty(&meta.RoutingFailureReason, eventStringAttr(event.Attributes, "routing_failure_reason"))
+		case event.Type == "routing.retry_queue_saturated":
+			setIfEmpty(&meta.RoutingFailureReason, "retry_queue_saturated")
+		case strings.HasPrefix(event.Type, "routing.sticky."):
+			status := strings.TrimPrefix(event.Type, "routing.sticky.")
+			if attrStatus := eventStringAttr(event.Attributes, "sticky_status"); attrStatus != "" {
+				status = attrStatus
+			}
+			setLastNonEmpty(&meta.StickyStatus, status)
+			setLastNonEmpty(&meta.StickyPreviousUpstreamID, eventStringAttr(event.Attributes, "previous_upstream_id"))
+			// A sticky decision repeats the selected identity, so it is also a
+			// valid source when a trace recorded sticky state without a
+			// `routing.selection` event.
+			setLastNonEmpty(&meta.RouteTargetID, eventStringAttr(event.Attributes, "route_target_id"))
+			setLastNonEmpty(&meta.ChannelID, eventStringAttr(event.Attributes, "channel_id"))
+			setLastNonEmpty(&meta.CredentialID, eventStringAttr(event.Attributes, "credential_id"))
+		}
+	}
+}
+
+// setIfEmpty fills a column the proxy owns only when it left it blank.
+func setIfEmpty(dst *string, value string) {
+	if *dst == "" && value != "" {
+		*dst = value
+	}
+}
+
+// setLastNonEmpty keeps the most recent value, so a retried request records the
+// attempt it finished with.
+func setLastNonEmpty(dst *string, value string) {
+	if value != "" {
+		*dst = value
+	}
+}
+
+func eventStringAttr(attrs map[string]interface{}, key string) string {
+	if attrs == nil {
+		return ""
+	}
+	value, ok := attrs[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
+	}
+}
+
 func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	if info.File == nil {
 		return nil
@@ -285,6 +401,11 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	if len(info.Events) > 0 {
 		events = append(events, info.Events...)
 	}
+	// Mirror the aggregated routing facts into the meta header before it is
+	// marshalled: the header is what the index row and the cassette prelude are
+	// both built from, so deriving it here keeps the write path and the
+	// `Sync` re-index of the same file in agreement without a second parser.
+	ApplyRoutingDetailFromEvents(events, &info.Header.Meta)
 	prelude, err := recordfile.MarshalPrelude(info.Header, events)
 	if err != nil {
 		return err

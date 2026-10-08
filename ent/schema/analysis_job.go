@@ -40,5 +40,7 @@ func (AnalysisJob) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("status", "updated_at"),
 		index.Fields("target_type", "target_id", "created_at"),
+		// The job list is newest-first across every target.
+		index.Fields("created_at", "id"),
 	}
 }

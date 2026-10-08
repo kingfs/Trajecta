@@ -165,7 +165,7 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 	return out, nil
 }
 
-func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySince time.Time, bucketSize time.Duration, bucketCount int) (ModelDetailAnalyticsRecord, error) {
+func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySince time.Time, bucketSize time.Duration, bucketCount int, loc *time.Location) (ModelDetailAnalyticsRecord, error) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model == "" {
 		return ModelDetailAnalyticsRecord{}, errors.New("model is required")
@@ -184,7 +184,7 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 	if detail.Model.Model == "" {
 		return ModelDetailAnalyticsRecord{}, sql.ErrNoRows
 	}
-	trends, err := s.usageTrends("model = ?", []any{model}, since, bucketSize, bucketCount)
+	trends, err := s.usageTrends("model = ?", []any{model}, since, bucketSize, bucketCount, loc)
 	if err != nil {
 		return ModelDetailAnalyticsRecord{}, err
 	}
@@ -313,7 +313,7 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 	return out, rows.Err()
 }
 
-func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, limitReasons int, limitRecent int, bucketSize time.Duration, bucketCount int) (RoutingFailureAnalytics, error) {
+func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, limitReasons int, limitRecent int, bucketSize time.Duration, bucketCount int, loc *time.Location) (RoutingFailureAnalytics, error) {
 	if limitReasons <= 0 {
 		limitReasons = 5
 	}
@@ -404,7 +404,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
-	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	bucketStart := bucketSlot(referenceTime, bucketSize, loc).Add(-time.Duration(bucketCount-1) * bucketSize)
 	timelineArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
 	timelineRows, err := s.db.Query(`
 		SELECT recorded_at
@@ -431,7 +431,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 		if err != nil {
 			return RoutingFailureAnalytics{}, err
 		}
-		slot := recordedTime.UTC().Truncate(bucketSize)
+		slot := bucketSlot(recordedTime, bucketSize, loc)
 		if slot.Before(bucketStart) {
 			continue
 		}
@@ -808,4 +808,43 @@ func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, [
 		return "", nil
 	}
 	return " AND " + strings.Join(clauses, " AND "), args
+}
+
+// bucketSlot aligns an instant to a bucket boundary in loc.
+//
+// The Monitor's charts are drawn in the operator's timezone, so a 24-hour bucket
+// has to open at local midnight rather than at 08:00 local, which is what a UTC
+// grid produces for UTC+08:00. Passing a nil loc keeps the previous UTC grid.
+//
+// The local case counts forward from the instant's own local midnight instead of
+// calling time.Truncate. Truncate measures from the zero Time in year 1, and the
+// span to the present overflows the nanosecond Duration it computes, so
+// `t.Truncate(24 * time.Hour)` does not land on a day boundary at all - it landed
+// 16 hours and a few microseconds away when this was written. Counting from
+// midnight stays inside a day's worth of nanoseconds and is exact.
+//
+// Both the grid slots and the per-row lookups must go through this function: a
+// time.Time map key carries its location as well as its instant, so aligning one
+// side and not the other makes every lookup miss and the chart come back empty.
+// The returned value is always in UTC, so the two sides agree.
+func bucketSlot(t time.Time, size time.Duration, loc *time.Location) time.Time {
+	if size <= 0 {
+		return t.UTC()
+	}
+	if loc == nil || loc == time.UTC {
+		return t.UTC().Truncate(size)
+	}
+	local := t.In(loc)
+	year, month, day := local.Date()
+	midnight := time.Date(year, month, day, 0, 0, 0, 0, loc)
+	// Local midnight is itself a boundary, so the grid is midnight + j*size for
+	// every integer j, and the boundary at or before t is the largest of those
+	// that is not after t. sinceMidnight is under 24h, so this arithmetic cannot
+	// overflow. Truncating the division is flooring here because it is not
+	// negative.
+	sinceMidnight := local.Sub(midnight)
+	if sinceMidnight < 0 {
+		sinceMidnight = 0
+	}
+	return midnight.Add((sinceMidnight / size) * size).UTC()
 }

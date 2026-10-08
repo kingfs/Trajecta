@@ -26,6 +26,12 @@ type builder struct {
 	exchange        Exchange
 	model           string
 	metricsRequests int
+	requests        int
+	sessionSource   string
+	// stream, when non-nil, receives the increments the NDJSON exporter writes
+	// as each trace is consumed. It is nil for the buffered Build path, which
+	// keeps that path byte-for-byte unchanged.
+	stream *streamEmitter
 }
 
 // Build uses one agent step per recorded model response, not per SSE item.
@@ -42,101 +48,123 @@ func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exc
 		}
 		return exchanges[i].Time.Before(exchanges[j].Time)
 	})
-	b := builder{trajectory: Trajectory{SchemaVersion: SchemaVersion, SessionID: sessionID, Agent: Agent{Name: "unknown", Version: "unknown"}}, calls: map[string]callLocation{}, results: map[string]string{}, warnings: []Warning{}}
-	if strings.Contains(sessionSource, "codex") {
-		b.trajectory.Agent.Name = "codex"
-	}
+	b := newBuilder(sessionID, sessionSource)
 	for _, ex := range exchanges {
 		if err := ctx.Err(); err != nil {
 			return Trajectory{}, err
 		}
-		b.exchange, b.model = ex, ex.Model
-		b.identifyAgent(ex)
-		if ex.Error != "" {
-			b.gap("cassette_unavailable", ex.Error)
-			continue
-		}
-		var req item
-		if json.Unmarshal(ex.Request, &req) != nil || req == nil {
-			b.gap("invalid_request", "Unable to decode request JSON")
-			continue
-		}
-		if !strings.HasSuffix(strings.TrimRight(strings.Split(ex.Endpoint, "?")[0], "/"), "/responses") {
-			b.gap("unsupported_endpoint", "Unsupported exchange; original content is available in the source trace")
-			continue
-		}
-		if s := str(req["model"]); s != "" {
-			b.model = s
-		}
-		instructions := render(req["instructions"])
-		if instructions != b.instructions {
-			if instructions != "" {
-				b.add(Step{Source: "system", Message: instructions, Extra: b.reference("request", "$.instructions")})
-			} else {
-				b.warning("instructions_removed")
-			}
-			b.instructions = instructions
-		}
-		input := items(req["input"])
-		n := overlap(b.history, input)
-		incremental := str(req["previous_response_id"]) != ""
-		if incremental {
-			n = 0
-		}
-		if len(b.history) > 0 && len(input) > 0 && n < min(len(b.history), len(input)) && !incremental {
-			b.warning("context_discontinuity")
-		}
-		b.appendInput(input, n)
-		response := parseResponse(ex.Response, ex.Stream)
-		for _, w := range response.Warnings {
-			b.warning(w)
-		}
-		if response.Model != "" {
-			b.model = response.Model
-		}
-		if ex.StatusCode < 200 || ex.StatusCode >= 300 {
-			b.warning("http_error")
-		}
-		// Even an empty or failed response remains visible as a recorded attempt.
-		step := b.agentStep(response.Output, "response", "$.output")
-		step.ModelName = b.model
-		if ex.ExchangeKind != "entry" && ex.StatusCode >= 200 && ex.StatusCode < 300 {
-			one := 1
-			step.LLMCallCount = &one
-		}
-		step.Timestamp = timestamp(ex.Time.Add(time.Duration(ex.DurationMs) * time.Millisecond))
-		step.Extra["timestamp_basis"] = "request_start_plus_recorded_duration"
-		if ex.Time.IsZero() {
-			step.Timestamp = ""
-			delete(step.Extra, "timestamp_basis")
-		}
-		if response.ID != "" {
-			step.Extra["response_id"] = response.ID
-		}
-		if response.Status != "" {
-			step.Extra["response_status"] = response.Status
-		}
-		if ex.StatusCode < 200 || ex.StatusCode >= 300 {
-			step.Extra["http_status"] = ex.StatusCode
-		}
-		step.Metrics = normalizeMetrics(response.Usage)
-		if step.Metrics != nil {
-			b.metricsRequests++
-		}
-		if reasoning, ok := req["reasoning"].(map[string]any); ok {
-			step.ReasoningEffort = str(reasoning["effort"])
-		}
-		if len(response.Output) == 0 {
-			b.warning("empty_response_output")
-		}
-		b.addAgent(step, response.Output)
-		if incremental {
-			b.history = append(b.history, input...)
-		} else {
-			b.history = append([]item(nil), input...)
-		}
-		b.history = append(b.history, response.Output...)
+		b.consume(ex)
 	}
+	b.finish()
+	return b.trajectory, nil
+}
+
+func newBuilder(sessionID, sessionSource string) *builder {
+	b := &builder{trajectory: Trajectory{SchemaVersion: SchemaVersion, SessionID: sessionID, Agent: Agent{Name: "unknown", Version: "unknown"}}, calls: map[string]callLocation{}, results: map[string]string{}, warnings: []Warning{}, sessionSource: sessionSource}
+	if strings.Contains(sessionSource, "codex") {
+		b.trajectory.Agent.Name = "codex"
+	}
+	return b
+}
+
+// consume folds one recorded exchange into the builder state. Callers are
+// responsible for the ordering guarantee: exchanges arrive oldest first.
+func (b *builder) consume(ex Exchange) {
+	b.requests++
+	if b.stream != nil {
+		b.stream.beginTrace(ex.TraceID, len(b.trajectory.Steps))
+	}
+	b.exchange, b.model = ex, ex.Model
+	b.identifyAgent(ex)
+	if ex.Error != "" {
+		b.gap("cassette_unavailable", ex.Error)
+		return
+	}
+	var req item
+	if json.Unmarshal(ex.Request, &req) != nil || req == nil {
+		b.gap("invalid_request", "Unable to decode request JSON")
+		return
+	}
+	if !strings.HasSuffix(strings.TrimRight(strings.Split(ex.Endpoint, "?")[0], "/"), "/responses") {
+		b.gap("unsupported_endpoint", "Unsupported exchange; original content is available in the source trace")
+		return
+	}
+	if s := str(req["model"]); s != "" {
+		b.model = s
+	}
+	instructions := render(req["instructions"])
+	if instructions != b.instructions {
+		if instructions != "" {
+			b.add(Step{Source: "system", Message: instructions, Extra: b.reference("request", "$.instructions")})
+		} else {
+			b.warning("instructions_removed")
+		}
+		b.instructions = instructions
+	}
+	input := items(req["input"])
+	n := overlap(b.history, input)
+	incremental := str(req["previous_response_id"]) != ""
+	if incremental {
+		n = 0
+	}
+	if len(b.history) > 0 && len(input) > 0 && n < min(len(b.history), len(input)) && !incremental {
+		b.warning("context_discontinuity")
+	}
+	b.appendInput(input, n)
+	response := parseResponse(ex.Response, ex.Stream)
+	for _, w := range response.Warnings {
+		b.warning(w)
+	}
+	if response.Model != "" {
+		b.model = response.Model
+	}
+	if ex.StatusCode < 200 || ex.StatusCode >= 300 {
+		b.warning("http_error")
+	}
+	// Even an empty or failed response remains visible as a recorded attempt.
+	step := b.agentStep(response.Output, "response", "$.output")
+	step.ModelName = b.model
+	if ex.ExchangeKind != "entry" && ex.StatusCode >= 200 && ex.StatusCode < 300 {
+		one := 1
+		step.LLMCallCount = &one
+	}
+	step.Timestamp = timestamp(ex.Time.Add(time.Duration(ex.DurationMs) * time.Millisecond))
+	step.Extra["timestamp_basis"] = "request_start_plus_recorded_duration"
+	if ex.Time.IsZero() {
+		step.Timestamp = ""
+		delete(step.Extra, "timestamp_basis")
+	}
+	if response.ID != "" {
+		step.Extra["response_id"] = response.ID
+	}
+	if response.Status != "" {
+		step.Extra["response_status"] = response.Status
+	}
+	if ex.StatusCode < 200 || ex.StatusCode >= 300 {
+		step.Extra["http_status"] = ex.StatusCode
+	}
+	step.Metrics = normalizeMetrics(response.Usage)
+	if step.Metrics != nil {
+		b.metricsRequests++
+	}
+	if reasoning, ok := req["reasoning"].(map[string]any); ok {
+		step.ReasoningEffort = str(reasoning["effort"])
+	}
+	if len(response.Output) == 0 {
+		b.warning("empty_response_output")
+	}
+	b.addAgent(step, response.Output)
+	if incremental {
+		b.history = append(b.history, input...)
+	} else {
+		b.history = append([]item(nil), input...)
+	}
+	b.history = append(b.history, response.Output...)
+}
+
+// finish closes the trajectory: every tool call without a result becomes a
+// missing-result warning, and the session-level metrics and extras are set.
+func (b *builder) finish() {
 	for i := range b.trajectory.Steps {
 		step := &b.trajectory.Steps[i]
 		var missing []string
@@ -154,23 +182,33 @@ func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exc
 			}
 		}
 		if len(missing) > 0 {
-			b.warnings = append(b.warnings, Warning{Code: "missing_tool_result", TraceID: str(step.Extra["trace_id"])})
-			step.Extra["missing_result_call_ids"] = missing
+			traceID := str(step.Extra["trace_id"])
+			b.warnings = append(b.warnings, Warning{Code: "missing_tool_result", TraceID: traceID})
+			if b.stream != nil {
+				// The step record is already on the wire, so the result gap is
+				// reported as its own NDJSON record instead of a late mutation.
+				b.stream.missing = append(b.stream.missing, StreamMissing{Type: "missing_tool_result", StepID: step.StepID, TraceID: traceID, CallIDs: missing})
+			} else {
+				step.Extra["missing_result_call_ids"] = missing
+			}
 		}
 	}
 	if len(b.trajectory.Steps) == 0 {
 		b.gap("empty_trajectory", "No reconstructable conversation items")
 	}
 	b.trajectory.FinalMetrics = aggregateMetrics(b.trajectory.Steps)
-	b.trajectory.FinalMetrics.Extra = map[string]any{"recorded_requests": len(exchanges), "requests_with_usage": b.metricsRequests, "usage_scope": "recorded_client_visible_responses"}
-	b.trajectory.Extra = map[string]any{"exporter": "trajecta", "exporter_version": "2", "session_source": sessionSource, "scope": "client_visible_responses", "request_count": len(exchanges), "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id"}
-	return b.trajectory, nil
+	b.trajectory.FinalMetrics.Extra = map[string]any{"recorded_requests": b.requests, "requests_with_usage": b.metricsRequests, "usage_scope": "recorded_client_visible_responses"}
+	b.trajectory.Extra = map[string]any{"exporter": "trajecta", "exporter_version": "2", "session_source": b.sessionSource, "scope": "client_visible_responses", "request_count": b.requests, "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id"}
 }
 func (b *builder) reference(origin, path string) map[string]any {
 	return map[string]any{"trace_id": b.exchange.TraceID, "origin": origin, "path": path}
 }
 func (b *builder) warning(code string) {
-	b.warnings = append(b.warnings, Warning{Code: code, TraceID: b.exchange.TraceID})
+	w := Warning{Code: code, TraceID: b.exchange.TraceID}
+	b.warnings = append(b.warnings, w)
+	if b.stream != nil {
+		b.stream.warningAdded(w)
+	}
 }
 func (b *builder) gap(code, message string) {
 	b.warning(code)
@@ -179,7 +217,11 @@ func (b *builder) gap(code, message string) {
 func (b *builder) add(s Step) int {
 	s.StepID = len(b.trajectory.Steps) + 1
 	b.trajectory.Steps = append(b.trajectory.Steps, s)
-	return len(b.trajectory.Steps) - 1
+	index := len(b.trajectory.Steps) - 1
+	if b.stream != nil {
+		b.stream.stepAdded(index, s)
+	}
+	return index
 }
 func timestamp(t time.Time) string {
 	if t.IsZero() {
@@ -364,10 +406,51 @@ func (b *builder) appendResult(it item, path string) {
 			return
 		}
 		result.SourceCallID = id
-		attach(&b.trajectory.Steps[loc.step], result)
+		b.attachResult(loc.step, result)
 		b.results[id] = signature(it)
 	} else {
 		b.warning("orphan_tool_result")
 		b.add(Step{Source: "system", Message: "Tool result without a recorded call", Observation: &Observation{Results: []Result{result}}, Extra: b.reference("request", path)})
+	}
+}
+
+// attachResult attaches a tool result to the step that made the call. In
+// streaming mode the step's record is already emitted, so the result is handed
+// to the stream as its own record and only the call id is retained locally for
+// the final missing-result pass; this keeps a late result from holding its
+// payload in memory a second time.
+func (b *builder) attachResult(stepIndex int, result Result) {
+	if stepIndex < 0 || stepIndex >= len(b.trajectory.Steps) {
+		return
+	}
+	if b.stream != nil {
+		b.stream.resultAdded(stepIndex, result)
+		attach(&b.trajectory.Steps[stepIndex], Result{SourceCallID: result.SourceCallID})
+		return
+	}
+	attach(&b.trajectory.Steps[stepIndex], result)
+}
+
+// compactFrom drops the payload of every step emitted so far while keeping the
+// small bookkeeping the builder still needs: tool-call ids, attached result call
+// ids, metrics and the trace id used by final warnings.
+func (b *builder) compactFrom(start int) {
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < len(b.trajectory.Steps); i++ {
+		step := &b.trajectory.Steps[i]
+		compact := Step{StepID: step.StepID, Source: step.Source, ToolCalls: step.ToolCalls, Metrics: step.Metrics, LLMCallCount: step.LLMCallCount}
+		if traceID, ok := step.Extra["trace_id"]; ok {
+			compact.Extra = map[string]any{"trace_id": traceID}
+		}
+		if step.Observation != nil && len(step.Observation.Results) > 0 {
+			results := make([]Result, 0, len(step.Observation.Results))
+			for _, result := range step.Observation.Results {
+				results = append(results, Result{SourceCallID: result.SourceCallID})
+			}
+			compact.Observation = &Observation{Results: results}
+		}
+		*step = compact
 	}
 }

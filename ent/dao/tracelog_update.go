@@ -779,6 +779,76 @@ func (_u *TraceLogUpdate) SetNillableRoutingFailureReason(v *string) *TraceLogUp
 	return _u
 }
 
+// SetRouteTargetID sets the "route_target_id" field.
+func (_u *TraceLogUpdate) SetRouteTargetID(v string) *TraceLogUpdate {
+	_u.mutation.SetRouteTargetID(v)
+	return _u
+}
+
+// SetNillableRouteTargetID sets the "route_target_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableRouteTargetID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetRouteTargetID(*v)
+	}
+	return _u
+}
+
+// SetChannelID sets the "channel_id" field.
+func (_u *TraceLogUpdate) SetChannelID(v string) *TraceLogUpdate {
+	_u.mutation.SetChannelID(v)
+	return _u
+}
+
+// SetNillableChannelID sets the "channel_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableChannelID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetChannelID(*v)
+	}
+	return _u
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (_u *TraceLogUpdate) SetCredentialID(v string) *TraceLogUpdate {
+	_u.mutation.SetCredentialID(v)
+	return _u
+}
+
+// SetNillableCredentialID sets the "credential_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableCredentialID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetCredentialID(*v)
+	}
+	return _u
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (_u *TraceLogUpdate) SetStickyStatus(v string) *TraceLogUpdate {
+	_u.mutation.SetStickyStatus(v)
+	return _u
+}
+
+// SetNillableStickyStatus sets the "sticky_status" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableStickyStatus(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetStickyStatus(*v)
+	}
+	return _u
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (_u *TraceLogUpdate) SetStickyPreviousUpstreamID(v string) *TraceLogUpdate {
+	_u.mutation.SetStickyPreviousUpstreamID(v)
+	return _u
+}
+
+// SetNillableStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableStickyPreviousUpstreamID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetStickyPreviousUpstreamID(*v)
+	}
+	return _u
+}
+
 // Mutation returns the TraceLogMutation object of the builder.
 func (_u *TraceLogUpdate) Mutation() *TraceLogMutation {
 	return _u.mutation
@@ -1029,6 +1099,21 @@ func (_u *TraceLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.RoutingFailureReason(); ok {
 		_spec.SetField(tracelog.FieldRoutingFailureReason, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RouteTargetID(); ok {
+		_spec.SetField(tracelog.FieldRouteTargetID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ChannelID(); ok {
+		_spec.SetField(tracelog.FieldChannelID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CredentialID(); ok {
+		_spec.SetField(tracelog.FieldCredentialID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.StickyStatus(); ok {
+		_spec.SetField(tracelog.FieldStickyStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.StickyPreviousUpstreamID(); ok {
+		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
 	}
 	_spec.Node.Schema = _u.schemaConfig.TraceLog
 	ctx = internal.NewSchemaConfigContext(ctx, _u.schemaConfig)
@@ -1803,6 +1888,76 @@ func (_u *TraceLogUpdateOne) SetNillableRoutingFailureReason(v *string) *TraceLo
 	return _u
 }
 
+// SetRouteTargetID sets the "route_target_id" field.
+func (_u *TraceLogUpdateOne) SetRouteTargetID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetRouteTargetID(v)
+	return _u
+}
+
+// SetNillableRouteTargetID sets the "route_target_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableRouteTargetID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetRouteTargetID(*v)
+	}
+	return _u
+}
+
+// SetChannelID sets the "channel_id" field.
+func (_u *TraceLogUpdateOne) SetChannelID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetChannelID(v)
+	return _u
+}
+
+// SetNillableChannelID sets the "channel_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableChannelID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetChannelID(*v)
+	}
+	return _u
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (_u *TraceLogUpdateOne) SetCredentialID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetCredentialID(v)
+	return _u
+}
+
+// SetNillableCredentialID sets the "credential_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableCredentialID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetCredentialID(*v)
+	}
+	return _u
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (_u *TraceLogUpdateOne) SetStickyStatus(v string) *TraceLogUpdateOne {
+	_u.mutation.SetStickyStatus(v)
+	return _u
+}
+
+// SetNillableStickyStatus sets the "sticky_status" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableStickyStatus(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetStickyStatus(*v)
+	}
+	return _u
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (_u *TraceLogUpdateOne) SetStickyPreviousUpstreamID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetStickyPreviousUpstreamID(v)
+	return _u
+}
+
+// SetNillableStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableStickyPreviousUpstreamID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetStickyPreviousUpstreamID(*v)
+	}
+	return _u
+}
+
 // Mutation returns the TraceLogMutation object of the builder.
 func (_u *TraceLogUpdateOne) Mutation() *TraceLogMutation {
 	return _u.mutation
@@ -2083,6 +2238,21 @@ func (_u *TraceLogUpdateOne) sqlSave(ctx context.Context) (_node *TraceLog, err 
 	}
 	if value, ok := _u.mutation.RoutingFailureReason(); ok {
 		_spec.SetField(tracelog.FieldRoutingFailureReason, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RouteTargetID(); ok {
+		_spec.SetField(tracelog.FieldRouteTargetID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ChannelID(); ok {
+		_spec.SetField(tracelog.FieldChannelID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CredentialID(); ok {
+		_spec.SetField(tracelog.FieldCredentialID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.StickyStatus(); ok {
+		_spec.SetField(tracelog.FieldStickyStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.StickyPreviousUpstreamID(); ok {
+		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
 	}
 	_spec.Node.Schema = _u.schemaConfig.TraceLog
 	ctx = internal.NewSchemaConfigContext(ctx, _u.schemaConfig)

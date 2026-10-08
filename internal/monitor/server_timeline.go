@@ -279,7 +279,7 @@ func parseSystemEventWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "today", "", "24h":
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour)
 	case "30d":
@@ -287,7 +287,7 @@ func parseSystemEventWindow(value string) (string, time.Time) {
 	case "all":
 		return "all", time.Time{}
 	default:
-		return "today", startOfUTCDay(now)
+		return "today", startOfDisplayDay(now)
 	}
 }
 

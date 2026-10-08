@@ -33,9 +33,6 @@ func (s *Store) initSchema() error {
 		if err := s.ensureLogExchangeColumns(); err != nil {
 			return err
 		}
-		if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
-			return err
-		}
 		return nil
 	}
 	stmts := sqliteSchemaStatements
@@ -265,7 +262,12 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		routing_policy TEXT NOT NULL DEFAULT '',
 		routing_score REAL NOT NULL DEFAULT 0,
 		routing_candidate_count INTEGER NOT NULL DEFAULT 0,
-		routing_failure_reason TEXT NOT NULL DEFAULT ''
+		routing_failure_reason TEXT NOT NULL DEFAULT '',
+		route_target_id TEXT NOT NULL DEFAULT '',
+		channel_id TEXT NOT NULL DEFAULT '',
+		credential_id TEXT NOT NULL DEFAULT '',
+		sticky_status TEXT NOT NULL DEFAULT '',
+		sticky_previous_upstream_id TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		return err
 	}
@@ -278,7 +280,8 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		request_audit_id, response_id,
 		exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
+		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
 	)
 	SELECT
 		path, trace_id, mod_time_ns, file_size, version, request_id,
@@ -292,7 +295,8 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		'', '',
 		'', '', '', '', 0,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
+		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
 	FROM logs_old`); err != nil {
 		return err
 	}
@@ -405,9 +409,13 @@ func (s *Store) ensureLogExchangeColumns() error {
 	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	// `(request_audit_id, recorded_at)` and `(exchange_kind, recorded_at)` used to
+	// be created here as well. The planner never chose either on Postgres, and
+	// migration 20261009090000_add_hot_path_indexes drops them there; SQLite keeps
+	// only the access paths both engines actually use, so a database that already
+	// has the two old indexes keeps them rather than losing a query plan it may
+	// have been relying on.
 	for _, stmt := range []string{
-		`CREATE INDEX IF NOT EXISTS tracelog_request_audit_id_recorded_at ON logs(request_audit_id, recorded_at)`,
-		`CREATE INDEX IF NOT EXISTS tracelog_exchange_kind_recorded_at ON logs(exchange_kind, recorded_at)`,
 		`CREATE INDEX IF NOT EXISTS tracelog_parent_exchange_id ON logs(parent_exchange_id)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -431,7 +439,10 @@ func (s *Store) ensureHotpathIndexes() error {
 		`CREATE INDEX IF NOT EXISTS requestaudit_created_at_id ON request_audits(created_at, id)`,
 		`CREATE INDEX IF NOT EXISTS toolcallaudit_created_at_id ON tool_call_audits(created_at, id)`,
 		`CREATE INDEX IF NOT EXISTS analysisrun_created_at_id ON analysis_runs(created_at, id)`,
-		`CREATE INDEX IF NOT EXISTS tracefinding_severity_created_at ON trace_findings(severity, created_at)`,
+		`CREATE INDEX IF NOT EXISTS tracefinding_created_at_id ON trace_findings(created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS tracefinding_severity_created_at_id ON trace_findings(severity, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS analysisjob_created_at_id ON analysis_jobs(created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_recorded_at_sticky ON logs(recorded_at, sticky_status)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err

@@ -33,7 +33,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -90,8 +89,6 @@ type Client struct {
 	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
-	// SemanticNode is the client for interacting with the SemanticNode builders.
-	SemanticNode *SemanticNodeClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
 	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
@@ -139,7 +136,6 @@ func (c *Client) init() {
 	c.Response = NewResponseClient(c.config)
 	c.ResponseItem = NewResponseItemClient(c.config)
 	c.Score = NewScoreClient(c.config)
-	c.SemanticNode = NewSemanticNodeClient(c.config)
 	c.SystemEvent = NewSystemEventClient(c.config)
 	c.ToolCallAudit = NewToolCallAuditClient(c.config)
 	c.TraceFinding = NewTraceFindingClient(c.config)
@@ -261,7 +257,6 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Response:         NewResponseClient(cfg),
 		ResponseItem:     NewResponseItemClient(cfg),
 		Score:            NewScoreClient(cfg),
-		SemanticNode:     NewSemanticNodeClient(cfg),
 		SystemEvent:      NewSystemEventClient(cfg),
 		ToolCallAudit:    NewToolCallAuditClient(cfg),
 		TraceFinding:     NewTraceFindingClient(cfg),
@@ -308,7 +303,6 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Response:         NewResponseClient(cfg),
 		ResponseItem:     NewResponseItemClient(cfg),
 		Score:            NewScoreClient(cfg),
-		SemanticNode:     NewSemanticNodeClient(cfg),
 		SystemEvent:      NewSystemEventClient(cfg),
 		ToolCallAudit:    NewToolCallAuditClient(cfg),
 		TraceFinding:     NewTraceFindingClient(cfg),
@@ -350,9 +344,9 @@ func (c *Client) Use(hooks ...Hook) {
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
 		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
 		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
-		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
-		c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
-		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.Response, c.ResponseItem, c.Score, c.SystemEvent, c.ToolCallAudit,
+		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
+		c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -365,9 +359,9 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
 		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
 		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
-		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
-		c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
-		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.Response, c.ResponseItem, c.Score, c.SystemEvent, c.ToolCallAudit,
+		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
+		c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -412,8 +406,6 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ResponseItem.mutate(ctx, m)
 	case *ScoreMutation:
 		return c.Score.mutate(ctx, m)
-	case *SemanticNodeMutation:
-		return c.SemanticNode.mutate(ctx, m)
 	case *SystemEventMutation:
 		return c.SystemEvent.mutate(ctx, m)
 	case *ToolCallAuditMutation:
@@ -2850,139 +2842,6 @@ func (c *ScoreClient) mutate(ctx context.Context, m *ScoreMutation) (Value, erro
 	}
 }
 
-// SemanticNodeClient is a client for the SemanticNode schema.
-type SemanticNodeClient struct {
-	config
-}
-
-// NewSemanticNodeClient returns a client for the SemanticNode from the given config.
-func NewSemanticNodeClient(c config) *SemanticNodeClient {
-	return &SemanticNodeClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `semanticnode.Hooks(f(g(h())))`.
-func (c *SemanticNodeClient) Use(hooks ...Hook) {
-	c.hooks.SemanticNode = append(c.hooks.SemanticNode, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `semanticnode.Intercept(f(g(h())))`.
-func (c *SemanticNodeClient) Intercept(interceptors ...Interceptor) {
-	c.inters.SemanticNode = append(c.inters.SemanticNode, interceptors...)
-}
-
-// Create returns a builder for creating a SemanticNode entity.
-func (c *SemanticNodeClient) Create() *SemanticNodeCreate {
-	mutation := newSemanticNodeMutation(c.config, OpCreate)
-	return &SemanticNodeCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of SemanticNode entities.
-func (c *SemanticNodeClient) CreateBulk(builders ...*SemanticNodeCreate) *SemanticNodeCreateBulk {
-	return &SemanticNodeCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *SemanticNodeClient) MapCreateBulk(slice any, setFunc func(*SemanticNodeCreate, int)) *SemanticNodeCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &SemanticNodeCreateBulk{err: fmt.Errorf("calling to SemanticNodeClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*SemanticNodeCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &SemanticNodeCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for SemanticNode.
-func (c *SemanticNodeClient) Update() *SemanticNodeUpdate {
-	mutation := newSemanticNodeMutation(c.config, OpUpdate)
-	return &SemanticNodeUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *SemanticNodeClient) UpdateOne(_m *SemanticNode) *SemanticNodeUpdateOne {
-	mutation := newSemanticNodeMutation(c.config, OpUpdateOne, withSemanticNode(_m))
-	return &SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *SemanticNodeClient) UpdateOneID(id int) *SemanticNodeUpdateOne {
-	mutation := newSemanticNodeMutation(c.config, OpUpdateOne, withSemanticNodeID(id))
-	return &SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for SemanticNode.
-func (c *SemanticNodeClient) Delete() *SemanticNodeDelete {
-	mutation := newSemanticNodeMutation(c.config, OpDelete)
-	return &SemanticNodeDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *SemanticNodeClient) DeleteOne(_m *SemanticNode) *SemanticNodeDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *SemanticNodeClient) DeleteOneID(id int) *SemanticNodeDeleteOne {
-	builder := c.Delete().Where(semanticnode.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &SemanticNodeDeleteOne{builder}
-}
-
-// Query returns a query builder for SemanticNode.
-func (c *SemanticNodeClient) Query() *SemanticNodeQuery {
-	return &SemanticNodeQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeSemanticNode},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a SemanticNode entity by its id.
-func (c *SemanticNodeClient) Get(ctx context.Context, id int) (*SemanticNode, error) {
-	return c.Query().Where(semanticnode.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *SemanticNodeClient) GetX(ctx context.Context, id int) *SemanticNode {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *SemanticNodeClient) Hooks() []Hook {
-	return c.hooks.SemanticNode
-}
-
-// Interceptors returns the client interceptors.
-func (c *SemanticNodeClient) Interceptors() []Interceptor {
-	return c.inters.SemanticNode
-}
-
-func (c *SemanticNodeClient) mutate(ctx context.Context, m *SemanticNodeMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&SemanticNodeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&SemanticNodeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&SemanticNodeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown SemanticNode mutation op: %q", m.Op())
-	}
-}
-
 // SystemEventClient is a client for the SystemEvent schema.
 type SystemEventClient struct {
 	config
@@ -4205,16 +4064,16 @@ type (
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
 		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
 		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SemanticNode, SystemEvent, ToolCallAudit, TraceFinding,
-		TraceLog, TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		ResponseItem, Score, SystemEvent, ToolCallAudit, TraceFinding, TraceLog,
+		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Hook
 	}
 	inters struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
 		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
 		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SemanticNode, SystemEvent, ToolCallAudit, TraceFinding,
-		TraceLog, TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		ResponseItem, Score, SystemEvent, ToolCallAudit, TraceFinding, TraceLog,
+		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Interceptor
 	}
 )

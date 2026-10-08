@@ -15,7 +15,7 @@ import (
 
 // fakePathIndex is an in-memory stand-in for the Postgres trace index. It keeps
 // the same key invariant as the real schema: a path holds at most one set of
-// rows (logs.path and overview_metric_bucket_members.path are primary keys).
+// rows (logs.path is the primary key).
 type fakePathIndex struct {
 	mu       sync.Mutex
 	rows     map[string]PathRefs
@@ -79,7 +79,7 @@ func TestApplyCassetteLayoutMovesFilesAndRepointsIndex(t *testing.T) {
 	root := t.TempDir()
 	source := writeLayoutCassette(t, root, "gpt-5.5/2026/01/02/a.http", recordfile.FileMagic, "gpt-5.5")
 	index := newFakePathIndex()
-	index.seed("/vault/gpt-5.5/2026/01/02/a.http", PathRefs{Logs: 1, Exchanges: 1, OverviewMembers: 3})
+	index.seed("/vault/gpt-5.5/2026/01/02/a.http", PathRefs{Logs: 1, Exchanges: 1})
 	withFakeIndex(t, index)
 
 	report, err := ApplyCassetteLayout(context.Background(), ApplyOptions{
@@ -96,8 +96,8 @@ func TestApplyCassetteLayoutMovesFilesAndRepointsIndex(t *testing.T) {
 	if report.Failed() || report.Moved != 1 {
 		t.Fatalf("report = %+v, want one move and no failure", report)
 	}
-	if report.DatabaseRows != 5 {
-		t.Fatalf("DatabaseRows = %d, want 5", report.DatabaseRows)
+	if report.DatabaseRows != 2 {
+		t.Fatalf("DatabaseRows = %d, want 2", report.DatabaseRows)
 	}
 	if report.CassettesWithoutIndex != 0 {
 		t.Fatalf("CassettesWithoutIndex = %d, want 0", report.CassettesWithoutIndex)
@@ -155,7 +155,7 @@ func TestApplyCassetteLayoutRepairsInterruptedRun(t *testing.T) {
 	// source: the state a crash between rename and commit leaves behind.
 	writeLayoutCassette(t, root, "unknown-site/gpt-5.5/2026/01/02/a.http", recordfile.FileMagic, "gpt-5.5")
 	index := newFakePathIndex()
-	index.seed("/vault/gpt-5.5/2026/01/02/a.http", PathRefs{Logs: 1, OverviewMembers: 2})
+	index.seed("/vault/gpt-5.5/2026/01/02/a.http", PathRefs{Logs: 1})
 	withFakeIndex(t, index)
 
 	report, err := ApplyCassetteLayout(context.Background(), ApplyOptions{

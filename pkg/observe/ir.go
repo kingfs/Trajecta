@@ -284,6 +284,46 @@ func FlattenNodes(nodes []SemanticNode) []FlatSemanticNode {
 	return out
 }
 
+// FlattenObservationNodes returns every semantic node an observation holds, as
+// one deduplicated flat list.
+//
+// Request, response and stream entries are separate trees that can name the same
+// node - a streamed tool call is both a response node and an accumulated stream
+// call - so the list is folded by node id, keeping the first occurrence. Nodes
+// without an id are kept: they are distinct positions in the payload rather than
+// duplicates of one another.
+//
+// The nodes used to be written to a `semantic_nodes` table and read back, which
+// is where this ordering came from. They are now rebuilt from the cassette when a
+// trace is opened, so the flattening lives here, next to the tree it inverts.
+func FlattenObservationNodes(obs TraceObservation) []FlatSemanticNode {
+	var roots []SemanticNode
+	roots = append(roots, obs.Request.Nodes...)
+	roots = append(roots, obs.Response.Nodes...)
+	roots = append(roots, obs.Stream.AccumulatedToolCalls...)
+	return dedupeFlatNodes(FlattenNodes(roots))
+}
+
+func dedupeFlatNodes(nodes []FlatSemanticNode) []FlatSemanticNode {
+	if len(nodes) < 2 {
+		return nodes
+	}
+	out := make([]FlatSemanticNode, 0, len(nodes))
+	seen := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		if node.Node.ID == "" {
+			out = append(out, node)
+			continue
+		}
+		if _, ok := seen[node.Node.ID]; ok {
+			continue
+		}
+		seen[node.Node.ID] = struct{}{}
+		out = append(out, node)
+	}
+	return out
+}
+
 func RebuildNodeTree(rows []FlatSemanticNode) []SemanticNode {
 	nodes := make(map[string]*SemanticNode, len(rows))
 	order := make([]string, 0, len(rows))

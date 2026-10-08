@@ -33,7 +33,7 @@ func newLayoutApplyCommand(runtime *cliRuntime, root *string) *cobra.Command {
 
 Each planned move renames one cassette and, in the same step, repoints every
 index row that stores its path: logs.path (the primary key of the trace index),
-upstream_exchanges.cassette_path and overview_metric_bucket_members.path.
+and upstream_exchanges.cassette_path.
 logs.trace_id is never touched, so parse jobs, observations, findings, analysis
 jobs and session summaries stay attached to their trace.
 
@@ -204,19 +204,19 @@ func writeLayoutApplyReport(path string, report *legacymigrate.LayoutApplyReport
 
 	if strings.EqualFold(filepath.Ext(path), ".csv") {
 		writer := csv.NewWriter(file)
-		if err := writer.Write([]string{"status", "from", "to", "model", "logs_rows", "exchange_rows", "overview_rows"}); err != nil {
+		if err := writer.Write([]string{"status", "from", "to", "model", "logs_rows", "exchange_rows"}); err != nil {
 			return err
 		}
 		for _, sample := range report.Samples {
 			if err := writer.Write([]string{
 				sample.Status, sample.From, sample.To, sample.Model,
-				fmt.Sprint(sample.Refs.Logs), fmt.Sprint(sample.Refs.Exchanges), fmt.Sprint(sample.Refs.OverviewMembers),
+				fmt.Sprint(sample.Refs.Logs), fmt.Sprint(sample.Refs.Exchanges),
 			}); err != nil {
 				return err
 			}
 		}
 		for _, failure := range report.Failures {
-			if err := writer.Write([]string{"failed:" + failure.Stage, failure.From, failure.To, "", "", "", ""}); err != nil {
+			if err := writer.Write([]string{"failed:" + failure.Stage, failure.From, failure.To, "", "", ""}); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(file, "# %s: %s\n", failure.Stage, failure.Message); err != nil {
@@ -277,7 +277,7 @@ func printLayoutApply(w io.Writer, report *legacymigrate.LayoutApplyReport, samp
 			}
 			fmt.Fprintf(w, "  [%s] %s\n    -> %s", applied.Status, applied.From, applied.To)
 			if applied.Refs.Rows() > 0 {
-				fmt.Fprintf(w, " (index rows: logs=%d exchanges=%d overview=%d)", applied.Refs.Logs, applied.Refs.Exchanges, applied.Refs.OverviewMembers)
+				fmt.Fprintf(w, " (index rows: logs=%d exchanges=%d)", applied.Refs.Logs, applied.Refs.Exchanges)
 			}
 			fmt.Fprintln(w)
 		}

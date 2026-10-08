@@ -486,13 +486,12 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 	}()
 
 	var obs observe.TraceObservation
-	if job.JobType == JobTypeTraceRescan {
-		obs, err = s.store.GetObservation(job.TargetID)
-	} else {
-		obs, err = observeworker.ReparseTrace(ctx, s.store, s.registry, job.TargetID)
-		if err == nil {
-			err = s.store.SaveObservation(obs)
-		}
+	// Both job types parse the cassette. A rescan only differs in that it does not
+	// write the observation back, so it is the same read either way; the semantic
+	// nodes are no longer stored, which is why reading them back is not an option.
+	obs, err = observeworker.ReparseTrace(ctx, s.store, s.registry, job.TargetID)
+	if err == nil && job.JobType != JobTypeTraceRescan {
+		err = s.store.SaveObservation(obs)
 	}
 	if err != nil {
 		return Result{}, err

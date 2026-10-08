@@ -72,13 +72,12 @@ type ApplyOptions struct {
 
 // PathRefs counts the index rows that store one cassette path.
 type PathRefs struct {
-	Logs            int64 `json:"logs,omitempty"`
-	Exchanges       int64 `json:"upstream_exchanges,omitempty"`
-	OverviewMembers int64 `json:"overview_metric_bucket_members,omitempty"`
+	Logs      int64 `json:"logs,omitempty"`
+	Exchanges int64 `json:"upstream_exchanges,omitempty"`
 }
 
 // Rows is the total number of index rows that reference the cassette.
-func (r PathRefs) Rows() int64 { return r.Logs + r.Exchanges + r.OverviewMembers }
+func (r PathRefs) Rows() int64 { return r.Logs + r.Exchanges }
 
 // ApplyMoveResult is the outcome of one planned move.
 type ApplyMoveResult struct {
@@ -145,12 +144,13 @@ var openCassettePathIndex = func(ctx context.Context, dsn string) (cassettePathI
 	return openPostgresPathIndex(ctx, dsn)
 }
 
-// postgresPathIndex repoints the three index columns that hold a cassette path.
-// logs.path is the primary key of the trace index, upstream_exchanges holds an
-// optional copy and overview_metric_bucket_members is keyed by path. Nothing
-// else in the schema stores a cassette path: parse_jobs/analysis_jobs reference
-// traces by UUID, and request_audits.path / semantic_nodes.path are HTTP and
-// JSON paths.
+// postgresPathIndex repoints the index columns that hold a cassette path.
+// logs.path is the primary key of the trace index and upstream_exchanges holds an
+// optional copy. Nothing else in the schema stores a cassette path:
+// parse_jobs/analysis_jobs reference traces by UUID, and request_audits.path is
+// an HTTP path. The Overview's hourly bucket table used to be repointed here too;
+// it is no longer written or read, and a database that has already dropped it
+// must not make `layout apply` fail, so it is left alone.
 type postgresPathIndex struct{ db *sql.DB }
 
 func openPostgresPathIndex(ctx context.Context, dsn string) (*postgresPathIndex, error) {
@@ -176,9 +176,8 @@ func (p *postgresPathIndex) CountRefs(ctx context.Context, cassettePath string) 
 	var refs PathRefs
 	err := p.db.QueryRowContext(ctx,
 		`SELECT (SELECT count(*) FROM logs WHERE path = $1),
-		        (SELECT count(*) FROM upstream_exchanges WHERE cassette_path = $1),
-		        (SELECT count(*) FROM overview_metric_bucket_members WHERE path = $1)`,
-		cassettePath).Scan(&refs.Logs, &refs.Exchanges, &refs.OverviewMembers)
+		        (SELECT count(*) FROM upstream_exchanges WHERE cassette_path = $1)`,
+		cassettePath).Scan(&refs.Logs, &refs.Exchanges)
 	if err != nil {
 		return PathRefs{}, fmt.Errorf("count index rows for %s: %w", cassettePath, err)
 	}
@@ -186,9 +185,8 @@ func (p *postgresPathIndex) CountRefs(ctx context.Context, cassettePath string) 
 }
 
 // MovePath repoints every index row of one cassette inside a single
-// transaction. A unique violation on logs.path or
-// overview_metric_bucket_members.path means another row already claims the
-// target path; the caller then moves the file back.
+// transaction. A unique violation on logs.path means another row already claims
+// the target path; the caller then moves the file back.
 func (p *postgresPathIndex) MovePath(ctx context.Context, oldPath, newPath string) (PathRefs, error) {
 	var refs PathRefs
 	tx, err := p.db.BeginTx(ctx, nil)
@@ -204,7 +202,6 @@ func (p *postgresPathIndex) MovePath(ctx context.Context, oldPath, newPath strin
 	}{
 		{"logs.path", &refs.Logs, `UPDATE logs SET path = $1 WHERE path = $2`},
 		{"upstream_exchanges.cassette_path", &refs.Exchanges, `UPDATE upstream_exchanges SET cassette_path = $1 WHERE cassette_path = $2`},
-		{"overview_metric_bucket_members.path", &refs.OverviewMembers, `UPDATE overview_metric_bucket_members SET path = $1 WHERE path = $2`},
 	}
 	for _, step := range steps {
 		result, err := tx.ExecContext(ctx, step.query, newPath, oldPath)

@@ -191,7 +191,7 @@ func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryR
 	return s.usageSummariesByGroupKey("model", since)
 }
 
-func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
+func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, bucketSize time.Duration, bucketCount int, loc *time.Location) ([]UsageTrendRecord, error) {
 	if bucketSize <= 0 {
 		bucketSize = 24 * time.Hour
 	}
@@ -217,10 +217,10 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))
 	}
-	// The recorded slots below are UTC (recorded_at is stored in UTC), and a time.Time map key carries
-	// its location, so the bucket grid has to be UTC too: a local-time reference would leave every
-	// lookup missing and return an all-zero timeline.
-	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	// The grid and the per-row lookups both go through bucketSlot, which returns UTC
+	// instants: a time.Time map key carries its location, so aligning only one side
+	// would leave every lookup missing and return an all-zero timeline.
+	bucketStart := bucketSlot(referenceTime, bucketSize, loc).Add(-time.Duration(bucketCount-1) * bucketSize)
 	queryArgs := append([]any(nil), args...)
 	queryArgs = append(queryArgs, bucketStart.Format(timeLayout))
 	rows, err := s.db.Query(`
@@ -262,7 +262,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 		if err != nil {
 			return nil, err
 		}
-		slot := recordedTime.UTC().Truncate(bucketSize)
+		slot := bucketSlot(recordedTime, bucketSize, loc)
 		item := buckets[slot]
 		if item == nil {
 			continue
