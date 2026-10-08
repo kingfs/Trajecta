@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 )
 
 // fixedConnector hands out one prepared connection, which is all the wrapper
@@ -352,5 +355,51 @@ func TestSystemDatabaseSnapshotIsUnsupportedOutsidePostgres(t *testing.T) {
 	}
 	if snapshot.Relations == nil || snapshot.Tables == nil || snapshot.Settings == nil || snapshot.Warnings == nil {
 		t.Fatalf("unsupported snapshot has nil lists: %+v", snapshot)
+	}
+}
+
+// TestPostgresCheckpointerTimesAreCastToIntegers pins the bug a live Postgres 17
+// found: pg_stat_checkpointer.write_time and pg_stat_bgwriter.checkpoint_write_time
+// are double precision, so scanning them straight into an int64 fails once the
+// value is large enough for Go to format it in scientific notation. The failure
+// was silent - the checkpointer section simply came back absent with a warning -
+// and it did not reproduce in tests, because a fresh database reports 0, which
+// parses as an integer.
+//
+// The test drives the exact expressions the collector's queries use, so removing
+// the round()::bigint casts fails here rather than on an operator's page.
+func TestPostgresCheckpointerTimesAreCastToIntegers(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	// A served store refuses to open unless the versioned migrations have been
+	// applied, so bring the schema up first exactly as the other Postgres tests do.
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+	st, err := NewWithDatabaseOptions(t.TempDir(), "postgres", dsn, 2, 2, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	defer st.Close()
+
+	// 70169111 is the write_time the reference deployment reported; Go formats it
+	// as 7.0169111e+07, which strconv.ParseInt rejects.
+	const largeMs = 70169111.0
+
+	var casted int64
+	if err := st.db.QueryRow(`SELECT round(?::double precision)::bigint`, largeMs).Scan(&casted); err != nil {
+		t.Fatalf("the cast the collector relies on failed: %v", err)
+	}
+	if casted != int64(largeMs) {
+		t.Fatalf("casted value = %d, want %d", casted, int64(largeMs))
+	}
+
+	// The uncast shape is what failed, so the test states the failure it guards
+	// against rather than only the happy path.
+	var uncast int64
+	if err := st.db.QueryRow(`SELECT ?::double precision`, largeMs).Scan(&uncast); err == nil {
+		t.Fatalf("scanning a large double precision into int64 unexpectedly succeeded (%d); if database/sql changed, this guard needs a different assertion", uncast)
 	}
 }

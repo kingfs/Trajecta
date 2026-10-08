@@ -567,6 +567,13 @@ type SystemDatabaseTable struct {
 // SystemCheckpointerState reports the checkpointer counters. Postgres 17 moved
 // them from pg_stat_bgwriter into pg_stat_checkpointer and dropped
 // checkpoints_timed/checkpoints_req in favour of num_timed/num_requested.
+//
+// The two time columns are double precision in both the old and the new view
+// (they accumulate milliseconds), so both queries round and cast them to bigint
+// in SQL. Scanning them straight into int64 fails at runtime with "converting
+// driver.Value type float64 to a int64", which is what a live Postgres 17
+// reported before this cast was added - the section came back absent and only a
+// warning was left behind.
 type SystemCheckpointerState struct {
 	Source         string `json:"source"`
 	Timed          int64  `json:"num_timed"`
@@ -979,7 +986,9 @@ LIMIT ` + strconv.Itoa(systemDatabaseListLimit)
 func (s *Store) collectCheckpointer(ctx context.Context, tx *sql.Tx, snapshot *SystemDatabaseSnapshot, versionNum int) error {
 	if versionNum >= 170000 {
 		const query = `
-SELECT num_timed, num_requested, write_time, sync_time, buffers_written
+SELECT num_timed, num_requested,
+       round(write_time)::bigint, round(sync_time)::bigint,
+       buffers_written
 FROM pg_stat_checkpointer`
 		var state SystemCheckpointerState
 		state.Source = "pg_stat_checkpointer"
@@ -992,7 +1001,9 @@ FROM pg_stat_checkpointer`
 	// Postgres 16 and older: the counters live in pg_stat_bgwriter and use the
 	// checkpoints_* names.
 	const query = `
-SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, checkpoint_sync_time, buffers_checkpoint
+SELECT checkpoints_timed, checkpoints_req,
+       round(checkpoint_write_time)::bigint, round(checkpoint_sync_time)::bigint,
+       buffers_checkpoint
 FROM pg_stat_bgwriter`
 	var state SystemCheckpointerState
 	state.Source = "pg_stat_bgwriter"

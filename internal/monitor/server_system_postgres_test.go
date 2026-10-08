@@ -140,9 +140,17 @@ func TestPostgresSystemDatabaseAPI(t *testing.T) {
 	}
 	// SET LOCAL inside the read-only transaction must have been accepted; a
 	// warning here means the page's own timeout is not actually applied.
+	//
+	// A warning about the checkpointer means the section's counters could not be
+	// read at all, which is how a float/integer mismatch in pg_stat_checkpointer
+	// presented on a live Postgres 17: Checkpointer came back nil and the page
+	// silently rendered no checkpointer row.
 	for _, warning := range payload.Warnings {
 		if strings.Contains(warning, "statement timeout") {
 			t.Fatalf("the read-only transaction could not set a statement timeout: %s", warning)
+		}
+		if strings.Contains(warning, "checkpointer") {
+			t.Fatalf("the checkpointer counters could not be read: %s", warning)
 		}
 	}
 }
