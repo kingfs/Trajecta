@@ -123,6 +123,18 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-routed/observation" || path === "/api/traces/trace-routed/findings" || path === "/api/traces/trace-routed/performance") {
       return route.fulfill({ json: {} });
     }
+    if (path === "/api/traces") {
+      return route.fulfill({ json: traceListPayload() });
+    }
+    if (path === "/api/sessions") {
+      return route.fulfill({ json: sessionListPayload() });
+    }
+    if (path === "/api/system/host") {
+      return route.fulfill({ json: systemHostPayload() });
+    }
+    if (path === "/api/system/runtime") {
+      return route.fulfill({ json: systemRuntimePayload() });
+    }
     if (path === "/api/findings") {
       return route.fulfill({ json: { total: 0, items: [] } });
     }
@@ -272,32 +284,98 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByText(/job #301 completed/)).toBeVisible();
 });
 
-test("audit page renders responses audit trace", async ({ page }) => {
+// The audit page became 质量 with a tab strip, and the two halves that used to
+// share one scroll no longer do: lineage is a tab of 质量, while the server-side
+// tool bindings moved to 系统 → 服务端工具.
+test("quality page renders responses audit trace lineage", async ({ page }) => {
   await page.goto("/audit?response_id=resp_123");
-  await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Request lineage" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Server-side tools" })).toBeVisible();
-  await expect(page.getByText("lookup_order")).toBeVisible();
-  await expect(page.getByText("output configured")).toBeVisible();
-  await expect(page.getByText("do-not-leak")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Quality", exact: true })).toBeVisible();
+  // A deep link carrying response_id opens the lineage tab, not the findings tab.
+  await expect(page.getByRole("tab", { name: "Request lineage", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Responses request lineage" })).toBeVisible();
   await expect(page.getByText("audit_resp_123")).toBeVisible();
   await expect(page.getByText("response.request").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "trace-routed" })).toHaveAttribute("href", "/traces/trace-routed");
 });
 
-test("connect page renders protocol entrypoint examples", async ({ page }) => {
+// 请求 and 会话 used to be two sidebar entries and, for 请求, two URLs rendering
+// the same component. They are two tabs of /traces now, with the old addresses
+// redirected so existing links keep working.
+test("traffic page merges requests and sessions behind a tab strip", async ({ page }) => {
+  await page.goto("/traces");
+  await expect(page.getByRole("heading", { name: "Traffic", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Requests", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent requests" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Sessions" }).click();
+  await expect(page).toHaveURL(/\/traces\?tab=sessions$/);
+  await expect(page.getByRole("tab", { name: "Sessions", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent sessions" })).toBeVisible();
+
+  // The tab is URL state, so a reload lands on the same panel.
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Sessions", selected: true })).toBeVisible();
+
+  await page.goto("/requests");
+  await expect(page).toHaveURL(/\/traces$/);
+  await page.goto("/sessions");
+  await expect(page).toHaveURL(/\/traces\?tab=sessions$/);
+  await expect(page.getByRole("tab", { name: "Sessions", selected: true })).toBeVisible();
+});
+
+// The system page reads the host, the process and Postgres through three
+// independent endpoints, one per tab.
+test("system runtime tab renders host, disk and network metrics", async ({ page }) => {
+  await page.goto("/system");
+  await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Host resources" })).toBeVisible();
+  await expect(page.getByText("CPU usage")).toBeVisible();
+  await expect(page.getByText("12.5 %")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Go process" })).toBeVisible();
+
+  // Two overlay mounts on the same device collapse into one row that reports
+  // how many mount points it stands for.
+  const diskSection = page.locator(".system-table-row--disk");
+  await expect(diskSection).toHaveCount(2);
+  await expect(diskSection.first()).toContainText("/data");
+  await expect(diskSection.first()).toContainText("+1");
+
+  // Idle container bridges are dropped; only interfaces that moved bytes show.
+  const networkRows = page.locator(".system-table-row--net");
+  await expect(networkRows).toHaveCount(2);
+  // Busiest interface first; the bridge that never carried a byte is gone.
+  await expect(networkRows.first()).toContainText("eth0");
+  await expect(networkRows.last()).toContainText("lo");
+});
+
+test("server-side tool bindings live on the system page", async ({ page }) => {
+  await page.goto("/system?tab=tools");
+  await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Server-side tools", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Server-side tools" })).toBeVisible();
+  await expect(page.getByText("lookup_order")).toBeVisible();
+  await expect(page.getByText("output configured")).toBeVisible();
+  await expect(page.getByText("do-not-leak")).toHaveCount(0);
+});
+
+test("access page renders protocol entrypoint examples", async ({ page }) => {
   await page.goto("/connect");
-  await expect(page.getByRole("heading", { name: "Connect" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Access" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Client setup", selected: true })).toBeVisible();
   await expect(page.getByText("OpenAI-compatible Chat Completions")).toBeVisible();
   await expect(page.getByText("OpenAI Responses / Codex")).toBeVisible();
   await expect(page.getByText("Anthropic Messages / Claude Code")).toBeVisible();
   await expect(page.getByText("/anthropic/messages").first()).toBeVisible();
 });
 
-test("analysis page renders runs and reanalysis jobs", async ({ page }) => {
+// /analysis is a legacy address: it redirects to the analysis tab of 质量,
+// carrying its query string.
+test("legacy /analysis redirects to the analysis tab of the quality page", async ({ page }) => {
   await page.goto("/analysis");
-  await expect(page.getByRole("heading", { name: "Analysis", exact: true })).toBeVisible();
-  await expect(page.getByText("Job queue")).toBeVisible();
+  await expect(page).toHaveURL(/\/audit\?tab=analysis$/);
+  await expect(page.getByRole("heading", { name: "Quality", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Analysis jobs", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job queue" })).toBeVisible();
   await expect(page.getByText("trace_reanalyze")).toBeVisible();
   await expect(page.getByText("session_summary", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Repair token stats" }).click();
@@ -640,6 +718,82 @@ function traceListPayload() {
       cached_tokens: 0,
       is_stream: false,
     }],
+  };
+}
+
+function sessionListPayload() {
+  return {
+    page: 1,
+    page_size: 50,
+    total: 1,
+    total_pages: 1,
+    refreshed_at: new Date().toISOString(),
+    items: [{
+      session_id: "session-a",
+      session_source: "responses",
+      last_model: "gpt-5",
+      providers: ["openai"],
+      first_seen: new Date().toISOString(),
+      last_seen: new Date().toISOString(),
+      request_count: 3,
+      stream_count: 1,
+      failed_request: 0,
+      success_rate: 100,
+      avg_ttft: 120,
+      total_tokens: 340,
+      total_duration_ms: 2400,
+    }],
+  };
+}
+
+function systemHostPayload() {
+  return {
+    generated_at: new Date().toISOString(),
+    unsupported: false,
+    reason: "",
+    host: { hostname: "fixture-host", uptime_seconds: 90_000, kernel: "6.8.0-test" },
+    cpu: {
+      cores: 8, usage_percent: 12.5, user_percent: 9, system_percent: 3, iowait_percent: 0.5,
+      idle_percent: 87.5, load1: 0.4, load5: 0.3, load15: 0.2,
+      per_core_percent: [10, 11, 12, 13, 14, 15, 16, 17],
+    },
+    memory: {
+      total_bytes: 16 * 1024 ** 3, used_bytes: 4 * 1024 ** 3, available_bytes: 12 * 1024 ** 3,
+      used_percent: 25, cached_bytes: 2 * 1024 ** 3, swap_total_bytes: 1024 ** 3,
+      swap_used_bytes: 0, swap_used_percent: 0,
+    },
+    // Two mount points on the same device, plus one that stands alone.
+    disk: [
+      { mount: "/data/docker/volumes/a/_data", filesystem: "ext4", device: "/dev/mapper/vg-data", total_bytes: 100 * 1024 ** 3, used_bytes: 60 * 1024 ** 3, available_bytes: 40 * 1024 ** 3, used_percent: 60 },
+      { mount: "/data", filesystem: "ext4", device: "/dev/mapper/vg-data", total_bytes: 100 * 1024 ** 3, used_bytes: 60 * 1024 ** 3, available_bytes: 40 * 1024 ** 3, used_percent: 60 },
+      { mount: "/", filesystem: "ext4", device: "/dev/mapper/vg-root", total_bytes: 50 * 1024 ** 3, used_bytes: 10 * 1024 ** 3, available_bytes: 40 * 1024 ** 3, used_percent: 20 },
+    ],
+    network: {
+      interfaces: [
+        { name: "lo", loopback: true, rx_bytes: 2048, tx_bytes: 2048, rx_bytes_per_sec: 10, tx_bytes_per_sec: 10 },
+        { name: "eth0", loopback: false, rx_bytes: 4096, tx_bytes: 8192, rx_bytes_per_sec: 20, tx_bytes_per_sec: 40 },
+        { name: "br-idle", loopback: false, rx_bytes: 0, tx_bytes: 0, rx_bytes_per_sec: 0, tx_bytes_per_sec: 0 },
+      ],
+      rx_bytes_per_sec: 30, tx_bytes_per_sec: 50,
+    },
+    process: { pid: 4321, rss_bytes: 64 * 1024 ** 2, vs_z_bytes: 1024 ** 3, cpu_percent: 1.5, threads: 12, open_fds: 21, started_at: new Date().toISOString() },
+    warnings: [],
+  };
+}
+
+function systemRuntimePayload() {
+  return {
+    generated_at: new Date().toISOString(),
+    go_version: "go1.26.5",
+    goos: "linux",
+    goarch: "amd64",
+    num_cpu: 8,
+    gomaxprocs: 8,
+    goroutines: 42,
+    uptime_seconds: 3600,
+    heap: { alloc_bytes: 8 * 1024 ** 2, in_use_bytes: 6 * 1024 ** 2, total_sys_bytes: 32 * 1024 ** 2, objects: 1234, stack_bytes: 512 * 1024 },
+    gc: { cycles: 12, pause_total_ms: 4.5, recent_pause_count: 4, last_gc: new Date().toISOString(), recent_pause_min_ms: 0.1, recent_pause_p50_ms: 0.2, recent_pause_p75_ms: 0.3, recent_pause_max_ms: 0.4 },
+    db_pool: { driver: "postgres", max_open: 10, open: 2, in_use: 1, idle: 1, wait_count: 0, wait_duration_ms: 0, max_idle_closed: 0, max_lifetime_closed: 0 },
   };
 }
 

@@ -9,6 +9,7 @@ export const apiPaths = {
   authTokens: "/api/auth/tokens",
   overview: "/api/overview",
   systemRuntime: "/api/system/runtime",
+  systemHost: "/api/system/host",
   systemDatabase: "/api/system/db",
   systemSlowQueries: "/api/system/slow-queries",
   events: "/api/events",

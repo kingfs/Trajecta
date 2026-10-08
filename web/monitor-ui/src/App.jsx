@@ -1,24 +1,21 @@
 import React, { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
 import { useI18n } from "./lib/i18n";
-import { AnalysisPage } from "./routes/AnalysisPage";
-import { AuditPage } from "./routes/AuditPage";
+import { AccessPage } from "./routes/AccessPage";
 import { ProviderDetailPage } from "./routes/ChannelDetailPage";
 import { ProvidersPage } from "./routes/ChannelsPage";
-import { ConnectPage } from "./routes/ConnectPage";
 import { EventsPage } from "./routes/EventsPage";
 import { ModelDetailPage } from "./routes/ModelDetailPage";
 import { ModelsPage } from "./routes/ModelsPage";
 import { OverviewPage } from "./routes/OverviewPage";
-import { RequestsPage } from "./routes/RequestsPage";
+import { QualityPage } from "./routes/QualityPage";
 import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
-import { SessionsPage } from "./routes/SessionsPage";
 import { SystemPage } from "./routes/SystemPage";
-import { TokensPage } from "./routes/TokensPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
+import { TrafficPage } from "./routes/TrafficPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 
 function App() {
@@ -101,7 +98,7 @@ function App() {
           <label htmlFor="monitor-password">{t("auth.password")}</label>
           <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
-          <button className="ghost-button" type="submit">{t("auth.signIn")}</button>
+          <button className="ghost-button active" type="submit">{t("auth.signIn")}</button>
         </form>
       </div>
     );
@@ -113,29 +110,54 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
+
+          <Route path="/traces" element={<TrafficPage />} />
+          <Route path="/traces/:traceID" element={<TraceDetailPage />} />
+          <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
           <Route path="/events" element={<EventsPage />} />
-          <Route path="/requests" element={<RequestsPage />} />
-          <Route path="/traces" element={<RequestsPage />} />
-          <Route path="/sessions" element={<SessionsPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/models" element={<ModelsPage />} />
-          <Route path="/models/:model" element={<ModelDetailPage />} />
+          <Route path="/audit" element={<QualityPage />} />
+
           <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/providers/:providerID" element={<ProviderDetailPage />} />
-          <Route path="/channels" element={<Navigate to="/providers" replace />} />
-          <Route path="/channels/:channelID" element={<ProviderDetailPage />} />
-          <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/models" element={<ModelsPage />} />
+          <Route path="/models/:model" element={<ModelDetailPage />} />
           <Route path="/routing" element={<RoutingPage />} />
-          <Route path="/analysis" element={<AnalysisPage />} />
-          <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/connect" element={<AccessPage />} />
+
           <Route path="/system" element={<SystemPage />} />
-          <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
           <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
-          <Route path="/traces/:traceID" element={<TraceDetailPage />} />
+
+          {/* Pre-redesign addresses. Everything below redirects, preserving the
+              query string, so bookmarks, external links and the trace detail
+              "back" links keep working. */}
+          <Route path="/requests" element={<LegacyRedirect to="/traces" />} />
+          <Route path="/sessions" element={<LegacyRedirect to="/traces" tab="sessions" />} />
+          <Route path="/analysis" element={<LegacyRedirect to="/audit" tab="analysis" />} />
+          <Route path="/tokens" element={<LegacyRedirect to="/connect" tab="tokens" />} />
+          <Route path="/channels" element={<LegacyRedirect to="/providers" />} />
+          <Route path="/channels/:channelID" element={<LegacyRedirect to="/providers/:channelID" />} />
+          <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </MonitorErrorBoundary>
     </AppShell>
   );
+}
+
+// Tab state lives in the query string, so a redirect to a merged page has to
+// carry both the original parameters and the tab that replaces the old page.
+function LegacyRedirect({ to, tab }) {
+  const location = useLocation();
+  const params = useParams();
+  const path = Object.entries(params).reduce(
+    (resolved, [key, value]) => resolved.replace(`:${key}`, encodeURIComponent(value ?? "")),
+    to,
+  );
+  const search = new URLSearchParams(location.search);
+  if (tab) {
+    search.set("tab", tab);
+  }
+  const query = search.toString();
+  return <Navigate to={query ? `${path}?${query}` : path} replace />;
 }
 
 class MonitorErrorBoundary extends React.Component {
@@ -155,7 +177,7 @@ class MonitorErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="shell shell-list">
+        <main className="shell shell-list">
           <section className="panel">
             <div className="panel-head">
               <div>
@@ -164,7 +186,7 @@ class MonitorErrorBoundary extends React.Component {
             </div>
             <p className="event-message">{this.state.error.message || "The monitor UI hit a rendering error."}</p>
           </section>
-        </div>
+        </main>
       );
     }
     return this.props.children;

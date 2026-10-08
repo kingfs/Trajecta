@@ -1,5 +1,5 @@
 import React from "react";
-import { useI18n } from "../lib/i18n";
+import { useI18n } from "../../lib/i18n";
 
 const baseOrigin = () => {
   if (typeof window === "undefined") {
@@ -8,7 +8,7 @@ const baseOrigin = () => {
   return window.location.origin;
 };
 
-export function ConnectPage() {
+export function ConnectPanel() {
   const { t } = useI18n();
   const origin = baseOrigin();
   const token = "${TRAJECTA_TOKEN}";
@@ -46,24 +46,17 @@ export function ConnectPage() {
   ];
 
   return (
-    <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">{t("connect.clientSetup")}</p>
-          <h1>{t("connect.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge">{origin}</span>
-        </div>
-      </header>
-
+    <>
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("connect.entrypoints")}</p>
             <h2>{t("connect.chooseAPI")}</h2>
           </div>
+          <div className="panel-head-actions">
+            <span className="badge">{origin}</span>
+          </div>
         </div>
+        <p className="system-note">{t("connect.copyHint")}</p>
         <div className="provider-entry-grid">
           {examples.map((item) => (
             <article className="provider-entry-card" key={item.title}>
@@ -83,6 +76,6 @@ export function ConnectPage() {
           ))}
         </div>
       </section>
-    </div>
+    </>
   );
 }
