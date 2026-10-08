@@ -1992,7 +1992,7 @@ func (h *Handler) writeUpstreamResponse(
 	logInfo.Header.Meta.ContentLength = written
 	logInfo.Header.Meta.TTFTMs = ttft
 
-	if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
+	if uErr := h.recorder.SubmitLogFile(logInfo); uErr != nil {
 		slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
 	}
 	h.router.Complete(selection, router.Outcome{
@@ -2133,7 +2133,7 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 		logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, code, duration, ""))
 	}
 
-	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+	if err := h.recorder.SubmitLogFile(logInfo); err != nil {
 		slog.Error("Failed to update synthetic count_tokens log file", "path", logInfo.Path, "err", err)
 	}
 
@@ -2194,6 +2194,36 @@ func anthropicCountTokensStructuralOverhead(body []byte) int {
 
 // closeLogFile closes and removes the log file for a failed attempt so stale
 // recordings from retried targets do not interfere with later lookup.
+// StartFinalizeWorkers turns on the background finalize queue. A handler that
+// never calls it finalises every recording inline, which is what the tests and
+// every short-lived caller want: nothing is queued behind a worker they would
+// have to wait for.
+func (h *Handler) StartFinalizeWorkers() {
+	if h == nil || h.recorder == nil {
+		return
+	}
+	h.recorder.StartFinalizeWorkers()
+}
+
+// FinalizeRecordings waits for the background finalize queue to drain. The
+// server calls it during shutdown, after the HTTP servers stopped accepting
+// requests and before the store is closed, because finalising a recording writes
+// its trace index row and enqueues its parse job.
+func (h *Handler) FinalizeRecordings(ctx context.Context) error {
+	if h == nil || h.recorder == nil {
+		return nil
+	}
+	return h.recorder.Close(ctx)
+}
+
+// FinalizeStats reports how the finalize queue has been used.
+func (h *Handler) FinalizeStats() recorder.FinalizeStats {
+	if h == nil || h.recorder == nil {
+		return recorder.FinalizeStats{}
+	}
+	return h.recorder.FinalizeStats()
+}
+
 func (h *Handler) closeLogFile(logInfo *recorder.LogInfo) {
 	if logInfo == nil || logInfo.File == nil {
 		return
@@ -2447,7 +2477,7 @@ func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Header.Layout.IsStream = false
-	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+	if err := h.recorder.SubmitLogFile(logInfo); err != nil {
 		slog.Error("Failed to update synthetic model-info log file", "path", logInfo.Path, "err", err)
 	}
 }
@@ -2532,7 +2562,7 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 		},
 	})
 
-	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+	if err := h.recorder.SubmitLogFile(logInfo); err != nil {
 		slog.Error("Failed to update selection-failure log file", "path", logInfo.Path, "err", err)
 	}
 }
@@ -2730,7 +2760,7 @@ func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time,
 		Attributes: limitEventAttributes(h.cfg.Limits, statusCode, decision),
 	})
 
-	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+	if err := h.recorder.SubmitLogFile(logInfo); err != nil {
 		slog.Error("Failed to update limit-rejection log file", "path", logInfo.Path, "err", err)
 	}
 }

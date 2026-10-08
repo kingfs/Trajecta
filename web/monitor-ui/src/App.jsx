@@ -16,6 +16,7 @@ import { RequestsPage } from "./routes/RequestsPage";
 import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
 import { SessionsPage } from "./routes/SessionsPage";
+import { SystemPage } from "./routes/SystemPage";
 import { TokensPage } from "./routes/TokensPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
@@ -127,6 +128,7 @@ function App() {
           <Route path="/routing" element={<RoutingPage />} />
           <Route path="/analysis" element={<AnalysisPage />} />
           <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/system" element={<SystemPage />} />
           <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
           <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
           <Route path="/traces/:traceID" element={<TraceDetailPage />} />

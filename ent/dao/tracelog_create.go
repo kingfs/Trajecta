@@ -621,6 +621,76 @@ func (_c *TraceLogCreate) SetNillableRoutingFailureReason(v *string) *TraceLogCr
 	return _c
 }
 
+// SetRouteTargetID sets the "route_target_id" field.
+func (_c *TraceLogCreate) SetRouteTargetID(v string) *TraceLogCreate {
+	_c.mutation.SetRouteTargetID(v)
+	return _c
+}
+
+// SetNillableRouteTargetID sets the "route_target_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableRouteTargetID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetRouteTargetID(*v)
+	}
+	return _c
+}
+
+// SetChannelID sets the "channel_id" field.
+func (_c *TraceLogCreate) SetChannelID(v string) *TraceLogCreate {
+	_c.mutation.SetChannelID(v)
+	return _c
+}
+
+// SetNillableChannelID sets the "channel_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableChannelID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetChannelID(*v)
+	}
+	return _c
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (_c *TraceLogCreate) SetCredentialID(v string) *TraceLogCreate {
+	_c.mutation.SetCredentialID(v)
+	return _c
+}
+
+// SetNillableCredentialID sets the "credential_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableCredentialID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetCredentialID(*v)
+	}
+	return _c
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (_c *TraceLogCreate) SetStickyStatus(v string) *TraceLogCreate {
+	_c.mutation.SetStickyStatus(v)
+	return _c
+}
+
+// SetNillableStickyStatus sets the "sticky_status" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableStickyStatus(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetStickyStatus(*v)
+	}
+	return _c
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (_c *TraceLogCreate) SetStickyPreviousUpstreamID(v string) *TraceLogCreate {
+	_c.mutation.SetStickyPreviousUpstreamID(v)
+	return _c
+}
+
+// SetNillableStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableStickyPreviousUpstreamID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetStickyPreviousUpstreamID(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *TraceLogCreate) SetID(v string) *TraceLogCreate {
 	_c.mutation.SetID(v)
@@ -826,6 +896,26 @@ func (_c *TraceLogCreate) defaults() {
 		v := tracelog.DefaultRoutingFailureReason
 		_c.mutation.SetRoutingFailureReason(v)
 	}
+	if _, ok := _c.mutation.RouteTargetID(); !ok {
+		v := tracelog.DefaultRouteTargetID
+		_c.mutation.SetRouteTargetID(v)
+	}
+	if _, ok := _c.mutation.ChannelID(); !ok {
+		v := tracelog.DefaultChannelID
+		_c.mutation.SetChannelID(v)
+	}
+	if _, ok := _c.mutation.CredentialID(); !ok {
+		v := tracelog.DefaultCredentialID
+		_c.mutation.SetCredentialID(v)
+	}
+	if _, ok := _c.mutation.StickyStatus(); !ok {
+		v := tracelog.DefaultStickyStatus
+		_c.mutation.SetStickyStatus(v)
+	}
+	if _, ok := _c.mutation.StickyPreviousUpstreamID(); !ok {
+		v := tracelog.DefaultStickyPreviousUpstreamID
+		_c.mutation.SetStickyPreviousUpstreamID(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -974,6 +1064,21 @@ func (_c *TraceLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.RoutingFailureReason(); !ok {
 		return &ValidationError{Name: "routing_failure_reason", err: errors.New(`dao: missing required field "TraceLog.routing_failure_reason"`)}
+	}
+	if _, ok := _c.mutation.RouteTargetID(); !ok {
+		return &ValidationError{Name: "route_target_id", err: errors.New(`dao: missing required field "TraceLog.route_target_id"`)}
+	}
+	if _, ok := _c.mutation.ChannelID(); !ok {
+		return &ValidationError{Name: "channel_id", err: errors.New(`dao: missing required field "TraceLog.channel_id"`)}
+	}
+	if _, ok := _c.mutation.CredentialID(); !ok {
+		return &ValidationError{Name: "credential_id", err: errors.New(`dao: missing required field "TraceLog.credential_id"`)}
+	}
+	if _, ok := _c.mutation.StickyStatus(); !ok {
+		return &ValidationError{Name: "sticky_status", err: errors.New(`dao: missing required field "TraceLog.sticky_status"`)}
+	}
+	if _, ok := _c.mutation.StickyPreviousUpstreamID(); !ok {
+		return &ValidationError{Name: "sticky_previous_upstream_id", err: errors.New(`dao: missing required field "TraceLog.sticky_previous_upstream_id"`)}
 	}
 	if v, ok := _c.mutation.ID(); ok {
 		if err := tracelog.IDValidator(v); err != nil {
@@ -1196,6 +1301,26 @@ func (_c *TraceLogCreate) createSpec() (*TraceLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RoutingFailureReason(); ok {
 		_spec.SetField(tracelog.FieldRoutingFailureReason, field.TypeString, value)
 		_node.RoutingFailureReason = value
+	}
+	if value, ok := _c.mutation.RouteTargetID(); ok {
+		_spec.SetField(tracelog.FieldRouteTargetID, field.TypeString, value)
+		_node.RouteTargetID = value
+	}
+	if value, ok := _c.mutation.ChannelID(); ok {
+		_spec.SetField(tracelog.FieldChannelID, field.TypeString, value)
+		_node.ChannelID = value
+	}
+	if value, ok := _c.mutation.CredentialID(); ok {
+		_spec.SetField(tracelog.FieldCredentialID, field.TypeString, value)
+		_node.CredentialID = value
+	}
+	if value, ok := _c.mutation.StickyStatus(); ok {
+		_spec.SetField(tracelog.FieldStickyStatus, field.TypeString, value)
+		_node.StickyStatus = value
+	}
+	if value, ok := _c.mutation.StickyPreviousUpstreamID(); ok {
+		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
+		_node.StickyPreviousUpstreamID = value
 	}
 	return _node, _spec
 }
@@ -1888,6 +2013,66 @@ func (u *TraceLogUpsert) SetRoutingFailureReason(v string) *TraceLogUpsert {
 // UpdateRoutingFailureReason sets the "routing_failure_reason" field to the value that was provided on create.
 func (u *TraceLogUpsert) UpdateRoutingFailureReason() *TraceLogUpsert {
 	u.SetExcluded(tracelog.FieldRoutingFailureReason)
+	return u
+}
+
+// SetRouteTargetID sets the "route_target_id" field.
+func (u *TraceLogUpsert) SetRouteTargetID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldRouteTargetID, v)
+	return u
+}
+
+// UpdateRouteTargetID sets the "route_target_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateRouteTargetID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldRouteTargetID)
+	return u
+}
+
+// SetChannelID sets the "channel_id" field.
+func (u *TraceLogUpsert) SetChannelID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldChannelID, v)
+	return u
+}
+
+// UpdateChannelID sets the "channel_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateChannelID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldChannelID)
+	return u
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (u *TraceLogUpsert) SetCredentialID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldCredentialID, v)
+	return u
+}
+
+// UpdateCredentialID sets the "credential_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateCredentialID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldCredentialID)
+	return u
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (u *TraceLogUpsert) SetStickyStatus(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldStickyStatus, v)
+	return u
+}
+
+// UpdateStickyStatus sets the "sticky_status" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateStickyStatus() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldStickyStatus)
+	return u
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (u *TraceLogUpsert) SetStickyPreviousUpstreamID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldStickyPreviousUpstreamID, v)
+	return u
+}
+
+// UpdateStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateStickyPreviousUpstreamID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldStickyPreviousUpstreamID)
 	return u
 }
 
@@ -2685,6 +2870,76 @@ func (u *TraceLogUpsertOne) SetRoutingFailureReason(v string) *TraceLogUpsertOne
 func (u *TraceLogUpsertOne) UpdateRoutingFailureReason() *TraceLogUpsertOne {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateRoutingFailureReason()
+	})
+}
+
+// SetRouteTargetID sets the "route_target_id" field.
+func (u *TraceLogUpsertOne) SetRouteTargetID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetRouteTargetID(v)
+	})
+}
+
+// UpdateRouteTargetID sets the "route_target_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateRouteTargetID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateRouteTargetID()
+	})
+}
+
+// SetChannelID sets the "channel_id" field.
+func (u *TraceLogUpsertOne) SetChannelID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetChannelID(v)
+	})
+}
+
+// UpdateChannelID sets the "channel_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateChannelID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateChannelID()
+	})
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (u *TraceLogUpsertOne) SetCredentialID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetCredentialID(v)
+	})
+}
+
+// UpdateCredentialID sets the "credential_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateCredentialID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateCredentialID()
+	})
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (u *TraceLogUpsertOne) SetStickyStatus(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetStickyStatus(v)
+	})
+}
+
+// UpdateStickyStatus sets the "sticky_status" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateStickyStatus() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateStickyStatus()
+	})
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (u *TraceLogUpsertOne) SetStickyPreviousUpstreamID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetStickyPreviousUpstreamID(v)
+	})
+}
+
+// UpdateStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateStickyPreviousUpstreamID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateStickyPreviousUpstreamID()
 	})
 }
 
@@ -3649,6 +3904,76 @@ func (u *TraceLogUpsertBulk) SetRoutingFailureReason(v string) *TraceLogUpsertBu
 func (u *TraceLogUpsertBulk) UpdateRoutingFailureReason() *TraceLogUpsertBulk {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateRoutingFailureReason()
+	})
+}
+
+// SetRouteTargetID sets the "route_target_id" field.
+func (u *TraceLogUpsertBulk) SetRouteTargetID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetRouteTargetID(v)
+	})
+}
+
+// UpdateRouteTargetID sets the "route_target_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateRouteTargetID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateRouteTargetID()
+	})
+}
+
+// SetChannelID sets the "channel_id" field.
+func (u *TraceLogUpsertBulk) SetChannelID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetChannelID(v)
+	})
+}
+
+// UpdateChannelID sets the "channel_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateChannelID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateChannelID()
+	})
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (u *TraceLogUpsertBulk) SetCredentialID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetCredentialID(v)
+	})
+}
+
+// UpdateCredentialID sets the "credential_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateCredentialID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateCredentialID()
+	})
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (u *TraceLogUpsertBulk) SetStickyStatus(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetStickyStatus(v)
+	})
+}
+
+// UpdateStickyStatus sets the "sticky_status" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateStickyStatus() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateStickyStatus()
+	})
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (u *TraceLogUpsertBulk) SetStickyPreviousUpstreamID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetStickyPreviousUpstreamID(v)
+	})
+}
+
+// UpdateStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateStickyPreviousUpstreamID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateStickyPreviousUpstreamID()
 	})
 }
 

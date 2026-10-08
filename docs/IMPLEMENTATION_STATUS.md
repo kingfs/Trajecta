@@ -51,13 +51,15 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 当前应用库中的主要表：
 
-- trace 与观测：`logs`、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
+- trace 与观测：`logs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
 - Responses 与审计：`responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`。
 - 渠道与模型：`channel_configs`、`channel_models`、`channel_probe_runs`、`model_catalog`、`model_aliases`、`upstream_targets`、`upstream_models`。
 - eval 与实验：`datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`。
-- 其他：`app_settings`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`users`、`api_tokens`。
+- 其他：`app_settings`、`session_summaries`、`users`、`api_tokens`。
 
-`config inspect`、`db migrate status` 和 `doctor` 会输出 `production_storage_driver=postgres`、`production_ready`、`storage_role`、`storage_contract`。`db migrate status` 与 `db migrate up/down --dry-run` 报告迁移来源：Postgres 为 checked-in SQL，SQLite 为 `internal/store` 启动 DDL fallback；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 与 required table 状态，不创建缺失文件、不做 destructive repair。Postgres 真实检查与代表 runtime SQL 路径由 `TRAJECTA_TEST_POSTGRES_DSN` 门控，默认测试离线。该 DSN 必须指向专用的测试库（例如 `trajecta_scratch`）而不是生产库：`TestMergeSQLiteIntoPostgresIntegration` 这类用例会向 `logs` 写入真实行，指向生产库时会在生产库留下指向不存在 cassette 的索引行。`db summary rebuild overview` 的 Postgres 门禁（`TestDBSummaryRebuildOverviewRepairsDriftPostgres`）例外：它在同一个 server 上自建并删除临时库（`trajecta_overviewtest_<pid>`），只要求 DSN 具备建库权限，不要求 `trajecta_scratch` 为空。
+`semantic_nodes` 与 `overview_metric_buckets` / `overview_metric_bucket_members` 已不再被写入或读取：SQLite 启动 schema 不再建这三张表，必需表检查（`internal/appdbmigrate`、`internal/store`）也不再要求它们；语义节点树改由 Protocol/详情视图按需从 cassette 重解析（`Store.SaveObservation` 只写 `trace_observations` 的紧凑摘要），Overview 直接聚合 `logs`，路由事实则落到 `logs` 新增的 `route_target_id` / `channel_id` / `credential_id` / `sticky_status` / `sticky_previous_upstream_id` 五列上。注意 Postgres 的历史迁移（`20260622130545_add_runtime_store_tables`、`20260703110000_add_overview_metric_buckets`）仍然创建这三张表且没有 drop 迁移，所以新建 Postgres 库经 `db migrate up` 仍会得到三张空表，已有库保留旧数据；代码不会删除它们，回收空间是运维在稳定运行一段时间后手工 `DROP TABLE` 的决定（详见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。派生汇总命令当前只有 `server db summary rebuild sessions`，`server db summary rebuild overview` 已随派生表一起移除。
+
+`config inspect`、`db migrate status` 和 `doctor` 会输出 `production_storage_driver=postgres`、`production_ready`、`storage_role`、`storage_contract`。`db migrate status` 与 `db migrate up/down --dry-run` 报告迁移来源：Postgres 为 checked-in SQL，SQLite 为 `internal/store` 启动 DDL fallback；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 与 required table 状态，不创建缺失文件、不做 destructive repair。Postgres 真实检查与代表 runtime SQL 路径由 `TRAJECTA_TEST_POSTGRES_DSN` 门控，默认测试离线。该 DSN 必须指向专用的测试库（例如 `trajecta_scratch`）而不是生产库：`TestMergeSQLiteIntoPostgresIntegration` 这类用例会向 `logs` 写入真实行，指向生产库时会在生产库留下指向不存在 cassette 的索引行。
 
 Postgres 的 auth 表由 application migration set 拥有：`auth migrate up` 复用同一套 checked-in SQL，`auth migrate down` 已被阻止，status/dry-run 报告 `effective_database_namespace=application`、`schema_authority=application_postgres_migration_set`、`storage_contract=postgres_application_schema_owns_auth_tables`、`postgres_auth_namespace_strategy=shared_application_schema_migrations`、`independent_auth_namespace_status=not_implemented`。
 
@@ -112,11 +114,11 @@ YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Mon
 
 ## Monitor
 
-Monitor 是 Go embed 的 React/Vite 前端，当前页面/视角包括：Overview、Events、Sessions、Traces（旧的 `/requests` 入口仍可用）、Audit、Models、Providers（旧的 `/channels` 入口重定向到 `/providers`）、Connect、Routing、Analysis、Tokens，以及 trace／session／provider／model 详情页。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
+Monitor 是 Go embed 的 React/Vite 前端，当前页面/视角包括：Overview、Events、Sessions、Traces（旧的 `/requests` 入口仍可用）、Audit、Models、Providers（旧的 `/channels` 入口重定向到 `/providers`）、Connect、Routing、Analysis、Tokens、System（仅 admin），以及 trace／session／provider／model 详情页。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
 
-Session 详情页提供「导出会话轨迹（ATIF）」动作（UI 标签 `Export trajectory (ATIF)`），已实现从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`：格式固定为 ATIF-v1.8，不调用模型、不修改 cassette。
+Session 详情页提供默认（带上限）与完整流式两种导出（UI 标签 `导出轨迹 (ATIF)` / `完整导出 (NDJSON 流)`），从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`（流式为 `session-<id>.atif.ndjson`）：格式固定为 ATIF-v1.8，默认只重建最早的 500 条 trace 并在响应 `extra` 里给出 `trace_count` / `included_traces` / `truncated` / `trace_cap`，`?full=1` 取消上限，`?stream=1` 走 NDJSON 流式输出；不调用模型、不修改 cassette。接口契约见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
-主要 HTTP API：`/api/overview`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/analysis`、`/api/upstreams`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
+主要 HTTP API：`/api/overview`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/analysis`、`/api/upstreams`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 
 使用说明见 [./MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 
@@ -137,7 +139,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 
 语义解析与派生分析层已实现：
 
-- `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化并可在 trace detail 展示；parser 失败写入 system events。
+- `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化紧凑摘要（parser、status、usage、warnings 等）并可在 trace detail 展示；节点树不落库，Protocol/详情视图打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 重解析；parser 失败写入 system events。
 - deterministic audit detectors：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。
 - 重分析 job 类型：`trace_reparse`、`trace_rescan`、`trace_repair_usage`、`trace_reanalyze`、`session_reanalyze`、`batch_reanalyze`，状态持久化在 `analysis_jobs`。
 - parser/analyzer/router/upstream 事件写入 system events。
@@ -159,7 +161,7 @@ Responses audit 属于部分实现，职责边界如下：
 - 跨协议请求转换网关：转发热路径不做 OpenAI、Anthropic、Gemini、Vertex 之间的请求互转，唯一例外是 `/v1/responses` 本地 runtime 把 Responses 编排为内部 Chat Completions。
 - 公网多租户 API 分发平台，以及计费、充值、订阅销售。
 - 对上游 Responses provider 的 native semantic interposition：native Responses 只做透传，不做语义改写。
-- ATIF 会话轨迹导出的语义重建范围：只重建 `/responses`（OpenAI Responses generation 及 SSE）的 exchange，其他 endpoint（含 compact）保留源 trace 引用并在 `extra.warnings` 报告 `unsupported_endpoint`，不做因果推断；导出在单次请求内同步生成，以一次查询得到的请求集合为快照，生成期间新增的请求不进入本次文件。
+- ATIF 会话轨迹导出的语义重建范围：只重建 `/responses`（OpenAI Responses generation 及 SSE）的 exchange，其他 endpoint（含 compact）保留源 trace 引用并在 `extra.warnings` 报告 `unsupported_endpoint`，不做因果推断；导出以一次查询得到的请求集合为快照，生成期间新增的请求不进入本次文件。默认与 `?full=1` 在服务端组装完整响应（默认只含最早的 500 条 trace），极大会话应使用 `?stream=1` 流式输出。
 - 用结构化数据库替代 raw cassette 作为 replay/详情事实源；也不让 replay 依赖网络访问，更不让测试依赖真实 provider。
 - 完整的 model profile / context optimization，以及复杂组合（未知或未实现 hosted 工具、非平凡 `tool_choice`）在 auto compact 后的真实增量本地 Responses streaming。
 - `external_command` executor 的 root/container 级沙箱：当前只有 opt-in 的 working directory、绝对 command、allowed_command_dirs、reject_root 轻量进程隔离。

@@ -32,6 +32,7 @@ export function SessionDetailPage() {
   const [jobNotice, setJobNotice] = useState(null);
   const [jobBusy, setJobBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [fullExportBusy, setFullExportBusy] = useState(false);
   const [exportNotice, setExportNotice] = useState(null);
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
   const summary = detail.data?.summary;
@@ -43,21 +44,33 @@ export function SessionDetailPage() {
   const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
   const failureContexts = buildFailureContexts(timeline);
 
+  const downloadSessionExport = async (path, extension) => {
+    const blob = await downloadBlob(path);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `session-${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return blob;
+  };
+
   const exportTrajectory = async () => {
     setExportBusy(true);
     setExportNotice(null);
-    let url;
     try {
-      const blob = await downloadBlob(apiPaths.sessionTrajectory(sessionID));
+      const blob = await downloadSessionExport(apiPaths.sessionTrajectory(sessionID), ".atif.jsonl");
       const trajectory = JSON.parse(await blob.text());
-      url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `session-${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}.atif.jsonl`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
       const warnings = trajectory.extra?.warnings?.length || 0;
+      if (trajectory.extra?.truncated) {
+        setExportNotice({
+          tone: "default",
+          text: t("sessionDetail.exportTruncated", { included: trajectory.extra?.included_traces ?? 0, total: trajectory.extra?.trace_count ?? 0 }),
+        });
+        return;
+      }
       setExportNotice({
         tone: warnings ? "danger" : "green",
         text: warnings
@@ -67,8 +80,20 @@ export function SessionDetailPage() {
     } catch (error) {
       setExportNotice({ tone: "danger", text: error.message || t("sessionDetail.exportError") });
     } finally {
-      if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setExportBusy(false);
+    }
+  };
+
+  const exportFullTrajectory = async () => {
+    setFullExportBusy(true);
+    setExportNotice(null);
+    try {
+      await downloadSessionExport(apiPaths.sessionTrajectory(sessionID, { full: true, stream: true }), ".atif.ndjson");
+      setExportNotice({ tone: "green", text: t("sessionDetail.exportFullDone") });
+    } catch (error) {
+      setExportNotice({ tone: "danger", text: error.message || t("sessionDetail.exportError") });
+    } finally {
+      setFullExportBusy(false);
     }
   };
 
@@ -112,8 +137,11 @@ export function SessionDetailPage() {
             <Link className="icon-button" to="/sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
               <HomeIcon />
             </Link>
-            <button className="ghost-button" type="button" disabled={exportBusy || !detail.data} onClick={exportTrajectory}>
+            <button className="ghost-button" type="button" disabled={exportBusy || fullExportBusy || !detail.data} onClick={exportTrajectory}>
               {exportBusy ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
+            </button>
+            <button className="ghost-button" type="button" disabled={exportBusy || fullExportBusy || !detail.data} onClick={exportFullTrajectory}>
+              {fullExportBusy ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectoryFull")}
             </button>
             <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
               {jobBusy ? t("analysis.queueing") : t("sessionDetail.refreshAnalysis")}

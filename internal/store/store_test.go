@@ -95,7 +95,10 @@ func TestNewInitializesAnalyticsIndexes(t *testing.T) {
 		"requestaudit_created_at_id":                {"created_at", "id"},
 		"toolcallaudit_created_at_id":               {"created_at", "id"},
 		"analysisrun_created_at_id":                 {"created_at", "id"},
-		"tracefinding_severity_created_at":          {"severity", "created_at"},
+		"analysisjob_created_at_id":                 {"created_at", "id"},
+		"tracefinding_created_at_id":                {"created_at", "id"},
+		"tracefinding_severity_created_at_id":       {"severity", "created_at", "id"},
+		"tracelog_recorded_at_sticky":               {"recorded_at", "sticky_status"},
 	}
 	for name, want := range expected {
 		t.Run(name, func(t *testing.T) {
@@ -140,131 +143,6 @@ func TestNewInitializesAppSettingsSchema(t *testing.T) {
 	}
 	if name != "app_settings" {
 		t.Fatalf("sqlite table = %q, want app_settings", name)
-	}
-}
-
-func TestNewInitializesOverviewMetricBucketSchema(t *testing.T) {
-	st, err := New(t.TempDir())
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	for _, table := range []string{"overview_metric_buckets", "overview_metric_bucket_members"} {
-		t.Run(table, func(t *testing.T) {
-			var name string
-			if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
-				t.Fatalf("query sqlite_master table %q error = %v", table, err)
-			}
-			if name != table {
-				t.Fatalf("sqlite table = %q, want %q", name, table)
-			}
-		})
-	}
-}
-
-func TestOverviewMetricBucketsTrackLogUpsertDeltas(t *testing.T) {
-	dir := t.TempDir()
-	st, err := New(dir)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	recordPath := filepath.Join(dir, "overview-delta.http")
-	if err := os.WriteFile(recordPath, []byte("# delta\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(record) error = %v", err)
-	}
-	firstHour := time.Date(2026, 7, 3, 8, 15, 0, 0, time.UTC)
-	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
-	header.Meta.RequestID = "req-overview-delta-1"
-	header.Meta.Time = firstHour
-	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
-	header.Meta.Method = http.MethodPost
-	header.Meta.StatusCode = http.StatusOK
-	header.Meta.Model = "gpt-overview"
-	header.Meta.ExchangeKind = "entry"
-	header.Meta.TTFTMs = 120
-	header.Meta.DurationMs = 900
-	header.Usage.TotalTokens = 42
-	header.Layout.IsStream = true
-	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
-		t.Fatalf("UpsertLogWithGrouping(first) error = %v", err)
-	}
-
-	st.flushDerivedRefresh()
-	firstBucket := readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
-	if firstBucket.requestCount != 1 || firstBucket.successRequest != 1 || firstBucket.failedRequest != 0 ||
-		firstBucket.totalTokens != 42 || firstBucket.ttftSum != 120 || firstBucket.ttftCount != 1 ||
-		firstBucket.durationSum != 900 || firstBucket.durationCount != 1 || firstBucket.streamCount != 1 {
-		t.Fatalf("first bucket = %+v", firstBucket)
-	}
-
-	secondHour := firstHour.Add(time.Hour)
-	header.Meta.RequestID = "req-overview-delta-2"
-	header.Meta.Time = secondHour
-	header.Meta.StatusCode = http.StatusInternalServerError
-	header.Meta.Error = "upstream failed"
-	header.Meta.TTFTMs = 0
-	header.Meta.DurationMs = 300
-	header.Usage.TotalTokens = 7
-	header.Layout.IsStream = false
-	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
-		t.Fatalf("UpsertLogWithGrouping(second) error = %v", err)
-	}
-
-	st.flushDerivedRefresh()
-	firstBucket = readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
-	if firstBucket.requestCount != 0 || firstBucket.successRequest != 0 || firstBucket.totalTokens != 0 ||
-		firstBucket.ttftSum != 0 || firstBucket.streamCount != 0 {
-		t.Fatalf("first bucket after overwrite = %+v, want old contribution removed", firstBucket)
-	}
-	secondBucket := readOverviewMetricBucketForTest(t, st, secondHour.Truncate(time.Hour))
-	if secondBucket.requestCount != 1 || secondBucket.successRequest != 0 || secondBucket.failedRequest != 1 ||
-		secondBucket.totalTokens != 7 || secondBucket.ttftCount != 0 ||
-		secondBucket.durationSum != 300 || secondBucket.durationCount != 1 || secondBucket.streamCount != 0 {
-		t.Fatalf("second bucket = %+v", secondBucket)
-	}
-}
-
-func TestOverviewMetricBucketsRefreshAfterUsageUpdate(t *testing.T) {
-	dir := t.TempDir()
-	st, err := New(dir)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	recordPath := filepath.Join(dir, "overview-usage.http")
-	if err := os.WriteFile(recordPath, []byte("# usage\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(record) error = %v", err)
-	}
-	recordedAt := time.Date(2026, 7, 3, 9, 5, 0, 0, time.UTC)
-	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
-	header.Meta.RequestID = "req-overview-usage"
-	header.Meta.Time = recordedAt
-	header.Meta.URL = "https://api.openai.com/v1/responses"
-	header.Meta.Method = http.MethodPost
-	header.Meta.StatusCode = http.StatusOK
-	header.Meta.Model = "gpt-overview"
-	header.Meta.ExchangeKind = "entry"
-	header.Usage.TotalTokens = 1
-	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
-		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
-	}
-
-	var traceID string
-	if err := st.db.QueryRow(`SELECT trace_id FROM logs WHERE path = ?`, recordPath).Scan(&traceID); err != nil {
-		t.Fatalf("query trace_id error = %v", err)
-	}
-	if err := st.UpdateLogUsage(traceID, recordfile.UsageInfo{PromptTokens: 10, CompletionTokens: 15, TotalTokens: 25}); err != nil {
-		t.Fatalf("UpdateLogUsage() error = %v", err)
-	}
-
-	st.flushDerivedRefresh()
-	bucket := readOverviewMetricBucketForTest(t, st, recordedAt.Truncate(time.Hour))
-	if bucket.requestCount != 1 || bucket.totalTokens != 25 {
-		t.Fatalf("bucket after usage update = %+v, want one request and refreshed token total", bucket)
 	}
 }
 
@@ -335,63 +213,6 @@ func TestOverviewPercentilesIgnoreZeroSamples(t *testing.T) {
 	}
 	if dashboard.Summary.P95TTFTMs != 0 || dashboard.Summary.P95DurationMs != 0 {
 		t.Fatalf("zeroed p95 = ttft:%d duration:%d, want 0/0", dashboard.Summary.P95TTFTMs, dashboard.Summary.P95DurationMs)
-	}
-}
-
-func TestRebuildOverviewMetricBucketsFromLogs(t *testing.T) {
-	dir := t.TempDir()
-	st, err := New(dir)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	base := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		name         string
-		statusCode   int
-		errorText    string
-		totalTokens  int
-		exchangeKind string
-	}{
-		{name: "success", statusCode: http.StatusOK, totalTokens: 11, exchangeKind: "entry"},
-		{name: "failed", statusCode: http.StatusTooManyRequests, errorText: "rate limited", totalTokens: 3, exchangeKind: "proxy"},
-		{name: "child-model", statusCode: http.StatusOK, totalTokens: 99, exchangeKind: "model"},
-	} {
-		recordPath := filepath.Join(dir, tc.name+".http")
-		if err := os.WriteFile(recordPath, []byte("# "+tc.name+"\n"), 0o644); err != nil {
-			t.Fatalf("WriteFile(%q) error = %v", tc.name, err)
-		}
-		header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
-		header.Meta.RequestID = "req-overview-rebuild-" + tc.name
-		header.Meta.Time = base.Add(5 * time.Minute)
-		header.Meta.URL = "https://api.openai.com/v1/chat/completions"
-		header.Meta.Method = http.MethodPost
-		header.Meta.StatusCode = tc.statusCode
-		header.Meta.Error = tc.errorText
-		header.Meta.Model = "gpt-overview"
-		header.Meta.ExchangeKind = tc.exchangeKind
-		header.Meta.TTFTMs = 50
-		header.Meta.DurationMs = 100
-		header.Usage.TotalTokens = tc.totalTokens
-		if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
-			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", tc.name, err)
-		}
-	}
-	if _, err := st.db.Exec(`DELETE FROM overview_metric_bucket_members`); err != nil {
-		t.Fatalf("delete members error = %v", err)
-	}
-	if _, err := st.db.Exec(`DELETE FROM overview_metric_buckets`); err != nil {
-		t.Fatalf("delete buckets error = %v", err)
-	}
-
-	if err := st.RebuildOverviewMetricBuckets(); err != nil {
-		t.Fatalf("RebuildOverviewMetricBuckets() error = %v", err)
-	}
-	bucket := readOverviewMetricBucketForTest(t, st, base)
-	if bucket.requestCount != 2 || bucket.successRequest != 1 || bucket.failedRequest != 1 ||
-		bucket.totalTokens != 14 || bucket.ttftCount != 2 || bucket.durationCount != 2 {
-		t.Fatalf("rebuilt bucket = %+v", bucket)
 	}
 }
 
@@ -532,42 +353,6 @@ func writeBackfillCassetteForTest(t *testing.T, path string, header recordfile.R
 	}
 }
 
-type overviewMetricBucketForTest struct {
-	requestCount   int64
-	successRequest int64
-	failedRequest  int64
-	totalTokens    int64
-	ttftSum        int64
-	ttftCount      int64
-	durationSum    int64
-	durationCount  int64
-	streamCount    int64
-}
-
-func readOverviewMetricBucketForTest(t *testing.T, st *Store, bucketStart time.Time) overviewMetricBucketForTest {
-	t.Helper()
-	var bucket overviewMetricBucketForTest
-	if err := st.db.QueryRow(`
-		SELECT request_count, success_request, failed_request, total_tokens,
-			ttft_sum, ttft_count, duration_sum, duration_count, stream_count
-		FROM overview_metric_buckets
-		WHERE bucket_start = ? AND bucket_size_seconds = ?
-	`, bucketStart.UTC().Format(timeLayout), int(overviewMetricBucketSize/time.Second)).Scan(
-		&bucket.requestCount,
-		&bucket.successRequest,
-		&bucket.failedRequest,
-		&bucket.totalTokens,
-		&bucket.ttftSum,
-		&bucket.ttftCount,
-		&bucket.durationSum,
-		&bucket.durationCount,
-		&bucket.streamCount,
-	); err != nil {
-		t.Fatalf("query overview_metric_buckets at %s error = %v", bucketStart.Format(timeLayout), err)
-	}
-	return bucket
-}
-
 func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {
@@ -577,7 +362,7 @@ func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
 
 	invalidText := string([]byte{'o', 'k', ' ', 0xe8})
 	invalidRaw := json.RawMessage([]byte{'{', '"', 't', 'e', 'x', 't', '"', ':', '"', 0xe8, '"', '}'})
-	if err := st.SaveObservation(observe.TraceObservation{
+	observation := observe.TraceObservation{
 		TraceID:       "trace-invalid-utf8",
 		Provider:      "openai_compatible",
 		Operation:     "chat.completions",
@@ -595,22 +380,32 @@ func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
 				Raw:            invalidRaw,
 			}},
 		},
-	}); err != nil {
+	}
+	// Malformed client bytes must not fail the write: the cassette holds them
+	// verbatim and the parse that produced this observation already went through
+	// them. Only the compact summary reaches the database, and it has to survive
+	// the round trip as valid UTF-8.
+	if err := st.SaveObservation(observation); err != nil {
 		t.Fatalf("SaveObservation() error = %v", err)
 	}
 
-	nodes, err := st.ListSemanticNodes("trace-invalid-utf8")
+	summary, err := st.GetObservationSummary("trace-invalid-utf8")
 	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
+		t.Fatalf("GetObservationSummary() error = %v", err)
 	}
+	if !utf8.ValidString(summary.SummaryJSON) {
+		t.Fatalf("summary json is not valid UTF-8: %q", summary.SummaryJSON)
+	}
+
+	// The node tree is no longer persisted, so the malformed text travels from the
+	// observation to the detail view unchanged; this pins that flattening it does
+	// not corrupt the bytes on the way.
+	nodes := observe.FlattenObservationNodes(observation)
 	if len(nodes) != 1 {
 		t.Fatalf("nodes = %d, want 1", len(nodes))
 	}
-	if !utf8.ValidString(nodes[0].Node.Text) {
-		t.Fatalf("node text is not valid UTF-8: %q", nodes[0].Node.Text)
-	}
-	if !utf8.Valid(nodes[0].Node.Raw) {
-		t.Fatalf("node raw is not valid UTF-8: %q", string(nodes[0].Node.Raw))
+	if nodes[0].Node.Text != invalidText {
+		t.Fatalf("flattened node text = %q, want %q", nodes[0].Node.Text, invalidText)
 	}
 }
 
@@ -1041,17 +836,6 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	if stats.TotalRequest == 0 || stats.SuccessRequest == 0 {
 		t.Fatalf("Stats(postgres) = %+v, want successful smoke request included", stats)
 	}
-	var bucketRequests int
-	if err := st.db.QueryRow(`
-		SELECT request_count
-		FROM overview_metric_buckets
-		WHERE bucket_start = ? AND bucket_size_seconds = ?
-	`, header.Meta.Time.UTC().Truncate(time.Hour).Format(timeLayout), int(overviewMetricBucketSize/time.Second)).Scan(&bucketRequests); err != nil {
-		t.Fatalf("query overview_metric_buckets(postgres) error = %v", err)
-	}
-	if bucketRequests == 0 {
-		t.Fatalf("overview_metric_buckets(postgres) request_count = 0, want smoke request included")
-	}
 	page, err := st.ListPage(1, 10, ListFilter{
 		Provider:          "openai_compatible",
 		Endpoint:          "chat/completions",
@@ -1141,12 +925,12 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveObservation(postgres) error = %v", err)
 	}
-	nodes, err := st.ListSemanticNodes(observationTraceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes(postgres) error = %v", err)
-	}
-	if len(nodes) != 1 || nodes[0].Node.Text != "hello postgres" {
-		t.Fatalf("postgres semantic nodes = %+v, want one saved node", nodes)
+	// The node tree is no longer written, so the Postgres smoke check covers the
+	// summary row it does write.
+	if summary, summaryErr := st.GetObservationSummary(observationTraceID); summaryErr != nil {
+		t.Fatalf("GetObservationSummary(postgres) error = %v", summaryErr)
+	} else if summary.Model != "gpt-test" {
+		t.Fatalf("postgres observation summary = %+v", summary)
 	}
 
 	if err := st.SaveFindings(observationTraceID, []observe.Finding{{
@@ -1475,7 +1259,7 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 			{query: `DELETE FROM eval_runs WHERE id = ? OR dataset_id = ?`, args: []any{evalRunID, datasetID}},
 			{query: `DELETE FROM dataset_examples WHERE dataset_id = ? OR trace_id = ?`, args: []any{datasetID, traceID}},
 			{query: `DELETE FROM datasets WHERE id = ?`, args: []any{datasetID}},
-			{query: `DELETE FROM logs WHERE id = ? OR request_id = ?`, args: []any{traceID, requestID}},
+			{query: `DELETE FROM logs WHERE trace_id = ? OR request_id = ?`, args: []any{traceID, requestID}},
 		} {
 			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
 				t.Logf("cleanup %q error = %v", cleanup.query, err)
@@ -2364,14 +2148,19 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 	if upstream.RequestCount != 2 || upstream.SuccessRequest != 1 || upstream.FailedRequest != 1 || upstream.TotalTokens != 12 {
 		t.Fatalf("upstream analytics = %#v, want request/success/failure/tokens 2/1/1/12", upstream)
 	}
-	if upstream.LastModel != model || !containsString(upstream.Models, model) {
-		t.Fatalf("upstream models = last:%q models:%#v, want %q", upstream.LastModel, upstream.Models, model)
+	// The coverage list reports the model the way every other model list in the
+	// index does - lowercased, because model identity is case-insensitive (see
+	// TestUpstreamModelCoverageTreatsModelCasingAsOneModel). The suffix carries
+	// this test's mixed-case name, so it has to be lowered here too.
+	wantModel := strings.ToLower(model)
+	if upstream.LastModel != wantModel || !containsString(upstream.Models, wantModel) {
+		t.Fatalf("upstream models = last:%q models:%#v, want %q", upstream.LastModel, upstream.Models, wantModel)
 	}
 	if len(upstream.RecentFailures) != 1 || upstream.RecentFailures[0].Reason != "rate_limited" {
 		t.Fatalf("upstream failures = %#v, want one rate_limited failure", upstream.RecentFailures)
 	}
 
-	detail, err := st.GetUpstreamDetail(upstreamID, base.Add(-time.Minute), model, 10, time.Hour, 3)
+	detail, err := st.GetUpstreamDetail(upstreamID, base.Add(-time.Minute), model, 10, time.Hour, 3, nil)
 	if err != nil {
 		t.Fatalf("GetUpstreamDetail(postgres) error = %v", err)
 	}
@@ -2382,7 +2171,7 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 		t.Fatalf("detail failure reasons = %#v, want rate_limited", detail.FailureReasons)
 	}
 
-	routing, err := st.GetRoutingFailureAnalytics(base.Add(-time.Minute), model, 5, 5, time.Hour, 3)
+	routing, err := st.GetRoutingFailureAnalytics(base.Add(-time.Minute), model, 5, 5, time.Hour, 3, nil)
 	if err != nil {
 		t.Fatalf("GetRoutingFailureAnalytics(postgres) error = %v", err)
 	}
@@ -2519,7 +2308,7 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 		}
 	}
 
-	detail, err := st.GetModelDetailAnalytics(model, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4)
+	detail, err := st.GetModelDetailAnalytics(model, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4, nil)
 	if err != nil {
 		t.Fatalf("GetModelDetailAnalytics(postgres) error = %v", err)
 	}
@@ -2534,7 +2323,7 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 		t.Fatalf("last trend = %+v, want request/failure/missing/tokens 3/1/1/150", lastTrend)
 	}
 
-	traceOnlyDetail, err := st.GetModelDetailAnalytics(traceModel, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4)
+	traceOnlyDetail, err := st.GetModelDetailAnalytics(traceModel, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4, nil)
 	if err != nil {
 		t.Fatalf("GetModelDetailAnalytics(trace-only postgres) error = %v", err)
 	}
@@ -2629,7 +2418,7 @@ func TestPostgresChannelAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 		t.Fatalf("channel summary = %+v, want requests/success/failure/missing/tokens 5/4/1/2/175", summary)
 	}
 
-	trends, err := st.GetChannelUsageTrends(channelID, base.Add(-time.Minute), time.Hour, 3)
+	trends, err := st.GetChannelUsageTrends(channelID, base.Add(-time.Minute), time.Hour, 3, nil)
 	if err != nil {
 		t.Fatalf("GetChannelUsageTrends(postgres) error = %v", err)
 	}
@@ -3060,7 +2849,7 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 		t.Fatalf("summary = %+v", item.Summary)
 	}
 
-	detail, err := st.GetModelDetailAnalytics("gpt-5", now.Add(-24*time.Hour), startOfDayForTest(now), time.Hour, 24)
+	detail, err := st.GetModelDetailAnalytics("gpt-5", now.Add(-24*time.Hour), startOfDayForTest(now), time.Hour, 24, nil)
 	if err != nil {
 		t.Fatalf("GetModelDetailAnalytics() error = %v", err)
 	}
@@ -3211,12 +3000,12 @@ func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
 	bucketSize := time.Hour
 	bucketCount := 4
 
-	batched, err := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount)
+	batched, err := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount, nil)
 	if err != nil {
 		t.Fatalf("GetChannelUsageTrendsBatch() error = %v", err)
 	}
 	for _, channelID := range []string{"alpha", "beta"} {
-		want, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount)
+		want, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetChannelUsageTrends(%s) error = %v", channelID, err)
 		}
@@ -3737,15 +3526,12 @@ func TestDerivedRefreshIsDeferredAndAppliedOnRead(t *testing.T) {
 	if logsCount != 2 {
 		t.Fatalf("logs count = %d, want 2", logsCount)
 	}
-	var summaries, buckets int
+	var summaries int
 	if err := st.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaries); err != nil {
 		t.Fatalf("count session_summaries error = %v", err)
 	}
-	if err := st.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_buckets`).Scan(&buckets); err != nil {
-		t.Fatalf("count overview_metric_buckets error = %v", err)
-	}
-	if summaries != 0 || buckets != 0 {
-		t.Fatalf("derived rows after write = summaries:%d buckets:%d, want 0/0 (deferred)", summaries, buckets)
+	if summaries != 0 {
+		t.Fatalf("derived rows after write = %d, want 0 (deferred)", summaries)
 	}
 
 	// Reading the session list is the barrier that applies them.
@@ -3756,10 +3542,6 @@ func TestDerivedRefreshIsDeferredAndAppliedOnRead(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].SessionID != "sess-deferred" || page.Items[0].RequestCount != 2 {
 		t.Fatalf("ListSessionPage() items = %#v, want one session with 2 requests", page.Items)
-	}
-	bucket := readOverviewMetricBucketForTest(t, st, base)
-	if bucket.requestCount != 2 || bucket.totalTokens != 0 || bucket.ttftCount != 2 {
-		t.Fatalf("bucket after read = %+v", bucket)
 	}
 
 	// A fresh writer applies the deferred work as soon as the queue reaches the
@@ -3814,13 +3596,6 @@ func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
 		t.Fatalf("session summary = requests:%d failed:%d tokens:%d, want 3/1/30", requestCount, failedCount, totalTokens)
 	}
 
-	bucket := readOverviewMetricBucketForTest(t, st, base)
-	if bucket.requestCount != 4 || bucket.successRequest != 3 || bucket.failedRequest != 1 ||
-		bucket.totalTokens != 100 || bucket.ttftSum != 140 || bucket.ttftCount != 4 ||
-		bucket.durationSum != 940 || bucket.durationCount != 4 || bucket.streamCount != 2 {
-		t.Fatalf("bucket after first sync = %+v", bucket)
-	}
-
 	// A second walk with no changed file must leave the derived tables alone.
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() (second) error = %v", err)
@@ -3830,162 +3605,6 @@ func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
 	}
 	if requestCount != 3 {
 		t.Fatalf("session summary after second sync = %d, want 3", requestCount)
-	}
-	if again := readOverviewMetricBucketForTest(t, st, base); again != bucket {
-		t.Fatalf("bucket after second sync = %+v, want %+v", again, bucket)
-	}
-}
-
-// overviewMetricStateForTest renders both derived tables as ordered lines so two
-// refresh strategies can be compared field by field.
-func overviewMetricStateForTest(t *testing.T, st *Store) string {
-	t.Helper()
-
-	lines := make([]string, 0, 8)
-	rows, err := st.db.Query(`
-		SELECT bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
-		FROM overview_metric_buckets
-		ORDER BY bucket_start, bucket_size_seconds
-	`)
-	if err != nil {
-		t.Fatalf("query overview_metric_buckets error = %v", err)
-	}
-	for rows.Next() {
-		var (
-			bucketStart any
-			size        int64
-			values      [9]int64
-		)
-		if err := rows.Scan(
-			&bucketStart,
-			&size,
-			&values[0],
-			&values[1],
-			&values[2],
-			&values[3],
-			&values[4],
-			&values[5],
-			&values[6],
-			&values[7],
-			&values[8],
-		); err != nil {
-			rows.Close()
-			t.Fatalf("scan overview_metric_buckets error = %v", err)
-		}
-		parsed, err := timeParseValue(bucketStart)
-		if err != nil {
-			rows.Close()
-			t.Fatalf("parse bucket_start error = %v", err)
-		}
-		lines = append(lines, fmt.Sprintf("bucket %s %d %v", parsed.UTC().Format(timeLayout), size, values))
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatalf("iterate overview_metric_buckets error = %v", err)
-	}
-	rows.Close()
-
-	rows, err = st.db.Query(`
-		SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
-		FROM overview_metric_bucket_members
-		ORDER BY path
-	`)
-	if err != nil {
-		t.Fatalf("query overview_metric_bucket_members error = %v", err)
-	}
-	for rows.Next() {
-		var (
-			path        string
-			bucketStart any
-			size        int64
-			values      [9]int64
-		)
-		if err := rows.Scan(
-			&path,
-			&bucketStart,
-			&size,
-			&values[0],
-			&values[1],
-			&values[2],
-			&values[3],
-			&values[4],
-			&values[5],
-			&values[6],
-			&values[7],
-			&values[8],
-		); err != nil {
-			rows.Close()
-			t.Fatalf("scan overview_metric_bucket_members error = %v", err)
-		}
-		parsed, err := timeParseValue(bucketStart)
-		if err != nil {
-			rows.Close()
-			t.Fatalf("parse member bucket_start error = %v", err)
-		}
-		lines = append(lines, fmt.Sprintf("member %s %s %d %v", path, parsed.UTC().Format(timeLayout), size, values))
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatalf("iterate overview_metric_bucket_members error = %v", err)
-	}
-	rows.Close()
-
-	return strings.Join(lines, "\n")
-}
-
-func TestBatchedOverviewMetricRefreshMatchesPerPath(t *testing.T) {
-	dir := t.TempDir()
-	st, err := New(dir)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
-	writeSessionSummaryTestLog(t, st, dir, "batch-a.http", "sess-batch", base, http.StatusOK, 20, 10, true)
-	writeSessionSummaryTestLog(t, st, dir, "batch-b.http", "sess-batch", base.Add(5*time.Minute), http.StatusInternalServerError, 30, 20, false)
-	writeSessionSummaryTestLog(t, st, dir, "batch-c.http", "sess-other", base.Add(80*time.Minute), http.StatusOK, 40, 30, true)
-
-	paths := []string{
-		filepath.Join(dir, "batch-a.http"),
-		filepath.Join(dir, "batch-b.http"),
-		filepath.Join(dir, "batch-c.http"),
-	}
-	st.flushDerivedRefresh()
-	perPath := overviewMetricStateForTest(t, st)
-
-	// Rebuild the same state from scratch through the batched entry point: the
-	// two strategies must agree on every bucket and member field.
-	if _, err := st.db.Exec(`DELETE FROM overview_metric_bucket_members`); err != nil {
-		t.Fatalf("delete members error = %v", err)
-	}
-	if _, err := st.db.Exec(`DELETE FROM overview_metric_buckets`); err != nil {
-		t.Fatalf("delete buckets error = %v", err)
-	}
-	if err := st.refreshOverviewMetricBuckets(paths); err != nil {
-		t.Fatalf("refreshOverviewMetricBuckets() error = %v", err)
-	}
-	if batched := overviewMetricStateForTest(t, st); batched != perPath {
-		t.Fatalf("batched refresh state =\n%s\nwant\n%s", batched, perPath)
-	}
-
-	// A path whose index row disappeared must lose its member row and its bucket
-	// contribution through the batched path exactly like the per-path one.
-	if _, err := st.db.Exec(`DELETE FROM logs WHERE path = ?`, filepath.Join(dir, "batch-c.http")); err != nil {
-		t.Fatalf("delete log row error = %v", err)
-	}
-	if err := st.refreshOverviewMetricBuckets(paths); err != nil {
-		t.Fatalf("refreshOverviewMetricBuckets() (after delete) error = %v", err)
-	}
-	batchedAfterDelete := overviewMetricStateForTest(t, st)
-
-	if err := st.RefreshOverviewMetricBucketForPath(filepath.Join(dir, "batch-c.http")); err != nil {
-		t.Fatalf("RefreshOverviewMetricBucketForPath() error = %v", err)
-	}
-	if perPathAfterDelete := overviewMetricStateForTest(t, st); perPathAfterDelete != batchedAfterDelete {
-		t.Fatalf("per-path refresh after delete =\n%s\nwant\n%s", perPathAfterDelete, batchedAfterDelete)
 	}
 }
 
@@ -5800,7 +5419,7 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	writeLog("match-b.http", base.Add(2*time.Minute), "/v1/chat/completions", "gpt-5", 503, 0, "upstream overloaded")
 	writeLog("other-model.http", base.Add(3*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, 10, "")
 
-	detail, err := st.GetUpstreamDetail("openai-primary", time.Time{}, "gpt-5", 10, time.Minute, 4)
+	detail, err := st.GetUpstreamDetail("openai-primary", time.Time{}, "gpt-5", 10, time.Minute, 4, nil)
 	if err != nil {
 		t.Fatalf("GetUpstreamDetail() error = %v", err)
 	}
@@ -5886,7 +5505,7 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	writeLog("reason-c.http", base.Add(3*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", base.Add(4*time.Minute), "gemini-2.5-flash", "no_supporting_target")
 
-	analytics, err := st.GetRoutingFailureAnalytics(time.Time{}, "gpt-5", 5, 5, time.Hour, 6)
+	analytics, err := st.GetRoutingFailureAnalytics(time.Time{}, "gpt-5", 5, 5, time.Hour, 6, nil)
 	if err != nil {
 		t.Fatalf("GetRoutingFailureAnalytics() error = %v", err)
 	}
@@ -5917,7 +5536,7 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	}
 }
 
-func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
+func TestSaveObservationPersistsSummaryOnly(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -5964,10 +5583,10 @@ func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
 		t.Fatalf("summary = %+v", summary)
 	}
 
-	nodes, err := st.ListSemanticNodes("trace-observe")
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
+	// The node tree used to be written here too. It is no longer stored - the
+	// detail view parses it from the cassette - so the summary is all this write
+	// owes the database, and the tree is rebuilt in memory from the observation.
+	nodes := observe.FlattenObservationNodes(obs)
 	if len(nodes) != 2 {
 		t.Fatalf("nodes = %d, want 2", len(nodes))
 	}
@@ -5977,7 +5596,7 @@ func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
 	}
 }
 
-func TestSaveObservationDeduplicatesSemanticNodes(t *testing.T) {
+func TestSaveObservationStoresNoSemanticNodes(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -6014,15 +5633,17 @@ func TestSaveObservationDeduplicatesSemanticNodes(t *testing.T) {
 		t.Fatalf("second SaveObservation() error = %v", err)
 	}
 
-	nodes, err := st.ListSemanticNodes("trace-observe-duplicate")
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
+	// A new database no longer creates the node table at all, which is what makes
+	// the drop safe: nothing writes it, nothing reads it, and an existing database
+	// keeps whatever it already had until an operator reclaims the space.
+	var tableCount int
+	if err := st.db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'semantic_nodes'`,
+	).Scan(&tableCount); err != nil {
+		t.Fatalf("query sqlite_master error = %v", err)
 	}
-	if len(nodes) != 1 {
-		t.Fatalf("nodes = %d, want 1", len(nodes))
-	}
-	if nodes[0].Node.ID != "node-tool-call" {
-		t.Fatalf("node id = %q, want node-tool-call", nodes[0].Node.ID)
+	if tableCount != 0 {
+		t.Fatalf("semantic_nodes table still created by the schema")
 	}
 }
 
@@ -6609,17 +6230,12 @@ func TestSaveFindingsBatchesRepeatedKeys(t *testing.T) {
 	}
 }
 
-// TestSaveObservationBatchesSemanticNodes exercises the chunked node write: more
-// nodes than one statement carries, plus a repeated node id that the batch must
-// fold before sending.
-func TestSaveObservationBatchesSemanticNodes(t *testing.T) {
-	st, err := New(t.TempDir())
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer st.Close()
-
-	const nodes = 150 // more than one chunk (900 parameters / 14 columns)
+// TestFlattenObservationNodesFoldsRepeatedIDs builds a wide tree, wider than the
+// chunked insert that used to carry it, and pins the folding the detail view
+// depends on: a node id that appears in both the response tree and the
+// accumulated stream calls is one node, and the first occurrence wins.
+func TestFlattenObservationNodesFoldsRepeatedIDs(t *testing.T) {
+	const nodes = 150
 	rootNodes := make([]observe.SemanticNode, 0, nodes+1)
 	for i := 0; i < nodes; i++ {
 		rootNodes = append(rootNodes, observe.SemanticNode{
@@ -6632,39 +6248,23 @@ func TestSaveObservationBatchesSemanticNodes(t *testing.T) {
 			Text:           fmt.Sprintf("node text %03d", i),
 		})
 	}
-	// The same id cannot appear twice in one statement. observationFlatNodes
-	// already folds a repeated id first-wins before the nodes reach the batch
-	// writer, so this pins that the batch still stores exactly one row.
+	// The same id cannot appear twice in the flattened list.
 	repeat := rootNodes[7]
 	repeat.Text = "node text 007 updated"
-	rootNodes = append(rootNodes, repeat)
 
-	if err := st.SaveObservation(observe.TraceObservation{
-		TraceID:       "trace-batched-nodes",
-		Provider:      "openai_compatible",
-		Operation:     "chat.completions",
-		Model:         "gpt-test",
-		Parser:        "store-test",
-		ParserVersion: "1",
-		Status:        observe.ParseStatusParsed,
-		Response:      observe.ObservationResponse{Nodes: rootNodes},
-	}); err != nil {
-		t.Fatalf("SaveObservation(batched) error = %v", err)
+	flattened := observe.FlattenObservationNodes(observe.TraceObservation{
+		Response: observe.ObservationResponse{Nodes: rootNodes},
+		Stream:   observe.ObservationStream{AccumulatedToolCalls: []observe.SemanticNode{repeat}},
+	})
+	if len(flattened) != nodes {
+		t.Fatalf("flattened nodes = %d, want %d", len(flattened), nodes)
 	}
-
-	stored, err := st.ListSemanticNodes("trace-batched-nodes")
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
-	if len(stored) != nodes {
-		t.Fatalf("semantic nodes = %d, want %d", len(stored), nodes)
-	}
-	byID := make(map[string]string, len(stored))
-	for _, node := range stored {
+	byID := make(map[string]string, len(flattened))
+	for _, node := range flattened {
 		byID[node.Node.ID] = node.Node.Text
 	}
 	if byID["node-007"] != "node text 007" {
-		t.Fatalf("node-007 text = %q, want the first occurrence kept by the upstream fold", byID["node-007"])
+		t.Fatalf("node-007 text = %q, want the first occurrence kept by the fold", byID["node-007"])
 	}
 }
 

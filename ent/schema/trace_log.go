@@ -66,6 +66,15 @@ func (TraceLog) Fields() []ent.Field {
 		field.Float("routing_score").Default(0),
 		field.Int("routing_candidate_count").Default(0),
 		field.String("routing_failure_reason").Default(""),
+		// The routing decision's identity and sticky outcome. These mirror the
+		// `routing.selected` / `routing.sticky.*` cassette events so the routing
+		// summary aggregates over this table instead of opening every cassette
+		// in its window. See recorder.applyRoutingDetailFromEvents.
+		field.String("route_target_id").Default(""),
+		field.String("channel_id").Default(""),
+		field.String("credential_id").Default(""),
+		field.String("sticky_status").Default(""),
+		field.String("sticky_previous_upstream_id").Default(""),
 	}
 }
 
@@ -75,8 +84,11 @@ func (TraceLog) Indexes() []ent.Index {
 		index.Fields("model", "recorded_at"),
 		index.Fields("session_id", "recorded_at"),
 		index.Fields("request_id"),
-		index.Fields("request_audit_id", "recorded_at"),
-		index.Fields("exchange_kind", "recorded_at"),
+		// `(request_audit_id, recorded_at)` and `(exchange_kind, recorded_at)` used
+		// to sit here. Neither was ever chosen by the planner: `request_audit_id`
+		// lookups are point lookups already served by a unique key, and
+		// `exchange_kind` is never selective enough to beat a sequential scan on
+		// this table. Migration 20261009090000_add_hot_path_indexes drops them.
 		index.Fields("parent_exchange_id"),
 		// The upstream analytics helpers all start from the upstream id
 		// (`WHERE selected_upstream_id = ?` or `<> ''`) and no other index

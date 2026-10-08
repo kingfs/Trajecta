@@ -225,18 +225,6 @@ func (f ScoreFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ScoreMutation", m)
 }
 
-// The SemanticNodeFunc type is an adapter to allow the use of ordinary
-// function as SemanticNode mutator.
-type SemanticNodeFunc func(context.Context, *dao.SemanticNodeMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f SemanticNodeFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.SemanticNodeMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.SemanticNodeMutation", m)
-}
-
 // The SystemEventFunc type is an adapter to allow the use of ordinary
 // function as SystemEvent mutator.
 type SystemEventFunc func(context.Context, *dao.SystemEventMutation) (dao.Value, error)

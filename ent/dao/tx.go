@@ -50,8 +50,6 @@ type Tx struct {
 	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
-	// SemanticNode is the client for interacting with the SemanticNode builders.
-	SemanticNode *SemanticNodeClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
 	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
@@ -219,7 +217,6 @@ func (tx *Tx) init() {
 	tx.Response = NewResponseClient(tx.config)
 	tx.ResponseItem = NewResponseItemClient(tx.config)
 	tx.Score = NewScoreClient(tx.config)
-	tx.SemanticNode = NewSemanticNodeClient(tx.config)
 	tx.SystemEvent = NewSystemEventClient(tx.config)
 	tx.ToolCallAudit = NewToolCallAuditClient(tx.config)
 	tx.TraceFinding = NewTraceFindingClient(tx.config)

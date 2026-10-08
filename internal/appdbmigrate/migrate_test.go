@@ -62,8 +62,6 @@ func TestCheckStatusSQLiteReportsApplicationSchemaMarker(t *testing.T) {
 		`CREATE TABLE upstream_exchanges (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE tool_call_audits (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE session_summaries (session_id TEXT PRIMARY KEY)`,
-		`CREATE TABLE overview_metric_buckets (bucket_start datetime NOT NULL, bucket_size_seconds INTEGER NOT NULL, PRIMARY KEY (bucket_start, bucket_size_seconds))`,
-		`CREATE TABLE overview_metric_bucket_members (path TEXT PRIMARY KEY)`,
 		`CREATE TABLE app_schema_status (
 			namespace TEXT PRIMARY KEY,
 			version INTEGER NOT NULL,
@@ -248,7 +246,6 @@ func TestMigrateUpPostgresIntegration(t *testing.T) {
 		"response_items",
 		"responses",
 		"scores",
-		"semantic_nodes",
 		"system_events",
 		"tool_call_audits",
 		"trace_findings",

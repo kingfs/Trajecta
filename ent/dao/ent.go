@@ -30,7 +30,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -118,7 +117,6 @@ func checkColumn(t, c string) error {
 			response.Table:         response.ValidColumn,
 			responseitem.Table:     responseitem.ValidColumn,
 			score.Table:            score.ValidColumn,
-			semanticnode.Table:     semanticnode.ValidColumn,
 			systemevent.Table:      systemevent.ValidColumn,
 			toolcallaudit.Table:    toolcallaudit.ValidColumn,
 			tracefinding.Table:     tracefinding.ValidColumn,

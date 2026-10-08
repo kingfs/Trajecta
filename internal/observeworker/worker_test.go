@@ -38,10 +38,10 @@ func TestWorkerRunOnceParsesQueuedJob(t *testing.T) {
 	if summary.ExchangeKind != "model" || summary.ExchangeRole != "primary_model_call" {
 		t.Fatalf("exchange summary = %+v, want model primary_model_call fallback", summary)
 	}
-	nodes, err := st.ListSemanticNodes(traceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
+	// The worker writes the summary; the node tree is rebuilt from the cassette on
+	// demand. Parsing the same trace again is therefore how the tree is observed
+	// now, and it also pins that the tree is still produced.
+	nodes := observe.FlattenObservationNodes(reparseForTest(t, st, traceID))
 	if len(nodes) == 0 {
 		t.Fatalf("semantic nodes empty")
 	}
@@ -73,18 +73,11 @@ func TestWorkerRunOnceParsesEntryExchangeWithEntryObservation(t *testing.T) {
 	if summary.ExchangeKind != "entry" || summary.ExchangeRole != "client_request" || summary.RequestAuditID != "audit-entry" || summary.ResponseID != "resp_entry_1" {
 		t.Fatalf("exchange summary = %+v", summary)
 	}
-	obs, err := st.GetObservation(traceID)
-	if err != nil {
-		t.Fatalf("GetObservation() error = %v", err)
-	}
+	obs := reparseForTest(t, st, traceID)
 	if obs.ExchangeKind != "entry" || obs.ResponseID != "resp_entry_1" {
 		t.Fatalf("observation exchange fields = %+v", obs)
 	}
-	nodes, err := st.ListSemanticNodes(traceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
-	if len(nodes) == 0 {
+	if nodes := observe.FlattenObservationNodes(obs); len(nodes) == 0 {
 		t.Fatalf("semantic nodes empty")
 	}
 }
@@ -119,17 +112,11 @@ func TestWorkerRunOnceRecordsPlainTextProxyErrorAsObservation(t *testing.T) {
 	if summary.Parser != "entry" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
-	obs, err := st.GetObservation(traceID)
-	if err != nil {
-		t.Fatalf("GetObservation() error = %v", err)
-	}
+	obs := reparseForTest(t, st, traceID)
 	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "http_error_response" {
 		t.Fatalf("warnings = %+v", obs.Warnings)
 	}
-	nodes, err := st.ListSemanticNodes(traceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
+	nodes := observe.FlattenObservationNodes(obs)
 	var foundError bool
 	for _, node := range nodes {
 		if node.Node.NormalizedType == observe.NodeError && node.Node.ProviderType == "http_error" {
@@ -531,10 +518,7 @@ func TestWorkerRecordsExchangeWithoutAParserAsUnsupported(t *testing.T) {
 		t.Fatalf("observation status = %q, want %q", summary.Status, observe.ParseStatusUnsupported)
 	}
 
-	obs, err := st.GetObservation(traceID)
-	if err != nil {
-		t.Fatalf("GetObservation() error = %v", err)
-	}
+	obs := reparseForTest(t, st, traceID)
 	// The endpoint is not a column on trace_observations (it stays on the trace
 	// row), so only the operation is asserted here.
 	if obs.Operation != "embeddings" || obs.Provider != "openai_compatible" {
@@ -552,4 +536,15 @@ func TestWorkerRecordsExchangeWithoutAParserAsUnsupported(t *testing.T) {
 	if reparsed.Status != observe.ParseStatusUnsupported {
 		t.Fatalf("reparsed status = %q, want %q", reparsed.Status, observe.ParseStatusUnsupported)
 	}
+}
+
+// reparseForTest re-reads a trace from its cassette, which is how the node tree
+// is obtained now that it is no longer stored.
+func reparseForTest(t *testing.T, st *store.Store, traceID string) observe.TraceObservation {
+	t.Helper()
+	obs, err := ReparseTrace(context.Background(), st, nil, traceID)
+	if err != nil {
+		t.Fatalf("ReparseTrace() error = %v", err)
+	}
+	return obs
 }

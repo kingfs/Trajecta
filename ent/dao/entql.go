@@ -22,7 +22,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -41,7 +40,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 28)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 27)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -471,33 +470,6 @@ var schemaGraph = func() *sqlgraph.Schema {
 	}
 	graph.Nodes[18] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
-			Table:   semanticnode.Table,
-			Columns: semanticnode.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeInt,
-				Column: semanticnode.FieldID,
-			},
-		},
-		Type: "SemanticNode",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			semanticnode.FieldTraceID:        {Type: field.TypeString, Column: semanticnode.FieldTraceID},
-			semanticnode.FieldNodeID:         {Type: field.TypeString, Column: semanticnode.FieldNodeID},
-			semanticnode.FieldParentNodeID:   {Type: field.TypeString, Column: semanticnode.FieldParentNodeID},
-			semanticnode.FieldProviderType:   {Type: field.TypeString, Column: semanticnode.FieldProviderType},
-			semanticnode.FieldNormalizedType: {Type: field.TypeString, Column: semanticnode.FieldNormalizedType},
-			semanticnode.FieldRole:           {Type: field.TypeString, Column: semanticnode.FieldRole},
-			semanticnode.FieldPath:           {Type: field.TypeString, Column: semanticnode.FieldPath},
-			semanticnode.FieldNodeIndex:      {Type: field.TypeInt, Column: semanticnode.FieldNodeIndex},
-			semanticnode.FieldDepth:          {Type: field.TypeInt, Column: semanticnode.FieldDepth},
-			semanticnode.FieldTextPreview:    {Type: field.TypeString, Column: semanticnode.FieldTextPreview},
-			semanticnode.FieldJSON:           {Type: field.TypeString, Column: semanticnode.FieldJSON},
-			semanticnode.FieldRaw:            {Type: field.TypeString, Column: semanticnode.FieldRaw},
-			semanticnode.FieldRawRef:         {Type: field.TypeString, Column: semanticnode.FieldRawRef},
-			semanticnode.FieldCreatedAt:      {Type: field.TypeTime, Column: semanticnode.FieldCreatedAt},
-		},
-	}
-	graph.Nodes[19] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
 			Table:   systemevent.Table,
 			Columns: systemevent.Columns,
 			ID: &sqlgraph.FieldSpec{
@@ -529,7 +501,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			systemevent.FieldResolvedAt:      {Type: field.TypeTime, Column: systemevent.FieldResolvedAt},
 		},
 	}
-	graph.Nodes[20] = &sqlgraph.Node{
+	graph.Nodes[19] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   toolcallaudit.Table,
 			Columns: toolcallaudit.Columns,
@@ -558,7 +530,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			toolcallaudit.FieldCreatedAt:      {Type: field.TypeTime, Column: toolcallaudit.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[21] = &sqlgraph.Node{
+	graph.Nodes[20] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracefinding.Table,
 			Columns: tracefinding.Columns,
@@ -584,7 +556,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracefinding.FieldCreatedAt:       {Type: field.TypeTime, Column: tracefinding.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[22] = &sqlgraph.Node{
+	graph.Nodes[21] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracelog.Table,
 			Columns: tracelog.Columns,
@@ -640,9 +612,14 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldRoutingScore:                   {Type: field.TypeFloat64, Column: tracelog.FieldRoutingScore},
 			tracelog.FieldRoutingCandidateCount:          {Type: field.TypeInt, Column: tracelog.FieldRoutingCandidateCount},
 			tracelog.FieldRoutingFailureReason:           {Type: field.TypeString, Column: tracelog.FieldRoutingFailureReason},
+			tracelog.FieldRouteTargetID:                  {Type: field.TypeString, Column: tracelog.FieldRouteTargetID},
+			tracelog.FieldChannelID:                      {Type: field.TypeString, Column: tracelog.FieldChannelID},
+			tracelog.FieldCredentialID:                   {Type: field.TypeString, Column: tracelog.FieldCredentialID},
+			tracelog.FieldStickyStatus:                   {Type: field.TypeString, Column: tracelog.FieldStickyStatus},
+			tracelog.FieldStickyPreviousUpstreamID:       {Type: field.TypeString, Column: tracelog.FieldStickyPreviousUpstreamID},
 		},
 	}
-	graph.Nodes[23] = &sqlgraph.Node{
+	graph.Nodes[22] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   traceobservation.Table,
 			Columns: traceobservation.Columns,
@@ -671,7 +648,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			traceobservation.FieldUpdatedAt:        {Type: field.TypeTime, Column: traceobservation.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[24] = &sqlgraph.Node{
+	graph.Nodes[23] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamexchange.Table,
 			Columns: upstreamexchange.Columns,
@@ -702,7 +679,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamexchange.FieldErrorText:        {Type: field.TypeString, Column: upstreamexchange.FieldErrorText},
 		},
 	}
-	graph.Nodes[25] = &sqlgraph.Node{
+	graph.Nodes[24] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreammodel.Table,
 			Columns: upstreammodel.Columns,
@@ -719,7 +696,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
 		},
 	}
-	graph.Nodes[26] = &sqlgraph.Node{
+	graph.Nodes[25] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamtarget.Table,
 			Columns: upstreamtarget.Columns,
@@ -743,7 +720,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
 		},
 	}
-	graph.Nodes[27] = &sqlgraph.Node{
+	graph.Nodes[26] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -2496,116 +2473,6 @@ func (f *ScoreFilter) WhereCreatedAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
-func (_q *SemanticNodeQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the SemanticNodeQuery builder.
-func (_q *SemanticNodeQuery) Filter() *SemanticNodeFilter {
-	return &SemanticNodeFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *SemanticNodeMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the SemanticNodeMutation builder.
-func (m *SemanticNodeMutation) Filter() *SemanticNodeFilter {
-	return &SemanticNodeFilter{config: m.config, predicateAdder: m}
-}
-
-// SemanticNodeFilter provides a generic filtering capability at runtime for SemanticNodeQuery.
-type SemanticNodeFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *SemanticNodeFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[18].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql int predicate on the id field.
-func (f *SemanticNodeFilter) WhereID(p entql.IntP) {
-	f.Where(p.Field(semanticnode.FieldID))
-}
-
-// WhereTraceID applies the entql string predicate on the trace_id field.
-func (f *SemanticNodeFilter) WhereTraceID(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldTraceID))
-}
-
-// WhereNodeID applies the entql string predicate on the node_id field.
-func (f *SemanticNodeFilter) WhereNodeID(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldNodeID))
-}
-
-// WhereParentNodeID applies the entql string predicate on the parent_node_id field.
-func (f *SemanticNodeFilter) WhereParentNodeID(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldParentNodeID))
-}
-
-// WhereProviderType applies the entql string predicate on the provider_type field.
-func (f *SemanticNodeFilter) WhereProviderType(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldProviderType))
-}
-
-// WhereNormalizedType applies the entql string predicate on the normalized_type field.
-func (f *SemanticNodeFilter) WhereNormalizedType(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldNormalizedType))
-}
-
-// WhereRole applies the entql string predicate on the role field.
-func (f *SemanticNodeFilter) WhereRole(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldRole))
-}
-
-// WherePath applies the entql string predicate on the path field.
-func (f *SemanticNodeFilter) WherePath(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldPath))
-}
-
-// WhereNodeIndex applies the entql int predicate on the node_index field.
-func (f *SemanticNodeFilter) WhereNodeIndex(p entql.IntP) {
-	f.Where(p.Field(semanticnode.FieldNodeIndex))
-}
-
-// WhereDepth applies the entql int predicate on the depth field.
-func (f *SemanticNodeFilter) WhereDepth(p entql.IntP) {
-	f.Where(p.Field(semanticnode.FieldDepth))
-}
-
-// WhereTextPreview applies the entql string predicate on the text_preview field.
-func (f *SemanticNodeFilter) WhereTextPreview(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldTextPreview))
-}
-
-// WhereJSON applies the entql string predicate on the json field.
-func (f *SemanticNodeFilter) WhereJSON(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldJSON))
-}
-
-// WhereRaw applies the entql string predicate on the raw field.
-func (f *SemanticNodeFilter) WhereRaw(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldRaw))
-}
-
-// WhereRawRef applies the entql string predicate on the raw_ref field.
-func (f *SemanticNodeFilter) WhereRawRef(p entql.StringP) {
-	f.Where(p.Field(semanticnode.FieldRawRef))
-}
-
-// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
-func (f *SemanticNodeFilter) WhereCreatedAt(p entql.TimeP) {
-	f.Where(p.Field(semanticnode.FieldCreatedAt))
-}
-
-// addPredicate implements the predicateAdder interface.
 func (_q *SystemEventQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -2634,7 +2501,7 @@ type SystemEventFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *SystemEventFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[19].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[18].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2774,7 +2641,7 @@ type ToolCallAuditFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ToolCallAuditFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[19].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2894,7 +2761,7 @@ type TraceFindingFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceFindingFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2999,7 +2866,7 @@ type TraceLogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceLogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3235,6 +3102,31 @@ func (f *TraceLogFilter) WhereRoutingFailureReason(p entql.StringP) {
 	f.Where(p.Field(tracelog.FieldRoutingFailureReason))
 }
 
+// WhereRouteTargetID applies the entql string predicate on the route_target_id field.
+func (f *TraceLogFilter) WhereRouteTargetID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldRouteTargetID))
+}
+
+// WhereChannelID applies the entql string predicate on the channel_id field.
+func (f *TraceLogFilter) WhereChannelID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldChannelID))
+}
+
+// WhereCredentialID applies the entql string predicate on the credential_id field.
+func (f *TraceLogFilter) WhereCredentialID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldCredentialID))
+}
+
+// WhereStickyStatus applies the entql string predicate on the sticky_status field.
+func (f *TraceLogFilter) WhereStickyStatus(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldStickyStatus))
+}
+
+// WhereStickyPreviousUpstreamID applies the entql string predicate on the sticky_previous_upstream_id field.
+func (f *TraceLogFilter) WhereStickyPreviousUpstreamID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldStickyPreviousUpstreamID))
+}
+
 // addPredicate implements the predicateAdder interface.
 func (_q *TraceObservationQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
@@ -3264,7 +3156,7 @@ type TraceObservationFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceObservationFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[23].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3384,7 +3276,7 @@ type UpstreamExchangeFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamExchangeFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[24].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[23].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3514,7 +3406,7 @@ type UpstreamModelFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamModelFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[25].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[24].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3574,7 +3466,7 @@ type UpstreamTargetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamTargetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[26].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[25].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3669,7 +3561,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[27].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[26].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

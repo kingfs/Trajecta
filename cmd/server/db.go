@@ -92,33 +92,7 @@ func newDBSummaryCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	rebuildCmd.AddCommand(newDBSummaryRebuildSessionsCommand(runtime))
-	rebuildCmd.AddCommand(newDBSummaryRebuildOverviewCommand(runtime))
 	cmd.AddCommand(rebuildCmd)
-	return cmd
-}
-
-// newDBSummaryRebuildOverviewCommand exposes Store.RebuildOverviewMetricBuckets, which had no
-// caller: the hourly buckets are maintained incrementally through a deferred queue, so they
-// can drift from the logs they summarize, and until this command existed nothing could repair
-// that drift (a process that died before settling the queue left the numbers short forever).
-func newDBSummaryRebuildOverviewCommand(runtime *cliRuntime) *cobra.Command {
-	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "overview",
-		Short: "Rebuild overview_metric_buckets from logs",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
-				return runDBSummaryRebuildOverviewWithOptions(dbSummaryRebuildOptions{
-					configPath: runtime.configPath(),
-					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
-					stdout:     cmd.OutOrStdout(),
-				})
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report the drift without changing overview_metric_buckets")
 	return cmd
 }
 
@@ -690,72 +664,6 @@ func writeDBSummaryRebuildSessionsText(w io.Writer, result map[string]any) {
 	}
 	fmt.Fprintf(w, "candidate_count: %v\n", result["candidate_count"])
 	fmt.Fprintf(w, "existing_count: %v\n", result["existing_count"])
-	fmt.Fprintf(w, "mutated: %v\n", result["mutated"])
-}
-
-// runDBSummaryRebuildOverviewWithOptions reports the current drift and, unless this is a dry
-// run, rebuilds the overview buckets from the logs. Both halves print the same counters, so
-// running the command twice shows what the first run repaired.
-func runDBSummaryRebuildOverviewWithOptions(opts dbSummaryRebuildOptions) int {
-	st, closeStore, code := openTraceStoreForCommand(opts.configPath)
-	if code != 0 {
-		return code
-	}
-	defer closeStore()
-
-	before, err := st.OverviewMetricRebuildStats()
-	if err != nil {
-		slog.Error("Inspect overview metric rebuild candidates failed", "error", err)
-		return 1
-	}
-	result := map[string]any{
-		"dry_run":         opts.dryRun,
-		"mutated":         false,
-		"candidate_count": before.CandidateCount,
-		"buckets_before":  before.Buckets,
-		"members_before":  before.Members,
-	}
-	if opts.dryRun {
-		if opts.format != "json" {
-			fmt.Fprintf(stdoutOrDefault(opts.stdout), "dry-run db.summary.rebuild.overview: no changes will be applied\n")
-			writeDBSummaryRebuildOverviewText(stdoutOrDefault(opts.stdout), result)
-			return 0
-		}
-		return writeDryRunResult(opts.stdout, opts.format, "db.summary.rebuild.overview", result)
-	}
-
-	if err := st.RebuildOverviewMetricBuckets(); err != nil {
-		slog.Error("Rebuild overview metric buckets failed", "error", err)
-		return 1
-	}
-	after, err := st.OverviewMetricRebuildStats()
-	if err != nil {
-		slog.Error("Inspect rebuilt overview metric buckets failed", "error", err)
-		return 1
-	}
-	result["mutated"] = true
-	result["rebuilt_all"] = true
-	result["buckets_after"] = after.Buckets
-	result["members_after"] = after.Members
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.summary.rebuild.overview", result, func(w io.Writer) error {
-		fmt.Fprintf(w, "overview metric buckets rebuilt\n")
-		writeDBSummaryRebuildOverviewText(w, result)
-		return nil
-	}); err != nil {
-		slog.Error("Write overview metric rebuild result failed", "error", err)
-		return 1
-	}
-	return 0
-}
-
-func writeDBSummaryRebuildOverviewText(w io.Writer, result map[string]any) {
-	fmt.Fprintf(w, "candidate_count: %v\n", result["candidate_count"])
-	fmt.Fprintf(w, "buckets_before: %v\n", result["buckets_before"])
-	fmt.Fprintf(w, "members_before: %v\n", result["members_before"])
-	if after, ok := result["buckets_after"]; ok {
-		fmt.Fprintf(w, "buckets_after: %v\n", after)
-		fmt.Fprintf(w, "members_after: %v\n", result["members_after"])
-	}
 	fmt.Fprintf(w, "mutated: %v\n", result["mutated"])
 }
 

@@ -104,6 +104,19 @@ type MetaData struct {
 	RoutingScore                   float64   `json:"routing_score,omitempty"`
 	RoutingCandidateCount          int       `json:"routing_candidate_count,omitempty"`
 	RoutingFailureReason           string    `json:"routing_failure_reason,omitempty"`
+	// The routing identity this request was dispatched to, plus the sticky
+	// decision that produced it. The same facts live in the `routing.selected`
+	// and `routing.sticky.*` prelude events, but those can only be read by
+	// opening the cassette, and the Monitor's routing summary aggregates over
+	// every trace in its window: 57 ms of spinning-disk seek per trace is what
+	// made that endpoint take 49 s. Mirroring the five aggregated fields into
+	// the indexed row keeps the summary a single GROUP BY while leaving the
+	// events - the durable, replayable record - untouched.
+	RouteTargetID            string `json:"route_target_id,omitempty"`
+	ChannelID                string `json:"channel_id,omitempty"`
+	CredentialID             string `json:"credential_id,omitempty"`
+	StickyStatus             string `json:"sticky_status,omitempty"`
+	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
 }
 
 type RecordHeader struct {

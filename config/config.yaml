@@ -3,6 +3,10 @@ server:
 
 monitor:
   port: "8081"
+  # Timezone for the day-based windows ("today") and the calendar buckets in the
+  # Monitor. It defaults to Asia/Shanghai; the API is unaffected, only how a
+  # window is bounded and how its buckets are labelled.
+  timezone: "Asia/Shanghai"
 
 mcp:
   enabled: true
@@ -16,10 +20,29 @@ database:
   dsn: ""
   max_open_conns: 16
   max_idle_conns: 8
+  # A second pool serves the read-only statements the Monitor and MCP issue, so a
+  # cold page cannot hold every connection the proxy needs to persist what it just
+  # recorded. On the reference deployment a cold 30-day Overview took 14 s while
+  # holding the only four connections the recording path had. This is enabled by
+  # default because the isolation is the point; the total connection count is
+  # read_max_open_conns plus max_open_conns. 0 disables the split and leaves every
+  # statement on the single pool above.
+  read_max_open_conns: 4
+  read_max_idle_conns: 4
+  # Bound on one read-path statement. 0 disables it. It is deliberately not a few
+  # seconds: the slowest legitimate cold read measured on the reference deployment
+  # was a 30-day Overview at 14 s, and a five-second bound would turn slow pages
+  # into errors. This still kills a runaway read and returns the connection.
+  read_statement_timeout: 0s
   auto_migrate: true
 
 trace:
   output_dir: "./data/traces"
+  # How often the background reconciliation walks the cassette directory. A
+  # cassette is indexed when it is written, so this is a backstop for files that
+  # appeared while the process was down; on a large install each pass re-reads
+  # every prelude, which is why the default is half an hour rather than minutes.
+  sync_interval: 30m
 
 # The local Responses execution mode is always available: /v1/responses is
 # served by a native Responses upstream when one serves the model, and by the

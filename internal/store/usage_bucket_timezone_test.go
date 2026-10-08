@@ -31,7 +31,7 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 	since := now.Add(-24 * time.Hour)
 
 	t.Run("channel trends", func(t *testing.T) {
-		trends, err := st.GetChannelUsageTrends("channel-a", since, bucketSize, bucketCount)
+		trends, err := st.GetChannelUsageTrends("channel-a", since, bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetChannelUsageTrends() error = %v", err)
 		}
@@ -42,7 +42,7 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 		// The reference time here is time.Now(), which is the case a local-time reference breaks. The
 		// upstream variant of this case needs a configured channel without logs, which GetUpstreamDetail
 		// rejects before it reaches the timeline.
-		trends, err := st.GetChannelUsageTrends("channel-empty", since, bucketSize, bucketCount)
+		trends, err := st.GetChannelUsageTrends("channel-empty", since, bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetChannelUsageTrends(empty) error = %v", err)
 		}
@@ -50,7 +50,7 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 	})
 
 	t.Run("channel trends batch", func(t *testing.T) {
-		batched, err := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount)
+		batched, err := st.GetChannelUsageTrendsBatch(since, bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetChannelUsageTrendsBatch() error = %v", err)
 		}
@@ -62,7 +62,7 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 	})
 
 	t.Run("model detail trends", func(t *testing.T) {
-		detail, err := st.GetModelDetailAnalytics("gpt-5", since, now.Truncate(24*time.Hour), bucketSize, bucketCount)
+		detail, err := st.GetModelDetailAnalytics("gpt-5", since, now.Truncate(24*time.Hour), bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetModelDetailAnalytics() error = %v", err)
 		}
@@ -70,7 +70,7 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 	})
 
 	t.Run("upstream timeline", func(t *testing.T) {
-		detail, err := st.GetUpstreamDetail("channel-a", since, "", 10, bucketSize, bucketCount)
+		detail, err := st.GetUpstreamDetail("channel-a", since, "", 10, bucketSize, bucketCount, nil)
 		if err != nil {
 			t.Fatalf("GetUpstreamDetail() error = %v", err)
 		}
@@ -81,6 +81,55 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 		assertBucketGrid(t, "GetUpstreamDetail", starts, bucketSize, bucketCount)
 	})
 
+}
+
+// TestUsageBucketGridsAlignToTheDisplayTimezone is the other half of
+// TestUsageBucketGridsAreUTC: the keys stay UTC so the recorded_at lookups match,
+// but a calendar bucket opens at local midnight rather than at the UTC midnight
+// that is 08:00 in Asia/Shanghai.
+func TestUsageBucketGridsAlignToTheDisplayTimezone(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skipf("Asia/Shanghai is unavailable: %v", err)
+	}
+
+	// 09:00 local on the 8th, so the current local day is the 8th.
+	now := time.Date(2026, 10, 8, 9, 0, 0, 0, shanghai)
+	writeModelLog(t, st, dir, "tz-align.http", "gpt-5", "/v1/responses", "POST", "channel-a", 200, 11, now.Add(-2*time.Hour))
+
+	const bucketSize = 24 * time.Hour
+	const bucketCount = 3
+	trends, err := st.GetChannelUsageTrends("channel-a", now.Add(-72*time.Hour), bucketSize, bucketCount, shanghai)
+	if err != nil {
+		t.Fatalf("GetChannelUsageTrends() error = %v", err)
+	}
+	if len(trends) != bucketCount {
+		t.Fatalf("buckets = %d, want %d", len(trends), bucketCount)
+	}
+
+	// The last bucket opens at local midnight of the current local day.
+	wantLast := time.Date(2026, 10, 8, 0, 0, 0, 0, shanghai)
+	if got := trends[len(trends)-1].Time; !got.Equal(wantLast) {
+		t.Fatalf("last bucket = %s, want %s (local midnight)", got.In(shanghai), wantLast.In(shanghai))
+	}
+	// The key is still UTC, which is what the recorded_at lookups rely on.
+	for index, trend := range trends {
+		if trend.Time.Location() != time.UTC {
+			t.Fatalf("bucket %d = %s in location %q, want UTC", index, trend.Time, trend.Time.Location())
+		}
+	}
+	// The row recorded at 07:00 local falls in the midnight bucket, not the
+	// previous one, which is the whole point of aligning locally.
+	if trends[len(trends)-1].RequestCount != 1 {
+		t.Fatalf("current-day bucket requests = %d, want 1", trends[len(trends)-1].RequestCount)
+	}
 }
 
 func trendStarts(trends []UsageTrendRecord) []time.Time {

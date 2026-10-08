@@ -831,12 +831,12 @@ func (s *Store) ListChannelProbeRuns(channelID string, limit int) ([]ChannelProb
 	return out, nil
 }
 
-func (s *Store) GetChannelUsageTrends(channelID string, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
+func (s *Store) GetChannelUsageTrends(channelID string, since time.Time, bucketSize time.Duration, bucketCount int, loc *time.Location) ([]UsageTrendRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
 		return nil, errors.New("channel id is required")
 	}
-	return s.usageTrends("selected_upstream_id = ?", []any{channelID}, since, bucketSize, bucketCount)
+	return s.usageTrends("selected_upstream_id = ?", []any{channelID}, since, bucketSize, bucketCount, loc)
 }
 
 func (s *Store) GetChannelUsageSummary(channelID string, since time.Time) (UsageSummaryRecord, error) {
@@ -1021,7 +1021,7 @@ func (s *Store) GetChannelUsageSummaries(since time.Time) (map[string]UsageSumma
 // falls outside its own channel's window is dropped while bucketing. A channel
 // with no rows at all is absent from the result, because the scan cannot know
 // the empty window such a channel would have.
-func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Duration, bucketCount int) (map[string][]UsageTrendRecord, error) {
+func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Duration, bucketCount int, loc *time.Location) (map[string][]UsageTrendRecord, error) {
 	if bucketSize <= 0 {
 		bucketSize = 24 * time.Hour
 	}
@@ -1084,8 +1084,8 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 	slotsByChannel := make(map[string][]time.Time, len(references))
 	bucketsByChannel := make(map[string]map[time.Time]*bucket, len(references))
 	for channelID, referenceTime := range references {
-		// UTC grid, see usageTrends: the lookups below use UTC-truncated recorded_at values.
-		bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+		// Same grid rule as usageTrends: both sides use bucketSlot.
+		bucketStart := bucketSlot(referenceTime, bucketSize, loc).Add(-time.Duration(bucketCount-1) * bucketSize)
 		slots := make([]time.Time, 0, bucketCount)
 		buckets := make(map[time.Time]*bucket, bucketCount)
 		for index := 0; index < bucketCount; index++ {
@@ -1134,7 +1134,7 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 		if err != nil {
 			return nil, err
 		}
-		item := buckets[recordedTime.UTC().Truncate(bucketSize)]
+		item := buckets[bucketSlot(recordedTime, bucketSize, loc)]
 		if item == nil {
 			continue
 		}

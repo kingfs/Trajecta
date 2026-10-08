@@ -218,8 +218,6 @@ func TestSQLiteAndPostgresSchemasAgree(t *testing.T) {
 	handWrittenTables := []string{
 		"app_settings",
 		"model_aliases",
-		"overview_metric_bucket_members",
-		"overview_metric_buckets",
 		"session_summaries",
 	}
 

@@ -151,7 +151,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		logInfo.Header.Meta.Error = "send chat completion request: " + err.Error()
 		modelCallStatus := responsesModelCallFailureStatus(err)
-		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
+		if uErr := a.recorder.SubmitLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
 		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
@@ -184,7 +184,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		logInfo.Header.Meta.Error = err.Error()
 		modelCallStatus := responsesModelCallFailureStatus(err)
-		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
+		if uErr := a.recorder.SubmitLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
 		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
@@ -225,7 +225,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	logInfo.Header.Meta.ContentLength = logInfo.Header.Layout.ResBodyLen
 	logInfo.Header.Layout.IsStream = isStream
 	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, statusCode, duration, logInfo.Header.Meta.Error))
-	if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
+	if uErr := a.recorder.SubmitLogFile(logInfo); uErr != nil {
 		slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 	}
 	modelCallStatus := "completed"
@@ -544,7 +544,7 @@ func (r *responsesEntryRecorder) finalize(statusCode int) {
 			"target_path": r.targetPath,
 		},
 	})
-	if err := r.recorder.UpdateLogFile(r.logInfo); err != nil {
+	if err := r.recorder.SubmitLogFile(r.logInfo); err != nil {
 		slog.Error("Failed to update local Responses entry recording", "path", r.logInfo.Path, "err", err)
 	}
 }

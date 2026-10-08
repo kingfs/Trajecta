@@ -87,11 +87,10 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 	if len(args) == 0 {
 		return out, nil
 	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(args)), ",")
 	rows, err := s.db.Query(`
 		SELECT trace_id, parser, parser_version, status, updated_at
 		FROM trace_observations
-		WHERE trace_id IN (`+placeholders+`)
+		WHERE trace_id IN (`+placeholders(len(args))+`)
 	`, args...)
 	if err != nil {
 		return nil, err
@@ -122,7 +121,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		return nil, err
 	}
 
-	missingArgs := make([]any, 0, len(out))
+	missingArgs := make([]string, 0, len(out))
 	for traceID, meta := range out {
 		if strings.TrimSpace(meta.Parser) == "" {
 			missingArgs = append(missingArgs, traceID)
@@ -131,39 +130,61 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 	if len(missingArgs) == 0 {
 		return out, nil
 	}
-	missingPlaceholders := strings.TrimRight(strings.Repeat("?,", len(missingArgs)), ",")
-	rows, err = s.db.Query(`
-		SELECT p.trace_id, p.status, p.updated_at
-		FROM parse_jobs p
-		INNER JOIN (
-			SELECT trace_id, MAX(id) AS id
+	// One row per trace id, straight off `parsejob_trace_id_unique` (Postgres) or
+	// `idx_parse_jobs_trace_id` (SQLite). This used to be a `INNER JOIN (SELECT
+	// trace_id, MAX(id) ... GROUP BY trace_id)` so that it would pick the newest
+	// job of a trace that had several.
+	//
+	// That aggregate was the single worst statement in the deployment: the plan
+	// materialised a grouped id list and hash-joined it, so every call seq-scanned
+	// the whole of `parse_jobs` (239,578 rows, 6.59e9 rows read, 14,745 seq scans
+	// on a 10-day window, twice per 60 s poll), and the list was never chunked, so
+	// a session with more traces than the driver's bind-parameter limit failed
+	// outright. Migration 20261006000000_unique_parse_jobs_trace_id collapsed the
+	// duplicates and made trace_id unique, so "the newest job of a trace" is just
+	// "the job of a trace" and the subquery has no work left to do.
+	//
+	// The uniqueness is load-bearing. `requirePostgresApplicationMigrations`
+	// refuses to serve Postgres traffic without that index, and the SQLite schema
+	// creates the same unique index at startup, so a database that has duplicates
+	// cannot reach this code.
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(missingArgs), storeSQLParamChunk) {
+		chunkRows, err := s.db.Query(`
+			SELECT trace_id, status, updated_at
 			FROM parse_jobs
-			WHERE trace_id IN (`+missingPlaceholders+`)
-			GROUP BY trace_id
-		) latest ON latest.id = p.id
-	`, missingArgs...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			traceID   string
-			meta      ObservationMetadata
-			updatedAt any
-		)
-		if err := rows.Scan(&traceID, &meta.Status, &updatedAt); err != nil {
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+		`, stringArgs(chunk)...)
+		if err != nil {
 			return nil, err
 		}
-		if meta.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+		for chunkRows.Next() {
+			var (
+				traceID   string
+				meta      ObservationMetadata
+				updatedAt any
+			)
+			if err := chunkRows.Scan(&traceID, &meta.Status, &updatedAt); err != nil {
+				chunkRows.Close()
+				return nil, err
+			}
+			if meta.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+				chunkRows.Close()
+				return nil, err
+			}
+			if strings.TrimSpace(meta.Status) == "" {
+				meta.Status = "unparsed"
+			}
+			out[traceID] = meta
+		}
+		if err := chunkRows.Err(); err != nil {
+			chunkRows.Close()
 			return nil, err
 		}
-		if strings.TrimSpace(meta.Status) == "" {
-			meta.Status = "unparsed"
+		if err := chunkRows.Close(); err != nil {
+			return nil, err
 		}
-		out[traceID] = meta
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) SaveObservation(obs observe.TraceObservation) error {
@@ -175,11 +196,10 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	if err != nil {
 		return err
 	}
-	summaryJSON, err := json.Marshal(observationSummaryJSON(obs))
+	summaryJSON, err := json.Marshal(ObservationSummaryJSON(obs))
 	if err != nil {
 		return err
 	}
-	nodes := observationFlatNodes(obs)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -222,12 +242,13 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		sqlSafeBytes(summaryJSON), sqlSafeBytes(warningsJSON), now, now); err != nil {
 		return err
 	}
-	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
-		return err
-	}
-	if err := s.insertSemanticNodesTx(tx, obs.TraceID, nodes, now); err != nil {
-		return err
-	}
+	// The semantic nodes are deliberately not written. They were ~240 rows and
+	// ~1.4 MB per trace - 98% of the database's bytes, 115 GB of 117 GB - to
+	// answer one detail view, and every re-analysis rewrote them. The cassette is
+	// the source of truth for detail, so the node tree is parsed from it when a
+	// trace is opened (see monitor.handleTraceObservation). What stays here is the
+	// compact summary the lists, the Overview and the analysis jobs read.
+	//
 	// One parse job per trace: the observation result updates the job that
 	// EnqueueParseJob queued (or creates it when a trace was parsed without
 	// one). Inserting a second row here made every parsed trace appear twice in
@@ -292,40 +313,6 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 		return ObservationSummary{}, err
 	}
 	return summary, nil
-}
-
-func (s *Store) GetObservation(traceID string) (observe.TraceObservation, error) {
-	summary, err := s.GetObservationSummary(traceID)
-	if err != nil {
-		return observe.TraceObservation{}, err
-	}
-	nodes, err := s.ListSemanticNodes(traceID)
-	if err != nil {
-		return observe.TraceObservation{}, err
-	}
-	var warnings []observe.ParseWarning
-	if strings.TrimSpace(summary.WarningsJSON) != "" {
-		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warnings)
-	}
-	return observe.TraceObservation{
-		TraceID:          summary.TraceID,
-		Provider:         summary.Provider,
-		Operation:        summary.Operation,
-		Model:            summary.Model,
-		ExchangeKind:     summary.ExchangeKind,
-		ExchangeRole:     summary.ExchangeRole,
-		ParentExchangeID: summary.ParentExchangeID,
-		SequenceIndex:    summary.SequenceIndex,
-		RequestAuditID:   summary.RequestAuditID,
-		ResponseID:       summary.ResponseID,
-		Parser:           summary.Parser,
-		ParserVersion:    summary.ParserVersion,
-		Status:           observe.ParseStatus(summary.Status),
-		Warnings:         warnings,
-		Response: observe.ObservationResponse{
-			Nodes: observe.RebuildNodeTree(nodes),
-		},
-	}, nil
 }
 
 func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
@@ -553,7 +540,10 @@ func scanFindings(rows *sql.Rows) ([]observe.Finding, error) {
 	return out, rows.Err()
 }
 
-func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
+// ObservationSummaryJSON is the compact per-trace summary stored on
+// trace_observations. The Monitor renders the same shape when it parses a trace
+// on demand, so the two views agree.
+func ObservationSummaryJSON(obs observe.TraceObservation) map[string]any {
 	return map[string]any{
 		"request_nodes":  len(obs.Request.Nodes),
 		"response_nodes": len(obs.Response.Nodes),
@@ -564,12 +554,4 @@ func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
 		"exchange_kind":  obs.ExchangeKind,
 		"exchange_role":  obs.ExchangeRole,
 	}
-}
-
-func observationFlatNodes(obs observe.TraceObservation) []observe.FlatSemanticNode {
-	var roots []observe.SemanticNode
-	roots = append(roots, obs.Request.Nodes...)
-	roots = append(roots, obs.Response.Nodes...)
-	roots = append(roots, obs.Stream.AccumulatedToolCalls...)
-	return dedupeFlatSemanticNodes(observe.FlattenNodes(roots))
 }

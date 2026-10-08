@@ -289,6 +289,31 @@ func RoutingFailureReason(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldEQ(FieldRoutingFailureReason, v))
 }
 
+// RouteTargetID applies equality check predicate on the "route_target_id" field. It's identical to RouteTargetIDEQ.
+func RouteTargetID(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldRouteTargetID, v))
+}
+
+// ChannelID applies equality check predicate on the "channel_id" field. It's identical to ChannelIDEQ.
+func ChannelID(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldChannelID, v))
+}
+
+// CredentialID applies equality check predicate on the "credential_id" field. It's identical to CredentialIDEQ.
+func CredentialID(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldCredentialID, v))
+}
+
+// StickyStatus applies equality check predicate on the "sticky_status" field. It's identical to StickyStatusEQ.
+func StickyStatus(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldStickyStatus, v))
+}
+
+// StickyPreviousUpstreamID applies equality check predicate on the "sticky_previous_upstream_id" field. It's identical to StickyPreviousUpstreamIDEQ.
+func StickyPreviousUpstreamID(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldStickyPreviousUpstreamID, v))
+}
+
 // TraceIDEQ applies the EQ predicate on the "trace_id" field.
 func TraceIDEQ(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldEQ(FieldTraceID, v))
@@ -2707,6 +2732,331 @@ func RoutingFailureReasonEqualFold(v string) predicate.TraceLog {
 // RoutingFailureReasonContainsFold applies the ContainsFold predicate on the "routing_failure_reason" field.
 func RoutingFailureReasonContainsFold(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldContainsFold(FieldRoutingFailureReason, v))
+}
+
+// RouteTargetIDEQ applies the EQ predicate on the "route_target_id" field.
+func RouteTargetIDEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDNEQ applies the NEQ predicate on the "route_target_id" field.
+func RouteTargetIDNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDIn applies the In predicate on the "route_target_id" field.
+func RouteTargetIDIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldRouteTargetID, vs...))
+}
+
+// RouteTargetIDNotIn applies the NotIn predicate on the "route_target_id" field.
+func RouteTargetIDNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldRouteTargetID, vs...))
+}
+
+// RouteTargetIDGT applies the GT predicate on the "route_target_id" field.
+func RouteTargetIDGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDGTE applies the GTE predicate on the "route_target_id" field.
+func RouteTargetIDGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDLT applies the LT predicate on the "route_target_id" field.
+func RouteTargetIDLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDLTE applies the LTE predicate on the "route_target_id" field.
+func RouteTargetIDLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDContains applies the Contains predicate on the "route_target_id" field.
+func RouteTargetIDContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDHasPrefix applies the HasPrefix predicate on the "route_target_id" field.
+func RouteTargetIDHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDHasSuffix applies the HasSuffix predicate on the "route_target_id" field.
+func RouteTargetIDHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDEqualFold applies the EqualFold predicate on the "route_target_id" field.
+func RouteTargetIDEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldRouteTargetID, v))
+}
+
+// RouteTargetIDContainsFold applies the ContainsFold predicate on the "route_target_id" field.
+func RouteTargetIDContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldRouteTargetID, v))
+}
+
+// ChannelIDEQ applies the EQ predicate on the "channel_id" field.
+func ChannelIDEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldChannelID, v))
+}
+
+// ChannelIDNEQ applies the NEQ predicate on the "channel_id" field.
+func ChannelIDNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldChannelID, v))
+}
+
+// ChannelIDIn applies the In predicate on the "channel_id" field.
+func ChannelIDIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldChannelID, vs...))
+}
+
+// ChannelIDNotIn applies the NotIn predicate on the "channel_id" field.
+func ChannelIDNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldChannelID, vs...))
+}
+
+// ChannelIDGT applies the GT predicate on the "channel_id" field.
+func ChannelIDGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldChannelID, v))
+}
+
+// ChannelIDGTE applies the GTE predicate on the "channel_id" field.
+func ChannelIDGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldChannelID, v))
+}
+
+// ChannelIDLT applies the LT predicate on the "channel_id" field.
+func ChannelIDLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldChannelID, v))
+}
+
+// ChannelIDLTE applies the LTE predicate on the "channel_id" field.
+func ChannelIDLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldChannelID, v))
+}
+
+// ChannelIDContains applies the Contains predicate on the "channel_id" field.
+func ChannelIDContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldChannelID, v))
+}
+
+// ChannelIDHasPrefix applies the HasPrefix predicate on the "channel_id" field.
+func ChannelIDHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldChannelID, v))
+}
+
+// ChannelIDHasSuffix applies the HasSuffix predicate on the "channel_id" field.
+func ChannelIDHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldChannelID, v))
+}
+
+// ChannelIDEqualFold applies the EqualFold predicate on the "channel_id" field.
+func ChannelIDEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldChannelID, v))
+}
+
+// ChannelIDContainsFold applies the ContainsFold predicate on the "channel_id" field.
+func ChannelIDContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldChannelID, v))
+}
+
+// CredentialIDEQ applies the EQ predicate on the "credential_id" field.
+func CredentialIDEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldCredentialID, v))
+}
+
+// CredentialIDNEQ applies the NEQ predicate on the "credential_id" field.
+func CredentialIDNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldCredentialID, v))
+}
+
+// CredentialIDIn applies the In predicate on the "credential_id" field.
+func CredentialIDIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldCredentialID, vs...))
+}
+
+// CredentialIDNotIn applies the NotIn predicate on the "credential_id" field.
+func CredentialIDNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldCredentialID, vs...))
+}
+
+// CredentialIDGT applies the GT predicate on the "credential_id" field.
+func CredentialIDGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldCredentialID, v))
+}
+
+// CredentialIDGTE applies the GTE predicate on the "credential_id" field.
+func CredentialIDGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldCredentialID, v))
+}
+
+// CredentialIDLT applies the LT predicate on the "credential_id" field.
+func CredentialIDLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldCredentialID, v))
+}
+
+// CredentialIDLTE applies the LTE predicate on the "credential_id" field.
+func CredentialIDLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldCredentialID, v))
+}
+
+// CredentialIDContains applies the Contains predicate on the "credential_id" field.
+func CredentialIDContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldCredentialID, v))
+}
+
+// CredentialIDHasPrefix applies the HasPrefix predicate on the "credential_id" field.
+func CredentialIDHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldCredentialID, v))
+}
+
+// CredentialIDHasSuffix applies the HasSuffix predicate on the "credential_id" field.
+func CredentialIDHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldCredentialID, v))
+}
+
+// CredentialIDEqualFold applies the EqualFold predicate on the "credential_id" field.
+func CredentialIDEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldCredentialID, v))
+}
+
+// CredentialIDContainsFold applies the ContainsFold predicate on the "credential_id" field.
+func CredentialIDContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldCredentialID, v))
+}
+
+// StickyStatusEQ applies the EQ predicate on the "sticky_status" field.
+func StickyStatusEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldStickyStatus, v))
+}
+
+// StickyStatusNEQ applies the NEQ predicate on the "sticky_status" field.
+func StickyStatusNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldStickyStatus, v))
+}
+
+// StickyStatusIn applies the In predicate on the "sticky_status" field.
+func StickyStatusIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldStickyStatus, vs...))
+}
+
+// StickyStatusNotIn applies the NotIn predicate on the "sticky_status" field.
+func StickyStatusNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldStickyStatus, vs...))
+}
+
+// StickyStatusGT applies the GT predicate on the "sticky_status" field.
+func StickyStatusGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldStickyStatus, v))
+}
+
+// StickyStatusGTE applies the GTE predicate on the "sticky_status" field.
+func StickyStatusGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldStickyStatus, v))
+}
+
+// StickyStatusLT applies the LT predicate on the "sticky_status" field.
+func StickyStatusLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldStickyStatus, v))
+}
+
+// StickyStatusLTE applies the LTE predicate on the "sticky_status" field.
+func StickyStatusLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldStickyStatus, v))
+}
+
+// StickyStatusContains applies the Contains predicate on the "sticky_status" field.
+func StickyStatusContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldStickyStatus, v))
+}
+
+// StickyStatusHasPrefix applies the HasPrefix predicate on the "sticky_status" field.
+func StickyStatusHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldStickyStatus, v))
+}
+
+// StickyStatusHasSuffix applies the HasSuffix predicate on the "sticky_status" field.
+func StickyStatusHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldStickyStatus, v))
+}
+
+// StickyStatusEqualFold applies the EqualFold predicate on the "sticky_status" field.
+func StickyStatusEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldStickyStatus, v))
+}
+
+// StickyStatusContainsFold applies the ContainsFold predicate on the "sticky_status" field.
+func StickyStatusContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldStickyStatus, v))
+}
+
+// StickyPreviousUpstreamIDEQ applies the EQ predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDNEQ applies the NEQ predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDIn applies the In predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldStickyPreviousUpstreamID, vs...))
+}
+
+// StickyPreviousUpstreamIDNotIn applies the NotIn predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldStickyPreviousUpstreamID, vs...))
+}
+
+// StickyPreviousUpstreamIDGT applies the GT predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDGTE applies the GTE predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDLT applies the LT predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDLTE applies the LTE predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDContains applies the Contains predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDHasPrefix applies the HasPrefix predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDHasSuffix applies the HasSuffix predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDEqualFold applies the EqualFold predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldStickyPreviousUpstreamID, v))
+}
+
+// StickyPreviousUpstreamIDContainsFold applies the ContainsFold predicate on the "sticky_previous_upstream_id" field.
+func StickyPreviousUpstreamIDContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldStickyPreviousUpstreamID, v))
 }
 
 // And groups predicates with the AND operator between them.

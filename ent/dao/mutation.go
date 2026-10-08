@@ -30,7 +30,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -69,7 +68,6 @@ const (
 	TypeResponse         = "Response"
 	TypeResponseItem     = "ResponseItem"
 	TypeScore            = "Score"
-	TypeSemanticNode     = "SemanticNode"
 	TypeSystemEvent      = "SystemEvent"
 	TypeToolCallAudit    = "ToolCallAudit"
 	TypeTraceFinding     = "TraceFinding"
@@ -17246,1103 +17244,6 @@ func (m *ScoreMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Score edge %s", name)
 }
 
-// SemanticNodeMutation represents an operation that mutates the SemanticNode nodes in the graph.
-type SemanticNodeMutation struct {
-	config
-	op              Op
-	typ             string
-	id              *int
-	trace_id        *string
-	node_id         *string
-	parent_node_id  *string
-	provider_type   *string
-	normalized_type *string
-	role            *string
-	_path           *string
-	node_index      *int
-	addnode_index   *int
-	depth           *int
-	adddepth        *int
-	text_preview    *string
-	json            *string
-	raw             *string
-	raw_ref         *string
-	created_at      *time.Time
-	clearedFields   map[string]struct{}
-	done            bool
-	oldValue        func(context.Context) (*SemanticNode, error)
-	predicates      []predicate.SemanticNode
-}
-
-var _ ent.Mutation = (*SemanticNodeMutation)(nil)
-
-// semanticnodeOption allows management of the mutation configuration using functional options.
-type semanticnodeOption func(*SemanticNodeMutation)
-
-// newSemanticNodeMutation creates new mutation for the SemanticNode entity.
-func newSemanticNodeMutation(c config, op Op, opts ...semanticnodeOption) *SemanticNodeMutation {
-	m := &SemanticNodeMutation{
-		config:        c,
-		op:            op,
-		typ:           TypeSemanticNode,
-		clearedFields: make(map[string]struct{}),
-	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
-
-// withSemanticNodeID sets the ID field of the mutation.
-func withSemanticNodeID(id int) semanticnodeOption {
-	return func(m *SemanticNodeMutation) {
-		var (
-			err   error
-			once  sync.Once
-			value *SemanticNode
-		)
-		m.oldValue = func(ctx context.Context) (*SemanticNode, error) {
-			once.Do(func() {
-				if m.done {
-					err = errors.New("querying old values post mutation is not allowed")
-				} else {
-					value, err = m.Client().SemanticNode.Get(ctx, id)
-				}
-			})
-			return value, err
-		}
-		m.id = &id
-	}
-}
-
-// withSemanticNode sets the old SemanticNode of the mutation.
-func withSemanticNode(node *SemanticNode) semanticnodeOption {
-	return func(m *SemanticNodeMutation) {
-		m.oldValue = func(context.Context) (*SemanticNode, error) {
-			return node, nil
-		}
-		m.id = &node.ID
-	}
-}
-
-// Client returns a new `ent.Client` from the mutation. If the mutation was
-// executed in a transaction (ent.Tx), a transactional client is returned.
-func (m SemanticNodeMutation) Client() *Client {
-	client := &Client{config: m.config}
-	client.init()
-	return client
-}
-
-// Tx returns an `ent.Tx` for mutations that were executed in transactions;
-// it returns an error otherwise.
-func (m SemanticNodeMutation) Tx() (*Tx, error) {
-	if _, ok := m.driver.(*txDriver); !ok {
-		return nil, errors.New("dao: mutation is not running in a transaction")
-	}
-	tx := &Tx{config: m.config}
-	tx.init()
-	return tx, nil
-}
-
-// ID returns the ID value in the mutation. Note that the ID is only available
-// if it was provided to the builder or after it was returned from the database.
-func (m *SemanticNodeMutation) ID() (id int, exists bool) {
-	if m.id == nil {
-		return
-	}
-	return *m.id, true
-}
-
-// IDs queries the database and returns the entity ids that match the mutation's predicate.
-// That means, if the mutation is applied within a transaction with an isolation level such
-// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
-// or updated by the mutation.
-func (m *SemanticNodeMutation) IDs(ctx context.Context) ([]int, error) {
-	switch {
-	case m.op.Is(OpUpdateOne | OpDeleteOne):
-		id, exists := m.ID()
-		if exists {
-			return []int{id}, nil
-		}
-		fallthrough
-	case m.op.Is(OpUpdate | OpDelete):
-		return m.Client().SemanticNode.Query().Where(m.predicates...).IDs(ctx)
-	default:
-		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
-	}
-}
-
-// SetTraceID sets the "trace_id" field.
-func (m *SemanticNodeMutation) SetTraceID(s string) {
-	m.trace_id = &s
-}
-
-// TraceID returns the value of the "trace_id" field in the mutation.
-func (m *SemanticNodeMutation) TraceID() (r string, exists bool) {
-	v := m.trace_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldTraceID returns the old "trace_id" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldTraceID(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldTraceID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldTraceID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldTraceID: %w", err)
-	}
-	return oldValue.TraceID, nil
-}
-
-// ResetTraceID resets all changes to the "trace_id" field.
-func (m *SemanticNodeMutation) ResetTraceID() {
-	m.trace_id = nil
-}
-
-// SetNodeID sets the "node_id" field.
-func (m *SemanticNodeMutation) SetNodeID(s string) {
-	m.node_id = &s
-}
-
-// NodeID returns the value of the "node_id" field in the mutation.
-func (m *SemanticNodeMutation) NodeID() (r string, exists bool) {
-	v := m.node_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldNodeID returns the old "node_id" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldNodeID(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldNodeID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldNodeID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldNodeID: %w", err)
-	}
-	return oldValue.NodeID, nil
-}
-
-// ResetNodeID resets all changes to the "node_id" field.
-func (m *SemanticNodeMutation) ResetNodeID() {
-	m.node_id = nil
-}
-
-// SetParentNodeID sets the "parent_node_id" field.
-func (m *SemanticNodeMutation) SetParentNodeID(s string) {
-	m.parent_node_id = &s
-}
-
-// ParentNodeID returns the value of the "parent_node_id" field in the mutation.
-func (m *SemanticNodeMutation) ParentNodeID() (r string, exists bool) {
-	v := m.parent_node_id
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldParentNodeID returns the old "parent_node_id" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldParentNodeID(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldParentNodeID is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldParentNodeID requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldParentNodeID: %w", err)
-	}
-	return oldValue.ParentNodeID, nil
-}
-
-// ResetParentNodeID resets all changes to the "parent_node_id" field.
-func (m *SemanticNodeMutation) ResetParentNodeID() {
-	m.parent_node_id = nil
-}
-
-// SetProviderType sets the "provider_type" field.
-func (m *SemanticNodeMutation) SetProviderType(s string) {
-	m.provider_type = &s
-}
-
-// ProviderType returns the value of the "provider_type" field in the mutation.
-func (m *SemanticNodeMutation) ProviderType() (r string, exists bool) {
-	v := m.provider_type
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldProviderType returns the old "provider_type" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldProviderType(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldProviderType is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldProviderType requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldProviderType: %w", err)
-	}
-	return oldValue.ProviderType, nil
-}
-
-// ResetProviderType resets all changes to the "provider_type" field.
-func (m *SemanticNodeMutation) ResetProviderType() {
-	m.provider_type = nil
-}
-
-// SetNormalizedType sets the "normalized_type" field.
-func (m *SemanticNodeMutation) SetNormalizedType(s string) {
-	m.normalized_type = &s
-}
-
-// NormalizedType returns the value of the "normalized_type" field in the mutation.
-func (m *SemanticNodeMutation) NormalizedType() (r string, exists bool) {
-	v := m.normalized_type
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldNormalizedType returns the old "normalized_type" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldNormalizedType(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldNormalizedType is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldNormalizedType requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldNormalizedType: %w", err)
-	}
-	return oldValue.NormalizedType, nil
-}
-
-// ResetNormalizedType resets all changes to the "normalized_type" field.
-func (m *SemanticNodeMutation) ResetNormalizedType() {
-	m.normalized_type = nil
-}
-
-// SetRole sets the "role" field.
-func (m *SemanticNodeMutation) SetRole(s string) {
-	m.role = &s
-}
-
-// Role returns the value of the "role" field in the mutation.
-func (m *SemanticNodeMutation) Role() (r string, exists bool) {
-	v := m.role
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldRole returns the old "role" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldRole(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldRole is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldRole requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldRole: %w", err)
-	}
-	return oldValue.Role, nil
-}
-
-// ResetRole resets all changes to the "role" field.
-func (m *SemanticNodeMutation) ResetRole() {
-	m.role = nil
-}
-
-// SetPath sets the "path" field.
-func (m *SemanticNodeMutation) SetPath(s string) {
-	m._path = &s
-}
-
-// Path returns the value of the "path" field in the mutation.
-func (m *SemanticNodeMutation) Path() (r string, exists bool) {
-	v := m._path
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldPath returns the old "path" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldPath(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldPath is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldPath requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldPath: %w", err)
-	}
-	return oldValue.Path, nil
-}
-
-// ResetPath resets all changes to the "path" field.
-func (m *SemanticNodeMutation) ResetPath() {
-	m._path = nil
-}
-
-// SetNodeIndex sets the "node_index" field.
-func (m *SemanticNodeMutation) SetNodeIndex(i int) {
-	m.node_index = &i
-	m.addnode_index = nil
-}
-
-// NodeIndex returns the value of the "node_index" field in the mutation.
-func (m *SemanticNodeMutation) NodeIndex() (r int, exists bool) {
-	v := m.node_index
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldNodeIndex returns the old "node_index" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldNodeIndex(ctx context.Context) (v int, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldNodeIndex is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldNodeIndex requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldNodeIndex: %w", err)
-	}
-	return oldValue.NodeIndex, nil
-}
-
-// AddNodeIndex adds i to the "node_index" field.
-func (m *SemanticNodeMutation) AddNodeIndex(i int) {
-	if m.addnode_index != nil {
-		*m.addnode_index += i
-	} else {
-		m.addnode_index = &i
-	}
-}
-
-// AddedNodeIndex returns the value that was added to the "node_index" field in this mutation.
-func (m *SemanticNodeMutation) AddedNodeIndex() (r int, exists bool) {
-	v := m.addnode_index
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ResetNodeIndex resets all changes to the "node_index" field.
-func (m *SemanticNodeMutation) ResetNodeIndex() {
-	m.node_index = nil
-	m.addnode_index = nil
-}
-
-// SetDepth sets the "depth" field.
-func (m *SemanticNodeMutation) SetDepth(i int) {
-	m.depth = &i
-	m.adddepth = nil
-}
-
-// Depth returns the value of the "depth" field in the mutation.
-func (m *SemanticNodeMutation) Depth() (r int, exists bool) {
-	v := m.depth
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldDepth returns the old "depth" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldDepth(ctx context.Context) (v int, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldDepth is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldDepth requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldDepth: %w", err)
-	}
-	return oldValue.Depth, nil
-}
-
-// AddDepth adds i to the "depth" field.
-func (m *SemanticNodeMutation) AddDepth(i int) {
-	if m.adddepth != nil {
-		*m.adddepth += i
-	} else {
-		m.adddepth = &i
-	}
-}
-
-// AddedDepth returns the value that was added to the "depth" field in this mutation.
-func (m *SemanticNodeMutation) AddedDepth() (r int, exists bool) {
-	v := m.adddepth
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ResetDepth resets all changes to the "depth" field.
-func (m *SemanticNodeMutation) ResetDepth() {
-	m.depth = nil
-	m.adddepth = nil
-}
-
-// SetTextPreview sets the "text_preview" field.
-func (m *SemanticNodeMutation) SetTextPreview(s string) {
-	m.text_preview = &s
-}
-
-// TextPreview returns the value of the "text_preview" field in the mutation.
-func (m *SemanticNodeMutation) TextPreview() (r string, exists bool) {
-	v := m.text_preview
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldTextPreview returns the old "text_preview" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldTextPreview(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldTextPreview is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldTextPreview requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldTextPreview: %w", err)
-	}
-	return oldValue.TextPreview, nil
-}
-
-// ResetTextPreview resets all changes to the "text_preview" field.
-func (m *SemanticNodeMutation) ResetTextPreview() {
-	m.text_preview = nil
-}
-
-// SetJSON sets the "json" field.
-func (m *SemanticNodeMutation) SetJSON(s string) {
-	m.json = &s
-}
-
-// JSON returns the value of the "json" field in the mutation.
-func (m *SemanticNodeMutation) JSON() (r string, exists bool) {
-	v := m.json
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldJSON returns the old "json" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldJSON(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldJSON is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldJSON requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldJSON: %w", err)
-	}
-	return oldValue.JSON, nil
-}
-
-// ResetJSON resets all changes to the "json" field.
-func (m *SemanticNodeMutation) ResetJSON() {
-	m.json = nil
-}
-
-// SetRaw sets the "raw" field.
-func (m *SemanticNodeMutation) SetRaw(s string) {
-	m.raw = &s
-}
-
-// Raw returns the value of the "raw" field in the mutation.
-func (m *SemanticNodeMutation) Raw() (r string, exists bool) {
-	v := m.raw
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldRaw returns the old "raw" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldRaw(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldRaw is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldRaw requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldRaw: %w", err)
-	}
-	return oldValue.Raw, nil
-}
-
-// ResetRaw resets all changes to the "raw" field.
-func (m *SemanticNodeMutation) ResetRaw() {
-	m.raw = nil
-}
-
-// SetRawRef sets the "raw_ref" field.
-func (m *SemanticNodeMutation) SetRawRef(s string) {
-	m.raw_ref = &s
-}
-
-// RawRef returns the value of the "raw_ref" field in the mutation.
-func (m *SemanticNodeMutation) RawRef() (r string, exists bool) {
-	v := m.raw_ref
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldRawRef returns the old "raw_ref" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldRawRef(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldRawRef is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldRawRef requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldRawRef: %w", err)
-	}
-	return oldValue.RawRef, nil
-}
-
-// ResetRawRef resets all changes to the "raw_ref" field.
-func (m *SemanticNodeMutation) ResetRawRef() {
-	m.raw_ref = nil
-}
-
-// SetCreatedAt sets the "created_at" field.
-func (m *SemanticNodeMutation) SetCreatedAt(t time.Time) {
-	m.created_at = &t
-}
-
-// CreatedAt returns the value of the "created_at" field in the mutation.
-func (m *SemanticNodeMutation) CreatedAt() (r time.Time, exists bool) {
-	v := m.created_at
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldCreatedAt returns the old "created_at" field's value of the SemanticNode entity.
-// If the SemanticNode object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *SemanticNodeMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
-	}
-	return oldValue.CreatedAt, nil
-}
-
-// ResetCreatedAt resets all changes to the "created_at" field.
-func (m *SemanticNodeMutation) ResetCreatedAt() {
-	m.created_at = nil
-}
-
-// Where appends a list predicates to the SemanticNodeMutation builder.
-func (m *SemanticNodeMutation) Where(ps ...predicate.SemanticNode) {
-	m.predicates = append(m.predicates, ps...)
-}
-
-// WhereP appends storage-level predicates to the SemanticNodeMutation builder. Using this method,
-// users can use type-assertion to append predicates that do not depend on any generated package.
-func (m *SemanticNodeMutation) WhereP(ps ...func(*sql.Selector)) {
-	p := make([]predicate.SemanticNode, len(ps))
-	for i := range ps {
-		p[i] = ps[i]
-	}
-	m.Where(p...)
-}
-
-// Op returns the operation name.
-func (m *SemanticNodeMutation) Op() Op {
-	return m.op
-}
-
-// SetOp allows setting the mutation operation.
-func (m *SemanticNodeMutation) SetOp(op Op) {
-	m.op = op
-}
-
-// Type returns the node type of this mutation (SemanticNode).
-func (m *SemanticNodeMutation) Type() string {
-	return m.typ
-}
-
-// Fields returns all fields that were changed during this mutation. Note that in
-// order to get all numeric fields that were incremented/decremented, call
-// AddedFields().
-func (m *SemanticNodeMutation) Fields() []string {
-	fields := make([]string, 0, 14)
-	if m.trace_id != nil {
-		fields = append(fields, semanticnode.FieldTraceID)
-	}
-	if m.node_id != nil {
-		fields = append(fields, semanticnode.FieldNodeID)
-	}
-	if m.parent_node_id != nil {
-		fields = append(fields, semanticnode.FieldParentNodeID)
-	}
-	if m.provider_type != nil {
-		fields = append(fields, semanticnode.FieldProviderType)
-	}
-	if m.normalized_type != nil {
-		fields = append(fields, semanticnode.FieldNormalizedType)
-	}
-	if m.role != nil {
-		fields = append(fields, semanticnode.FieldRole)
-	}
-	if m._path != nil {
-		fields = append(fields, semanticnode.FieldPath)
-	}
-	if m.node_index != nil {
-		fields = append(fields, semanticnode.FieldNodeIndex)
-	}
-	if m.depth != nil {
-		fields = append(fields, semanticnode.FieldDepth)
-	}
-	if m.text_preview != nil {
-		fields = append(fields, semanticnode.FieldTextPreview)
-	}
-	if m.json != nil {
-		fields = append(fields, semanticnode.FieldJSON)
-	}
-	if m.raw != nil {
-		fields = append(fields, semanticnode.FieldRaw)
-	}
-	if m.raw_ref != nil {
-		fields = append(fields, semanticnode.FieldRawRef)
-	}
-	if m.created_at != nil {
-		fields = append(fields, semanticnode.FieldCreatedAt)
-	}
-	return fields
-}
-
-// Field returns the value of a field with the given name. The second boolean
-// return value indicates that this field was not set, or was not defined in the
-// schema.
-func (m *SemanticNodeMutation) Field(name string) (ent.Value, bool) {
-	switch name {
-	case semanticnode.FieldTraceID:
-		return m.TraceID()
-	case semanticnode.FieldNodeID:
-		return m.NodeID()
-	case semanticnode.FieldParentNodeID:
-		return m.ParentNodeID()
-	case semanticnode.FieldProviderType:
-		return m.ProviderType()
-	case semanticnode.FieldNormalizedType:
-		return m.NormalizedType()
-	case semanticnode.FieldRole:
-		return m.Role()
-	case semanticnode.FieldPath:
-		return m.Path()
-	case semanticnode.FieldNodeIndex:
-		return m.NodeIndex()
-	case semanticnode.FieldDepth:
-		return m.Depth()
-	case semanticnode.FieldTextPreview:
-		return m.TextPreview()
-	case semanticnode.FieldJSON:
-		return m.JSON()
-	case semanticnode.FieldRaw:
-		return m.Raw()
-	case semanticnode.FieldRawRef:
-		return m.RawRef()
-	case semanticnode.FieldCreatedAt:
-		return m.CreatedAt()
-	}
-	return nil, false
-}
-
-// OldField returns the old value of the field from the database. An error is
-// returned if the mutation operation is not UpdateOne, or the query to the
-// database failed.
-func (m *SemanticNodeMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
-	switch name {
-	case semanticnode.FieldTraceID:
-		return m.OldTraceID(ctx)
-	case semanticnode.FieldNodeID:
-		return m.OldNodeID(ctx)
-	case semanticnode.FieldParentNodeID:
-		return m.OldParentNodeID(ctx)
-	case semanticnode.FieldProviderType:
-		return m.OldProviderType(ctx)
-	case semanticnode.FieldNormalizedType:
-		return m.OldNormalizedType(ctx)
-	case semanticnode.FieldRole:
-		return m.OldRole(ctx)
-	case semanticnode.FieldPath:
-		return m.OldPath(ctx)
-	case semanticnode.FieldNodeIndex:
-		return m.OldNodeIndex(ctx)
-	case semanticnode.FieldDepth:
-		return m.OldDepth(ctx)
-	case semanticnode.FieldTextPreview:
-		return m.OldTextPreview(ctx)
-	case semanticnode.FieldJSON:
-		return m.OldJSON(ctx)
-	case semanticnode.FieldRaw:
-		return m.OldRaw(ctx)
-	case semanticnode.FieldRawRef:
-		return m.OldRawRef(ctx)
-	case semanticnode.FieldCreatedAt:
-		return m.OldCreatedAt(ctx)
-	}
-	return nil, fmt.Errorf("unknown SemanticNode field %s", name)
-}
-
-// SetField sets the value of a field with the given name. It returns an error if
-// the field is not defined in the schema, or if the type mismatched the field
-// type.
-func (m *SemanticNodeMutation) SetField(name string, value ent.Value) error {
-	switch name {
-	case semanticnode.FieldTraceID:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetTraceID(v)
-		return nil
-	case semanticnode.FieldNodeID:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetNodeID(v)
-		return nil
-	case semanticnode.FieldParentNodeID:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetParentNodeID(v)
-		return nil
-	case semanticnode.FieldProviderType:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetProviderType(v)
-		return nil
-	case semanticnode.FieldNormalizedType:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetNormalizedType(v)
-		return nil
-	case semanticnode.FieldRole:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetRole(v)
-		return nil
-	case semanticnode.FieldPath:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetPath(v)
-		return nil
-	case semanticnode.FieldNodeIndex:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetNodeIndex(v)
-		return nil
-	case semanticnode.FieldDepth:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetDepth(v)
-		return nil
-	case semanticnode.FieldTextPreview:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetTextPreview(v)
-		return nil
-	case semanticnode.FieldJSON:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetJSON(v)
-		return nil
-	case semanticnode.FieldRaw:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetRaw(v)
-		return nil
-	case semanticnode.FieldRawRef:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetRawRef(v)
-		return nil
-	case semanticnode.FieldCreatedAt:
-		v, ok := value.(time.Time)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetCreatedAt(v)
-		return nil
-	}
-	return fmt.Errorf("unknown SemanticNode field %s", name)
-}
-
-// AddedFields returns all numeric fields that were incremented/decremented during
-// this mutation.
-func (m *SemanticNodeMutation) AddedFields() []string {
-	var fields []string
-	if m.addnode_index != nil {
-		fields = append(fields, semanticnode.FieldNodeIndex)
-	}
-	if m.adddepth != nil {
-		fields = append(fields, semanticnode.FieldDepth)
-	}
-	return fields
-}
-
-// AddedField returns the numeric value that was incremented/decremented on a field
-// with the given name. The second boolean return value indicates that this field
-// was not set, or was not defined in the schema.
-func (m *SemanticNodeMutation) AddedField(name string) (ent.Value, bool) {
-	switch name {
-	case semanticnode.FieldNodeIndex:
-		return m.AddedNodeIndex()
-	case semanticnode.FieldDepth:
-		return m.AddedDepth()
-	}
-	return nil, false
-}
-
-// AddField adds the value to the field with the given name. It returns an error if
-// the field is not defined in the schema, or if the type mismatched the field
-// type.
-func (m *SemanticNodeMutation) AddField(name string, value ent.Value) error {
-	switch name {
-	case semanticnode.FieldNodeIndex:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddNodeIndex(v)
-		return nil
-	case semanticnode.FieldDepth:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddDepth(v)
-		return nil
-	}
-	return fmt.Errorf("unknown SemanticNode numeric field %s", name)
-}
-
-// ClearedFields returns all nullable fields that were cleared during this
-// mutation.
-func (m *SemanticNodeMutation) ClearedFields() []string {
-	return nil
-}
-
-// FieldCleared returns a boolean indicating if a field with the given name was
-// cleared in this mutation.
-func (m *SemanticNodeMutation) FieldCleared(name string) bool {
-	_, ok := m.clearedFields[name]
-	return ok
-}
-
-// ClearField clears the value of the field with the given name. It returns an
-// error if the field is not defined in the schema.
-func (m *SemanticNodeMutation) ClearField(name string) error {
-	return fmt.Errorf("unknown SemanticNode nullable field %s", name)
-}
-
-// ResetField resets all changes in the mutation for the field with the given name.
-// It returns an error if the field is not defined in the schema.
-func (m *SemanticNodeMutation) ResetField(name string) error {
-	switch name {
-	case semanticnode.FieldTraceID:
-		m.ResetTraceID()
-		return nil
-	case semanticnode.FieldNodeID:
-		m.ResetNodeID()
-		return nil
-	case semanticnode.FieldParentNodeID:
-		m.ResetParentNodeID()
-		return nil
-	case semanticnode.FieldProviderType:
-		m.ResetProviderType()
-		return nil
-	case semanticnode.FieldNormalizedType:
-		m.ResetNormalizedType()
-		return nil
-	case semanticnode.FieldRole:
-		m.ResetRole()
-		return nil
-	case semanticnode.FieldPath:
-		m.ResetPath()
-		return nil
-	case semanticnode.FieldNodeIndex:
-		m.ResetNodeIndex()
-		return nil
-	case semanticnode.FieldDepth:
-		m.ResetDepth()
-		return nil
-	case semanticnode.FieldTextPreview:
-		m.ResetTextPreview()
-		return nil
-	case semanticnode.FieldJSON:
-		m.ResetJSON()
-		return nil
-	case semanticnode.FieldRaw:
-		m.ResetRaw()
-		return nil
-	case semanticnode.FieldRawRef:
-		m.ResetRawRef()
-		return nil
-	case semanticnode.FieldCreatedAt:
-		m.ResetCreatedAt()
-		return nil
-	}
-	return fmt.Errorf("unknown SemanticNode field %s", name)
-}
-
-// AddedEdges returns all edge names that were set/added in this mutation.
-func (m *SemanticNodeMutation) AddedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// AddedIDs returns all IDs (to other nodes) that were added for the given edge
-// name in this mutation.
-func (m *SemanticNodeMutation) AddedIDs(name string) []ent.Value {
-	return nil
-}
-
-// RemovedEdges returns all edge names that were removed in this mutation.
-func (m *SemanticNodeMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
-// the given name in this mutation.
-func (m *SemanticNodeMutation) RemovedIDs(name string) []ent.Value {
-	return nil
-}
-
-// ClearedEdges returns all edge names that were cleared in this mutation.
-func (m *SemanticNodeMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 0)
-	return edges
-}
-
-// EdgeCleared returns a boolean which indicates if the edge with the given name
-// was cleared in this mutation.
-func (m *SemanticNodeMutation) EdgeCleared(name string) bool {
-	return false
-}
-
-// ClearEdge clears the value of the edge with the given name. It returns an error
-// if that edge is not defined in the schema.
-func (m *SemanticNodeMutation) ClearEdge(name string) error {
-	return fmt.Errorf("unknown SemanticNode unique edge %s", name)
-}
-
-// ResetEdge resets all changes to the edge with the given name in this mutation.
-// It returns an error if the edge is not defined in the schema.
-func (m *SemanticNodeMutation) ResetEdge(name string) error {
-	return fmt.Errorf("unknown SemanticNode edge %s", name)
-}
-
 // SystemEventMutation represents an operation that mutates the SystemEvent nodes in the graph.
 type SystemEventMutation struct {
 	config
@@ -22210,6 +21111,11 @@ type TraceLogMutation struct {
 	routing_candidate_count           *int
 	addrouting_candidate_count        *int
 	routing_failure_reason            *string
+	route_target_id                   *string
+	channel_id                        *string
+	credential_id                     *string
+	sticky_status                     *string
+	sticky_previous_upstream_id       *string
 	clearedFields                     map[string]struct{}
 	done                              bool
 	oldValue                          func(context.Context) (*TraceLog, error)
@@ -24280,6 +23186,186 @@ func (m *TraceLogMutation) ResetRoutingFailureReason() {
 	m.routing_failure_reason = nil
 }
 
+// SetRouteTargetID sets the "route_target_id" field.
+func (m *TraceLogMutation) SetRouteTargetID(s string) {
+	m.route_target_id = &s
+}
+
+// RouteTargetID returns the value of the "route_target_id" field in the mutation.
+func (m *TraceLogMutation) RouteTargetID() (r string, exists bool) {
+	v := m.route_target_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRouteTargetID returns the old "route_target_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldRouteTargetID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRouteTargetID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRouteTargetID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRouteTargetID: %w", err)
+	}
+	return oldValue.RouteTargetID, nil
+}
+
+// ResetRouteTargetID resets all changes to the "route_target_id" field.
+func (m *TraceLogMutation) ResetRouteTargetID() {
+	m.route_target_id = nil
+}
+
+// SetChannelID sets the "channel_id" field.
+func (m *TraceLogMutation) SetChannelID(s string) {
+	m.channel_id = &s
+}
+
+// ChannelID returns the value of the "channel_id" field in the mutation.
+func (m *TraceLogMutation) ChannelID() (r string, exists bool) {
+	v := m.channel_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldChannelID returns the old "channel_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldChannelID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldChannelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldChannelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldChannelID: %w", err)
+	}
+	return oldValue.ChannelID, nil
+}
+
+// ResetChannelID resets all changes to the "channel_id" field.
+func (m *TraceLogMutation) ResetChannelID() {
+	m.channel_id = nil
+}
+
+// SetCredentialID sets the "credential_id" field.
+func (m *TraceLogMutation) SetCredentialID(s string) {
+	m.credential_id = &s
+}
+
+// CredentialID returns the value of the "credential_id" field in the mutation.
+func (m *TraceLogMutation) CredentialID() (r string, exists bool) {
+	v := m.credential_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialID returns the old "credential_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldCredentialID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialID: %w", err)
+	}
+	return oldValue.CredentialID, nil
+}
+
+// ResetCredentialID resets all changes to the "credential_id" field.
+func (m *TraceLogMutation) ResetCredentialID() {
+	m.credential_id = nil
+}
+
+// SetStickyStatus sets the "sticky_status" field.
+func (m *TraceLogMutation) SetStickyStatus(s string) {
+	m.sticky_status = &s
+}
+
+// StickyStatus returns the value of the "sticky_status" field in the mutation.
+func (m *TraceLogMutation) StickyStatus() (r string, exists bool) {
+	v := m.sticky_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStickyStatus returns the old "sticky_status" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldStickyStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStickyStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStickyStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStickyStatus: %w", err)
+	}
+	return oldValue.StickyStatus, nil
+}
+
+// ResetStickyStatus resets all changes to the "sticky_status" field.
+func (m *TraceLogMutation) ResetStickyStatus() {
+	m.sticky_status = nil
+}
+
+// SetStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field.
+func (m *TraceLogMutation) SetStickyPreviousUpstreamID(s string) {
+	m.sticky_previous_upstream_id = &s
+}
+
+// StickyPreviousUpstreamID returns the value of the "sticky_previous_upstream_id" field in the mutation.
+func (m *TraceLogMutation) StickyPreviousUpstreamID() (r string, exists bool) {
+	v := m.sticky_previous_upstream_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStickyPreviousUpstreamID returns the old "sticky_previous_upstream_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldStickyPreviousUpstreamID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStickyPreviousUpstreamID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStickyPreviousUpstreamID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStickyPreviousUpstreamID: %w", err)
+	}
+	return oldValue.StickyPreviousUpstreamID, nil
+}
+
+// ResetStickyPreviousUpstreamID resets all changes to the "sticky_previous_upstream_id" field.
+func (m *TraceLogMutation) ResetStickyPreviousUpstreamID() {
+	m.sticky_previous_upstream_id = nil
+}
+
 // Where appends a list predicates to the TraceLogMutation builder.
 func (m *TraceLogMutation) Where(ps ...predicate.TraceLog) {
 	m.predicates = append(m.predicates, ps...)
@@ -24314,7 +23400,7 @@ func (m *TraceLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TraceLogMutation) Fields() []string {
-	fields := make([]string, 0, 45)
+	fields := make([]string, 0, 50)
 	if m.trace_id != nil {
 		fields = append(fields, tracelog.FieldTraceID)
 	}
@@ -24450,6 +23536,21 @@ func (m *TraceLogMutation) Fields() []string {
 	if m.routing_failure_reason != nil {
 		fields = append(fields, tracelog.FieldRoutingFailureReason)
 	}
+	if m.route_target_id != nil {
+		fields = append(fields, tracelog.FieldRouteTargetID)
+	}
+	if m.channel_id != nil {
+		fields = append(fields, tracelog.FieldChannelID)
+	}
+	if m.credential_id != nil {
+		fields = append(fields, tracelog.FieldCredentialID)
+	}
+	if m.sticky_status != nil {
+		fields = append(fields, tracelog.FieldStickyStatus)
+	}
+	if m.sticky_previous_upstream_id != nil {
+		fields = append(fields, tracelog.FieldStickyPreviousUpstreamID)
+	}
 	return fields
 }
 
@@ -24548,6 +23649,16 @@ func (m *TraceLogMutation) Field(name string) (ent.Value, bool) {
 		return m.RoutingCandidateCount()
 	case tracelog.FieldRoutingFailureReason:
 		return m.RoutingFailureReason()
+	case tracelog.FieldRouteTargetID:
+		return m.RouteTargetID()
+	case tracelog.FieldChannelID:
+		return m.ChannelID()
+	case tracelog.FieldCredentialID:
+		return m.CredentialID()
+	case tracelog.FieldStickyStatus:
+		return m.StickyStatus()
+	case tracelog.FieldStickyPreviousUpstreamID:
+		return m.StickyPreviousUpstreamID()
 	}
 	return nil, false
 }
@@ -24647,6 +23758,16 @@ func (m *TraceLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldRoutingCandidateCount(ctx)
 	case tracelog.FieldRoutingFailureReason:
 		return m.OldRoutingFailureReason(ctx)
+	case tracelog.FieldRouteTargetID:
+		return m.OldRouteTargetID(ctx)
+	case tracelog.FieldChannelID:
+		return m.OldChannelID(ctx)
+	case tracelog.FieldCredentialID:
+		return m.OldCredentialID(ctx)
+	case tracelog.FieldStickyStatus:
+		return m.OldStickyStatus(ctx)
+	case tracelog.FieldStickyPreviousUpstreamID:
+		return m.OldStickyPreviousUpstreamID(ctx)
 	}
 	return nil, fmt.Errorf("unknown TraceLog field %s", name)
 }
@@ -24970,6 +24091,41 @@ func (m *TraceLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRoutingFailureReason(v)
+		return nil
+	case tracelog.FieldRouteTargetID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRouteTargetID(v)
+		return nil
+	case tracelog.FieldChannelID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetChannelID(v)
+		return nil
+	case tracelog.FieldCredentialID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialID(v)
+		return nil
+	case tracelog.FieldStickyStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStickyStatus(v)
+		return nil
+	case tracelog.FieldStickyPreviousUpstreamID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStickyPreviousUpstreamID(v)
 		return nil
 	}
 	return fmt.Errorf("unknown TraceLog field %s", name)
@@ -25361,6 +24517,21 @@ func (m *TraceLogMutation) ResetField(name string) error {
 		return nil
 	case tracelog.FieldRoutingFailureReason:
 		m.ResetRoutingFailureReason()
+		return nil
+	case tracelog.FieldRouteTargetID:
+		m.ResetRouteTargetID()
+		return nil
+	case tracelog.FieldChannelID:
+		m.ResetChannelID()
+		return nil
+	case tracelog.FieldCredentialID:
+		m.ResetCredentialID()
+		return nil
+	case tracelog.FieldStickyStatus:
+		m.ResetStickyStatus()
+		return nil
+	case tracelog.FieldStickyPreviousUpstreamID:
+		m.ResetStickyPreviousUpstreamID()
 		return nil
 	}
 	return fmt.Errorf("unknown TraceLog field %s", name)

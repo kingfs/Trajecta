@@ -2,6 +2,8 @@ package reanalysis
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +58,11 @@ func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 	}
 }
 
-func TestServiceRescanTraceRequiresObservation(t *testing.T) {
+// TestServiceRescanTraceParsesCassetteWithoutStoringObservation pins the
+// difference between the two trace jobs now that the node table is gone: both
+// parse the cassette, but a rescan leaves the stored observation alone. It used to
+// fail here because a rescan read the node table, which nothing had filled yet.
+func TestServiceRescanTraceParsesCassetteWithoutStoringObservation(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.New(dir)
 	if err != nil {
@@ -65,15 +71,22 @@ func TestServiceRescanTraceRequiresObservation(t *testing.T) {
 	defer st.Close()
 
 	traceID := writeIndexedResponseTrace(t, st, dir)
-	if _, err := New(st, Options{}).RescanTrace(context.Background(), traceID); err == nil {
-		t.Fatalf("RescanTrace() error = nil, want missing observation error")
+	result, err := New(st, Options{}).RescanTrace(context.Background(), traceID)
+	if err != nil {
+		t.Fatalf("RescanTrace() error = %v", err)
 	}
-	jobs, err := st.ListAnalysisJobs("failed", "trace", traceID, 10)
+	if result.Findings == nil || result.Findings.Count == 0 {
+		t.Fatalf("rescan findings = %+v, want findings from the cassette", result.Findings)
+	}
+	jobs, err := st.ListAnalysisJobs("completed", "trace", traceID, 10)
 	if err != nil {
 		t.Fatalf("ListAnalysisJobs() error = %v", err)
 	}
 	if len(jobs) != 1 || jobs[0].JobType != JobTypeTraceRescan {
-		t.Fatalf("jobs = %+v, want failed rescan job", jobs)
+		t.Fatalf("jobs = %+v, want one completed rescan job", jobs)
+	}
+	if _, err := st.GetObservationSummary(traceID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetObservationSummary() error = %v, want a rescan to leave no stored observation", err)
 	}
 }
 

@@ -7,10 +7,12 @@
 ```text
 Raw cassette (.http, LLM_PROXY_V3)
   -> trace index (logs)
-  -> trace_observations
-  -> semantic_nodes / trace_findings
+  -> trace_observations（仅紧凑摘要）
+  -> trace_findings
   -> analysis_runs
 ```
+
+> 语义节点树（原 `semantic_nodes` 表）不再持久化：Protocol/详情视图在打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 实时重解析（`internal/monitor/server.go` 的 `handleTraceObservation`）。`Store.SaveObservation` 只写 `trace_observations` 的紧凑摘要（`internal/store/observation_store.go`）。
 
 - Raw cassette 保存 raw request、raw response、`# meta:` prelude 和基础 `# event:` timeline，是 replay 与 trace detail 视图的事实源。
 - 应用数据库保存结构化状态与索引，只服务于列表、过滤与聚合。数据库不是 replay 依赖：`pkg/replay` 在没有任何数据库的情况下也能回放 cassette。
@@ -30,7 +32,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `<model>` 与 site host 都先经 `tracePathSegment` 规范化再拼路径（`internal/recorder/recorder.go`）：`/` 保留（模型 slug 需要分层），空段、`.` 与 `..` 段被丢弃，控制字符被删除，`\` 改为 `_`，每段长度有上限。model 名来自请求体，是客户端可控输入；不做这一步时含 `..` 的 model 会经 `filepath.Join` 的清理逃出 `trace.output_dir`，含 NUL 的 model 会让 `os.MkdirAll` 以 `invalid argument` 失败并整条丢失 trace（只在日志里留一行 ERROR）。规范化只作用于路径，cassette 元数据与索引里的 model 名保持客户端原值。
 - 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
 - 文件名用录制进程的时刻（容器镜像通过 `TZ=UTC` 固定为 UTC）与纳秒，不保证与同目录内其它文件单调可比。
-- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）、`upstream_exchanges.cassette_path` 与 `overview_metric_bucket_members.path`：移动文件后必须同步这三列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`semantic_nodes`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
+- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）与 `upstream_exchanges.cassette_path`：移动文件后必须同步这两列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
 - `upstream_exchanges.trace_id` **不属于** `logs.trace_id` 的命名空间。它是**上游调用自己的 id**（`meta.request_id`，形如 `1789090160442478635` 的 UnixNano 时间戳；cassette 文件名里的数字是同一时刻的纳秒部分，即该时间戳的后 9 位，文件 prelude 里声明的也是同一个完整值），而同一份 cassette 在 `logs` 里是按客户端 trace id（UUID）索引的：两者靠 `upstream_exchanges.cassette_path` 与 `logs.path` 指向同一个文件来关联，没有外键。所以用「客户端 trace id」口径做孤儿检查时，`upstream_exchanges` 整表都不匹配是**正常的**，不能据此判断索引断裂；必须为 0 的是 `parse_jobs`、`trace_observations`、`trace_findings`、`system_events` 这些真正按客户端 trace id 关联的表。
 - 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
 - `trajecta layout plan` 只读地报告哪些 cassette 不在当前布局里、以及它们的目标路径（判定依据是每个文件 prelude 里的 `meta.model`）。搬迁本身不在 `serve` 里做，也不会由任何命令自动触发。
@@ -55,6 +57,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - 未配置 `database.driver` 时驱动为 Postgres：缺 DSN 会直接报错，不会新建本地文件（`config.DatabaseDriver` 与 store/auth 的 `normalize*Driver` 都以 postgres 为默认）。只有显式写 `database.driver: "sqlite"` 才会打开 SQLite，它用于本地、dev、test 与旧库导入，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库（`config.ResolveDefaultSQLitePath`）；需要把旧库文件批量改名到新名字时用 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh)（详见“从 `llm-tracelab` 升级已有部署”）。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
 - SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库（`db migrate status --check-db` 的只读报告语义见[实现状态](./IMPLEMENTATION_STATUS.md)）。
 - `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
+- 读写连接池分离（仅 Postgres；SQLite 始终单池）：`database.read_max_open_conns`（`TRAJECTA_DATABASE_READ_MAX_OPEN_CONNS`，默认 `0`）打开第二个只读池供 Monitor 与 MCP 使用，`0` 表示不分离、全部走写入池；`database.read_max_idle_conns`（`TRAJECTA_DATABASE_READ_MAX_IDLE_CONNS`，默认等于 `read_max_open_conns`）设置该池的空闲连接数；`database.read_statement_timeout`（`TRAJECTA_DATABASE_READ_STATEMENT_TIMEOUT`，默认 `0s`）给只读池的每条语句加 `statement_timeout`，`0` 表示不设上界。录制路径（proxy finalizer、parse worker、reanalysis）始终使用 `database.max_open_conns`。
 
 ## 命令归属（哪个命令负责迁移、哪个负责 serve、auto_migrate 语义）
 
@@ -114,6 +117,7 @@ docker compose up -d
 - 配置文件路径由 `TRAJECTA_CONFIG` 决定（CLI 的 viper 实例使用 `TRAJECTA` 前缀并开启 `AutomaticEnv`，`cmd/server/root.go`）；镜像 `Dockerfile` 与 compose 都把它设为 `/app/config/config.yaml`，未设置且未传 `-c` 时回退到 `config.yaml`。
 - 输出目录：`TRAJECTA_OUTPUT_DIR` 同时覆盖 `debug.output_dir` 与 `trace.output_dir`，`TRAJECTA_TRACE_OUTPUT_DIR` 只覆盖 `trace.output_dir` 且在两者都设置时后者生效（`internal/config/config.go`）；镜像把两者都设为 `/app/data/traces`，compose 同样注入。解析优先级是 `trace.output_dir` → `debug.output_dir`（`Config.TraceOutputDir()`），**录制器、store、默认 SQLite 路径与启动日志共用这一个解析结果**；两者都为空不报错，但 `Load` 会打一条 warning，此时 cassette 与默认 SQLite 文件写在进程工作目录下。
 - 响应写超时默认关闭：`http.Server.WriteTimeout` 覆盖整个响应写入而不是两次写入之间的间隔，而代理转发的 completion、本地 Responses 的 SSE、以及 Monitor 的 `GET /api/events/stream` 都可能是长连接，固定值会把它们在中途截断（客户端只看到连接关闭，没有可解析的协议错误）。因此 `server.write_timeout` 默认 `0`（不设写截止时间）；请求的上界改由调用方决定——转发到上游的请求携带入站请求的 context，SDK 取消即取消上游调用，再叠加 transport 的拨号/TLS 超时。同一段 transport 也没有等待上游响应头的上界（`ResponseHeaderTimeout`），因为代理无法区分"上游卡住"和"上游很慢"：非流式的推理调用可能在首字节前合法地花掉几分钟，而拨号、TLS 握手与空闲连接三个超时都看不见这段等待。代价是：上游接受连接后不再作答时，客户端的请求、它的并发槽位与连接会一直被占着，直到调用方自己放弃。愿意用快速失败换资源占用的部署可以设 `server.upstream_response_header_timeout`（或 `TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT`），流式调用只需覆盖到首字节的时间而不是到最后一个 token 的时间。需要硬上限的部署（例如公网暴露、防慢读客户端）可设 `server.write_timeout`（如 `30m`）或 `TRAJECTA_SERVER_WRITE_TIMEOUT`；`server.read_timeout` 默认 `5m`，可用 `TRAJECTA_SERVER_READ_TIMEOUT` 覆盖（`cmd/server/serve.go`）。
+- 排障开关默认关闭，只在排查问题时临时打开：`debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 `false`）在 Monitor mux 上挂载 `net/http/pprof`（关闭时 `/debug/` 前缀返回 404，不会落到 SPA）；`debug.slow_query_threshold`（`TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD`，默认 `0`，即不记录）让 store 记录超过该阈值的语句供 System 页读取。两者都是排查手段，不是常态配置；页面细节见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
 迁移与首个用户（手动等价路径）：
 
@@ -163,18 +167,20 @@ proxy 捕获字节
   -> trace index (logs)
   -> enqueue parse_job
 parse_job -> 读取 cassette -> provider parser
-  -> TraceObservation -> semantic_nodes -> enqueue analysis_job
+  -> TraceObservation（紧凑摘要落库 + 更新 parse_job）
+  -> enqueue analysis_job
 analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 ```
 
 - 运行时由 `serve` 内的两个 in-process worker 消费 `parse_jobs` 与 `analysis_jobs`（间隔 5s，批量分别为 10 与 5），没有外部队列。
-- Monitor 的按窗口聚合（channel/model/upstream 的 summary 与 timeline）都在 `internal/store` 内用 `recorded_at` 现算，不落表；这些桶网格一律按 **UTC 整点/整日**切分（`referenceTime.UTC().Truncate(bucketSize)`），因为 `recorded_at` 按 UTC 存储、且 `time.Time` 作为 map key 会带上 location——参考时间若落在本地时区，桶查找会全部落空并返回全零曲线。窗口参数（`window=1h|24h|7d|all|today`）的起点也由 `startOfUTCDay` 决定。
+- 后台索引对账由 `trace.sync_interval`（`TRAJECTA_TRACE_SYNC_INTERVAL`，默认 `30m`）控制：`serve` 启动时先跑一次 `Store.Sync()`（这是丢失 finalize 的 cassette 的恢复路径），之后每 `sync_interval` 再跑一次；`0` 回退到默认值（`internal/store/store.go`、`cmd/server/serve.go`）。
+- Monitor 的按窗口聚合（channel/model/upstream 的 summary 与 timeline）都在 `internal/store` 内用 `recorded_at` 现算，不落表；`recorded_at` 按 UTC 存储，但窗口起点与桶边界按 `monitor.timezone`（`TRAJECTA_MONITOR_TIMEZONE`，默认 `Asia/Shanghai`）计算，因此 `today` 与日/小时桶对齐到运维的自然日而不是容器的 UTC 日。`today` 的起点是 `internal/monitor/server.go` 的 `startOfDisplayDay`，桶网格由 `internal/store/analytics.go` 的 `bucketSlot` 对齐；两者都返回 UTC 时刻，`time.Time` map key 的 location 因此一致。时区名缺失或无法解析时回退到 `Asia/Shanghai`，不回退到 UTC。
 - enqueue parse job 失败不会让请求失败（只记 warn）；cassette 写入失败会向上返回错误，是可观测的。
 
 | 类别 | 内容 | 说明 |
 | --- | --- | --- |
-| 可由 cassette 重算 | `logs` 索引、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等，`semantic_nodes` 可按 `trace_id` 清理重建 |
-| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新，但更新先进进程内队列（上限 256 条），由派生表读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.Close()` 会先 settle 队列再关闭句柄（`serve` 关闭路径本已显式 flush，其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移（进程崩溃未走到 `Close`、或历史版本留下的漂移）用 `server db summary rebuild overview` 修复，`OverviewMetricRebuildStats` 给出候选 logs 数与当前 bucket/member 行数，`--dry-run` 只报告不修改 |
+| 可由 cassette 重算 | `logs` 索引、`trace_observations`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等（节点树不落库，详情视图按需从 cassette 重解析） |
+| 由写入路径增量维护 | `session_summaries` | 随写入按 session 重建，但重建先记进进程内队列（上限 256 条），由派生读模型读取者或 `Store.FlushDerivedRefresh()` 触发落库，所以写完一行不等于该派生行已可读；`Store.Close()` 会先 settle 队列再关闭句柄（`serve` 关闭路径本已显式 flush，其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移用 `server db summary rebuild sessions` 修复 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 
@@ -190,17 +196,17 @@ server analyze session --session-id <id>
 server analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
 server analyze refresh --all
 server db summary rebuild sessions [--session-id <id>]
-server db summary rebuild overview [--dry-run]
 ```
 
-`db summary rebuild overview` 从 `logs` 整表重算小时桶（`overview_metric_buckets` 与 `overview_metric_bucket_members`）：派生聚合是增量维护的，进程在 settle 队列之前退出就会与 logs 漂移，这是唯一的修复入口；输出候选 logs 数与重建前后的 bucket/member 行数，`--dry-run` 只报告漂移。
+`db summary rebuild` 当前只有 `sessions` 一个子命令（从 `logs` 重建 `session_summaries`，支持 `--session-id` 与 `--dry-run`）；`overview` 子命令已移除，`overview_metric_*` 两张表也不再被读写（Postgres 历史迁移仍会建表，除非运维手工 `DROP`）。
 
 `analyze batch` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器；`analyze refresh` 固定执行 reparse + scan（没有 `--reparse` / `--scan` 开关），另支持 `--repair-usage`、`--rewrite-cassette`、`--enqueue`、`--workers`、`--limit` 与同样的过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
 
 ## 数据体积与归档策略
 
-- raw body 不复制进 `semantic_nodes`：该表存 text preview、必要 JSON 与按文本记录的 `raw_ref`，没有独立的 blob 或 sidecar 存储；原始字节只保留在 cassette，多模态数据只索引 metadata。
+- 语义节点树不落库：Protocol/详情视图在打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 实时重解析（见 `internal/monitor/server.go` 的 `handleTraceObservation`），数据库只保留 `trace_observations` 的紧凑摘要；没有独立的 blob 或 sidecar 存储，原始字节只保留在 cassette，多模态数据只索引 metadata。
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
+- 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）以及 `overview_metric_buckets` / `overview_metric_bucket_members` 两张表及其数据仍然留在已有 Postgres/SQLite 库里；Postgres 的历史迁移也仍然创建这三张表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到三张空表。运行时代码、必需表检查与任何命令都不会读取或删除它们。是否回收空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`、`DROP TABLE overview_metric_buckets;`、`DROP TABLE overview_metric_bucket_members;`（先备份；删除不可逆，且代码不会代做）。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
 - 显式选择的 SQLite DB 默认位于输出目录内，备份时应把 SQLite DB 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 - `db migrate status --check-db` 对 SQLite 是只读的：不会创建缺失文件、不会修复 drift、不会重写用户数据。手工修复前先备份 SQLite DB 与 `.http` 目录。
@@ -208,7 +214,7 @@ server db summary rebuild overview [--dry-run]
 ## 故障处理
 
 - **cassette 写入失败**：recorder 向上返回错误，不会静默吞掉；此时该请求不会出现在索引中。
-- **收到 SIGTERM / SIGINT**：`serve` 先停止接受新连接并排空在飞行中的请求（最长 30 秒），然后才走既有的清理路径——冲刷派生读模型队列（`Store.FlushDerivedRefresh`）、关闭 store、停止 parse 与 analysis worker。飞行中的请求会被完整服务到结束，所以它正在写的 cassette 仍会被补上前导：cassette 是 record-first 写的，若在补前导之前被杀，文件既不是 V3 也没有 V2 的定长头，只能被索引跳过，等于这笔录制（连同已经付过的上游费用）丢失。超过 30 秒仍未结束的请求会被丢弃；再收到一个信号立即结束进程。
+- **收到 SIGTERM / SIGINT**：`serve` 先停止接受新连接并排空在飞行中的请求（最长 30 秒），随后排空 recorder 的 finalize 队列（`handler.FinalizeRecordings`，最长 `recorder.FinalizeTimeout` 30 秒）。代理请求路径只把完成的录制投入有界后台队列（`internal/recorder/finalize_queue.go`：2 个 worker、深度 256，队列满时回退到请求内联完成，不丢录制），finalize 才负责补前导、写 `logs` 行与入队 parse_job；队列排空后才冲刷派生读模型队列（`Store.FlushDerivedRefresh`）、关闭 store、停止 parse 与 analysis worker。cassette 是 record-first 写的，若在补前导之前进程被直接杀掉（强杀，或在排空过程中再次收到信号立即结束），文件既不是 V3 也没有 V2 的定长头，无法修复（将要成为前导的元数据只存在于内存中），等于这笔录制（连同已经付过的上游费用）丢失；`Store.Sync` 会把这类不完整文件计数并以 `Cassette files are incomplete and were skipped` 记入日志，不再静默跳过。`Store.Sync` 还会为每个新索引的 cassette 入队 parse_job，这是“已索引但从未入队解析”的启动恢复路径。超过 30 秒仍未结束的请求会被丢弃；再收到一个信号立即结束进程。
 - **parse failed**：`parse_jobs.last_error` 记录失败；trace 仍出现在列表里，Monitor 显示 Raw 可用、Protocol 不可用、Audit 可能未运行。用 `analyze reparse --trace-id` 重试。
 - **analysis failed**：`analysis_jobs.last_error` 记录失败；Monitor 显示 Protocol 可用、Audit 部分可用。用 `analyze reanalyze` / `analyze scan` 重试。
 - **enqueue 失败**：只记录 warning，不影响 trace list 与客户端请求。

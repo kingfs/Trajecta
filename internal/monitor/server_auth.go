@@ -225,6 +225,32 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
 }
+
+// monitorAdminRequired gates a handler behind the verified principal's admin
+// role. It composes monitorAuthRequired, so an unauthenticated caller gets the
+// same 401 (with the same WWW-Authenticate header) as every other Monitor API
+// and only an authenticated non-admin gets 403.
+//
+// With no verifier configured there is no identity to check: the whole Monitor
+// is open in that deployment (monitorAuthRequired returns the handler
+// unchanged), so this gate stays out of the way rather than locking the one
+// deployment that cannot log in out of its own diagnostics.
+func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
+	gated := func(w http.ResponseWriter, r *http.Request) {
+		if verifier == nil {
+			next(w, r)
+			return
+		}
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if !ok || !strings.EqualFold(strings.TrimSpace(principal.Role), "admin") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+			return
+		}
+		next(w, r)
+	}
+	return monitorAuthRequired(gated, verifier)
+}
+
 func allowMonitorQueryAccessToken(r *http.Request) bool {
 	return r.Method == http.MethodGet && pathClean(r.URL.Path) == "/api/events/stream"
 }

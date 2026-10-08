@@ -22,14 +22,27 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/observeworker"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
+	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )
+
+// reparseTraceForTest rebuilds a trace's observation from its cassette, which is
+// how the node tree is obtained now that it is no longer stored.
+func reparseTraceForTest(t *testing.T, st *store.Store, traceID string) observe.TraceObservation {
+	t.Helper()
+	obs, err := observeworker.ReparseTrace(context.Background(), st, nil, traceID)
+	if err != nil {
+		t.Fatalf("ReparseTrace() error = %v", err)
+	}
+	return obs
+}
 
 func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
 	var buf bytes.Buffer
@@ -4627,11 +4640,9 @@ debug:
 	if summary.Parser != "openai" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
-	nodes, err := st.ListSemanticNodes(traceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
-	if len(nodes) == 0 {
+	// The node tree is not persisted any more; it is rebuilt from the cassette, so
+	// this re-reads the same trace the CLI just parsed.
+	if nodes := observe.FlattenObservationNodes(reparseTraceForTest(t, st, traceID)); len(nodes) == 0 {
 		t.Fatalf("semantic nodes empty")
 	}
 
@@ -4946,10 +4957,7 @@ debug:
 	if err != nil {
 		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
 	}
-	nodes, err := st.ListSemanticNodes(traceID)
-	if err != nil {
-		t.Fatalf("ListSemanticNodes() error = %v", err)
-	}
+	nodes := observe.FlattenObservationNodes(reparseTraceForTest(t, st, traceID))
 	var foundText bool
 	for _, node := range nodes {
 		if string(node.Node.NormalizedType) == "text" && node.Node.Text == "hello from cli" {
@@ -5533,126 +5541,5 @@ func TestRouterConfigurationKeepsDisabledAndDeletedChannelsAcrossBootstrap(t *te
 				t.Fatalf("source=%s targets=%v", source, runtimeCfg.EffectiveUpstreams())
 			}
 		})
-	}
-}
-
-// TestDBSummaryRebuildOverviewRepairsDriftSQLite pins the repair path for the hourly overview
-// aggregates, which had none.
-//
-// overview_metric_buckets is maintained incrementally through a deferred queue, so it drifts
-// from the logs it summarizes whenever a process dies before settling the queue. Store.Close
-// now settles it, but drift that already exists - or that a crash produced - could not be
-// repaired by any command, because Store.RebuildOverviewMetricBuckets had no caller. The dry
-// run has to report the drift without touching it, and the rebuild has to make the stored
-// counters agree with the logs again.
-func TestDBSummaryRebuildOverviewRepairsDriftSQLite(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	configPath := writeSessionSummaryOpsCLIConfig(t, dir)
-	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
-	if err != nil {
-		t.Fatalf("store.NewWithDatabase() error = %v", err)
-	}
-	at := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC)
-	writeCLISessionSummaryTestLog(t, st, dir, "overview-cli-a.http", "sess-overview-cli-a", at, http.StatusOK, 10)
-	writeCLISessionSummaryTestLog(t, st, dir, "overview-cli-b.http", "sess-overview-cli-b", at.Add(5*time.Minute), http.StatusOK, 20)
-	st.FlushDerivedRefresh()
-
-	indexPath := filepath.Join(dir, "trace_index.sqlite3")
-	assertOverviewCounts := func(t *testing.T, buckets int, members int) {
-		t.Helper()
-		db, err := sql.Open("sqlite", indexPath)
-		if err != nil {
-			t.Fatalf("sql.Open() error = %v", err)
-		}
-		defer db.Close()
-		var gotBuckets, gotMembers int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM overview_metric_buckets`).Scan(&gotBuckets); err != nil {
-			t.Fatalf("count buckets error = %v", err)
-		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM overview_metric_bucket_members`).Scan(&gotMembers); err != nil {
-			t.Fatalf("count members error = %v", err)
-		}
-		if gotBuckets != buckets || gotMembers != members {
-			t.Fatalf("overview rows = %d buckets / %d members, want %d / %d", gotBuckets, gotMembers, buckets, members)
-		}
-	}
-	// Both logs land in the same hourly bucket, and the aggregate starts out correct.
-	assertOverviewCounts(t, 1, 2)
-
-	// Remove one member out of band: the aggregate now undercounts its own logs.
-	db, err := sql.Open("sqlite", indexPath)
-	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
-	}
-	if _, err := db.Exec(`DELETE FROM overview_metric_bucket_members WHERE path LIKE '%overview-cli-b.http'`); err != nil {
-		t.Fatalf("delete member error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("db.Close() error = %v", err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	var dryRunOut bytes.Buffer
-	if code := runDBSummaryRebuildOverviewWithOptions(dbSummaryRebuildOptions{
-		configPath: configPath,
-		dryRun:     true,
-		format:     "json",
-		stdout:     &dryRunOut,
-	}); code != 0 {
-		t.Fatalf("dry-run runDBSummaryRebuildOverviewWithOptions() = %d, output=%s", code, dryRunOut.String())
-	}
-	var dryEnvelope cliEnvelope
-	if err := json.Unmarshal(dryRunOut.Bytes(), &dryEnvelope); err != nil {
-		t.Fatalf("json.Unmarshal(dry-run) error = %v; output=%s", err, dryRunOut.String())
-	}
-	dryResult, ok := dryEnvelope.Result.(map[string]any)
-	if !ok {
-		t.Fatalf("dry-run result = %#v, want map", dryEnvelope.Result)
-	}
-	if dryResult["dry_run"] != true || dryResult["mutated"] != false {
-		t.Fatalf("dry-run result = %#v, want dry_run true mutated false", dryResult)
-	}
-	if dryResult["candidate_count"].(float64) != 2 || dryResult["buckets_before"].(float64) != 1 || dryResult["members_before"].(float64) != 1 {
-		t.Fatalf("dry-run result = %#v, want the drift reported (2 logs, 1 bucket, 1 member)", dryResult)
-	}
-	// The dry run must not have repaired anything.
-	assertOverviewCounts(t, 1, 1)
-
-	var rebuildOut bytes.Buffer
-	if code := runDBSummaryRebuildOverviewWithOptions(dbSummaryRebuildOptions{
-		configPath: configPath,
-		format:     "json",
-		stdout:     &rebuildOut,
-	}); code != 0 {
-		t.Fatalf("rebuild runDBSummaryRebuildOverviewWithOptions() = %d, output=%s", code, rebuildOut.String())
-	}
-	var rebuildEnvelope cliEnvelope
-	if err := json.Unmarshal(rebuildOut.Bytes(), &rebuildEnvelope); err != nil {
-		t.Fatalf("json.Unmarshal(rebuild) error = %v; output=%s", err, rebuildOut.String())
-	}
-	rebuildResult, ok := rebuildEnvelope.Result.(map[string]any)
-	if !ok {
-		t.Fatalf("rebuild result = %#v, want map", rebuildEnvelope.Result)
-	}
-	if rebuildResult["mutated"] != true || rebuildResult["members_after"].(float64) != 2 {
-		t.Fatalf("rebuild result = %#v, want mutated true and both members restored", rebuildResult)
-	}
-	assertOverviewCounts(t, 1, 2)
-
-	// The command is reachable from the CLI, not just from the runner.
-	cmd := newRootCommand()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "summary", "rebuild", "overview", "--dry-run"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v; output=%s", err, out.String())
-	}
-	if !strings.Contains(out.String(), `"command": "db.summary.rebuild.overview"`) {
-		t.Fatalf("output = %s, want the rebuild command envelope", out.String())
 	}
 }

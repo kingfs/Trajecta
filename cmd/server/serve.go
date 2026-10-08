@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/proxy"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
+	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -108,6 +109,13 @@ func runServeWithConfig(configPath string) int {
 		store.DatabaseOptions{
 			AutoMigrate:           false,
 			UseSessionSummaryRead: cfg.DatabaseUseSessionSummaryRead(),
+			// The Monitor's list and analytics reads share this process with the
+			// proxy. A separate, bounded pool keeps a cold page - a 30-day
+			// Overview measured 14 s on this deployment's rotational disk - from
+			// holding every connection the proxy needs to persist a recording.
+			ReadMaxOpenConns:     cfg.DatabaseReadMaxOpenConns(),
+			ReadMaxIdleConns:     cfg.DatabaseReadMaxIdleConns(),
+			ReadStatementTimeout: cfg.DatabaseReadStatementTimeout(),
 		},
 	)
 	if err != nil {
@@ -199,7 +207,21 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 
-	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute, &background)
+	// The periodic walk is a reconciliation backstop, not the normal path: a
+	// cassette is indexed when it is written, and Sync only has to catch files
+	// that appeared while the process was not running. On a large install every
+	// pass re-reads every prelude, so the interval is configurable and defaults to
+	// the much longer trace.sync_interval rather than five minutes.
+	startTraceStoreBackgroundSync(syncCtx, traceStore, cfg.TraceSyncInterval(), &background)
+
+	// Finalising a recording rewrites the whole cassette to put its prelude in
+	// front of the record, then writes the trace index row and enqueues the parse
+	// job. That work is as large as the response body, so it runs on a bounded
+	// background queue instead of on the request goroutine, which would otherwise
+	// hold the client connection long after the last byte was delivered. The
+	// queue falls back to finalising inline when it is full, so a recording is
+	// never dropped for the sake of latency.
+	handler.StartFinalizeWorkers()
 
 	addr := ":" + cfg.Server.Port
 	srv := newProxyHTTPServer(cfg, handler)
@@ -225,6 +247,21 @@ func runServeWithConfig(configPath string) int {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
 		return 1
+	}
+
+	// The HTTP servers have stopped, so nothing new can be queued. Drain the
+	// finalize queue before the deferred cleanup closes the store: finalising a
+	// recording writes its index row and enqueues its parse job, and both need a
+	// live store. A recording that is still a record-first fragment after a hard
+	// kill cannot be repaired, because the metadata that becomes its prelude only
+	// ever existed in memory.
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.Background(), recorder.FinalizeTimeout)
+	defer cancelFinalize()
+	if err := handler.FinalizeRecordings(finalizeCtx); err != nil {
+		slog.Warn("Recorder finalize queue did not drain cleanly", "error", err)
+	}
+	if stats := handler.FinalizeStats(); stats.Queued > 0 || stats.Inline > 0 {
+		slog.Info("Recorder finalize queue drained", "queued", stats.Queued, "inline", stats.Inline, "still_queued", stats.Depth)
 	}
 	return 0
 }

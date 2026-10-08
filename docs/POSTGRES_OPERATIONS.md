@@ -46,7 +46,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@host/db?sslmode=require' \
 
 脚本读取 `TRAJECTA_DATABASE_DSN`，回退 `DATABASE_URL` 或 libpq `PG*` 变量；`BASELINE_WINDOW` 默认 `7 days`。除下面明确标注的 reset 外，所有语句都只读。
 
-本节按脚本的覆盖范围贴出基线语句：表大小与 vacuum 各覆盖 12 张表，索引使用覆盖到 `trace_findings` 为止的 9 张表。为便于手工执行，脚本里由 psql 变量注入的占位符在这里展开为默认值：`BASELINE_WINDOW` 写作 `interval '7 days'`，keyset EXPLAIN 的游标写作 `TIMESTAMPTZ 'REPLACE_WITH_CURSOR_AT'` 与 `'REPLACE_WITH_LAST_ID'`（脚本对应默认值为 `1970-01-01T00:00:00Z` 与空字符串）。脚本不包含的其它表见本节末尾的“扩展手查（脚本不覆盖的表）”，那部分需要手工执行。
+本节按脚本的覆盖范围贴出基线语句：表大小与 vacuum 各覆盖 10 张当前 schema 的表，索引使用覆盖到 `trace_findings` 为止的 7 张表。已移除的派生表 `overview_metric_buckets` / `overview_metric_bucket_members` 不在这些清单里；第 9 节用 `to_regclass(...) IS NOT NULL` 判断它们是否仍存在，只有存在时才读取，不存在时脚本打印 `skipped` 并以 0 退出，而不是报错或把空结果当成 0 行。为便于手工执行，脚本里由 psql 变量注入的占位符在这里展开为默认值：`BASELINE_WINDOW` 写作 `interval '7 days'`，keyset EXPLAIN 的游标写作 `TIMESTAMPTZ 'REPLACE_WITH_CURSOR_AT'` 与 `'REPLACE_WITH_LAST_ID'`（脚本对应默认值为 `1970-01-01T00:00:00Z` 与空字符串）。脚本不包含的其它表见本节末尾的“扩展手查（脚本不覆盖的表）”，那部分需要手工执行。
 
 环境与扩展状态：
 
@@ -74,7 +74,7 @@ WHERE name IN (
 ORDER BY name;
 ```
 
-表大小（脚本覆盖 `logs`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings`、`request_audits`、`execution_events`、`upstream_exchanges` 共 12 张表）：
+表大小（脚本覆盖 `logs`、`session_summaries`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings`、`request_audits`、`execution_events`、`upstream_exchanges` 共 10 张当前 schema 的表）：
 
 ```sql
 SELECT
@@ -91,8 +91,6 @@ WHERE c.relkind = 'r'
   AND c.relname IN (
     'logs',
     'session_summaries',
-    'overview_metric_buckets',
-    'overview_metric_bucket_members',
     'trace_observations',
     'parse_jobs',
     'system_events',
@@ -105,7 +103,7 @@ WHERE c.relkind = 'r'
 ORDER BY pg_total_relation_size(c.oid) DESC;
 ```
 
-vacuum 与 dead tuples（与表大小相同的 12 张表）：
+vacuum 与 dead tuples（与表大小相同的 10 张表）：
 
 ```sql
 SELECT
@@ -125,8 +123,6 @@ FROM pg_stat_user_tables
 WHERE relname IN (
   'logs',
   'session_summaries',
-  'overview_metric_buckets',
-  'overview_metric_bucket_members',
   'trace_observations',
   'parse_jobs',
   'system_events',
@@ -139,7 +135,7 @@ WHERE relname IN (
 ORDER BY n_dead_tup DESC;
 ```
 
-索引使用（脚本覆盖 `logs`、`session_summaries`、`overview_metric_buckets`、`overview_metric_bucket_members`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings` 共 9 张表；`idx_scan` 长期为 0 且体积大的索引是候选清理对象）：
+索引使用（脚本覆盖 `logs`、`session_summaries`、`trace_observations`、`parse_jobs`、`system_events`、`analysis_runs`、`trace_findings` 共 7 张表；`idx_scan` 长期为 0 且体积大的索引是候选清理对象）：
 
 ```sql
 SELECT
@@ -155,8 +151,6 @@ JOIN pg_index i ON i.indexrelid = s.indexrelid
 WHERE s.relname IN (
   'logs',
   'session_summaries',
-  'overview_metric_buckets',
-  'overview_metric_bucket_members',
   'trace_observations',
   'parse_jobs',
   'system_events',
@@ -227,7 +221,11 @@ SELECT
   (SELECT MIN(updated_at) FROM session_summaries) AS summary_min_updated_at;
 ```
 
+旧的 Overview 小时桶（`overview_metric_buckets` / `overview_metric_bucket_members`）代码已不再写入，Overview 改为直接聚合 `logs`（Postgres 历史迁移仍会创建这两张空表，除非运维手工 `DROP`）。脚本只在它们仍存在时才读取；下面就是脚本用的 `\gset` + `\if` 写法，表不存在时打印一行 `skipped`：
+
 ```sql
+SELECT to_regclass('overview_metric_buckets') IS NOT NULL AS has_overview_buckets \gset
+\if :has_overview_buckets
 SELECT
   COUNT(*) AS bucket_count,
   MIN(bucket_start) AS first_bucket,
@@ -235,16 +233,24 @@ SELECT
   SUM(request_count) AS bucket_requests,
   SUM(success_request) AS bucket_success,
   SUM(failed_request) AS bucket_failed,
-  SUM(total_tokens) AS bucket_tokens
+  SUM(total_tokens) AS bucket_tokens,
+  pg_size_pretty(pg_total_relation_size('overview_metric_buckets')) AS total_size
 FROM overview_metric_buckets;
-```
+\else
+\echo 'skipped: overview_metric_buckets absent (removed derived table)'
+\endif
 
-```sql
+SELECT to_regclass('overview_metric_bucket_members') IS NOT NULL AS has_overview_members \gset
+\if :has_overview_members
 SELECT
   COUNT(*) AS member_count,
   MIN(updated_at) AS first_member_update,
-  MAX(updated_at) AS last_member_update
+  MAX(updated_at) AS last_member_update,
+  pg_size_pretty(pg_total_relation_size('overview_metric_bucket_members')) AS total_size
 FROM overview_metric_bucket_members;
+\else
+\echo 'skipped: overview_metric_bucket_members absent (removed derived table)'
+\endif
 ```
 
 backlog 与 system events：
@@ -282,7 +288,7 @@ LIMIT 50;
 
 ### 扩展手查（脚本不覆盖的表）
 
-`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句。注意下面这份表集合是示例而非全集：`semantic_nodes`（本仓库最大的表）、`responses`、`response_items`、`upstream_targets`、`upstream_models`、`channel_probe_runs`、`datasets`、`dataset_examples`、`scores`、`experiment_runs`、`parser_versions`、`users`、`api_tokens` 既不在脚本里，也不在下面这份列表里，需要时把它们加进 `IN (...)`。
+`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句。注意下面这份表集合是示例而非全集：`semantic_nodes`（旧部署里最大的表；运行时代码已不再写入它，但 Postgres 的历史迁移仍会建表，所以只有运维手工 `DROP` 之后它才消失——把这个名字留在 `IN (...)` 里不会报错，`relname IN` 中的不存在表名只是匹配不到行，也可以直接删掉）、`responses`、`response_items`、`upstream_targets`、`upstream_models`、`channel_probe_runs`、`datasets`、`dataset_examples`、`scores`、`experiment_runs`、`parser_versions`、`users`、`api_tokens` 既不在脚本里，也不在下面这份列表里，需要时把它们加进 `IN (...)`。
 
 表大小（脚本外）：
 
@@ -368,6 +374,23 @@ WHERE s.relname IN (
 ORDER BY pg_relation_size(i.indexrelid) DESC, s.idx_scan ASC;
 ```
 
+## Monitor 系统页（内置基线视图）
+
+Monitor 的 `/system` 页面（管理员可见）提供了本节基线的在线版本，`GET /api/system/db` 一次请求即读取：`pg_database_size` 与 `pg_stat_database` 的命中率/temp/deadlock/事务计数、`pg_stat_activity` 的连接分布与最久运行语句、`public` 下最大的关系、`pg_stat_user_indexes` 的未使用索引（`idx_scan = 0`，按大小）与读放大最严重的索引、`pg_stat_user_tables` 的热表、检查点计数与 `pg_settings` 的关键参数。
+
+采集纪律（改动这一页时必须保持）：
+
+- 只读：全部语句在一条 `BEGIN ... READ ONLY` 事务内执行，最后回滚；页面与测试都不得执行 `EXPLAIN`、`EXPLAIN ANALYZE`、`VACUUM`、`ANALYZE` 或任何写语句。
+- 有界：事务内 `SET LOCAL statement_timeout = 2000`，外层 `context.WithTimeout(5s)`，每个列表 `LIMIT 20`，`pg_stat_activity.query` 先 `left(query, 4000)` 再由 Go 侧脱敏并截断到 500 字符。
+- 分节失败不整体失败：单节错误进入响应的 `warnings`，其余分节照常返回。
+- 非 Postgres 驱动返回 HTTP 200 且 `supported=false`、`unsupported=true`，不返回 5xx。
+
+检查点计数在 Postgres 17 上来自 `pg_stat_checkpointer`（`num_timed`/`num_requested`）；`pg_stat_bgwriter.checkpoints_timed`/`checkpoints_req` 在这些版本已不存在，响应里的 `source` 字段标明实际来源。
+
+应用侧的慢语句采集默认关闭，由 `debug.slow_query_threshold`（`TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD`，默认 `0`）控制：为 0 时不包装、不记录，热路径没有额外开销；设为正数（例如 `"200ms"`）后记录超过阈值的语句，保存在容量 50 的进程内环形缓冲区中，语句先脱敏再截断到 500 字符。它记录的是应用发出的语句文本，不依赖 `pg_stat_statements` 扩展。
+
+profiling 由 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 false）控制；为 true 时 `net/http/pprof` 挂载在 Monitor 的 `/debug/pprof/`，为 false 时该前缀返回 404。
+
 ## pg_stat_statements 基线与热点查询
 
 启用要求：实例需加载扩展；托管数据库若要求在参数组配置 `shared_preload_libraries = 'pg_stat_statements'`，需按平台流程滚动重启，不要在没有变更窗口时临时重启生产库。
@@ -439,6 +462,8 @@ LIMIT 30;
 - `temp_blks_written` 高：排序/聚合/hash 溢出，检查 `work_mem`、索引顺序或 summary 设计。
 - `rows/calls` 远高于页面大小：过滤条件或分页策略有问题。
 
+`shared_buffers` 属实例侧参数，应用不会设置它（仓库里没有 `shared_buffers` / `effective_cache_size` 配置项）。参考实例的 117 GB 数据库仍沿用默认 `shared_buffers = 128 MB`，缓存命中率约 **87.83%**，`pg_stat_statements` 里高成本的列表/overview 查询因此反复读盘（`shared_blks_read` 高）。这是运维侧最值得优先调整的一项：专用主机上的常见起点是把 `shared_buffers` 提到内存的约 25%，并同时把 `effective_cache_size` 设为内存的约 50–75%，比逐条查询调 `work_mem` 更根本；改后需重启（托管实例走参数组），并重新采样基线确认命中率与 top SQL 的变化。
+
 Trajecta 热表优先级：
 
 - `logs`：trace list、session list、overview、model/provider/time filters。
@@ -447,6 +472,8 @@ Trajecta 热表优先级：
 - `channel_configs`、`channel_models`、`model_catalog`、`model_aliases`：routing/model 管理读路径。
 
 ## 大表聚合的内存与并行度
+
+`semantic_nodes` 说明：本节与后面的「派生表修复里最容易踩的…」「第二容易踩的…」两节，都用旧库的 `semantic_nodes`（旧部署里最大的表）做实测。运行时代码已不再写入该表，但 Postgres 的历史迁移仍会建表且没有 drop 迁移，所以除非运维手工 `DROP`，它仍在；`trajecta upgrade db --reconcile-derived-trace-ids` 通过 `targetTableColumns` 从当前 Postgres 的 `information_schema` 动态发现带 `trace_id` 的派生表，所以只要表还在，下面的结论就继续适用；运维按 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 手工 `DROP TABLE semantic_nodes` 之后，这些章节随之作废。
 
 `/dev/shm` 决定并行查询能申请多少共享内存。容器默认只有 64 MB，`work_mem` 给得高、并行 worker 又多时，hash 聚合会直接失败：
 
@@ -565,7 +592,7 @@ ORDER BY idx_scan, indexrelname;
 
 ## 第二批缺口：`logs(selected_upstream_id)`、审计表与分析表的 `created_at`
 
-按上面同样的方法再把两套 schema 对一遍，又找到五处形状缺口，都进同一条版本化迁移 `20260930130000_add_analytics_indexes`（`ent/schema` 同步声明，SQLite 启动 schema 在 `ensureHotpathIndexes` 里用同样的索引名与列补齐）：
+按上面同样的方法再把两套 schema 对一遍，又找到五处形状缺口，都进同一条版本化迁移 `20260930130000_add_analytics_indexes`（`ent/schema` 同步声明，SQLite 启动 schema 在 `ensureHotpathIndexes` 里用同样的索引名与列补齐；其中 `tracefinding_severity_created_at` 这个形状后来被 `20261009090000_add_hot_path_indexes` 替换，见本节末尾）：
 
 | 索引 | 表 | 服务的查询 |
 | --- | --- | --- |
@@ -573,7 +600,7 @@ ORDER BY idx_scan, indexrelname;
 | `requestaudit_created_at_id` | `request_audits` | 默认 Responses audit 列表（无过滤，`ORDER BY created_at DESC, id DESC`） |
 | `toolcallaudit_created_at_id` | `tool_call_audits` | 同上 |
 | `analysisrun_created_at_id` | `analysis_runs` | `ListAnalysisRuns("", "", "", limit)`（overview 的最近分析），原有两个索引都以 `trace_id` 或 `session_id` 打头 |
-| `tracefinding_severity_created_at` | `trace_findings` | `overviewHighRiskFindings` 的 `severity IN ('critical', 'high')`，原有索引都以 `trace_id` 打头 |
+| `tracefinding_severity_created_at_id` | `trace_findings` | `overviewHighRiskFindings` 的 `severity IN ('critical', 'high')`（查询改成两次单 severity 查找后按 `created_at DESC, id DESC` 排序），原有索引都以 `trace_id` 打头。它取代了 `20260930130000` 建的 `tracefinding_severity_created_at (severity, created_at)`：旧形状无法服务 `CASE` 排序，`20261009090000_add_hot_path_indexes` 已把它 `DROP` |
 
 `logs` 这一处最贵：`selected_upstream_id` 被 24 处 `= ?` / `<> ''` 谓词加 3 处 `GROUP BY` 命中，分布在 `internal/store/store.go`（4 处谓词）、`analytics.go`（11 处谓词 + 2 处 `GROUP BY`）与 `channel_store.go`（9 处谓词 + 1 处 `GROUP BY`）里，而它不在任何一个索引里，于是 upstream analytics 页面按 upstream 数量发起的 1+4N 条查询，每条都是 `logs` 的全表扫。用 20 万行的同形合成表测同一条聚合（`selected_upstream_id = 'ch3' AND recorded_at >= now() - interval '7 days'`）：
 
@@ -585,6 +612,11 @@ ORDER BY idx_scan, indexrelname;
 真实 `logs` 是 388 MB / 248,164 行的宽表，同一个形状在 5 个 upstream 的 analytics 页上会重复约 20 次，省下的是页面级的重复全表扫而不是单条查询的常数。审计表的两个索引则要跟着请求写入放大，取舍依据是「无过滤、按 `created_at` 倒序分页」的默认列表在 Postgres 上只能全表扫加排序；另外三张表都不在请求热路径上。
 
 这五个索引和 `parsejob_trace_id_status` 一样由 `db migrate up`（或启动时的迁移）以普通 `CREATE INDEX` 创建：`logs` 上的那个要在 388 MB 的表上写入阻塞数秒。可以先在实例上手工执行对应的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，之后的迁移就是空操作。
+
+后续形状变更由两条迁移完成，它们同样由 `db migrate up` 以普通 `CREATE INDEX` / `DROP INDEX` 执行，想避免写阻塞就先把 `CREATE INDEX` 手工换成 `CONCURRENTLY`：
+
+- `20261009090000_add_hot_path_indexes`：新增 `tracefinding_created_at_id`（`trace_findings(created_at DESC, id DESC)`，findings 列表默认排序）与 `analysisjob_created_at_id`（`analysis_jobs(created_at DESC, id DESC)`，analysis job 列表默认排序）；新增 `tracefinding_severity_created_at_id`（`(severity, created_at DESC, id DESC)`）并 `DROP` 掉 `tracefinding_severity_created_at`；`DROP` 掉从未被扫描的 `tracelog_request_audit_id_recorded_at` 与 `tracelog_exchange_kind_recorded_at`（各约 15 MB，`logs` 是最热写入路径，无人读取的索引就是纯写入放大）。down 迁移把四者反转。
+- `20261008120000_add_log_routing_detail`：给 `logs` 新增 `route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id` 五列（`NOT NULL DEFAULT ''`）并建 `tracelog_recorded_at_sticky`（`logs(recorded_at, sticky_status)`），让路由 summary 从逐 cassette 读 prelude 变成对 `logs` 的一次 `GROUP BY`。
 
 ## 并发索引变更
 
@@ -709,7 +741,7 @@ Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refres
 | --- | --- | --- |
 | `common.sh` | 共享库：配置解析、`psql`/CLI/API 包装、通过/失败计数器。只被 source，单独执行会报错退出 | — |
 | `evidence.sh` | **只读**证据报告：驱动与配置、迁移版本、SQLite 归档、索引健康、路径前缀与文件存在性、派生表孤儿、Monitor API、cassette magic 抽样。永不判定失败，适合贴进迁移记录或事故说明 | 迁移后、例行巡检 |
-| `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`parse_jobs` 去重语句仍计划为反连接（写成 `NOT IN (子查询)` 时 PostgreSQL 会保留 `SubPlan`，分组 id 超出 hash 预算后逐行重扫）、`semantic_nodes` 反连接仍为 `Merge Anti Join`、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
+| `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`parse_jobs` 去重语句仍计划为反连接（写成 `NOT IN (子查询)` 时 PostgreSQL 会保留 `SubPlan`，分组 id 超出 hash 预算后逐行重扫）、仅当 `semantic_nodes` 仍存在时其反连接仍为 `Merge Anti Join`（表已 `DROP` 的库打印一行 skipped，不计失败）、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
 | `reconcile-apply.sh` | 跑 `upgrade db --reconcile-derived-trace-ids`（默认干跑，`--apply` 才写；可加 `--prune-superseded-index-rows`），完整日志落到 `backups/` | 派生 trace id 需要修复时 |
 | `vacuum-after-repair.sh` | 修复后的统计刷新与死元组回收：中小编制表 `VACUUM (ANALYZE)`，大表默认只 `ANALYZE` 并报出 dead tuples | 修复结束后紧接着 |
 | `optimize-indexes.sh` | 建热查询部分索引（`server db migrate optimize-indexes`，`CONCURRENTLY` 且幂等）并用 `EXPLAIN (ANALYZE)` 复测失败列表与慢请求列表 | 首次建索引、索引变更后 |
@@ -904,11 +936,11 @@ session_summaries
 
 索引为 `session_summaries_last_seen (last_seen DESC, session_id DESC)` 与 `session_summaries_last_model (last_model)`。
 
-重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。`overview_metric_buckets` / `overview_metric_bucket_members` 由写入路径按 path 增量维护；`Store.RebuildOverviewMetricBuckets`（`internal/store/overview.go`）可全量删除并按 `logs` 重建，但当前没有 CLI 调用者，所以没有等价的命令行重建入口。
+重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。这是当前唯一的派生汇总重建命令：`overview_metric_buckets` / `overview_metric_bucket_members` 已随 Overview 改为直接聚合 `logs` 一并停止维护，`Store.RebuildOverviewMetricBuckets` 与 `db summary rebuild overview` 都不存在了；这两张表不会被代码读取或写入（新建 Postgres 库经 `db migrate up` 仍会由历史迁移创建为空表，SQLite 启动 schema 不再创建），是否 `DROP` 由运维决定。
 
-两条派生表都不是写完 `logs` 就同步刷新的：写入路径只把受影响的 path、trace 与 session 记进一个进程内队列（`Store.markDerivedRefreshForPath` / `markDerivedRefreshForTrace`），队列达到上限（256 条）或调用 `Store.FlushDerivedRefresh()` 时才真正落库。读 `session_summaries` 的两个入口（`ListSessionPage`、`GetSession`）在任何查询之前先冲刷队列，所以 Monitor 看到的一定包含它之前完成的写入；`db summary rebuild sessions --dry-run` 用的 `SessionSummaryRebuildStats` 故意不冲刷，它要报告表里现存的漂移而不是先把漂移修好。冲刷按 session 去重重建一次 `session_summaries`，并把同一小时桶的增量合并成一次 `overview_metric_buckets` 更新，`overview_metric_bucket_members` 的删除与插入按绑定参数上限分批执行。`Sync`/`Rebuild` 在遍历结束后冲刷一次，所以 N 个同 session 的 cassette 只汇总一次而不是 N 次；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
+这条队列只服务于 `session_summaries`：写入路径只把受影响的 path、trace 与 session 记进一个进程内队列（`Store.markDerivedRefreshForPath` / `markDerivedRefreshForTrace`），队列达到上限（256 条）或调用 `Store.FlushDerivedRefresh()` 时才真正落库。读 `session_summaries` 的两个入口（`ListSessionPage`、`GetSession`）在任何查询之前先冲刷队列，所以 Monitor 看到的一定包含它之前完成的写入；`db summary rebuild sessions --dry-run` 用的 `SessionSummaryRebuildStats` 故意不冲刷，它要报告表里现存的漂移而不是先把漂移修好。冲刷按 session 去重重建一次 `session_summaries`。`Sync`/`Rebuild` 在遍历结束后冲刷一次，所以 N 个同 session 的 cassette 只汇总一次而不是 N 次；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
 
-这条队列只存在于进程内，不落盘：进程被强杀时最多丢掉 256 条待刷新记录。丢掉的 session 汇总会一直滞后，直到该 session 下次写入或执行 `db summary rebuild sessions` 才恢复；Monitor 的轮询本身就是冲刷点，所以只有目前没有读取者的派生表（例如 `overview_metric_buckets`）才可能长期停在滞后状态。`serve` 在后台同步停止之后、关闭数据库之前会调用一次 `FlushDerivedRefresh()`，正常停机不会把待刷新记录留给下一次启动。
+队列只存在于进程内，不落盘：进程被强杀时最多丢掉 256 条待刷新记录。丢掉的 session 汇总会一直滞后，直到该 session 下次写入或执行 `db summary rebuild sessions` 才恢复；Monitor 的轮询本身就是冲刷点，所以只有长期无人访问的 session 才可能停在滞后状态。`serve` 在后台同步停止之后、关闭数据库之前会调用一次 `FlushDerivedRefresh()`，正常停机不会把待刷新记录留给下一次启动。
 
 语义要点（用于一致性对比）：
 
@@ -984,11 +1016,28 @@ LIMIT 1000;
 代码里也没有按时间删除、搬迁或导出历史行的 retention/archive job。`internal/store` 中可验证的删除路径全部是派生数据重建，不删除 raw `.http` cassette：
 
 - `RebuildSessionSummaries` / `RebuildSessionSummary`：删除并按 `logs` 重建 `session_summaries`。
-- `RebuildOverviewMetricBuckets`：删除并按 `logs` 重建 `overview_metric_buckets` / `overview_metric_bucket_members`（当前无 CLI 调用者）。
-- `SaveObservation`：按 `trace_id` 删除并重写 `semantic_nodes`；`SaveFindings`：按 `trace_id` 删除并重写 `trace_findings`。
+- `SaveObservation`：按 `trace_id` upsert `trace_observations` 的紧凑摘要（并维护 `parser_versions` 与 `parse_jobs`），不再触碰已移除的 `semantic_nodes`；`SaveFindings`：按 `trace_id` 删除并重写 `trace_findings`。
 - `Store.Reset` + `Store.Rebuild`（顶层 `migrate --rebuild-index`）：清空并重新扫描重建 `logs` 索引。
 
 因此表分区与归档 job 在本仓库代码中未实现。若确需分区，属于 DBA 侧手工操作（自行建分区表、迁移数据并调整查询），应用侧没有配套的分区维护或归档代码；任何此类操作都必须自行保证 `.http` cassette 仍是 replay 的事实源。
+
+## 应用侧读写连接池与语句超时
+
+应用只通过配置管理自己的连接池，不会替实例调 `shared_buffers`、`work_mem` 等参数。Postgres 下可以给 Monitor/MCP 的读路径单独开一个只读池，避免慢看板占满写入路径的连接（配置键在 `database` 下，实现在 `internal/config/config.go` 与 `internal/store/store.go`）：
+
+| 配置键 | 环境变量 | 默认 | 作用 |
+| --- | --- | --- | --- |
+| `database.read_max_open_conns` | `TRAJECTA_DATABASE_READ_MAX_OPEN_CONNS` | `0` | 只读池连接数上限。`0` 表示不单独开池，所有语句共用写入池的 `database.max_open_conns` |
+| `database.read_max_idle_conns` | `TRAJECTA_DATABASE_READ_MAX_IDLE_CONNS` | `0`（等同 `read_max_open_conns`） | 只读池的空闲连接数；单独设置它不会开池 |
+| `database.read_statement_timeout` | `TRAJECTA_DATABASE_READ_STATEMENT_TIMEOUT` | `0s` | 只读池上每条语句的 `statement_timeout`；`0` 表示不设上界。单独设置它也会开池 |
+
+要点：
+
+- 只对 Postgres 生效：`openReadPool` 对 SQLite 直接返回「用写入池」，因为 SQLite 在文件级序列化写入，第二个池只会增加争用。
+- 池在 `read_max_open_conns > 0` 或 `read_statement_timeout > 0` 时打开，并在启动时 `Ping`；打不开就启动失败，而不是等第一个 Monitor 请求。
+- 只有不在事务内、且首个关键字是 `SELECT` / `VALUES` 的语句才走只读池（`isReadOnlyStatement` 的判定刻意窄：`WITH`、`INSERT`/`UPDATE`/`DELETE`、DDL 与无法识别的语句一律走写入池，避免把写语句静默切到只读池）；事务内语句永远跟随该事务使用的池。写路径（proxy finalizer、parse worker、reanalysis 的写入）保持 `database.max_open_conns`。
+- `read_statement_timeout` 通过 lib/pq 的连接选项 `statement_timeout` 施加，作用在该连接上的每条语句；超时的读以错误返回，而不是继续占着连接和磁盘队列。
+- 只读池没有单独的 `application_name`，在 `pg_stat_activity` 里与写入池的连接无法直接区分；确认池是否生效要对照配置上限与实际连接数。
 
 ## 锁与长事务排查
 

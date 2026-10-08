@@ -60,9 +60,6 @@ type ResponseItem func(*sql.Selector)
 // Score is the predicate function for score builders.
 type Score func(*sql.Selector)
 
-// SemanticNode is the predicate function for semanticnode builders.
-type SemanticNode func(*sql.Selector)
-
 // SystemEvent is the predicate function for systemevent builders.
 type SystemEvent func(*sql.Selector)
 

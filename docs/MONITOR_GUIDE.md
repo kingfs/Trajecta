@@ -37,13 +37,13 @@ Monitor API 本身只接受登录 JWT，不使用个人 token。
 Monitor 同时使用两类数据：
 
 - application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/trajecta.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、模型服务商与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
-- raw `.http` cassette：trace 详情、raw protocol、路由事件和 replay-safe 检查的事实来源。
+- raw `.http` cassette：trace 详情、raw protocol 与 replay-safe 检查的事实来源。路由事实在数据库里是 `logs` 上的派生列，原始 `routing.*` 事件仍记录在 cassette prelude 中。
 
-因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。`GET /api/routing/summary` 是二者的组合：按数据库索引顺序扫描 trace，再读取每个 cassette prelude 中的路由事件做聚合（旧数据或缺少事件的文件单独计数）。
+因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。`GET /api/routing/summary` 也完全走数据库：`buildRoutingSummary` 调 `store.RoutingSummary(since, model)`，对 `logs` 上的路由列做一次 `GROUP BY`，不再打开任何 cassette。计数是**按 trace** 而不是按路由事件：每条 trace 只保留每个事实的最后一个非空值（`internal/recorder/recorder.go` 的 `setLastNonEmpty`），所以同一条 trace 里的多次 sticky 事件折叠成最后一次。只要 `selected_upstream_id`、`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`routing_failure_reason` 任一非空，这条 trace 就算「有事件」；`legacy_or_missing_events = total_traces - eventful_traces`。迁移前的行不一定算 legacy：`selected_upstream_id` 是迁移前就有的列，这类 trace 仍算有事件，只是 `route_target_id` / `channel_id` / `credential_id` 与 sticky 拆分为空，直到一次重索引从 prelude 重新推导这五列。
 
 ## 页面
 
-左侧主导航固定为 11 项。下面按导航顺序说明路由与用途。
+左侧主导航固定为 12 项。下面按导航顺序说明路由与用途。
 
 ### 概览 `/overview`
 
@@ -78,18 +78,22 @@ session ID 的抽取顺序为：
 
 ### 手动导出会话轨迹
 
-会话详情页提供 `Export trajectory (ATIF)` 按钮。点击后，服务从该会话的客户端可见 cassette 重建轨迹并下载 `session-<id>.atif.jsonl`，不会调用模型、修改 cassette 或自动提交分析任务。
+会话详情页提供两个按钮：`导出轨迹 (ATIF)`（默认，带上限）与 `完整导出 (NDJSON 流)`（完整会话，流式）。两者都从该会话的客户端可见 cassette 重建轨迹并下载文件，不会调用模型、修改 cassette 或自动提交分析任务。
 
-- 格式固定为 **ATIF-v1.8**；每个 JSONL 行是完整 trajectory。单会话下载只有一行，并以换行结束，可拼接成多会话数据集。
+- 格式固定为 **ATIF-v1.8**；默认响应是单个 trajectory 对象的 JSONL（一行，以换行结束），可拼接成多会话数据集。
+- 默认只重建最早的 500 条 trace（`trajectoryTraceCap`），以便默认视图在慢盘上仍有界；响应 `extra` 增加 `trace_count`（会话总 trace 数）、`included_traces`（本次导出条数）、`truncated`（是否被截断）与 `trace_cap`。被截断时页面提示"默认只导出最早的 N / M 条 trace"，并引导使用完整导出。
+- `?full=1` 取消上限，导出完整会话（仍是单对象 JSON）。
+- `?stream=1` 使用 NDJSON 流式导出，每行一个 JSON 对象并逐条 flush，不在服务端累积整个会话：第一行 `type=header`（`schema_version`、`session_id`、`agent`、`trace_count`、`included_traces`、`truncated`、`trace_cap`）；随后每个 trace 一行 `type=trace`（`trace_id`、`steps`、`results`、`warnings`、可选的 `error`），其中 `results` 是晚到、需要回挂到更早步骤的工具结果，带 `step_id`；从未收到结果的工具调用最后以 `type=missing_tool_result` 行报告；最后一行 `type=final`（`final_metrics` 与会话级 `extra`）。`?stream=1&full=1` 流式导出完整会话。服务端每读完一条 cassette 就 flush，请求 context 取消（客户端断开）时立即停止后续读取。
+- 默认（带上限）导出的结果缓存到 `<trace.output_dir>/trajectory-cache/`，键为 `(session_id, last_trace_id, trace_count, limit)`，因此重看同一会话无需重建。会话只会追加 trace，且已写入的索引行不可变，所以只要轨迹会变，键就必然变化：命中即证明是同一条 trace 序列，无需失效逻辑。条目以临时文件加 rename 原子写入，最多保留 512 个条目 / 512 MiB，超出按写入时间淘汰；`?full=1` 与 `?stream=1` 不读写该缓存。容量上限只影响命中率，未命中一律回落到重建。
 - 当前语义重建支持 Codex 使用的 OpenAI Responses generation（`/responses`、`/v1/responses`）及 SSE。其他 endpoint（包括 compact）保留源 trace 引用，并报告 `unsupported_endpoint`；不伪装成已解析的对话。
 - 请求按 `recorded_at` 与 trace ID 排序，输出按 Responses `output_index` 排序。会话归组依据保存在 `extra.session_source`，无法从 HTTP 证明全部事件的因果关系或任务已完成。
 - 相邻请求的历史上下文按有序重叠合并，不全局删除相同文本。`previous_response_id` 请求按增量输入处理。工具结果按调用 ID 回挂到发起调用的步骤。
 - 每个录制响应合并为一个 agent 步骤，而不是每个 SSE 事件一个步骤。多模态内容保留文本与占位引用，不生成外部附件；未知内容报告警告。reasoning summary 放在 `extra.reasoning_summary`，加密内容仅标记已省略，不当作完整可读思维链。
 - 每步携带 `trace_id`、origin 与归一化 item 路径（流式输出先重建）。标准 `metrics` 每个响应记录一次 token 计数，`final_metrics` 汇总；不重复导出逐项 usage attribution、原生 item 或请求配置。内部 model child exchanges 不重复计入这份客户端视角导出；仅历史恢复的内容不推测 usage。
 - `extra.warnings` 报告文件缺失、无法解析、上下文不连续、缺失或孤立工具结果、流式中断等问题，下载完成后页面显示警告数量。`completion=unknown` 不将 HTTP 成功解释为任务成功。
-- 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。当前为同步生成并在浏览器下载，极大会话受服务端与浏览器可用内存限制。
+- 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。默认与 `?full=1` 仍在服务端组装完整响应；极大会话应使用 `?stream=1`。
 
-接口为 `GET /api/sessions/:sessionID/trajectory`，使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
+接口为 `GET /api/sessions/:sessionID/trajectory`，可选参数 `full` 与 `stream`（`1`/`true`/`yes`/`on` 视为真），使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头；默认文件名 `session-<id>.atif.jsonl`，流式为 `session-<id>.atif.ndjson`。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
 
 ### 追踪 `/traces`
 
@@ -144,7 +148,7 @@ session ID 的抽取顺序为：
 - Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
 - Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未声明模型的可路由性也按同一条规则判断：只有渠道的 `allow_unknown_models` 为真时才会规划出路由，否则候选会以 `model_not_matched` 被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
 
-摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件、旧数据/缺失事件和解析错误的 trace。
+摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。响应里仍保留 `parse_errors` 字段只为兼容旧前端：这个端点已不解析任何文件，该字段恒为 0，不代表解析失败数。
 
 ### 分析 `/analysis`
 
@@ -158,6 +162,23 @@ session ID 的抽取顺序为：
 ### 令牌 `/tokens`
 
 管理当前用户的个人 API token，见上文「个人 API token」。
+
+### 系统 `/system`
+
+管理员专属页面：导航项只对 `role=admin` 的登录用户显示，未启用认证时显示给 `local` 伪用户（此时 Monitor 本身不校验身份）；后端对未认证请求返回 401、对已认证的非管理员返回 403。页面每 60 秒轮询三个只读接口。
+
+`GET /api/system/runtime` 报告 Go 进程事实：Go 版本、GOOS/GOARCH、CPU 核数、GOMAXPROCS、协程数、进程运行时长、堆的累计分配/在用/存活对象/进程总内存/栈内存、GC 次数与最近 256 次 GC 暂停的 min/p25/p50/p75/max，以及 `database/sql` 连接池计数（最大连接、已打开、使用中、空闲、等待次数、等待累计、因空闲或超时被关闭）。它不查询任何数据库行。
+
+`GET /api/system/db` 报告 Postgres 统计视图；非 Postgres 驱动（如 SQLite）返回 HTTP 200、`supported=false`、`unsupported=true` 和 `reason`，页面显示说明而不是报错。采集全部来自 `pg_stat_*` 与系统视图，在一条只读事务内完成（`SET LOCAL statement_timeout = 2000`，外层 5 秒超时），每个列表最多 20 行，`pg_stat_activity.query` 先在 SQL 里截到 4000 字符，再在 Go 侧脱敏并截断到 500 字符。它从不执行 `EXPLAIN`、`EXPLAIN ANALYZE`、`VACUUM`、`ANALYZE` 或任何写语句；单个分节失败只进入响应的 `warnings`。页面展示：
+
+- 数据库大小、缓存命中率（低于 95% 标黄、低于 90% 标红）、临时文件与临时写入字节、死锁、事务提交/回滚。
+- 连接与活动：本库连接数、实例总连接数、按 `state` 与 `wait_event_type` 的分组计数、运行最久的非 idle 语句。
+- `public` 下最大的关系（总大小/堆大小/估算行数）、未被使用的索引（`idx_scan = 0`，按大小高亮，附维护成本提示）、读放大最严重的索引（`idx_tup_read / idx_scan`）、写入最频繁的表。
+- 检查点计数（Postgres 17 来自 `pg_stat_checkpointer` 的 `num_timed`/`num_requested`，响应中的 `source` 标明来源）与 `pg_settings` 的关键参数（`shared_buffers`、`work_mem`、`maintenance_work_mem`、`effective_cache_size`、`random_page_cost`、`max_wal_size`、`max_connections`、`statement_timeout`）。
+
+`GET /api/system/slow-queries` 返回进程内慢语句环形缓冲区。采集默认关闭：`debug.slow_query_threshold`（`TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD`）为 `0` 时不记录任何语句，热路径只有一次原子读取，页面显示「collector disabled」空状态并提示设置该配置。设为正数（例如 `"200ms"`）并重启后，慢于阈值且经过数据库驱动的语句进入容量 50 的缓冲区，保存时间、耗时、操作类型（`query`/`exec`）以及脱敏并截断到 500 字符的语句。
+
+pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 false）为 true 时挂载到 Monitor 的 `/debug/pprof/`；为 false 时该前缀返回 404，不会落到前端 SPA。
 
 ## 兼容路由与详情路由
 

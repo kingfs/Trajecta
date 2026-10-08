@@ -15,10 +15,14 @@
 # instead. Raise TRAJECTA_OPS_BIG_TABLES_VACUUM=1 when you do want the full
 # vacuum, ideally outside working hours.
 #
+# semantic_nodes is a legacy table: the runtime no longer writes it, but the
+# Postgres migrations still create it, so it is normally present until an
+# operator drops it; the big-table step reports it as skipped when it is absent.
+#
 # Usage: scripts/postgres/vacuum-after-repair.sh
 # Environment: see scripts/postgres/common.sh, plus
 #   TRAJECTA_OPS_SMALL_TABLES   tables to VACUUM (ANALYZE) (default: the derived tables)
-#   TRAJECTA_OPS_BIG_TABLES     tables to ANALYZE only (default: semantic_nodes)
+#   TRAJECTA_OPS_BIG_TABLES     tables to ANALYZE only (default: semantic_nodes, a legacy table)
 #   TRAJECTA_OPS_BIG_TABLES_VACUUM  1 to VACUUM (ANALYZE) the big tables as well
 set -Eeuo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
@@ -55,7 +59,7 @@ done
 section "3) ANALYZE on the big derived tables"
 for table in $BIG; do
   if ! table_exists "$table"; then
-    note "$table: absent, skipped"
+    note "$table: absent (removed derived table), skipped"
     continue
   fi
   if [ "$BIG_VACUUM" = "1" ]; then

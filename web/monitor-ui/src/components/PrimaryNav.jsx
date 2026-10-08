@@ -19,6 +19,22 @@ const navItems = [
   { to: "/tokens", labelKey: "nav.tokens", icon: "key" },
 ];
 
+// The system page exposes process internals, database statistics and (when the
+// slow-query collector is armed) statement text, so the API behind it is
+// admin-only. The entry follows the same rule: an admin sees it, and so does
+// the "local" pseudo-user of a Monitor running without auth, which is the only
+// deployment whose API answers without a role.
+const systemNavItem = { to: "/system", labelKey: "nav.system", icon: "settings" };
+
+function canOpenSystemPage(user) {
+  const role = String(user?.role || "").trim().toLowerCase();
+  return role === "admin" || role === "local";
+}
+
+function navVisibleItems(user) {
+  return canOpenSystemPage(user) ? [...navItems, systemNavItem] : navItems;
+}
+
 export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
   const { t } = useI18n();
   const [accountOpen, setAccountOpen] = useState(false);
@@ -99,7 +115,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           </button>
         </div>
         <div className="nav-section">
-          {navItems.map((item) => {
+          {navVisibleItems(user).map((item) => {
             const label = t(item.labelKey);
             return (
               <NavLink

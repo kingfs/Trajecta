@@ -26,7 +26,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `cmd/server`：CLI 入口与 `serve` 装配。`main.go` 只通过 `run` 退出，命令接线在 `root.go`；命令文件包括 `serve.go`、`migrate.go`、`db.go`、`config.go`、`doctor.go`、`provider.go`、`models.go`、`tools.go`、`audit.go`、`auth.go`、`analyze.go`、`version.go`、`schema.go`、`completion.go`。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配，`provider_startup_probe.go` 提供 provider probe 辅助。
 - `internal/proxy`：反向代理与 `/v1/responses` 入口，负责鉴权、转发、响应截获与协议感知透传调整。
 - `internal/recorder`：cassette 写入与 metadata finalization。
-- `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`。
+- `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。
 - `internal/upstream`：上游解析、协议族、能力/路由 profile 与鉴权/URL 规则。
 - `internal/channel`：渠道（provider）配置与 probe 用例、legacy YAML bootstrap、runtime targets。
 - `internal/responses`：本地 Responses 运行时及其子系统——`runtime`（编排与 state store）、`httpapi`（HTTP handler）、`chatclient`（内部 Chat Completions client）、`audit`（审计查询与写入）、`functionexec`（本地函数执行器）、`tools`（hosted tools：`hosted`、`mcp`、`websearch`）、`protocol`（类型定义）、`codexfixtures`（Codex 兼容 fixture）。
@@ -66,7 +66,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 5. 请求转发到上游，响应以流式或非流式返回 client。若某次 `/v1/responses` 请求被判定为原生直通，则该请求只会在「自己实现 Responses API」的目标里选择：只能靠本地 runtime 翻译的 Chat Completions 目标在这一请求上不可选（重试重新选择时同样不可选），否则原样转发会把 Responses 请求发给不实现该协议的上游。转发路径自己写响应体（不经 `httputil.ReverseProxy` 的拷贝），所以「流式响应逐次 flush」这条契约由它承担：流式（或长度未知）的响应每写一次就 flush 一次，否则小于服务端输出缓冲的写入会被攒着，client 在 handler 返回前收不到任何东西——连响应头都收不到，`stream: true` 就退化成「最后一个 token 之后一次性收到完整回答」，首字节时间等于总时长。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 与 `llm.*` timeline 事件。
-8. application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。
+8. application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。代理请求路径只把完成的录制投入有界后台 finalize 队列（`internal/recorder/finalize_queue.go`：2 个 worker、深度 256），worker 负责补 prelude、写 `logs`（含 routing 列）并入队 parse_job；队列满时回退到请求内联完成，进程正常关闭时排空队列。
 9. observeworker 与 reanalysis 从 raw cassette 解析 Observation IR、findings 和分析任务结果。
 10. Monitor 与 MCP 从 application DB 查询列表/聚合，从 cassette 读取详情。
 11. Monitor 的会话轨迹导出用 `internal/trajectory` 从该会话的客户端可见 cassette 重建 ATIF-v1.8 JSONL（不调用模型、不修改 cassette）。
@@ -118,10 +118,14 @@ raw `.http` cassette 是事实源：
 application DB 是结构化查询源：
 
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；
-- auth user/token、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval；
+- auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）。
 
 生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
+
+派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表仍由 Postgres 历史迁移创建（SQLite 启动 schema 不再创建），代码不读取也不写入它们，回收空间是运维的手工决定（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
+
+Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个有界磁盘缓存：键为 `(session_id, last_trace_id, trace_count, limit)`，条目以临时文件加 rename 原子写入，最多保留 512 条 / 512 MiB。它是纯派生数据，任何时候都可以删除并按下述 cassette 重建；`?full=1` 与 `?stream=1` 不读写该缓存。
 
 部署与迁移细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)，Postgres 长期运行优化见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 

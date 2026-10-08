@@ -23,7 +23,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/ent/dao/score"
-	"github.com/kingfs/Trajecta/ent/dao/semanticnode"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -744,64 +743,6 @@ func init() {
 	scoreDescID := scoreFields[0].Descriptor()
 	// score.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	score.IDValidator = scoreDescID.Validators[0].(func(string) error)
-	semanticnodeFields := schema.SemanticNode{}.Fields()
-	_ = semanticnodeFields
-	// semanticnodeDescTraceID is the schema descriptor for trace_id field.
-	semanticnodeDescTraceID := semanticnodeFields[0].Descriptor()
-	// semanticnode.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
-	semanticnode.TraceIDValidator = semanticnodeDescTraceID.Validators[0].(func(string) error)
-	// semanticnodeDescNodeID is the schema descriptor for node_id field.
-	semanticnodeDescNodeID := semanticnodeFields[1].Descriptor()
-	// semanticnode.NodeIDValidator is a validator for the "node_id" field. It is called by the builders before save.
-	semanticnode.NodeIDValidator = semanticnodeDescNodeID.Validators[0].(func(string) error)
-	// semanticnodeDescParentNodeID is the schema descriptor for parent_node_id field.
-	semanticnodeDescParentNodeID := semanticnodeFields[2].Descriptor()
-	// semanticnode.DefaultParentNodeID holds the default value on creation for the parent_node_id field.
-	semanticnode.DefaultParentNodeID = semanticnodeDescParentNodeID.Default.(string)
-	// semanticnodeDescProviderType is the schema descriptor for provider_type field.
-	semanticnodeDescProviderType := semanticnodeFields[3].Descriptor()
-	// semanticnode.DefaultProviderType holds the default value on creation for the provider_type field.
-	semanticnode.DefaultProviderType = semanticnodeDescProviderType.Default.(string)
-	// semanticnodeDescNormalizedType is the schema descriptor for normalized_type field.
-	semanticnodeDescNormalizedType := semanticnodeFields[4].Descriptor()
-	// semanticnode.DefaultNormalizedType holds the default value on creation for the normalized_type field.
-	semanticnode.DefaultNormalizedType = semanticnodeDescNormalizedType.Default.(string)
-	// semanticnodeDescRole is the schema descriptor for role field.
-	semanticnodeDescRole := semanticnodeFields[5].Descriptor()
-	// semanticnode.DefaultRole holds the default value on creation for the role field.
-	semanticnode.DefaultRole = semanticnodeDescRole.Default.(string)
-	// semanticnodeDescPath is the schema descriptor for path field.
-	semanticnodeDescPath := semanticnodeFields[6].Descriptor()
-	// semanticnode.DefaultPath holds the default value on creation for the path field.
-	semanticnode.DefaultPath = semanticnodeDescPath.Default.(string)
-	// semanticnodeDescNodeIndex is the schema descriptor for node_index field.
-	semanticnodeDescNodeIndex := semanticnodeFields[7].Descriptor()
-	// semanticnode.DefaultNodeIndex holds the default value on creation for the node_index field.
-	semanticnode.DefaultNodeIndex = semanticnodeDescNodeIndex.Default.(int)
-	// semanticnodeDescDepth is the schema descriptor for depth field.
-	semanticnodeDescDepth := semanticnodeFields[8].Descriptor()
-	// semanticnode.DefaultDepth holds the default value on creation for the depth field.
-	semanticnode.DefaultDepth = semanticnodeDescDepth.Default.(int)
-	// semanticnodeDescTextPreview is the schema descriptor for text_preview field.
-	semanticnodeDescTextPreview := semanticnodeFields[9].Descriptor()
-	// semanticnode.DefaultTextPreview holds the default value on creation for the text_preview field.
-	semanticnode.DefaultTextPreview = semanticnodeDescTextPreview.Default.(string)
-	// semanticnodeDescJSON is the schema descriptor for json field.
-	semanticnodeDescJSON := semanticnodeFields[10].Descriptor()
-	// semanticnode.DefaultJSON holds the default value on creation for the json field.
-	semanticnode.DefaultJSON = semanticnodeDescJSON.Default.(string)
-	// semanticnodeDescRaw is the schema descriptor for raw field.
-	semanticnodeDescRaw := semanticnodeFields[11].Descriptor()
-	// semanticnode.DefaultRaw holds the default value on creation for the raw field.
-	semanticnode.DefaultRaw = semanticnodeDescRaw.Default.(string)
-	// semanticnodeDescRawRef is the schema descriptor for raw_ref field.
-	semanticnodeDescRawRef := semanticnodeFields[12].Descriptor()
-	// semanticnode.DefaultRawRef holds the default value on creation for the raw_ref field.
-	semanticnode.DefaultRawRef = semanticnodeDescRawRef.Default.(string)
-	// semanticnodeDescCreatedAt is the schema descriptor for created_at field.
-	semanticnodeDescCreatedAt := semanticnodeFields[13].Descriptor()
-	// semanticnode.DefaultCreatedAt holds the default value on creation for the created_at field.
-	semanticnode.DefaultCreatedAt = semanticnodeDescCreatedAt.Default.(func() time.Time)
 	systemeventFields := schema.SystemEvent{}.Fields()
 	_ = systemeventFields
 	// systemeventDescFingerprint is the schema descriptor for fingerprint field.
@@ -1134,6 +1075,26 @@ func init() {
 	tracelogDescRoutingFailureReason := tracelogFields[45].Descriptor()
 	// tracelog.DefaultRoutingFailureReason holds the default value on creation for the routing_failure_reason field.
 	tracelog.DefaultRoutingFailureReason = tracelogDescRoutingFailureReason.Default.(string)
+	// tracelogDescRouteTargetID is the schema descriptor for route_target_id field.
+	tracelogDescRouteTargetID := tracelogFields[46].Descriptor()
+	// tracelog.DefaultRouteTargetID holds the default value on creation for the route_target_id field.
+	tracelog.DefaultRouteTargetID = tracelogDescRouteTargetID.Default.(string)
+	// tracelogDescChannelID is the schema descriptor for channel_id field.
+	tracelogDescChannelID := tracelogFields[47].Descriptor()
+	// tracelog.DefaultChannelID holds the default value on creation for the channel_id field.
+	tracelog.DefaultChannelID = tracelogDescChannelID.Default.(string)
+	// tracelogDescCredentialID is the schema descriptor for credential_id field.
+	tracelogDescCredentialID := tracelogFields[48].Descriptor()
+	// tracelog.DefaultCredentialID holds the default value on creation for the credential_id field.
+	tracelog.DefaultCredentialID = tracelogDescCredentialID.Default.(string)
+	// tracelogDescStickyStatus is the schema descriptor for sticky_status field.
+	tracelogDescStickyStatus := tracelogFields[49].Descriptor()
+	// tracelog.DefaultStickyStatus holds the default value on creation for the sticky_status field.
+	tracelog.DefaultStickyStatus = tracelogDescStickyStatus.Default.(string)
+	// tracelogDescStickyPreviousUpstreamID is the schema descriptor for sticky_previous_upstream_id field.
+	tracelogDescStickyPreviousUpstreamID := tracelogFields[50].Descriptor()
+	// tracelog.DefaultStickyPreviousUpstreamID holds the default value on creation for the sticky_previous_upstream_id field.
+	tracelog.DefaultStickyPreviousUpstreamID = tracelogDescStickyPreviousUpstreamID.Default.(string)
 	// tracelogDescID is the schema descriptor for id field.
 	tracelogDescID := tracelogFields[0].Descriptor()
 	// tracelog.IDValidator is a validator for the "id" field. It is called by the builders before save.

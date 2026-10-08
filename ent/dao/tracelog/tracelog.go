@@ -103,6 +103,16 @@ const (
 	FieldRoutingCandidateCount = "routing_candidate_count"
 	// FieldRoutingFailureReason holds the string denoting the routing_failure_reason field in the database.
 	FieldRoutingFailureReason = "routing_failure_reason"
+	// FieldRouteTargetID holds the string denoting the route_target_id field in the database.
+	FieldRouteTargetID = "route_target_id"
+	// FieldChannelID holds the string denoting the channel_id field in the database.
+	FieldChannelID = "channel_id"
+	// FieldCredentialID holds the string denoting the credential_id field in the database.
+	FieldCredentialID = "credential_id"
+	// FieldStickyStatus holds the string denoting the sticky_status field in the database.
+	FieldStickyStatus = "sticky_status"
+	// FieldStickyPreviousUpstreamID holds the string denoting the sticky_previous_upstream_id field in the database.
+	FieldStickyPreviousUpstreamID = "sticky_previous_upstream_id"
 	// Table holds the table name of the tracelog in the database.
 	Table = "logs"
 )
@@ -155,6 +165,11 @@ var Columns = []string{
 	FieldRoutingScore,
 	FieldRoutingCandidateCount,
 	FieldRoutingFailureReason,
+	FieldRouteTargetID,
+	FieldChannelID,
+	FieldCredentialID,
+	FieldStickyStatus,
+	FieldStickyPreviousUpstreamID,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -254,6 +269,16 @@ var (
 	DefaultRoutingCandidateCount int
 	// DefaultRoutingFailureReason holds the default value on creation for the "routing_failure_reason" field.
 	DefaultRoutingFailureReason string
+	// DefaultRouteTargetID holds the default value on creation for the "route_target_id" field.
+	DefaultRouteTargetID string
+	// DefaultChannelID holds the default value on creation for the "channel_id" field.
+	DefaultChannelID string
+	// DefaultCredentialID holds the default value on creation for the "credential_id" field.
+	DefaultCredentialID string
+	// DefaultStickyStatus holds the default value on creation for the "sticky_status" field.
+	DefaultStickyStatus string
+	// DefaultStickyPreviousUpstreamID holds the default value on creation for the "sticky_previous_upstream_id" field.
+	DefaultStickyPreviousUpstreamID string
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
 	IDValidator func(string) error
 )
@@ -489,4 +514,29 @@ func ByRoutingCandidateCount(opts ...sql.OrderTermOption) OrderOption {
 // ByRoutingFailureReason orders the results by the routing_failure_reason field.
 func ByRoutingFailureReason(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRoutingFailureReason, opts...).ToFunc()
+}
+
+// ByRouteTargetID orders the results by the route_target_id field.
+func ByRouteTargetID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRouteTargetID, opts...).ToFunc()
+}
+
+// ByChannelID orders the results by the channel_id field.
+func ByChannelID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldChannelID, opts...).ToFunc()
+}
+
+// ByCredentialID orders the results by the credential_id field.
+func ByCredentialID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCredentialID, opts...).ToFunc()
+}
+
+// ByStickyStatus orders the results by the sticky_status field.
+func ByStickyStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStickyStatus, opts...).ToFunc()
+}
+
+// ByStickyPreviousUpstreamID orders the results by the sticky_previous_upstream_id field.
+func ByStickyPreviousUpstreamID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStickyPreviousUpstreamID, opts...).ToFunc()
 }

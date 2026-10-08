@@ -39,7 +39,11 @@ ENV TZ=UTC \
 	TRAJECTA_OUTPUT_DIR=/app/data/traces \
 	TRAJECTA_TRACE_OUTPUT_DIR=/app/data/traces
 
-RUN mkdir -p /app/bin /app/config /app/data/traces
+# tzdata is not part of the alpine base image, and the Monitor resolves its
+# display timezone with time.LoadLocation. Both binaries also embed the IANA
+# database, so this keeps the image consistent for anything else that reads TZ.
+RUN apk add --no-cache tzdata && \
+	mkdir -p /app/bin /app/config /app/data/traces
 
 WORKDIR /app
 

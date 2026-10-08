@@ -543,30 +543,6 @@ func (f ScoreMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation)
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ScoreMutation", m)
 }
 
-// The SemanticNodeQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type SemanticNodeQueryRuleFunc func(context.Context, *dao.SemanticNodeQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f SemanticNodeQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.SemanticNodeQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.SemanticNodeQuery", q)
-}
-
-// The SemanticNodeMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type SemanticNodeMutationRuleFunc func(context.Context, *dao.SemanticNodeMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f SemanticNodeMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.SemanticNodeMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.SemanticNodeMutation", m)
-}
-
 // The SystemEventQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type SystemEventQueryRuleFunc func(context.Context, *dao.SystemEventQuery) error
@@ -854,8 +830,6 @@ func queryFilter(q dao.Query) (Filter, error) {
 		return q.Filter(), nil
 	case *dao.ScoreQuery:
 		return q.Filter(), nil
-	case *dao.SemanticNodeQuery:
-		return q.Filter(), nil
 	case *dao.SystemEventQuery:
 		return q.Filter(), nil
 	case *dao.ToolCallAuditQuery:
@@ -916,8 +890,6 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.ResponseItemMutation:
 		return m.Filter(), nil
 	case *dao.ScoreMutation:
-		return m.Filter(), nil
-	case *dao.SemanticNodeMutation:
 		return m.Filter(), nil
 	case *dao.SystemEventMutation:
 		return m.Filter(), nil

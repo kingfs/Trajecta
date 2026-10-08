@@ -322,8 +322,10 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	seenFailureUnparsed := false
 	for _, item := range unparsedItems {
 		unparsedItem := item.(map[string]any)
-		if got := unparsedItem["observation"].(map[string]any)["status"].(string); got != "unparsed" {
-			t.Fatalf("list_traces unparsed observation = %q, want unparsed", got)
+		// The filter selects traces with no observation row; the status it reports
+		// comes from the parse job the indexing sync queued for that trace.
+		if got := unparsedItem["observation"].(map[string]any)["status"].(string); got != "queued" {
+			t.Fatalf("list_traces unparsed observation = %q, want queued", got)
 		}
 		if got := unparsedItem["id"].(string); got == failureEntry.ID {
 			seenFailureUnparsed = true

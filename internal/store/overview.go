@@ -1,35 +1,18 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
-	"fmt"
 	"math"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
-type overviewMetricContribution struct {
-	Path              string
-	BucketStart       time.Time
-	BucketSizeSeconds int
-	RequestCount      int64
-	SuccessRequest    int64
-	FailedRequest     int64
-	TotalTokens       int64
-	TTFTSum           int64
-	TTFTCount         int64
-	DurationSum       int64
-	DurationCount     int64
-	StreamCount       int64
-}
-
 type OverviewOptions struct {
-	Since       time.Time
+	Since time.Time
+	// Location anchors the calendar buckets. Nil keeps the UTC grid.
+	Location    *time.Location
 	BucketSize  time.Duration
 	BucketCount int
 	Limit       int
@@ -106,418 +89,11 @@ const (
 	SystemEventStatusIgnored  = "ignored"
 )
 
-func (s *Store) ensureOverviewMetricBucketsSchema() error {
-	timeType := "datetime"
-	if s.driver == "postgres" {
-		timeType = "timestamptz"
-	}
-	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
-		bucket_start %s NOT NULL,
-		bucket_size_seconds INTEGER NOT NULL,
-		request_count BIGINT NOT NULL DEFAULT 0,
-		success_request BIGINT NOT NULL DEFAULT 0,
-		failed_request BIGINT NOT NULL DEFAULT 0,
-		total_tokens BIGINT NOT NULL DEFAULT 0,
-		ttft_sum BIGINT NOT NULL DEFAULT 0,
-		ttft_count BIGINT NOT NULL DEFAULT 0,
-		duration_sum BIGINT NOT NULL DEFAULT 0,
-		duration_count BIGINT NOT NULL DEFAULT 0,
-		stream_count BIGINT NOT NULL DEFAULT 0,
-		updated_at %s NOT NULL,
-		PRIMARY KEY (bucket_start, bucket_size_seconds)
-	)`, timeType, timeType)); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
-		path TEXT PRIMARY KEY,
-		bucket_start %s NOT NULL,
-		bucket_size_seconds INTEGER NOT NULL,
-		request_count BIGINT NOT NULL DEFAULT 0,
-		success_request BIGINT NOT NULL DEFAULT 0,
-		failed_request BIGINT NOT NULL DEFAULT 0,
-		total_tokens BIGINT NOT NULL DEFAULT 0,
-		ttft_sum BIGINT NOT NULL DEFAULT 0,
-		ttft_count BIGINT NOT NULL DEFAULT 0,
-		duration_sum BIGINT NOT NULL DEFAULT 0,
-		duration_count BIGINT NOT NULL DEFAULT 0,
-		stream_count BIGINT NOT NULL DEFAULT 0,
-		updated_at %s NOT NULL
-	)`, timeType, timeType)); err != nil {
-		return err
-	}
-	for _, stmt := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start)`,
-		`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds)`,
-	} {
-		if _, err := s.db.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// refreshOverviewMetricBucketsBestEffort reports whether the refresh was applied. A
-// failure is printed and returned so the caller can keep the work queued: the deferred queue
-// is the only record that these paths still owe the buckets an update, and dropping it would
-// leave the aggregate permanently short (nothing calls RebuildOverviewMetricBuckets in
-// normal operation).
-func (s *Store) refreshOverviewMetricBucketsBestEffort(paths []string) bool {
-	if len(paths) == 0 {
-		return true
-	}
-	if err := s.refreshOverviewMetricBuckets(paths); err != nil {
-		fmt.Fprintf(os.Stderr, "trajecta: refresh overview metric buckets failed: %v\n", err)
-		return false
-	}
-	return true
-}
-
-// refreshOverviewMetricBuckets rebuilds the hourly bucket contribution of a set
-// of paths in one transaction. Path by path costs a contribution read, a member
-// read, a member delete and two upserts each in its own transaction; the batched
-// form reads both sides once and writes one aggregated delta per distinct bucket,
-// with the member rows deleted and re-inserted in parameter-bounded chunks.
-
-// addOverviewMetricContributionDelta accumulates one bucket delta. A net-zero
-// delta writes nothing: the previous implementation added the removed member and
-// the new contribution as two separate upserts, which left a zero-valued row
-// behind when a path ended up in the same bucket with the same numbers.
-
-func overviewMetricBucketKey(contribution overviewMetricContribution) string {
-	return contribution.BucketStart.UTC().Format(timeLayout) + "|" + strconv.Itoa(contribution.BucketSizeSeconds)
-}
-
-func (s *Store) insertOverviewMetricMembersTx(tx *sql.Tx, contributions map[string]overviewMetricContribution) error {
-	if len(contributions) == 0 {
-		return nil
-	}
-	now := time.Now().UTC().Format(timeLayout)
-	const memberColumns = 13
-	rowsPerStatement := storeSQLParamChunk / memberColumns
-	valueRow := "(" + placeholders(memberColumns) + ")"
-	for _, chunk := range chunkStrings(sortedKeys(contributions), rowsPerStatement) {
-		values := make([]string, 0, len(chunk))
-		args := make([]any, 0, len(chunk)*memberColumns)
-		for _, path := range chunk {
-			contribution := contributions[path]
-			values = append(values, valueRow)
-			args = append(args,
-				contribution.Path,
-				contribution.BucketStart.UTC().Format(timeLayout),
-				contribution.BucketSizeSeconds,
-				contribution.RequestCount,
-				contribution.SuccessRequest,
-				contribution.FailedRequest,
-				contribution.TotalTokens,
-				contribution.TTFTSum,
-				contribution.TTFTCount,
-				contribution.DurationSum,
-				contribution.DurationCount,
-				contribution.StreamCount,
-				now,
-			)
-		}
-		if _, err := s.execTx(tx, `
-			INSERT INTO overview_metric_bucket_members (
-				path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-				total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
-			) VALUES `+strings.Join(values, ", "), args...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // storeSQLParamChunk bounds how many bind parameters one statement carries.
 // Postgres allows 65535 and current SQLite builds allow 32766, but the historic
 // SQLite limit of 999 is the only value that is safe for every driver and
 // version the project supports.
 const storeSQLParamChunk = 900
-
-func (s *Store) RefreshOverviewMetricBucketForPath(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	contribution, ok, err := s.overviewMetricContributionForPath(path)
-	if err != nil {
-		return err
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := s.applyOverviewMetricContributionTx(tx, path, contribution, ok); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// OverviewMetricRebuildStats describes what RebuildOverviewMetricBuckets reads and replaces.
-//
-// The bucket tables are maintained incrementally, so they can drift from the logs they
-// summarize (a process that died before settling its deferred queue, or a flush that failed
-// and was never retried). Comparing CandidateCount with the stored rows is how an operator
-// sees that drift before rebuilding, and running the same report afterwards shows it is gone.
-type OverviewMetricRebuildStats struct {
-	// CandidateCount is the number of client-visible log rows that contribute to a bucket.
-	CandidateCount int `json:"candidate_count"`
-	// Buckets and Members are the aggregate rows currently stored; a rebuild replaces both.
-	Buckets int `json:"buckets"`
-	Members int `json:"members"`
-}
-
-func (s *Store) OverviewMetricRebuildStats() (OverviewMetricRebuildStats, error) {
-	var stats OverviewMetricRebuildStats
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE ` + clientVisibleLogClause("")).Scan(&stats.CandidateCount); err != nil {
-		return stats, err
-	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_buckets`).Scan(&stats.Buckets); err != nil {
-		return stats, err
-	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM overview_metric_bucket_members`).Scan(&stats.Members); err != nil {
-		return stats, err
-	}
-	return stats, nil
-}
-
-func (s *Store) RebuildOverviewMetricBuckets() error {
-	rows, err := s.db.Query(`
-		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
-		FROM logs
-		WHERE ` + clientVisibleLogClause("") + `
-		ORDER BY recorded_at ASC, path ASC
-	`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	var contributions []overviewMetricContribution
-	for rows.Next() {
-		contribution, err := s.scanOverviewMetricContribution(rows)
-		if err != nil {
-			return err
-		}
-		contributions = append(contributions, contribution)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members`); err != nil {
-		return err
-	}
-	if _, err := s.execTx(tx, `DELETE FROM overview_metric_buckets`); err != nil {
-		return err
-	}
-	for _, contribution := range contributions {
-		if err := s.insertOverviewMetricContributionTx(tx, contribution); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *Store) overviewMetricContributionForPath(path string) (overviewMetricContribution, bool, error) {
-	row := s.db.QueryRow(`
-		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
-		FROM logs
-		WHERE path = ? AND `+clientVisibleLogClause("")+`
-	`, path)
-	contribution, err := s.scanOverviewMetricContribution(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return overviewMetricContribution{}, false, nil
-	}
-	if err != nil {
-		return overviewMetricContribution{}, false, err
-	}
-	return contribution, true, nil
-}
-
-type overviewMetricContributionScanner interface {
-	Scan(dest ...any) error
-}
-
-func (s *Store) scanOverviewMetricContribution(scanner overviewMetricContributionScanner) (overviewMetricContribution, error) {
-	var (
-		contribution overviewMetricContribution
-		recordedAt   any
-		statusCode   int
-		errorText    string
-		totalTokens  int64
-		ttftMs       int64
-		durationMs   int64
-		isStream     any
-	)
-	if err := scanner.Scan(
-		&contribution.Path,
-		&recordedAt,
-		&statusCode,
-		&errorText,
-		&totalTokens,
-		&ttftMs,
-		&durationMs,
-		&isStream,
-	); err != nil {
-		return overviewMetricContribution{}, err
-	}
-	recorded, err := timeParseValue(recordedAt)
-	if err != nil {
-		return overviewMetricContribution{}, err
-	}
-	contribution.BucketStart = recorded.UTC().Truncate(overviewMetricBucketSize)
-	contribution.BucketSizeSeconds = int(overviewMetricBucketSize / time.Second)
-	contribution.RequestCount = 1
-	if statusCode >= 200 && statusCode < 300 && strings.TrimSpace(errorText) == "" {
-		contribution.SuccessRequest = 1
-	} else {
-		contribution.FailedRequest = 1
-	}
-	contribution.TotalTokens = totalTokens
-	if ttftMs > 0 {
-		contribution.TTFTSum = ttftMs
-		contribution.TTFTCount = 1
-	}
-	if durationMs > 0 {
-		contribution.DurationSum = durationMs
-		contribution.DurationCount = 1
-	}
-	if boolValue(isStream) {
-		contribution.StreamCount = 1
-	}
-	return contribution, nil
-}
-
-func (s *Store) applyOverviewMetricContributionTx(tx *sql.Tx, path string, contribution overviewMetricContribution, hasContribution bool) error {
-	previous, ok, err := s.overviewMetricMemberTx(tx, path)
-	if err != nil {
-		return err
-	}
-	if ok {
-		previous.RequestCount = -previous.RequestCount
-		previous.SuccessRequest = -previous.SuccessRequest
-		previous.FailedRequest = -previous.FailedRequest
-		previous.TotalTokens = -previous.TotalTokens
-		previous.TTFTSum = -previous.TTFTSum
-		previous.TTFTCount = -previous.TTFTCount
-		previous.DurationSum = -previous.DurationSum
-		previous.DurationCount = -previous.DurationCount
-		previous.StreamCount = -previous.StreamCount
-		if err := s.addOverviewMetricBucketTx(tx, previous); err != nil {
-			return err
-		}
-		if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members WHERE path = ?`, path); err != nil {
-			return err
-		}
-	}
-	if !hasContribution {
-		return nil
-	}
-	return s.insertOverviewMetricContributionTx(tx, contribution)
-}
-
-func (s *Store) overviewMetricMemberTx(tx *sql.Tx, path string) (overviewMetricContribution, bool, error) {
-	var contribution overviewMetricContribution
-	var bucketStart any
-	err := tx.QueryRow(s.db.rebind(`
-		SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
-		FROM overview_metric_bucket_members
-		WHERE path = ?
-	`), path).Scan(
-		&contribution.Path,
-		&bucketStart,
-		&contribution.BucketSizeSeconds,
-		&contribution.RequestCount,
-		&contribution.SuccessRequest,
-		&contribution.FailedRequest,
-		&contribution.TotalTokens,
-		&contribution.TTFTSum,
-		&contribution.TTFTCount,
-		&contribution.DurationSum,
-		&contribution.DurationCount,
-		&contribution.StreamCount,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return overviewMetricContribution{}, false, nil
-	}
-	if err != nil {
-		return overviewMetricContribution{}, false, err
-	}
-	parsed, err := timeParseValue(bucketStart)
-	if err != nil {
-		return overviewMetricContribution{}, false, err
-	}
-	contribution.BucketStart = parsed.UTC()
-	return contribution, true, nil
-}
-
-func (s *Store) insertOverviewMetricContributionTx(tx *sql.Tx, contribution overviewMetricContribution) error {
-	now := time.Now().UTC().Format(timeLayout)
-	if _, err := s.execTx(tx, `
-		INSERT INTO overview_metric_bucket_members (
-			path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, contribution.Path,
-		contribution.BucketStart.UTC().Format(timeLayout),
-		contribution.BucketSizeSeconds,
-		contribution.RequestCount,
-		contribution.SuccessRequest,
-		contribution.FailedRequest,
-		contribution.TotalTokens,
-		contribution.TTFTSum,
-		contribution.TTFTCount,
-		contribution.DurationSum,
-		contribution.DurationCount,
-		contribution.StreamCount,
-		now,
-	); err != nil {
-		return err
-	}
-	return s.addOverviewMetricBucketTx(tx, contribution)
-}
-
-func (s *Store) addOverviewMetricBucketTx(tx *sql.Tx, contribution overviewMetricContribution) error {
-	now := time.Now().UTC().Format(timeLayout)
-	_, err := s.execTx(tx, `
-		INSERT INTO overview_metric_buckets (
-			bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
-			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(bucket_start, bucket_size_seconds) DO UPDATE SET
-			request_count = overview_metric_buckets.request_count + excluded.request_count,
-			success_request = overview_metric_buckets.success_request + excluded.success_request,
-			failed_request = overview_metric_buckets.failed_request + excluded.failed_request,
-			total_tokens = overview_metric_buckets.total_tokens + excluded.total_tokens,
-			ttft_sum = overview_metric_buckets.ttft_sum + excluded.ttft_sum,
-			ttft_count = overview_metric_buckets.ttft_count + excluded.ttft_count,
-			duration_sum = overview_metric_buckets.duration_sum + excluded.duration_sum,
-			duration_count = overview_metric_buckets.duration_count + excluded.duration_count,
-			stream_count = overview_metric_buckets.stream_count + excluded.stream_count,
-			updated_at = excluded.updated_at
-	`, contribution.BucketStart.UTC().Format(timeLayout),
-		contribution.BucketSizeSeconds,
-		contribution.RequestCount,
-		contribution.SuccessRequest,
-		contribution.FailedRequest,
-		contribution.TotalTokens,
-		contribution.TTFTSum,
-		contribution.TTFTCount,
-		contribution.DurationSum,
-		contribution.DurationCount,
-		contribution.StreamCount,
-		now,
-	)
-	return err
-}
 
 func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 	if opts.Limit <= 0 {
@@ -635,7 +211,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
-	bucketStart := referenceTime.UTC().Truncate(opts.BucketSize).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
+	bucketStart := bucketSlot(referenceTime, opts.BucketSize, opts.Location).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
 	queryArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
 	rows, err := s.db.Query(`
 		SELECT recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms
@@ -684,7 +260,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		if recorded.IsZero() {
 			return nil, errors.New("overview timeline: log row has an empty recorded_at")
 		}
-		bucketTime := recorded.UTC().Truncate(opts.BucketSize)
+		bucketTime := bucketSlot(recorded, opts.BucketSize, opts.Location)
 		bucket, ok := buckets[bucketTime]
 		if !ok {
 			continue
@@ -839,23 +415,48 @@ func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy stri
 	return entries, rows.Err()
 }
 
+// overviewHighRiskFindings returns the newest critical findings followed by the
+// newest high ones, up to limit in total.
+//
+// It is two single-severity lookups rather than one `WHERE severity IN
+// ('critical', 'high') ORDER BY CASE severity ...` query. The CASE expression
+// could not drive an index, so the combined form read the whole of
+// trace_findings (341,161 rows, 272 MB) and sorted it for every Overview render.
+// Each half here is a plain `severity = ?` filter ordered by the same
+// (created_at DESC, id DESC) pair that `tracefinding_severity_created_at_id`
+// indexes, so each stops after the rows it actually returns.
 func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
-	rows, err := s.db.Query(`
+	if limit <= 0 {
+		return nil, nil
+	}
+	const why = `
 		SELECT finding_id, trace_id, category, severity, confidence, title, description,
 			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
 		FROM trace_findings
-		WHERE severity IN ('critical', 'high')
-		ORDER BY
-			CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
-			created_at DESC,
-			id DESC
-		LIMIT ?
-	`, limit)
-	if err != nil {
-		return nil, err
+		WHERE severity = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`
+	out := make([]observe.Finding, 0, limit)
+	for _, severity := range []string{"critical", "high"} {
+		remaining := limit - len(out)
+		if remaining <= 0 {
+			break
+		}
+		rows, err := s.db.Query(why, severity, remaining)
+		if err != nil {
+			return nil, err
+		}
+		findings, err := scanFindings(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		out = append(out, findings...)
 	}
-	defer rows.Close()
-	return scanFindings(rows)
+	return out, nil
 }
 
 func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit int) ([]RoutingFailureRecord, error) {
@@ -926,8 +527,8 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 			(SELECT COUNT(*) FROM logs l WHERE NOT EXISTS (
 				SELECT 1 FROM trace_observations o WHERE o.trace_id = l.trace_id
 			)),
-			(SELECT COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0) FROM parse_jobs),
-			(SELECT COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) FROM parse_jobs)
+			(SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'),
+			(SELECT COUNT(*) FROM parse_jobs WHERE status = 'running')
 	`).Scan(
 		&summary.TotalObservations,
 		&summary.Parsed,

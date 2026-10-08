@@ -35,6 +35,13 @@ type Config struct {
 
 	Monitor struct {
 		Port string `yaml:"port"`
+		// Timezone names the IANA zone the Monitor's day-based windows
+		// ("today") and bucket boundaries are computed in. Recorded timestamps
+		// stay UTC; this only moves the window edges and the bucket edges, so a
+		// "today" window matches the operator's calendar day. An empty value
+		// means Asia/Shanghai (see Config.MonitorLocation), which is the
+		// deployment's operating zone rather than the container's UTC.
+		Timezone string `yaml:"timezone"`
 	} `yaml:"monitor"`
 
 	MCP struct {
@@ -54,10 +61,28 @@ type Config struct {
 		MaxIdleConns          int    `yaml:"max_idle_conns"`
 		AutoMigrate           *bool  `yaml:"auto_migrate"`
 		UseSessionSummaryRead *bool  `yaml:"use_session_summary_read"`
+		// ReadMaxOpenConns bounds the separate read-only pool the Monitor and
+		// the MCP surface use. Recording (the proxy finaliser, the parse worker
+		// and reanalysis) keeps MaxOpenConns. A dedicated read pool stops a slow
+		// dashboard query from occupying the connections the write path needs;
+		// zero means no separate pool, so every caller shares MaxOpenConns.
+		ReadMaxOpenConns int `yaml:"read_max_open_conns"`
+		// ReadMaxIdleConns sizes the idle half of that pool. Zero means "as many
+		// as ReadMaxOpenConns".
+		ReadMaxIdleConns int `yaml:"read_max_idle_conns"`
+		// ReadStatementTimeout bounds one Monitor/MCP query. A read that exceeds
+		// it is cancelled instead of holding a connection and a disk queue slot.
+		// Zero disables the bound.
+		ReadStatementTimeout time.Duration `yaml:"read_statement_timeout"`
 	} `yaml:"database"`
 
 	Trace struct {
 		OutputDir string `yaml:"output_dir"`
+		// SyncInterval is how often the trace index is reconciled against the
+		// cassette tree. The startup sweep is what recovers recordings whose
+		// finalisation was lost, so this only bounds how long an out-of-band
+		// cassette change stays invisible. Zero means DefaultSyncInterval.
+		SyncInterval time.Duration `yaml:"sync_interval"`
 	} `yaml:"trace"`
 
 	Upstream  UpstreamConfig         `yaml:"upstream"`
@@ -80,6 +105,14 @@ type Config struct {
 		// it to false to record the original values, which puts live credentials in
 		// the cassette.
 		MaskKey bool `yaml:"mask_key"`
+		// PprofEnabled mounts net/http/pprof on the management mux. It is off by
+		// default because a profile endpoint is an unauthenticated-cost CPU sink
+		// and exposes process internals; turn it on while diagnosing.
+		PprofEnabled bool `yaml:"pprof_enabled"`
+		// SlowQueryThreshold records every application query slower than this
+		// into a bounded in-memory ring the system page reads. Zero disables the
+		// recording entirely, which is the default.
+		SlowQueryThreshold time.Duration `yaml:"slow_query_threshold"`
 	} `yaml:"debug"`
 
 	// 新增 Chaos 配置
@@ -627,6 +660,13 @@ func applyEnvOverrides(cfg *Config) {
 	envInt(&cfg.Database.MaxIdleConns, "TRAJECTA_DATABASE_MAX_IDLE_CONNS")
 	envBoolPtr(&cfg.Database.AutoMigrate, "TRAJECTA_DATABASE_AUTO_MIGRATE")
 	envBoolPtr(&cfg.Database.UseSessionSummaryRead, "TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ")
+	envInt(&cfg.Database.ReadMaxOpenConns, "TRAJECTA_DATABASE_READ_MAX_OPEN_CONNS")
+	envInt(&cfg.Database.ReadMaxIdleConns, "TRAJECTA_DATABASE_READ_MAX_IDLE_CONNS")
+	envDuration(&cfg.Database.ReadStatementTimeout, "TRAJECTA_DATABASE_READ_STATEMENT_TIMEOUT")
+	envDuration(&cfg.Trace.SyncInterval, "TRAJECTA_TRACE_SYNC_INTERVAL")
+	envString(&cfg.Monitor.Timezone, "TRAJECTA_MONITOR_TIMEZONE")
+	envBool(&cfg.Debug.PprofEnabled, "TRAJECTA_DEBUG_PPROF_ENABLED")
+	envDuration(&cfg.Debug.SlowQueryThreshold, "TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD")
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROVIDER_PRESET", func(u *UpstreamConfig, v string) { u.ProviderPreset = v })
@@ -1225,6 +1265,83 @@ func (c Config) DatabaseMaxIdleConns() int {
 		return c.Database.MaxIdleConns
 	}
 	return 4
+}
+
+// DatabaseReadMaxOpenConns bounds the read-only pool. Zero keeps every caller
+// on the write pool, which is the historical single-pool behaviour.
+func (c Config) DatabaseReadMaxOpenConns() int {
+	if c.Database.ReadMaxOpenConns > 0 {
+		return c.Database.ReadMaxOpenConns
+	}
+	return 0
+}
+
+// DatabaseReadMaxIdleConns sizes the idle half of the read-only pool. It
+// defaults to the pool's own maximum, because an idle connection that has to be
+// re-established costs a full Postgres handshake, and read traffic here is
+// bursty rather than steady.
+func (c Config) DatabaseReadMaxIdleConns() int {
+	if c.Database.ReadMaxIdleConns > 0 {
+		return c.Database.ReadMaxIdleConns
+	}
+	return c.DatabaseReadMaxOpenConns()
+}
+
+// DatabaseReadStatementTimeout bounds one read-path query. Zero disables it.
+func (c Config) DatabaseReadStatementTimeout() time.Duration {
+	if c.Database.ReadStatementTimeout > 0 {
+		return c.Database.ReadStatementTimeout
+	}
+	return 0
+}
+
+// DefaultSyncInterval is how long the trace index may stay behind the cassette
+// tree before the periodic reconcile runs. The startup sweep recovers lost
+// finalisations, so the periodic pass only bounds out-of-band cassette changes.
+const DefaultSyncInterval = 30 * time.Minute
+
+// TraceSyncInterval returns the configured index reconcile interval.
+func (c Config) TraceSyncInterval() time.Duration {
+	if c.Trace.SyncInterval > 0 {
+		return c.Trace.SyncInterval
+	}
+	return DefaultSyncInterval
+}
+
+// DefaultMonitorTimezone is the zone the deployment operates in. The database
+// stores UTC, but "today" on the Monitor has to match the operator's calendar
+// day rather than the container's, which is UTC.
+const DefaultMonitorTimezone = "Asia/Shanghai"
+
+// MonitorLocation resolves the configured Monitor timezone. An unset or
+// unparseable zone falls back to the default rather than to UTC, because a
+// silent UTC fallback is exactly the bug this setting exists to fix.
+func (c Config) MonitorLocation() *time.Location {
+	name := strings.TrimSpace(c.Monitor.Timezone)
+	if name == "" {
+		name = DefaultMonitorTimezone
+	}
+	if loc, err := time.LoadLocation(name); err == nil {
+		return loc
+	}
+	if loc, err := time.LoadLocation(DefaultMonitorTimezone); err == nil {
+		return loc
+	}
+	return time.UTC
+}
+
+// DebugPprofEnabled reports whether the pprof endpoints are mounted.
+func (c Config) DebugPprofEnabled() bool {
+	return c.Debug.PprofEnabled
+}
+
+// DebugSlowQueryThreshold returns the slow-query recording threshold. Zero
+// disables recording, which is the default.
+func (c Config) DebugSlowQueryThreshold() time.Duration {
+	if c.Debug.SlowQueryThreshold > 0 {
+		return c.Debug.SlowQueryThreshold
+	}
+	return 0
 }
 
 func (c Config) ProviderProbeStartupFillEnabled() bool {

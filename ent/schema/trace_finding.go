@@ -40,9 +40,12 @@ func (TraceFinding) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("trace_id", "finding_id").Unique(),
 		index.Fields("trace_id", "severity", "category"),
-		// overviewHighRiskFindings filters `WHERE severity IN ('critical',
-		// 'high')` across all traces, and the index above only helps once the
-		// trace id is known.
-		index.Fields("severity", "created_at"),
+		// overviewHighRiskFindings looks for the newest `critical` and `high`
+		// findings across all traces, and the index above only helps once the trace
+		// id is known. The trailing `id` makes the key stable when several findings
+		// share a timestamp, which is what the per-severity `LIMIT` needs.
+		index.Fields("severity", "created_at", "id"),
+		// Newest-first listing across every trace.
+		index.Fields("created_at", "id"),
 	}
 }
