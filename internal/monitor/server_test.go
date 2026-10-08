@@ -3866,6 +3866,76 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	}
 }
 
+// TestRoutingSummaryCountsTracesNotBuckets pins the difference between the
+// number of traces a routing fact describes and the number of distinct
+// routing-fact combinations that carry it.
+//
+// The aggregate hands the page one row per distinct combination, each with the
+// number of traces behind it, so folding those rows has to add the row's count
+// rather than one. Counting the rows instead reads correctly in every fixture
+// that has one trace per combination - which is what
+// TestRoutingSummaryAPIHandlerAggregatesPreludeEvents uses, and why it stayed
+// green while a real deployment reported 245,906 eventful traces as nine
+// upstream labels of one trace each.
+func TestRoutingSummaryCountsTracesNotBuckets(t *testing.T) {
+	outputDir := t.TempDir()
+	reqBody := `{"input":"hello"}`
+	resBody := `{"output_text":"done"}`
+	// Three traces whose routing facts are identical, so they collapse into one
+	// bucket with a count of three.
+	events := []recordfile.RecordEvent{
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 9, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"upstream_id": "openai-primary", "route_target_id": "openai-primary:cred-a",
+			"channel_id": "openai-primary", "credential_id": "cred-a",
+		}},
+	}
+	for _, name := range []string{"same-1.http", "same-2.http", "same-3.http"} {
+		writeRoutingSummaryTrace(t, outputDir, name, reqBody, resBody, events)
+	}
+	// A second combination, written once, so the two are distinguishable.
+	writeRoutingSummaryTrace(t, outputDir, "other.http", reqBody, resBody, []recordfile.RecordEvent{
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 9, 1, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"upstream_id": "openrouter-fallback", "route_target_id": "openrouter-fallback:default",
+			"channel_id": "openrouter-fallback", "credential_id": "default",
+		}},
+	})
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/routing/summary?window=all", nil)
+	rr := httptest.NewRecorder()
+	routingSummaryAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload routingSummaryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.TotalTraces != 4 || payload.EventfulTraces != 4 {
+		t.Fatalf("summary counters = %+v, want 4 total and 4 eventful", payload)
+	}
+	// The label counts have to sum to the eventful traces; a bucket count would
+	// make them sum to the number of distinct combinations instead.
+	assertCountItem(t, payload.SelectedUpstreams, "openai-primary", 3)
+	assertCountItem(t, payload.SelectedUpstreams, "openrouter-fallback", 1)
+	assertCountItem(t, payload.SelectedRouteTargets, "openai-primary:cred-a", 3)
+	assertCountItem(t, payload.SelectedChannels, "openai-primary", 3)
+	assertCountItem(t, payload.SelectedCredentials, "cred-a", 3)
+	sum := 0
+	for _, item := range payload.SelectedUpstreams {
+		sum += item.Count
+	}
+	if sum != 4 {
+		t.Fatalf("selected upstream counts sum to %d, want the 4 eventful traces: %+v", sum, payload.SelectedUpstreams)
+	}
+}
+
 func TestRoutingSummaryAPIHandlerRejectsWriteMethods(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 1.1.0, and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The release dates below are the dates of the tagged commits; the earlier release history of this project is also visible in the repository's git tags.
 
+## [3.0.1] - 2026-10-08
+
+### Fixed
+- `GET /api/routing/summary` reports the number of traces behind each label instead of the number of distinct routing-fact combinations that carry it. 3.0.0 replaced the per-trace cassette walk with one `GROUP BY` over `logs`, which hands the page one row per distinct combination together with the number of traces behind it; folding those rows added one per row rather than the row's count, so `selected_upstreams`, `selected_route_targets`, `selected_channels`, `selected_credentials`, `sticky_statuses` and `failure_reasons` all read as small numbers. The reference deployment with 245,906 eventful traces reported nine upstream labels of one trace each, and every per-label total was wrong in the same direction. `sticky_breaks.total` was already correct, because that path used the bucket's count and only the label maps did not. The helper is now `addStringCount(counts, value, n)` with the amount explicit, so the call site cannot silently mean "one". Gate: `TestRoutingSummaryCountsTracesNotBuckets` writes three traces with identical routing facts and asserts the label reads 3 and that the labels sum to the eventful traces; injection - restoring `counts[value]++` fails it with `count for "openai-primary" = 1, want 3`. The pre-existing `TestRoutingSummaryAPIHandlerAggregatesPreludeEvents` could not catch this: its fixture has exactly one trace per distinct combination, where a bucket count and a trace count are the same number.
+
 ## [3.0.0] - 2026-10-08
 
 ### Added
@@ -647,6 +652,7 @@ READMEs were rewritten as project landing pages.
 - The project was named llm-tracelab.
 
 [3.0.0]: https://github.com/kingfs/Trajecta/compare/v2.2.0...v3.0.0
+[3.0.1]: https://github.com/kingfs/Trajecta/compare/v3.0.0...v3.0.1
 [2.2.0]: https://github.com/kingfs/Trajecta/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/kingfs/Trajecta/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/kingfs/Trajecta/compare/v2.0.1...v2.1.0

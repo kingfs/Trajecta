@@ -418,19 +418,19 @@ func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (
 	stickyBreaks := 0
 	for _, bucket := range aggregate.Buckets {
 		count := int(bucket.TraceCount)
-		incrementStringCount(selectedUpstreams, bucket.SelectedUpstreamID)
-		incrementStringCount(selectedRouteTargets, bucket.RouteTargetID)
-		incrementStringCount(selectedChannels, bucket.ChannelID)
-		incrementStringCount(selectedCredentials, bucket.CredentialID)
-		incrementStringCount(stickyStatuses, bucket.StickyStatus)
-		incrementStringCount(failureReasons, bucket.RoutingFailureReason)
+		addStringCount(selectedUpstreams, bucket.SelectedUpstreamID, count)
+		addStringCount(selectedRouteTargets, bucket.RouteTargetID, count)
+		addStringCount(selectedChannels, bucket.ChannelID, count)
+		addStringCount(selectedCredentials, bucket.CredentialID, count)
+		addStringCount(stickyStatuses, bucket.StickyStatus, count)
+		addStringCount(failureReasons, bucket.RoutingFailureReason, count)
 		if bucket.StickyStatus == "break" {
 			stickyBreaks += count
-			incrementStringCount(stickyPrevious, bucket.StickyPreviousUpstreamID)
-			incrementStringCount(stickyNext, bucket.SelectedUpstreamID)
-			incrementStringCount(stickyNextRouteTargets, bucket.RouteTargetID)
-			incrementStringCount(stickyNextChannels, bucket.ChannelID)
-			incrementStringCount(stickyNextCredentials, bucket.CredentialID)
+			addStringCount(stickyPrevious, bucket.StickyPreviousUpstreamID, count)
+			addStringCount(stickyNext, bucket.SelectedUpstreamID, count)
+			addStringCount(stickyNextRouteTargets, bucket.RouteTargetID, count)
+			addStringCount(stickyNextChannels, bucket.ChannelID, count)
+			addStringCount(stickyNextCredentials, bucket.CredentialID, count)
 		}
 	}
 

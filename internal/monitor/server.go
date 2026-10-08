@@ -2150,12 +2150,17 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 	return payload
 }
 
-func incrementStringCount(counts map[string]int, value string) {
+// addStringCount adds n to the count for value, ignoring a blank value. The
+// amount is explicit because the routing summary folds pre-aggregated buckets
+// rather than individual rows: a bucket already carries the number of traces it
+// stands for, so counting the bucket as one would report the number of distinct
+// routing-fact combinations instead of the number of traces.
+func addStringCount(counts map[string]int, value string, n int) {
 	value = strings.TrimSpace(value)
-	if value == "" {
+	if value == "" || n == 0 {
 		return
 	}
-	counts[value]++
+	counts[value] += n
 }
 
 func countMapToItems(counts map[string]int) []sessionCountItem {
