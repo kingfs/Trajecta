@@ -98,7 +98,6 @@ func TestNewInitializesAnalyticsIndexes(t *testing.T) {
 		"analysisjob_created_at_id":                 {"created_at", "id"},
 		"tracefinding_created_at_id":                {"created_at", "id"},
 		"tracefinding_severity_created_at_id":       {"severity", "created_at", "id"},
-		"tracelog_recorded_at_sticky":               {"recorded_at", "sticky_status"},
 	}
 	for name, want := range expected {
 		t.Run(name, func(t *testing.T) {

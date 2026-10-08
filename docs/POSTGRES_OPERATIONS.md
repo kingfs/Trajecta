@@ -616,7 +616,7 @@ ORDER BY idx_scan, indexrelname;
 后续形状变更由两条迁移完成，它们同样由 `db migrate up` 以普通 `CREATE INDEX` / `DROP INDEX` 执行，想避免写阻塞就先把 `CREATE INDEX` 手工换成 `CONCURRENTLY`：
 
 - `20261009090000_add_hot_path_indexes`：新增 `tracefinding_created_at_id`（`trace_findings(created_at DESC, id DESC)`，findings 列表默认排序）与 `analysisjob_created_at_id`（`analysis_jobs(created_at DESC, id DESC)`，analysis job 列表默认排序）；新增 `tracefinding_severity_created_at_id`（`(severity, created_at DESC, id DESC)`）并 `DROP` 掉 `tracefinding_severity_created_at`；`DROP` 掉从未被扫描的 `tracelog_request_audit_id_recorded_at` 与 `tracelog_exchange_kind_recorded_at`（各约 15 MB，`logs` 是最热写入路径，无人读取的索引就是纯写入放大）。down 迁移把四者反转。
-- `20261008120000_add_log_routing_detail`：给 `logs` 新增 `route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id` 五列（`NOT NULL DEFAULT ''`）并建 `tracelog_recorded_at_sticky`（`logs(recorded_at, sticky_status)`），让路由 summary 从逐 cassette 读 prelude 变成对 `logs` 的一次 `GROUP BY`。
+- `20261008120000_add_log_routing_detail`：给 `logs` 新增 `route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id` 五列（`NOT NULL DEFAULT ''`），让路由 summary 从逐 cassette 读 prelude 变成对 `logs` 的一次 `GROUP BY`。它**不**建新索引：summary 唯一的谓词是时间窗口，已有的 `tracelog_recorded_at`（`logs(recorded_at)`）已经用 bitmap index scan 覆盖它，而 `sticky_status` 在代码里从来不是谓词，所以 `(recorded_at, sticky_status)` 只会是更宽、永远不会被选中的死索引——在这张全进程最热的写入表上，无人读的索引就是纯粹的写放大。
 
 ## 并发索引变更
 

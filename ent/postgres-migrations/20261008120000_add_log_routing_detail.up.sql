@@ -13,6 +13,13 @@ ALTER TABLE "logs" ADD COLUMN IF NOT EXISTS "credential_id" character varying NO
 ALTER TABLE "logs" ADD COLUMN IF NOT EXISTS "sticky_status" character varying NOT NULL DEFAULT '';
 ALTER TABLE "logs" ADD COLUMN IF NOT EXISTS "sticky_previous_upstream_id" character varying NOT NULL DEFAULT '';
 
--- Every routing summary groups by the window first, sometimes narrowed to one
--- model, so both shapes are covered.
-CREATE INDEX IF NOT EXISTS "tracelog_recorded_at_sticky" ON "logs" ("recorded_at", "sticky_status");
+-- No index is added for these columns. The summary's only predicate is the
+-- window, and "tracelog_recorded_at" on ("recorded_at") already serves it with a
+-- bitmap index scan; the summary's plan was checked against the live database and
+-- picks that index. A second index on ("recorded_at", "sticky_status") is strictly
+-- wider, so the planner can never prefer it, and "sticky_status" is not a
+-- predicate anywhere in the codebase - the one sticky-oriented reader, the MCP
+-- query_sticky_routing tool, parses the cassette prelude and filters in Go. On
+-- "logs", the hottest write path in the process, an index nobody reads is pure
+-- write amplification: this same release drops three indexes for having
+-- idx_scan = 0, two of them on this table.

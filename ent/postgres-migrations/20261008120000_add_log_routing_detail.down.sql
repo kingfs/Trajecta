@@ -1,4 +1,3 @@
-DROP INDEX IF EXISTS "tracelog_recorded_at_sticky";
 ALTER TABLE "logs" DROP COLUMN IF EXISTS "sticky_previous_upstream_id";
 ALTER TABLE "logs" DROP COLUMN IF EXISTS "sticky_status";
 ALTER TABLE "logs" DROP COLUMN IF EXISTS "credential_id";
