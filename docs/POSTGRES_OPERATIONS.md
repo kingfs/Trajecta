@@ -709,7 +709,7 @@ Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refres
 | --- | --- | --- |
 | `common.sh` | 共享库：配置解析、`psql`/CLI/API 包装、通过/失败计数器。只被 source，单独执行会报错退出 | — |
 | `evidence.sh` | **只读**证据报告：驱动与配置、迁移版本、SQLite 归档、索引健康、路径前缀与文件存在性、派生表孤儿、Monitor API、cassette magic 抽样。永不判定失败，适合贴进迁移记录或事故说明 | 迁移后、例行巡检 |
-| `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`semantic_nodes` 反连接仍为 `Merge Anti Join`、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
+| `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`parse_jobs` 去重语句仍计划为反连接（写成 `NOT IN (子查询)` 时 PostgreSQL 会保留 `SubPlan`，分组 id 超出 hash 预算后逐行重扫）、`semantic_nodes` 反连接仍为 `Merge Anti Join`、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
 | `reconcile-apply.sh` | 跑 `upgrade db --reconcile-derived-trace-ids`（默认干跑，`--apply` 才写；可加 `--prune-superseded-index-rows`），完整日志落到 `backups/` | 派生 trace id 需要修复时 |
 | `vacuum-after-repair.sh` | 修复后的统计刷新与死元组回收：中小编制表 `VACUUM (ANALYZE)`，大表默认只 `ANALYZE` 并报出 dead tuples | 修复结束后紧接着 |
 | `optimize-indexes.sh` | 建热查询部分索引（`server db migrate optimize-indexes`，`CONCURRENTLY` 且幂等）并用 `EXPLAIN (ANALYZE)` 复测失败列表与慢请求列表 | 首次建索引、索引变更后 |

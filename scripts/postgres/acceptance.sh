@@ -13,9 +13,12 @@
 #     one is reported with its size
 #   * schema_migrations is applied and not dirty, and no index is invalid or
 #     not ready
-#   * the parse_jobs trace_id probe uses its index, and the semantic_nodes
-#     anti-join still plans as a Merge Anti Join (the column statistics override
-#     from migration 20260929100000 is what keeps it there)
+#   * the parse_jobs trace_id probe uses its index, the dedup statement from
+#     migration 20261006000000 still plans as an anti join (written as
+#     `NOT IN (subquery)` PostgreSQL keeps a SubPlan and rescans the grouped ids
+#     once per row as soon as they stop fitting the hash budget), and the
+#     semantic_nodes anti-join still plans as a Merge Anti Join (the column
+#     statistics override from migration 20260929100000 is what keeps it there)
 #   * a reconcile dry run reports no superseded row and no pending prune
 #   * the monitor API logs in, lists traces and serves one detail document
 #
@@ -120,13 +123,27 @@ check_zero "invalid indexes" "$(psql_scalar "SELECT count(*) FROM pg_index WHERE
 check_zero "not-ready indexes" "$(psql_scalar "SELECT count(*) FROM pg_index WHERE NOT indisready")"
 note "logs indexes = $(psql_scalar "SELECT count(*) FROM pg_indexes WHERE tablename = 'logs'")"
 
-section "5) parse_jobs trace_id probe"
+section "5) parse_jobs trace_id probe and dedup anti-join"
 if table_exists parse_jobs; then
   PLAN=$(psql_lines "EXPLAIN (COSTS OFF) SELECT 1 FROM parse_jobs WHERE trace_id = 'probe'" | tr '\n' ' ')
   case "$PLAN" in
     *parsejob_trace_id_status*) ok "probe uses parsejob_trace_id_status" ;;
     *"Seq Scan"*) warn "probe still seq scans (expected for a tiny table; the index matters with more rows): $PLAN" ;;
     *) note "probe plan: $PLAN" ;;
+  esac
+  # The statement from 20261006000000_unique_parse_jobs_trace_id.up.sql. Written
+  # as `id NOT IN (SELECT MAX(id) ... GROUP BY trace_id)` PostgreSQL cannot turn
+  # it into an anti join, so it keeps a SubPlan: a hashed one while the grouped
+  # ids fit the hash budget, a Materialize that is rescanned for every row once
+  # they do not. That is what held a deployment's startup migration for over
+  # half an hour at a full core with nothing logged. EXPLAIN without ANALYZE does
+  # not execute the DELETE.
+  DEDUP_SQL='DELETE FROM "parse_jobs" AS p WHERE NOT EXISTS (SELECT 1 FROM (SELECT MAX("id") AS "keep_id" FROM "parse_jobs" GROUP BY "trace_id") AS "kept" WHERE "kept"."keep_id" = p."id")'
+  DEDUP_PLAN=$(psql_lines "EXPLAIN (COSTS OFF) $DEDUP_SQL" | tr '\n' ' ')
+  case "$DEDUP_PLAN" in
+    *SubPlan*) fail "the parse_jobs dedup statement keeps a per-row SubPlan (a NOT IN subquery); it is quadratic once the grouped ids exceed the hash budget: $DEDUP_PLAN" ;;
+    *"Anti Join"*) ok "dedup statement plans as an anti join" ;;
+    *) note "dedup statement plan: $DEDUP_PLAN" ;;
   esac
 else
   warn "parse_jobs absent in this schema, skipped"

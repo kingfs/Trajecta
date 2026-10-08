@@ -232,18 +232,23 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	// EnqueueParseJob queued (or creates it when a trace was parsed without
 	// one). Inserting a second row here made every parsed trace appear twice in
 	// parse_jobs and doubled the queue table with rows no worker ever claimed.
-	if _, err := s.execTx(tx, `
-		UPDATE parse_jobs
-		SET status = ?, attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END, last_error = '', updated_at = ?
-		WHERE trace_id = ?
-	`, string(obs.Status), now, obs.TraceID); err != nil {
-		return err
-	}
+	//
+	// This is one upsert rather than the UPDATE plus `INSERT ... WHERE NOT
+	// EXISTS` it replaced. That pair was a read-then-write inside a transaction:
+	// under READ COMMITTED two writers could both find no row and both insert,
+	// which the unique index turns from a silent duplicate into a hard unique
+	// violation. It also costs one statement instead of two on the path every
+	// parsed trace takes. `attempts` keeps the same shape as before - 1 for a row
+	// this statement creates, and 0 promoted to 1 for a row it finds.
 	if _, err := s.execTx(tx, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
-		SELECT ?, ?, 1, ?, ?
-		WHERE NOT EXISTS (SELECT 1 FROM parse_jobs WHERE trace_id = ?)
-	`, obs.TraceID, string(obs.Status), now, now, obs.TraceID); err != nil {
+		VALUES (?, ?, 1, ?, ?)
+		ON CONFLICT (trace_id) DO UPDATE
+		SET status = excluded.status,
+			attempts = CASE WHEN parse_jobs.attempts = 0 THEN 1 ELSE parse_jobs.attempts END,
+			last_error = '',
+			updated_at = excluded.updated_at
+	`, obs.TraceID, string(obs.Status), now, now); err != nil {
 		return err
 	}
 	return tx.Commit()

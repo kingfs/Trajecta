@@ -10,3 +10,11 @@ trace_index.sqlite3
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
+# Local scratch: .dsh-cache is ~1.9 GB of build caches and captured logs and
+# .dsh-bin holds prebuilt binaries and helper scripts. Both are gitignored and
+# neither is an input to the image, but `COPY . .` in the builder stage shipped
+# them into the build context on every build.
+.dsh-cache
+.dsh-bin
+docker-data
+web/monitor-ui/node_modules

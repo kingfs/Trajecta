@@ -78,6 +78,12 @@ func runServeWithConfig(configPath string) int {
 	}
 
 	if cfg.DatabaseAutoMigrate() {
+		// Announce it before blocking. Migrations run ahead of the first
+		// "Starting LLM Proxy..." line, so a migration that takes minutes - or
+		// that never returns, which is what a pathological plan looks like from
+		// the outside - otherwise presents as a process that started cleanly,
+		// printed nothing, and sat at 0% CPU while the database burned a core.
+		slog.Info("Applying application database migrations...", "driver", cfg.DatabaseDriver())
 		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
 			slog.Error("Failed to migrate application database", "error", err)
 			return 1

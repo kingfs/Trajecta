@@ -353,6 +353,18 @@ func migratePostgres(dsn string, run func(*gomigrate.Migrate) error) error {
 	if errors.Is(err, gomigrate.ErrNoChange) {
 		return nil
 	}
+	var dirty gomigrate.ErrDirty
+	if errors.As(err, &dirty) {
+		// The version row is written with dirty=true before the migration body
+		// runs and committed separately from it, so an interrupted or failed
+		// migration leaves dirty=true behind even though the body's own
+		// transaction rolled back. golang-migrate then refuses every later
+		// Up/Steps until the flag is cleared, and this package deliberately
+		// exposes no Force - so an operator has to reconcile the schema by hand.
+		// Say that, rather than only repeating the library's "Fix and force
+		// version." for a force this binary cannot perform.
+		return fmt.Errorf("%w; schema_migrations is stopped at version %d with dirty=true, so no migration runs until it is repaired: inspect it with `db migrate status --check-db`, finish or undo that migration's work by hand, then clear schema_migrations.dirty", err, dirty.Version)
+	}
 	return err
 }
 
