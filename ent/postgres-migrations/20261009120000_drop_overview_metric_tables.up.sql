@@ -1,0 +1,25 @@
+-- Drop the two dead review-aggregate tables.
+--
+-- 20260703110000_add_overview_metric_buckets introduced them as a write-through
+-- rollup for the Overview page: `overview_metric_buckets` held one row per
+-- (bucket_start, bucket_size_seconds) and `overview_metric_bucket_members` one row
+-- per cassette path, so that a render could read pre-aggregated buckets instead of
+-- scanning `logs`.
+--
+-- That design was removed before this migration: the Overview endpoint queries
+-- `logs` directly, the recording path stopped writing members, and
+-- `server db summary rebuild overview` - the only command that rebuilt them - no
+-- longer exists. Nothing has read or written either table since, and their content
+-- is derivable from `logs`, so they hold no data an operator could not recompute.
+-- On the reference deployment they occupy 120 MB + 8 MB for a page that does not
+-- use them.
+--
+-- This is not the same call as `semantic_nodes`, which this release also stopped
+-- writing: that table held the parsed Observation IR of every recorded trace, and
+-- dropping it discards work that is expensive to redo. These two are a cache.
+--
+-- Reversible: the down migration recreates both tables empty and identical to the
+-- original definition, so a binary rolled back to a release that still writes them
+-- finds the schema it expects.
+DROP TABLE IF EXISTS "overview_metric_bucket_members";
+DROP TABLE IF EXISTS "overview_metric_buckets";

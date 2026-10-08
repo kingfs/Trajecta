@@ -35,6 +35,22 @@ database:
   # into errors. This still kills a runaway read and returns the connection.
   read_statement_timeout: 0s
   auto_migrate: true
+  # Serve the session list from the derived read model `session_summaries` instead
+  # of grouping the log window on every request. On the reference deployment the
+  # log path costs 506 ms for the COUNT(DISTINCT session_id) plus 106 ms for the
+  # GROUP BY, against 5 ms and 0.4 ms from the summary, a difference of roughly two
+  # orders of magnitude on a page the UI polls.
+  #
+  # The code default stays false, and this file turns it on, because enabling it is
+  # only safe once the summary covers the same sessions the log path does: the
+  # summary is a derived read model filled in the background, so a deployment whose
+  # backfill has not finished would silently show the summarised subset. Verify
+  # parity first - the query in docs/POSTGRES_OPERATIONS.md compares
+  # request_count, first_seen, last_seen, total_tokens, last_model and
+  # failed_request per sampled session - then enable it here or with
+  # TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true. The `model` and `q` filters
+  # always stay on the log path, because a summary row only holds the last model.
+  use_session_summary_read: true
 
 trace:
   output_dir: "./data/traces"

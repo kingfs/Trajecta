@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 1.1.0, and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The release dates below are the dates of the tagged commits; the earlier release history of this project is also visible in the repository's git tags.
 
+## [3.1.0] - 2026-10-08
+
+### Changed
+- The Overview page reads its five top-N distributions (models, providers, endpoints, upstreams, routing failure reasons) from one pass over `logs` on Postgres. Each list was its own `GROUP BY`, so a render scanned the same window five times: on the reference deployment, 251k client-visible rows over a 223 MB heap, at 285-320 ms per list for 1238 ms total, against 599 ms for a single `GROUP BY GROUPING SETS` covering all five. The other drivers keep the per-column loop, because `GROUPING SETS` is Postgres-only. Gate: `TestPostgresOverviewDistributionsMatchPerColumnQueries` seeds six rows with a tie, more values than the limit and an empty value in every dimension, then asserts the grouped pass equals the per-column queries item by item; injection - removing the top-N truncation - fails it with `model grouped pass = [{m1 5} {m2 1} {m3 1}], want [{m1 5} {m2 1}]`.
+- The Overview's distinct-session count is its own statement instead of a column of the wide aggregate. `COUNT(DISTINCT session_id)` inside that aggregate forces a hash over every session id in the window on top of the scan: the pass took 818 ms with it and 311 ms without, while the same count alone costs 85 ms, because `tracelog_session_recent_client_visible_idx` carries `session_id` for exactly the client-visible rows and answers it index-only. Splitting it is ~420 ms cheaper on a 251k-row window.
+- The shipped `config/config.yaml` sets `database.use_session_summary_read: true`, so the session list is served by `session_summaries` rather than by grouping the log window per request. The reference deployment measures 506 ms for `COUNT(DISTINCT session_id)` plus 106 ms for the `GROUP BY` on the log path, against 4.7 ms and 0.4 ms from the summary. The code default stays `false`: the summary is a derived read model filled in the background, so a deployment whose backfill has not finished would silently show the summarised subset. Verify parity first - `docs/POSTGRES_OPERATIONS.md` has the per-session comparison - then enable it here or with `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true`. `model` and `q` filtering always stays on the log path, because a summary row only holds the session's last model.
+
+### Removed
+- Migration `20261009120000_drop_overview_metric_tables` drops `overview_metric_buckets` and `overview_metric_bucket_members`. 3.0.0 stopped writing them and removed `server db summary rebuild overview`, the only command that rebuilt them, and left the physical drop to the operator; this completes that removal. They are a cache of what `logs` already holds - 120 MB + 8 MB on the reference deployment - not stored work like `semantic_nodes`, so the drop discards nothing an operator cannot recompute. The down migration recreates both tables empty and identical to their original definition, including the two indexes and both primary keys, so rolling the binary back to a release that still writes them finds the schema it expects.
+
+### Fixed
+- The image no longer declares `/app/config` as a volume. A `VOLUME` entry makes Docker create an anonymous volume on first run and then reuse it on every `docker compose up --force-recreate`, so the `config.yaml` baked into the image was shadowed by the first container's copy and never updated again. On the reference deployment that silently discarded two settings: the read-only pool (`read_max_open_conns`, whose code default is 0, so every Monitor read shared the proxy's write pool - the isolation 3.0.0's notes describe as enabled by default was not in effect) and `use_session_summary_read`. Rebuilding the image never propagated a config change. `/app/data` stays a volume, because the cassettes are state; operators who want their own config file mount it explicitly, which already overrides the image's copy. Found while verifying this release: the shipped config set `use_session_summary_read: true` and the session list stayed at 0.90 s, because the running container's config file predated the change.
+
 ## [3.0.1] - 2026-10-08
 
 ### Fixed
@@ -653,6 +666,7 @@ READMEs were rewritten as project landing pages.
 
 [3.0.0]: https://github.com/kingfs/Trajecta/compare/v2.2.0...v3.0.0
 [3.0.1]: https://github.com/kingfs/Trajecta/compare/v3.0.0...v3.0.1
+[3.1.0]: https://github.com/kingfs/Trajecta/compare/v3.0.1...v3.1.0
 [2.2.0]: https://github.com/kingfs/Trajecta/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/kingfs/Trajecta/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/kingfs/Trajecta/compare/v2.0.1...v2.1.0

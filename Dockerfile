@@ -51,7 +51,20 @@ COPY --from=builder /out/server /app/bin/server
 COPY --from=builder /out/trajecta /app/bin/trajecta
 COPY config/config.yaml /app/config/config.yaml
 
-VOLUME ["/app/config", "/app/data"]
+# /app/data is a volume: the cassettes are state the container must not carry
+# inside its own layer.
+#
+# /app/config deliberately is not. Declaring it a volume made Docker create an
+# anonymous volume on first run and then *reuse* it on every
+# `docker compose up --force-recreate`, so the copy of config.yaml baked into the
+# image was shadowed by that first container's file forever. On the reference
+# deployment that silently discarded two settings for months: the read-only pool
+# (`read_max_open_conns`, whose code default is 0, so every Monitor read shared
+# the proxy's write pool) and `use_session_summary_read`. Copying a new image
+# never propagated a config change, and nothing reported it. Operators who want
+# their own file mount it explicitly, which already overrides the image's copy:
+#   - ./config/config.yaml:/app/config/config.yaml:ro
+VOLUME ["/app/data"]
 
 EXPOSE 8080 8081
 

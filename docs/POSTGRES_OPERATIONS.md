@@ -590,6 +590,39 @@ ORDER BY idx_scan, indexrelname;
 
 `idx_scan` 统计在 `pg_stat_reset()` 或实例重启后清零，判断前要先确认统计窗口覆盖了完整的流量周期（至少一个工作日加一次周报/月度报表）。
 
+**`idx_scan = 0` 还有第二种成因：这张表根本没有统计信息。** 2026-10-08 核对时，
+`execution_events`（249,925 行、202 MB）的 6 个索引 `idx_scan` 全为 0，包括主键
+`execution_events_pkey`——主键 0 扫描本身就是「这份统计不可信」的信号，因为任何按 id 的
+查找都会用它。实际原因是这张表从未被 ANALYZE 过（`pg_stat_user_tables.n_live_tup = 0`、
+`last_autovacuum IS NULL`，而表里有 25 万行）：没有统计信息时规划器按默认行数估算，可能
+干脆不选索引，于是「0 次扫描」是缺统计的结果，不是「用不上」。`ANALYZE execution_events;`
+（464 ms）之后 `n_live_tup` 变成 249,925，审计视图那条
+`WHERE request_audit_id = ? ORDER BY occurred_at, id LIMIT n` 立刻改走
+`executionevent_request_audit_id_occurred_at` 索引扫描。`response_items`（228,398 行、319 MB）
+同样是 `n_live_tup = 0`，也一并 ANALYZE 了。
+
+所以判定顺序应当是先排除统计缺口，再谈删除：
+
+```sql
+-- 有行但统计缺失的表：先 ANALYZE，之后 idx_scan 才有参考价值
+SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid)) AS size, s.n_live_tup, s.last_analyze, s.last_autovacuum
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+WHERE n.nspname = 'public' AND c.relkind = 'r' AND s.n_live_tup = 0
+ORDER BY pg_total_relation_size(c.oid) DESC;
+```
+
+按这条流程复核后，本次**没有删除任何 `execution_events` 索引**：`request_audit_id`
+与 `response_id` 由 `internal/responses/audit/query.go` 的审计查询在 WHERE 里使用（ANALYZE 后
+规划器也确实选了它们），`event_type` 与 `conversation_id` 同样有生产代码过滤
+（`query.go` 的 `EventTypeEQ("response.compact")` 与 `ConversationIDEQ`），只有
+`executionevent_phase_status_occurred_at`（20 MB）的谓词仅出现在测试里——它占库 1811 MB 的
+1%，不值得为它单独走一次 DROP 迁移，留作后续候选。
+
+代码层面的证据要与实例层面的证据分开看：全仓库 grep 只能证明「代码不再按该列过滤」，
+证明不了「实例上没人查」，反过来 `idx_scan = 0` 也证明不了「用不上」。两边一致才动手。
+
 ## 第二批缺口：`logs(selected_upstream_id)`、审计表与分析表的 `created_at`
 
 按上面同样的方法再把两套 schema 对一遍，又找到五处形状缺口，都进同一条版本化迁移 `20260930130000_add_analytics_indexes`（`ent/schema` 同步声明，SQLite 启动 schema 在 `ensureHotpathIndexes` 里用同样的索引名与列补齐；其中 `tracefinding_severity_created_at` 这个形状后来被 `20261009090000_add_hot_path_indexes` 替换，见本节末尾）：
@@ -973,7 +1006,9 @@ ORDER BY max(recorded_at) DESC
 LIMIT 20;
 ```
 
-对每个抽样 session 比较 `request_count`、`first_seen`、`last_seen`、`total_tokens`、`last_model`、`failed_request`；一致后再让 session list 读 summary。实现侧开关为 `database.use_session_summary_read: true` 或环境变量 `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true`，默认关闭。
+对每个抽样 session 比较 `request_count`、`first_seen`、`last_seen`、`total_tokens`、`last_model`、`failed_request`；一致后再让 session list 读 summary。实现侧开关为 `database.use_session_summary_read: true` 或环境变量 `TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ=true`；**代码默认仍是关闭**，因为 summary 是后台补齐的派生读模型，尚未回填完的部署打开它会把会话列表悄悄缩成已汇总的子集。仓库自带的 `config/config.yaml` 已经显式设为 `true`，它对应的是已完成回填并核对过一致性的部署；其他部署请先跑上面的抽样查询再自行打开。
+
+参考部署实测差距：日志路径 `COUNT(DISTINCT session_id)` 506 ms + `GROUP BY` 105 ms，summary 路径 `COUNT(*)` 4.7 ms + `ORDER BY last_seen DESC LIMIT 50` 0.4 ms。
 
 ## Backfill 与灰度读
 
