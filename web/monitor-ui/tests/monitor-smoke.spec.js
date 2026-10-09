@@ -1300,6 +1300,65 @@ test("dialogs trap focus, close on Escape and restore focus to the trigger", asy
 // is visible to a build, so these assert the two ways it can silently break -
 // a colour syntax the browser rejects, which leaves the property empty, and a
 // theme that is not the one the reader asked for.
+// The light-theme overrides used to be written twice: once for
+// `data-theme="light"` and once inside `@media (prefers-color-scheme: light)`
+// for `data-theme="system"`. Resolving the theme in JavaScript left the second
+// copy unreachable, and folding the two together is the kind of edit that can
+// hand one component another's declaration. This sweeps every route in light
+// mode and asserts that nothing that should be a light surface came out dark:
+// the panels, cards, tables, filters, buttons and tags are all near-white.
+test("no light-mode surface resolves dark on any route", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/providers", "/routing", "/connect", "/system"];
+  // Elements with no intentional dark state. `.ghost-button.active`, `.badge-live`
+  // and the accent fills are deliberately inverted or coloured and are excluded.
+  const SURFACES = [
+    "header",
+    ".panel",
+    ".stat-card",
+    ".trace-table",
+    ".filter-bar",
+    ".ghost-button:not(.active)",
+    ".icon-button",
+    ".inline-tag",
+    ".detail-meta-pill",
+    ".provider-model-card",
+    ".model-catalog-row",
+    ".timeline-card",
+    ".payload-card",
+    ".breakdown-card",
+  ];
+  const offenders = [];
+  for (const route of ROUTES) {
+    await page.goto(route);
+    await expect(page.locator("main, .auth-screen, .app-shell").first()).toBeVisible();
+    const found = await page.evaluate((selectors) => {
+      // Chromium reports a colour declared in OKLCH back as `oklch()`, so the
+      // lightness is read from it directly; anything else is converted.
+      const lightness = (colour) => {
+        const oklch = colour.match(/^oklch\(([\d.]+)/);
+        if (oklch) return Number(oklch[1]);
+        const nums = colour.match(/[\d.]+/g);
+        if (!nums || nums.length < 3) return null;
+        const [r, g, b] = nums.map(Number).map((c) => c / 255);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const out = [];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          const background = getComputedStyle(el).backgroundColor;
+          if (background === "rgba(0, 0, 0, 0)" || background === "transparent") continue;
+          const l = lightness(background);
+          if (l !== null && l < 0.7) out.push(`${selector} -> ${background}`);
+        }
+      }
+      return [...new Set(out)];
+    }, SURFACES);
+    if (found.length) offenders.push(`${route}: ${found.join(", ")}`);
+  }
+  expect(offenders).toEqual([]);
+});
+
 test("each theme resolves to real colours", async ({ page }) => {
   const seen = {};
   for (const scheme of ["dark", "light"]) {

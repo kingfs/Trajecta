@@ -45,7 +45,7 @@
 @source "../index.html";
 
 /*
- * Dark mode is driven by the `data-theme` attribute `lib/theme.js` writes, not
+ * Dark mode is driven by the `data-theme` attribute `lib/theme.ts` writes, not
  * by a `.dark` class or a bare media query, and "system" has to keep following
  * the OS. Both spellings are declared so `dark:` utilities work on any page.
  */

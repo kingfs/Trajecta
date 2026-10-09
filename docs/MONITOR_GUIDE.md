@@ -19,7 +19,7 @@ go run ./cmd/server auth init-user -c config/config.yaml --username admin --pass
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
-左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一套遮罩，按 Esc 或点击遮罩关闭。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染到 `document.body` 并用视口定位，因此内容不再被侧边栏宽度截断。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
+左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一个 Radix Dialog primitive（`@radix-ui/react-dialog`，封装在 `web/monitor-ui/src/components/ui/dialog.tsx`）。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染在 Radix 的 portal 里，因此内容不再被侧边栏宽度截断。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定，以及关闭后把焦点还给触发按钮，都由这个 primitive 提供；焦点还原要求触发按钮与对话框处在同一个 Dialog root 内，所以 `PrimaryNav` 用一层 `Dialog` 同时包住两者，而不是在对话框内部自建 portal。模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `createPortal` 加 `.nav-modal-backdrop`）尚未改用它。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
 ## 个人 API token
 
@@ -43,7 +43,7 @@ Monitor 同时使用两类数据：
 
 ## 页面
 
-左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。下面按导航顺序说明路由与用途。
+左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。下面按导航顺序说明路由与用途。
 
 侧边栏可以折叠成只有图标的窄栏，折叠状态保存在浏览器 localStorage（`trajecta.monitor.sidebar.collapsed`）。折叠后品牌区块整体让位给展开按钮，因此折叠始终可逆；宽度不足 1000px 时布局固定为窄栏，与折叠状态无关，此时展开按钮不显示。
 
@@ -107,47 +107,6 @@ Trajecta 自身的事件收件箱：
 
 支持按状态、级别、来源过滤和搜索 fingerprint / trace / model / 消息，支持单条标记已读、解决、忽略，以及「全部标为已读」。重复事件按 fingerprint 合并。导航上的未读角标由 `GET /api/events/summary` 与 SSE `GET /api/events/stream` 驱动。
 
-### 会话 `/sessions`
-
-按 session 聚合最近 50 个会话，展示健康度、成功率、模型、模型服务商、流式标记与耗时。
-
-- 过滤语义：`provider` 匹配会话使用过的任一 provider；`model` 与搜索框 `q` 匹配会话中**任一**请求（因此一个「先 `gpt-alpha`、后 `claude-beta`」的会话按 `gpt-alpha` 也能查到）；`status` 是**会话级**判断——`success` 表示该会话没有任何失败请求（非 2xx），`failed` / `error` 表示至少有一个，与列表展示的 `success_request` / `failed_request` 计数同源。
-- `database.use_session_summary_read`（`TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）打开后，会话列表改由派生读模型 `session_summaries` 提供；该模型只保存会话的最后一个模型、provider 列表与请求计数，因此无法表达「任一请求命中」的 `model` / `q` 过滤，这两类过滤始终走日志路径。两个读路径对同一过滤条件必须给出相同结果，门禁 `TestSessionFiltersAgreeAcrossReadPaths` 会同时跑两条路径并逐项比对。 代码默认关闭，仓库自带 `config/config.yaml` 已显式打开（参考部署已核对两条读路径一致）；未完成 `session_summaries` 回填的部署应先核对再打开，方法见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)。
-
-session ID 的抽取顺序为：
-
-1. `Session-Id` / `Session_id`
-2. `X-Claude-Code-Session-Id`
-3. `X-Codex-Turn-Metadata` 中的 `session_id`
-4. `X-Codex-Window-Id` 的前缀
-
-适合分析 Codex、Claude Code 等 agent 在一轮任务中多次模型调用的整体行为。
-
-### 手动导出会话轨迹
-
-会话详情页提供两个按钮：`导出轨迹 (ATIF)`（默认，带上限）与 `完整导出 (NDJSON 流)`（完整会话，流式）。两者都从该会话的客户端可见 cassette 重建轨迹并下载文件，不会调用模型、修改 cassette 或自动提交分析任务。
-
-- 格式固定为 **ATIF-v1.8**；默认响应是单个 trajectory 对象的 JSONL（一行，以换行结束），可拼接成多会话数据集。
-- 默认只重建最早的 500 条 trace（`trajectoryTraceCap`），以便默认视图在慢盘上仍有界；响应 `extra` 增加 `trace_count`（会话总 trace 数）、`included_traces`（本次导出条数）、`truncated`（是否被截断）与 `trace_cap`。被截断时页面提示"默认只导出最早的 N / M 条 trace"，并引导使用完整导出。
-- `?full=1` 取消上限，导出完整会话（仍是单对象 JSON）。
-- `?stream=1` 使用 NDJSON 流式导出，每行一个 JSON 对象并逐条 flush，不在服务端累积整个会话：第一行 `type=header`（`schema_version`、`session_id`、`agent`、`trace_count`、`included_traces`、`truncated`、`trace_cap`）；随后每个 trace 一行 `type=trace`（`trace_id`、`steps`、`results`、`warnings`、可选的 `error`），其中 `results` 是晚到、需要回挂到更早步骤的工具结果，带 `step_id`；从未收到结果的工具调用最后以 `type=missing_tool_result` 行报告；最后一行 `type=final`（`final_metrics` 与会话级 `extra`）。`?stream=1&full=1` 流式导出完整会话。服务端每读完一条 cassette 就 flush，请求 context 取消（客户端断开）时立即停止后续读取。
-- 默认（带上限）导出的结果缓存到 `<trace.output_dir>/trajectory-cache/`，键为 `(session_id, last_trace_id, trace_count, limit)`，因此重看同一会话无需重建。会话只会追加 trace，且已写入的索引行不可变，所以只要轨迹会变，键就必然变化：命中即证明是同一条 trace 序列，无需失效逻辑。条目以临时文件加 rename 原子写入，最多保留 512 个条目 / 512 MiB，超出按写入时间淘汰；`?full=1` 与 `?stream=1` 不读写该缓存。容量上限只影响命中率，未命中一律回落到重建。
-- 当前语义重建支持 Codex 使用的 OpenAI Responses generation（`/responses`、`/v1/responses`）及 SSE。其他 endpoint（包括 compact）保留源 trace 引用，并报告 `unsupported_endpoint`；不伪装成已解析的对话。
-- 请求按 `recorded_at` 与 trace ID 排序，输出按 Responses `output_index` 排序。会话归组依据保存在 `extra.session_source`，无法从 HTTP 证明全部事件的因果关系或任务已完成。
-- 相邻请求的历史上下文按有序重叠合并，不全局删除相同文本。`previous_response_id` 请求按增量输入处理。工具结果按调用 ID 回挂到发起调用的步骤。
-- 每个录制响应合并为一个 agent 步骤，而不是每个 SSE 事件一个步骤。多模态内容保留文本与占位引用，不生成外部附件；未知内容报告警告。reasoning summary 放在 `extra.reasoning_summary`，加密内容仅标记已省略，不当作完整可读思维链。
-- 每步携带 `trace_id`、origin 与归一化 item 路径（流式输出先重建）。标准 `metrics` 每个响应记录一次 token 计数，`final_metrics` 汇总；不重复导出逐项 usage attribution、原生 item 或请求配置。内部 model child exchanges 不重复计入这份客户端视角导出；仅历史恢复的内容不推测 usage。
-- `extra.warnings` 报告文件缺失、无法解析、上下文不连续、缺失或孤立工具结果、流式中断等问题，下载完成后页面显示警告数量。`completion=unknown` 不将 HTTP 成功解释为任务成功。
-- 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。默认与 `?full=1` 仍在服务端组装完整响应；极大会话应使用 `?stream=1`。
-
-接口为 `GET /api/sessions/:sessionID/trajectory`，可选参数 `full` 与 `stream`（`1`/`true`/`yes`/`on` 视为真），使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头；默认文件名 `session-<id>.atif.jsonl`，流式为 `session-<id>.atif.ndjson`。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
-
-### 追踪 `/traces`
-
-逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。
-- 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
-- `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
-
 #### 质量 `/audit`
 
 四个标签页：发现项、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
@@ -171,7 +130,7 @@ session ID 的抽取顺序为：
 
 按模型查看时间窗口内的流量：模型覆盖哪些模型服务商，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
 
-### 模型服务商 `/providers`
+#### 模型服务商 `/providers`
 
 管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability。模型级的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 覆盖不在这里编辑，见上面的模型页。
 
@@ -275,6 +234,27 @@ Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `re
 3. Events 页面是否有 parser / analyzer / router / upstream 事件。
 4. 模型与模型服务商页面确认模型启用状态和模型服务商健康。
 5. 只有在派生结果明显不对时才运行 `Refresh analysis`；Token 统计异常时运行 `Repair stats`。
+
+## 前端实现
+
+Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19、`react-router-dom`、Vite 8、TypeScript）。`vite build` 输出到 `internal/monitor/ui/dist`，由 `internal/monitor/server.go` 的 `//go:embed ui/dist/*` 嵌进二进制，再由 `internal/monitor` 用 `http.FileServer` 提供，生产环境不需要额外的 Node 进程。`task ui:test` 依次跑 `bun run typecheck`（`tsc --noEmit`）、`node --test` 单元测试与 Playwright 浏览器测试；只跑类型检查用 `task ui:typecheck`。
+
+样式是 Tailwind CSS v4（`@tailwindcss/vite` 插件）加一份 OKLCH 调色板。`src/styles/tokens.css` 里的颜色全部取自 Radix 的公开色阶——中性色用 slate，六个色相用 blue、green、amber、red、cyan、violet——`tests-unit/tokens.test.js` 读这份 CSS 校验对比度关系，因此在 token 被手工改动或色阶升级后会在测试里失败而不是在眼睛里失败。`tokens.css` 留在 cascade layer 之外：它只声明自定义属性，而它使用的主题属性选择器必须继续压过 `:root` 默认值。其余历史样式表由 `src/styles/tailwind.css` 导入到最低优先级的 `legacy` 层（层序 `legacy < theme < base < components < utilities`），所以迁移期间一个 utility 类总能盖过同名的旧页面规则，不需要考虑特异性或源码顺序。Tailwind 的 preflight 故意不引入：它会重置 `styles.css` 等历史样式表所依赖的元素默认值，引入等于重排每个页面，`base.css` 已经带着 Monitor 实际需要的 reset。
+
+可复用的界面原语在 `src/components/ui/`（`button`、`dialog`、`tabs`、`select`、`dropdown-menu`、`tooltip`、`badge`、`card`、`input`、`switch`、`separator`、`skeleton`），类名合并走 `clsx` 加 `tailwind-merge`。服务端状态走 TanStack Query，客户端实例在 `src/lib/queryClient.ts`，其默认值刻意保持被替换掉的自写 `useJSON` 的行为（`retry: false`、`refetchOnWindowFocus: false`）。
+
+构建产物按需拆包，入口之外只加载用到的部分。当前 `vite build` 输出（3066 个 module）：
+
+- 语言词典是每种语言一个 chunk：`src/locales/<language>.js` 由 `loadMessages` 动态 `import()`，Vite 为每个匹配模块生成一个 chunk。`bootstrapI18n()` 在渲染前取到当前语言，取不到时回退英文而不是白屏。`zh-CN` chunk 55.81 kB（gzip 16.80）、`en` chunk 56.72 kB（gzip 15.29）。
+- 图表库是独立 chunk，只在真正画图的页面加载：`src/components/common/Charts.jsx` 用 `React.lazy` 在渲染时才 `import("./ChartsImpl")`，该 chunk 350.58 kB（gzip 102.44）。
+- `motion` 的特性集同样是独立 chunk（37.86 kB，gzip 14.53），首屏不等它；在它到达之前 `m` 元素就是普通元素，只是动画从起点瞬间到位。
+- 入口 `index` chunk 760.47 kB（gzip 209.32），样式 `index` 108.24 kB（gzip 18.89）。
+
+### 主题
+
+偏好设置提供深色、浅色、跟随系统三个选项。保存的是偏好本身，键为 localStorage 的 `trajecta.monitor.theme`，取值可能是 `dark`、`light` 或 `system`；`applyTheme()`（`src/lib/theme.ts`）把 `system` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析成实际主题，只把解析后的 `dark` 或 `light` 写进 `<html>` 的 `data-theme`，因此 `data-theme` 从不出现 `system`。`index.html` 里的内联脚本在样式表加载前做同一件事，这是页面加载时不再先闪出另一个主题的原因；`watchSystemTheme()` 监听 `matchMedia` 的 `change` 事件，让 `system` 偏好在页面打开期间继续跟随操作系统。
+
+因为 `data-theme` 始终是实际主题而不是偏好，CSS 只需要两组规则——深色写在 `:root, :root[data-theme="dark"]`（属性缺失时就是深色），浅色写在 `:root[data-theme="light"]`——不需要第三份写在 `prefers-color-scheme` 媒体查询里的浅色主题；Tailwind v4 侧对应的是 `src/styles/tailwind.css` 里的 `@custom-variant dark`，所以 `dark:` 工具类也只有一个选择器。
 
 ## 非目标与未实现
 

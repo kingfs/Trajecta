@@ -51,7 +51,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
-- `web/monitor-ui`：Monitor 前端源码（React + Vite，Playwright 测试）。
+- `web/monitor-ui`：Monitor 前端源码（React + Vite 8，Tailwind v4 + Radix primitives，TanStack Query 管服务端状态，Playwright 与 `node --test` 测试）。样式令牌由 `src/styles/tokens.css`（生成的 OKLCH 调色板）提供，`vite build` 的产物写入 `internal/monitor/ui/dist`。
 
 协议族与 provider 细节见 [协议与 Provider](./PROTOCOLS_AND_PROVIDERS.md)，路由与凭据规则见 [路由与凭据](./ROUTING_AND_CREDENTIALS.md)。
 
@@ -167,7 +167,7 @@ Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个
 
 - `pkg/recordfile`、`pkg/replay`、`pkg/llm`、`pkg/observe`：格式、回放、协议归一化与 Observation IR 的单元基线。
 - `internal/proxy`、`internal/router`、`internal/store`、`internal/monitor`：转发、路由、存储与 API 的集成基线。
-- `web/monitor-ui`：Playwright 前端测试。
+- `web/monitor-ui`：`node --test tests-unit/` 单元基线（含调色板对比度）与 Playwright mock 套件、真实服务套件。
 - `unittest/` 与 `tests/fixtures/`：cassette 回放与跨协议矩阵 fixture。
 
 常用入口（命令矩阵见 [开发指南](./DEVELOPMENT.md)）：
