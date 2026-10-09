@@ -143,6 +143,9 @@
   --shadow-lg: 0 24px 60px oklch(0 0 0 / 0.48);
 
   --chart-grid: color-mix(in srgb, oklch(0.9315 0.0236 250.1) 8%, transparent);
+  --scrim: oklch(0.09 0.01 265 / 0.72);
+  --surface-inverse: oklch(0.9489 0.0029 264.5);
+  --on-inverse: oklch(0.1785 0.0041 286.0);
   color-scheme: dark;
 }
 
@@ -212,6 +215,9 @@
   --shadow-lg: 0 20px 48px oklch(0.25 0.02 265 / 0.12);
 
   --chart-grid: color-mix(in srgb, oklch(0.1343 0.0931 264.1) 9%, transparent);
+  --scrim: oklch(0.20 0.02 265 / 0.42);
+  --surface-inverse: oklch(0.2411 0.0097 248.2);
+  --on-inverse: oklch(0.9913 0 0);
   color-scheme: light;
 }
 

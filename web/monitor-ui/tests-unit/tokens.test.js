@@ -101,6 +101,15 @@ for (const [theme, tokens] of Object.entries(themes)) {
     assert.ok(ratios[0] < ratios[1] && ratios[1] < ratios[2], `${theme}: borders are not ordered: ${ratios}`);
   });
 
+  test(`${theme}: the inverted pair is readable and the scrim is a real colour`, () => {
+    const inverted = contrastRatio(resolve(tokens, "on-inverse"), resolve(tokens, "surface-inverse"));
+    assert.ok(inverted >= 4.5, `${theme}: --on-inverse on --surface-inverse is ${inverted.toFixed(2)}:1`);
+    // The scrim is composited over the page, so it only has to parse and to
+    // darken what is behind it.
+    const scrim = resolve(tokens, "scrim");
+    assert.ok(contrastRatio(scrim, resolve(tokens, "bg-canvas")) > 1.05, `${theme}: --scrim does not darken the page`);
+  });
+
   test(`${theme}: the surface ramp is monotonic`, () => {
     // A raised surface must be lighter than the canvas in dark and darker in
     // light; a ramp that reverses somewhere reads as a rendering bug.

@@ -216,7 +216,7 @@
   padding: 0 5px;
   border-radius: var(--radius-pill);
   background: var(--danger-solid);
-  color: #fff;
+  color: var(--on-danger);
   font-size: var(--text-label);
   font-weight: var(--weight-semibold);
   line-height: 16px;
@@ -577,15 +577,15 @@
 }
 
 .theme-dot-dark {
-  background: linear-gradient(135deg, #1d2127, #0a0b0d);
+  background: linear-gradient(135deg, var(--surface-3), var(--bg-canvas));
 }
 
 .theme-dot-light {
-  background: linear-gradient(135deg, #ffffff, #d7dbe2);
+  background: linear-gradient(135deg, var(--surface-1), var(--surface-3));
 }
 
 .theme-dot-system {
-  background: linear-gradient(135deg, #ffffff 0 50%, #14171b 50% 100%);
+  background: linear-gradient(135deg, var(--surface-1) 0 50%, var(--bg-canvas) 50% 100%);
 }
 
 .theme-option-text {
