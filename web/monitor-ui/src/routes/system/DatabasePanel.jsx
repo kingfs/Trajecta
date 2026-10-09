@@ -9,8 +9,6 @@ import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 import { SystemFact, formatBytes, formatCount, formatMs, formatNumber, formatPercent, formatSettingBytes } from "./format";
 
-const REFRESH_MS = 60_000;
-
 /**
  * PostgreSQL statistics tab: the server and database counters, the key
  * settings this workload is sensitive to, connection/activity facts, the
@@ -25,7 +23,7 @@ const REFRESH_MS = 60_000;
 export function DatabasePanel() {
   const { t } = useI18n();
 
-  const database = useJSON(apiPaths.systemDatabase, [], { refetchInterval: REFRESH_MS });
+  const database = useJSON(apiPaths.systemDatabase, []);
   const db = database.data;
 
   return (

@@ -251,6 +251,21 @@ func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) ht
 	return monitorAuthRequired(gated, verifier)
 }
 
+// allowMonitorQueryAccessToken lists the endpoints a browser has to authenticate
+// from the query string, because the platform API it uses cannot attach a header.
+//
+// Both are long-lived streams opened by the browser itself: EventSource cannot
+// set an Authorization header at all, and `new WebSocket()` has no option for
+// one either. Everything else keeps the token in the Authorization header, where
+// it does not end up in a reverse proxy's access log.
 func allowMonitorQueryAccessToken(r *http.Request) bool {
-	return r.Method == http.MethodGet && pathClean(r.URL.Path) == "/api/events/stream"
+	if r.Method != http.MethodGet {
+		return false
+	}
+	switch pathClean(r.URL.Path) {
+	case "/api/events/stream", realtimeSocketPath:
+		return true
+	default:
+		return false
+	}
 }

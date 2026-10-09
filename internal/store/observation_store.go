@@ -188,6 +188,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 }
 
 func (s *Store) SaveObservation(obs observe.TraceObservation) error {
+	s.notifyChange(ChangeTraffic)
 	if obs.TraceID == "" {
 		return errors.New("save observation: trace id is required")
 	}
@@ -316,6 +317,7 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 }
 
 func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
+	s.notifyChange(ChangeTraffic)
 	if strings.TrimSpace(traceID) == "" {
 		return errors.New("save findings: trace id is required")
 	}

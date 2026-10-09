@@ -11,7 +11,6 @@ import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { setOrDeleteParam, summarizeSessionItems } from "../../lib/monitor";
 
-const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
 
 export function SessionsPanel() {
@@ -35,7 +34,7 @@ export function SessionsPanel() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model], { refetchInterval: REFRESH_MS });
+  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model]);
 
   useEffect(() => {
     setFilters({ query, provider, model });

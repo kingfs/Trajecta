@@ -4,6 +4,7 @@ import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { RealtimeProvider } from "./components/RealtimeProvider";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
 import { useI18n } from "./lib/i18n";
 import { AccessPage } from "./routes/AccessPage";
@@ -108,8 +109,11 @@ function App() {
   }
 
   return (
-    <AppShell user={auth.user} onLogout={logout}>
-      <MonitorErrorBoundary key={location.pathname}>
+    // Inside the authenticated branch on purpose: an unauthenticated console has
+    // nothing to subscribe to, and the socket's token comes from the login.
+    <RealtimeProvider>
+      <AppShell user={auth.user} onLogout={logout}>
+        <MonitorErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
@@ -141,8 +145,9 @@ function App() {
           <Route path="/channels/:channelID" element={<LegacyRedirect to="/providers/:channelID" />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
-      </MonitorErrorBoundary>
-    </AppShell>
+        </MonitorErrorBoundary>
+      </AppShell>
+    </RealtimeProvider>
   );
 }
 

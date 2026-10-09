@@ -8,8 +8,6 @@ import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 import { Meter, SystemFact, formatBytes, formatCount, formatMs, formatPercentPoints, formatRate, formatUptime } from "./format";
 
-const REFRESH_MS = 60_000;
-
 /**
  * Runtime is split into two panels on purpose: what the machine is doing (host
  * CPU, memory, disks, network, process footprint) and what the Go process is
@@ -20,8 +18,8 @@ const REFRESH_MS = 60_000;
 export function RuntimePanel() {
   const { t } = useI18n();
 
-  const host = useJSON(apiPaths.systemHost, [], { refetchInterval: REFRESH_MS });
-  const runtime = useJSON(apiPaths.systemRuntime, [], { refetchInterval: REFRESH_MS });
+  const host = useJSON(apiPaths.systemHost, []);
+  const runtime = useJSON(apiPaths.systemRuntime, []);
   const live = host.data;
   const facts = runtime.data;
   const pool = facts?.db_pool;

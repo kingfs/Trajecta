@@ -11,7 +11,6 @@ import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { formatDuration, formatTokenCount, setOrDeleteParam } from "../../lib/monitor";
 
-const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
 
 export function RequestsPanel() {
@@ -39,7 +38,7 @@ export function RequestsPanel() {
   if (observation) {
     requestParams.set("observation", observation);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation], { refetchInterval: REFRESH_MS });
+  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation]);
 
   useEffect(() => {
     setFilters({ query, provider, model, observation });

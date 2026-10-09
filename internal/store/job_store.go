@@ -164,6 +164,7 @@ func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
 }
 
 func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, error) {
+	s.notifyChange(ChangeTraffic)
 	if strings.TrimSpace(job.JobType) == "" {
 		return AnalysisJobRecord{}, errors.New("create analysis job: job type is required")
 	}
@@ -290,6 +291,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 }
 
 func (s *Store) MarkAnalysisJobRunning(id int64) error {
+	s.notifyChange(ChangeTraffic)
 	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
 		SET status = 'running', attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
@@ -331,6 +333,7 @@ func (s *Store) ClaimAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, erro
 }
 
 func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
+	s.notifyChange(ChangeTraffic)
 	if strings.TrimSpace(resultJSON) == "" {
 		resultJSON = "{}"
 	}
@@ -344,6 +347,7 @@ func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
 }
 
 func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
+	s.notifyChange(ChangeTraffic)
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
@@ -362,6 +366,7 @@ func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
 }
 
 func (s *Store) MarkAnalysisJobCanceled(id int64) error {
+	s.notifyChange(ChangeTraffic)
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 		UPDATE analysis_jobs

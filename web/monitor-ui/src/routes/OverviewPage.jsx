@@ -29,8 +29,6 @@ import {
   setOrDeleteParam,
 } from "../lib/monitor";
 
-const REFRESH_MS = 60_000;
-
 // The overview answers three questions in order: how much traffic and how did it
 // go (the tiles), what does the shape of that traffic look like (trends and
 // distribution), and what needs a human (the attention lists). Two blocks that
@@ -43,8 +41,8 @@ export function OverviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [breakdownKind, setBreakdownKind] = useState("models");
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue]);
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue]);
 
   const summary = data?.summary || {};
   const breakdown = data?.breakdown || {};

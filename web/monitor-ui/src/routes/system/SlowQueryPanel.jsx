@@ -7,8 +7,6 @@ import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 import { formatCount, formatMs } from "./format";
 
-const REFRESH_MS = 60_000;
-
 /**
  * Slow-query tab: the statement collector's armed/not-armed state and the
  * statements it recorded. The ring is in memory and is empty until
@@ -21,7 +19,7 @@ const REFRESH_MS = 60_000;
 export function SlowQueryPanel() {
   const { t } = useI18n();
 
-  const slowQueries = useJSON(apiPaths.systemSlowQueries, [], { refetchInterval: REFRESH_MS });
+  const slowQueries = useJSON(apiPaths.systemSlowQueries, []);
   const slow = slowQueries.data;
 
   return (

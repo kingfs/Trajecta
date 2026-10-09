@@ -591,6 +591,10 @@ func (s *Store) notifySystemEventChanged(event SystemEvent) {
 		}
 	}
 	s.shared.eventMu.Unlock()
+	// The event feed is what the sidebar badge and the events page read, so it
+	// is also a change topic. Published after the unlock: taking changeMu while
+	// holding eventMu would add a second lock order for no benefit.
+	s.notifyChange(ChangeEvents)
 }
 
 func systemEventForParseFailure(job ParseJobRecord) SystemEvent {

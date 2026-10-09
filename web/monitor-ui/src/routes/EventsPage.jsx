@@ -48,7 +48,6 @@ export function EventsPage() {
   // server rejected did nothing visible at all.
   const announce = () => {
     refresh();
-    window.dispatchEvent(new Event("trajecta:events-refresh"));
   };
 
   const mutateEvent = useWriteMutation({

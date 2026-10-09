@@ -96,6 +96,8 @@ type storeShared struct {
 	eventMu    sync.Mutex
 	eventSeq   uint64
 	eventSubs  map[chan SystemEventNotification]struct{}
+	changeMu   sync.Mutex
+	changeSubs map[chan string]struct{}
 
 	// claimMu serializes the SQLite task claims. Postgres takes its rows with
 	// FOR UPDATE SKIP LOCKED, so two claimers cannot overlap there; SQLite has no
@@ -2406,6 +2408,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 // belongs to, so a caller that discovers a cassette the write path never saw can
 // enqueue the parse job that the write path would have enqueued.
 func (s *Store) upsertLogWithGroupingTraceID(path string, header recordfile.RecordHeader, grouping GroupingInfo) (string, error) {
+	s.notifyChange(ChangeTraffic)
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -3372,6 +3375,7 @@ func (s *Store) GetTraceExchangeMetadata(traceID string) (recordfile.MetaData, e
 }
 
 func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
+	s.notifyChange(ChangeTraffic)
 	if strings.TrimSpace(run.Kind) == "" {
 		return 0, errors.New("save analysis run: kind is required")
 	}

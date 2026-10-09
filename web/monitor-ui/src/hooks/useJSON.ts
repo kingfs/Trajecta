@@ -1,5 +1,7 @@
+import { useEffect, useRef } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { requestJSON } from "../lib/api";
+import { realtimeTopicForURL, registerRealtimeQuery } from "../lib/realtime";
 
 /**
  * Read a Monitor endpoint.
@@ -19,8 +21,10 @@ import { requestJSON } from "../lib/api";
  * that are already in the query string, which is harmless; the ones that matter
  * are the window and filter selections.
  *
- * `options.refetchInterval` replaces the `refreshTick` state and `setInterval`
- * pair that every polling page used to carry: pass it and the page drops both.
+ * Nothing here polls. A read whose URL belongs to a realtime topic registers
+ * itself with the console socket (lib/realtime.js), and the page is refetched
+ * when the server says that topic changed - which replaced a `refetchInterval`
+ * on eight reads and a `setInterval` in the sidebar.
  */
 export type UseJSONOptions = {
   /** Poll interval in ms, or false to stop polling. */
@@ -38,9 +42,10 @@ export function useJSON<T = unknown>(
   // Callers use it to wait for a parent resource before firing sub-resources.
   const enabled = typeof url === "string" && url !== "";
   const { refetchInterval, ...rest } = options;
+  const queryKey = ["GET", url, ...deps];
 
   const query = useQuery<T>({
-    queryKey: ["GET", url, ...deps],
+    queryKey,
     queryFn: ({ signal }) => requestJSON(url as string, { signal }),
     enabled,
     refetchInterval,
@@ -49,6 +54,21 @@ export function useJSON<T = unknown>(
     placeholderData: keepPreviousData,
     ...rest,
   });
+
+  // The topic is derived from the URL, so a read is subscribed as soon as it is
+  // mounted and unsubscribed when it is not. The key is held in a ref because
+  // the query key array is rebuilt on every render while its identity - the
+  // request - is what the registry has to track.
+  const topic = enabled ? realtimeTopicForURL(url as string) : "";
+  const registrationKey = topic ? JSON.stringify(queryKey) : "";
+  const queryKeyRef = useRef(queryKey);
+  queryKeyRef.current = queryKey;
+  useEffect(() => {
+    if (!topic) {
+      return undefined;
+    }
+    return registerRealtimeQuery(topic, queryKeyRef.current);
+  }, [topic, registrationKey]);
 
   return {
     // `isPending` is true only while there is nothing to show for the current

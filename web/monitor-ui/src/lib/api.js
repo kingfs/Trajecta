@@ -1,5 +1,3 @@
-import { fetchEventSource } from "@microsoft/fetch-event-source";
-
 export const MONITOR_TOKEN_KEY = "trajecta.monitor.token";
 
 export const apiPaths = {
@@ -16,7 +14,7 @@ export const apiPaths = {
   systemSlowQueries: "/api/system/slow-queries",
   events: "/api/events",
   eventsSummary: "/api/events/summary",
-  eventsStream: "/api/events/stream",
+  eventsSocket: "/api/events/ws",
   eventsReadAll: "/api/events/read-all",
   eventRead: (eventID) => `/api/events/${encodeURIComponent(eventID)}/read`,
   eventResolve: (eventID) => `/api/events/${encodeURIComponent(eventID)}/resolve`,
@@ -151,69 +149,4 @@ export async function downloadBlob(path) {
 
 export function listItems(payload) {
   return Array.isArray(payload?.items) ? payload.items : [];
-}
-
-// streamSystemEvents subscribes to the monitor SSE stream. EventSource cannot
-// send an Authorization header, which used to force the JWT into the query
-// string (?access_token=...) where reverse proxies log it. `fetchEventSource`
-// exists for exactly this case - SSE over fetch, so the token travels in a
-// header only - and owns the frame parser, the reconnect and the cancellation
-// that this function used to write by hand.
-export function streamSystemEvents(handlers = {}) {
-  const controller = new AbortController();
-  const { onEvent, onError } = handlers;
-  let reconnectTimer = 0;
-
-  const connect = () => {
-    fetchEventSource(apiPaths.eventsStream, {
-      headers: { ...monitorAuthHeaders(), Accept: "text/event-stream" },
-      signal: controller.signal,
-      // The connection is kept while the tab is hidden, which is what the
-      // hand-written reader did: it never watched document visibility.
-      openWhenHidden: true,
-      async onopen(response) {
-        if (!response.ok) {
-          throw new Error(`event stream failed: ${response.status}`);
-        }
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.startsWith("text/event-stream")) {
-          throw new Error(`event stream returned ${contentType || "no content type"}`);
-        }
-      },
-      onmessage(event) {
-        // The parser dispatches on every blank line, heartbeat comments
-        // included, so a block with no `data:` field arrives here as an empty
-        // payload. The hand-written reader dropped those and so does this.
-        if (typeof onEvent !== "function" || event.data === "") {
-          return;
-        }
-        onEvent({ event: event.event || "", data: event.data });
-      },
-      onerror(err) {
-        if (typeof onError === "function") {
-          onError(err);
-        }
-        // The library retries on this interval rather than rejecting, which is
-        // the reconnect the hand-written reader did itself.
-        return 5000;
-      },
-      onclose() {
-        // A clean close ends the subscription as far as the library is
-        // concerned, so the reconnect is ours. Without it the event badge would
-        // quietly stop updating the first time the server ended the stream.
-        if (!controller.signal.aborted) {
-          reconnectTimer = window.setTimeout(connect, 5000);
-        }
-      },
-    }).catch(() => {
-      // onerror owns reporting; the promise only rejects when the handler
-      // itself throws, and an unhandled rejection there helps nobody.
-    });
-  };
-  connect();
-
-  return () => {
-    controller.abort();
-    window.clearTimeout(reconnectTimer);
-  };
 }

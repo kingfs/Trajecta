@@ -626,6 +626,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), monitorVerifier))
+	// The console reads the realtime socket; /api/events/stream stays for
+	// integrations that already speak SSE.
+	realtime := newRealtimeHub(st)
+	mux.HandleFunc("/api/events/ws", monitorAuthRequired(realtimeSocketAPIHandler(realtime), monitorVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))

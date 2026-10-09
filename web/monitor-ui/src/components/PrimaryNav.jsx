@@ -21,7 +21,8 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { apiPaths, apiURL, postJSON, requestJSON, streamSystemEvents } from "../lib/api";
+import { apiPaths, apiURL, postJSON } from "../lib/api";
+import { useJSON } from "../hooks/useJSON";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
@@ -87,57 +88,11 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   // the panel closes. See PasswordDialog.
   const accountButtonRef = React.useRef(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const [eventSummary, setEventSummary] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer = 0;
-    let source = null;
-    const refresh = async () => {
-      try {
-        const payload = await requestJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
-        if (!cancelled) {
-          setEventSummary(payload);
-        }
-      } catch {
-        if (!cancelled) {
-          setEventSummary(null);
-        }
-      }
-    };
-    refresh();
-    const onRefresh = () => refresh();
-    window.addEventListener("trajecta:events-refresh", onRefresh);
-    // The stream carries the JWT in an Authorization header (see
-    // streamSystemEvents): putting it in the query string leaked it into every
-    // reverse-proxy access log.
-    source = streamSystemEvents({
-      onEvent: (event) => {
-        if (event.event !== "system_event.summary" && event.event !== "system_event.updated") {
-          return;
-        }
-        try {
-          const payload = JSON.parse(event.data || "{}");
-          setEventSummary((current) => ({
-            ...(current || {}),
-            unread: Number(payload.unread || 0),
-          }));
-        } catch {
-          refresh();
-        }
-      },
-      onError: () => refresh(),
-    });
-    timer = window.setInterval(refresh, 60_000);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("trajecta:events-refresh", onRefresh);
-      if (source) {
-        source();
-      }
-      window.clearInterval(timer);
-    };
-  }, []);
+  // The unread badge is a normal Monitor read, so it is push-fresh: it belongs
+  // to the "events" realtime topic and refetches when the server says the feed
+  // changed. This replaced a `setInterval(refresh, 60_000)` and a subscription
+  // to the SSE stream, both of which the console socket makes redundant.
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
 
   return (
     <nav className="primary-nav" aria-label={t("nav.primary")}>

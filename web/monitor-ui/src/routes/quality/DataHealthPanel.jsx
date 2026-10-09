@@ -9,8 +9,6 @@ import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { formatDateTime, normalizeAnalyticsWindow } from "../../lib/monitor";
 
-const REFRESH_MS = 60_000;
-
 /**
  * Derived-data health: how much of the indexed traffic has been parsed into
  * observations, whether the parse and analysis queues are keeping up, and how
@@ -22,8 +20,8 @@ export function DataHealthPanel() {
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue]);
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue]);
 
   const observation = data?.observation || {};
   const analysis = data?.analysis || {};

@@ -6,6 +6,11 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("trajecta.monitor.language", "en");
   });
+  // The console keeps one realtime socket open. The mock layer answers /api/**
+  // but not the WebSocket upgrade, so without this every test would spend its
+  // run in the reconnect backoff and log a failed connection per attempt. A
+  // handler that does nothing is a socket that stays open and silent.
+  await page.routeWebSocket(/\/api\/events\/ws/, () => {});
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -1320,31 +1325,45 @@ test("switching language at runtime loads the other chunk", async ({ page, isMob
   expect(locales).toContain("zh-CN");
 });
 
-// The stream carries the JWT in an Authorization header rather than in the query
-// string, which is why it is SSE over fetch and not an EventSource. The polled
-// summary says 18 unread; the streamed one says 7, so the badge proves which of
-// the two reached the UI. A heartbeat comment rides along in the same body to
-// pin that it is dropped rather than parsed as an event.
-test("the event stream drives the unread badge", async ({ page }) => {
-  await page.route("**/api/events/stream", async (route) => {
-    // The opening poll and the opening stream start together, and the poll
-    // replaces the whole summary when it lands, so a streamed value that arrives
-    // first is overwritten by it. Holding the stream back until the poll has
-    // settled is what makes this an assertion about the stream rather than about
-    // which of the two won the mount race.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
-      body: ': heartbeat\n\nevent: system_event.summary\ndata: {"unread":7}\n\n',
-    });
+// The console has no refresh timers: the unread badge and every list are
+// refetched because the server said their topic changed. This drives the socket
+// the way the server does and counts the requests that follow, because "the page
+// updated" is not enough - a poll would also update it eventually.
+test("a realtime topic message refetches the reads that belong to it", async ({ page }) => {
+  const sockets = [];
+  await page.routeWebSocket(/\/api\/events\/ws/, (ws) => {
+    sockets.push(ws);
+    // Playwright's mock socket is connected to the page, not to a server, so the
+    // subscribe messages the page sends arrive here; nothing has to answer them.
+    ws.onMessage(() => {});
   });
 
-  await page.goto("/overview");
-  // The nav renders a badge per counter, and the events entry is rendered twice
-  // (the rail and its narrow-viewport duplicate), so this names one of them.
-  // `.nav-item-badge` alone matches three and fails in strict mode.
-  await expect(page.locator('a[href="/events"] .nav-item-badge').first()).toHaveText("7");
+  const tracesRequests = [];
+  let listTraces = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/traces") {
+      listTraces += 1;
+      tracesRequests.push(listTraces);
+    }
+  });
+
+  await page.goto("/traces");
+  await expect(page.getByRole("heading", { name: "Traffic" })).toBeVisible();
+  await expect.poll(() => listTraces).toBeGreaterThan(0);
+  const afterLoad = listTraces;
+
+  // A topic the page does not read must not wake it up.
+  for (const socket of sockets) {
+    socket.send(JSON.stringify({ topic: "system" }));
+  }
+  await page.waitForTimeout(400);
+  expect(listTraces, "an unrelated topic refetched the trace list").toBe(afterLoad);
+
+  // The topic it does read must.
+  for (const socket of sockets) {
+    socket.send(JSON.stringify({ topic: "traffic" }));
+  }
+  await expect.poll(() => listTraces, { timeout: 5_000 }).toBeGreaterThan(afterLoad);
 });
 
 // The date formatters hardcoded "zh-CN", so the English console printed
