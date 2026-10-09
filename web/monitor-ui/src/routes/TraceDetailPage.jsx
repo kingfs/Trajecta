@@ -1,5 +1,6 @@
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
@@ -7,6 +8,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import {
   buildRoutingDecisionSummary,
   buildProviderLink,
@@ -48,8 +50,7 @@ export function TraceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
-  const [jobNotice, setJobNotice] = useState(null);
-  const [jobBusy, setJobBusy] = useState("");
+
   const [derivedRefreshTick, setDerivedRefreshTick] = useState(0);
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
@@ -126,22 +127,25 @@ export function TraceDetailPage() {
     window.URL.revokeObjectURL(url);
   };
 
-  const runTraceAction = async (action, path, payload = {}) => {
-    setJobBusy(action);
-    setJobNotice(null);
-    try {
-      const response = await postJSON(path, payload);
-      setJobNotice({
-        tone: response.job?.status === "failed" ? "danger" : "green",
-        text: `${labelTraceAction(action, t)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`,
-      });
+  // The action name is the mutation's own variable now, so the toolbar can still
+  // tell "repair" from "reanalyze" while one of them is in flight.
+  const runTraceAction = useWriteMutation({
+    mutationFn: ({ path, payload }) => postJSON(path, payload),
+    error: (err, variables) => `${labelTraceAction(variables.action, t)} failed: ${err?.message || t("common.actionFailed")}`,
+    onSuccess: (response, variables) => {
+      // The request succeeded either way; whether the job it queued failed is a
+      // property of the result, which is why this picks its own toast.
+      const text = `${labelTraceAction(variables.action, t)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`;
+      if (response.job?.status === "failed") {
+        toast.error(text);
+      } else {
+        toast.success(text);
+      }
       setDerivedRefreshTick((value) => value + 1);
-    } catch (error) {
-      setJobNotice({ tone: "danger", text: `${labelTraceAction(action, t)} failed: ${error.message || "request failed"}` });
-    } finally {
-      setJobBusy("");
-    }
-  };
+    },
+  });
+  const jobBusy = runTraceAction.isPending ? runTraceAction.variables?.action || "" : "";
+  const runTraceActionWith = (action, path, payload = {}) => runTraceAction.mutate({ action, path, payload });
 
   useEffect(() => {
     if (focusTarget !== "failure" || !failureSummary || !failureSummaryRef.current) {
@@ -193,10 +197,10 @@ export function TraceDetailPage() {
             </button>
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
-            <button className="ghost-button" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceAction("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
+            <button className="ghost-button" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceActionWith("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
               {jobBusy === "repair" ? t("traceDetail.repairing") : t("traceDetail.repairStats")}
             </button>
-            <button className="ghost-button active" type="button" disabled={!traceExists || jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
+            <button className="ghost-button active" type="button" disabled={!traceExists || jobBusy === "reanalyze"} onClick={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
               {jobBusy === "reanalyze" ? t("traceDetail.reanalyzing") : t("traceDetail.reanalyze")}
             </button>
           </div>
@@ -209,8 +213,6 @@ export function TraceDetailPage() {
           </div>
         </div>
       </header>
-
-      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
       {failureSummary ? (
         <section
@@ -488,7 +490,7 @@ export function TraceDetailPage() {
           CodeBlock={CodeBlock}
           InlineTag={InlineTag}
           busy={jobBusy === "reanalyze"}
-          onRefresh={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
+          onRefresh={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
           t={t}
         />
       ) : null}

@@ -29,11 +29,19 @@ export function resolveTheme(preference: ThemePreference = currentTheme()): Reso
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/**
+ * Fired whenever `data-theme` changes, so a component can follow the theme
+ * without owning the preference. The toaster needs it: it is not a descendant of
+ * the picker, and its own theming has to agree with the surface behind it.
+ */
+export const THEME_EVENT = "trajecta:theme";
+
 /** Point the document at a preference and return the theme that was applied. */
 export function applyTheme(theme: ThemePreference = currentTheme()): ResolvedTheme {
   const normalized = (PREFERENCES.includes(theme) ? theme : "system") as ThemePreference;
   const resolved = resolveTheme(normalized);
   document.documentElement.dataset.theme = resolved;
+  window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: resolved }));
   return resolved;
 }
 

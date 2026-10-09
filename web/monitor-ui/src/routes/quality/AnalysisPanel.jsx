@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
@@ -6,52 +6,39 @@ import { useJSON } from "../../hooks/useJSON";
 import { useRefresh } from "../../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
+import { useWriteMutation } from "../../lib/mutations";
 import { formatDateTime } from "../../lib/monitor";
 
 export function AnalysisPanel() {
   const refresh = useRefresh();
   const { t } = useI18n();
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [jobNotice, setJobNotice] = useState(null);
   const analysis = useJSON(apiURL(apiPaths.analysis, { limit: "50" }), []);
   const jobs = useJSON(apiURL(apiPaths.analysisJobs, { limit: "50" }), []);
   const items = analysis.data?.items || [];
   const jobItems = jobs.data?.items || [];
 
-  const runMissingUsageBatch = async () => {
-    setBatchBusy(true);
-    setJobNotice(null);
-    try {
-      const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", missing_usage: true, limit: 1000, repair_usage: true });
-      setJobNotice({ tone: "green", text: t("analysis.queuedJob", { id: response.job?.id || "-" }) });
-      refresh();
-    } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
-    } finally {
-      setBatchBusy(false);
-    }
-  };
+  // The two batches share one busy flag because they disable both buttons while
+  // either is in flight; each mutation owns its own pending state now.
+  const runMissingUsageBatch = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", missing_usage: true, limit: 1000, repair_usage: true }),
+    success: (response) => t("analysis.queuedJob", { id: response?.job?.id || "-" }),
+    error: "sessionDetail.requestFailed",
+    onSuccess: () => refresh(),
+  });
 
-  const runAnalysisRepairBatch = async () => {
-    setBatchBusy(true);
-    setJobNotice(null);
-    try {
-      const batchResponses = await Promise.all([
-        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "failed", limit: 1000, reparse: true, scan: true }),
-        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
-      ]);
-      setJobNotice({ tone: "green", text: t("analysis.queuedJobs", { count: batchResponses.length }) });
-      refresh();
-    } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
-    } finally {
-      setBatchBusy(false);
-    }
-  };
+  const runAnalysisRepairBatch = useWriteMutation({
+    mutationFn: () => Promise.all([
+      postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "failed", limit: 1000, reparse: true, scan: true }),
+      postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
+    ]),
+    success: (responses) => t("analysis.queuedJobs", { count: responses.length }),
+    error: "sessionDetail.requestFailed",
+    onSuccess: () => refresh(),
+  });
+  const batchBusy = runMissingUsageBatch.isPending || runAnalysisRepairBatch.isPending;
 
   return (
     <>
-      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -60,10 +47,10 @@ export function AnalysisPanel() {
           </div>
           <div className="panel-head-actions" role="group" aria-label={t("analysis.batchRepair")}>
             <InlineTag>{t("analysis.jobs", { count: jobs.data?.total ?? 0 })}</InlineTag>
-            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runAnalysisRepairBatch}>
+            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={() => runAnalysisRepairBatch.mutate()}>
               {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
             </button>
-            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
+            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={() => runMissingUsageBatch.mutate()}>
               {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}
             </button>
           </div>

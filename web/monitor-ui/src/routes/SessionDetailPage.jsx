@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge, ViewIcon } from "../components/common/Badges";
@@ -8,6 +9,7 @@ import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import {
   buildFailureContexts,
   buildFailureDelta,
@@ -29,11 +31,6 @@ export function SessionDetailPage() {
   const { t } = useI18n();
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
-  const [jobNotice, setJobNotice] = useState(null);
-  const [jobBusy, setJobBusy] = useState(false);
-  const [exportBusy, setExportBusy] = useState(false);
-  const [fullExportBusy, setFullExportBusy] = useState(false);
-  const [exportNotice, setExportNotice] = useState(null);
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
@@ -57,59 +54,40 @@ export function SessionDetailPage() {
     return blob;
   };
 
-  const exportTrajectory = async () => {
-    setExportBusy(true);
-    setExportNotice(null);
-    try {
+  // An export has three outcomes rather than two - the file can arrive complete,
+  // with warnings, or truncated - so it picks its own toast from the result.
+  const exportTrajectory = useWriteMutation({
+    mutationFn: async () => {
       const blob = await downloadSessionExport(apiPaths.sessionTrajectory(sessionID), ".atif.jsonl");
-      const trajectory = JSON.parse(await blob.text());
+      return JSON.parse(await blob.text());
+    },
+    error: "sessionDetail.exportError",
+    onSuccess: (trajectory) => {
       const warnings = trajectory.extra?.warnings?.length || 0;
       if (trajectory.extra?.truncated) {
-        setExportNotice({
-          tone: "default",
-          text: t("sessionDetail.exportTruncated", { included: trajectory.extra?.included_traces ?? 0, total: trajectory.extra?.trace_count ?? 0 }),
-        });
+        toast.warning(t("sessionDetail.exportTruncated", { included: trajectory.extra?.included_traces ?? 0, total: trajectory.extra?.trace_count ?? 0 }));
         return;
       }
-      setExportNotice({
-        tone: warnings ? "danger" : "green",
-        text: warnings
-          ? t("sessionDetail.exportWarnings", { count: warnings })
-          : t("sessionDetail.exportDone"),
-      });
-    } catch (error) {
-      setExportNotice({ tone: "danger", text: error.message || t("sessionDetail.exportError") });
-    } finally {
-      setExportBusy(false);
-    }
-  };
+      if (warnings) {
+        toast.error(t("sessionDetail.exportWarnings", { count: warnings }));
+        return;
+      }
+      toast.success(t("sessionDetail.exportDone"));
+    },
+  });
 
-  const exportFullTrajectory = async () => {
-    setFullExportBusy(true);
-    setExportNotice(null);
-    try {
-      await downloadSessionExport(apiPaths.sessionTrajectory(sessionID, { full: true, stream: true }), ".atif.ndjson");
-      setExportNotice({ tone: "green", text: t("sessionDetail.exportFullDone") });
-    } catch (error) {
-      setExportNotice({ tone: "danger", text: error.message || t("sessionDetail.exportError") });
-    } finally {
-      setFullExportBusy(false);
-    }
-  };
+  const exportFullTrajectory = useWriteMutation({
+    mutationFn: () => downloadSessionExport(apiPaths.sessionTrajectory(sessionID, { full: true, stream: true }), ".atif.ndjson"),
+    success: "sessionDetail.exportFullDone",
+    error: "sessionDetail.exportError",
+  });
 
-  const reanalyzeSession = async () => {
-    setJobBusy(true);
-    setJobNotice(null);
-    try {
-      const response = await postJSON(apiPaths.sessionReanalyze(sessionID), { mode: "async", reparse: true, scan: true });
-      setJobNotice({ tone: "green", text: t("sessionDetail.refreshJobNotice", { id: response.job?.id || "-", status: response.job?.status || "queued" }) });
-      setTab("analysis");
-    } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
-    } finally {
-      setJobBusy(false);
-    }
-  };
+  const reanalyzeSession = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.sessionReanalyze(sessionID), { mode: "async", reparse: true, scan: true }),
+    success: (response) => t("sessionDetail.refreshJobNotice", { id: response?.job?.id || "-", status: response?.job?.status || "queued" }),
+    error: "sessionDetail.requestFailed",
+    onSuccess: () => setTab("analysis"),
+  });
 
   return (
     <div className="shell shell-detail">
@@ -137,14 +115,14 @@ export function SessionDetailPage() {
             <Link className="icon-button" to="/traces?tab=sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
               <HomeIcon />
             </Link>
-            <button className="ghost-button" type="button" disabled={exportBusy || fullExportBusy || !detail.data} onClick={exportTrajectory}>
-              {exportBusy ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
+            <button className="ghost-button" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportTrajectory.mutate()}>
+              {exportTrajectory.isPending ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
             </button>
-            <button className="ghost-button" type="button" disabled={exportBusy || fullExportBusy || !detail.data} onClick={exportFullTrajectory}>
-              {fullExportBusy ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectoryFull")}
+            <button className="ghost-button" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportFullTrajectory.mutate()}>
+              {exportFullTrajectory.isPending ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectoryFull")}
             </button>
-            <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
-              {jobBusy ? t("analysis.queueing") : t("sessionDetail.refreshAnalysis")}
+            <button className="ghost-button active" type="button" disabled={reanalyzeSession.isPending} onClick={() => reanalyzeSession.mutate()}>
+              {reanalyzeSession.isPending ? t("analysis.queueing") : t("sessionDetail.refreshAnalysis")}
             </button>
           </div>
           <div className="detail-toolbar-tokens">
@@ -154,10 +132,6 @@ export function SessionDetailPage() {
           </div>
         </div>
       </header>
-
-      {exportNotice ? <EmptyState title={t("sessionDetail.trajectoryExport")} detail={exportNotice.text} tone={exportNotice.tone} compact /> : null}
-
-      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
       {detail.error ? <EmptyState title={t("sessionDetail.loadError")} detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title={t("sessionDetail.loading")} detail={t("sessionDetail.loadingDetail")} /> : null}
