@@ -2,9 +2,13 @@ import React from "react";
 import { cn } from "../../lib/utils";
 
 /*
- * The surface every panel, stat tile and detail section sits on: 16px of
- * padding, a 12px radius and the raised-surface shadow, matching `.panel` and
- * `.stat-card` in the legacy sheets.
+ * A bordered surface: 16px of padding, a 12px radius, the subtle hairline and
+ * the small shadow. It is deliberately not a copy of `.panel` or `.stat-card`,
+ * which are the legacy surfaces this would replace - `.panel` pads to 20px and
+ * carries a 16px bottom margin, `.stat-card` is a flex column with a 4px gap,
+ * and both set `box-shadow: none` through the shared rule. Those two are
+ * migrated by pinning their measured boxes first, not by assuming this
+ * primitive is already them.
  */
 export function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
