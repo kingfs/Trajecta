@@ -10,7 +10,6 @@
 
 /* ------------------------------------------------------------ surfaces */
 
-.panel,
 .stat-card,
 .message-card,
 .collapse-card,
@@ -22,12 +21,6 @@
   backdrop-filter: none;
 }
 
-.panel {
-  padding: var(--space-5);
-  margin-bottom: var(--space-4);
-  background: var(--surface-1);
-}
-
 /* The card primitive is the same surface, so it takes the same gap between
  * stacked sections. The margin is a rule here rather than a utility on the
  * primitive on purpose: the layout sheet cancels it for a surface that is a
@@ -37,8 +30,6 @@
   margin-bottom: var(--space-4);
 }
 
-.shell > .panel:last-child,
-.shell-list > .panel:last-child,
 .shell > [data-slot="card"]:last-child,
 .shell-list > [data-slot="card"]:last-child {
   margin-bottom: 0;

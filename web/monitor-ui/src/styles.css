@@ -274,16 +274,6 @@
   backdrop-filter: none;
 }
 
-:root[data-theme="light"] .panel,
-:root[data-theme="light"] .stat-card,
-:root[data-theme="light"] .message-card,
-:root[data-theme="light"] .collapse-card,
-:root[data-theme="light"] .protocol-column {
-  border-color: var(--border-subtle);
-  background: var(--surface-1);
-  box-shadow: none;
-  backdrop-filter: none;
-}
 
 
 .topbar h1,
@@ -315,11 +305,6 @@
   letter-spacing: 0.24em;
   text-transform: uppercase;
   font-family: var(--font-sans);
-}
-
-.topbar .eyebrow,
-.panel-head .eyebrow {
-  display: none;
 }
 
 .topbar-meta,
@@ -736,16 +721,6 @@ a:focus-visible {
   margin-bottom: 0;
 }
 
-.stat-card,
-.panel,
-.message-card,
-.collapse-card,
-.protocol-column {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(12px);
-}
 
 .stat-card {
   border-radius: var(--radius-panel);
@@ -1407,14 +1382,6 @@ a:focus-visible {
 
 .accent-red {
   border-color: var(--danger-border);
-}
-
-.panel {
-  border-radius: var(--radius-panel);
-  padding: 18px;
-  background:
-    linear-gradient(180deg, var(--surface-1), var(--surface-1)),
-    linear-gradient(135deg, var(--accent-soft), transparent 32%);
 }
 
 :root[data-theme="light"] .filter-bar,
@@ -3492,10 +3459,6 @@ a:focus-visible {
 
   .topbar h1 {
     font-size: 2rem;
-  }
-
-  .panel {
-    padding: 18px;
   }
 
   .filter-bar {
