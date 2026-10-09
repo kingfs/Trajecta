@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from "react";
-import { InlineTag, PlusIcon } from "../components/common/Badges";
-import { StatCard } from "../components/common/Display";
-import { EmptyState } from "../components/common/EmptyState";
-import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../lib/api";
-import { useI18n } from "../lib/i18n";
-import { formatDateTime } from "../lib/monitor";
+import { InlineTag, PlusIcon } from "../../components/common/Badges";
+import { StatCard } from "../../components/common/Display";
+import { EmptyState } from "../../components/common/EmptyState";
+import { useJSON } from "../../hooks/useJSON";
+import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../../lib/api";
+import { useI18n } from "../../lib/i18n";
+import { formatDateTime } from "../../lib/monitor";
 
-export function TokensPage() {
+export function TokensPanel() {
   const { t } = useI18n();
   const [name, setName] = useState("local-dev");
   const [ttl, setTTL] = useState("");
@@ -52,11 +52,14 @@ export function TokensPage() {
     }
   };
 
-  const deleteToken = async (tokenID) => {
-    setBusyToken(tokenID);
+  const deleteToken = async (item) => {
+    if (!window.confirm(t("tokens.deleteConfirm", { name: item.name || item.id }))) {
+      return;
+    }
+    setBusyToken(item.id);
     setError("");
     try {
-      await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { delete: "1" }));
+      await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(item.id)}`, { delete: "1" }));
       setRefreshTick((tick) => tick + 1);
     } catch (err) {
       setError(err.message || t("tokens.deleteError"));
@@ -66,18 +69,7 @@ export function TokensPage() {
   };
 
   return (
-    <main className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Access control</p>
-          <h1>{t("tokens.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge">{t("tokens.activeBadge", { count: summary.active })}</span>
-          <span className="badge">{t("tokens.totalBadge", { count: summary.total })}</span>
-        </div>
-      </header>
-
+    <>
       <section className="hero-grid hero-grid-compact token-summary-grid">
         <StatCard label={t("common.total")} value={summary.total} />
         <StatCard label={t("common.active")} value={summary.active} accent="accent-green" />
@@ -88,10 +80,10 @@ export function TokensPage() {
       <section className="panel token-panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Current user</p>
             <h2>{t("tokens.create")}</h2>
           </div>
         </div>
+        <p className="system-note">{`${t("tokens.currentUser")} · ${t("tokens.scopeHint")}`}</p>
         <form className="token-form" onSubmit={createToken}>
           <label className="token-field" htmlFor="token-name">
             <span>{t("tokens.name")}</span>
@@ -122,18 +114,22 @@ export function TokensPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("tokens.inventory")}</p>
             <h2>{showAll ? t("tokens.allTokens") : t("tokens.activeTokens")}</h2>
           </div>
-          <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>
-            {showAll ? t("tokens.showActive") : t("tokens.showAll")}
-          </button>
+          <div className="panel-head-actions">
+            <span className="badge">{t("tokens.activeBadge", { count: summary.active })}</span>
+            <span className="badge">{t("tokens.totalBadge", { count: summary.total })}</span>
+            <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>
+              {showAll ? t("tokens.showActive") : t("tokens.showAll")}
+            </button>
+          </div>
         </div>
+        <p className="system-note">{t("tokens.lifecycleHint")}</p>
         {tokens.error ? <EmptyState title={t("tokens.loadError")} detail={tokens.error} tone="danger" /> : null}
         {tokens.loading && !tokens.data ? <EmptyState title={t("tokens.loading")} detail={t("tokens.loadingDetail")} /> : null}
         {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={revokeToken} onDelete={deleteToken} /> : null}
       </section>
-    </main>
+    </>
   );
 }
 
@@ -167,7 +163,7 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
             <button className="ghost-button" type="button" disabled={item.status !== "active" || busyToken === item.id} onClick={() => onRevoke(item.id)}>
               {busyToken === item.id ? t("tokens.revoking") : t("tokens.revoke")}
             </button>
-            <button className="ghost-button" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item.id)}>
+            <button className="ghost-button" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item)}>
               {busyToken === item.id ? t("tokens.deleting") : t("tokens.delete")}
             </button>
           </div>

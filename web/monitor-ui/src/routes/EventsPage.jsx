@@ -94,9 +94,9 @@ export function EventsPage() {
 
       <section className="hero-grid overview-kpi-grid">
         <StatCard label={t("events.unread")} value={summary?.unread ?? 0} detail={t("events.totalEvents", { count: summary?.total ?? 0 })} accent={(summary?.unread ?? 0) ? "accent-red" : "accent-green"} />
-        <StatCard label={t("events.critical")} value={summary?.critical ?? 0} detail={t("events.unreadCritical")} accent={(summary?.critical ?? 0) ? "accent-red" : ""} />
-        <StatCard label={t("events.error")} value={summary?.error ?? 0} detail={t("events.unreadErrors")} accent={(summary?.error ?? 0) ? "accent-red" : ""} />
-        <StatCard label={t("events.warning")} value={summary?.warning ?? 0} detail={t("events.unreadWarnings")} accent={(summary?.warning ?? 0) ? "accent-gold" : ""} />
+        <StatCard label={t("events.critical")} value={summary?.critical ?? 0} detail={t("events.criticalDetail")} accent={(summary?.critical ?? 0) ? "accent-red" : ""} />
+        <StatCard label={t("events.error")} value={summary?.error ?? 0} detail={t("events.errorDetail")} accent={(summary?.error ?? 0) ? "accent-red" : ""} />
+        <StatCard label={t("events.warning")} value={summary?.warning ?? 0} detail={t("events.warningDetail")} accent={(summary?.warning ?? 0) ? "accent-gold" : ""} />
       </section>
 
       <section className="panel">

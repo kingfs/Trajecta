@@ -76,7 +76,13 @@ export function TraceDetailPage() {
   const hasDeclaredToolsTab = Boolean(declaredTools.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
-  const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/${fromView}`;
+  // The request list and the session list are two tabs of /traces now, so a
+  // trace opened from either one comes back to the right tab.
+  const backLink = fromSessionID
+    ? `/sessions/${encodeURIComponent(fromSessionID)}`
+    : fromView === "sessions"
+      ? "/traces?tab=sessions"
+      : "/traces";
   const conversation = hasConversation(detail.data);
   const timelineCount = detail.data?.events?.length || 0;
   const messageCount = detail.data?.messages?.length || 0;

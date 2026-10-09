@@ -134,7 +134,7 @@ export function SessionDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
+            <Link className="icon-button" to="/traces?tab=sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
               <HomeIcon />
             </Link>
             <button className="ghost-button" type="button" disabled={exportBusy || fullExportBusy || !detail.data} onClick={exportTrajectory}>

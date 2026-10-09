@@ -1,0 +1,224 @@
+/*
+ * Page layer: the last stylesheet in the cascade.
+ *
+ * Two jobs live here. First, the sign-in screen, which is the one view a user
+ * sees before any of the console exists and therefore has to stand on its own.
+ * Second, the pre-redesign page blocks whose styling was decorative rather than
+ * structural - glow bars, gradient fills and hardcoded dark surfaces that the
+ * shared component layer could not reach without guessing at page semantics.
+ */
+
+/* ------------------------------------------------------------ sign in */
+
+.auth-screen {
+  min-height: 100vh;
+  padding: var(--space-6);
+  background: var(--bg-canvas);
+}
+
+.auth-panel {
+  width: min(384px, 100%);
+  gap: var(--space-3);
+  padding: var(--space-8);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: none;
+}
+
+.auth-panel h1 {
+  font-size: var(--text-2xl);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-2);
+}
+
+.auth-panel label {
+  margin-bottom: calc(-1 * var(--space-2));
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.auth-panel input {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+}
+
+.auth-panel input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.auth-panel .ghost-button {
+  min-height: 36px;
+  margin-top: var(--space-2);
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.auth-success {
+  color: var(--success);
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------- attention / overview */
+
+.overview-attention-panel {
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.overview-attention-panel .trace-table {
+  gap: 0;
+  border: 0;
+  background: transparent;
+}
+
+.overview-attention-panel .trace-row {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.overview-attention-panel .trace-row:first-child {
+  border-top: 0;
+}
+
+.overview-queue {
+  gap: 0;
+}
+
+.overview-queue-row {
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.overview-queue-row:first-child {
+  border-top: 0;
+}
+
+.overview-queue-row:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+
+.overview-queue-row strong {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.overview-queue-row:hover strong {
+  color: var(--accent);
+}
+
+.overview-queue-row span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.breakdown-row-link:hover {
+  background: var(--accent-soft);
+}
+
+.breakdown-label {
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------ detail surfaces */
+
+.trace-row-failed,
+.trace-row-failed:hover,
+.trace-row-group {
+  background: var(--danger-soft);
+}
+
+.trace-row-group {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+
+.trace-failure-panel {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.token-badge-strong {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.routing-timeline-bar-active {
+  background: var(--accent);
+}
+
+.timeline-node {
+  border-color: var(--border-subtle);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.timeline-node:hover {
+  border-color: var(--border);
+}
+
+.tool-modal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+}
+
+/* The light theme overrode the active primary button with a near-black fill
+   before there was a shared accent; the accent is the primary button now. */
+:root[data-theme="light"] .ghost-button.active,
+:root[data-theme="light"] .view-toggle .ghost-button.active,
+:root[data-theme="light"] .wrap-toggle.active,
+:root[data-theme="light"] .badge-live {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .ghost-button.active,
+  :root[data-theme="system"] .view-toggle .ghost-button.active,
+  :root[data-theme="system"] .wrap-toggle.active,
+  :root[data-theme="system"] .badge-live {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+}
+
+/* Recharts renders a fixed-size wrapper; keep the legend from overlapping the
+   plot when a chart has more than two series. */
+.line-chart-card .recharts-legend-wrapper {
+  position: static !important;
+  margin-top: var(--space-2);
+}
+
+.line-chart-card .recharts-legend-item-text {
+  color: var(--text-secondary) !important;
+}
+
+.line-chart-card .recharts-surface {
+  overflow: visible;
+}

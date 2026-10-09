@@ -669,6 +669,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/system/runtime", monitorAdminRequired(systemRuntimeAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/system/db", monitorAdminRequired(systemDatabaseAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/system/slow-queries", monitorAdminRequired(systemSlowQueriesAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/system/host", monitorAdminRequired(systemHostAPIHandler(), monitorVerifier))
 	// pprof is mounted on the Monitor mux; see registerPprofHandlers.
 	if opt.DebugPprofEnabled {
 		registerPprofHandlers(mux)

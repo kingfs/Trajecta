@@ -61,7 +61,7 @@ docker compose exec trajecta /app/bin/server \
 - Monitor：<http://localhost:8081>，用上面的用户名密码登录
 - Proxy：<http://localhost:8080/v1>，把 SDK 的 `base_url` 指向它
 
-登录后在 `Providers` 页面配置上游地址与 API key，在 `Tokens` 页面生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
+登录后在 `模型服务商` 页面配置上游地址与 API key，在 `接入 → API 令牌` 标签页生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
 
 ### 方式二：从源码运行
 
@@ -93,7 +93,7 @@ task build:go                    # 产出服务端 server 与 CLI trajecta
 
 ## 5 分钟：录制一次调用，然后在测试里回放
 
-**1. 让一次真实调用经过代理**（token 来自 Monitor 的 `Tokens` 页面）：
+**1. 让一次真实调用经过代理**（token 来自 Monitor 的 `接入 → API 令牌`）：
 
 ```bash
 export TRAJECTA_TOKEN=llmtl_xxx

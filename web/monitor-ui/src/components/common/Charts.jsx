@@ -12,7 +12,10 @@ import {
 import { formatCount, formatTimelineBucketLabel } from "../../lib/monitor";
 import { useI18n } from "../../lib/i18n";
 
-const COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#fb7185", "#a78bfa", "#22d3ee", "#f97316", "#10b981"];
+// Series palette. It has to stay legible on both themes, so the hues are the
+// desaturated cousins of the semantic colours rather than the raw tokens: the
+// accent leads, then green/amber/rose/violet, then supporting teals.
+const COLORS = ["#5b8cff", "#3ecf8e", "#e3a008", "#f2555a", "#a78bfa", "#22a7c4", "#e07b39", "#4f9d7a"];
 
 export function MultiLineChart({ items = [], series = [], metric = "request_count", height = 260 }) {
   const { t } = useI18n();
@@ -24,11 +27,11 @@ export function MultiLineChart({ items = [], series = [], metric = "request_coun
     <div className="line-chart-card" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 10, right: 18, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: "var(--muted)", fontSize: 12 }} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
-          <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} tickLine={false} axisLine={false} tickFormatter={formatCount} width={44} />
+          <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="label" tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
+          <YAxis tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={formatCount} width={48} />
           <Tooltip content={<ChartTooltip />} />
-          <Legend wrapperStyle={{ color: "var(--muted)", fontSize: 12 }} />
+          <Legend wrapperStyle={{ color: "var(--text-secondary)", fontSize: 12, paddingTop: 8 }} />
           {series.map((item, index) => (
             <Line
               key={item.key}

@@ -1,0 +1,238 @@
+/*
+ * Trajecta Console design tokens.
+ *
+ * The dark palette is the default. `:root[data-theme="light"]` and the
+ * `prefers-color-scheme` block for `data-theme="system"` re-point the same
+ * semantic names, so every component styles itself through one vocabulary and
+ * never through a hardcoded colour.
+ *
+ * Two families of names live here:
+ *   - semantic tokens (--surface-1, --text-secondary, --accent, ...) used by
+ *     every stylesheet written after this refactor;
+ *   - compatibility aliases (--bg, --panel, --line, --muted, ...) that keep the
+ *     page-level rules which predate the redesign on the same palette.
+ */
+
+:root {
+  /* Typography */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-label: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Layout */
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 68px;
+  --content-max: 1680px;
+
+  /* Motion */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --bg-canvas: #0a0b0d;
+  --bg-base: #0e1013;
+  --surface-1: #131519;
+  --surface-2: #171a1f;
+  --surface-3: #1d2127;
+  --surface-hover: rgba(255, 255, 255, 0.045);
+  --surface-inset: #0d0f12;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --text-primary: #eceef2;
+  --text-secondary: #9aa3b2;
+  --text-tertiary: #6b7484;
+  --text-inverse: #0a0b0d;
+
+  --accent: #5b8cff;
+  --accent-hover: #7ba3ff;
+  --accent-soft: rgba(91, 140, 255, 0.16);
+  --accent-border: rgba(91, 140, 255, 0.42);
+  --on-accent: #ffffff;
+
+  --success: #3ecf8e;
+  --success-soft: rgba(62, 207, 142, 0.14);
+  --warning: #e3a008;
+  --warning-soft: rgba(227, 160, 8, 0.16);
+  --danger: #f2555a;
+  --danger-soft: rgba(242, 85, 90, 0.15);
+  --info: #4cc4e0;
+  --info-soft: rgba(76, 196, 224, 0.14);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.48);
+
+  --chart-grid: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-canvas: #f7f8fa;
+  --bg-base: #f2f4f7;
+  --surface-1: #ffffff;
+  --surface-2: #f7f8fa;
+  --surface-3: #eef1f5;
+  --surface-hover: rgba(16, 24, 40, 0.04);
+  --surface-inset: #f7f8fa;
+
+  --border-subtle: rgba(16, 24, 40, 0.07);
+  --border: rgba(16, 24, 40, 0.12);
+  --border-strong: rgba(16, 24, 40, 0.2);
+
+  --text-primary: #101828;
+  --text-secondary: #55607a;
+  --text-tertiary: #7a8699;
+  --text-inverse: #ffffff;
+
+  --accent: #2f6bff;
+  --accent-hover: #1f56e0;
+  --accent-soft: rgba(47, 107, 255, 0.1);
+  --accent-border: rgba(47, 107, 255, 0.38);
+  --on-accent: #ffffff;
+
+  --success: #0f9d63;
+  --success-soft: rgba(15, 157, 99, 0.12);
+  --warning: #b7791f;
+  --warning-soft: rgba(183, 121, 31, 0.14);
+  --danger: #d92d20;
+  --danger-soft: rgba(217, 45, 32, 0.1);
+  --info: #0e7490;
+  --info-soft: rgba(14, 116, 144, 0.1);
+  --violet: #7c3aed;
+  --violet-soft: rgba(124, 58, 237, 0.1);
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 6px 20px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 20px 48px rgba(16, 24, 40, 0.12);
+
+  --chart-grid: rgba(16, 24, 40, 0.07);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg-canvas: #f7f8fa;
+    --bg-base: #f2f4f7;
+    --surface-1: #ffffff;
+    --surface-2: #f7f8fa;
+    --surface-3: #eef1f5;
+    --surface-hover: rgba(16, 24, 40, 0.04);
+    --surface-inset: #f7f8fa;
+
+    --border-subtle: rgba(16, 24, 40, 0.07);
+    --border: rgba(16, 24, 40, 0.12);
+    --border-strong: rgba(16, 24, 40, 0.2);
+
+    --text-primary: #101828;
+    --text-secondary: #55607a;
+    --text-tertiary: #7a8699;
+    --text-inverse: #ffffff;
+
+    --accent: #2f6bff;
+    --accent-hover: #1f56e0;
+    --accent-soft: rgba(47, 107, 255, 0.1);
+    --accent-border: rgba(47, 107, 255, 0.38);
+    --on-accent: #ffffff;
+
+    --success: #0f9d63;
+    --success-soft: rgba(15, 157, 99, 0.12);
+    --warning: #b7791f;
+    --warning-soft: rgba(183, 121, 31, 0.14);
+    --danger: #d92d20;
+    --danger-soft: rgba(217, 45, 32, 0.1);
+    --info: #0e7490;
+    --info-soft: rgba(14, 116, 144, 0.1);
+    --violet: #7c3aed;
+    --violet-soft: rgba(124, 58, 237, 0.1);
+
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+    --shadow-md: 0 6px 20px rgba(16, 24, 40, 0.08);
+    --shadow-lg: 0 20px 48px rgba(16, 24, 40, 0.12);
+
+    --chart-grid: rgba(16, 24, 40, 0.07);
+    color-scheme: light;
+  }
+}
+
+/*
+ * Compatibility aliases. Every rule in styles.css that predates the token
+ * refactor reads one of these names; pointing them at the semantic palette is
+ * what makes those pages inherit the new look without being rewritten.
+ */
+:root,
+:root[data-theme="dark"],
+:root[data-theme="light"],
+:root[data-theme="system"] {
+  --bg: var(--bg-canvas);
+  --bg-strong: var(--surface-1);
+  --panel: var(--surface-1);
+  --panel-strong: var(--surface-2);
+  --panel-soft: var(--surface-2);
+  --line: var(--border-subtle);
+  --line-strong: var(--border);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --muted-soft: var(--text-tertiary);
+  --accent-deep: var(--accent-hover);
+  --gold: var(--warning);
+  --green: var(--success);
+  --shadow: var(--shadow-md);
+  --shadow-soft: var(--shadow-sm);
+  --radius-panel: var(--radius-lg);
+  --radius-chip: var(--radius-sm);
+  --radius-control: var(--radius-md);
+}
+
+/* Mid-strength tones: a border or bar in the same hue as its soft/strong pair.
+   Declared after both themes so the aliases resolve in either one. */
+:root,
+:root[data-theme="light"] {
+  --success-border: rgba(62, 207, 142, 0.45);
+  --warning-border: rgba(227, 160, 8, 0.45);
+  --danger-border: rgba(242, 85, 90, 0.45);
+  --info-border: rgba(76, 196, 224, 0.45);
+  --violet-border: rgba(167, 139, 250, 0.45);
+}
+
+:root[data-theme="light"] {
+  --success-border: rgba(15, 157, 99, 0.4);
+  --warning-border: rgba(183, 121, 31, 0.4);
+  --danger-border: rgba(217, 45, 32, 0.4);
+  --info-border: rgba(14, 116, 144, 0.4);
+  --violet-border: rgba(124, 58, 237, 0.4);
+}

@@ -171,7 +171,7 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 
 ## Monitor 与 MCP 的管理入口
 
-Monitor 侧是渠道/模型/别名配置的主入口：导航中的 `Providers` 页面（API 仍为 `/api/channels`）负责渠道创建、编辑、启停、探测与 headers/能力配置，`Models` 页面负责模型广场、模型详情、模型启停与别名相关操作，`Routing` 页面展示 selected route 记录，`Connect` 页面展示协议入口。
+Monitor 侧是渠道/模型/别名配置的主入口：导航中的 `Providers` 页面（API 仍为 `/api/channels`）负责渠道创建、编辑、启停、探测与 headers/能力配置，`Models` 页面负责模型广场、模型详情、模型启停与别名相关操作，`Routing` 页面展示 selected route 记录，`Connect` 页面（客户端接入 tab）展示协议入口。
 
 MCP 侧提供查询工具与受控重分析动作工具，但没有渠道/模型/别名写入口：
 

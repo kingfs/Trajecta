@@ -43,13 +43,56 @@ Monitor 同时使用两类数据：
 
 ## 页面
 
-左侧主导航固定为 12 项。下面按导航顺序说明路由与用途。
+左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。下面按导航顺序说明路由与用途。
 
-### 概览 `/overview`
+### 监控
 
-时间窗口内的请求量、成功/失败数、Token、延迟、发现项和系统事件概览，以及派生数据健康度（已解析/未解析 trace、解析队列、失败的分析任务）。另有趋势图与主要拆分：端点、上游、路由失败、发现类别。概览每 60 秒自动刷新。
+#### 概览 `/overview`
 
-### 事件 `/events`
+时间窗口内的请求量、成功/失败数、Token、平均 TTFT、延迟、发现项和系统事件概览。趋势图按请求量、Token、延迟三个面板展示；主要拆分收敛为一个面板，用分段控件在模型、模型服务商、端点、上游、路由失败、发现类别之间切换，而不是六列并排。概览每 60 秒自动刷新，并给出两条去向链接：质量页的发现项与事件收件箱。已配置模型服务商的卡片列表与派生数据健康度不再放在这里——前者的完整版本在「模型服务商」页，后者是解析管道的属性而不是最近一小时流量的属性，现已移到「质量 → 数据健康」标签页。
+
+#### 流量 `/traces`
+
+请求与会话两个标签页。
+
+**请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。
+- 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
+- `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
+
+**会话**：按 session 聚合最近 50 个会话，展示健康度、成功率、模型、模型服务商、流式标记与耗时。列表页顶部的时间窗口与统计只覆盖**当前这一页**的 50 条会话，页面上的「本页范围」提示即说明这一点；它不是全库聚合。
+
+- 过滤语义：`provider` 匹配会话使用过的任一 provider；`model` 与搜索框 `q` 匹配会话中**任一**请求（因此一个「先 `gpt-alpha`、后 `claude-beta`」的会话按 `gpt-alpha` 也能查到）；`status` 是**会话级**判断——`success` 表示该会话没有任何失败请求（非 2xx），`failed` / `error` 表示至少有一个，与列表展示的 `success_request` / `failed_request` 计数同源。
+- `database.use_session_summary_read`（`TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）打开后，会话列表改由派生读模型 `session_summaries` 提供；该模型只保存会话的最后一个模型、provider 列表与请求计数，因此无法表达「任一请求命中」的 `model` / `q` 过滤，这两类过滤始终走日志路径。两个读路径对同一过滤条件必须给出相同结果，门禁 `TestSessionFiltersAgreeAcrossReadPaths` 会同时跑两条路径并逐项比对。 代码默认关闭，仓库自带 `config/config.yaml` 已显式打开（参考部署已核对两条读路径一致）；未完成 `session_summaries` 回填的部署应先核对再打开，方法见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)。
+
+session ID 的抽取顺序为：
+
+1. `Session-Id` / `Session_id`
+2. `X-Claude-Code-Session-Id`
+3. `X-Codex-Turn-Metadata` 中的 `session_id`
+4. `X-Codex-Window-Id` 的前缀
+
+适合分析 Codex、Claude Code 等 agent 在一轮任务中多次模型调用的整体行为。
+
+##### 手动导出会话轨迹
+
+会话详情页提供两个按钮：`导出轨迹 (ATIF)`（默认，带上限）与 `完整导出 (NDJSON 流)`（完整会话，流式）。两者都从该会话的客户端可见 cassette 重建轨迹并下载文件，不会调用模型、修改 cassette 或自动提交分析任务。
+
+- 格式固定为 **ATIF-v1.8**；默认响应是单个 trajectory 对象的 JSONL（一行，以换行结束），可拼接成多会话数据集。
+- 默认只重建最早的 500 条 trace（`trajectoryTraceCap`），以便默认视图在慢盘上仍有界；响应 `extra` 增加 `trace_count`（会话总 trace 数）、`included_traces`（本次导出条数）、`truncated`（是否被截断）与 `trace_cap`。被截断时页面提示"默认只导出最早的 N / M 条 trace"，并引导使用完整导出。
+- `?full=1` 取消上限，导出完整会话（仍是单对象 JSON）。
+- `?stream=1` 使用 NDJSON 流式导出，每行一个 JSON 对象并逐条 flush，不在服务端累积整个会话：第一行 `type=header`（`schema_version`、`session_id`、`agent`、`trace_count`、`included_traces`、`truncated`、`trace_cap`）；随后每个 trace 一行 `type=trace`（`trace_id`、`steps`、`results`、`warnings`、可选的 `error`），其中 `results` 是晚到、需要回挂到更早步骤的工具结果，带 `step_id`；从未收到结果的工具调用最后以 `type=missing_tool_result` 行报告；最后一行 `type=final`（`final_metrics` 与会话级 `extra`）。`?stream=1&full=1` 流式导出完整会话。服务端每读完一条 cassette 就 flush，请求 context 取消（客户端断开）时立即停止后续读取。
+- 默认（带上限）导出的结果缓存到 `<trace.output_dir>/trajectory-cache/`，键为 `(session_id, last_trace_id, trace_count, limit)`，因此重看同一会话无需重建。会话只会追加 trace，且已写入的索引行不可变，所以只要轨迹会变，键就必然变化：命中即证明是同一条 trace 序列，无需失效逻辑。条目以临时文件加 rename 原子写入，最多保留 512 个条目 / 512 MiB，超出按写入时间淘汰；`?full=1` 与 `?stream=1` 不读写该缓存。容量上限只影响命中率，未命中一律回落到重建。
+- 当前语义重建支持 Codex 使用的 OpenAI Responses generation（`/responses`、`/v1/responses`）及 SSE。其他 endpoint（包括 compact）保留源 trace 引用，并报告 `unsupported_endpoint`；不伪装成已解析的对话。
+- 请求按 `recorded_at` 与 trace ID 排序，输出按 Responses `output_index` 排序。会话归组依据保存在 `extra.session_source`，无法从 HTTP 证明全部事件的因果关系或任务已完成。
+- 相邻请求的历史上下文按有序重叠合并，不全局删除相同文本。`previous_response_id` 请求按增量输入处理。工具结果按调用 ID 回挂到发起调用的步骤。
+- 每个录制响应合并为一个 agent 步骤，而不是每个 SSE 事件一个步骤。多模态内容保留文本与占位引用，不生成外部附件；未知内容报告警告。reasoning summary 放在 `extra.reasoning_summary`，加密内容仅标记为已省略，不当作完整可读思维链。
+- 每步携带 `trace_id`、origin 与归一化 item 路径（流式输出先重建）。标准 `metrics` 每个响应记录一次 token 计数，`final_metrics` 汇总；不重复导出逐项 usage attribution、原生 item 或请求配置。内部 model child exchanges 不重复计入这份客户端视角导出；仅历史恢复的内容不推测 usage。
+- `extra.warnings` 报告文件缺失、无法解析、上下文不连续、缺失或孤立工具结果、流式中断等问题，下载完成后页面显示警告数量。`completion=unknown` 不将 HTTP 成功解释为任务成功。
+- 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。默认与 `?full=1` 仍在服务端组装完整响应；极大会话应使用 `?stream=1`。
+
+接口为 `GET /api/sessions/:sessionID/trajectory`，可选参数 `full` 与 `stream`（`1`/`true`/`yes`/`on` 视为真），使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头；默认文件名 `session-<id>.atif.jsonl`，流式为 `session-<id>.atif.ndjson`。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
+
+#### 事件 `/events`
 
 Trajecta 自身的事件收件箱：
 
@@ -101,18 +144,26 @@ session ID 的抽取顺序为：
 - 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
 - `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
 
-### 审计 `/audit`
+#### 质量 `/audit`
 
-审计页面有两个面板：
+四个标签页：发现项、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
 
-- 最近发现项（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
-- 请求链路：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
+**发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 
-页面调用的接口只有 `GET /api/findings`、`GET /api/responses/audit/trace` 和 `GET /api/responses/function-executors`；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。
+**请求链路**：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
 
-页面同时展示当前进程的 server-side function executor 状态面板（见下文）。
+**分析任务**：展示已持久化的 analysis run 与 analysis job 队列，并提供两个批量操作，都以异步 job 提交（`POST /api/analysis/batch/reanalyze`），不调用上游模型：
 
-### 模型 `/models`
+- 「修复分析数据」：对失败或未解析的 observation 重新解析。
+- 「修复 Token 统计」：对缺失 usage 的记录重新抽取 token 统计。
+
+**数据健康**：派生数据管道的健康度——已解析/未解析 trace、解析队列深度与失败的分析任务数，未解析项可跳到按 `observation=unparsed` 过滤的流量列表。数据每 60 秒刷新。这一项原先挤在概览页，但它是解析管道的属性，与「最近一小时的流量」无关。
+
+整个页面调用的接口只有 `GET /api/findings`、`GET /api/responses/audit/trace`、`GET /api/analysis/*` 和概览/事件摘要接口；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。server-side function executor 状态面板已移到「系统 → 服务端工具」。
+
+### 配置
+
+#### 模型 `/models`
 
 按模型查看时间窗口内的流量：模型覆盖哪些模型服务商，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
 
@@ -131,15 +182,19 @@ session ID 的抽取顺序为：
 
 配置归属：模型服务商、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 
-### 连接 `/connect`
+#### 接入 `/connect`
 
-展示当前部署的 base URL 与三种协议入口，并给出可复制的 curl 示例：
+两个标签页：客户端接入、API 令牌。
+
+**客户端接入**展示当前部署的 base URL 与三种协议入口，并给出可复制的 curl 示例：
 
 - `/v1/chat/completions`（OpenAI-compatible）
 - `/responses`（OpenAI Responses / Codex；`/v1/responses` 仍然支持）
 - `/anthropic/messages`（Anthropic Messages / Claude Code）
 
-### 路由 `/routing`
+**API 令牌**管理当前用户的个人 API token，见上文「个人 API token」。
+
+#### 路由 `/routing`
 
 工作区包含四个标签页：
 
@@ -150,22 +205,18 @@ session ID 的抽取顺序为：
 
 摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。该端点不解析任何文件，所以响应里没有解析失败计数，页面也不再显示这一项。
 
-### 分析 `/analysis`
+### 系统
 
-展示已持久化的 analysis run 与 analysis job 队列，并提供两个批量操作：
+#### 系统 `/system`
 
-- 「修复分析数据」：对失败或未解析的 observation 重新解析。
-- 「修复 Token 统计」：对缺失 usage 的记录重新抽取 token 统计。
+管理员专属页面：导航项只对 `role=admin` 的登录用户显示，未启用认证时显示给 `local` 伪用户（此时 Monitor 本身不校验身份）；后端对未认证请求返回 401、对已认证的非管理员返回 403。页面分四个标签页，各标签页只轮询自己需要的接口，每 60 秒刷新一次：
 
-两者都以异步 job 提交（`POST /api/analysis/batch/reanalyze`），不调用上游模型。
+- **运行时**：`GET /api/system/host` + `GET /api/system/runtime`。
+- **数据库**：`GET /api/system/db`。
+- **慢查询**：`GET /api/system/slow-queries`。
+- **服务端工具**：`GET /api/responses/function-executors`。
 
-### 令牌 `/tokens`
-
-管理当前用户的个人 API token，见上文「个人 API token」。
-
-### 系统 `/system`
-
-管理员专属页面：导航项只对 `role=admin` 的登录用户显示，未启用认证时显示给 `local` 伪用户（此时 Monitor 本身不校验身份）；后端对未认证请求返回 401、对已认证的非管理员返回 403。页面每 60 秒轮询三个只读接口。
+`GET /api/system/host` 报告主机资源事实，全部来自 `/proc` 与 `syscall.Statfs` 等系统调用，不需要额外 agent：主机名、uptime、内核版本；CPU 核数、总使用率与 user/system/iowait/idle 分解、1/5/15 分钟负载、每核使用率；内存总量/已用/可用/页缓存与 swap；每个挂载点的文件系统、设备、总量/已用/可用/使用率；网络接口的累计收发字节数与瞬时速率；以及本进程的 PID、RSS、虚拟内存、CPU 占用、线程数与打开文件数。非 Linux 平台返回 `unsupported=true` 与 `reason`，页面显示说明而不是报错。瞬时速率在两个采样点之间计算，同一进程内两次请求间隔不足 500 ms 时复用上一次结果，间隔超过 5 分钟则重置基线（此时速率显示为 0 而不是把休眠期间的平均值当成当前速率）。页面展示时会折叠噪音：同一设备上的多个挂载点（容器 overlay 层与 bind mount）合并为一行并标注还有几个挂载点，从未传输过字节的网络接口不显示。
 
 `GET /api/system/runtime` 报告 Go 进程事实：Go 版本、GOOS/GOARCH、CPU 核数、GOMAXPROCS、协程数、进程运行时长、堆的累计分配/在用/存活对象/进程总内存/栈内存、GC 次数与最近 256 次 GC 暂停的 min/p25/p50/p75/max，以及 `database/sql` 连接池计数（最大连接、已打开、使用中、空闲、等待次数、等待累计、因空闲或超时被关闭）。它不查询任何数据库行。
 
@@ -183,9 +234,10 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 ## 兼容路由与详情路由
 
 - `/` 重定向到 `/overview`。
-- `/requests` 与 `/traces` 渲染同一个页面（追踪）。
+- 合并掉的旧地址全部保留重定向，并且**保留原有查询参数**：`/requests` → `/traces`，`/sessions` → `/traces?tab=sessions`，`/analysis` → `/audit?tab=analysis`，`/tokens` → `/connect?tab=tokens`。
 - `/channels` 重定向到 `/providers`；`/channels/:channelID` 仍渲染模型服务商详情页。
 - 详情路由：`/traces/:traceID`、`/sessions/:sessionID`、`/models/:model`、`/providers/:providerID`、`/upstreams/:upstreamID`。
+- 未匹配的路径重定向到 `/overview`。
 
 ## Trace 详情
 
@@ -206,7 +258,7 @@ Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `re
 
 ## Responses function executors
 
-`GET /api/responses/function-executors` 返回当前进程的 server-side function executor 摘要，供 Audit 页面的状态面板使用；响应不返回 `static_response` 的 output 或 `external_command` 的 command 等敏感内容。
+`GET /api/responses/function-executors` 返回当前进程的 server-side function executor 摘要，供「系统 → 服务端工具」标签页使用；响应不返回 `static_response` 的 output 或 `external_command` 的 command 等敏感内容。
 
 `POST /api/responses/function-executors` 是 Monitor 的写入口：默认 `validate_only=true`，只返回归一化摘要和 warnings；`validate_only=false` 时把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 executor registry，后续新请求生效。字段、redaction 与进程约束语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 
@@ -217,7 +269,7 @@ Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `re
 1. trace detail 的 Routing & Conversation 与 Raw。
 2. Routing 页面的 Decisions，或 trace 中的 routing context。
 3. Events 页面是否有 parser / analyzer / router / upstream 事件。
-4. Models 与 Providers 页面确认模型启用状态和模型服务商健康。
+4. 模型与模型服务商页面确认模型启用状态和模型服务商健康。
 5. 只有在派生结果明显不对时才运行 `Refresh analysis`；Token 统计异常时运行 `Repair stats`。
 
 ## 非目标与未实现

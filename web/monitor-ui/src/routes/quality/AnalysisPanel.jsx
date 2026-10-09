@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { EmptyState } from "../components/common/EmptyState";
-import { DetailMetaPill, InlineTag } from "../components/common/Badges";
-import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, postJSON } from "../lib/api";
-import { useI18n } from "../lib/i18n";
-import { formatDateTime } from "../lib/monitor";
+import { EmptyState } from "../../components/common/EmptyState";
+import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
+import { useJSON } from "../../hooks/useJSON";
+import { apiPaths, apiURL, postJSON } from "../../lib/api";
+import { useI18n } from "../../lib/i18n";
+import { formatDateTime } from "../../lib/monitor";
 
-export function AnalysisPage() {
+export function AnalysisPanel() {
   const { t } = useI18n();
   const [refreshTick, setRefreshTick] = useState(0);
   const [batchBusy, setBatchBusy] = useState(false);
@@ -22,10 +22,10 @@ export function AnalysisPage() {
     setJobNotice(null);
     try {
       const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", missing_usage: true, limit: 1000, repair_usage: true });
-      setJobNotice({ tone: "green", text: `Batch reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      setJobNotice({ tone: "green", text: t("analysis.queuedJob", { id: response.job?.id || "-" }) });
       setRefreshTick((value) => value + 1);
     } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
     } finally {
       setBatchBusy(false);
     }
@@ -35,44 +35,37 @@ export function AnalysisPage() {
     setBatchBusy(true);
     setJobNotice(null);
     try {
-      const jobs = await Promise.all([
+      const batchResponses = await Promise.all([
         postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "failed", limit: 1000, reparse: true, scan: true }),
         postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
       ]);
-      const jobIDs = jobs.map((response) => `#${response.job?.id || "-"}`).join(", ");
-      setJobNotice({ tone: "green", text: `Analysis refresh jobs ${jobIDs} queued` });
+      setJobNotice({ tone: "green", text: t("analysis.queuedJobs", { count: batchResponses.length }) });
       setRefreshTick((value) => value + 1);
     } catch (error) {
-      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+      setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
     } finally {
       setBatchBusy(false);
     }
   };
 
   return (
-    <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Offline runs</p>
-          <h1>{t("analysis.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runAnalysisRepairBatch}>
-            {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
-          </button>
-          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
-            {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}
-          </button>
-        </div>
-      </header>
+    <>
       {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Reanalysis jobs</p>
             <h2>{t("analysis.jobQueue")}</h2>
+            <p className="trace-subline">{t("analysis.jobsHint")}</p>
           </div>
-          <InlineTag>{t("analysis.jobs", { count: jobs.data?.total ?? 0 })}</InlineTag>
+          <div className="panel-head-actions" role="group" aria-label={t("analysis.batchRepair")}>
+            <InlineTag>{t("analysis.jobs", { count: jobs.data?.total ?? 0 })}</InlineTag>
+            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runAnalysisRepairBatch}>
+              {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
+            </button>
+            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
+              {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}
+            </button>
+          </div>
         </div>
         {jobs.error ? <EmptyState title={t("analysis.loadJobsError")} detail={jobs.error} tone="danger" /> : null}
         {jobs.loading && !jobs.data ? <EmptyState title={t("analysis.loadingJobs")} detail={t("analysis.loadingJobsDetail")} /> : null}
@@ -88,10 +81,10 @@ export function AnalysisPage() {
                   <InlineTag tone={job.status === "completed" ? "green" : job.status === "failed" ? "danger" : "gold"}>{job.status}</InlineTag>
                 </div>
                 <div className="detail-meta-strip">
-                  <DetailMetaPill label="job" value={job.id} />
-                  <DetailMetaPill label="attempts" value={job.attempts ?? 0} />
-                  <DetailMetaPill label="created" value={formatDateTime(job.created_at)} />
-                  <DetailMetaPill label="updated" value={formatDateTime(job.updated_at)} />
+                  <DetailMetaPill label={t("analysis.metaJob")} value={job.id} />
+                  <DetailMetaPill label={t("analysis.metaAttempts")} value={job.attempts ?? 0} />
+                  <DetailMetaPill label={t("analysis.metaCreated")} value={formatDateTime(job.created_at)} />
+                  <DetailMetaPill label={t("analysis.metaUpdated")} value={formatDateTime(job.updated_at)} />
                 </div>
                 <pre className="code-block">{JSON.stringify({ steps: job.steps || [], request: job.request || {}, result: job.result || {}, error: job.last_error || "" }, null, 2)}</pre>
               </article>
@@ -104,7 +97,6 @@ export function AnalysisPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Persisted runs</p>
             <h2>{t("analysis.latest")}</h2>
           </div>
           <InlineTag>{t("analysis.totalRuns", { count: analysis.data?.total ?? 0 })}</InlineTag>
@@ -123,10 +115,10 @@ export function AnalysisPage() {
                   <InlineTag tone={run.status === "completed" ? "green" : "gold"}>{run.status}</InlineTag>
                 </div>
                 <div className="detail-meta-strip">
-                  <DetailMetaPill label="session" value={run.session_id || "-"} mono />
-                  <DetailMetaPill label="trace" value={run.trace_id || "-"} mono />
-                  <DetailMetaPill label="input" value={run.input_ref || "-"} mono />
-                  <DetailMetaPill label="created" value={formatDateTime(run.created_at)} />
+                  <DetailMetaPill label={t("analysis.metaSession")} value={run.session_id || "-"} mono />
+                  <DetailMetaPill label={t("analysis.metaTrace")} value={run.trace_id || "-"} mono />
+                  <DetailMetaPill label={t("analysis.metaInput")} value={run.input_ref || "-"} mono />
+                  <DetailMetaPill label={t("analysis.metaCreated")} value={formatDateTime(run.created_at)} />
                 </div>
                 <div className="action-group action-group-start">
                   {run.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(run.session_id)}`}>{t("analysis.openSession")}</Link> : null}
@@ -139,6 +131,6 @@ export function AnalysisPage() {
           <EmptyState title={t("analysis.noRuns")} detail={t("analysis.noRunsDetail")} />
         ) : null}
       </section>
-    </div>
+    </>
   );
 }
