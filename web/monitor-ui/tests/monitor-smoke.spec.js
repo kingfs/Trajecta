@@ -1525,11 +1525,14 @@ test("the window strips are radio groups with a checked option", async ({ page }
   await expect(page).toHaveURL(/window=30d/);
 
   // The labels are translated and therefore wider than the raw option values
-  // they replaced, which on a phone is enough to push the strip out of its
-  // panel: the track wraps rather than widening the page.
-  const panel = page.locator('[data-slot="card"]', { has: strip }).first();
-  const [stripBox, panelBox] = await Promise.all([strip.boundingBox(), panel.boundingBox()]);
-  expect(Math.round(stripBox.x + stripBox.width)).toBeLessThanOrEqual(Math.round(panelBox.x + panelBox.width));
+  // they replaced, which on a phone is enough to push the strip past the edge of
+  // the header it now lives in: the track wraps rather than widening the page.
+  const viewport = page.viewportSize();
+  const stripBox = await strip.boundingBox();
+  expect(Math.round(stripBox.x)).toBeGreaterThanOrEqual(0);
+  expect(Math.round(stripBox.x + stripBox.width)).toBeLessThanOrEqual(viewport.width + 1);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });
 
 // A hand-rolled modal handled Escape and the backdrop, and left everything else
@@ -1675,7 +1678,10 @@ test("the account panel is a light surface in light mode", async ({ page }) => {
     text: getComputedStyle(el.querySelector("strong")).color,
   }));
   expect(colours.background).not.toBe(colours.text);
-  expect(colours.text).toMatch(/oklch\(0\.[0-4]/);
+  // Dark ink on a light surface, read from whichever colour space Chromium
+  // reports - the tokens resolve to hex now, so the serialisation is rgb().
+  const ink = colours.text.match(/[\d.]+/g).slice(0, 3).map(Number);
+  expect(Math.max(...ink)).toBeLessThan(90);
 });
 
 test("each theme resolves to real colours", async ({ page }) => {
@@ -1853,4 +1859,73 @@ test("the card sections keep the panel box", async ({ page }) => {
   expect(box.tag).toBe("SECTION");
   // A section directly under the page body hugs the bottom of the page.
   expect(box.margin).toBe("0px");
+});
+
+// One heading layer per page. A page used to stack a group eyebrow ("监控")
+// over the title over a description of the page, which repeated the sidebar and
+// pushed the content down; the range control that used to sit in whichever
+// panel happened to own it now sits at the right of the title.
+test("every page has one heading layer and its range control in the header", async ({ page }) => {
+  const WINDOWED = ["/overview", "/events", "/providers", "/models", "/routing", "/audit?tab=health"];
+  const PLAIN = ["/traces", "/system", "/connect"];
+  for (const route of [...WINDOWED, ...PLAIN]) {
+    await page.goto(route);
+    const header = page.locator(".page-header");
+    await expect(header, `${route} has a page header`).toHaveCount(1);
+    // Exactly one heading, and no eyebrow and no subtitle in the header.
+    await expect(page.locator("h1"), `${route} has one page title`).toHaveCount(1);
+    await expect(header.locator(".eyebrow, .page-header-subtitle"), `${route} stacks no second layer`).toHaveCount(0);
+    const range = header.getByRole("radiogroup");
+    if (WINDOWED.includes(route)) {
+      await expect(range, `${route} offers a time range in the header`).toHaveCount(1);
+    } else {
+      await expect(range, `${route} has no time range`).toHaveCount(0);
+    }
+    // The server timestamp chip that used to sit next to the title is gone.
+    await expect(header.locator(".badge")).toHaveCount(0);
+  }
+});
+
+/*
+ * The palette is judged by numbers rather than by eye, because "light mode is
+ * one flat sheet" is exactly the kind of thing an eye adapts to. Two properties
+ * have to hold in both themes: a card is separated from the canvas it sits on,
+ * and a border is separated from the card. The thresholds are just above the
+ * gap that made the old light palette unreadable - a 9% hairline on white.
+ */
+test("both themes keep their surfaces and borders legible", async ({ page }) => {
+  const seen = {};
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/overview");
+    await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
+    seen[scheme] = await page.evaluate(() => {
+      const toRgb = (colour) => {
+        const nums = colour.match(/[\d.]+/g);
+        return nums ? nums.slice(0, 3).map(Number) : null;
+      };
+      const root = getComputedStyle(document.documentElement);
+      const card = document.querySelector('[data-slot="card"]');
+      const cardStyle = getComputedStyle(card);
+      return {
+        canvas: toRgb(getComputedStyle(document.body).backgroundColor),
+        card: toRgb(cardStyle.backgroundColor),
+        border: toRgb(cardStyle.borderTopColor),
+        text: toRgb(cardStyle.color),
+        darkClass: document.documentElement.classList.contains("dark"),
+      };
+    });
+    expect(seen[scheme].darkClass, `${scheme} selects the ${scheme} scales`).toBe(scheme === "dark");
+  }
+  // Sum of channel differences, which is enough to compare like with like.
+  const gap = (a, b) => a.reduce((sum, value, index) => sum + Math.abs(value - b[index]), 0);
+  for (const scheme of ["light", "dark"]) {
+    const { canvas, card, border, text } = seen[scheme];
+    for (const [name, value] of Object.entries({ canvas, card, border, text })) {
+      expect(value, `${scheme} ${name} resolves to a real colour`).not.toBeNull();
+    }
+    expect(gap(card, canvas), `${scheme}: a card separates from the canvas`).toBeGreaterThanOrEqual(12);
+    expect(gap(border, card), `${scheme}: a border separates from the card`).toBeGreaterThanOrEqual(45);
+    expect(gap(text, card), `${scheme}: text separates from the card`).toBeGreaterThanOrEqual(300);
+  }
 });

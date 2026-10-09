@@ -15,10 +15,7 @@ export function SystemPage() {
   const { t } = useI18n();
   return (
     <TabbedPage
-      eyebrow={t("nav.group.system")}
       title={t("system.title")}
-      subtitle={t("system.subtitle")}
-      meta={<span className="badge">{t("system.refresh")}</span>}
       tabs={[
         { id: "runtime", label: t("system.tabRuntime"), element: <RuntimePanel /> },
         { id: "database", label: t("system.tabDatabase"), element: <DatabasePanel /> },

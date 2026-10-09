@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { StatCard } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
@@ -78,19 +79,17 @@ export function EventsPage() {
 
   return (
     <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">System health</p>
-          <h1>{t("events.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <WindowToggle value={currentFilter(searchParams, "window", DEFAULT_EVENT_WINDOW)} onChange={(next) => setFilter("window", next)} label={t("events.window")} />
-          <Button variant="ghost" type="button" onClick={() => markAllRead.mutate()} disabled={busyID === "read-all"}>
-            {t("events.markAllRead")}
-          </Button>
-          <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
-        </div>
-      </header>
+      <PageHeader
+        title={t("events.title")}
+        actions={
+          <>
+            <Button variant="ghost" type="button" onClick={() => markAllRead.mutate()} disabled={busyID === "read-all"}>
+              {t("events.markAllRead")}
+            </Button>
+            <WindowToggle value={currentFilter(searchParams, "window", DEFAULT_EVENT_WINDOW)} onChange={(next) => setFilter("window", next)} label={t("events.window")} />
+          </>
+        }
+      />
 
       {error ? <EmptyState title={t("events.loadError")} detail={error} tone="danger" /> : null}
       {loading && !data ? <EmptyState title={t("events.loading")} detail={t("events.loadingDetail")} /> : null}

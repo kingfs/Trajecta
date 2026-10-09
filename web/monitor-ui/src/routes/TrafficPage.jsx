@@ -11,9 +11,7 @@ export function TrafficPage() {
   const { t } = useI18n();
   return (
     <TabbedPage
-      eyebrow={t("nav.group.observe")}
       title={t("nav.traffic")}
-      subtitle={t("traffic.subtitle")}
       tabs={[
         { id: "requests", label: t("traffic.tabRequests"), element: <RequestsPanel /> },
         { id: "sessions", label: t("traffic.tabSessions"), element: <SessionsPanel /> },

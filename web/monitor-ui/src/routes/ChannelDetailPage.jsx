@@ -16,7 +16,7 @@ import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatCount, formatDateTime, formatDuration, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
 export function ProviderDetailPage() {
@@ -219,7 +219,7 @@ export function ProviderDetailPage() {
               <Button variant="default" size="icon" type="button" onClick={confirmDeleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></Button>
               <Switch checked={Boolean(provider.enabled)} onChange={(enabled) => setProviderEnabled.mutate(enabled)} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
             </div>
-            <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
+            <WindowToggle value={windowValue} onChange={setWindow} label={t("channelDetail.windowLabel")} />
           </div>
         </header>
 
@@ -228,9 +228,6 @@ export function ProviderDetailPage() {
             <div>
               <p className="eyebrow">{t("channelDetail.analytics")}</p>
               <h2>{t("channelDetail.providerUsage")}</h2>
-            </div>
-            <div className="panel-head-actions">
-              <WindowToggle value={windowValue} onChange={setWindow} label={t("channelDetail.windowLabel")} />
             </div>
           </div>
           <div className="hero-grid hero-grid-compact">

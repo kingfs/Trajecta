@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { EmptyState } from "../components/common/EmptyState";
@@ -17,9 +18,8 @@ import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, patchJSON, postJSON, requestJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
+import { formatCount, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
-const REFRESH_MS = 60_000;
 const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
 const ROUTING_TABS = ["decisions", "settings", "aliases", "inspect"];
@@ -80,16 +80,14 @@ export function RoutingPage() {
 
   return (
     <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">{t("routing.decisions")}</p>
-          <h1>{t("routing.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge badge-live">{t("common.refresh60")}</span>
-          <span className="badge">{traces.data?.refreshed_at ? formatTime(traces.data.refreshed_at) : "..."}</span>
-        </div>
-      </header>
+      <PageHeader
+        title={t("routing.title")}
+        actions={
+          activeTab === "decisions" ? (
+            <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />
+          ) : null
+        }
+      />
 
       <Card as="section">
         <div className="panel-head">
@@ -118,9 +116,6 @@ export function RoutingPage() {
               <div>
                 <p className="eyebrow">{t("routing.decisionLog")}</p>
                 <h2>{t("routing.recent")}</h2>
-              </div>
-              <div className="panel-head-actions">
-                <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />
               </div>
             </div>
             <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>

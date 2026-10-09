@@ -9,7 +9,7 @@ import { RequestList } from "../../components/monitor/RequestList";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { formatDuration, formatTime, formatTokenCount, setOrDeleteParam } from "../../lib/monitor";
+import { formatDuration, formatTokenCount, setOrDeleteParam } from "../../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
@@ -88,8 +88,6 @@ export function RequestsPanel() {
             <h2>{t("requests.recentTitle")}</h2>
           </div>
           <div className="panel-head-actions">
-            <span className="badge badge-live">{t("common.refresh60")}</span>
-            <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
             <div className="pager">
               <Button variant="ghost" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
                 {t("common.previous")}

@@ -17,7 +17,7 @@ import { useI18n } from "../lib/i18n";
  * header and is how a panel exposes its own primary action (a repair button, a
  * create button) without owning the header.
  */
-export function TabbedPage({ eyebrow, title, subtitle, tabs, defaultTab, meta }) {
+export function TabbedPage({ title, tabs, defaultTab }) {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const fallback = defaultTab || tabs[0]?.id;
@@ -41,7 +41,7 @@ export function TabbedPage({ eyebrow, title, subtitle, tabs, defaultTab, meta })
 
   return (
     <main className="shell shell-list">
-      <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} meta={meta} actions={active.actions} />
+      <PageHeader title={title} actions={active.actions} />
       {/* Radix owns the tab semantics end to end now, so the trigger and the
           panel it controls are generated from one value and the aria-controls
           pair is real. The active value still comes from `?tab=`. */}

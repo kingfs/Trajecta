@@ -44,7 +44,6 @@ export function RuntimePanel() {
           </div>
           <div className="panel-head-actions">
             {live?.host?.hostname ? <span className="badge">{live.host.hostname}</span> : null}
-            {live?.generated_at ? <span className="badge">{t("system.sampled", { value: formatDateTime(live.generated_at) })}</span> : null}
           </div>
         </div>
 
@@ -206,9 +205,6 @@ export function RuntimePanel() {
         <div className="panel-head">
           <div>
             <h2>{t("system.goProcess")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            {facts?.generated_at ? <span className="badge">{t("system.sampled", { value: formatDateTime(facts.generated_at) })}</span> : null}
           </div>
         </div>
 

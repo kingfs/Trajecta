@@ -41,6 +41,11 @@ export function applyTheme(theme: ThemePreference = currentTheme()): ResolvedThe
   const normalized = (PREFERENCES.includes(theme) ? theme : "system") as ThemePreference;
   const resolved = resolveTheme(normalized);
   document.documentElement.dataset.theme = resolved;
+  // The colour scales in @radix-ui/colors swap under `.dark`, and this is what
+  // puts it there. `data-theme` stays the app's own switch - the Tailwind
+  // `dark:` variant and the tests read it - and the class is only how the
+  // upstream scales are selected, so the two are written together.
+  document.documentElement.classList.toggle("dark", resolved === "dark");
   window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: resolved }));
   return resolved;
 }

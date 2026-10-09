@@ -1,22 +1,19 @@
 import React from "react";
 
-// PageHeader is the one header every page renders. Standalone pages keep their
-// own `.topbar` markup, which is styled to match, so the console never shows
-// two different header treatments side by side.
-export function PageHeader({ eyebrow, title, subtitle, actions, meta }) {
+/*
+ * The one header every page renders: the page title, and on the right the
+ * controls that act on the whole page - the time range first among them.
+ *
+ * It is deliberately one line. A page used to stack a group eyebrow ("监控")
+ * over the title over a description of the page, which repeated what the
+ * sidebar and the navigation already said and pushed the content down by three
+ * lines. The descriptions now live in the guide.
+ */
+export function PageHeader({ title, actions }) {
   return (
     <header className="page-header">
-      <div className="page-header-title">
-        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
-        <h1>{title}</h1>
-        {subtitle ? <p className="page-header-subtitle">{subtitle}</p> : null}
-      </div>
-      {actions || meta ? (
-        <div className="page-header-actions">
-          {meta}
-          {actions}
-        </div>
-      ) : null}
+      <h1>{title}</h1>
+      {actions ? <div className="page-header-actions">{actions}</div> : null}
     </header>
   );
 }

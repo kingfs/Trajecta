@@ -18,7 +18,6 @@ import {
   buildProviderLink,
   formatCount,
   formatDateTime,
-  formatTime,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -70,7 +69,7 @@ export function ModelDetailPage() {
               </Link>
             </Button>
           </div>
-          <span className="badge">{detail.data?.refreshed_at ? formatTime(detail.data.refreshed_at) : "..."}</span>
+          <WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />
         </div>
       </header>
 
@@ -79,9 +78,6 @@ export function ModelDetailPage() {
           <div>
             <p className="eyebrow">Analytics</p>
             <h2>Usage window</h2>
-          </div>
-          <div className="panel-head-actions">
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">

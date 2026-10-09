@@ -4,6 +4,7 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -14,7 +15,6 @@ import {
   buildModelLink,
   formatCount,
   formatDateTime,
-  formatTime,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -52,24 +52,16 @@ export function ModelsPage() {
 
   return (
     <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Model marketplace</p>
-          <h1>{t("models.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge">{models.data?.refreshed_at ? formatTime(models.data.refreshed_at) : "..."}</span>
-        </div>
-      </header>
+      <PageHeader
+        title={t("models.title")}
+        actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />}
+      />
 
       <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Catalog</p>
             <h2>{t("models.catalogTitle")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />
           </div>
         </div>
         <form className="filter-bar" onSubmit={applySearch}>

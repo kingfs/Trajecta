@@ -35,12 +35,14 @@
   width: 100%;
 }
 
+/* Full-bleed on purpose. The 1680px cap used to centre the shell with an auto
+ * margin that grew with the window - fifty pixels a side on a 1780px screen -
+ * so the content sat in a narrower column than the space it was given. A
+ * dashboard reads better wide: the gutter is the padding, nothing else. */
 .shell,
 .shell-list,
 .shell-detail {
   width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
   padding: 0 var(--page-pad-x) var(--space-10);
 }
 
@@ -367,6 +369,15 @@
   background: var(--bg-canvas);
   box-shadow: none;
   backdrop-filter: none;
+}
+
+/* The page header is one line now - a title and the controls that act on the
+   page - so its controls are centred against the title instead of aligned to
+   the top of a title block. `.topbar` stays top-aligned: the detail pages keep
+   a multi-row heading block there. */
+.page-header {
+  align-items: center;
+  padding: var(--space-4) var(--page-pad-x);
 }
 
 .shell-detail .topbar {

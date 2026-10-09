@@ -10,9 +10,7 @@ export function AccessPage() {
   const { t } = useI18n();
   return (
     <TabbedPage
-      eyebrow={t("nav.group.configure")}
       title={t("nav.access")}
-      subtitle={t("access.subtitle")}
       tabs={[
         { id: "clients", label: t("access.tabClients"), element: <ConnectPanel /> },
         { id: "tokens", label: t("access.tabTokens"), element: <TokensPanel /> },

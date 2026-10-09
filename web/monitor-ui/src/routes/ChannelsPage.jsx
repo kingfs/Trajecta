@@ -5,6 +5,7 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -16,7 +17,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildProviderLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildProviderLink, formatCount, formatDateTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
   name: "",
@@ -65,24 +66,16 @@ export function ProvidersPage() {
 
   return (
     <div className="shell shell-list">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">{t("providers.management")}</p>
-          <h1>{t("providers.title")}</h1>
-        </div>
-        <div className="topbar-meta">
-          <span className="badge">{providers.data?.refreshed_at ? formatTime(providers.data.refreshed_at) : "..."}</span>
-        </div>
-      </header>
+      <PageHeader
+        title={t("providers.title")}
+        actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("providers.analyticsWindow")} />}
+      />
 
       <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("providers.overview")}</p>
             <h2>{t("providers.managed")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("providers.analyticsWindow")} />
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">

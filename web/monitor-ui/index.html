@@ -25,6 +25,10 @@
               ? "dark"
               : "light";
         document.documentElement.dataset.theme = theme;
+        // Kept in step with applyTheme(): the Radix colour scales are selected
+        // by this class, and setting it here is what stops the first paint from
+        // showing the light palette to a dark-theme visitor.
+        document.documentElement.classList.toggle("dark", theme === "dark");
       })();
     </script>
     <script type="module" src="/src/main.jsx"></script>

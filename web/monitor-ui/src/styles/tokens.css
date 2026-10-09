@@ -1,30 +1,46 @@
+@import "@radix-ui/colors/slate.css";
+@import "@radix-ui/colors/slate-dark.css";
+@import "@radix-ui/colors/slate-alpha.css";
+@import "@radix-ui/colors/slate-dark-alpha.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/green.css";
+@import "@radix-ui/colors/green-dark.css";
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/red.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/cyan.css";
+@import "@radix-ui/colors/cyan-dark.css";
+@import "@radix-ui/colors/violet.css";
+@import "@radix-ui/colors/violet-dark.css";
+
 /*
  * Trajecta Console design tokens.
  *
- * Every colour here is OKLCH, and every one comes from a published scale
- * rather than from a colour picker: the neutrals are Radix's slate ramp for
- * this theme, the six hues are Radix's blue, green, amber, red, cyan and violet
- * ramps. Those ramps are designed as a set - each step has a fixed job and a
- * contrast relationship to the steps around it - so the palette is legible by
- * construction rather than by eye. The step each semantic name takes, and why,
- * is recorded at the point of use.
+ * Colour comes from @radix-ui/colors. Each semantic token names the step Radix
+ * designed for that job rather than a colour picked by eye:
  *
- * OKLCH is used because it is perceptually uniform: equal steps in L are equal
- * steps in apparent lightness, which is what lets one `--text-tertiary` read as
- * the same level of de-emphasis on either theme. Hex cannot express that, and
- * mixing hex by hand - the previous state of this file - is how a palette ends
- * up with three greys that are the same lightness and two that are not.
+ *   step 1  app background            step 7  element border, focus ring
+ *   step 2  subtle background         step 8  hovered element border
+ *   step 3  element background        step 9  solid fill, the accent itself
+ *   step 4  hovered element           step 10 hovered solid
+ *   step 5  active/selected element   step 11 low-contrast text
+ *   step 6  subtle border             step 12 high-contrast text
  *
- * There are two theme blocks and no media query. `data-theme` always holds the
- * theme actually in use: `applyTheme()` resolves "system" against
- * `prefers-color-scheme` and index.html sets the same value before first paint,
- * so the light palette appears once instead of three times.
+ * Both themes resolve the same names. The imported `-dark` stylesheets re-point
+ * --slate-N and the six hues under `.dark`, and applyTheme() puts `dark` on
+ * <html> beside `data-theme`, so a semantic token needs one declaration rather
+ * than one per theme. The six hues are slate's siblings by construction: each
+ * ramp is tuned against the same neutrals, which is why a success green and a
+ * danger red sit at the same lightness and neither shouts.
  *
- * Two families of names live here:
- *   - semantic tokens (--surface-1, --text-secondary, --accent, ...) used by
- *     every stylesheet written after this refactor;
- *   - compatibility aliases (--bg, --panel, --line, --muted, ...) that keep the
- *     page-level rules which predate the redesign on the same palette.
+ * Only what Radix does not model is declared twice: the surface order (a light
+ * theme stacks near-white cards on a tinted canvas, a dark theme stacks lifted
+ * cards on a near-black canvas, so the steps swap) and the shadows, which are
+ * invisible on a dark background.
+ *
+ * Everything else here is theme-independent: type, spacing, radii and motion.
  */
 
 :root {
@@ -74,150 +90,135 @@
   --transition-slow: 280ms var(--ease-out-soft);
 }
 
-/* The dark palette is also the no-attribute default, so a browser that has not
-   run the bootstrap yet still paints a complete theme. */
-:root,
-:root[data-theme="dark"] {
-  --bg-canvas: oklch(0.1785 0.0041 286.0);
-  --bg-base: oklch(0.1785 0.0041 286.0);
-  --surface-1: oklch(0.2132 0.0042 264.5);
-  --surface-2: oklch(0.2521 0.0058 271.2);
-  --surface-3: oklch(0.2832 0.0070 248.1);
-  --surface-inset: oklch(0.1785 0.0041 286.0);
-  --surface-hover: color-mix(in srgb, oklch(0.9315 0.0236 250.1) 8%, transparent);
+/*
+ * The colour map. `:root` is the dark theme as well as the no-attribute
+ * default, so a browser that has not run the bootstrap yet still paints a
+ * complete theme.
+ */
+:root {
+  /* Surfaces. A dark theme lifts a card off the canvas; the light theme below
+     turns the pair around. */
+  --bg-canvas: var(--slate-1);
+  --bg-base: var(--slate-1);
+  --surface-1: var(--slate-2);
+  --surface-2: var(--slate-3);
+  --surface-3: var(--slate-4);
+  --surface-inset: var(--slate-1);
+  --surface-hover: var(--slate-a3);
+  --surface-inverse: var(--slate-12);
+  --on-inverse: var(--slate-1);
 
-  --border-subtle: color-mix(in srgb, oklch(0.9315 0.0236 250.1) 8%, transparent);
-  --border: color-mix(in srgb, oklch(0.9305 0.0312 225.1) 11%, transparent);
-  --border-strong: color-mix(in srgb, oklch(0.9365 0.0314 243.7) 15%, transparent);
+  /* Borders. Solid steps, not a translucent white: the reason light mode read
+     as one flat sheet was a 9% hairline that vanished against a white card. */
+  --border-subtle: var(--slate-6);
+  --border: var(--slate-7);
+  --border-strong: var(--slate-8);
 
-  --text-primary: oklch(0.9489 0.0029 264.5);
-  --text-secondary: oklch(0.7686 0.0096 258.3);
-  --text-tertiary: color-mix(in oklab, oklch(0.7686 0.0096 258.3) 95%, transparent);
-  --text-inverse: oklch(0.1785 0.0041 286.0);
+  --text-primary: var(--slate-12);
+  --text-secondary: var(--slate-11);
+  /* The scales only publish two text steps, 11 and 12, and step 10 is not a
+     text colour in either theme: as ink on the canvas it lands at 4.4:1 in
+     dark and 3.7:1 in light. 90% of step 11 keeps a third, dimmer level that
+     still clears AA on every surface. */
+  --text-tertiary: color-mix(in oklab, var(--slate-11) 90%, var(--slate-1));
+  --text-inverse: var(--slate-1);
 
-  --accent: color-mix(in oklab, oklch(0.7642 0.1257 249.5) 94%, oklch(0.9071 0.0510 238.4));
-  --accent-solid: oklch(0.6493 0.1930 251.8);
-  --accent-soft: oklch(0.2745 0.0663 253.9);
-  --accent-border: oklch(0.4160 0.1133 252.0);
-  --accent-strong: oklch(0.9071 0.0510 238.4);
-  --accent-hover: oklch(0.6884 0.1693 251.4);
-  --on-accent: oklch(1 0 0);
+  --accent: var(--blue-11);
+  --accent-solid: var(--blue-9);
+  --accent-hover: var(--blue-10);
+  --accent-soft: var(--blue-3);
+  --accent-border: var(--blue-7);
+  --accent-strong: var(--blue-12);
+  --on-accent: #ffffff;
 
-  --success: color-mix(in oklab, oklch(0.7794 0.1655 157.3) 94%, oklch(0.9048 0.0830 158.2));
-  --success-solid: oklch(0.6406 0.1329 157.7);
-  --success-soft: oklch(0.2721 0.0396 162.2);
-  --success-border: oklch(0.4124 0.0721 160.9);
-  --success-strong: oklch(0.9048 0.0830 158.2);
-  --on-success: oklch(1 0 0);
+  --success: var(--green-11);
+  --success-solid: var(--green-9);
+  --success-hover: var(--green-10);
+  --success-soft: var(--green-3);
+  --success-border: var(--green-7);
+  --success-strong: var(--green-12);
+  --on-success: #ffffff;
 
-  --warning: color-mix(in oklab, oklch(0.8617 0.1730 89.0) 94%, oklch(0.9351 0.0717 86.1));
-  --warning-solid: oklch(0.8537 0.1572 84.1);
-  --warning-soft: oklch(0.2578 0.0442 74.5);
-  --warning-border: oklch(0.3863 0.0784 75.3);
-  --warning-strong: oklch(0.9351 0.0717 86.1);
-  --on-warning: oklch(0.1850 0.0134 77.8);
+  /* Amber and cyan are the two ramps whose solid step is light, so their ink is
+     a constant dark rather than a step: step 12 flips to a light tint under
+     `.dark` and would be unreadable on a yellow fill. */
+  --warning: var(--amber-11);
+  --warning-solid: var(--amber-9);
+  --warning-hover: var(--amber-10);
+  --warning-soft: var(--amber-3);
+  --warning-border: var(--amber-7);
+  --warning-strong: var(--amber-12);
+  --on-warning: #4f3422;
 
-  --danger: color-mix(in oklab, oklch(0.7804 0.1281 22.1) 94%, oklch(0.9024 0.0527 6.5));
-  --danger-solid: oklch(0.6256 0.1933 23.0);
-  --danger-soft: oklch(0.2510 0.0649 12.7);
-  --danger-border: oklch(0.3814 0.1108 16.8);
-  --danger-strong: oklch(0.9024 0.0527 6.5);
-  --on-danger: oklch(1 0 0);
+  --danger: var(--red-11);
+  --danger-solid: var(--red-9);
+  --danger-hover: var(--red-10);
+  --danger-soft: var(--red-3);
+  --danger-border: var(--red-7);
+  --danger-strong: var(--red-12);
+  --on-danger: #ffffff;
 
-  --info: color-mix(in oklab, oklch(0.7854 0.1158 213.8) 94%, oklch(0.9095 0.0569 211.5));
-  --info-solid: oklch(0.6600 0.1217 221.7);
-  --info-soft: oklch(0.2733 0.0434 220.4);
-  --info-border: oklch(0.4135 0.0747 221.5);
-  --info-strong: oklch(0.9095 0.0569 211.5);
-  --on-info: oklch(1 0 0);
+  --info: var(--cyan-11);
+  --info-solid: var(--cyan-9);
+  --info-hover: var(--cyan-10);
+  --info-soft: var(--cyan-3);
+  --info-border: var(--cyan-7);
+  --info-strong: var(--cyan-12);
+  --on-info: #04303c;
 
-  --violet: color-mix(in oklab, oklch(0.7778 0.1246 293.2) 94%, oklch(0.9117 0.0450 292.4));
-  --violet-solid: oklch(0.5417 0.1790 288.0);
-  --violet-soft: oklch(0.2707 0.0655 294.4);
-  --violet-border: oklch(0.3889 0.1021 292.1);
-  --violet-strong: oklch(0.9117 0.0450 292.4);
-  --on-violet: oklch(1 0 0);
+  --violet: var(--violet-11);
+  --violet-solid: var(--violet-9);
+  --violet-hover: var(--violet-10);
+  --violet-soft: var(--violet-3);
+  --violet-border: var(--violet-7);
+  --violet-strong: var(--violet-12);
+  --on-violet: #ffffff;
 
+  --chart-grid: var(--slate-a5);
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.4);
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
   --shadow-md: 0 8px 24px oklch(0 0 0 / 0.36);
   --shadow-lg: 0 24px 60px oklch(0 0 0 / 0.48);
-
-  --chart-grid: color-mix(in srgb, oklch(0.9315 0.0236 250.1) 8%, transparent);
   --scrim: oklch(0.09 0.01 265 / 0.72);
-  --surface-inverse: oklch(0.9489 0.0029 264.5);
-  --on-inverse: oklch(0.1785 0.0041 286.0);
   color-scheme: dark;
 }
 
+/*
+ * Light theme. The canvas is a step darker than the cards, so a panel is a
+ * surface rather than a border floating on white; the border steps above give
+ * the hairline enough contrast to be seen at all; and the shadow steps are
+ * softened because a light theme's depth reads through them rather than
+ * through lightness.
+ */
 :root[data-theme="light"] {
-  --bg-canvas: oklch(0.9827 0.0026 286.4);
-  --bg-base: oklch(0.9827 0.0026 286.4);
-  --surface-1: oklch(0.9913 0 0);
-  --surface-2: oklch(0.9827 0.0026 286.4);
-  --surface-3: oklch(0.9560 0.0040 286.3);
-  --surface-inset: oklch(0.9560 0.0040 286.3);
-  --surface-hover: color-mix(in srgb, oklch(0.1451 0.1006 264.1) 6%, transparent);
+  --bg-canvas: var(--slate-2);
+  --bg-base: var(--slate-2);
+  /* A card is paper, so it is white rather than slate's step 1: the step is
+     #fcfcfd, three channel values off the canvas, which is the flat sheet the
+     light theme used to be. Everything else stays on the ramp. */
+  --surface-1: #ffffff;
+  --surface-2: var(--slate-3);
+  --surface-3: var(--slate-4);
+  --surface-inset: var(--slate-2);
+  --surface-hover: var(--slate-3);
 
-  --border-subtle: color-mix(in srgb, oklch(0.1343 0.0931 264.1) 9%, transparent);
-  --border: color-mix(in srgb, oklch(0.1678 0.0831 262.8) 12%, transparent);
-  --border-strong: color-mix(in srgb, oklch(0.1548 0.0819 263.4) 20%, transparent);
+  /* The ramps publish two text steps, so the middle of the three levels is
+     pulled towards step 12 and the dimmest is step 11 itself - the darkest ink
+     that still clears AA on this theme's raised surfaces. */
+  --text-secondary: color-mix(in oklab, var(--slate-11) 70%, var(--slate-12));
+  --text-tertiary: var(--slate-11);
 
-  --text-primary: oklch(0.2411 0.0097 248.2);
-  --text-secondary: oklch(0.5025 0.0136 264.4);
-  --text-tertiary: color-mix(in oklab, oklch(0.5025 0.0136 264.4) 95%, transparent);
-  --text-inverse: oklch(0.9827 0.0026 286.4);
+  /* Green's and amber's step 11 sit just under AA on a near-white page -
+     4.49:1 and 4.38:1 - so the light theme pulls that ink slightly towards step
+     12 rather than shipping status colours that fail by a rounding error. */
+  --success: color-mix(in oklab, var(--green-11) 92%, var(--green-12));
+  --warning: color-mix(in oklab, var(--amber-11) 88%, var(--amber-12));
 
-  --accent: color-mix(in oklab, oklch(0.5558 0.1622 252.2) 94%, oklch(0.3240 0.0964 258.8));
-  --accent-solid: oklch(0.6493 0.1930 251.8);
-  --accent-soft: oklch(0.9597 0.0201 238.7);
-  --accent-border: oklch(0.8633 0.0682 243.3);
-  --accent-strong: oklch(0.3240 0.0964 258.8);
-  --accent-hover: oklch(0.6223 0.1831 251.7);
-  --on-accent: oklch(1 0 0);
-
-  --success: color-mix(in oklab, oklch(0.5435 0.1116 159.5) 94%, oklch(0.3220 0.0475 164.5));
-  --success-solid: oklch(0.6406 0.1329 157.7);
-  --success-soft: oklch(0.9582 0.0223 155.9);
-  --success-border: oklch(0.8558 0.0641 158.2);
-  --success-strong: oklch(0.3220 0.0475 164.5);
-  --on-success: oklch(1 0 0);
-
-  --warning: color-mix(in oklab, oklch(0.5706 0.1291 63.9) 94%, oklch(0.3522 0.0486 54.2));
-  --warning-solid: oklch(0.8537 0.1572 84.1);
-  --warning-soft: oklch(0.9695 0.0684 100.4);
-  --warning-border: oklch(0.8804 0.1233 93.4);
-  --warning-strong: oklch(0.3522 0.0486 54.2);
-  --on-warning: oklch(0.3522 0.0486 54.2);
-
-  --danger: color-mix(in oklab, oklch(0.5570 0.1974 25.2) 94%, oklch(0.3390 0.1089 16.6));
-  --danger-solid: oklch(0.6256 0.1933 23.0);
-  --danger-soft: oklch(0.9555 0.0207 13.9);
-  --danger-border: oklch(0.8569 0.0741 17.7);
-  --danger-strong: oklch(0.3390 0.1089 16.6);
-  --on-danger: oklch(1 0 0);
-
-  --info: color-mix(in oklab, oklch(0.5470 0.0966 220.8) 94%, oklch(0.3314 0.0527 218.8));
-  --info-solid: oklch(0.6600 0.1217 221.7);
-  --info-soft: oklch(0.9586 0.0263 202.6);
-  --info-border: oklch(0.8579 0.0659 208.1);
-  --info-strong: oklch(0.3314 0.0527 218.8);
-  --on-info: oklch(1 0 0);
-
-  --violet: color-mix(in oklab, oklch(0.5078 0.1589 288.6) 94%, oklch(0.3128 0.0975 286.6));
-  --violet-solid: oklch(0.5417 0.1790 288.0);
-  --violet-soft: oklch(0.9623 0.0191 299.1);
-  --violet-border: oklch(0.8642 0.0721 293.7);
-  --violet-strong: oklch(0.3128 0.0975 286.6);
-  --on-violet: oklch(1 0 0);
-
-  --shadow-sm: 0 1px 2px oklch(0.25 0.02 265 / 0.06);
+  --shadow-xs: 0 1px 2px oklch(0.25 0.02 265 / 0.05);
+  --shadow-sm: 0 1px 2px oklch(0.25 0.02 265 / 0.06), 0 1px 3px oklch(0.25 0.02 265 / 0.04);
   --shadow-md: 0 6px 20px oklch(0.25 0.02 265 / 0.08);
   --shadow-lg: 0 20px 48px oklch(0.25 0.02 265 / 0.12);
-
-  --chart-grid: color-mix(in srgb, oklch(0.1343 0.0931 264.1) 9%, transparent);
   --scrim: oklch(0.20 0.02 265 / 0.42);
-  --surface-inverse: oklch(0.2411 0.0097 248.2);
-  --on-inverse: oklch(0.9913 0 0);
   color-scheme: light;
 }
 

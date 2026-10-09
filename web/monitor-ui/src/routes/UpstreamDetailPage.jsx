@@ -25,7 +25,6 @@ import {
   formatHealthLabel,
   formatMultiplier,
   formatRatio,
-  formatTime,
   healthTone,
   metricThresholdTone,
   normalizeUpstreamWindow,
@@ -112,6 +111,7 @@ export function UpstreamDetailPage() {
             <TokenBadge label={t("metric.totalTokens")} value={target?.total_tokens ?? 0} icon="total" accent="token-badge-strong" />
             <TokenBadge label={t("common.failed")} value={target?.failed_request ?? 0} icon="failed" />
           </div>
+          <WindowToggle value={windowValue} onChange={setWindow} label={t("upstreamDetail.windowLabel")} />
         </div>
       </header>
 
@@ -120,10 +120,6 @@ export function UpstreamDetailPage() {
           <div>
             <p className="eyebrow">{t("upstreamDetail.analyticsFilters")}</p>
             <h2>{t("upstreamDetail.windowAndModel")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("upstreamDetail.windowLabel")} />
-            <span className="badge">{detail.data?.refreshed_at ? formatTime(detail.data.refreshed_at) : "..."}</span>
           </div>
         </div>
         <form className="filter-bar" onSubmit={applyModel}>

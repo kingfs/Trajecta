@@ -35,9 +35,6 @@ export function DatabasePanel() {
           <div>
             <h2>{t("system.databasePanel")}</h2>
           </div>
-          <div className="panel-head-actions">
-            {db?.generated_at ? <span className="badge">{t("system.sampled", { value: formatDateTime(db.generated_at) })}</span> : null}
-          </div>
         </div>
 
         {database.error ? <EmptyState tone="danger" title={t("system.databaseUnavailable")} detail={database.error} /> : null}

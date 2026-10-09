@@ -70,15 +70,8 @@ export function OverviewPage() {
   return (
     <main className="shell shell-list">
       <PageHeader
-        eyebrow={t("nav.group.observe")}
         title={t("overview.title")}
-        meta={
-          <>
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("overview.window")} />
-            <span className="badge badge-live">{t("overview.refresh")}</span>
-            <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
-          </>
-        }
+        actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("overview.window")} />}
       />
 
       {error ? <EmptyState title={t("overview.loadError")} detail={error} tone="danger" /> : null}
