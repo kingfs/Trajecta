@@ -1192,3 +1192,27 @@ test("flat dotted keys and single-brace interpolation render through the UI", as
   // a key no language defines - have no screen that renders them on demand, so
   // they live in tests-unit/i18n.test.js instead.
 });
+
+// recharts and its dependency tree are about 360 kB, a third of the bundle, and
+// only four pages draw a chart. They are a lazy chunk now, so the entry stays
+// free of them and a reader who never opens a chart page never downloads them.
+test("the chart library is a lazy chunk fetched only where a chart is drawn", async ({ page }) => {
+  const charts = [];
+  page.on("response", (response) => {
+    if (/\/ChartsImpl-[A-Za-z0-9_-]+\.js$/.test(new URL(response.url()).pathname)) {
+      charts.push(response.url());
+    }
+  });
+
+  // The events page has no chart on it.
+  await page.goto("/events");
+  await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible();
+  expect(charts).toEqual([]);
+
+  // The providers page draws two of them, and the placeholder is replaced by the
+  // real thing once the chunk resolves.
+  await page.goto("/providers");
+  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  await expect(page.locator(".recharts-surface").first()).toBeVisible();
+  expect(charts.length).toBe(1);
+});
