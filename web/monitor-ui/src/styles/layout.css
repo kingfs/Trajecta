@@ -233,16 +233,16 @@
 
 /* The socket's state. It sits above the account button rather than in the scroll
    area, because it describes the whole console rather than a page.
-   The dot is the state at a glance and the label is the sentence; the label is
-   what the collapsed rail and the phone layout drop, and there the tooltip and
-   the accessible name carry it. */
+   One glyph wide in every layout: the rail has no room for a sentence, and the
+   tooltip is where the sentence lives. The colour carries the state at a
+   glance - live, working on it, or away - and the glyph differs too, so the
+   three states are not one icon in three hues for a reader who cannot tell
+   them apart. */
 .realtime-indicator {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: center;
   padding: 0 var(--space-2) var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--text-label);
   cursor: default;
 }
 
@@ -251,28 +251,12 @@
   color: var(--text-tertiary);
 }
 
-.realtime-indicator[data-connected="true"] svg {
+.realtime-indicator[data-status="connected"] svg {
   color: var(--success);
 }
 
-.realtime-indicator[data-connected="false"] svg {
+.realtime-indicator[data-status="retrying"] svg {
   color: var(--warning);
-}
-
-.app-shell-collapsed .realtime-indicator,
-.realtime-indicator-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-shell-collapsed .realtime-indicator {
-  justify-content: center;
-  padding: 0 0 var(--space-1);
-}
-
-.app-shell-collapsed .realtime-indicator-label {
-  display: none;
 }
 
 .account-trigger {
@@ -378,7 +362,6 @@
   .nav-brand-copy strong,
   .nav-section-label,
   .account-copy,
-  .realtime-indicator-label,
   .sidebar-toggle {
     display: none;
   }

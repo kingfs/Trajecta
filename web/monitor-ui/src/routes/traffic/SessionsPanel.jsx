@@ -9,7 +9,7 @@ import { SessionList } from "../../components/monitor/SessionList";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { normalizeListWindow, setOrDeleteParam, summarizeSessionItems } from "../../lib/monitor";
+import { formatRawNumber, formatTokenCount, normalizeListWindow, setOrDeleteParam, summarizeSessionItems } from "../../lib/monitor";
 
 const PAGE_SIZE = 50;
 
@@ -73,7 +73,12 @@ export function SessionsPanel() {
       <section className="hero-grid">
         <StatCard label={t("sessions.title")} value={sessionStats.totalSessions} />
         <StatCard label={`${t("sessions.recentTitle")} · ${t("common.requests")}`} value={sessionStats.totalRequests} />
-        <StatCard label={`${t("sessions.recentTitle")} · ${t("common.tokens")}`} value={sessionStats.totalTokens} accent="accent-gold" />
+        <StatCard
+          label={`${t("sessions.recentTitle")} · ${t("common.tokens")}`}
+          value={formatTokenCount(sessionStats.totalTokens)}
+          title={formatRawNumber(sessionStats.totalTokens)}
+          accent="accent-gold"
+        />
         <StatCard label={`${t("sessions.recentTitle")} · ${t("sessions.avgSuccess")}`} value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
         <p className="system-note">{t("sessions.pageScope")}</p>
       </section>

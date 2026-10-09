@@ -13,6 +13,7 @@ import { Skeleton } from "../ui/skeleton";
  */
 const MultiLineChartImpl = lazy(() => import("./ChartsImpl").then((module) => ({ default: module.MultiLineChart })));
 const SingleUsageChartsImpl = lazy(() => import("./ChartsImpl").then((module) => ({ default: module.SingleUsageCharts })));
+const UsageDonutImpl = lazy(() => import("./ChartsImpl").then((module) => ({ default: module.UsageDonut })));
 
 // Sized like the real thing so resolving the chunk does not move the page.
 function ChartFallback({ height, panels = 1 }) {
@@ -39,6 +40,14 @@ export function SingleUsageCharts({ height = 240, ...props }) {
   return (
     <Suspense fallback={<ChartFallback height={height} panels={2} />}>
       <SingleUsageChartsImpl height={height} {...props} />
+    </Suspense>
+  );
+}
+
+export function UsageDonut({ height = 240, ...props }) {
+  return (
+    <Suspense fallback={<ChartFallback height={height} />}>
+      <UsageDonutImpl height={height} {...props} />
     </Suspense>
   );
 }

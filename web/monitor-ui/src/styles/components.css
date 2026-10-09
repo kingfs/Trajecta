@@ -211,6 +211,8 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  /* The app paints these; the platform must not paint its own control too. */
+  appearance: none;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -1062,23 +1064,6 @@ input[type="radio"] {
   font-size: var(--text-label);
 }
 
-.disk-meter-cell {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.disk-meter-cell .meter {
-  min-width: 40px;
-}
-
-.disk-meter-cell span {
-  flex: none;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
 /* System tables: the legacy stylesheet sized these as grid rows, but the column
    sets differ per table, so each variant declares its own. */
 .system-table .system-table-head,
@@ -1088,18 +1073,11 @@ input[type="radio"] {
   gap: var(--space-3);
 }
 
-.system-table-head--disk,
-.system-table-row--disk {
-  grid-template-columns: minmax(120px, 1.1fr) minmax(70px, 0.7fr) minmax(74px, 0.7fr) minmax(74px, 0.7fr) minmax(74px, 0.7fr) minmax(120px, 1fr);
-}
-
 .system-table-head--net,
 .system-table-row--net {
   grid-template-columns: minmax(120px, 1.2fr) minmax(74px, 0.7fr) minmax(74px, 0.7fr) minmax(80px, 0.8fr) minmax(80px, 0.8fr);
 }
 
-.system-table-head--disk,
-.system-table-row--disk,
 .system-table-head--net,
 .system-table-row--net {
   min-width: 620px;

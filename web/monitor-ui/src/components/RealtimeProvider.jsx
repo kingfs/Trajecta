@@ -32,7 +32,11 @@ import {
 
 const COALESCE_MS = 150;
 const RECONNECT_MIN_MS = 1_000;
-const RECONNECT_MAX_MS = 30_000;
+// The cap the console settles on when the server stays away: one attempt every
+// five minutes is enough to come back on its own without a stopped server
+// collecting an attempt per second, and it is why a reader who restarts a
+// server overnight does not have to remember to reload the page.
+const RECONNECT_MAX_MS = 300_000;
 
 export function RealtimeProvider({ children = null }) {
   const queryClient = useQueryClient();
@@ -87,6 +91,7 @@ export function RealtimeProvider({ children = null }) {
       if (disposed) {
         return;
       }
+      setRealtimeStatus(RealtimeStatus.CONNECTING);
       const opened = new WebSocket(realtimeSocketURL());
       socket = opened;
       socketRef.current = opened;
@@ -111,7 +116,7 @@ export function RealtimeProvider({ children = null }) {
         if (socket === opened) {
           socketRef.current = null;
         }
-        setRealtimeStatus(RealtimeStatus.DISCONNECTED);
+        setRealtimeStatus(RealtimeStatus.RETRYING);
         if (disposed) {
           return;
         }
@@ -120,7 +125,7 @@ export function RealtimeProvider({ children = null }) {
         // retry will use, and let the sidebar indicator carry the state from
         // there.
         console.warn(
-          `[realtime] the console socket closed; retrying /api/events/ws in ${retryDelay}ms`,
+          `[realtime] the console socket closed; retrying /api/events/ws in ${retryDelay}ms (cap 300000ms)`,
         );
         reconnectTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, RECONNECT_MAX_MS);
@@ -136,7 +141,7 @@ export function RealtimeProvider({ children = null }) {
 
     return () => {
       disposed = true;
-      setRealtimeStatus(RealtimeStatus.DISCONNECTED);
+      setRealtimeStatus(RealtimeStatus.CONNECTING);
       unsubscribeRegistry();
       window.clearTimeout(reconnectTimer);
       window.clearTimeout(flushTimer);

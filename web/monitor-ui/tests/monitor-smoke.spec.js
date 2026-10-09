@@ -409,12 +409,12 @@ test("system runtime tab renders host, disk and network metrics", async ({ page 
   await expect(page.getByText("12.5 %")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Go process" })).toBeVisible();
 
-  // Two overlay mounts on the same device collapse into one row that reports
-  // how many mount points it stands for.
-  const diskSection = page.locator(".system-table-row--disk");
-  await expect(diskSection).toHaveCount(2);
-  await expect(diskSection.first()).toContainText("/data");
-  await expect(diskSection.first()).toContainText("+1");
+  // The disk table is a ring now, and the two overlay mounts on one device are
+  // folded into the machine's total before it is drawn.
+  await expect(page.locator(".system-table-row--disk")).toHaveCount(0);
+  const donut = page.locator(".usage-donut");
+  await expect(donut).toBeVisible();
+  await expect(donut.locator(".usage-donut-center span")).toHaveText("70.0 GiB / 150 GiB");
 
   // Idle container bridges are dropped; only interfaces that moved bytes show.
   const networkRows = page.locator(".system-table-row--net");
@@ -859,7 +859,7 @@ function sessionListPayload() {
       failed_request: 0,
       success_rate: 100,
       avg_ttft: 120,
-      total_tokens: 340,
+      total_tokens: 824018077,
       total_duration_ms: 2400,
     }],
   };
@@ -896,6 +896,13 @@ function systemHostPayload() {
       rx_bytes_per_sec: 30, tx_bytes_per_sec: 50,
     },
     process: { pid: 4321, rss_bytes: 64 * 1024 ** 2, vs_z_bytes: 1024 ** 3, cpu_percent: 1.5, threads: 12, open_fds: 21, started_at: new Date().toISOString() },
+    // The server's own readings while the tab was watching, oldest first.
+    history: Array.from({ length: 6 }, (_, index) => ({
+      at: new Date(Date.now() - (5 - index) * 5_000).toISOString(),
+      cpu_percent: 10 + index * 2,
+      memory_percent: 24 + index,
+      load1: 0.4,
+    })),
     warnings: [],
   };
 }
@@ -1345,7 +1352,7 @@ test("the traffic range reaches both tabs' requests", async ({ page }) => {
 
   await page.goto("/traces");
   await expect(page.getByRole("heading", { name: "Traffic" })).toBeVisible();
-  await expect.poll(() => asked.some((entry) => entry === "/api/traces?all")).toBe(true);
+  await expect.poll(() => asked.some((entry) => entry === "/api/traces?today")).toBe(true);
 
   await page.getByRole("radiogroup").getByRole("radio", { name: "Last 7 days", exact: true }).click();
   // `page` is dropped with the range: page 3 of 全部 is not page 3 of 近 7 天.
@@ -1977,5 +1984,180 @@ test("both themes keep their surfaces and borders legible", async ({ page }) => 
     expect(gap(card, canvas), `${scheme}: a card separates from the canvas`).toBeGreaterThanOrEqual(12);
     expect(gap(border, card), `${scheme}: a border separates from the card`).toBeGreaterThanOrEqual(45);
     expect(gap(text, card), `${scheme}: text separates from the card`).toBeGreaterThanOrEqual(300);
+  }
+});
+
+// The three socket states are one glyph each, and the glyph says which one it
+// is without a word beside it: the rail has the width for an icon and the
+// tooltip carries the sentence.
+test("the sidebar reports the socket state in one glyph", async ({ page }) => {
+  await page.goto("/overview");
+  const status = page.locator(".realtime-indicator");
+  await expect(status).toHaveCount(1);
+  await expect(status).toHaveAttribute("aria-label", "Live push data");
+  await expect(status).toHaveAttribute("data-status", "connected");
+  await expect(status).toHaveAttribute("title", "Live push data");
+  // One glyph, not an icon and a word.
+  await expect(status).toHaveText("");
+});
+
+test("a socket that cannot stay open reports the retry, not the connection", async ({ page }) => {
+  await page.routeWebSocket(/\/api\/events\/ws/, (socket) => socket.close());
+  await page.goto("/overview");
+  const status = page.locator(".realtime-indicator");
+  await expect(status).toHaveAttribute("data-status", "retrying");
+  await expect(status).toHaveAttribute("aria-label", "Disconnected, reconnecting…");
+});
+
+// The speed column is one wrapping row of chips now. Stacked one per line it
+// made the row twice as tall as the token column beside it.
+test("the request row's latency chips sit on one wrapping line", async ({ page }) => {
+  await page.goto("/traces");
+  const stack = page.locator(".latency-metric-stack").first();
+  await expect(stack).toBeVisible();
+  const layout = await stack.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { direction: style.flexDirection, wrap: style.flexWrap };
+  });
+  expect(layout).toEqual({ direction: "row", wrap: "wrap" });
+
+  const rows = async () => {
+    const tops = await stack.locator(".latency-metric").evaluateAll((chips) =>
+      chips.map((chip) => Math.round(chip.getBoundingClientRect().top)),
+    );
+    const counts = new Map();
+    for (const top of tops) {
+      counts.set(top, (counts.get(top) || 0) + 1);
+    }
+    return [...counts.values()];
+  };
+
+  // Wide enough for the four chips in one row, which is the difference from the
+  // one-per-line stack they used to be.
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await page.waitForTimeout(150);
+  expect(await rows()).toEqual([4]);
+
+  // Narrower, they wrap - and still fill each row rather than falling back to a
+  // single column. Below 1100px the whole row stacks, so this width is the one
+  // that exercises the wrap.
+  await page.setViewportSize({ width: 1250, height: 900 });
+  await page.waitForTimeout(150);
+  const wrapped = await rows();
+  // Fewer rows than chips, and at least one row holding two of them: that is
+  // the difference from one chip per line.
+  expect(wrapped.length).toBeGreaterThan(1);
+  expect(wrapped.length).toBeLessThan(4);
+  expect(Math.max(...wrapped)).toBeGreaterThan(1);
+});
+
+// A token total is a magnitude, not a count: 824018077 is 824M, and the exact
+// figure stays in the hover.
+test("the sessions panel scales its token total", async ({ page }) => {
+  await page.goto("/traces?tab=sessions");
+  const card = page.locator(".stat-card", { hasText: "Tokens" }).first();
+  await expect(card.locator("strong")).toHaveText("824M");
+  await expect(card).toHaveAttribute("title", "824,018,077");
+});
+
+// A button the app does not paint is painted by the browser: `appearance:
+// button` draws the platform's own border and background, which is the grey
+// slab and the outline the account panel was reported for.
+test("the account panel's rows carry no native button chrome", async ({ page }) => {
+  await page.goto("/overview");
+  await page.getByRole("button", { name: "Account" }).first().click();
+  // Every row, including the radio items: Radix renders those as buttons too,
+  // it just overrides their role, and the native chrome is an element-wide
+  // problem rather than a role-wide one.
+  const panel = page.getByRole("dialog", { name: "Account" });
+  const appearances = await panel.locator("button").evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).appearance),
+  );
+  expect(appearances.length).toBeGreaterThanOrEqual(7);
+  for (const [index, appearance] of appearances.entries()) {
+    expect(appearance, `row ${index} keeps the native appearance`).toBe("none");
+  }
+
+  // The two rows that are actions rather than choices draw nothing of their
+  // own: no border, and a transparent background until they are hovered.
+  for (const name of ["Change password", "Sign out"]) {
+    const chrome = await panel.getByRole("button", { name }).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { border: style.borderTopWidth, background: style.backgroundColor };
+    });
+    expect(chrome, `${name} still draws native chrome`).toEqual({ border: "0px", background: "rgba(0, 0, 0, 0)" });
+  }
+});
+
+// The dynamic half of the system page is a chart fed by the server's own
+// samples: the host response carries the trend and the realtime tick is what
+// makes the open tab fetch the next point.
+test("the runtime panel draws the host trend and a disk ring", async ({ page }) => {
+  await page.goto("/system");
+  const chart = page.locator(".line-chart-card").first();
+  await expect(chart).toBeVisible();
+  await expect(chart.locator(".recharts-line")).toHaveCount(2);
+  await expect(page.getByText("CPU usage", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Memory", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("The server samples every 5 seconds while this page is open")).toBeVisible();
+
+  // The ring folds the two mounts on the same device, so the machine reads
+  // 70 GiB of 150 GiB rather than counting the container layer twice.
+  const donut = page.locator(".usage-donut");
+  await expect(donut).toBeVisible();
+  // The formatter separates the number from the sign with a non-breaking space.
+  await expect(donut.locator(".usage-donut-center strong")).toContainText("46.7");
+  await expect(donut.locator(".usage-donut-center span")).toHaveText("70.0 GiB / 150 GiB");
+  await expect(donut.locator(".recharts-pie-sector")).toHaveCount(2);
+});
+
+test("the system page does not report thread or handle counts", async ({ page }) => {
+  await page.goto("/system");
+  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
+  await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Open FDs", { exact: true })).toHaveCount(0);
+});
+
+// The chart is live because of the topic, not because of a timer: the server
+// says the host sample changed, the page refetches, and the ring grows. This
+// drives the socket by hand, so a broken topic or a missing registry entry fails
+// here rather than in a reader's browser.
+test("a pushed sample adds a point to the system chart", async ({ page }) => {
+  let samples = 3;
+  await page.route("**/api/system/host", (route) => {
+    const payload = systemHostPayload();
+    payload.history = payload.history.slice(0, samples);
+    return route.fulfill({ json: payload });
+  });
+
+  let socket = null;
+  await page.routeWebSocket(/\/api\/events\/ws/, (mock) => {
+    socket = mock;
+  });
+
+  await page.goto("/system");
+  const line = page.locator(".recharts-line-curve").first();
+  await expect(line).toBeVisible();
+  // A monotone series draws with cubic segments rather than straight lines, so
+  // the segment count is every move or curve in the path.
+  const segments = async () => ((await line.getAttribute("d"))?.match(/[LC]/g) || []).length;
+  const before = await segments();
+
+  await expect.poll(() => socket !== null).toBe(true);
+  samples = 6;
+  socket.send(JSON.stringify({ topic: "system" }));
+
+  await expect.poll(segments, { timeout: 8_000 }).toBeGreaterThan(before);
+});
+
+// The system page grew two charts, and a chart is the easiest thing on a page to
+// let past the viewport: the ring and the trend both have to fit the phone.
+test("the system page's charts fit the viewport", async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/system");
+    await expect(page.locator(".usage-donut")).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `the ${viewport.width}px layout overflows`).toBeLessThanOrEqual(1);
   }
 });

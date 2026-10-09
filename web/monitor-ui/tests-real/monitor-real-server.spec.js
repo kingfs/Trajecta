@@ -80,15 +80,22 @@ test("real monitor server serves trace routing links", async ({ page }) => {
 // triggers the push is made out of band through the HTTP API, so the frame
 // cannot be an echo of something the page itself did.
 test("real monitor server pushes a store change to the console socket", async ({ page }) => {
-  const socketOpened = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/events/ws"));
+  // The listeners are attached the moment the socket is created. Waiting for
+  // the creation event and attaching afterwards loses the subscription frame:
+  // the page sends it from `onopen`, which can happen before the test's next
+  // line runs.
+  const sent = [];
+  const received = [];
+  page.on("websocket", (socket) => {
+    if (!socket.url().includes("/api/events/ws")) {
+      return;
+    }
+    socket.on("framesent", (frame) => sent.push(String(frame.payload)));
+    socket.on("framereceived", (frame) => received.push(String(frame.payload)));
+  });
+
   await page.goto("/traces");
   await expect(page.getByRole("heading", { name: "Traffic" })).toBeVisible();
-
-  const socket = await socketOpened;
-  const received = [];
-  const sent = [];
-  socket.on("framereceived", (frame) => received.push(String(frame.payload)));
-  socket.on("framesent", (frame) => sent.push(String(frame.payload)));
 
   // The browser has to tell the server what it is showing, or there is nothing
   // to push to it.

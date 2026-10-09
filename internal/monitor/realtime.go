@@ -56,11 +56,14 @@ var realtimeTopics = map[string]bool{
 }
 
 const (
-	// realtimeSystemSampleInterval is deliberately not faster than the poll it
-	// replaces: the system page reads PostgreSQL statistics, and the point of
-	// moving the timer to the server is one reader per sample rather than one
-	// reader per tab per interval.
-	realtimeSystemSampleInterval = 30 * time.Second
+	// realtimeSystemSampleInterval is the tick the system page's charts are
+	// drawn at. It is five seconds because the page plots a five-minute trend
+	// from the samples the server takes while a tab is watching, and a coarser
+	// tick would draw a straight line through the spike a reader opened the page
+	// to see. The tick only runs while a tab subscribes, so an unwatched server
+	// samples nothing, and the PostgreSQL panels on that page only refetch while
+	// they are the visible tab.
+	realtimeSystemSampleInterval = 5 * time.Second
 	realtimePingInterval         = 25 * time.Second
 	realtimePongWait             = 70 * time.Second
 	realtimeWriteWait            = 10 * time.Second
@@ -214,6 +217,12 @@ func (h *realtimeHub) sampleLoop() {
 			return
 		}
 		h.mu.Unlock()
+		// Take the reading before publishing it: the host sample is what the
+		// trend is made of, and the push is what makes the open tab fetch it.
+		// Sampling here rather than in the subscriber means every tab on the
+		// page draws the same series, and it is the reason the series exists at
+		// all when the reader has only just opened the page.
+		buildSystemHost(time.Now())
 		h.publish(realtimeTopicSystem)
 	}
 }

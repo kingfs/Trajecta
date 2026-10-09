@@ -1563,7 +1563,7 @@ a:focus-visible {
 .session-table-head,
 .session-row {
   display: grid;
-  grid-template-columns: minmax(0, 2.05fr) minmax(84px, 0.66fr) minmax(126px, 0.8fr) minmax(360px, 1.8fr) minmax(160px, 0.9fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(78px, 0.5fr) minmax(230px, 1.75fr) minmax(300px, 1.4fr) minmax(146px, 0.75fr);
   gap: 12px;
   align-items: center;
 }
@@ -1642,16 +1642,22 @@ a:focus-visible {
   gap: 3px;
 }
 
+/* The four latency chips are one row, wrapping onto a second line when the
+   column cannot hold them, the same way the token chips beside them behave.
+   Stacked one per line they made the row twice as tall as it needed to be and
+   read as four separate measurements rather than one speed column. */
 .latency-metric-stack {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   min-width: 0;
 }
 
 .latency-metric {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   color: var(--text);
   font-family: var(--font-sans);

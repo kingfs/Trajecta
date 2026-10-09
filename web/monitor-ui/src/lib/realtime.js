@@ -151,13 +151,22 @@ export function subscribeRealtimeRegistry(listener) {
  * the one component that shows the state should not pull the whole app into a
  * render per reconnect.
  *
- * It is deliberately two states and not an enum. A socket that is opening,
- * retrying or backing off means the same thing to a reader - what is on screen
- * is not being pushed to right now - and the indicator only has to say that.
+ * Three states, because the reader's next question differs: "connecting" means
+ * wait, "retrying" means the server is not there and the console is backing off
+ * to a five-minute cap, and "connected" means what is on screen is being kept
+ * current. The indicator draws a different glyph for each and says which one it
+ * is in its tooltip.
  */
-export const RealtimeStatus = { CONNECTED: "connected", DISCONNECTED: "disconnected" };
+export const RealtimeStatus = {
+  /** An attempt is in flight: the first one, or the one a backoff scheduled. */
+  CONNECTING: "connecting",
+  /** The socket is open and the tab is subscribed. */
+  CONNECTED: "connected",
+  /** The socket closed and the next attempt is waiting out its backoff. */
+  RETRYING: "retrying",
+};
 
-let realtimeStatus = RealtimeStatus.DISCONNECTED;
+let realtimeStatus = RealtimeStatus.CONNECTING;
 const statusListeners = new Set();
 
 export function currentRealtimeStatus() {

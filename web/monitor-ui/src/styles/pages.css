@@ -199,6 +199,36 @@
 
 /* Recharts renders a fixed-size wrapper; keep the legend from overlapping the
    plot when a chart has more than two series. */
+/* The disk ring, with its reading in the middle. The chart is absolutely
+   positioned inside a sized box so the centre overlay can be centred against
+   the ring rather than against the card. */
+.usage-donut {
+  position: relative;
+  width: 100%;
+}
+
+.usage-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.usage-donut-center strong {
+  font-size: 1.35rem;
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.usage-donut-center span {
+  font-size: var(--text-label);
+  color: var(--text-tertiary);
+}
+
 .line-chart-card .recharts-legend-wrapper {
   position: static !important;
   margin-top: var(--space-2);

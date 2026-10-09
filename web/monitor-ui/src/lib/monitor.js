@@ -196,6 +196,11 @@ export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab =
 
 export const MONITOR_WINDOW_OPTIONS = ["today", "7d", "30d", "all"];
 
+// What a page shows when it is handed no window at all. Every windowed page in
+// the console starts on 今天, including the traffic list, and 全部 is a choice a
+// reader makes rather than the state they land in.
+export const DEFAULT_WINDOW = "today";
+
 export function buildUpstreamLink(upstreamID, windowValue = "today", modelValue = "") {
   const params = new URLSearchParams();
   if (windowValue && windowValue !== "today") {
@@ -238,13 +243,12 @@ export function buildRoutingLink(upstreamWindow = "today", upstreamModel = "") {
   return query ? `/routing?${query}` : "/routing";
 }
 
-// The traffic list is the one windowed view whose default is 全部. Every other
-// page answers "what is happening", where 今天 is the honest default; this one
-// answers "where is that request I recorded", and a window that hides it by
-// default would be the wrong first impression. The server agrees: `window` is
-// opt-in there, and an absent parameter still means every recorded request.
+// The traffic list takes the same window as every other page, with the same
+// default: the console always sends the parameter explicitly, so 今天 is what a
+// reader sees even though the API itself treats a missing `window` as 全部 for
+// the callers that predate the range control.
 export function normalizeListWindow(value = "") {
-  return normalizeAnalyticsWindow(value || "all");
+  return normalizeAnalyticsWindow(value);
 }
 
 export function normalizeAnalyticsWindow(value = "") {
@@ -255,7 +259,7 @@ export function normalizeAnalyticsWindow(value = "") {
     case "all":
       return value;
     default:
-      return "today";
+      return DEFAULT_WINDOW;
   }
 }
 

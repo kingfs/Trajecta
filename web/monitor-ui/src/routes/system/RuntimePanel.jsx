@@ -1,11 +1,12 @@
 import React from "react";
 import { Card } from "../../components/ui/card";
+import { MultiLineChart, UsageDonut } from "../../components/common/Charts";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { formatDateTime } from "../../lib/monitor";
+import { formatDateTime, formatTime } from "../../lib/monitor";
 import { Meter, SystemFact, formatBytes, formatCount, formatMs, formatPercentPoints, formatRate, formatUptime } from "./format";
 
 /**
@@ -28,6 +29,27 @@ export function RuntimePanel() {
   // Twelve rows of identical numbers is not information, so disks are folded by
   // device and the representative row lists the other mount points.
   const disks = collapseDisks(live?.disk);
+  // The ring answers "how much disk is left" for the machine as a whole: the
+  // entries are already folded by device, so a container's layer and its volume
+  // cannot be counted twice.
+  const diskTotal = disks.reduce((sum, item) => sum + Number(item.total_bytes || 0), 0);
+  const diskUsed = disks.reduce((sum, item) => sum + Number(item.used_bytes || 0), 0);
+  const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
+  // The trend is the readings the server took while this tab was watching, in
+  // the order it took them. Two points make a line, one makes a dot, and the
+  // note under the heading says which of the two a reader is looking at.
+  const history = live?.history || [];
+  const trendItems = history.map((point) => ({
+    time: point.at,
+    series: {
+      cpu: { value: Number(point.cpu_percent || 0) },
+      memory: { value: Number(point.memory_percent || 0) },
+    },
+  }));
+  const trendSeries = [
+    { key: "cpu", name: t("system.cpuUsage") },
+    { key: "memory", name: t("system.memory") },
+  ];
   // Same story for bridges and veth pairs that have never carried a byte.
   const interfaces = (live?.network?.interfaces || [])
     .filter((item) => Number(item.rx_bytes || 0) + Number(item.tx_bytes || 0) > 0)
@@ -75,13 +97,31 @@ export function RuntimePanel() {
                 detail={`${formatBytes(live.memory?.used_bytes)} / ${formatBytes(live.memory?.total_bytes)}`}
                 accent={Number(live.memory?.used_percent || 0) >= 90 ? "accent-red" : Number(live.memory?.used_percent || 0) >= 75 ? "accent-gold" : ""}
               />
-              <StatCard label={t("system.procRss")} value={formatBytes(live.process?.rss_bytes)} detail={`${t("system.procThreads")} ${formatCount(live.process?.threads)}`} />
+              <StatCard label={t("system.procRss")} value={formatBytes(live.process?.rss_bytes)} detail={`PID ${formatCount(live.process?.pid)}`} />
               <StatCard
                 label={t("system.network")}
                 value={formatRate(live.network?.rx_bytes_per_sec)}
                 detail={`${t("system.netTx")} ${formatRate(live.network?.tx_bytes_per_sec)}`}
               />
             </div>
+
+            <div className="system-subhead">
+              <h3>{t("system.trendTitle")}</h3>
+              <span className="system-note">{t("system.trendNote")}</span>
+            </div>
+            {history.length > 1 ? (
+              <MultiLineChart
+                items={trendItems}
+                series={trendSeries}
+                metric="value"
+                height={240}
+                valueFormatter={formatPercentPoints}
+                yTickFormatter={(value) => `${Math.round(Number(value) || 0)}%`}
+                labelFormatter={formatTime}
+              />
+            ) : (
+              <p className="system-note">{t("system.trendWaiting")}</p>
+            )}
 
             <div className="system-subhead">
               <h3>{t("system.cpu")}</h3>
@@ -124,35 +164,19 @@ export function RuntimePanel() {
 
             <div className="system-subhead">
               <h3>{t("system.disk")}</h3>
-              <span className="system-note">{formatCount(disks.length)}</span>
+              <span className="system-note">{`${formatCount(disks.length)} · ${t("system.diskTotal")} ${formatBytes(diskTotal)}`}</span>
             </div>
-            {disks.length ? (
-              <div className="trace-table system-table">
-                <div className="trace-table-head system-table-head system-table-head--disk">
-                  <span>{t("system.diskMount")}</span>
-                  <span>{t("system.diskFilesystem")}</span>
-                  <span>{t("system.diskSize")}</span>
-                  <span>{t("system.diskUsed")}</span>
-                  <span>{t("system.diskAvailable")}</span>
-                  <span>{t("system.diskUsedPercent")}</span>
-                </div>
-                {disks.map((item) => (
-                  <div className="trace-row system-row system-table-row--disk" key={item.mount}>
-                    <span className="mono" title={item.device}>
-                      {item.mount}
-                      {item.extraMounts ? <span className="system-note"> +{item.extraMounts}</span> : null}
-                    </span>
-                    <span className="mono">{item.filesystem}</span>
-                    <span className="mono">{formatBytes(item.total_bytes)}</span>
-                    <span className="mono">{formatBytes(item.used_bytes)}</span>
-                    <span className="mono">{formatBytes(item.available_bytes)}</span>
-                    <span className="disk-meter-cell">
-                      <Meter percent={item.used_percent} label={`${item.mount} ${formatPercentPoints(item.used_percent)}`} />
-                      <span className="mono">{formatPercentPoints(item.used_percent)}</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {diskTotal > 0 ? (
+              <UsageDonut
+                height={240}
+                formatValue={formatBytes}
+                slices={[
+                  { label: t("system.diskUsed"), value: diskUsed, color: "var(--accent)" },
+                  { label: t("system.diskAvailable"), value: Math.max(0, diskTotal - diskUsed), color: "var(--surface-3)" },
+                ]}
+                centerValue={formatPercentPoints(diskPercent)}
+                centerDetail={`${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}`}
+              />
             ) : (
               <EmptyState title={t("system.disk")} compact />
             )}
@@ -192,8 +216,6 @@ export function RuntimePanel() {
               <SystemFact label={t("system.procPid")} value={formatCount(live.process?.pid)} />
               <SystemFact label={t("system.procRss")} value={formatBytes(live.process?.rss_bytes)} />
               <SystemFact label={t("system.procCpu")} value={formatPercentPoints(live.process?.cpu_percent)} />
-              <SystemFact label={t("system.procThreads")} value={formatCount(live.process?.threads)} />
-              <SystemFact label={t("system.procFds")} value={formatCount(live.process?.open_fds)} />
             </div>
           </>
         ) : null}

@@ -156,3 +156,52 @@ func TestSystemHostSamplerReusesRatesWithinTheMinimumInterval(t *testing.T) {
 		t.Fatalf("cached document is incomplete: disks=%d total_bytes=%d", len(second.Disk), second.Memory.TotalBytes)
 	}
 }
+
+// The trend the chart draws is the sampler's own readings, so it has to grow
+// with each sample, stay bounded, and be a copy: a caller that sorts or trims
+// what it was handed must not be able to reach into the next answer.
+func TestSystemHostHistoryGrowsAndStaysBounded(t *testing.T) {
+	sampler := &systemHostSampler{}
+	base := time.Unix(1_800_000_000, 0).UTC()
+
+	// The reading that is being answered is the newest point in its own trend,
+	// so a page opened on a fresh server still has one point to draw.
+	first := sampler.read(base)
+	if len(first.History) != 1 {
+		t.Fatalf("the first reading reported %d history points, want its own", len(first.History))
+	}
+	if !first.History[0].At.Equal(first.GeneratedAt) {
+		t.Errorf("the only point is %v, want the reading's own %v", first.History[0].At, first.GeneratedAt)
+	}
+
+	sampler.read(base.Add(time.Second))
+	second := sampler.read(base.Add(2 * time.Second))
+	if len(second.History) != 3 {
+		t.Fatalf("three samples produced %d history points, want 3", len(second.History))
+	}
+	if !second.History[2].At.Equal(second.GeneratedAt) {
+		t.Errorf("the newest point is %v, want the reading's own %v", second.History[2].At, second.GeneratedAt)
+	}
+
+	// Inside the minimum interval the rates are reused, but the trend is still
+	// the trend: a reader refreshing quickly sees the series, not an empty one.
+	reused := sampler.read(base.Add(2*time.Second + 100*time.Millisecond))
+	if len(reused.History) != 3 {
+		t.Errorf("a cached reading reported %d history points, want the same 3", len(reused.History))
+	}
+
+	for i := 0; i < systemHostHistoryLimit+10; i++ {
+		sampler.read(base.Add(time.Duration(3+i) * time.Second))
+	}
+	final := sampler.read(base.Add(time.Duration(3+systemHostHistoryLimit+10) * time.Second))
+	if len(final.History) != systemHostHistoryLimit {
+		t.Fatalf("history carries %d points, want the %d-point ring", len(final.History), systemHostHistoryLimit)
+	}
+	if !final.History[0].At.Before(final.History[len(final.History)-1].At) {
+		t.Error("history is not oldest-first")
+	}
+	final.History[0].CPUPercent = -1
+	if sampler.historySliceLocked()[0].CPUPercent == -1 {
+		t.Error("the reported history shares the sampler's own array")
+	}
+}

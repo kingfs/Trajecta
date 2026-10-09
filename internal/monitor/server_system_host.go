@@ -39,7 +39,25 @@ type systemHostResponse struct {
 	Network     systemHostNetwork `json:"network"`
 	Process     systemHostProcess `json:"process"`
 	Warnings    []string          `json:"warnings"`
+	History     []systemHostPoint `json:"history"`
 }
+
+// systemHostPoint is one reading in the trend the page draws. It is a much
+// smaller shape than the sample it comes from: the chart needs the timestamp
+// and the two percentages it plots, and copying the counters would put a
+// per-core array in every point of a sixty-point series.
+type systemHostPoint struct {
+	At            time.Time `json:"at"`
+	CPUPercent    float64   `json:"cpu_percent"`
+	MemoryPercent float64   `json:"memory_percent"`
+	Load1         float64   `json:"load1"`
+}
+
+// systemHostHistoryLimit is how many readings the trend keeps. The server
+// samples every five seconds while a tab is watching the system page, so this
+// is the last five minutes - a window wide enough to see a spike and short
+// enough that the oldest point still describes this machine's current load.
+const systemHostHistoryLimit = 60
 
 // systemHostInfo identifies the machine and how long it has been up. The
 // uptime is the kernel's, not this process's: it pairs with the load average
@@ -177,6 +195,12 @@ type systemHostSampler struct {
 	prevAt    time.Time
 	cached    systemHostResponse
 	hasCached bool
+
+	// history is the ring the trend is read from, oldest first. It is filled by
+	// whoever samples - the page's own request or the realtime hub's timer -
+	// so the chart keeps filling while the tab is open and stops with the last
+	// reader.
+	history []systemHostPoint
 }
 
 // systemHostSamples is the shared sampler instance behind the handler.
@@ -204,10 +228,12 @@ func (s *systemHostSampler) read(now time.Time) systemHostResponse {
 
 	// Two requests inside the minimum interval would divide by an interval too
 	// short to be meaningful, so the previous rates are reused and only the
-	// timestamp is refreshed.
+	// timestamp is refreshed. The trend is part of the answer here too: a reader
+	// refreshing quickly must not be told there is no history.
 	if s.hasCached && now.Sub(s.prevAt) < systemHostMinInterval {
 		reused := s.cached
 		reused.GeneratedAt = now.UTC()
+		reused.History = s.historySliceLocked()
 		return reused
 	}
 
@@ -222,8 +248,35 @@ func (s *systemHostSampler) read(now time.Time) systemHostResponse {
 	if !response.Unsupported {
 		s.prev = &sample
 		s.prevAt = now
+		s.appendHistoryLocked(response)
 	}
+	response.History = s.historySliceLocked()
 	s.cached = response
 	s.hasCached = true
 	return response
+}
+
+// appendHistoryLocked records one reading, dropping the oldest when the ring is
+// full.
+func (s *systemHostSampler) appendHistoryLocked(response systemHostResponse) {
+	s.history = append(s.history, systemHostPoint{
+		At:            response.GeneratedAt,
+		CPUPercent:    response.CPU.UsagePercent,
+		MemoryPercent: response.Memory.UsedPercent,
+		Load1:         response.CPU.Load1,
+	})
+	if len(s.history) > systemHostHistoryLimit {
+		s.history = append([]systemHostPoint(nil), s.history[len(s.history)-systemHostHistoryLimit:]...)
+	}
+}
+
+// historySliceLocked returns a copy, so a reader cannot append to the sampler's
+// own backing array and a response cannot be mutated after it is handed out.
+func (s *systemHostSampler) historySliceLocked() []systemHostPoint {
+	if len(s.history) == 0 {
+		return []systemHostPoint{}
+	}
+	out := make([]systemHostPoint, len(s.history))
+	copy(out, s.history)
+	return out
 }

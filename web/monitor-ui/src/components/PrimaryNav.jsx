@@ -9,9 +9,11 @@ import { Separator } from "./ui/separator";
 import {
   Activity,
   Bell,
+  LoaderCircle,
   Monitor,
   Moon,
   Radio,
+  WifiOff,
   Sun,
   LayoutGrid,
   Lock,
@@ -101,9 +103,8 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
   // The console has no refresh timers left, so "is anything pushing to me?" is a
   // question the sidebar has to answer rather than one a spinner or a timer
-  // used to. See lib/realtime.js for what the two states mean.
+  // used to. See lib/realtime.js for what the three states mean.
   const realtime = useRealtimeStatus();
-  const realtimeLabel = t(realtime === RealtimeStatus.CONNECTED ? "realtime.connected" : "realtime.disconnected");
 
   return (
     <nav className="primary-nav" aria-label={t("nav.primary")}>
@@ -157,18 +158,10 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
         <div className="nav-account">
           {/* A status, not a control: the glyph is the state, the tooltip is the
               sentence, and `aria-live` announces a reconnect to a reader who is
-              not looking at it. */}
-          <span
-            className="realtime-indicator"
-            role="status"
-            aria-live="polite"
-            data-connected={realtime === RealtimeStatus.CONNECTED ? "true" : "false"}
-            title={realtimeLabel}
-            aria-label={realtimeLabel}
-          >
-            <Radio size={14} aria-hidden="true" />
-            <span className="realtime-indicator-label">{realtimeLabel}</span>
-          </span>
+              not looking at it. Rail space is the scarce thing here, so the
+              indicator is one icon wide at every width and the word lives in
+              the tooltip rather than beside it. */}
+          <RealtimeIndicator status={realtime} />
           <PopoverTrigger asChild>
             <button
               ref={accountButtonRef}
@@ -225,10 +218,36 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
  * buttons - they are one radio group each - so the keyboard and the announced
  * state stay what they were.
  */
+// The three states as one glyph each, plus the sentence the tooltip and the
+// accessible name both use.
+const REALTIME_GLYPHS = {
+  [RealtimeStatus.CONNECTED]: { Icon: Radio, key: "realtime.connected" },
+  [RealtimeStatus.CONNECTING]: { Icon: LoaderCircle, key: "realtime.connecting" },
+  [RealtimeStatus.RETRYING]: { Icon: WifiOff, key: "realtime.retrying" },
+};
+
+function RealtimeIndicator({ status }) {
+  const { t } = useI18n();
+  const { Icon, key } = REALTIME_GLYPHS[status] || REALTIME_GLYPHS[RealtimeStatus.CONNECTING];
+  const label = t(key);
+  return (
+    <span
+      className="realtime-indicator"
+      role="status"
+      aria-live="polite"
+      data-status={status}
+      title={label}
+      aria-label={label}
+    >
+      <Icon size={15} aria-hidden="true" className={status === RealtimeStatus.CONNECTING ? "animate-spin" : undefined} />
+    </span>
+  );
+}
+
 // One row of the account panel. Utilities rather than a legacy class so the row
 // and the radio items above it hover the same way.
 const PANEL_ACTION =
-  "flex w-full cursor-pointer items-center gap-3 rounded-md bg-transparent px-2 py-2 font-sans text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
+  "flex w-full cursor-pointer appearance-none items-center gap-3 rounded-md border-0 bg-transparent px-2 py-2 font-sans text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
 export function AccountPanel({ user, onLogout, onPassword }) {
   const { t } = useI18n();

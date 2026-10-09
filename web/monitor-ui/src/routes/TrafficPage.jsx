@@ -5,7 +5,7 @@ import { WindowToggle } from "../components/common/Tabs";
 import { RequestsPanel } from "./traffic/RequestsPanel";
 import { SessionsPanel } from "./traffic/SessionsPanel";
 import { useI18n } from "../lib/i18n";
-import { normalizeListWindow, setOrDeleteParam } from "../lib/monitor";
+import { DEFAULT_WINDOW, normalizeListWindow, setOrDeleteParam } from "../lib/monitor";
 
 // 请求 and 会话 were two top-level nav entries pointing at the same data at two
 // different grains, and /traces and /requests were two URLs rendering the exact
@@ -17,8 +17,8 @@ export function TrafficPage() {
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
     // The default is written as an absent parameter, so a link to the page does
-    // not carry `window=all` in every URL.
-    setOrDeleteParam(next, "window", nextWindow === "all" ? "" : nextWindow);
+    // not carry `window=today` in every URL.
+    setOrDeleteParam(next, "window", nextWindow === DEFAULT_WINDOW ? "" : nextWindow);
     next.delete("page");
     setSearchParams(next);
   };
