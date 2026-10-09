@@ -100,7 +100,7 @@
   height: 26px;
   flex: none;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
@@ -215,7 +215,7 @@
   min-width: 18px;
   padding: 0 5px;
   border-radius: var(--radius-pill);
-  background: var(--danger);
+  background: var(--danger-solid);
   color: #fff;
   font-size: var(--text-label);
   font-weight: var(--weight-semibold);
@@ -605,7 +605,7 @@
 }
 
 .nav-item-badge-alert {
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 
 .nav-item-badge:not(.nav-item-badge-alert) {

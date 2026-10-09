@@ -786,7 +786,7 @@ a:focus-visible {
 
 .badge-live {
   border-color: var(--accent-border);
-  background: linear-gradient(135deg, var(--accent), var(--success));
+  background: linear-gradient(135deg, var(--accent-solid), var(--success-solid));
   color: var(--on-accent);
   font-weight: 700;
 }
@@ -844,7 +844,7 @@ a:focus-visible {
   position: absolute;
   inset: auto 0 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--success));
+  background: linear-gradient(90deg, var(--accent-solid), var(--success-solid));
   opacity: 0.72;
 }
 
@@ -920,7 +920,7 @@ a:focus-visible {
 }
 
 .routing-timeline-bar-active {
-  background: linear-gradient(180deg, var(--warning), var(--accent));
+  background: linear-gradient(180deg, var(--warning-solid), var(--accent-solid));
 }
 
 .overview-chart-grid {
@@ -1110,7 +1110,7 @@ a:focus-visible {
 
 .event-severity-critical,
 .event-severity-error {
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 
 .event-severity-warning {
@@ -1718,7 +1718,7 @@ a:focus-visible {
 
 .view-toggle .ghost-button.active {
   border-color: var(--accent-border);
-  background: linear-gradient(135deg, var(--accent), var(--success));
+  background: linear-gradient(135deg, var(--accent-solid), var(--success-solid));
   color: var(--on-accent);
 }
 
@@ -2410,11 +2410,11 @@ a:focus-visible {
 }
 
 .message-assistant .message-content-collapsed::after {
-  background: linear-gradient(180deg, transparent, var(--info));
+  background: linear-gradient(180deg, transparent, var(--info-solid));
 }
 
 .message-tool .message-content-collapsed::after {
-  background: linear-gradient(180deg, transparent, var(--warning));
+  background: linear-gradient(180deg, transparent, var(--warning-solid));
 }
 
 .message-expand-button {
@@ -2729,12 +2729,12 @@ a:focus-visible {
 }
 
 .timeline-dot-live {
-  background: var(--accent);
+  background: var(--accent-solid);
   box-shadow: 0 0 0 6px var(--accent-soft);
 }
 
 .timeline-dot-danger {
-  background: var(--danger);
+  background: var(--danger-solid);
   box-shadow: 0 0 0 6px var(--danger-soft);
 }
 

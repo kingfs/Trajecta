@@ -227,8 +227,8 @@
 
 .ghost-button.active,
 .wrap-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: var(--on-accent);
 }
 
@@ -432,7 +432,7 @@ select:focus,
 textarea:focus,
 .filter-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -449,7 +449,7 @@ input[type="checkbox"],
 input[type="radio"] {
   width: 15px;
   height: 15px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-solid);
   cursor: pointer;
 }
 
@@ -631,7 +631,7 @@ input[type="radio"] {
 }
 
 .empty-state-danger {
-  border-color: var(--danger);
+  border-color: var(--danger-solid);
   border-style: solid;
   background: var(--danger-soft);
 }
@@ -956,7 +956,7 @@ input[type="radio"] {
   gap: 6px;
   margin: var(--space-3) 0;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--warning);
+  border: 1px solid var(--warning-solid);
   border-radius: var(--radius-lg);
   background: var(--warning-soft);
   font-size: var(--text-sm);
@@ -1009,16 +1009,16 @@ input[type="radio"] {
 .meter-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--accent-solid);
   transition: width var(--transition-base);
 }
 
 .meter-warning .meter-fill {
-  background: var(--warning);
+  background: var(--warning-solid);
 }
 
 .meter-danger .meter-fill {
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 
 /* Per-core CPU strip: one thin meter per core, read left to right. */

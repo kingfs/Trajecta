@@ -5,7 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { I18nProvider, bootstrapI18n } from "./lib/i18n";
 import { queryClient } from "./lib/queryClient";
-import { applyTheme } from "./lib/theme";
+import { applyTheme, watchSystemTheme } from "./lib/theme";
 
 // tokens.css stays outside the cascade layers: it only declares custom
 // properties, and the theme attribute selectors it uses have to keep beating
@@ -15,6 +15,9 @@ import "./styles/tokens.css";
 import "./styles/tailwind.css";
 
 applyTheme();
+// index.html sets the same value before first paint; this keeps "system" honest
+// when the OS preference changes while the page is open.
+watchSystemTheme();
 
 // The active locale is a separate chunk, so the app cannot render before it has
 // been fetched. bootstrapI18n falls back to English if that fetch fails, so a

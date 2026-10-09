@@ -49,14 +49,12 @@
  * by a `.dark` class or a bare media query, and "system" has to keep following
  * the OS. Both spellings are declared so `dark:` utilities work on any page.
  */
+/* `data-theme` always carries the theme in use: applyTheme() resolves "system"
+   against prefers-color-scheme, so `dark:` needs one selector rather than a
+   selector plus a media query that would have to be kept in step with it. */
 @custom-variant dark {
   &:where([data-theme="dark"], [data-theme="dark"] *) {
     @slot;
-  }
-  @media (prefers-color-scheme: dark) {
-    &:where([data-theme="system"], [data-theme="system"] *) {
-      @slot;
-    }
   }
 }
 
@@ -102,29 +100,45 @@
   --color-border-strong: var(--border-strong);
 
   /* --- Brand and status ----------------------------------------------- */
+  /* Each hue has four jobs and therefore four names: the tone used for text and
+     icons (`brand`, `success`), the fill (`-solid`), the tint and its border
+     (`-soft`, `-border`), and the label that goes on the tint (`-strong`). */
   --color-brand: var(--accent);
+  --color-brand-strong: var(--accent-strong);
+  --color-brand-solid: var(--accent-solid);
   --color-brand-hover: var(--accent-hover);
   --color-brand-soft: var(--accent-soft);
   --color-brand-border: var(--accent-border);
-  --color-primary: var(--accent);
+  --color-primary: var(--accent-solid);
   --color-primary-foreground: var(--on-accent);
   --color-ring: var(--accent-border);
 
   --color-success: var(--success);
+  --color-success-strong: var(--success-strong);
+  --color-success-solid: var(--success-solid);
   --color-success-soft: var(--success-soft);
   --color-success-border: var(--success-border);
   --color-warning: var(--warning);
+  --color-warning-strong: var(--warning-strong);
+  --color-warning-solid: var(--warning-solid);
   --color-warning-soft: var(--warning-soft);
   --color-warning-border: var(--warning-border);
+  --color-warning-foreground: var(--on-warning);
   --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-solid: var(--danger-solid);
   --color-danger-soft: var(--danger-soft);
   --color-danger-border: var(--danger-border);
-  --color-destructive: var(--danger);
-  --color-destructive-foreground: var(--on-accent);
+  --color-destructive: var(--danger-solid);
+  --color-destructive-foreground: var(--on-danger);
   --color-info: var(--info);
+  --color-info-strong: var(--info-strong);
+  --color-info-solid: var(--info-solid);
   --color-info-soft: var(--info-soft);
   --color-info-border: var(--info-border);
   --color-violet: var(--violet);
+  --color-violet-strong: var(--violet-strong);
+  --color-violet-solid: var(--violet-solid);
   --color-violet-soft: var(--violet-soft);
   --color-violet-border: var(--violet-border);
 

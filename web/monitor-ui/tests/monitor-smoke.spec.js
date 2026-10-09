@@ -1294,3 +1294,55 @@ test("dialogs trap focus, close on Escape and restore focus to the trigger", asy
 });
 
 
+
+// The palette is generated OKLCH: custom properties in two theme blocks that
+// `applyTheme()` and an inline script in index.html select between. None of that
+// is visible to a build, so these assert the two ways it can silently break -
+// a colour syntax the browser rejects, which leaves the property empty, and a
+// theme that is not the one the reader asked for.
+test("each theme resolves to real colours", async ({ page }) => {
+  const seen = {};
+  for (const scheme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/overview");
+    await expect(page.getByRole("heading", { name: "Overview", exact: true }).first()).toBeVisible();
+    const state = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        attribute: document.documentElement.dataset.theme,
+        colorScheme: root.colorScheme,
+        canvas: root.getPropertyValue("--bg-canvas").trim(),
+        text: root.getPropertyValue("--text-primary").trim(),
+        // color-mix() output, so a rejected value would read as an empty string.
+        border: root.getPropertyValue("--border").trim(),
+        bodyBackground: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    expect(state.attribute).toBe(scheme);
+    expect(state.colorScheme).toBe(scheme);
+    for (const token of ["canvas", "text", "border"]) {
+      expect(state[token], `--${token} is empty in the ${scheme} theme`).not.toBe("");
+    }
+    expect(state.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+    seen[scheme] = state.bodyBackground;
+  }
+  // Dark really is the darker of the two, not just a differently named theme.
+  const luminance = (rgb) => rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map((c) => c / 255).reduce((sum, c) => sum + c, 0);
+  expect(luminance(seen.dark)).toBeLessThan(luminance(seen.light));
+});
+
+// A stored preference beats the OS setting, in either direction.
+test("the stored theme preference overrides the system one", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.addInitScript(() => window.localStorage.setItem("trajecta.monitor.theme", "dark"));
+  await page.goto("/overview");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("following the system theme picks up a change while the page is open", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/overview");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});

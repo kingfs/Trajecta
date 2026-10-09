@@ -13,12 +13,12 @@ const badgeVariants = cva(
     variants: {
       tone: {
         default: "border-border bg-card text-muted-foreground",
-        brand: "border-brand-border bg-brand-soft text-brand",
-        success: "border-success-border bg-success-soft text-success",
-        warning: "border-warning-border bg-warning-soft text-warning",
-        danger: "border-danger-border bg-danger-soft text-danger",
-        info: "border-info-border bg-info-soft text-info",
-        violet: "border-violet-border bg-violet-soft text-violet",
+        brand: "border-brand-border bg-brand-soft text-brand-strong",
+        success: "border-success-border bg-success-soft text-success-strong",
+        warning: "border-warning-border bg-warning-soft text-warning-strong",
+        danger: "border-danger-border bg-danger-soft text-danger-strong",
+        info: "border-info-border bg-info-soft text-info-strong",
+        violet: "border-violet-border bg-violet-soft text-violet-strong",
         muted: "border-border-subtle bg-secondary text-faint",
       },
     },
