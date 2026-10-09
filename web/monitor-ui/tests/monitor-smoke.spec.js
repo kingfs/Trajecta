@@ -1266,6 +1266,33 @@ test("switching language at runtime loads the other chunk", async ({ page, isMob
   expect(locales).toContain("zh-CN");
 });
 
+// The stream carries the JWT in an Authorization header rather than in the query
+// string, which is why it is SSE over fetch and not an EventSource. The polled
+// summary says 18 unread; the streamed one says 7, so the badge proves which of
+// the two reached the UI. A heartbeat comment rides along in the same body to
+// pin that it is dropped rather than parsed as an event.
+test("the event stream drives the unread badge", async ({ page }) => {
+  await page.route("**/api/events/stream", async (route) => {
+    // The opening poll and the opening stream start together, and the poll
+    // replaces the whole summary when it lands, so a streamed value that arrives
+    // first is overwritten by it. Holding the stream back until the poll has
+    // settled is what makes this an assertion about the stream rather than about
+    // which of the two won the mount race.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+      body: ': heartbeat\n\nevent: system_event.summary\ndata: {"unread":7}\n\n',
+    });
+  });
+
+  await page.goto("/overview");
+  // The nav renders a badge per counter, and the events entry is rendered twice
+  // (the rail and its narrow-viewport duplicate), so this names one of them.
+  // `.nav-item-badge` alone matches three and fails in strict mode.
+  await expect(page.locator('a[href="/events"] .nav-item-badge').first()).toHaveText("7");
+});
+
 // The date formatters hardcoded "zh-CN", so the English console printed
 // Chinese-ordered dates under English labels. They resolve the language when they
 // format, so a switch re-formats the rows already on screen rather than waiting
@@ -1608,5 +1635,7 @@ test("reduced motion turns the dialog animation off", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(content).toHaveCount(0);
 });
+
+
 
 
