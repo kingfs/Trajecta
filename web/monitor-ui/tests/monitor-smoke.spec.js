@@ -284,7 +284,9 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.getByRole("button", { name: "Show all" }).click();
   await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
   await page.getByRole("button", { name: "Reanalyze" }).click();
-  await expect(page.getByText(/job #301 completed/)).toBeVisible();
+  // The queued job is reported as a toast, and the toast layer is a live region,
+  // so the outcome is announced as well as shown.
+  await expect(page.getByRole("region", { name: /Notifications/ })).toContainText(/job #301 completed/);
 });
 
 // Markdown is react-markdown + remark-gfm now. The renderer it replaced escaped
@@ -1105,7 +1107,11 @@ test("provider toggle failure is visible and preserves the displayed choice", as
   });
   await page.goto("/providers");
   await page.getByLabel("OpenAI Primary enabled", { exact: true }).click();
-  await expect(page.getByRole("alert")).toHaveText("Upstreams are managed by YAML credentials");
+  // The failure is reported through the toast layer now, which sonner exposes as
+  // a polite live region rather than as `role="alert"`: it is a notification
+  // beside the page, not a dialog over it.
+  const notifications = page.getByRole("region", { name: /Notifications/ });
+  await expect(notifications).toContainText("Upstreams are managed by YAML credentials");
   await expect(page.getByLabel("OpenAI Primary enabled", { exact: true })).toBeChecked();
 });
 

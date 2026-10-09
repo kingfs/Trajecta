@@ -10,6 +10,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
@@ -21,8 +22,6 @@ export function ProviderDetailPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const [actionError, setActionError] = useState("");
-  const [busy, setBusy] = useState("");
   const [modelDraft, setModelDraft] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(() => emptyEditForm());
@@ -52,138 +51,126 @@ export function ProviderDetailPage() {
     setSearchParams(next);
   };
   const reload = () => refresh();
-  const probe = async () => {
-    setBusy("probe");
-    setActionError("");
-    try {
-      const result = await postJSON(apiPaths.providerProbe(effectiveProviderID), { enable_discovered: false, detect_provider: true });
+  // The page keeps one busy slot for its toolbar, exactly as before, but each
+  // action owns its pending state instead of sharing a string with eight others.
+  // The action name is the mutation's own variable, so a command that names what
+  // it operates on - a model toggle, a model delete - still reports which row it
+  // is working on while it is in flight.
+  const probe = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerProbe(effectiveProviderID), { enable_discovered: false, detect_provider: true }),
+    error: (err) => formatProbeActionError(err, t),
+    onSuccess: (result) => {
       setLastProbe(result);
       reload();
-    } catch (err) {
+    },
+    onError: (err) => {
+      // A failed probe can still carry a report worth showing.
       if (err.payload?.provider_probe) {
         setLastProbe(err.payload);
       }
-      setActionError(formatProbeActionError(err, t));
       reload();
-    } finally {
-      setBusy("");
-    }
-  };
-  const applyProbeSuggestions = async () => {
-    const report = lastProbe?.provider_probe;
-    if (!report) {
-      return;
-    }
-    setBusy("apply-probe");
-    setActionError("");
-    try {
-      await patchJSON(apiPaths.provider(effectiveProviderID), providerProbeSuggestionPayload(provider, report));
+    },
+  });
+
+  const applyProbeSuggestions = useWriteMutation({
+    mutationFn: (report) => patchJSON(apiPaths.provider(effectiveProviderID), providerProbeSuggestionPayload(provider, report)),
+    error: "channelDetail.applyProbeError",
+    onSuccess: () => {
       setLastProbe(null);
       reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.applyProbeError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const setProviderEnabled = async (enabled) => {
-    setBusy("provider");
-    setActionError("");
-    try {
-      await patchJSON(apiPaths.provider(effectiveProviderID), { enabled });
-      reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.updateProviderError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const saveProvider = async () => {
-    setBusy("save-provider");
-    setActionError("");
-    try {
-      await patchJSON(apiPaths.provider(effectiveProviderID), providerPayloadFromForm(editForm));
+    },
+  });
+
+  const setProviderEnabled = useWriteMutation({
+    mutationFn: (enabled) => patchJSON(apiPaths.provider(effectiveProviderID), { enabled }),
+    error: "channelDetail.updateProviderError",
+    onSuccess: reload,
+  });
+
+  const saveProvider = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.provider(effectiveProviderID), providerPayloadFromForm(editForm)),
+    error: "channelDetail.saveProviderError",
+    onSuccess: () => {
       setEditOpen(false);
       reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.saveProviderError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const setModelEnabled = async (model, enabled) => {
-    setBusy(model);
-    setActionError("");
-    try {
-      await patchJSON(apiPaths.providerModel(effectiveProviderID, model), { enabled });
-      reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.updateModelError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const deleteProvider = async () => {
-    if (!window.confirm(t("providers.deleteConfirm", { name: provider.name || effectiveProviderID }))) {
-      return;
-    }
-    setBusy("delete-provider");
-    setActionError("");
-    try {
-      await deleteJSON(apiPaths.provider(effectiveProviderID));
-      navigate("/providers");
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.deleteProviderError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const deleteModel = async (model) => {
-    if (!window.confirm(t("channelDetail.deleteModelConfirm", { model }))) {
-      return;
-    }
-    setBusy(`delete:${model}`);
-    setActionError("");
-    try {
-      await deleteJSON(apiPaths.providerModel(effectiveProviderID, model));
-      reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.deleteModelError"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const addModel = async (event) => {
-    event.preventDefault();
-    const model = modelDraft.trim();
-    if (!model) {
-      return;
-    }
-    setBusy("add-model");
-    setActionError("");
-    try {
-      await postJSON(apiPaths.providerModels(effectiveProviderID), { model, display_name: model, enabled: true });
+    },
+  });
+
+  const setModelEnabled = useWriteMutation({
+    mutationFn: ({ model, enabled }) => patchJSON(apiPaths.providerModel(effectiveProviderID, model), { enabled }),
+    error: "channelDetail.updateModelError",
+    onSuccess: reload,
+  });
+
+  const deleteProvider = useWriteMutation({
+    mutationFn: () => deleteJSON(apiPaths.provider(effectiveProviderID)),
+    error: "channelDetail.deleteProviderError",
+    onSuccess: () => navigate("/providers"),
+  });
+
+  const deleteModel = useWriteMutation({
+    mutationFn: ({ model }) => deleteJSON(apiPaths.providerModel(effectiveProviderID, model)),
+    error: "channelDetail.deleteModelError",
+    onSuccess: reload,
+  });
+
+  const addModel = useWriteMutation({
+    mutationFn: ({ model }) => postJSON(apiPaths.providerModels(effectiveProviderID), { model, display_name: model, enabled: true }),
+    error: "channelDetail.addModelError",
+    onSuccess: () => {
       setModelDraft("");
       reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.addModelError"));
-    } finally {
-      setBusy("");
+    },
+  });
+
+  const setModelsEnabled = useWriteMutation({
+    mutationFn: ({ models, enabled }) => patchJSON(apiPaths.providerModelsBatch(effectiveProviderID), { models, enabled }),
+    error: "channelDetail.updateModelsError",
+    onSuccess: reload,
+  });
+
+  const busy =
+    (probe.isPending && "probe") ||
+    (applyProbeSuggestions.isPending && "apply-probe") ||
+    (setProviderEnabled.isPending && "provider") ||
+    (saveProvider.isPending && "save-provider") ||
+    (setModelEnabled.isPending && setModelEnabled.variables?.model) ||
+    (deleteProvider.isPending && "delete-provider") ||
+    (deleteModel.isPending && `delete:${deleteModel.variables?.model}`) ||
+    (addModel.isPending && "add-model") ||
+    (setModelsEnabled.isPending && (setModelsEnabled.variables?.enabled ? "models-enable" : "models-disable")) ||
+    "";
+
+  const confirmDeleteProvider = () => {
+    if (window.confirm(t("providers.deleteConfirm", { name: provider.name || effectiveProviderID }))) {
+      deleteProvider.mutate();
     }
   };
-  const setModelsEnabled = async (models, enabled) => {
-    if (!models.length) {
-      return;
+
+  const confirmDeleteModel = (model) => {
+    if (window.confirm(t("channelDetail.deleteModelConfirm", { model }))) {
+      deleteModel.mutate({ model });
     }
-    setBusy(enabled ? "models-enable" : "models-disable");
-    setActionError("");
-    try {
-      await patchJSON(apiPaths.providerModelsBatch(effectiveProviderID), { models, enabled });
-      reload();
-    } catch (err) {
-      setActionError(err.message || t("channelDetail.updateModelsError"));
-    } finally {
-      setBusy("");
+  };
+
+  const submitAddModel = (event) => {
+    event.preventDefault();
+    const model = modelDraft.trim();
+    if (model) {
+      addModel.mutate({ model });
+    }
+  };
+
+  const applyProbe = () => {
+    const report = lastProbe?.provider_probe;
+    if (report) {
+      applyProbeSuggestions.mutate(report);
+    }
+  };
+
+  const toggleModels = (models, enabled) => {
+    if (models.length) {
+      setModelsEnabled.mutate({ models, enabled });
     }
   };
 
@@ -218,12 +205,12 @@ export function ProviderDetailPage() {
               <Link className="icon-button" to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
                 <HomeIcon />
               </Link>
-              <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
+              <button className="icon-button" type="button" onClick={() => probe.mutate()} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
               <DialogTrigger asChild>
                 <button className="icon-button" type="button" title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></button>
               </DialogTrigger>
-              <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
-              <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
+              <button className="icon-button" type="button" onClick={confirmDeleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
+              <Switch checked={Boolean(provider.enabled)} onChange={(enabled) => setProviderEnabled.mutate(enabled)} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
             </div>
             <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
           </div>
@@ -253,7 +240,6 @@ export function ProviderDetailPage() {
           </div>
         </section>
 
-        {actionError ? <EmptyState title={t("channelDetail.actionFailed")} detail={actionError} tone="danger" /> : null}
         {detail.error ? <EmptyState title={t("channelDetail.loadError")} detail={detail.error} tone="danger" /> : null}
         {detail.loading && !detail.data ? <EmptyState title={t("channelDetail.loading")} detail={t("channelDetail.loadingDetail")} /> : null}
         {detail.data?.secret_storage_mode === "plaintext-local" ? (
@@ -263,7 +249,7 @@ export function ProviderDetailPage() {
           <ProviderProbeSuggestionPanel
             report={lastProbe.provider_probe}
             busy={busy === "apply-probe"}
-            onApply={applyProbeSuggestions}
+            onApply={applyProbe}
           />
         ) : null}
 
@@ -301,10 +287,10 @@ export function ProviderDetailPage() {
                   {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
                 </div>
               </div>
-              <form className="filter-bar" onSubmit={addModel}>
+              <form className="filter-bar" onSubmit={submitAddModel}>
                 <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
                 <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</button>
-                <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
+                <button className="ghost-button" type="button" onClick={() => toggleModels(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
               </form>
               <div className="provider-model-card-grid">
                 {modelsUsage.length ? modelsUsage.map((model) => (
@@ -314,8 +300,8 @@ export function ProviderDetailPage() {
                     providerEnabled={Boolean(provider.enabled)}
                     busy={busy === model.model}
                     deleting={busy === `delete:${model.model}`}
-                    onToggle={() => setModelEnabled(model.model, !model.enabled)}
-                    onDelete={() => deleteModel(model.model)}
+                    onToggle={() => setModelEnabled.mutate({ model: model.model, enabled: !model.enabled })}
+                    onDelete={() => confirmDeleteModel(model.model)}
                   />
                 )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
               </div>

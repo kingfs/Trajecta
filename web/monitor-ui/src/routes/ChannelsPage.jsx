@@ -10,6 +10,7 @@ import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import { buildProviderLink, formatCount, formatDateTime, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
@@ -168,14 +169,13 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const { t } = useI18n();
   const [form, setForm] = useState(DEFAULT_FORM);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [validating, setValidating] = useState(false);
   const [probeReport, setProbeReport] = useState(null);
   const [setupResult, setSetupResult] = useState(null);
   const [validatedSignature, setValidatedSignature] = useState("");
-  const [error, setError] = useState("");
   const formVersion = useRef(0);
+  // Validation numbers the form it was asked about, because the answer is only
+  // about a form that has not changed since.
+  const validationVersion = useRef(0);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const currentSetupSignature = setupValidationSignature(form);
   const setupStale = Boolean(setupResult && validatedSignature !== currentSetupSignature);
@@ -188,22 +188,20 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
       setValidatedSignature("");
     }
   };
-  const detectProvider = async () => {
-    setDetecting(true);
-    setError("");
-    try {
-      const report = await postJSON(apiPaths.providerProbePreview, providerProbePreviewPayload(form));
+  const detectProvider = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerProbePreview, providerProbePreviewPayload(form)),
+    error: "providers.probeFailed",
+    onSuccess: (report) => {
       setProbeReport(report);
       setAdvancedOpen(true);
-    } catch (err) {
+    },
+    onError: (err) => {
+      // A refused probe can still carry a report worth showing.
       if (err.payload?.status) {
         setProbeReport(err.payload);
       }
-      setError(err.message || t("providers.probeFailed"));
-    } finally {
-      setDetecting(false);
-    }
-  };
+    },
+  });
   const applyProbeSuggestions = () => {
     formVersion.current += 1;
     setForm((current) => ({
@@ -224,25 +222,32 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
       return next;
     });
   };
-  const validateSetup = async () => {
-    setValidating(true);
-    setError("");
-    setSetupResult(null);
-    setValidatedSignature("");
-    const validationVersion = formVersion.current;
-    try {
-      const result = await postJSON(apiPaths.providerSetupValidate, normalizeProviderPayload(form));
-      if (validationVersion !== formVersion.current) {
-        setError(t("providers.validationStaleReason"));
+  // "Stale" is not a failure: the form moved on while the answer was in flight,
+  // so the answer describes something the reader is no longer looking at. It is
+  // the message for the toast either way, which is why the error option decides
+  // it rather than a second toast being raised from onError.
+  const setupIsStale = () => validationVersion.current !== formVersion.current;
+
+  const validateSetup = useWriteMutation({
+    mutationFn: () => {
+      validationVersion.current = formVersion.current;
+      setSetupResult(null);
+      setValidatedSignature("");
+      return postJSON(apiPaths.providerSetupValidate, normalizeProviderPayload(form));
+    },
+    error: (err) => (setupIsStale() ? t("providers.validationStaleReason") : err?.message || t("providers.validationStaleReason")),
+    onSuccess: (result) => {
+      if (setupIsStale()) {
+        toast.warning(t("providers.validationStaleReason"));
         return;
       }
       setSetupResult(result);
       setProbeReport(result.probe || null);
       applySetupConfig(result.normalized_config);
       setAdvancedOpen(true);
-    } catch (err) {
-      if (validationVersion !== formVersion.current) {
-        setError(t("providers.validationStaleReason"));
+    },
+    onError: (err) => {
+      if (setupIsStale()) {
         return;
       }
       if (err.payload?.normalized_config) {
@@ -251,28 +256,24 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         applySetupConfig(err.payload.normalized_config);
         setAdvancedOpen(true);
       }
-      setError(err.message || t("providers.validationStaleReason"));
-    } finally {
-      setValidating(false);
-    }
-  };
+    },
+  });
 
-  const submit = async (event) => {
+  // `canApply` is a gate in front of the request, not a response to one, so it
+  // reports itself and nothing is sent.
+  const createProvider = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form)),
+    error: "providers.validateRequiredReason",
+    onSuccess: (result) => onCreated(result.channel),
+  });
+
+  const submit = (event) => {
     event.preventDefault();
     if (!setupStatus.canApply) {
-      setError(setupStatus.reason);
+      toast.warning(setupStatus.reason);
       return;
     }
-    setSaving(true);
-    setError("");
-    try {
-      const result = await postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form));
-      onCreated(result.channel);
-    } catch (err) {
-      setError(err.message || t("providers.validateRequiredReason"));
-    } finally {
-      setSaving(false);
-    }
+    createProvider.mutate();
   };
 
   return (
@@ -296,8 +297,8 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
         <div className="provider-form-actions">
-          <button className="ghost-button" type="button" onClick={detectProvider} disabled={detecting || !form.base_url.trim()}>{detecting ? t("providers.detecting") : t("providers.detect")}</button>
-          <button className="ghost-button active" type="button" onClick={validateSetup} disabled={validating || !form.base_url.trim()}>{validating ? t("providers.validating") : t("providers.validate")}</button>
+          <button className="ghost-button" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</button>
+          <button className="ghost-button active" type="button" onClick={() => validateSetup.mutate()} disabled={validateSetup.isPending || !form.base_url.trim()}>{validateSetup.isPending ? t("providers.validating") : t("providers.validate")}</button>
           <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</button>
         </div>
         {setupResult ? <ProviderSetupStatusPanel result={setupResult} status={setupStatus} /> : <p className="trace-subline">{t("providers.validateBeforeCreate")}</p>}
@@ -307,10 +308,9 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
           </div>
         ) : null}
-        {error ? <p className="auth-error">{error}</p> : null}
           <DialogFooter>
             <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-            <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? t("providers.creating") : t("providers.create")}</button>
+            <button className="ghost-button active" type="submit" disabled={createProvider.isPending || !setupStatus.canApply}>{createProvider.isPending ? t("providers.creating") : t("providers.create")}</button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -322,40 +322,30 @@ function ProviderCard({ item, windowValue, onRefresh }) {
   const { t } = useI18n();
   const summary = item.summary || {};
   const modeTag = providerModeTag(item.mode);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
   const [probeOpen, setProbeOpen] = useState(false);
   // Called with the next value only. Bubble suppression lives in the Switch,
   // which is the only place that knows it is nested in a clickable card.
-  const setEnabled = async (enabled) => {
-    setSaving(true);
-    setError("");
-    try {
-      await patchJSON(apiPaths.provider(item.id), { enabled });
-      onRefresh?.();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-  const deleteProvider = async (event) => {
+  const setEnabled = useWriteMutation({
+    mutationFn: (enabled) => patchJSON(apiPaths.provider(item.id), { enabled }),
+    error: "common.actionFailed",
+    onSuccess: () => onRefresh?.(),
+  });
+
+  const removeProvider = useWriteMutation({
+    mutationFn: () => deleteJSON(apiPaths.provider(item.id)),
+    error: "common.actionFailed",
+    onSuccess: () => onRefresh?.(),
+  });
+
+  const deleteProvider = (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!window.confirm(t("providers.deleteConfirm", { name: item.name || item.id }))) {
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      await deleteJSON(apiPaths.provider(item.id));
-      onRefresh?.();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+    if (window.confirm(t("providers.deleteConfirm", { name: item.name || item.id }))) {
+      removeProvider.mutate();
     }
   };
+
+  const saving = setEnabled.isPending || removeProvider.isPending;
   return (
     <Link className="upstream-card" to={buildProviderLink(item.id, windowValue)}>
       <div className="upstream-card-head">
@@ -364,7 +354,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           <h2>{item.name || item.id}</h2>
         </div>
         <div className="trace-tag-group">
-          <Switch checked={Boolean(item.enabled)} onChange={setEnabled} disabled={saving} label={`${item.name || item.id} enabled`} />
+          <Switch checked={Boolean(item.enabled)} onChange={(enabled) => setEnabled.mutate(enabled)} disabled={saving} label={`${item.name || item.id} enabled`} />
           <button className="icon-button" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
             <DeleteIcon />
           </button>
@@ -390,7 +380,6 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         <Metric label={t("overview.requests")} value={formatCount(summary.request_count)} />
         <Metric label={t("overview.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
       </div>
-      {error ? <p className="auth-error" role="alert">{error}</p> : null}
       <p className="trace-subline">{!item.enabled ? t("providers.routingDisabled") : !item.enabled_model_count && !item.allow_unknown_models ? t("providers.chooseModels") : t("providers.routingEnabled")}</p>
       <div className="upstream-card-footer">
         <span className="mono">{item.base_url}</span>
@@ -404,43 +393,30 @@ function ProviderCard({ item, windowValue, onRefresh }) {
 function ProviderProbeDialog({ provider, onClose, onApplied }) {
   const { t } = useI18n();
   const [report, setReport] = useState(null);
-  const [busy, setBusy] = useState("preview");
-  const [error, setError] = useState("");
   const [applyResult, setApplyResult] = useState(null);
   const providerMap = useMemo(() => new Map([[provider.id, provider]]), [provider]);
   const summary = useMemo(() => summarizeProbeBatchReport(report, providerMap), [report, providerMap]);
   const row = summary.rows[0] || null;
 
-  const previewReport = async () => {
-    setBusy("preview");
-    setError("");
-    setApplyResult(null);
-    try {
-      const nextReport = await postJSON(apiPaths.providerProbeReport, providerProbeBatchApplyPayload(provider.id));
+  const previewReport = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerProbeReport, providerProbeBatchApplyPayload(provider.id)),
+    error: "providers.probeFailed",
+    onSuccess: (nextReport) => {
+      setApplyResult(null);
       setReport(nextReport);
-    } catch (err) {
-      setError(err.message || t("providers.probeFailed"));
-    } finally {
-      setBusy("");
-    }
-  };
+    },
+  });
 
-  const applyDetected = async () => {
-    if (!summary.applyable.length) {
-      return;
-    }
-    setBusy("apply");
-    setError("");
-    try {
-      const result = await postJSON(apiPaths.providerProbeApply, providerProbeBatchApplyPayload(provider.id));
+  const applyDetected = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerProbeApply, providerProbeBatchApplyPayload(provider.id)),
+    error: "providers.probeFailed",
+    onSuccess: (result) => {
       setApplyResult(result);
       onApplied?.();
-    } catch (err) {
-      setError(err.message || t("providers.probeFailed"));
-    } finally {
-      setBusy("");
-    }
-  };
+    },
+  });
+
+  const busy = previewReport.isPending ? "preview" : applyDetected.isPending ? "apply" : "";
 
   React.useEffect(() => {
     previewReport();
@@ -467,10 +443,9 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
         {row ? <ProviderProbeBatchRow row={row} /> : null}
         {report && !row ? <EmptyState title={t("providers.noProbe")} detail={t("providers.noProbeDetail")} compact /> : null}
         {applyResult ? <p className="trace-subline">{t("providers.applyAccepted", { result: formatProviderProbeApplyResult(applyResult, t) })}</p> : null}
-        {error ? <EmptyState title={t("providers.probeFailed")} detail={error} tone="danger" compact /> : null}
         <DialogFooter>
-          <button className="ghost-button" type="button" onClick={previewReport} disabled={busy === "preview"}>{busy === "preview" ? t("providers.probing") : t("providers.runAgain")}</button>
-          <button className="ghost-button active" type="button" onClick={applyDetected} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? t("providers.applying") : t("providers.applySuggestions")}</button>
+          <button className="ghost-button" type="button" onClick={() => previewReport.mutate()} disabled={busy === "preview"}>{busy === "preview" ? t("providers.probing") : t("providers.runAgain")}</button>
+          <button className="ghost-button active" type="button" onClick={() => applyDetected.mutate()} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? t("providers.applying") : t("providers.applySuggestions")}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
