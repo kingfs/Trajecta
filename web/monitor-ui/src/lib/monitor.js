@@ -1,3 +1,33 @@
+import { currentLanguage } from "./i18nOptions.ts";
+
+/*
+ * Dates and raw numbers print in the language the reader picked, not in a
+ * hardcoded one. They used to pass "zh-CN" and the browser default, so the
+ * English console printed Chinese-ordered dates (`2026/10/09 12:05:17` instead
+ * of `10/09/2026, 12:05:17 PM`) while every label around it was English.
+ *
+ * `Intl.DateTimeFormat` instances are expensive to construct and a trace table
+ * asks for one per cell, so they are cached by locale and option set. The locale
+ * is resolved at format time rather than captured: a component that re-renders
+ * on a language change must not keep printing the previous language.
+ */
+const dateTimeFormats = new Map();
+
+function dateTimeFormat(locale, options) {
+  const key = `${locale}|${options.year || ""}${options.month || ""}${options.day || ""}${options.hour || ""}${options.minute || ""}${options.second || ""}`;
+  let format = dateTimeFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, options);
+    dateTimeFormats.set(key, format);
+  }
+  return format;
+}
+
+// The same idea for the numbers inside tooltips, which are asserted verbatim.
+function groupDigits(value, locale = currentLanguage()) {
+  return new Intl.NumberFormat(locale).format(Math.round(value));
+}
+
 export function formatEndpointTag(value = "") {
   const endpoint = String(value || "").toLowerCase();
   if (endpoint.includes("/v1/chat/completions")) {
@@ -304,7 +334,7 @@ export function formatRawDuration(value) {
   if (!Number.isFinite(ms) || ms <= 0) {
     return "0 ms";
   }
-  return `${Math.round(ms).toLocaleString()} ms`;
+  return `${groupDigits(ms)} ms`;
 }
 
 export function formatRawNumber(value = 0) {
@@ -312,7 +342,7 @@ export function formatRawNumber(value = 0) {
   if (!Number.isFinite(number)) {
     return "0";
   }
-  return Math.round(number).toLocaleString();
+  return groupDigits(number);
 }
 
 export function totalTokensPerSecond(tokens = 0, durationMs = 0) {
@@ -392,7 +422,7 @@ export function formatRawRate(value, unit = "tok/s") {
   if (!Number.isFinite(number) || number <= 0) {
     return `0 ${unit}`;
   }
-  return `${Math.round(number).toLocaleString()} ${unit}`;
+  return `${groupDigits(number)} ${unit}`;
 }
 
 export function formatTokenRate(tokens = 0, durationMs = 0) {
@@ -429,7 +459,7 @@ export function formatRawCacheRate(cachedTokens = 0, totalTokens = 0) {
     return "";
   }
   const rate = (cached / total) * 100;
-  return `${rate.toFixed(2)}% (${Math.round(cached).toLocaleString()} / ${Math.round(total).toLocaleString()})`;
+  return `${rate.toFixed(2)}% (${groupDigits(cached)} / ${groupDigits(total)})`;
 }
 
 export function formatCount(value = 0) {
@@ -585,35 +615,37 @@ export function formatDateTime(value) {
   if (!value) {
     return "-";
   }
-  return new Date(value).toLocaleString("zh-CN", {
+  return dateTimeFormat(currentLanguage(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+  }).format(new Date(value));
 }
 
 export function formatTime(value) {
   if (!value) {
     return "-";
   }
-  return new Date(value).toLocaleTimeString("zh-CN", {
+  return dateTimeFormat(currentLanguage(), {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+  }).format(new Date(value));
 }
 
 export function formatTimelineBucketLabel(value) {
   if (!value) {
     return "-";
   }
-  return new Date(value).toLocaleString("zh-CN", {
+  // The bucket axis keeps the clock time only when the range stays inside one
+  // day, which is what the month/day/hour/minute set already produced.
+  return dateTimeFormat(currentLanguage(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }).format(new Date(value));
 }

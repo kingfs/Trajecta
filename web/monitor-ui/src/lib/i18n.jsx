@@ -5,23 +5,16 @@ import resourcesToBackend from "i18next-resources-to-backend";
 import {
   DEFAULT_LANGUAGE,
   FALLBACK_LANGUAGE,
+  LANGUAGE_KEY,
   baseOptions,
+  currentLanguage,
   languageOptions,
   loadMessages,
   normalizeLanguage,
   supportedLanguages,
 } from "./i18nOptions";
 
-export { languageOptions, normalizeLanguage, supportedLanguages };
-
-export const LANGUAGE_KEY = "trajecta.monitor.language";
-
-export function currentLanguage() {
-  if (typeof window === "undefined") {
-    return DEFAULT_LANGUAGE;
-  }
-  return normalizeLanguage(window.localStorage.getItem(LANGUAGE_KEY));
-}
+export { LANGUAGE_KEY, currentLanguage, languageOptions, normalizeLanguage, supportedLanguages };
 
 let bootstrap;
 

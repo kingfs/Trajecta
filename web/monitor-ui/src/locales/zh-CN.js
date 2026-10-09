@@ -40,6 +40,8 @@ export default {
   "password.update": "更新",
   "password.updated": "密码已更新。",
   "password.failed": "无法修改密码。",
+  "common.show": "展开",
+  "common.hide": "收起",
   "common.close": "关闭",
   "common.save": "保存",
   "common.saving": "保存中",

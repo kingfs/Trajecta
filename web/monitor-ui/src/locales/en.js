@@ -40,6 +40,8 @@ export default {
   "password.update": "Update",
   "password.updated": "Password updated.",
   "password.failed": "Unable to change password.",
+  "common.show": "Show",
+  "common.hide": "Hide",
   "common.close": "Close",
   "common.save": "Save",
   "common.saving": "Saving",

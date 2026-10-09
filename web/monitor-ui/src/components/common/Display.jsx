@@ -1,20 +1,40 @@
 import React, { useMemo, useState } from "react";
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { useI18n } from "../../lib/i18n";
 import { formatRawNumber } from "../../lib/monitor";
 
+/**
+ * A disclosure, owned by Radix Collapsible.
+ *
+ * It was a `useState` and a plain button, which left two things missing: the
+ * trigger reported no `aria-expanded`, so a screen reader could not tell whether
+ * the section in front of it was open, and it never named the section it opens.
+ * The label beside it was the literal string "hide"/"show" in a UI that ships
+ * two languages. Radix derives the state attribute from the root, generates the
+ * content id, and names it through `aria-controls` while the content is mounted,
+ * which is the only time that id resolves. The label is a dictionary entry now.
+ */
 export function CollapsibleCard({ title, subtitle, defaultOpen = false, children, bodyClassName = "" }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className="collapse-card">
-      <button className="collapse-head" onClick={() => setOpen((value) => !value)}>
-        <div>
-          <strong>{title}</strong>
-          {subtitle ? <span>{subtitle}</span> : null}
-        </div>
-        <span>{open ? "hide" : "show"}</span>
-      </button>
-      {open ? <div className={`collapse-body ${bodyClassName}`.trim()}>{children}</div> : null}
-    </section>
+    <Collapsible.Root asChild open={open} onOpenChange={setOpen}>
+      <section className="collapse-card">
+        <Collapsible.Trigger asChild>
+          <button className="collapse-head" type="button">
+            <div>
+              <strong>{title}</strong>
+              {subtitle ? <span>{subtitle}</span> : null}
+            </div>
+            <span>{open ? t("common.hide") : t("common.show")}</span>
+          </button>
+        </Collapsible.Trigger>
+        <Collapsible.Content asChild>
+          <div className={`collapse-body ${bodyClassName}`.trim()}>{children}</div>
+        </Collapsible.Content>
+      </section>
+    </Collapsible.Root>
   );
 }
 

@@ -287,6 +287,44 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByText(/job #301 completed/)).toBeVisible();
 });
 
+// The disclosure was a `useState` and a plain button: no `aria-expanded`, no
+// `aria-controls`, and a hardcoded English "hide"/"show" in a UI that ships two
+// languages. Radix Collapsible owns the first two, and the third is a key.
+test("the disclosure reports its state and follows the language", async ({ page, isMobile }) => {
+  await page.goto("/traces/trace-routed");
+  const trigger = page.getByRole("button", { name: /^Reasoning/ }).first();
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(trigger).toContainText("Show");
+  // Closed, it names nothing: the section it would point at is not mounted, and
+  // an `aria-controls` pointing at a missing id is worse than none. Radix sets
+  // it only while the content is in the document.
+  await expect(trigger).not.toHaveAttribute("aria-controls", /./);
+
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(trigger).toContainText("Hide");
+  const controls = await trigger.getAttribute("aria-controls");
+  expect(controls).toBeTruthy();
+  // The id it names resolves, which is the half the hand-written version could
+  // not have got right without generating ids.
+  await expect(page.locator(`[id="${controls}"]`)).toHaveCount(1);
+
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(`[id="${controls}"]`)).toHaveCount(0);
+
+  // Desktop only: the mobile project's emulated viewport scales pointer
+  // coordinates against a 412px document inside an 826px layout viewport, so the
+  // account button click lands on its container instead of the button.
+  if (!isMobile) {
+    await page.getByRole("button", { name: "Account" }).first().click();
+    await page.getByRole("dialog", { name: "Account" }).getByRole("radio", { name: "中文" }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: /^推理/ }).first()).toContainText("展开");
+  }
+});
+
 // The audit page became 质量 with a tab strip, and the two halves that used to
 // share one scroll no longer do: lineage is a tab of 质量, while the server-side
 // tool bindings moved to 系统 → 服务端工具.
@@ -637,6 +675,9 @@ function tracePayload() {
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       layout: { is_stream: false },
     },
+    // Renders the one disclosure on this page that is not gated on a tool
+    // message, which is what the disclosure test drives.
+    ai_reasoning: "The route was chosen because the primary upstream was healthy.",
     messages: [
       { role: "system", content: longSystemPrompt(), message_type: "message" },
       { role: "user", content: "hello", message_type: "message" },
@@ -1225,6 +1266,26 @@ test("switching language at runtime loads the other chunk", async ({ page, isMob
   expect(locales).toContain("zh-CN");
 });
 
+// The date formatters hardcoded "zh-CN", so the English console printed
+// Chinese-ordered dates under English labels. They resolve the language when they
+// format, so a switch re-formats the rows already on screen rather than waiting
+// for the next fetch.
+test("the rendered timestamps are formatted in the active language", async ({ page, isMobile }) => {
+  test.skip(isMobile, "mobile emulation scales click coordinates off the account button");
+  await page.goto("/traces");
+  const stamp = page.locator(".trace-subline").first();
+  await expect(stamp).toBeVisible();
+  // English: day first, and a meridiem on the time.
+  await expect(stamp).toHaveText(/^\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2}\s?(AM|PM)$/);
+
+  await page.getByRole("button", { name: "Account" }).first().click();
+  await page.getByRole("dialog", { name: "Account" }).getByRole("radio", { name: "中文" }).click();
+  await page.keyboard.press("Escape");
+
+  // Chinese: year first, 24-hour, and no meridiem.
+  await expect(stamp).toHaveText(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
+});
+
 // i18next is configured with single-brace interpolation and with both the key
 // and namespace separators disabled, because the keys are flat names that
 // contain dots. Each of these is a case that configuration exists for, observed
@@ -1547,4 +1608,5 @@ test("reduced motion turns the dialog animation off", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(content).toHaveCount(0);
 });
+
 

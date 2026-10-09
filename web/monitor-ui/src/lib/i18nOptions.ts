@@ -14,6 +14,26 @@
 export const DEFAULT_LANGUAGE = "zh-CN";
 export const FALLBACK_LANGUAGE = "en";
 
+/**
+ * Where the chosen language is remembered. It lives here rather than in
+ * lib/i18n.jsx because two things that have no business importing React need it:
+ * the bootstrap probe, and the date and number formatters in lib/monitor.js,
+ * which have to print in the language the reader picked.
+ */
+export const LANGUAGE_KEY = "trajecta.monitor.language";
+
+/**
+ * The language in effect right now, read from the same place the provider writes
+ * it. A formatter calls this at format time rather than capturing a language,
+ * so a format that ran before the switch cannot keep printing the old one.
+ */
+export function currentLanguage(): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_LANGUAGE;
+  }
+  return normalizeLanguage(window.localStorage.getItem(LANGUAGE_KEY));
+}
+
 export type LanguageOption = {
   value: string;
   label: string;
