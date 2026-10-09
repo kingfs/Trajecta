@@ -6,8 +6,11 @@ import { cn } from "../../lib/utils";
 /*
  * Radix Select replaces the native <select> in the forms that need one, on the
  * grounds that a native popup cannot be themed and renders differently in every
- * browser. It is deliberately not applied to the list filters, which are
- * segmented controls rather than selects.
+ * browser. It has no call sites yet.
+ *
+ * The list filters are deliberately left native. They are real <select>
+ * elements submitting with the surrounding form, and the platform picker is an
+ * advantage on a phone; a portalled listbox would trade that away for theming.
  */
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;

@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
+import { Separator } from "./ui/separator";
 import {
   Activity,
   Bell,
@@ -19,6 +22,7 @@ import {
 import { apiPaths, apiURL, postJSON, requestJSON, streamSystemEvents } from "../lib/api";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
+import { cn } from "../lib/utils";
 
 /**
  * The sidebar is grouped by what the operator is doing, not by which table the
@@ -76,7 +80,9 @@ function navGroups(user) {
 export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
   const { t } = useI18n();
   const [accountOpen, setAccountOpen] = useState(false);
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  // The account button, as the place focus returns to after a form opened from
+  // the panel closes. See PasswordDialog.
+  const accountButtonRef = React.useRef(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [eventSummary, setEventSummary] = useState(null);
 
@@ -173,109 +179,208 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
         ))}
       </div>
 
-      {/* One Dialog root wraps the rail button and the panel it opens. Radix
-          hands focus back to the trigger on close, which only works when the two
-          share a root. */}
-      <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
-      {/* The trigger is a Radix DialogTrigger rather than a plain button with an
-          onClick. That is what lets the dialog hand focus back to the button it
-          was opened from when it closes; without it focus lands on <body> and a
-          keyboard reader loses their place in the rail. */}
-      <div className="nav-account">
-        <DialogTrigger asChild>
-          <button
-            className="account-trigger"
-            type="button"
-            aria-expanded={accountOpen}
-            aria-label={t("account.openAccount")}
-            title={collapsed ? displayName(user) : undefined}
-          >
-            <span className="account-avatar">{initials(user)}</span>
-            <span className="account-copy">
-              <strong>{displayName(user)}</strong>
-              <small>{user?.role || t("account.roleFallback")}</small>
-            </span>
-          </button>
-        </DialogTrigger>
-      </div>
+      {/* One popover root wraps the rail button and the panel it opens. Radix
+          portals the panel and positions it against the button, which is what
+          lets it hang over the page instead of being clamped to the rail's
+          width, and it hands focus back to the button on close, which only
+          works when the two share a root. */}
+      <Popover open={accountOpen} onOpenChange={setAccountOpen}>
+        <div className="nav-account">
+          <PopoverTrigger asChild>
+            <button
+              ref={accountButtonRef}
+              className="account-trigger"
+              type="button"
+              aria-label={t("account.openAccount")}
+              title={collapsed ? displayName(user) : undefined}
+            >
+              <span className="account-avatar">{initials(user)}</span>
+              <span className="account-copy">
+                <strong>{displayName(user)}</strong>
+                <small>{user?.role || t("account.roleFallback")}</small>
+              </span>
+            </button>
+          </PopoverTrigger>
+        </div>
 
-      {accountOpen ? (
-        <AccountDialog
+        <AccountPanel
           user={user}
           onLogout={onLogout}
-          onPreferences={() => {
-            setPreferencesOpen(true);
-            setAccountOpen(false);
-          }}
           onPassword={() => {
             setPasswordOpen(true);
             setAccountOpen(false);
           }}
         />
-      ) : null}
-      </Dialog>
+      </Popover>
 
-      {preferencesOpen ? <PreferencesDialog onClose={() => setPreferencesOpen(false)} /> : null}
-      {passwordOpen ? <PasswordDialog onClose={() => setPasswordOpen(false)} /> : null}
+      {passwordOpen ? <PasswordDialog returnFocusTo={accountButtonRef} onClose={() => setPasswordOpen(false)} /> : null}
     </nav>
   );
 }
 
 /**
- * The account surface is a centred dialog rather than a popover.
+ * The account surface is a panel that opens upwards from the rail button.
  *
- * Anchored to the trigger at the bottom of the rail, its content was clamped to
- * the sidebar's own width, which left the language picker and the account fields
- * fighting for ~200px. The modal reuses the same backdrop the preferences and
- * password dialogs already use, so the sidebar keeps one overlay pattern.
+ * It was a centred dialog before that, and a hand-positioned popover clamped to
+ * the rail before that. Neither is what this is: surface attached to the button
+ * that opened it, hanging over the page so its content is measured against the
+ * viewport rather than against the 232px rail. Radix flips it when there is no
+ * room above, so the same markup works with the rail collapsed and on a phone.
+ *
+ * The theme and the language live here rather than behind a Preferences dialog.
+ * Each is one choice out of several, so each is a radio group, and neither is a
+ * page-level decision that deserves a modal: a reader who wants the light theme
+ * should not have to open one to get it. The panel stays open across a pick, so
+ * both can be set before it is dismissed, and the arrows move within a group
+ * instead of walking out of the panel.
  */
-function AccountDialog({ user, onLogout, onPreferences, onPassword }) {
-  const { t } = useI18n();
-  // Radix owns Escape, the backdrop click, the focus trap, focus restore and the
-  // body scroll lock, so the document-level keydown listener this used to add is
-  // gone. The Dialog root lives in PrimaryNav, wrapping both this and the
-  // trigger, because that pairing is what makes focus restore work.
-  return (
-    <DialogContent className="account-modal" aria-labelledby="account-title">
-        <DialogHeader>
-          <div className="account-modal-identity">
-            <span className="account-avatar account-avatar-menu">{initials(user)}</span>
-            <div>
-              <DialogTitle id="account-title">{displayName(user)}</DialogTitle>
-              <span className="account-modal-role">
-                {user?.role || t("account.roleFallback")} · {user?.scope || t("account.scopeFallback")}
-              </span>
-            </div>
-          </div>
-          <DialogClose asChild>
-            <button className="icon-button" type="button" aria-label={t("common.close")}>
-              <X size={14} aria-hidden="true" />
-            </button>
-          </DialogClose>
-        </DialogHeader>
-      <AccountMenuContent onLogout={onLogout} onPreferences={onPreferences} onPassword={onPassword} />
-    </DialogContent>
-  );
-}
+// One row of the account panel. Utilities rather than a legacy class so the row
+// and the radio items above it hover the same way.
+const PANEL_ACTION =
+  "flex w-full cursor-pointer items-center gap-3 rounded-md px-2 py-2 font-sans text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
-function AccountMenuContent({ onLogout, onPreferences, onPassword }) {
+export function AccountPanel({ user, onLogout, onPassword }) {
   const { t } = useI18n();
   return (
-    <>
-      <button className="account-menu-item" type="button" onClick={onPreferences}>
-        <NavIcon name="settings" />
-        <span>{t("account.preferences")}</span>
-      </button>
-      <button className="account-menu-item" type="button" onClick={onPassword}>
+    <PopoverContent side="top" align="start" sideOffset={10} aria-label={t("account.openAccount")} className="w-[272px]">
+      <div className="flex min-w-0 items-center gap-3 px-2 py-1.5">
+        <span className="account-avatar size-[34px] text-sm">{initials(user)}</span>
+        <div className="min-w-0 flex-1">
+          <strong className="block truncate font-sans text-sm font-medium text-foreground">{displayName(user)}</strong>
+          <span className="block truncate text-label text-faint">
+            {user?.role || t("account.roleFallback")} · {user?.scope || t("account.scopeFallback")}
+          </span>
+        </div>
+      </div>
+      <Separator className="my-1.5" />
+      <p className="px-2 pt-1 pb-1 font-sans text-label font-medium text-faint">{t("preferences.theme")}</p>
+      <ThemePicker />
+      <Separator className="my-1.5" />
+      <p className="px-2 pt-1 pb-1 font-sans text-label font-medium text-faint">{t("preferences.language")}</p>
+      <LanguagePicker />
+      <Separator className="my-1.5" />
+      <button className={PANEL_ACTION} type="button" onClick={onPassword}>
         <NavIcon name="lock" />
         <span>{t("account.changePassword")}</span>
       </button>
-      <div className="account-menu-divider" />
-      <button className="account-menu-item account-menu-danger" type="button" onClick={onLogout}>
+      <button className={cn(PANEL_ACTION, "text-danger hover:text-danger")} type="button" onClick={onLogout}>
         <NavIcon name="logout" />
         <span>{t("account.signOut")}</span>
       </button>
-    </>
+    </PopoverContent>
+  );
+}
+
+function ThemePicker() {
+  const { t } = useI18n();
+  const [theme, setTheme] = useState(() => currentTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  return (
+    <RadioGroup
+      value={theme}
+      aria-label={t("preferences.theme")}
+      onValueChange={(next) => {
+        window.localStorage.setItem(THEME_KEY, next);
+        setTheme(next);
+      }}
+    >
+      {themeOptions.map((option) => (
+        <RadioGroupItem key={option.value} value={option.value}>
+          <span className={`theme-dot theme-dot-${option.value}`} aria-hidden="true" />
+          <span>{t(`theme.${option.value}`)}</span>
+        </RadioGroupItem>
+      ))}
+    </RadioGroup>
+  );
+}
+
+function LanguagePicker() {
+  const { language, setLanguage, t } = useI18n();
+  return (
+    <RadioGroup value={language} aria-label={t("preferences.language")} onValueChange={setLanguage}>
+      {languageOptions.map((option) => (
+        <RadioGroupItem key={option.value} value={option.value}>
+          <span>{option.label}</span>
+        </RadioGroupItem>
+      ))}
+    </RadioGroup>
+  );
+}
+
+function PasswordDialog({ onClose, returnFocusTo }) {
+  const { t } = useI18n();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setStatus("");
+    try {
+      await postJSON(apiPaths.authPassword, { current_password: currentPassword, new_password: newPassword });
+      setCurrentPassword("");
+      setNewPassword("");
+      setStatus(t("password.updated"));
+    } catch (err) {
+      setError(err.message || t("password.failed"));
+    }
+  };
+
+  // The form sits inside the dialog rather than being the dialog element itself:
+  // Radix clones its content element when `asChild` is used, and a form as the
+  // content root bought nothing.
+  return (
+    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent
+        aria-labelledby="password-title"
+        onCloseAutoFocus={(event) => {
+          // Radix hands focus back to the trigger it owns. This form has none -
+          // it is opened from the account panel, so the menu item that opened it
+          // is already unmounted - and without this the reader would be dropped
+          // on <body> at the top of the document.
+          event.preventDefault();
+          returnFocusTo?.current?.focus();
+        }}
+      >
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <div>
+              <p className="eyebrow">{t("password.eyebrow")}</p>
+              <DialogTitle id="password-title">{t("password.title")}</DialogTitle>
+            </div>
+            <DialogClose asChild>
+              <button className="icon-button" type="button" aria-label={t("common.close")}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            </DialogClose>
+          </DialogHeader>
+          <label className="nav-field">
+            {t("password.current")}
+            <input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+          </label>
+          <label className="nav-field">
+            {t("password.next")}
+            <input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+          </label>
+          {error ? <p className="auth-error">{error}</p> : null}
+          {status ? <p className="auth-success">{status}</p> : null}
+          <DialogFooter>
+            <button className="ghost-button" type="button" onClick={onClose}>
+              {t("password.cancel")}
+            </button>
+            <button className="ghost-button active" type="submit">
+              {t("password.update")}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -313,161 +418,6 @@ function NavIcon({ name }) {
     return null;
   }
   return <Icon size={15} aria-hidden="true" />;
-}
-
-function ThemeSwitcher({ labelled = false }) {
-  const { t } = useI18n();
-  const [theme, setTheme] = useState(() => currentTheme());
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  return (
-    <div className={labelled ? "theme-switcher theme-switcher-labelled" : "theme-switcher"} role="group" aria-label={t("preferences.theme")}>
-      {themeOptions.map((option) => (
-        <button
-          key={option.value}
-          className={theme === option.value ? "theme-option theme-option-active" : "theme-option"}
-          type="button"
-          title={t(`theme.${option.value}`)}
-          aria-label={t(`theme.${option.value}`)}
-          aria-pressed={theme === option.value}
-          onClick={() => {
-            window.localStorage.setItem(THEME_KEY, option.value);
-            setTheme(option.value);
-          }}
-        >
-          <span className={`theme-dot theme-dot-${option.value}`} aria-hidden="true" />
-          <span className="theme-option-text">{labelled ? t(`theme.${option.value}`) : option.short}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function LanguageSwitcher() {
-  const { language, setLanguage, t } = useI18n();
-  return (
-    <div className="language-switcher" role="group" aria-label={t("preferences.language")}>
-      {languageOptions.map((option) => (
-        <button
-          key={option.value}
-          className={language === option.value ? "language-option language-option-active" : "language-option"}
-          type="button"
-          aria-pressed={language === option.value}
-          onClick={() => setLanguage(option.value)}
-        >
-          <span>{option.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function PreferencesDialog({ onClose }) {
-  const { t } = useI18n();
-  return (
-    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent className="preferences-modal" aria-labelledby="preferences-title">
-        <DialogHeader>
-          <div>
-            <p className="eyebrow">{t("preferences.eyebrow")}</p>
-            <DialogTitle id="preferences-title">{t("preferences.title")}</DialogTitle>
-          </div>
-          <DialogClose asChild>
-            <button className="icon-button" type="button" aria-label={t("common.close")}>
-              <X size={14} aria-hidden="true" />
-            </button>
-          </DialogClose>
-        </DialogHeader>
-        <div className="preferences-list">
-          <section className="preferences-row">
-            <div>
-              <strong>{t("preferences.language")}</strong>
-              <span>{t("preferences.saved")}</span>
-            </div>
-            <LanguageSwitcher />
-          </section>
-          <section className="preferences-row">
-            <div>
-              <strong>{t("preferences.theme")}</strong>
-              <span>{t("preferences.saved")}</span>
-            </div>
-            <ThemeSwitcher labelled />
-          </section>
-        </div>
-        <DialogFooter>
-          <button className="ghost-button" type="button" onClick={onClose}>
-            {t("preferences.close")}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function PasswordDialog({ onClose }) {
-  const { t } = useI18n();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setStatus("");
-    try {
-      await postJSON(apiPaths.authPassword, { current_password: currentPassword, new_password: newPassword });
-      setCurrentPassword("");
-      setNewPassword("");
-      setStatus(t("password.updated"));
-    } catch (err) {
-      setError(err.message || t("password.failed"));
-    }
-  };
-
-  // The form sits inside the dialog rather than being the dialog element itself:
-  // Radix clones its content element when `asChild` is used, and a form as the
-  // content root bought nothing.
-  return (
-    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent aria-labelledby="password-title">
-        <form onSubmit={submit}>
-          <DialogHeader>
-            <div>
-              <p className="eyebrow">{t("password.eyebrow")}</p>
-              <DialogTitle id="password-title">{t("password.title")}</DialogTitle>
-            </div>
-            <DialogClose asChild>
-              <button className="icon-button" type="button" aria-label={t("common.close")}>
-                <X size={14} aria-hidden="true" />
-              </button>
-            </DialogClose>
-          </DialogHeader>
-          <label className="nav-field">
-            {t("password.current")}
-            <input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
-          </label>
-          <label className="nav-field">
-            {t("password.next")}
-            <input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-          </label>
-          {error ? <p className="auth-error">{error}</p> : null}
-          {status ? <p className="auth-success">{status}</p> : null}
-          <DialogFooter>
-            <button className="ghost-button" type="button" onClick={onClose}>
-              {t("password.cancel")}
-            </button>
-            <button className="ghost-button active" type="submit">
-              {t("password.update")}
-            </button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 function displayName(user) {

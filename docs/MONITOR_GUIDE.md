@@ -19,7 +19,9 @@ go run ./cmd/server auth init-user -c config/config.yaml --username admin --pass
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
-左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一个 Radix Dialog primitive（`@radix-ui/react-dialog`，封装在 `web/monitor-ui/src/components/ui/dialog.tsx`）。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染在 Radix 的 portal 里，因此内容不再被侧边栏宽度截断。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定，以及关闭后把焦点还给触发按钮，都由这个 primitive 提供；焦点还原要求触发按钮与对话框处在同一个 Dialog root 内，所以 `PrimaryNav` 用一层 `Dialog` 同时包住两者，而不是在对话框内部自建 portal。模型服务商列表页的新建弹窗、模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗都改用了同一个 primitive，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
+左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 248px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
+
+对话框仍用于真正需要打断的表单：修改密码（从面板进入，`DialogContent` 的 `onCloseAutoFocus` 显式把焦点还给账号按钮，因为这个表单没有自己的触发按钮）、模型服务商列表页的新建弹窗、模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗，都走 `web/monitor-ui/src/components/ui/dialog.tsx`（`@radix-ui/react-dialog`）。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定都由这个 primitive 提供，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
 ## 个人 API token
 
@@ -241,18 +243,18 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 
 样式是 Tailwind CSS v4（`@tailwindcss/vite` 插件）加一份 OKLCH 调色板。`src/styles/tokens.css` 里的颜色全部取自 Radix 的公开色阶——中性色用 slate，六个色相用 blue、green、amber、red、cyan、violet——`tests-unit/tokens.test.js` 读这份 CSS 校验对比度关系，因此在 token 被手工改动或色阶升级后会在测试里失败而不是在眼睛里失败。`tokens.css` 留在 cascade layer 之外：它只声明自定义属性，而它使用的主题属性选择器必须继续压过 `:root` 默认值。其余历史样式表由 `src/styles/tailwind.css` 导入到最低优先级的 `legacy` 层（层序 `legacy < theme < base < components < utilities`），所以迁移期间一个 utility 类总能盖过同名的旧页面规则，不需要考虑特异性或源码顺序。Tailwind 的 preflight 故意不引入：它会重置 `styles.css` 等历史样式表所依赖的元素默认值，引入等于重排每个页面，`base.css` 已经带着 Monitor 实际需要的 reset。
 
-可复用的界面原语在 `src/components/ui/`（`button`、`dialog`、`tabs`、`select`、`dropdown-menu`、`tooltip`、`badge`、`card`、`input`、`switch`、`separator`、`skeleton`），类名合并走 `clsx` 加 `tailwind-merge`。服务端状态走 TanStack Query，客户端实例在 `src/lib/queryClient.ts`，其默认值刻意保持被替换掉的自写 `useJSON` 的行为（`retry: false`、`refetchOnWindowFocus: false`）。
+可复用的界面原语在 `src/components/ui/`：`dialog`、`tabs`、`switch`、`separator`、`skeleton`、`popover`、`radio-group` 已在页面上使用，类名合并走 `clsx` 加 `tailwind-merge`。目录里另有 `badge`、`button`、`card`、`dropdown-menu`、`input`、`select`、`tooltip` 已经写好但还没有页面接入——它们是 shadcn/ui 式的拷贝进源码的原语，接入才算完成，未接入的按死代码看待。页面里还有大量自写的同类实现（分段选择器、手写表格、写操作反馈）没有迁到原语上，这一层迁移是增量的。服务端状态走 TanStack Query，客户端实例在 `src/lib/queryClient.ts`，其默认值刻意保持被替换掉的自写 `useJSON` 的行为（`retry: false`、`refetchOnWindowFocus: false`）。
 
 构建产物按需拆包，入口之外只加载用到的部分。当前 `vite build` 输出（3066 个 module）：
 
 - 语言词典是每种语言一个 chunk：`src/locales/<language>.js` 由 `loadMessages` 动态 `import()`，Vite 为每个匹配模块生成一个 chunk。`bootstrapI18n()` 在渲染前取到当前语言，取不到时回退英文而不是白屏。`zh-CN` chunk 55.81 kB（gzip 16.80）、`en` chunk 56.72 kB（gzip 15.29）。
 - 图表库是独立 chunk，只在真正画图的页面加载：`src/components/common/Charts.jsx` 用 `React.lazy` 在渲染时才 `import("./ChartsImpl")`，该 chunk 350.58 kB（gzip 102.44）。
 - `motion` 的特性集同样是独立 chunk（37.86 kB，gzip 14.53），首屏不等它；在它到达之前 `m` 元素就是普通元素，只是动画从起点瞬间到位。
-- 入口 `index` chunk 760.47 kB（gzip 209.32），样式 `index` 108.24 kB（gzip 18.89）。
+- 入口 `index` chunk 796.44 kB（gzip 222.10），样式 `index` 108.24 kB（gzip 18.89）。入口比引入 Popover 之前大 35.9 kB（gzip 12.8），其中约 29.7 kB（gzip 11.1）是 popper/floating-ui——把一个浮层按视口定位、空间不足时翻转、并让它盖出侧边栏所要付的一次性成本，`radio-group` 只占 6.2 kB（gzip 1.7）。
 
 ### 主题
 
-偏好设置提供深色、浅色、跟随系统三个选项。保存的是偏好本身，键为 localStorage 的 `trajecta.monitor.theme`，取值可能是 `dark`、`light` 或 `system`；`applyTheme()`（`src/lib/theme.ts`）把 `system` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析成实际主题，只把解析后的 `dark` 或 `light` 写进 `<html>` 的 `data-theme`，因此 `data-theme` 从不出现 `system`。`index.html` 里的内联脚本在样式表加载前做同一件事，这是页面加载时不再先闪出另一个主题的原因；`watchSystemTheme()` 监听 `matchMedia` 的 `change` 事件，让 `system` 偏好在页面打开期间继续跟随操作系统。
+账号面板里的主题单选组提供深色、浅色、跟随系统三个选项。保存的是偏好本身，键为 localStorage 的 `trajecta.monitor.theme`，取值可能是 `dark`、`light` 或 `system`；`applyTheme()`（`src/lib/theme.ts`）把 `system` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析成实际主题，只把解析后的 `dark` 或 `light` 写进 `<html>` 的 `data-theme`，因此 `data-theme` 从不出现 `system`。`index.html` 里的内联脚本在样式表加载前做同一件事，这是页面加载时不再先闪出另一个主题的原因；`watchSystemTheme()` 监听 `matchMedia` 的 `change` 事件，让 `system` 偏好在页面打开期间继续跟随操作系统。
 
 因为 `data-theme` 始终是实际主题而不是偏好，CSS 只需要两组规则——深色写在 `:root, :root[data-theme="dark"]`（属性缺失时就是深色），浅色写在 `:root[data-theme="light"]`——不需要第三份写在 `prefers-color-scheme` 媒体查询里的浅色主题；Tailwind v4 侧对应的是 `src/styles/tailwind.css` 里的 `@custom-variant dark`，所以 `dark:` 工具类也只有一个选择器。
 

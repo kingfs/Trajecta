@@ -1052,39 +1052,88 @@ test("collapsed sidebar keeps a visible expand control", async ({ page, isMobile
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
 });
 
-// The account surface used to be a popover anchored inside the rail, so its
-// content was clamped to the sidebar width. It is a centred dialog now.
-test("the account trigger opens a centred modal with a backdrop", async ({ page }) => {
+// The account surface has been three shapes: a hand-positioned popover clamped
+// to the rail, a centred modal, and now a panel anchored to the account button.
+// The two properties below are the ones both earlier shapes got wrong - it opens
+// upwards from the button, and it is wider than the rail it hangs off.
+test("the account panel opens above the rail button and overflows the rail", async ({ page }) => {
   await page.goto("/overview");
+  const trigger = page.getByRole("button", { name: "Account" }).first();
+  const rail = page.locator(".app-sidebar");
 
-  await page.getByRole("button", { name: "Account" }).click();
+  await trigger.click();
+  const panel = page.getByRole("dialog", { name: "Account" });
+  await expect(panel).toBeVisible();
 
-  const backdrop = page.locator(".nav-modal-backdrop");
-  const dialog = page.getByRole("dialog", { name: "local" });
-  await expect(backdrop).toBeVisible();
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Sign out" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Preferences" })).toBeVisible();
+  // A panel rather than a modal: no backdrop, and the page behind stays live.
+  await expect(page.locator(".nav-modal-backdrop")).toHaveCount(0);
+  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).not.toBe("hidden");
 
-  // Centred in the overlay, and wider than the ~232px rail that used to clip it.
-  // The comparison is against the backdrop rather than page.viewportSize()
-  // because a mobile layout viewport is not reported at the same scale.
-  const box = await dialog.boundingBox();
-  const overlay = await backdrop.boundingBox();
-  expect(Math.abs(box.x + box.width / 2 - (overlay.x + overlay.width / 2))).toBeLessThanOrEqual(2);
-  expect(box.width).toBeGreaterThan(320);
-  expect(box.width).toBeLessThanOrEqual(420);
-  // Nothing spills past the overlay: the old popover was clamped, not overflowing.
-  expect(box.x).toBeGreaterThanOrEqual(overlay.x);
-  expect(box.x + box.width).toBeLessThanOrEqual(overlay.x + overlay.width + 1);
+  const triggerBox = await trigger.boundingBox();
+  const panelBox = await panel.boundingBox();
+  const railBox = await rail.boundingBox();
+
+  // Above the button it was opened from, with the gap `sideOffset` asks for.
+  expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(triggerBox.y + 1);
+  expect(triggerBox.y - (panelBox.y + panelBox.height)).toBeLessThanOrEqual(16);
+  // Flush with the button's left edge, or nudged inwards by the collision
+  // padding when the button sits closer to the viewport edge than that padding
+  // allows - which is what the 8px rail gutter makes it do. Never pushed the
+  // other way, and never centred.
+  expect(panelBox.x).toBeGreaterThanOrEqual(triggerBox.x);
+  expect(panelBox.x - triggerBox.x).toBeLessThanOrEqual(12);
+  // Wider than the rail, hanging over the page. This is the assertion the
+  // clamped popover failed and the reason the modal existed in between.
+  expect(panelBox.x + panelBox.width).toBeGreaterThan(railBox.x + railBox.width);
+  // And still on screen: the flip/shift middleware owns that, not the CSS.
+  const viewport = page.viewportSize();
+  expect(panelBox.x).toBeGreaterThanOrEqual(0);
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(panelBox.y).toBeGreaterThanOrEqual(0);
 
   await page.keyboard.press("Escape");
-  await expect(backdrop).toHaveCount(0);
+  await expect(panel).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
 
-  await page.getByRole("button", { name: "Account" }).click();
-  await expect(backdrop).toBeVisible();
-  await backdrop.click({ position: { x: 4, y: 4 } });
-  await expect(page.locator(".nav-modal-backdrop")).toHaveCount(0);
+// The panel is not a menu. It holds two radio groups, so the arrows belong to
+// the group being read rather than moving between the panel's controls, and each
+// pick reports itself as one of several rather than as an independent toggle.
+test("the theme and language picks are radio groups with a roving tab stop", async ({ page }) => {
+  await page.goto("/overview");
+  await page.getByRole("button", { name: "Account" }).first().click();
+
+  const panel = page.getByRole("dialog", { name: "Account" });
+  const themes = panel.getByRole("radiogroup", { name: "Theme" });
+  const languages = panel.getByRole("radiogroup", { name: "Language" });
+  await expect(themes.getByRole("radio")).toHaveCount(3);
+  await expect(languages.getByRole("radio")).toHaveCount(2);
+
+  // Exactly one checked per group, which is the property a row of aria-pressed
+  // buttons does not express.
+  await expect(themes.getByRole("radio", { checked: true })).toHaveCount(1);
+  await expect(languages.getByRole("radio", { checked: true })).toHaveCount(1);
+  // The group is a single tab stop, so tabbing does not walk all five options.
+  expect(await themes.getByRole("radio", { checked: true }).getAttribute("tabindex")).toBe("0");
+  const unchecked = themes.getByRole("radio", { checked: false }).first();
+  expect(await unchecked.getAttribute("tabindex")).toBe("-1");
+
+  // Arrow keys move the selection inside the group without leaving the panel,
+  // and picking does not dismiss it: both picks can be set in one visit.
+  const before = await themes.getByRole("radio", { checked: true }).textContent();
+  await themes.getByRole("radio", { checked: true }).focus();
+  // Held across a frame rather than sent as an instant press: Radix moves focus
+  // from a deferred callback and only selects the item it lands on if the arrow
+  // is still down when that runs. A real key press always spans that gap.
+  await page.keyboard.down("ArrowDown");
+  await page.waitForTimeout(100);
+  await page.keyboard.up("ArrowDown");
+  await expect
+    .poll(async () => themes.getByRole("radio", { checked: true }).textContent())
+    .not.toBe(before);
+  await expect(panel).toBeVisible();
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
 });
 
 // Trace rows carry nine metrics; the chips show the icon and the number only and
@@ -1169,9 +1218,8 @@ test("switching language at runtime loads the other chunk", async ({ page, isMob
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
   await page.getByRole("button", { name: "Account" }).first().click();
-  await page.getByRole("button", { name: "Preferences" }).click();
-  await page.getByRole("button", { name: "中文" }).click();
-  await page.locator(".nav-modal .nav-modal-actions .ghost-button").first().click();
+  await page.getByRole("dialog", { name: "Account" }).getByRole("radio", { name: "中文" }).click();
+  await page.keyboard.press("Escape");
 
   await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
   expect(locales).toContain("zh-CN");
@@ -1278,10 +1326,13 @@ test("page tabs are reachable and operable from the keyboard", async ({ page }) 
 // the background kept scrolling. Radix does all of it, so all of it is asserted.
 test("dialogs trap focus, close on Escape and restore focus to the trigger", async ({ page }) => {
   await page.goto("/providers");
-  const trigger = page.getByRole("button", { name: "Account" }).first();
-  await trigger.click();
+  const account = page.getByRole("button", { name: "Account" }).first();
+  await account.click();
+  // The password form is a dialog, not a panel: it is a page-level interruption
+  // with a submit button, so it keeps the focus trap and the scroll lock.
+  await page.getByRole("dialog", { name: "Account" }).getByRole("button", { name: "Change password" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "local" });
+  const dialog = page.getByRole("dialog", { name: "Change password" });
   await expect(dialog).toBeVisible();
   // Focus moved into the dialog rather than staying on the page behind it.
   await expect(dialog.locator(":focus")).toHaveCount(1);
@@ -1290,7 +1341,9 @@ test("dialogs trap focus, close on Escape and restore focus to the trigger", asy
 
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(trigger).toBeFocused();
+  // Focus goes back to the button that opened the form, so the reader is not
+  // dropped at the top of the page.
+  await expect(account).toBeFocused();
 });
 
 // The provider edit form on the channel detail page was the last dialog still
@@ -1319,6 +1372,34 @@ test("the provider edit dialog is the shared dialog primitive", async ({ page })
 });
 
 
+
+// A background that is too dark to be a light-mode surface, reported with the
+// selector that produced it. Chromium reports a colour declared in OKLCH back as
+// `oklch()`, so the lightness is read from it directly; anything else is
+// converted. Shared so a new surface cannot be added to the app without a way to
+// sweep it by the same rule.
+async function darkSurfaces(page, selectors) {
+  return page.evaluate((selectors) => {
+    const lightness = (colour) => {
+      const oklch = colour.match(/^oklch\(([\d.]+)/);
+      if (oklch) return Number(oklch[1]);
+      const nums = colour.match(/[\d.]+/g);
+      if (!nums || nums.length < 3) return null;
+      const [r, g, b] = nums.map(Number).map((c) => c / 255);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const out = [];
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        const background = getComputedStyle(el).backgroundColor;
+        if (background === "rgba(0, 0, 0, 0)" || background === "transparent") continue;
+        const l = lightness(background);
+        if (l !== null && l < 0.7) out.push(`${selector} -> ${background}`);
+      }
+    }
+    return [...new Set(out)];
+  }, selectors);
+}
 
 // The palette is generated OKLCH: custom properties in two theme blocks that
 // `applyTheme()` and an inline script in index.html select between. None of that
@@ -1357,31 +1438,31 @@ test("no light-mode surface resolves dark on any route", async ({ page }) => {
   for (const route of ROUTES) {
     await page.goto(route);
     await expect(page.locator("main, .auth-screen, .app-shell").first()).toBeVisible();
-    const found = await page.evaluate((selectors) => {
-      // Chromium reports a colour declared in OKLCH back as `oklch()`, so the
-      // lightness is read from it directly; anything else is converted.
-      const lightness = (colour) => {
-        const oklch = colour.match(/^oklch\(([\d.]+)/);
-        if (oklch) return Number(oklch[1]);
-        const nums = colour.match(/[\d.]+/g);
-        if (!nums || nums.length < 3) return null;
-        const [r, g, b] = nums.map(Number).map((c) => c / 255);
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      };
-      const out = [];
-      for (const selector of selectors) {
-        for (const el of document.querySelectorAll(selector)) {
-          const background = getComputedStyle(el).backgroundColor;
-          if (background === "rgba(0, 0, 0, 0)" || background === "transparent") continue;
-          const l = lightness(background);
-          if (l !== null && l < 0.7) out.push(`${selector} -> ${background}`);
-        }
-      }
-      return [...new Set(out)];
-    }, SURFACES);
+    const found = await darkSurfaces(page, SURFACES);
     if (found.length) offenders.push(`${route}: ${found.join(", ")}`);
   }
   expect(offenders).toEqual([]);
+});
+
+// The account panel is only in the document while it is open, so the route sweep
+// above cannot see it. It is a new surface on new tokens, which is exactly the
+// shape of thing that came out dark in light mode before.
+test("the account panel is a light surface in light mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/overview");
+  await page.getByRole("button", { name: "Account" }).first().click();
+  const panel = page.getByRole("dialog", { name: "Account" });
+  await expect(panel).toBeVisible();
+
+  expect(await darkSurfaces(page, ['[role="dialog"][aria-label="Account"]', '[role="dialog"][aria-label="Account"] .account-avatar'])).toEqual([]);
+
+  // And the panel's own text is the light theme's foreground, not the dark one.
+  const colours = await panel.evaluate((el) => ({
+    background: getComputedStyle(el).backgroundColor,
+    text: getComputedStyle(el.querySelector("strong")).color,
+  }));
+  expect(colours.background).not.toBe(colours.text);
+  expect(colours.text).toMatch(/oklch\(0\.[0-4]/);
 });
 
 test("each theme resolves to real colours", async ({ page }) => {
@@ -1456,11 +1537,14 @@ test("the tab strip shares a single indicator, under the active tab", async ({ p
 test("reduced motion turns the dialog animation off", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/providers");
-  await page.getByRole("button", { name: "Account" }).first().click();
-  const content = page.getByRole("dialog", { name: "local" });
+  // The provider form rather than the account panel: the reduced-motion rule is
+  // about the dialog keyframes, and the account surface is a popover with none.
+  await page.getByRole("button", { name: "New provider" }).click();
+  const content = page.locator(".nav-modal");
   await expect(content).toBeVisible();
   expect(await content.evaluate((e) => getComputedStyle(e).animationName)).toBe("none");
   // And the dialog still closes, which is the part an exit animation can break.
   await page.keyboard.press("Escape");
   await expect(content).toHaveCount(0);
 });
+
