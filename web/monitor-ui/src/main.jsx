@@ -1,8 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { I18nProvider, bootstrapI18n } from "./lib/i18n";
+import { queryClient } from "./lib/queryClient";
 import { applyTheme } from "./lib/theme";
 
 // tokens.css stays outside the cascade layers: it only declares custom
@@ -20,11 +22,13 @@ applyTheme();
 bootstrapI18n().finally(() => {
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.StrictMode>
-      <I18nProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </I18nProvider>
+      </QueryClientProvider>
     </React.StrictMode>,
   );
 });

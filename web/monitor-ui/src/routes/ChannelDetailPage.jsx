@@ -7,19 +7,20 @@ import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
+import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
 export function ProviderDetailPage() {
+  const refresh = useRefresh();
   const { providerID = "", channelID = "" } = useParams();
   const effectiveProviderID = providerID || channelID;
   const navigate = useNavigate();
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const [refreshTick, setRefreshTick] = useState(0);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState("");
   const [modelDraft, setModelDraft] = useState("");
@@ -28,7 +29,7 @@ export function ProviderDetailPage() {
   const [lastProbe, setLastProbe] = useState(null);
   const params = new URLSearchParams();
   params.set("window", windowValue);
-  const detail = useJSON(apiURL(apiPaths.provider(effectiveProviderID), params), [effectiveProviderID, windowValue, refreshTick]);
+  const detail = useJSON(apiURL(apiPaths.provider(effectiveProviderID), params), [effectiveProviderID, windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
   const provider = detail.data || {};
   const summary = provider.summary || {};
@@ -50,7 +51,7 @@ export function ProviderDetailPage() {
     setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
-  const reload = () => setRefreshTick((tick) => tick + 1);
+  const reload = () => refresh();
   const probe = async () => {
     setBusy("probe");
     setActionError("");

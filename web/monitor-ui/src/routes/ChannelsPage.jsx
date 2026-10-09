@@ -7,6 +7,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
+import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { buildProviderLink, formatCount, formatDateTime, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
@@ -35,15 +36,15 @@ const DEFAULT_FORM = {
 };
 
 export function ProvidersPage() {
+  const refresh = useRefresh();
   const navigate = useNavigate();
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const [refreshTick, setRefreshTick] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const params = new URLSearchParams();
   params.set("window", windowValue);
-  const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue, refreshTick]);
+  const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
   const items = providers.data?.items || [];
   const totals = useMemo(() => summarizeProviders(items), [items]);
@@ -119,7 +120,7 @@ export function ProvidersPage() {
             </div>
           </div>
           <div className="provider-grid">
-            {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title={t("providers.none")} detail={t("providers.noneDetail")} />}
+            {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={refresh} />) : <EmptyState title={t("providers.none")} detail={t("providers.noneDetail")} />}
           </div>
         </section>
       ) : null}
@@ -129,7 +130,7 @@ export function ProvidersPage() {
           onClose={() => setFormOpen(false)}
           onCreated={(item) => {
             setFormOpen(false);
-            setRefreshTick((tick) => tick + 1);
+            refresh();
             if (item?.id) navigate(buildProviderLink(item.id, windowValue));
           }}
         />

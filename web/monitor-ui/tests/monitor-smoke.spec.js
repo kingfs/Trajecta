@@ -17,6 +17,9 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/events/summary") {
       return route.fulfill({ json: eventSummaryPayload() });
     }
+    if (path === "/api/events/read-all" && method === "POST") {
+      return route.fulfill({ json: { updated: 3 } });
+    }
     if (path === "/api/events") {
       expect(url.searchParams.get("window")).toBe("all");
       expect(url.searchParams.get("status")).toBe("unread");
@@ -1215,4 +1218,25 @@ test("the chart library is a lazy chunk fetched only where a chart is drawn", as
   await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
   await expect(page.locator(".recharts-surface").first()).toBeVisible();
   expect(charts.length).toBe(1);
+});
+
+// Every write handler used to bump a per-page `refreshTick` counter that the
+// reads were keyed on. That counter is gone: a write now invalidates the query
+// cache. If invalidation did not reach the read, the page would silently keep
+// showing pre-write data, so the refetch itself is what this asserts.
+test("a write refetches the read it invalidates", async ({ page }) => {
+  const listReads = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/events" && request.method() === "GET") {
+      listReads.push(url.search);
+    }
+  });
+
+  await page.goto("/events");
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+  expect(listReads.length).toBe(1);
+
+  await page.getByRole("button", { name: "Mark all read" }).click();
+  await expect.poll(() => listReads.length).toBe(2);
 });

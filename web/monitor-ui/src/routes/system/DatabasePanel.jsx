@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { InlineTag } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -23,14 +23,8 @@ const REFRESH_MS = 60_000;
  */
 export function DatabasePanel() {
   const { t } = useI18n();
-  const [refreshTick, setRefreshTick] = useState(0);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const database = useJSON(apiPaths.systemDatabase, [refreshTick]);
+  const database = useJSON(apiPaths.systemDatabase, [], { refetchInterval: REFRESH_MS });
   const db = database.data;
 
   return (

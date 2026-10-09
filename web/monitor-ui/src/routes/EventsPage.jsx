@@ -4,6 +4,7 @@ import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { StatCard } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
+import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { buildTraceLink, formatDateTime, formatFailureReason, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
@@ -15,15 +16,15 @@ const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
 const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp"];
 
 export function EventsPage() {
+  const refresh = useRefresh();
   const { language, t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [refreshTick, setRefreshTick] = useState(0);
   const [selectedID, setSelectedID] = useState("");
   const [busyID, setBusyID] = useState("");
   const params = useMemo(() => eventQueryParams(searchParams), [searchParams]);
-  const { loading, data, error } = useJSON(apiURL(apiPaths.events, params), [params.toString(), refreshTick]);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.events, params), [params.toString()]);
   const summaryWindow = params.get("window") || DEFAULT_EVENT_WINDOW;
-  const { data: summary } = useJSON(apiURL(apiPaths.eventsSummary, { window: summaryWindow }), [summaryWindow, refreshTick]);
+  const { data: summary } = useJSON(apiURL(apiPaths.eventsSummary, { window: summaryWindow }), [summaryWindow]);
   const items = data?.items || [];
   const selected = items.find((item) => item.id === selectedID) || items[0] || null;
 
@@ -49,7 +50,7 @@ export function EventsPage() {
     setBusyID(`${eventID}:${action}`);
     try {
       await postJSON(path, {});
-      setRefreshTick((tick) => tick + 1);
+      refresh();
       window.dispatchEvent(new Event("trajecta:events-refresh"));
     } finally {
       setBusyID("");
@@ -60,7 +61,7 @@ export function EventsPage() {
     setBusyID("read-all");
     try {
       await postJSON(apiURL(apiPaths.eventsReadAll, params), {});
-      setRefreshTick((tick) => tick + 1);
+      refresh();
       window.dispatchEvent(new Event("trajecta:events-refresh"));
     } finally {
       setBusyID("");
