@@ -1975,7 +1975,7 @@ func (h *Handler) writeUpstreamResponse(
 	if isStream || resp.ContentLength < 0 {
 		bodyWriter = flushAfterWrite{w: irw}
 	}
-	if _, err := io.Copy(bodyWriter, resp.Body); err != nil && err != io.EOF {
+	if _, err := io.Copy(bodyWriter, resp.Body); err != nil && err != io.EOF && !errors.Is(err, context.Canceled) && originalReq.Context().Err() == nil {
 		logInfo.Header.Meta.Error = "failed to copy response body: " + err.Error()
 	}
 

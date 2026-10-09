@@ -76,6 +76,43 @@
   font-size: var(--text-sm);
 }
 
+.session-trajectory-panel {
+  margin-bottom: var(--space-5);
+}
+.session-trajectory-list {
+  display: grid;
+  gap: var(--space-4);
+}
+.session-trajectory-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(124,108,255,.08), rgba(255,255,255,.02));
+}
+.session-trajectory-user { border-left: 3px solid var(--accent-solid); }
+.session-trajectory-agent { border-left: 3px solid var(--success); }
+.session-trajectory-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.session-trajectory-head { display: flex; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.session-trajectory-head strong { display: block; text-transform: capitalize; }
+.session-trajectory-model { display: block; margin-top: 3px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--text-xs); }
+.session-trajectory-message { color: var(--text-primary); line-height: 1.65; }
+.session-trajectory-reasoning, .session-trajectory-tool, .session-trajectory-result { margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: rgba(0,0,0,.16); }
+.session-trajectory-reasoning { color: var(--text-secondary); }
+.session-trajectory-reasoning pre, .session-trajectory-tool pre, .session-trajectory-result pre { margin: var(--space-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-xs); }
+
 /* ------------------------------------------------- attention / overview */
 
 .overview-attention-panel {

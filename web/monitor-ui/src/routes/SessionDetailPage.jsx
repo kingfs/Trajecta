@@ -9,6 +9,7 @@ import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge, ViewIcon } from "../co
 import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
+import { SessionTrajectory } from "../components/monitor/SessionTrajectory";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -35,6 +36,7 @@ export function SessionDetailPage() {
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
+  const trajectory = useJSON(apiPaths.sessionTrajectory(sessionID), [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
   const timeline = detail.data?.timeline ?? [];
@@ -143,6 +145,7 @@ export function SessionDetailPage() {
 
       {detail.data ? (
         <>
+          <SessionTrajectory trajectory={trajectory.data} loading={trajectory.loading} error={trajectory.error} />
           <SessionTabs tab={tab} setTab={setTab} analysisCount={analysis.length} failedCount={breakdown?.failed_traces ?? 0} />
           <div className="detail-grid detail-grid-compact">
             <Card as="section">
