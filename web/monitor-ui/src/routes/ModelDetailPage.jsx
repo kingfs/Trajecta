@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -73,7 +74,7 @@ export function ModelDetailPage() {
         </div>
       </header>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Analytics</p>
@@ -89,14 +90,14 @@ export function ModelDetailPage() {
           <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
           <StatCard label={t("models.today")} value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request, t)} />
         </div>
-      </section>
+      </Card>
 
       {detail.error ? <EmptyState title={t("models.detailLoadError")} detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title={t("models.detailLoading")} detail={t("models.detailLoadingDetail")} /> : null}
 
       {detail.data ? (
         <>
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Trend</p>
@@ -104,9 +105,9 @@ export function ModelDetailPage() {
               </div>
             </div>
             <SingleUsageCharts items={trends} />
-          </section>
+          </Card>
 
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Channels</p>
@@ -116,9 +117,9 @@ export function ModelDetailPage() {
             <div className="channel-model-table">
               {channels.length ? channels.map((channel) => <ModelChannelRow key={channel.channel_id} item={channel} windowValue={windowValue} t={t} />) : <EmptyState title={t("models.noChannels")} detail={t("models.noChannelsDetail")} compact />}
             </div>
-          </section>
+          </Card>
 
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Codex</p>
@@ -132,7 +133,7 @@ export function ModelDetailPage() {
                 <ModelConfigCard key={`${channel.channel_id}-config`} item={channel} model={model} suggestion={spec.data?.suggestion} language={language} t={t} />
               )) : <EmptyState title={t("models.noConfigTargets")} detail={t("models.noChannelsDetail")} compact />}
             </div>
-          </section>
+          </Card>
         </>
       ) : null}
     </div>

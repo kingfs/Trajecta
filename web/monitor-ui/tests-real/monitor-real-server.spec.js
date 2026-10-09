@@ -26,7 +26,9 @@ test("real monitor server renders seeded model and channel data", async ({ page 
 
   await page.getByRole("button", { name: "Edit provider" }).click();
   await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
-  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  // The preset is a listbox now, so it shows the option's label rather than a
+  // DOM value.
+  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await expect(page.locator("textarea")).toContainText("X-Test: visible");

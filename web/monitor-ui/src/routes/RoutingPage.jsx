@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -90,7 +91,7 @@ export function RoutingPage() {
         </div>
       </header>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("routing.gateway")}</p>
@@ -104,7 +105,7 @@ export function RoutingPage() {
             </SegmentedControlItem>
           ))}
         </SegmentedControl>
-      </section>
+      </Card>
 
       {activeTab === "settings" ? <RoutingSettingsPanel /> : null}
       {activeTab === "aliases" ? <ModelAliasesPanel /> : null}
@@ -112,7 +113,7 @@ export function RoutingPage() {
 
       {activeTab === "decisions" ? (
         <>
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{t("routing.decisionLog")}</p>
@@ -145,7 +146,7 @@ export function RoutingPage() {
           <StatCard label={t("common.errors")} value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing, t)} />
         </div>
-          </section>
+          </Card>
 
           {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
           {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
@@ -215,7 +216,7 @@ function RoutingSettingsPanel() {
   });
 
   return (
-    <section className="panel">
+    <Card as="section">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("routing.systemPolicy")}</p>
@@ -260,7 +261,7 @@ function RoutingSettingsPanel() {
         </label>
         <Button variant="ghost" type="submit">{t("common.save")}</Button>
       </form>
-    </section>
+    </Card>
   );
 }
 
@@ -404,7 +405,7 @@ function ModelAliasesPanel() {
   const editDisabled = isAliasSaveDisabled(editForm || {}, editValidation);
 
   return (
-    <section className="panel">
+    <Card as="section">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("routing.modelResolution")}</p>
@@ -453,7 +454,7 @@ function ModelAliasesPanel() {
           ))}
         </div>
       ) : !aliases.error ? <EmptyState title={t("routing.noAliases")} detail={t("routing.noAliasesDetail")} compact /> : null}
-    </section>
+    </Card>
   );
 }
 
@@ -474,7 +475,7 @@ function RouteInspectorPanel() {
   };
 
   return (
-    <section className="panel">
+    <Card as="section">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("routing.dryRun")}</p>
@@ -497,7 +498,7 @@ function RouteInspectorPanel() {
       </form>
       {result ? <RouteInspectorResult result={result} /> : null}
       {!result && !error ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
-    </section>
+    </Card>
   );
 }
 
@@ -768,7 +769,7 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
   const hasCredentialData = summary.routeTargets.length || summary.channels.length || summary.credentials.length || summary.stickyBreakTotal > 0;
   const stickyBreakContext = firstNonEmptyItem(summary.stickyBreakRouteTargets, summary.stickyBreakPreviousRouteTargets, summary.stickyBreakPreviousUpstreams);
   return (
-    <section className="panel">
+    <Card as="section">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("routing.credentialRouting")}</p>
@@ -796,7 +797,7 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
       ) : (
         <EmptyState title={t("routing.noCredentialEvents")} detail={t("routing.noCredentialEventsDetail")} compact />
       )}
-    </section>
+    </Card>
   );
 }
 

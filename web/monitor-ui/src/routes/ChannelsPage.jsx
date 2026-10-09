@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -74,7 +75,7 @@ export function ProvidersPage() {
         </div>
       </header>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("providers.overview")}</p>
@@ -100,12 +101,12 @@ export function ProvidersPage() {
             <MultiLineChart items={chartItems} series={chartSeries} metric="total_tokens" />
           </section>
         </div>
-      </section>
+      </Card>
 
       {providers.error ? <EmptyState title={t("providers.loadError")} detail={providers.error} tone="danger" /> : null}
       {providers.loading && !providers.data ? <EmptyState title={t("providers.loading")} detail={t("providers.loadingDetail")} /> : null}
       {providers.data ? (
-        <section className="panel">
+        <Card as="section">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("providers.configured")}</p>
@@ -121,7 +122,7 @@ export function ProvidersPage() {
           <div className="provider-grid">
             {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={refresh} />) : <EmptyState title={t("providers.none")} detail={t("providers.noneDetail")} />}
           </div>
-        </section>
+        </Card>
       ) : null}
       {formOpen ? (
         <CreateProviderDialog

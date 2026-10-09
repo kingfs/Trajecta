@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
@@ -144,7 +145,7 @@ export function SessionDetailPage() {
         <>
           <SessionTabs tab={tab} setTab={setTab} analysisCount={analysis.length} failedCount={breakdown?.failed_traces ?? 0} />
           <div className="detail-grid detail-grid-compact">
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("sessionDetail.failureSurface")}</p>
@@ -157,8 +158,8 @@ export function SessionDetailPage() {
                 <StatCard label={t("sessionDetail.streams")} value={summary?.stream_count ?? 0} />
                 <StatCard label={t("sessionDetail.duration")} value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${formatDuration(summary?.total_duration_ms ?? 0)} total`} title={`${summary?.total_duration_ms ?? 0} ms`} />
               </div>
-            </section>
-            <section className="panel">
+            </Card>
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("sessionDetail.distribution")}</p>
@@ -170,13 +171,13 @@ export function SessionDetailPage() {
                 <BreakdownList title={t("sessionDetail.endpoints")} items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
                 <BreakdownList title={t("sessionDetail.failureReasons")} items={breakdown?.failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} />
               </div>
-            </section>
+            </Card>
           </div>
         </>
       ) : null}
 
       {detail.data && tab === "timeline" && timeline.length ? (
-        <section className="panel timeline-panel">
+        <Card as="section" className="timeline-panel">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("sessionDetail.sessionTimeline")}</p>
@@ -236,13 +237,13 @@ export function SessionDetailPage() {
               </article>
             ))}
           </div>
-        </section>
+        </Card>
       ) : detail.data && tab === "timeline" ? (
         <EmptyState title={t("sessionDetail.noTimeline")} detail={t("sessionDetail.noTimelineDetail")} />
       ) : null}
 
       {detail.data && tab === "timeline" && failureContexts.length ? (
-        <section className="panel">
+        <Card as="section">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("sessionDetail.failureContext")}</p>
@@ -272,13 +273,13 @@ export function SessionDetailPage() {
               </article>
             ))}
           </div>
-        </section>
+        </Card>
       ) : detail.data && tab === "timeline" ? (
         <EmptyState title={t("sessionDetail.noFailureContext")} detail={t("sessionDetail.noFailureContextDetail")} />
       ) : null}
 
       {detail.data && tab === "traces" ? (
-        <section className="panel">
+        <Card as="section">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("sessionDetail.sessionTraces")}</p>
@@ -303,7 +304,7 @@ export function SessionDetailPage() {
           ) : (
             <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures groupSessionFailures />
           )}
-        </section>
+        </Card>
       ) : null}
 
       {detail.data && tab === "audit" ? <SessionAuditPanel failedCount={breakdown?.failed_traces ?? 0} traces={traces} sessionID={summary?.session_id || sessionID} /> : null}
@@ -338,7 +339,7 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
   const { t } = useI18n();
   const failed = traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300);
   return (
-    <section className="panel audit-panel">
+    <Card as="section" className="audit-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("sessionDetail.sessionAudit")}</p>
@@ -370,7 +371,7 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
       ) : (
         <EmptyState title={t("sessionDetail.noFailedTraces")} detail={t("sessionDetail.noAuditFailuresDetail")} compact />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -380,7 +381,7 @@ function SessionPerformancePanel({ performance }) {
     return <EmptyState title={t("sessionDetail.noPerformanceData")} detail={t("sessionDetail.noPerformanceDataDetail")} />;
   }
   return (
-    <section className="panel performance-panel">
+    <Card as="section" className="performance-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("sessionDetail.sessionPerformance")}</p>
@@ -401,14 +402,14 @@ function SessionPerformancePanel({ performance }) {
         <DetailMetaPill label={t("sessionDetail.output")} value={formatTokenCount(performance.completion_tokens || 0)} />
         <DetailMetaPill label={t("sessionDetail.cached")} value={formatTokenCount(performance.cached_tokens || 0)} />
       </div>
-    </section>
+    </Card>
   );
 }
 
 function SessionAnalysisPanel({ analysis }) {
   const { t } = useI18n();
   return (
-    <section className="panel analysis-panel">
+    <Card as="section" className="analysis-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("sessionDetail.sessionLearning")}</p>
@@ -439,7 +440,7 @@ function SessionAnalysisPanel({ analysis }) {
       ) : (
         <EmptyState title={t("analysis.noRuns")} detail={t("sessionDetail.noAnalysisRunsDetail")} compact />
       )}
-    </section>
+    </Card>
   );
 }
 

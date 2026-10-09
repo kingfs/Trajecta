@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { BreakdownList } from "../components/monitor/BreakdownList";
@@ -92,7 +93,7 @@ export function OverviewPage() {
         <StatCard label={t("overview.latency")} value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
       </section>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("overview.workspaceActivity")}</h2>
@@ -148,12 +149,12 @@ export function OverviewPage() {
             />
           </section>
         </div>
-      </section>
+      </Card>
 
       {/* Six separate breakdown lists used to be six full-height columns of the
           same shape; one list plus a dimension switch shows the same data
           without making the page scroll sideways. */}
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("overview.topBreakdowns")}</h2>
@@ -174,9 +175,9 @@ export function OverviewPage() {
           formatter={activeBreakdown.formatter}
           linkFor={(item) => buildOverviewBreakdownLink(activeBreakdown.id, item.label, windowValue)}
         />
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("overview.needsReview")}</h2>
@@ -211,7 +212,7 @@ export function OverviewPage() {
             {(attention.routing_failures || []).length ? <RoutingFailureQueue items={attention.routing_failures || []} /> : null}
           </AttentionPanel>
         </div>
-      </section>
+      </Card>
     </main>
   );
 }

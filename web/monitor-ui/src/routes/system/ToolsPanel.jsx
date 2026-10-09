@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
@@ -44,7 +45,7 @@ export function ToolsPanel() {
 
   return (
     <>
-      <section className="panel responses-function-executors-panel">
+      <Card as="section" className="responses-function-executors-panel">
         <div className="panel-head">
           <div>
             <h2>{t("audit.serverTools")}</h2>
@@ -108,7 +109,7 @@ export function ToolsPanel() {
             )}
           </>
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }

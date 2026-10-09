@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { InlineTag, PlusIcon } from "../../components/common/Badges";
@@ -71,7 +72,7 @@ export function TokensPanel() {
         <StatCard label={t("common.revoked")} value={summary.revoked} accent={summary.revoked ? "accent-red" : ""} />
       </section>
 
-      <section className="panel token-panel">
+      <Card as="section" className="token-panel">
         <div className="panel-head">
           <div>
             <h2>{t("tokens.create")}</h2>
@@ -103,9 +104,9 @@ export function TokensPanel() {
             <small>{t("tokens.prefixStored", { prefix: created.prefix || "-" })}</small>
           </div>
         ) : null}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{showAll ? t("tokens.allTokens") : t("tokens.activeTokens")}</h2>
@@ -122,7 +123,7 @@ export function TokensPanel() {
         {tokens.error ? <EmptyState title={t("tokens.loadError")} detail={tokens.error} tone="danger" /> : null}
         {tokens.loading && !tokens.data ? <EmptyState title={t("tokens.loading")} detail={t("tokens.loadingDetail")} /> : null}
         {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={(tokenID) => revokeToken.mutate({ tokenID })} onDelete={confirmDelete} /> : null}
-      </section>
+      </Card>
     </>
   );
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { useSearchParams } from "react-router-dom";
@@ -81,7 +82,7 @@ export function RequestsPanel() {
         <StatCard label={t("common.success")} value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
       </section>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("requests.recentTitle")}</h2>
@@ -149,7 +150,7 @@ export function RequestsPanel() {
         {loading && !data ? <EmptyState title={t("requests.loading")} detail={t("requests.loadingDetail")} /> : null}
 
         <RequestList items={items} fromView="requests" />
-      </section>
+      </Card>
     </>
   );
 }

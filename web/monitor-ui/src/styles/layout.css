@@ -514,7 +514,12 @@
   gap: var(--space-4);
 }
 
-.page-body > .panel {
+/* A surface directly under the page body hugs the bottom of the page. The
+ * selector names the card primitive's marker as well as the legacy class,
+ * because the surface is the same element either way and this is the one rule
+ * that had to survive the migration that removed `.panel` from the markup. */
+.page-body > .panel,
+.page-body > [data-slot="card"] {
   margin-bottom: 0;
 }
 

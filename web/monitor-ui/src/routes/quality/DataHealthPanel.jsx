@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
@@ -33,7 +34,7 @@ export function DataHealthPanel() {
       {error ? <EmptyState title={t("overview.loadError")} detail={error} tone="danger" /> : null}
       {loading && !data ? <EmptyState title={t("overview.loading")} detail={t("overview.loadingDetail")} /> : null}
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("health.parsed")}</h2>
@@ -70,7 +71,7 @@ export function DataHealthPanel() {
             </Link>
           </Button>
         </div>
-      </section>
+      </Card>
     </>
   );
 }

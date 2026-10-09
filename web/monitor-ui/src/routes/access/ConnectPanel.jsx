@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { useI18n } from "../../lib/i18n";
 
 const baseOrigin = () => {
@@ -47,7 +48,7 @@ export function ConnectPanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("connect.chooseAPI")}</h2>
@@ -75,7 +76,7 @@ export function ConnectPanel() {
             </article>
           ))}
         </div>
-      </section>
+      </Card>
     </>
   );
 }

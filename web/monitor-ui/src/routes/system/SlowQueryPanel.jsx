@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths } from "../../lib/api";
@@ -25,7 +26,7 @@ export function SlowQueryPanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("system.slowQueries")}</h2>
@@ -63,7 +64,7 @@ export function SlowQueryPanel() {
             )}
           </>
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }

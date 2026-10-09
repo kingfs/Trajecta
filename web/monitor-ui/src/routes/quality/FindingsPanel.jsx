@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
@@ -38,7 +39,7 @@ export function FindingsPanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("audit.crossTraceFindings")}</h2>
@@ -87,7 +88,7 @@ export function FindingsPanel() {
         ) : findings.data ? (
           <EmptyState title={t("audit.noFindings")} detail={t("audit.noFindingsDetail")} />
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }

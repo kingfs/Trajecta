@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -114,7 +115,7 @@ export function UpstreamDetailPage() {
         </div>
       </header>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("upstreamDetail.analyticsFilters")}</p>
@@ -148,14 +149,14 @@ export function UpstreamDetailPage() {
             {t("common.reset")}
           </Button>
         </form>
-      </section>
+      </Card>
 
       {detail.error ? <EmptyState title={t("upstreamDetail.loadError")} detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title={t("upstreamDetail.loading")} detail={t("upstreamDetail.loadingDetail")} /> : null}
 
       {detail.data ? (
         <div className="detail-grid detail-grid-compact">
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{t("upstreamDetail.trafficSummary")}</p>
@@ -168,8 +169,8 @@ export function UpstreamDetailPage() {
               <StatCard label={t("upstreamDetail.inflight")} value={target?.inflight ?? 0} />
               <StatCard label={t("providers.capacity")} value={formatCapacity(target?.weight, target?.capacity_hint)} />
             </div>
-          </section>
-          <section className="panel">
+          </Card>
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{t("upstreamDetail.routerHealth")}</p>
@@ -235,8 +236,8 @@ export function UpstreamDetailPage() {
                 </div>
               </section>
             </div>
-          </section>
-          <section className="panel">
+          </Card>
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{t("upstreamDetail.distribution")}</p>
@@ -247,8 +248,8 @@ export function UpstreamDetailPage() {
               <BreakdownList title={t("upstreamDetail.models")} items={breakdown?.models || []} formatter={(item) => item.label} />
               <BreakdownList title={t("upstreamDetail.endpoints")} items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
             </div>
-          </section>
-          <section className="panel" id="models">
+          </Card>
+          <Card as="section" id="models">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{t("upstreamDetail.modelCatalog")}</p>
@@ -303,11 +304,11 @@ export function UpstreamDetailPage() {
                 )}
               </section>
             </div>
-          </section>
+          </Card>
         </div>
       ) : null}
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("upstreamDetail.failureTrend")}</p>
@@ -319,9 +320,9 @@ export function UpstreamDetailPage() {
         ) : (
           <EmptyState title={t("upstreamDetail.noFailureTimeline")} detail={t("upstreamDetail.noFailureTimelineDetail")} />
         )}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("upstreamDetail.recentFailures")}</p>
@@ -346,9 +347,9 @@ export function UpstreamDetailPage() {
         ) : (
           <EmptyState title={t("upstreamDetail.noRecentFailures")} detail={t("upstreamDetail.noRecentFailuresDetail")} />
         )}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("upstreamDetail.recentRequests")}</p>
@@ -356,7 +357,7 @@ export function UpstreamDetailPage() {
           </div>
         </div>
         {traces.length ? <RequestList items={traces} focusFailures /> : <EmptyState title={t("upstreamDetail.noRoutedTraces")} detail={t("upstreamDetail.noRoutedTracesDetail")} />}
-      </section>
+      </Card>
     </div>
   );
 }

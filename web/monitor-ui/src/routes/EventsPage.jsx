@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
@@ -101,7 +102,7 @@ export function EventsPage() {
         <StatCard label={t("events.warning")} value={summary?.warning ?? 0} detail={t("events.warningDetail")} accent={(summary?.warning ?? 0) ? "accent-gold" : ""} />
       </section>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Inbox filters</p>
@@ -121,10 +122,10 @@ export function EventsPage() {
           </select>
           <Input className="min-w-[260px]" type="search" value={searchParams.get("q") || ""} onChange={(event) => setFilter("q", event.target.value)} placeholder={t("events.search")} />
         </div>
-      </section>
+      </Card>
 
       <div className="event-workspace">
-        <section className="panel event-list-panel">
+        <Card as="section" className="event-list-panel">
           <div className="event-list">
             {items.length ? items.map((item) => (
               <button key={item.id} className={selected?.id === item.id ? "event-row event-row-active" : "event-row"} type="button" onClick={() => setSelectedID(item.id)}>
@@ -141,15 +142,15 @@ export function EventsPage() {
               </button>
             )) : <EmptyState title={t("events.noMatch")} detail={t("events.noMatchDetail")} compact />}
           </div>
-        </section>
+        </Card>
 
-        <section className="panel event-detail-panel">
+        <Card as="section" className="event-detail-panel">
           {selected ? (
             <EventDetail event={selected} busyID={busyID} onAction={mutateEventAction} />
           ) : (
             <EmptyState title={t("events.noSelected")} detail={t("events.noSelectedDetail")} />
           )}
-        </section>
+        </Card>
       </div>
     </div>
   );

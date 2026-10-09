@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
@@ -180,14 +181,14 @@ class MonitorErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <main className="shell shell-list">
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <h2>Unable to render this page</h2>
               </div>
             </div>
             <p className="event-message">{this.state.error.message || "The monitor UI hit a rendering error."}</p>
-          </section>
+          </Card>
         </main>
       );
     }

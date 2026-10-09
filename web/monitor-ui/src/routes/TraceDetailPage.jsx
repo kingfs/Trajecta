@@ -1,5 +1,6 @@
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -220,9 +221,9 @@ export function TraceDetailPage() {
       </header>
 
       {failureSummary ? (
-        <section
+        <Card as="section"
           ref={failureSummaryRef}
-          className={focusTarget === "failure" ? "panel trace-failure-panel trace-failure-panel-focused" : "panel trace-failure-panel"}
+          className={focusTarget === "failure" ? "trace-failure-panel trace-failure-panel-focused" : "trace-failure-panel"}
         >
           <div className="trace-failure-head">
             <div>
@@ -255,11 +256,11 @@ export function TraceDetailPage() {
             ) : null}
           </div>
           {failureSummary.detail ? <pre className="trace-failure-detail">{failureSummary.detail}</pre> : null}
-        </section>
+        </Card>
       ) : null}
 
       {detail.data ? (
-        <section className="panel trace-reading-panel">
+        <Card as="section" className="trace-reading-panel">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("traceDetail.readingGuide")}</p>
@@ -302,7 +303,7 @@ export function TraceDetailPage() {
               <p>{t("traceDetail.cardRawDetail")}</p>
             </button>
           </div>
-        </section>
+        </Card>
       ) : null}
 
       {detail.error ? <EmptyState title={t("traceDetail.loadError")} detail={detail.error} tone="danger" /> : null}
@@ -311,7 +312,7 @@ export function TraceDetailPage() {
       {tab === "conversation" && detail.data ? (
         <div className="detail-grid">
           {selectedUpstreamID || routingFailureReason || routingDecision.events.length ? (
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{routePlan ? t("traceDetail.routePlan") : t("traceDetail.routingDecision")}</p>
@@ -430,10 +431,10 @@ export function TraceDetailPage() {
                 </div>
               ) : null}
               <RoutingDecisionPanel decision={routingDecision} InlineTag={InlineTag} CodeBlock={CodeBlock} showCandidates={!routePlan} t={t} />
-            </section>
+            </Card>
           ) : null}
           {upstreamCalls.length ? <RelatedUpstreamCallsPanel calls={upstreamCalls} currentTraceID={traceID} fromSessionID={fromSessionID || session?.session_id || ""} t={t} /> : null}
-          <section className="panel">
+          <Card as="section">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">{hasConversation(detail.data) ? t("traceDetail.conversation") : t("traceDetail.payload")}</p>
@@ -491,7 +492,7 @@ export function TraceDetailPage() {
             ) : (
               <PayloadSummary raw={raw} CodeBlock={CodeBlock} t={t} />
             )}
-          </section>
+          </Card>
           <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
           {hasDeclaredToolsTab ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} /> : null}
         </div>
@@ -516,7 +517,7 @@ export function TraceDetailPage() {
 
 function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessionID = "", t }) {
   return (
-    <section className="panel related-upstream-panel">
+    <Card as="section" className="related-upstream-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.relatedUpstreamCalls")}</p>
@@ -573,7 +574,7 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
           );
         })}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -598,7 +599,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("traceDetail.declaredTools")}</p>
@@ -670,7 +671,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
         ) : (
           <EmptyState title={t("traceDetail.noDeclaredTools")} detail={t("traceDetail.noDeclaredToolsDetail")} />
         )}
-      </section>
+      </Card>
       {schemaTool ? (
         <Dialog open onOpenChange={(next) => (next ? undefined : setSchemaToolName(""))}>
           {/* Radix generates the aria-labelledby pair from DialogTitle, so the
@@ -703,7 +704,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
 function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefresh, t }) {
   if (observation.error) {
     return (
-      <section className="panel protocol-panel">
+      <Card as="section" className="protocol-panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("traceDetail.observationIR")}</p>
@@ -714,7 +715,7 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
           </Button>
         </div>
         <EmptyState title={t("traceDetail.protocolUnavailable")} detail={observation.error} tone="danger" compact />
-      </section>
+      </Card>
     );
   }
   if (observation.loading && !observation.data) {
@@ -724,7 +725,7 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
   const tree = observation.data?.tree || [];
   if (!observation.data) {
     return (
-      <section className="panel protocol-panel">
+      <Card as="section" className="protocol-panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">{t("traceDetail.observationIR")}</p>
@@ -735,11 +736,11 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
           </Button>
         </div>
         <EmptyState title={t("traceDetail.noProtocolObservation")} detail={t("traceDetail.noProtocolObservationDetail")} compact />
-      </section>
+      </Card>
     );
   }
   return (
-    <section className="panel protocol-panel">
+    <Card as="section" className="protocol-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.observationIR")}</p>
@@ -773,7 +774,7 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
       ) : (
         <EmptyState title={t("traceDetail.noSemanticNodes")} detail={t("traceDetail.noSemanticNodesDetail")} compact />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -827,7 +828,7 @@ function AuditPanel({ findings, InlineTag, CodeBlock, t }) {
   }
   const items = Array.isArray(findings.data?.items) ? findings.data.items : Array.isArray(findings.data) ? findings.data : [];
   return (
-    <section className="panel audit-panel">
+    <Card as="section" className="audit-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.deterministicAudit")}</p>
@@ -862,7 +863,7 @@ function AuditPanel({ findings, InlineTag, CodeBlock, t }) {
       ) : (
         <EmptyState title={t("audit.noFindings")} detail={t("traceDetail.noFindingsDetail")} compact />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -938,7 +939,7 @@ function PerformancePanel({ performance, t }) {
     return <EmptyState title={t("traceDetail.noPerformanceData")} detail={t("traceDetail.noPerformanceDataDetail")} />;
   }
   return (
-    <section className="panel performance-panel">
+    <Card as="section" className="performance-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.runtimeMetrics")}</p>
@@ -962,7 +963,7 @@ function PerformancePanel({ performance, t }) {
         <DetailMetaPill label={t("traceDetail.metaPolicy")} value={perf.routing_policy || "-"} />
       </div>
       {perf.provider_error ? <pre className="trace-failure-detail">{perf.provider_error}</pre> : null}
-    </section>
+    </Card>
   );
 }
 
@@ -989,7 +990,7 @@ function RawProtocolPanel({ raw, focusTarget = "", t }) {
   }
 
   return (
-    <section className="panel raw-panel">
+    <Card as="section" className="raw-panel">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.rawHttpExchange")}</p>
@@ -1004,7 +1005,7 @@ function RawProtocolPanel({ raw, focusTarget = "", t }) {
         <ProtocolColumn ref={requestRef} title={t("traceDetail.request")} value={raw.data?.request_protocol || ""} wrap={wrap} focused={focusTarget === "request"} />
         <ProtocolColumn ref={responseRef} title={t("traceDetail.response")} value={raw.data?.response_protocol || ""} wrap={wrap} focused={focusTarget === "response"} />
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -1024,7 +1025,7 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
   }
 
   return (
-    <section ref={panelRef} className={focusTarget === "timeline" ? "panel timeline-panel timeline-panel-focused" : "panel timeline-panel"}>
+    <Card as="section" ref={panelRef} className={focusTarget === "timeline" ? "timeline-panel timeline-panel-focused" : "timeline-panel"}>
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("traceDetail.providerTimeline")}</p>
@@ -1052,7 +1053,7 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
           </article>
         ))}
       </div>
-    </section>
+    </Card>
   );
 }
 

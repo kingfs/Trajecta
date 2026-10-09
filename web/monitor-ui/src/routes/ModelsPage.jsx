@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
@@ -61,7 +62,7 @@ export function ModelsPage() {
         </div>
       </header>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Catalog</p>
@@ -93,7 +94,7 @@ export function ModelsPage() {
           <StatCard label={t("common.failed")} value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
         </div>
-      </section>
+      </Card>
 
       {models.error ? <EmptyState title={t("models.loadError")} detail={models.error} tone="danger" /> : null}
       {models.loading && !models.data ? <EmptyState title={t("models.loading")} detail={t("models.loadingDetail")} /> : null}

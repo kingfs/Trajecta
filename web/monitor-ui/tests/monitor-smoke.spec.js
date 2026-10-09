@@ -1527,7 +1527,7 @@ test("the window strips are radio groups with a checked option", async ({ page }
   // The labels are translated and therefore wider than the raw option values
   // they replaced, which on a phone is enough to push the strip out of its
   // panel: the track wraps rather than widening the page.
-  const panel = page.locator(".panel", { has: strip }).first();
+  const panel = page.locator('[data-slot="card"]', { has: strip }).first();
   const [stripBox, panelBox] = await Promise.all([strip.boundingBox(), panel.boundingBox()]);
   expect(Math.round(stripBox.x + stripBox.width)).toBeLessThanOrEqual(Math.round(panelBox.x + panelBox.width));
 });
@@ -1631,12 +1631,14 @@ test("no light-mode surface resolves dark on any route", async ({ page }) => {
   // and the accent fills are deliberately inverted or coloured and are excluded.
   const SURFACES = [
     "header",
-    ".panel",
+    // The page sections: `.panel` and `.icon-button` are gone from the markup,
+    // so they are named by what replaced them rather than left in the list
+    // matching nothing.
+    '[data-slot="card"]',
     ".stat-card",
     ".trace-table",
     ".filter-bar",
     ".ghost-button:not(.active)",
-    ".icon-button",
     ".inline-tag",
     ".detail-meta-pill",
     ".provider-model-card",
@@ -1823,4 +1825,32 @@ test("the migrated selects keep the empty option and its label", async ({ page }
   await page.getByRole("option", { name: "Inherit" }).click();
   await expect(responses).toHaveText(/Inherit/);
   await expect(responses).toHaveAttribute("aria-expanded", "false");
+});
+
+// The page sections were `.panel` elements: 20px of padding, no shadow, and a
+// 16px gap between stacked sections that the layout sheet cancels for a section
+// sitting directly under the page body. All three are easy to lose in a
+// migration to a primitive, and none of them would fail a functional test.
+test("the card sections keep the panel box", async ({ page }) => {
+  await page.goto("/audit");
+  const card = page.locator('[data-slot="card"]').first();
+  await expect(card).toBeVisible();
+  const box = await card.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      padding: style.padding,
+      radius: style.borderRadius,
+      shadow: style.boxShadow,
+      margin: style.marginBottom,
+      tag: element.tagName,
+    };
+  });
+  expect(box.padding).toBe("20px");
+  expect(box.radius).toBe("12px");
+  expect(box.shadow).toBe("none");
+  // The surface stays a <section>: a card is not a reason to flatten the
+  // document outline.
+  expect(box.tag).toBe("SECTION");
+  // A section directly under the page body hugs the bottom of the page.
+  expect(box.margin).toBe("0px");
 });

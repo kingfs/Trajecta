@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Link } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -40,7 +41,7 @@ export function AnalysisPanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("analysis.jobQueue")}</h2>
@@ -82,8 +83,8 @@ export function AnalysisPanel() {
         ) : jobs.data ? (
           <EmptyState title={t("analysis.noJobs")} detail={t("analysis.noJobsDetail")} />
         ) : null}
-      </section>
-      <section className="panel">
+      </Card>
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("analysis.latest")}</h2>
@@ -119,7 +120,7 @@ export function AnalysisPanel() {
         ) : analysis.data ? (
           <EmptyState title={t("analysis.noRuns")} detail={t("analysis.noRunsDetail")} />
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }

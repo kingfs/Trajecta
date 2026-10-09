@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
@@ -36,7 +37,7 @@ export function RuntimePanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("system.hostSection")}</h2>
@@ -199,9 +200,9 @@ export function RuntimePanel() {
             </div>
           </>
         ) : null}
-      </section>
+      </Card>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("system.goProcess")}</h2>
@@ -278,7 +279,7 @@ export function RuntimePanel() {
             </div>
           </>
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }

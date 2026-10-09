@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -222,7 +223,7 @@ export function ProviderDetailPage() {
           </div>
         </header>
 
-        <section className="panel">
+        <Card as="section">
           <div className="panel-head">
             <div>
               <p className="eyebrow">{t("channelDetail.analytics")}</p>
@@ -238,7 +239,7 @@ export function ProviderDetailPage() {
             <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
             <StatCard label={t("common.success")} value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
           </div>
-        </section>
+        </Card>
 
         {detail.error ? <EmptyState title={t("channelDetail.loadError")} detail={detail.error} tone="danger" /> : null}
         {detail.loading && !detail.data ? <EmptyState title={t("channelDetail.loading")} detail={t("channelDetail.loadingDetail")} /> : null}
@@ -268,7 +269,7 @@ export function ProviderDetailPage() {
 
         {detail.data ? (
           <>
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("channelDetail.trend")}</p>
@@ -276,9 +277,9 @@ export function ProviderDetailPage() {
                 </div>
               </div>
               <SingleUsageCharts items={trends} />
-            </section>
+            </Card>
 
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("nav.models")}</p>
@@ -305,9 +306,9 @@ export function ProviderDetailPage() {
                   />
                 )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
               </div>
-            </section>
+            </Card>
 
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("channelDetail.discovery")}</p>
@@ -321,9 +322,9 @@ export function ProviderDetailPage() {
               ) : (
                 <EmptyState title={t("channelDetail.noProbeRuns")} detail={t("channelDetail.noProbeRunsDetail")} />
               )}
-            </section>
+            </Card>
 
-            <section className="panel">
+            <Card as="section">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">{t("channelDetail.failures")}</p>
@@ -347,7 +348,7 @@ export function ProviderDetailPage() {
               ) : (
                 <EmptyState title={t("channelDetail.noRecentFailures")} detail={t("channelDetail.noRecentFailuresDetail")} />
               )}
-            </section>
+            </Card>
           </>
         ) : null}
       </div>
@@ -439,7 +440,7 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
   const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
   const warnings = Array.isArray(report.warnings) ? report.warnings : [];
   return (
-    <section className="panel">
+    <Card as="section">
       <div className="panel-head">
         <div>
           <p className="eyebrow">{t("providers.detection")}</p>
@@ -459,7 +460,7 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
       <div className="provider-form-actions">
         <Button variant="primary" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? t("providers.applying") : t("providers.applySuggestions")}</Button>
       </div>
-    </section>
+    </Card>
   );
 }
 

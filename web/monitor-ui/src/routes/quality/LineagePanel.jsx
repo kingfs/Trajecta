@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
@@ -71,7 +72,7 @@ export function LineagePanel() {
 
   return (
     <>
-      <section className="panel responses-audit-panel">
+      <Card as="section" className="responses-audit-panel">
         <div className="panel-head">
           <div>
             <h2>{t("audit.responsesTraceTitle")}</h2>
@@ -102,7 +103,7 @@ export function LineagePanel() {
         {traceState.loading ? <EmptyState title={t("audit.loadingResponsesTrace")} detail={t("audit.loadingResponsesTraceDetail")} compact /> : null}
         {traceState.error ? <EmptyState title={t("audit.loadResponsesTraceError")} detail={traceState.error} tone="danger" compact /> : null}
         {traceState.data ? <ResponsesAuditTrace trace={traceState.data} /> : null}
-      </section>
+      </Card>
     </>
   );
 }

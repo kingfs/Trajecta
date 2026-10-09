@@ -1,4 +1,5 @@
 import React from "react";
+import { Card } from "../../components/ui/card";
 import { InlineTag } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -29,7 +30,7 @@ export function DatabasePanel() {
 
   return (
     <>
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("system.databasePanel")}</h2>
@@ -45,7 +46,7 @@ export function DatabasePanel() {
           <EmptyState title={t("system.unsupportedTitle")} detail={db.reason || `driver: ${db.driver || "unknown"}`} />
         ) : null}
         {!database.error && db && db.supported ? <DatabaseStatistics db={db} t={t} /> : null}
-      </section>
+      </Card>
     </>
   );
 }

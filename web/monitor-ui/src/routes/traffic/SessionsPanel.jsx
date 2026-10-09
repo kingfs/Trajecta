@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { useSearchParams } from "react-router-dom";
@@ -76,7 +77,7 @@ export function SessionsPanel() {
         <p className="system-note">{t("sessions.pageScope")}</p>
       </section>
 
-      <section className="panel">
+      <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("sessions.recentTitle")}</h2>
@@ -131,7 +132,7 @@ export function SessionsPanel() {
         {loading && !data ? <EmptyState title={t("sessions.loading")} detail={t("sessions.loadingDetail")} /> : null}
 
         <SessionList items={items} />
-      </section>
+      </Card>
     </>
   );
 }
