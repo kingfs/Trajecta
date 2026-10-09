@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { apiPaths, apiURL, postJSON, requestJSON, streamSystemEvents } from "../lib/api";
 import { languageOptions, useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 import { cn } from "../lib/utils";
 
@@ -315,21 +316,19 @@ function PasswordDialog({ onClose, returnFocusTo }) {
   const { t } = useI18n();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setStatus("");
-    try {
-      await postJSON(apiPaths.authPassword, { current_password: currentPassword, new_password: newPassword });
+  const changePassword = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.authPassword, { current_password: currentPassword, new_password: newPassword }),
+    success: "password.updated",
+    error: "password.failed",
+    onSuccess: () => {
       setCurrentPassword("");
       setNewPassword("");
-      setStatus(t("password.updated"));
-    } catch (err) {
-      setError(err.message || t("password.failed"));
-    }
+    },
+  });
+
+  const submit = (event) => {
+    event.preventDefault();
+    changePassword.mutate();
   };
 
   // The form sits inside the dialog rather than being the dialog element itself:
@@ -368,8 +367,6 @@ function PasswordDialog({ onClose, returnFocusTo }) {
             {t("password.next")}
             <input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
           </label>
-          {error ? <p className="auth-error">{error}</p> : null}
-          {status ? <p className="auth-success">{status}</p> : null}
           <DialogFooter>
             <button className="ghost-button" type="button" onClick={onClose}>
               {t("password.cancel")}

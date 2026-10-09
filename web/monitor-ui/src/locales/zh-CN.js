@@ -727,6 +727,7 @@ export default {
   "routing.edit": "编辑",
   "routing.noAliases": "没有配置别名",
   "routing.noAliasesDetail": "后端 API 启用后可在此创建别名。",
+  "routing.aliasSaveFailed": "无法保存模型别名",
   "routing.resolveValidationErrors": "保存前请先解决别名校验错误。",
   "routing.dryRun": "试运行",
   "routing.routeInspector": "路由检查器",

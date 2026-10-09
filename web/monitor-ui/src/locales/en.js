@@ -727,6 +727,7 @@ export default {
   "routing.edit": "Edit",
   "routing.noAliases": "No aliases configured",
   "routing.noAliasesDetail": "Create aliases here once the backend API is enabled.",
+  "routing.aliasSaveFailed": "Unable to save the model alias",
   "routing.resolveValidationErrors": "Resolve alias validation errors before saving.",
   "routing.dryRun": "Dry run",
   "routing.routeInspector": "Route inspector",

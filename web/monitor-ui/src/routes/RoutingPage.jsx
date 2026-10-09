@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
@@ -9,6 +10,7 @@ import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, patchJSON, postJSON, requestJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
@@ -177,7 +179,10 @@ function routingTabLabel(tab, t) {
 function RoutingSettingsPanel() {
   const { t } = useI18n();
   const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", missing_model_policy: "reject" });
-  const [status, setStatus] = useState({ loading: true, error: "", saved: false });
+  // The loading flag and its error belong to the read that fills the form; the
+  // save reports itself through a toast like every other write here.
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -185,12 +190,14 @@ function RoutingSettingsPanel() {
       .then((payload) => {
         if (!cancelled) {
           setSettings({ ...settings, ...payload });
-          setStatus({ loading: false, error: "", saved: false });
+          setLoadingSettings(false);
+          setLoadError("");
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setStatus({ loading: false, error: error.message, saved: false });
+          setLoadingSettings(false);
+          setLoadError(error.message);
         }
       });
     return () => {
@@ -199,17 +206,14 @@ function RoutingSettingsPanel() {
   }, []);
 
   const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
-  const save = async (event) => {
-    event.preventDefault();
-    setStatus({ loading: false, error: "", saved: false });
-    try {
-      const payload = await patchJSON(apiPaths.routingSettings, settings);
-      setSettings({ ...settings, ...payload });
-      setStatus({ loading: false, error: "", saved: true });
-    } catch (error) {
-      setStatus({ loading: false, error: error.message, saved: false });
-    }
-  };
+  // The server's copy wins over the one that was submitted: it is the stored
+  // settings, not the echoed request.
+  const save = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.routingSettings, settings),
+    success: "routing.saved",
+    error: "routing.settingsUnavailable",
+    onSuccess: (payload) => setSettings((current) => ({ ...current, ...payload })),
+  });
 
   return (
     <section className="panel">
@@ -218,10 +222,10 @@ function RoutingSettingsPanel() {
           <p className="eyebrow">{t("routing.systemPolicy")}</p>
           <h2>{t("routing.settings")}</h2>
         </div>
-        {status.saved ? <InlineTag tone="green">{t("routing.saved")}</InlineTag> : null}
+        {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
       </div>
-      {status.error ? <EmptyState title={t("routing.settingsUnavailable")} detail={status.error} compact /> : null}
-      <form className="filter-bar routing-filter-bar" onSubmit={save}>
+      {loadError ? <EmptyState title={t("routing.settingsUnavailable")} detail={loadError} compact /> : null}
+      <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
         <label className="filter-label">
           {t("routing.responsesStrategy")}
           <select className="filter-input" value={settings.responses_strategy || "auto"} onChange={(event) => update("responses_strategy", event.target.value)}>
@@ -262,7 +266,6 @@ function ModelAliasesPanel() {
   const [editID, setEditID] = useState("");
   const [editForm, setEditForm] = useState(null);
   const [editValidation, setEditValidation] = useState(emptyAliasValidationState());
-  const [submitError, setSubmitError] = useState("");
   const items = Array.isArray(aliases.data?.items) ? aliases.data.items : [];
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const updateEdit = (key, value) => setEditForm((current) => ({ ...current, [key]: value }));
@@ -323,26 +326,33 @@ function ModelAliasesPanel() {
     };
   }, [editID, editForm]);
 
+  // Validation runs first and is not part of the write: a form that fails it is
+  // never posted, so the warning is raised here rather than by the mutation.
+  const createAlias = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.modelAliases, form),
+    error: "routing.aliasSaveFailed",
+    onSuccess: () => {
+      setForm({ alias: "", target_model: "", channel_id: "" });
+      setValidation(emptyAliasValidationState());
+      refresh();
+    },
+  });
+
   const create = async (event) => {
     event.preventDefault();
-    setSubmitError("");
     try {
       const checked = await validateAlias(form);
       setValidation({ loading: false, data: checked, error: "" });
       if (!checked.valid) {
-        setSubmitError(t("routing.resolveValidationErrors"));
+        toast.warning(t("routing.resolveValidationErrors"));
         return;
       }
-      await postJSON(apiPaths.modelAliases, form);
-      setForm({ alias: "", target_model: "", channel_id: "" });
-      setValidation(emptyAliasValidationState());
-      refresh();
+      createAlias.mutate();
     } catch (error) {
-      setSubmitError(error.message);
+      toast.error(error.message);
     }
   };
   const startEdit = (item) => {
-    setSubmitError("");
     setEditID(item.id || "");
     setEditForm({
       id: item.id || "",
@@ -359,21 +369,27 @@ function ModelAliasesPanel() {
     setEditForm(null);
     setEditValidation(emptyAliasValidationState());
   };
+  const saveAlias = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.modelAlias(editID), editForm),
+    error: "routing.aliasSaveFailed",
+    onSuccess: () => {
+      cancelEdit();
+      refresh();
+    },
+  });
+
   const saveEdit = async (event) => {
     event.preventDefault();
-    setSubmitError("");
     try {
       const checked = await validateAlias(editForm);
       setEditValidation({ loading: false, data: checked, error: "" });
       if (!checked.valid) {
-        setSubmitError(t("routing.resolveValidationErrors"));
+        toast.warning(t("routing.resolveValidationErrors"));
         return;
       }
-      await patchJSON(apiPaths.modelAlias(editID), editForm);
-      cancelEdit();
-      refresh();
+      saveAlias.mutate();
     } catch (error) {
-      setSubmitError(error.message);
+      toast.error(error.message);
     }
   };
   const createDisabled = isAliasSaveDisabled(form, validation);
@@ -396,7 +412,6 @@ function ModelAliasesPanel() {
         <button className="ghost-button" type="submit" disabled={createDisabled}>{t("routing.create")}</button>
       </form>
       <AliasValidationMessages state={validation} />
-      {submitError ? <p className="event-message">{submitError}</p> : null}
       {items.length ? (
         <div className="session-breakdown-grid">
           {items.map((item) => (
@@ -438,17 +453,16 @@ function RouteInspectorPanel() {
   const { t } = useI18n();
   const [form, setForm] = useState({ endpoint: "responses", model: "", stream: false, tools: false });
   const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const inspect = async (event) => {
+  const inspect = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.routingInspect, form),
+    error: "routing.inspectorUnavailable",
+    onSuccess: setResult,
+  });
+  const runInspect = (event) => {
     event.preventDefault();
-    setError("");
     setResult(null);
-    try {
-      setResult(await postJSON(apiPaths.routingInspect, form));
-    } catch (err) {
-      setError(err.message);
-    }
+    inspect.mutate();
   };
 
   return (
@@ -459,7 +473,7 @@ function RouteInspectorPanel() {
           <h2>{t("routing.routeInspector")}</h2>
         </div>
       </div>
-      <form className="filter-bar routing-filter-bar" onSubmit={inspect}>
+      <form className="filter-bar routing-filter-bar" onSubmit={runInspect}>
         <select className="filter-input" value={form.endpoint} onChange={(event) => update("endpoint", event.target.value)}>
           <option value="chat_completions">chat_completions</option>
           <option value="responses">responses</option>
@@ -470,7 +484,6 @@ function RouteInspectorPanel() {
         <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>
         <button className="ghost-button" type="submit">{t("routing.inspect")}</button>
       </form>
-      {error ? <EmptyState title={t("routing.inspectorUnavailable")} detail={error} compact /> : null}
       {result ? <RouteInspectorResult result={result} /> : null}
       {!result && !error ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
     </section>
