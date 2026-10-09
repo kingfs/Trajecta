@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { WindowToggle } from "../components/common/Tabs";
 import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
@@ -14,7 +15,6 @@ import {
   formatCount,
   formatDateTime,
   formatTime,
-  MONITOR_WINDOW_OPTIONS,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -75,13 +75,7 @@ export function ModelDetailPage() {
             <h2>Usage window</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label={t("models.window")}>
-              {MONITOR_WINDOW_OPTIONS.map((window) => (
-                <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                  {window}
-                </button>
-              ))}
-            </div>
+            <WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge, ViewIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
@@ -272,14 +273,14 @@ export function SessionDetailPage() {
               <h2>{traceFilter === "failed" ? t("sessionDetail.failedRequestList") : t("sessionDetail.groupedRequestList")}</h2>
             </div>
             <div className="panel-head-actions">
-              <div className="view-toggle" role="tablist" aria-label={t("sessionDetail.traceFilterLabel")}>
-                <button className={traceFilter === "all" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("all")}>
+              <SegmentedControl type="single" value={traceFilter} onValueChange={setTraceFilter} aria-label={t("sessionDetail.traceFilterLabel")}>
+                <SegmentedControlItem value="all" active={traceFilter === "all"}>
                   {t("sessionDetail.all")}
-                </button>
-                <button className={traceFilter === "failed" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("failed")}>
+                </SegmentedControlItem>
+                <SegmentedControlItem value="failed" active={traceFilter === "failed"}>
                   {t("sessionDetail.failedOnly")}
-                </button>
-              </div>
+                </SegmentedControlItem>
+              </SegmentedControl>
               <span className="session-filter-count">
                 {t("sessionDetail.traceCount", { visible: visibleTraces.length, total: traces.length })}
               </span>

@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { WindowToggle } from "../components/common/Tabs";
 import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
@@ -11,7 +12,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildProviderLink, formatCount, formatDateTime, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildProviderLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
   name: "",
@@ -77,13 +78,7 @@ export function ProvidersPage() {
             <h2>{t("providers.managed")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label={t("providers.analyticsWindow")}>
-              {MONITOR_WINDOW_OPTIONS.map((window) => (
-                <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                  {window}
-                </button>
-              ))}
-            </div>
+            <WindowToggle value={windowValue} onChange={setWindow} label={t("providers.analyticsWindow")} />
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">

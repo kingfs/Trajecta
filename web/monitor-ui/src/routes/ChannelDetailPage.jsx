@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { WindowToggle } from "../components/common/Tabs";
 import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
@@ -11,7 +12,7 @@ import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
 export function ProviderDetailPage() {
@@ -223,13 +224,7 @@ export function ProviderDetailPage() {
               <h2>{t("channelDetail.providerUsage")}</h2>
             </div>
             <div className="panel-head-actions">
-              <div className="view-toggle" role="tablist" aria-label={t("channelDetail.windowLabel")}>
-                {MONITOR_WINDOW_OPTIONS.map((window) => (
-                  <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                    {window}
-                  </button>
-                ))}
-              </div>
+              <WindowToggle value={windowValue} onChange={setWindow} label={t("channelDetail.windowLabel")} />
             </div>
           </div>
           <div className="hero-grid hero-grid-compact">

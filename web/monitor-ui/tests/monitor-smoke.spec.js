@@ -1459,6 +1459,39 @@ test("page tabs are reachable and operable from the keyboard", async ({ page }) 
   await expect(page).toHaveURL(/\/traces$/);
 });
 
+// The window strips used to declare role="tablist" over a row of plain
+// buttons: no role="tab" child, no aria-selected, no tabpanel, so the strip
+// announced itself as a widget whose parts it could not describe. They are
+// radio groups now - one choice out of a few - and these are the parts of that
+// pattern an edit could quietly drop.
+test("the window strips are radio groups with a checked option", async ({ page }) => {
+  await page.goto("/providers");
+  const strip = page.getByRole("radiogroup", { name: "Provider analytics window" });
+  await expect(strip).toBeVisible();
+  const today = strip.getByRole("radio", { name: "Today", exact: true });
+  await expect(today).toHaveAttribute("aria-checked", "true");
+
+  const week = strip.getByRole("radio", { name: "Last 7 days", exact: true });
+  await week.click();
+  await expect(week).toHaveAttribute("aria-checked", "true");
+  await expect(today).toHaveAttribute("aria-checked", "false");
+  await expect(page).toHaveURL(/window=7d/);
+
+  // Arrows move and select, which is the radio pattern rather than the tab one;
+  // the strip is horizontal, so they are the horizontal pair.
+  await week.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(strip.getByRole("radio", { name: "Last 30 days", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(page).toHaveURL(/window=30d/);
+
+  // The labels are translated and therefore wider than the raw option values
+  // they replaced, which on a phone is enough to push the strip out of its
+  // panel: the track wraps rather than widening the page.
+  const panel = page.locator(".panel", { has: strip }).first();
+  const [stripBox, panelBox] = await Promise.all([strip.boundingBox(), panel.boundingBox()]);
+  expect(Math.round(stripBox.x + stripBox.width)).toBeLessThanOrEqual(Math.round(panelBox.x + panelBox.width));
+});
+
 // A hand-rolled modal handled Escape and the backdrop, and left everything else
 // to the reader: focus stayed on the page behind it, Tab could walk out, and
 // the background kept scrolling. Radix does all of it, so all of it is asserted.

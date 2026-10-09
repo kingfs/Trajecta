@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { WindowToggle } from "../components/common/Tabs";
+import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { EmptyState } from "../components/common/EmptyState";
 import { InlineTag } from "../components/common/Badges";
 import { BreakdownList } from "../components/monitor/BreakdownList";
@@ -92,13 +94,13 @@ export function RoutingPage() {
             <h2>{t("routing.workspace")}</h2>
           </div>
         </div>
-        <div className="view-toggle routing-mode-toggle" role="tablist" aria-label={t("routing.workspaceLabel")}>
+        <SegmentedControl type="single" className="routing-mode-toggle" value={activeTab} onValueChange={setTab} aria-label={t("routing.workspaceLabel")}>
           {ROUTING_TABS.map((tab) => (
-            <button key={tab} className={activeTab === tab ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setTab(tab)}>
+            <SegmentedControlItem key={tab} value={tab} active={activeTab === tab}>
               {routingTabLabel(tab, t)}
-            </button>
+            </SegmentedControlItem>
           ))}
-        </div>
+        </SegmentedControl>
       </section>
 
       {activeTab === "settings" ? <RoutingSettingsPanel /> : null}
@@ -114,13 +116,7 @@ export function RoutingPage() {
                 <h2>{t("routing.recent")}</h2>
               </div>
               <div className="panel-head-actions">
-                <div className="view-toggle" role="tablist" aria-label={t("routing.window")}>
-                  {WINDOW_OPTIONS.map((window) => (
-                    <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                      {window}
-                    </button>
-                  ))}
-                </div>
+                <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />
               </div>
             </div>
             <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>

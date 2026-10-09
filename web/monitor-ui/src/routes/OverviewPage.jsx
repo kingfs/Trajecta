@@ -6,7 +6,8 @@ import { InlineTag } from "../components/common/Badges";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { PageHeader } from "../components/common/PageHeader";
-import { SegmentedControl, WindowToggle } from "../components/common/Tabs";
+import { WindowToggle } from "../components/common/Tabs";
+import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
@@ -157,7 +158,13 @@ export function OverviewPage() {
             <h2>{t("overview.topBreakdowns")}</h2>
           </div>
           <div className="panel-head-actions">
-            <SegmentedControl label={t("overview.distribution")} value={breakdownKind} onChange={setBreakdownKind} options={breakdownOptions.map((option) => ({ value: option.id, label: option.label }))} />
+            <SegmentedControl value={breakdownKind} onValueChange={setBreakdownKind} aria-label={t("overview.distribution")}>
+              {breakdownOptions.map((option) => (
+                <SegmentedControlItem key={option.id} value={option.id} active={breakdownKind === option.id}>
+                  {option.label}
+                </SegmentedControlItem>
+              ))}
+            </SegmentedControl>
           </div>
         </div>
         <BreakdownList

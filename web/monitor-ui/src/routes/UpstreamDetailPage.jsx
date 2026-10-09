@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
+import { WindowToggle } from "../components/common/Tabs";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
@@ -24,7 +25,6 @@ import {
   formatTime,
   healthTone,
   metricThresholdTone,
-  MONITOR_WINDOW_OPTIONS,
   normalizeUpstreamWindow,
   resolveThresholdState,
   setOrDeleteParam,
@@ -117,17 +117,7 @@ export function UpstreamDetailPage() {
             <h2>{t("upstreamDetail.windowAndModel")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label={t("upstreamDetail.windowLabel")}>
-              {MONITOR_WINDOW_OPTIONS.map((window) => (
-                <button
-                  key={window}
-                  className={windowValue === window ? "ghost-button active" : "ghost-button"}
-                  onClick={() => setWindow(window)}
-                >
-                  {window}
-                </button>
-              ))}
-            </div>
+            <WindowToggle value={windowValue} onChange={setWindow} label={t("upstreamDetail.windowLabel")} />
             <span className="badge">{detail.data?.refreshed_at ? formatTime(detail.data.refreshed_at) : "..."}</span>
           </div>
         </div>

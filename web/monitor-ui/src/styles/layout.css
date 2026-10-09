@@ -444,7 +444,11 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-2);
-  flex-wrap: nowrap;
+  /* The labels are translated, so the track cannot assume it fits on one line:
+     "Last 30 days" is four times the width of "30d". Wrapping only happens when
+     the row would otherwise overflow, which on a phone is the difference
+     between a second row of pills and a horizontally scrolling page. */
+  flex-wrap: wrap;
 }
 
 .segmented-item,
