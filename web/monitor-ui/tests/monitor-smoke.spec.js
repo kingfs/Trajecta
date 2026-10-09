@@ -287,6 +287,30 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByText(/job #301 completed/)).toBeVisible();
 });
 
+// Markdown is react-markdown + remark-gfm now. The renderer it replaced escaped
+// the source and then applied regular expressions to the escaped string, which
+// meant inline emphasis ran over code spans (`**literal**` in backticks came out
+// bold) and anything outside its seven constructs arrived as punctuation. Raw
+// HTML is not rendered at all, and react-markdown's default url transform drops
+// `javascript:` links.
+test("markdown renders constructs the hand-written renderer could not", async ({ page }) => {
+  await page.goto("/traces/trace-routed");
+  const card = page.locator(".message-card", { hasText: "literal" });
+  await expect(card.locator(".rendered-markdown")).toBeVisible();
+
+  await expect(card.locator("strong")).toHaveText("bold");
+  // One code element, asterisks intact, and no emphasis inside it.
+  await expect(card.locator("code").first()).toHaveText("**literal**");
+  await expect(card.locator("code").first().locator("strong")).toHaveCount(0);
+
+  // GFM: a table and a fenced block, neither of which the old renderer produced.
+  await expect(card.locator("table th")).toHaveCount(2);
+  await expect(card.locator("table td")).toHaveCount(2);
+  await expect(card.locator("pre.md-pre code")).toHaveText('fmt.Println("hi")');
+
+  await expect(card.getByRole("link", { name: "unsafe" })).not.toHaveAttribute("href", /javascript/);
+});
+
 // The disclosure was a `useState` and a plain button: no `aria-expanded`, no
 // `aria-controls`, and a hardcoded English "hide"/"show" in a UI that ships two
 // languages. Radix Collapsible owns the first two, and the third is a key.
@@ -681,10 +705,30 @@ function tracePayload() {
     messages: [
       { role: "system", content: longSystemPrompt(), message_type: "message" },
       { role: "user", content: "hello", message_type: "message" },
+      // Nine lines, so it stays under the collapse threshold and the page keeps
+      // exactly one "Show all" button.
+      { role: "assistant", content: markdownMessage(), message_type: "message", content_format: "markdown" },
     ],
     events: [],
     tools: [],
   };
+}
+
+// Every construct here is one the hand-written renderer either got wrong or did
+// not know about: emphasis inside a code span, a table, a fenced block, and a
+// link protocol that has to be refused.
+function markdownMessage() {
+  return [
+    "**bold** and `**literal**` and [unsafe](javascript:alert(1))",
+    "",
+    "| col a | col b |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "```go",
+    'fmt.Println("hi")',
+    "```",
+  ].join("\n");
 }
 
 function longSystemPrompt() {
