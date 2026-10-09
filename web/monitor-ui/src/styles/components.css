@@ -788,6 +788,17 @@ input[type="radio"] {
   box-shadow: var(--shadow-lg);
 }
 
+/* Width modifiers for a modal, next to the .nav-modal rule they modify rather
+   than in styles.css: that file loads first, so a width declared there lost to
+   .nav-modal's own and the modifier silently did nothing. */
+.provider-create-modal {
+  width: min(620px, 100%);
+}
+
+.provider-edit-modal {
+  width: min(720px, 100%);
+}
+
 .nav-modal-head {
   display: flex;
   align-items: flex-start;

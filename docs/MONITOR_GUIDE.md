@@ -19,7 +19,7 @@ go run ./cmd/server auth init-user -c config/config.yaml --username admin --pass
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
-左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一个 Radix Dialog primitive（`@radix-ui/react-dialog`，封装在 `web/monitor-ui/src/components/ui/dialog.tsx`）。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染在 Radix 的 portal 里，因此内容不再被侧边栏宽度截断。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定，以及关闭后把焦点还给触发按钮，都由这个 primitive 提供；焦点还原要求触发按钮与对话框处在同一个 Dialog root 内，所以 `PrimaryNav` 用一层 `Dialog` 同时包住两者，而不是在对话框内部自建 portal。模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `createPortal` 加 `.nav-modal-backdrop`）尚未改用它。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
+左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一个 Radix Dialog primitive（`@radix-ui/react-dialog`，封装在 `web/monitor-ui/src/components/ui/dialog.tsx`）。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染在 Radix 的 portal 里，因此内容不再被侧边栏宽度截断。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定，以及关闭后把焦点还给触发按钮，都由这个 primitive 提供；焦点还原要求触发按钮与对话框处在同一个 Dialog root 内，所以 `PrimaryNav` 用一层 `Dialog` 同时包住两者，而不是在对话框内部自建 portal。模型服务商列表页的新建弹窗、模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗都改用了同一个 primitive，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
 ## 个人 API token
 

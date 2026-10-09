@@ -1293,6 +1293,31 @@ test("dialogs trap focus, close on Escape and restore focus to the trigger", asy
   await expect(trigger).toBeFocused();
 });
 
+// The provider edit form on the channel detail page was the last dialog still
+// written by hand - a `createPortal` into `.nav-modal-backdrop` with no focus
+// trap and no focus restore - so it is the one that a future edit could quietly
+// leave behind when the shared primitive changes.
+test("the provider edit dialog is the shared dialog primitive", async ({ page }) => {
+  await page.goto("/providers/openai-primary");
+  const trigger = page.getByRole("button", { name: "Edit provider" }).first();
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "Edit provider" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  // It keeps its own width rather than the default card's 560px. Below 720px the
+  // viewport is the cap, which is what `min(720px, 100%)` means.
+  const width = await dialog.evaluate((e) => ({
+    actual: parseFloat(getComputedStyle(e).width),
+    cap: Math.min(720, window.innerWidth),
+  }));
+  expect(Math.round(width.actual)).toBe(Math.round(width.cap));
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
 
 
 // The palette is generated OKLCH: custom properties in two theme blocks that

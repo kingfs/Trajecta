@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
@@ -9,6 +8,7 @@ import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useI18n } from "../lib/i18n";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
@@ -188,180 +188,184 @@ export function ProviderDetailPage() {
   };
 
   return (
-    <div className="shell shell-detail">
-      <header className="topbar detail-topbar">
-        <div className="detail-title-block">
-          <div className="detail-heading-row">
-            <h1>{provider.name || effectiveProviderID}</h1>
-            <div className="trace-tag-group detail-tag-group">
-              <InlineTag tone={provider.enabled ? "green" : "default"}>{provider.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>
-              <InlineTag tone={provider.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(provider.source)}</InlineTag>
-              <InlineTag tone="accent">{provider.provider_preset || "custom"}</InlineTag>
-              {provider.secret_storage_mode ? <InlineTag tone={provider.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{provider.secret_storage_mode}</InlineTag> : null}
-              {provider.last_probe_status ? <InlineTag tone={provider.last_probe_status === "success" ? "green" : "danger"}>{provider.last_probe_status}</InlineTag> : null}
-            </div>
-          </div>
-          <div className="detail-meta-strip">
-            <DetailMetaPill label={t("channelDetail.configSource")} value={providerSourceLabel(provider.source)} />
-            <DetailMetaPill label={t("providers.apiType")} value={provider.api_type || "-"} />
-            <DetailMetaPill label={t("channelDetail.mode")} value={provider.mode || "-"} />
-            <DetailMetaPill label={t("channelDetail.baseUrl")} value={provider.base_url || "-"} mono />
-            <DetailMetaPill label={t("channelDetail.models")} value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
-            <DetailMetaPill label={t("common.requests")} value={formatCount(summary.request_count)} />
-            <DetailMetaPill label={t("common.tokens")} value={formatCount(summary.total_tokens)} />
-            {summary.missing_usage_request ? <DetailMetaPill label={t("channelDetail.missingUsage")} value={formatCount(summary.missing_usage_request)} /> : null}
-          </div>
-        </div>
-        <div className="topbar-meta detail-toolbar">
-          <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
-              <HomeIcon />
-            </Link>
-            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
-            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></button>
-            <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
-            <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
-          </div>
-          <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
-        </div>
-      </header>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">{t("channelDetail.analytics")}</p>
-            <h2>{t("channelDetail.providerUsage")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label={t("channelDetail.windowLabel")}>
-              {MONITOR_WINDOW_OPTIONS.map((window) => (
-                <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                  {window}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="hero-grid hero-grid-compact">
-          <StatCard label={t("common.requests")} value={formatCount(summary.request_count)} />
-          <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
-          <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
-          <StatCard label={t("common.success")} value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
-        </div>
-      </section>
-
-      {actionError ? <EmptyState title={t("channelDetail.actionFailed")} detail={actionError} tone="danger" /> : null}
-      {detail.error ? <EmptyState title={t("channelDetail.loadError")} detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title={t("channelDetail.loading")} detail={t("channelDetail.loadingDetail")} /> : null}
-      {detail.data?.secret_storage_mode === "plaintext-local" ? (
-        <EmptyState title={t("channelDetail.plaintextStorage")} detail={t("channelDetail.plaintextStorageDetail")} tone="danger" />
-      ) : null}
-      {lastProbe?.provider_probe ? (
-        <ProviderProbeSuggestionPanel
-          report={lastProbe.provider_probe}
-          busy={busy === "apply-probe"}
-          onApply={applyProbeSuggestions}
-        />
-      ) : null}
-
-      {detail.data && editOpen ? (
-        <EditProviderDialog
-          provider={provider}
-          form={editForm}
-          presetData={presets.data}
-          saving={busy === "save-provider"}
-          onChange={setEditForm}
-          onReset={() => setEditForm(editFormFromProvider(provider))}
-          onClose={() => setEditOpen(false)}
-          onSave={saveProvider}
-        />
-      ) : null}
-
-      {detail.data ? (
-        <>
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("channelDetail.trend")}</p>
-                <h2>{t("channelDetail.tokenRequestBuckets")}</h2>
+    <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <div className="shell shell-detail">
+        <header className="topbar detail-topbar">
+          <div className="detail-title-block">
+            <div className="detail-heading-row">
+              <h1>{provider.name || effectiveProviderID}</h1>
+              <div className="trace-tag-group detail-tag-group">
+                <InlineTag tone={provider.enabled ? "green" : "default"}>{provider.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>
+                <InlineTag tone={provider.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(provider.source)}</InlineTag>
+                <InlineTag tone="accent">{provider.provider_preset || "custom"}</InlineTag>
+                {provider.secret_storage_mode ? <InlineTag tone={provider.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{provider.secret_storage_mode}</InlineTag> : null}
+                {provider.last_probe_status ? <InlineTag tone={provider.last_probe_status === "success" ? "green" : "danger"}>{provider.last_probe_status}</InlineTag> : null}
               </div>
             </div>
-            <SingleUsageCharts items={trends} />
-          </section>
+            <div className="detail-meta-strip">
+              <DetailMetaPill label={t("channelDetail.configSource")} value={providerSourceLabel(provider.source)} />
+              <DetailMetaPill label={t("providers.apiType")} value={provider.api_type || "-"} />
+              <DetailMetaPill label={t("channelDetail.mode")} value={provider.mode || "-"} />
+              <DetailMetaPill label={t("channelDetail.baseUrl")} value={provider.base_url || "-"} mono />
+              <DetailMetaPill label={t("channelDetail.models")} value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
+              <DetailMetaPill label={t("common.requests")} value={formatCount(summary.request_count)} />
+              <DetailMetaPill label={t("common.tokens")} value={formatCount(summary.total_tokens)} />
+              {summary.missing_usage_request ? <DetailMetaPill label={t("channelDetail.missingUsage")} value={formatCount(summary.missing_usage_request)} /> : null}
+            </div>
+          </div>
+          <div className="topbar-meta detail-toolbar">
+            <div className="detail-toolbar-actions">
+              <Link className="icon-button" to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
+                <HomeIcon />
+              </Link>
+              <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
+              <DialogTrigger asChild>
+                <button className="icon-button" type="button" title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></button>
+              </DialogTrigger>
+              <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
+              <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
+            </div>
+            <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
+          </div>
+        </header>
 
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("nav.models")}</p>
-                <h2>{t("channelDetail.modelRoutingUsage")}</h2>
-                <p className="trace-subline">{t("channelDetail.enableHint")}</p>
-                {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
-              </div>
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">{t("channelDetail.analytics")}</p>
+              <h2>{t("channelDetail.providerUsage")}</h2>
             </div>
-            <form className="filter-bar" onSubmit={addModel}>
-              <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
-              <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</button>
-              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
-            </form>
-            <div className="provider-model-card-grid">
-              {modelsUsage.length ? modelsUsage.map((model) => (
-                <ProviderModelRow
-                  key={model.model}
-                  item={model}
-                  providerEnabled={Boolean(provider.enabled)}
-                  busy={busy === model.model}
-                  deleting={busy === `delete:${model.model}`}
-                  onToggle={() => setModelEnabled(model.model, !model.enabled)}
-                  onDelete={() => deleteModel(model.model)}
-                />
-              )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("channelDetail.discovery")}</p>
-                <h2>{t("channelDetail.recentProbes")}</h2>
-              </div>
-            </div>
-            {probeRuns.length ? (
-              <div className="provider-probe-list">
-                {probeRuns.map((run) => <ProbeRunCard key={run.id} item={run} />)}
-              </div>
-            ) : (
-              <EmptyState title={t("channelDetail.noProbeRuns")} detail={t("channelDetail.noProbeRunsDetail")} />
-            )}
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("channelDetail.failures")}</p>
-                <h2>{t("channelDetail.recentFailedTraces")}</h2>
-              </div>
-            </div>
-            {failures.length ? (
-              <div className="upstream-failure-list upstream-failure-list-detail">
-                {failures.map((failure) => (
-                  <Link key={failure.trace_id} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "providers", "", "", "failure")}>
-                    <div className="trace-tag-group">
-                      <InlineTag tone="danger">{failure.status_code}</InlineTag>
-                      {failure.reason ? <InlineTag>{failure.reason}</InlineTag> : null}
-                    </div>
-                    <strong>{failure.model || t("channelDetail.unknownModel")}</strong>
-                    <span>{formatDateTime(failure.recorded_at)}</span>
-                    {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
-                  </Link>
+            <div className="panel-head-actions">
+              <div className="view-toggle" role="tablist" aria-label={t("channelDetail.windowLabel")}>
+                {MONITOR_WINDOW_OPTIONS.map((window) => (
+                  <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
+                    {window}
+                  </button>
                 ))}
               </div>
-            ) : (
-              <EmptyState title={t("channelDetail.noRecentFailures")} detail={t("channelDetail.noRecentFailuresDetail")} />
-            )}
-          </section>
-        </>
-      ) : null}
-    </div>
+            </div>
+          </div>
+          <div className="hero-grid hero-grid-compact">
+            <StatCard label={t("common.requests")} value={formatCount(summary.request_count)} />
+            <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
+            <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+            <StatCard label={t("common.success")} value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
+          </div>
+        </section>
+
+        {actionError ? <EmptyState title={t("channelDetail.actionFailed")} detail={actionError} tone="danger" /> : null}
+        {detail.error ? <EmptyState title={t("channelDetail.loadError")} detail={detail.error} tone="danger" /> : null}
+        {detail.loading && !detail.data ? <EmptyState title={t("channelDetail.loading")} detail={t("channelDetail.loadingDetail")} /> : null}
+        {detail.data?.secret_storage_mode === "plaintext-local" ? (
+          <EmptyState title={t("channelDetail.plaintextStorage")} detail={t("channelDetail.plaintextStorageDetail")} tone="danger" />
+        ) : null}
+        {lastProbe?.provider_probe ? (
+          <ProviderProbeSuggestionPanel
+            report={lastProbe.provider_probe}
+            busy={busy === "apply-probe"}
+            onApply={applyProbeSuggestions}
+          />
+        ) : null}
+
+        {detail.data && editOpen ? (
+          <EditProviderDialog
+            provider={provider}
+            form={editForm}
+            presetData={presets.data}
+            saving={busy === "save-provider"}
+            onChange={setEditForm}
+            onReset={() => setEditForm(editFormFromProvider(provider))}
+            onClose={() => setEditOpen(false)}
+            onSave={saveProvider}
+          />
+        ) : null}
+
+        {detail.data ? (
+          <>
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">{t("channelDetail.trend")}</p>
+                  <h2>{t("channelDetail.tokenRequestBuckets")}</h2>
+                </div>
+              </div>
+              <SingleUsageCharts items={trends} />
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">{t("nav.models")}</p>
+                  <h2>{t("channelDetail.modelRoutingUsage")}</h2>
+                  <p className="trace-subline">{t("channelDetail.enableHint")}</p>
+                  {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
+                </div>
+              </div>
+              <form className="filter-bar" onSubmit={addModel}>
+                <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
+                <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</button>
+                <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
+              </form>
+              <div className="provider-model-card-grid">
+                {modelsUsage.length ? modelsUsage.map((model) => (
+                  <ProviderModelRow
+                    key={model.model}
+                    item={model}
+                    providerEnabled={Boolean(provider.enabled)}
+                    busy={busy === model.model}
+                    deleting={busy === `delete:${model.model}`}
+                    onToggle={() => setModelEnabled(model.model, !model.enabled)}
+                    onDelete={() => deleteModel(model.model)}
+                  />
+                )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">{t("channelDetail.discovery")}</p>
+                  <h2>{t("channelDetail.recentProbes")}</h2>
+                </div>
+              </div>
+              {probeRuns.length ? (
+                <div className="provider-probe-list">
+                  {probeRuns.map((run) => <ProbeRunCard key={run.id} item={run} />)}
+                </div>
+              ) : (
+                <EmptyState title={t("channelDetail.noProbeRuns")} detail={t("channelDetail.noProbeRunsDetail")} />
+              )}
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">{t("channelDetail.failures")}</p>
+                  <h2>{t("channelDetail.recentFailedTraces")}</h2>
+                </div>
+              </div>
+              {failures.length ? (
+                <div className="upstream-failure-list upstream-failure-list-detail">
+                  {failures.map((failure) => (
+                    <Link key={failure.trace_id} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "providers", "", "", "failure")}>
+                      <div className="trace-tag-group">
+                        <InlineTag tone="danger">{failure.status_code}</InlineTag>
+                        {failure.reason ? <InlineTag>{failure.reason}</InlineTag> : null}
+                      </div>
+                      <strong>{failure.model || t("channelDetail.unknownModel")}</strong>
+                      <span>{formatDateTime(failure.recorded_at)}</span>
+                      {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState title={t("channelDetail.noRecentFailures")} detail={t("channelDetail.noRecentFailuresDetail")} />
+              )}
+            </section>
+          </>
+        ) : null}
+      </div>
+    </Dialog>
   );
 }
 
@@ -377,16 +381,18 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
     await onSave();
   };
 
-  return createPortal(
-    <div className="nav-modal-backdrop" role="presentation">
-      <form className="nav-modal provider-edit-modal" onSubmit={submit}>
-        <div className="nav-modal-head">
+  return (
+    <DialogContent className="provider-edit-modal">
+      <form onSubmit={submit}>
+        <DialogHeader>
           <div>
             <p className="eyebrow">{t("providers.configuration")}</p>
-            <h2>{t("channelDetail.editProvider")}</h2>
+            <DialogTitle>{t("channelDetail.editProvider")}</DialogTitle>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>x</button>
-        </div>
+          <DialogClose asChild>
+            <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+          </DialogClose>
+        </DialogHeader>
         <div className="provider-form provider-form-modal">
           <label>{t("providers.name")}<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
           <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
@@ -400,14 +406,13 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
           </div>
         ) : null}
-        <div className="nav-modal-actions">
+        <DialogFooter>
           <button className="ghost-button" type="button" onClick={onReset}>{t("common.reset")}</button>
           <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
           <button className="ghost-button active" type="submit" disabled={saving}>{saving ? t("common.saving") : t("channelDetail.saveChanges")}</button>
-        </div>
+        </DialogFooter>
       </form>
-    </div>,
-    document.body,
+    </DialogContent>
   );
 }
 
