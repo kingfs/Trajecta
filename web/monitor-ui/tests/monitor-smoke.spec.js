@@ -430,6 +430,49 @@ test("an anchor opens the long text it landed on", async ({ page }) => {
   await expect(step.locator(".message-content")).not.toHaveClass(/message-content-collapsed/);
 });
 
+// The conversation is a new surface, and the light theme is where a new surface
+// goes wrong: every fill it draws has to be a token, so it is judged by the
+// luminance the browser resolved rather than by eye.
+test("the conversation has no dark surface in the light theme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/traces/trace-parsed?node=$.output[1]");
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
+  const surfaces = await page.evaluate(() => {
+    const luminance = (colour) => {
+      const nums = String(colour).match(/[\d.]+/g);
+      if (!nums || nums.length < 3) {
+        return null;
+      }
+      const [r, g, b] = nums.slice(0, 3).map((part) => {
+        const channel = Number(part) / 255;
+        return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    return [".conversation-step", ".conversation-result", ".conversation-anchor-chip", ".conversation-toolbar"].map((selector) => {
+      const element = document.querySelector(selector);
+      const background = element ? getComputedStyle(element).backgroundColor : "";
+      const alpha = element ? getComputedStyle(element).backgroundColor.match(/[\d.]+/g) : null;
+      return {
+        selector,
+        found: Boolean(element),
+        // A fully transparent fill has nothing to judge; the ones that paint are
+        // the two surfaces that must stay light.
+        opaque: Boolean(alpha) && Number(alpha[3] ?? 1) > 0,
+        luminance: luminance(background),
+      };
+    });
+  });
+  for (const surface of surfaces) {
+    expect(surface.found, `${surface.selector} is not on the page`).toBe(true);
+  }
+  const painted = surfaces.filter((surface) => surface.opaque);
+  expect(painted.length, "no filled conversation surface to judge").toBeGreaterThan(0);
+  for (const surface of painted) {
+    expect(surface.luminance, `${surface.selector} is a dark surface in the light theme`).toBeGreaterThan(0.5);
+  }
+});
+
 // A conversation is a column of long unbroken strings - JSON arguments, file
 // paths, tool output - which is exactly what widens a page.
 test("the conversation fits the viewport", async ({ page }) => {
