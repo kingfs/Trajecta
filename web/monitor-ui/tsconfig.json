@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    /*
+     * Incremental adoption: `include` lists only the modules that are already
+     * TypeScript, so the 44 remaining .jsx files keep working and keep not being
+     * checked. `allowJs` is what lets the typed modules be imported from them.
+     * Widening this is a matter of renaming the next file and adding its path.
+     */
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

@@ -14,7 +14,7 @@ export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 
-export function DropdownMenuContent({ className, sideOffset = 6, align = "start", ...props }) {
+export function DropdownMenuContent({ className, sideOffset = 6, align = "start", ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -30,7 +30,7 @@ export function DropdownMenuContent({ className, sideOffset = 6, align = "start"
   );
 }
 
-export function DropdownMenuItem({ className, inset, ...props }) {
+export function DropdownMenuItem({ className, inset, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & { inset?: boolean }) {
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
@@ -43,7 +43,7 @@ export function DropdownMenuItem({ className, inset, ...props }) {
   );
 }
 
-export function DropdownMenuCheckboxItem({ className, children, checked, ...props }) {
+export function DropdownMenuCheckboxItem({ className, children, checked, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
   return (
     <DropdownMenuPrimitive.CheckboxItem
       checked={checked}
@@ -63,7 +63,7 @@ export function DropdownMenuCheckboxItem({ className, children, checked, ...prop
   );
 }
 
-export function DropdownMenuLabel({ className, ...props }) {
+export function DropdownMenuLabel({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
   return (
     <DropdownMenuPrimitive.Label
       className={cn("px-2 py-1.5 font-sans text-label font-medium text-faint", className)}
@@ -72,6 +72,6 @@ export function DropdownMenuLabel({ className, ...props }) {
   );
 }
 
-export function DropdownMenuSeparator({ className, ...props }) {
+export function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
   return <DropdownMenuPrimitive.Separator className={cn("my-1 h-px bg-border-subtle", className)} {...props} />;
 }

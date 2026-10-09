@@ -1,5 +1,5 @@
 import React from "react";
-import { cva } from "class-variance-authority";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 /*
@@ -26,7 +26,7 @@ const badgeVariants = cva(
   },
 );
 
-export function Badge({ className, tone, ...props }) {
+export function Badge({ className, tone, ...props }: React.ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
   return <span className={cn(badgeVariants({ tone }), className)} {...props} />;
 }
 

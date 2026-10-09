@@ -31,11 +31,19 @@ tasks:
       - bun install --frozen-lockfile
       - bun run build
 
-  ui:test:
-    desc: Run unit and browser smoke tests for the Monitor UI
+  ui:typecheck:
+    desc: Type-check the TypeScript modules of the Monitor UI
     dir: web/monitor-ui
     cmds:
       - bun install --frozen-lockfile
+      - bun run typecheck
+
+  ui:test:
+    desc: Run type-check, unit and browser smoke tests for the Monitor UI
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run typecheck
       - bun run test:unit
       - bun run test:ui
 

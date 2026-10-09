@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createQueryClient } from "../src/lib/queryClient.js";
+import { createQueryClient } from "../src/lib/queryClient.ts";
 
 describe("query client defaults", () => {
   it("does not retry, so a failure surfaces once", () => {

@@ -14,15 +14,25 @@
 export const DEFAULT_LANGUAGE = "zh-CN";
 export const FALLBACK_LANGUAGE = "en";
 
-export const languageOptions = [
+export type LanguageOption = {
+  value: string;
+  label: string;
+  short: string;
+};
+
+export const languageOptions: LanguageOption[] = [
   { value: "zh-CN", label: "中文", short: "中" },
   { value: "en", label: "English", short: "EN" },
 ];
 
 export const supportedLanguages = languageOptions.map((option) => option.value);
 
-export function normalizeLanguage(value) {
-  return languageOptions.some((option) => option.value === value) ? value : DEFAULT_LANGUAGE;
+/** Messages are flat `{ "dotted.key": "text" }` maps. */
+export type Messages = Record<string, string>;
+
+/** Anything the browser might hand back from localStorage. */
+export function normalizeLanguage(value: unknown): string {
+  return typeof value === "string" && languageOptions.some((option) => option.value === value) ? value : DEFAULT_LANGUAGE;
 }
 
 /**
@@ -34,8 +44,14 @@ export function normalizeLanguage(value) {
  *
  * Vite turns the template literal into one chunk per matching module.
  */
-export function loadMessages(language) {
-  return import(`../locales/${language}.js`).then((module) => module.default);
+export function loadMessages(language: string): Promise<Messages> {
+  // Vite needs a statically analysable pattern here; it emits one chunk per
+  // matching module. TypeScript cannot resolve the template, so the assertion
+  // says what the bundler guarantees: every supported language ships a default
+  // export that is a Messages map.
+  return import(`../locales/${language}.js`).then(
+    (module) => (module as { default: Messages }).default,
+  );
 }
 
 /** Everything except `lng`, which the caller decides. */

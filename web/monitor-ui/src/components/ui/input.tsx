@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "../../lib/utils";
 
-export function Input({ className, type = "text", ...props }) {
+export function Input({ className, type = "text", ...props }: React.ComponentProps<"input">) {
   return (
     <input
       type={type}
@@ -14,7 +14,7 @@ export function Input({ className, type = "text", ...props }) {
   );
 }
 
-export function Textarea({ className, ...props }) {
+export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
@@ -26,6 +26,6 @@ export function Textarea({ className, ...props }) {
   );
 }
 
-export function Label({ className, ...props }) {
+export function Label({ className, ...props }: React.ComponentProps<"label">) {
   return <label className={cn("font-sans text-xs font-medium text-muted-foreground", className)} {...props} />;
 }

@@ -27,7 +27,13 @@ export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogClose = DialogPrimitive.Close;
 export const DialogPortal = DialogPrimitive.Portal;
 
-export function DialogContent({ className, children, showClose = false, closeLabel, ...props }) {
+type DialogContentProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
+  /** Render the corner close button the legacy modals all had. */
+  showClose?: boolean;
+  closeLabel?: string;
+};
+
+export function DialogContent({ className, children, showClose = false, closeLabel, ...props }: DialogContentProps) {
   const { t } = useI18n();
   return (
     <DialogPrimitive.Portal>
@@ -53,11 +59,11 @@ export function DialogContent({ className, children, showClose = false, closeLab
   );
 }
 
-export function DialogTitle({ className, ...props }) {
+export function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return <DialogPrimitive.Title className={cn("m-0 font-sans text-lg font-semibold text-foreground", className)} {...props} />;
 }
 
-export function DialogDescription({ className, ...props }) {
+export function DialogDescription({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Description>) {
   return (
     <DialogPrimitive.Description
       className={cn("m-0 mt-1 font-sans text-sm text-muted-foreground", className)}
@@ -66,10 +72,10 @@ export function DialogDescription({ className, ...props }) {
   );
 }
 
-export function DialogHeader({ className, ...props }) {
+export function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("nav-modal-head", className)} {...props} />;
 }
 
-export function DialogFooter({ className, ...props }) {
+export function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("nav-modal-actions", className)} {...props} />;
 }

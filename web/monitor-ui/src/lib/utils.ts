@@ -1,4 +1,4 @@
-import { clsx } from "clsx";
+import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 /**
@@ -8,6 +8,6 @@ import { twMerge } from "tailwind-merge";
  * "px-3"). Kept at this path and under this name so components copied from the
  * shadcn registry can be used unmodified.
  */
-export function cn(...inputs) {
+export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

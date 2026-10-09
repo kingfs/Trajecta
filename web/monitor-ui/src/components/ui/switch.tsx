@@ -7,7 +7,7 @@ import { cn } from "../../lib/utils";
  * hand-written <button role="switch"> had to add by hand: Space and Enter both
  * toggle it, and it is a real form control.
  */
-export function Switch({ className, ...props }) {
+export function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimitive.Root>) {
   return (
     <SwitchPrimitive.Root
       className={cn(

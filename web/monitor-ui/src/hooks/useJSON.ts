@@ -22,15 +22,26 @@ import { requestJSON } from "../lib/api";
  * `options.refetchInterval` replaces the `refreshTick` state and `setInterval`
  * pair that every polling page used to carry: pass it and the page drops both.
  */
-export function useJSON(url, deps = [], options = {}) {
+export type UseJSONOptions = {
+  /** Poll interval in ms, or false to stop polling. */
+  refetchInterval?: number | false;
+  /** Forwarded to TanStack Query; `staleTime` and `enabled` are the ones used. */
+  [key: string]: unknown;
+};
+
+export function useJSON<T = unknown>(
+  url: string | null | undefined,
+  deps: readonly unknown[] = [],
+  options: UseJSONOptions = {},
+) {
   // A falsy url parks the hook: nothing is requested and the state stays idle.
   // Callers use it to wait for a parent resource before firing sub-resources.
   const enabled = typeof url === "string" && url !== "";
   const { refetchInterval, ...rest } = options;
 
-  const query = useQuery({
+  const query = useQuery<T>({
     queryKey: ["GET", url, ...deps],
-    queryFn: ({ signal }) => requestJSON(url, { signal }),
+    queryFn: ({ signal }) => requestJSON(url as string, { signal }),
     enabled,
     refetchInterval,
     // Hold the previous key's data while the next one loads. Without this a

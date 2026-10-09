@@ -12,7 +12,7 @@ import i18next from "i18next";
 
 import en from "../src/locales/en.js";
 import zhCN from "../src/locales/zh-CN.js";
-import { baseOptions, languageOptions, normalizeLanguage, supportedLanguages } from "../src/lib/i18nOptions.js";
+import { baseOptions, languageOptions, normalizeLanguage, supportedLanguages } from "../src/lib/i18nOptions.ts";
 
 const messages = { en, "zh-CN": zhCN };
 
