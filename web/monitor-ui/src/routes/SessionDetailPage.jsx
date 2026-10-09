@@ -148,7 +148,6 @@ export function SessionDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("sessionDetail.failureSurface")}</p>
                   <h2>{t("sessionDetail.sessionHealth")}</h2>
                 </div>
               </div>
@@ -162,7 +161,6 @@ export function SessionDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("sessionDetail.distribution")}</p>
                   <h2>{t("sessionDetail.modelsAndEndpoints")}</h2>
                 </div>
               </div>
@@ -180,7 +178,6 @@ export function SessionDetailPage() {
         <Card as="section" className="timeline-panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("sessionDetail.sessionTimeline")}</p>
               <h2>{t("sessionDetail.requestSequence")}</h2>
             </div>
           </div>
@@ -246,7 +243,6 @@ export function SessionDetailPage() {
         <Card as="section">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("sessionDetail.failureContext")}</p>
               <h2>{t("sessionDetail.requestsAroundFailure")}</h2>
             </div>
           </div>
@@ -282,7 +278,6 @@ export function SessionDetailPage() {
         <Card as="section">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("sessionDetail.sessionTraces")}</p>
               <h2>{traceFilter === "failed" ? t("sessionDetail.failedRequestList") : t("sessionDetail.groupedRequestList")}</h2>
             </div>
             <div className="panel-head-actions">
@@ -342,7 +337,6 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
     <Card as="section" className="audit-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("sessionDetail.sessionAudit")}</p>
           <h2>{t("sessionDetail.riskEntryPoints")}</h2>
         </div>
         <InlineTag tone={failedCount ? "danger" : "green"}>{t("sessionDetail.failedCount", { count: failedCount })}</InlineTag>
@@ -384,7 +378,6 @@ function SessionPerformancePanel({ performance }) {
     <Card as="section" className="performance-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("sessionDetail.sessionPerformance")}</p>
           <h2>{t("sessionDetail.latencyAndTokens")}</h2>
         </div>
       </div>
@@ -412,7 +405,6 @@ function SessionAnalysisPanel({ analysis }) {
     <Card as="section" className="analysis-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("sessionDetail.sessionLearning")}</p>
           <h2>{t("sessionDetail.analysisRuns")}</h2>
         </div>
       </div>

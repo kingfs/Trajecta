@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -233,5 +232,5 @@ func waitFor(t *testing.T, condition func() bool, message string) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal(fmt.Sprintf("timed out: %s", message))
+	t.Fatalf("timed out: %s", message)
 }

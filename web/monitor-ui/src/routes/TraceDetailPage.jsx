@@ -263,7 +263,6 @@ export function TraceDetailPage() {
         <Card as="section" className="trace-reading-panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("traceDetail.readingGuide")}</p>
               <h2>{t("traceDetail.traceInspector")}</h2>
             </div>
             {responsesAuditLink ? (
@@ -315,7 +314,6 @@ export function TraceDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{routePlan ? t("traceDetail.routePlan") : t("traceDetail.routingDecision")}</p>
                   <h2>{selectedRouteIdentity ? t("traceDetail.selectedRouteTarget") : t("traceDetail.routingFailure")}</h2>
                 </div>
                 <div className="panel-head-actions">
@@ -437,7 +435,6 @@ export function TraceDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{hasConversation(detail.data) ? t("traceDetail.conversation") : t("traceDetail.payload")}</p>
                 <h2>{hasConversation(detail.data) ? t("traceDetail.requestAndResponse") : t("traceDetail.requestResponseBody")}</h2>
               </div>
               <label className="wrap-toggle">
@@ -520,7 +517,6 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
     <Card as="section" className="related-upstream-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.relatedUpstreamCalls")}</p>
           <h2>{t(calls.length === 1 ? "traceDetail.childCallsOne" : "traceDetail.childCalls", { count: calls.length })}</h2>
         </div>
         <InlineTag tone="gold">{t("traceDetail.lineage")}</InlineTag>
@@ -602,7 +598,6 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("traceDetail.declaredTools")}</p>
             <h2>{t("traceDetail.requestTools")}</h2>
           </div>
         </div>
@@ -707,7 +702,6 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
       <Card as="section" className="protocol-panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("traceDetail.observationIR")}</p>
             <h2>{t("audit.protocol")}</h2>
           </div>
           <Button variant="primary" type="button" disabled={busy} onClick={onRefresh}>
@@ -728,7 +722,6 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
       <Card as="section" className="protocol-panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("traceDetail.observationIR")}</p>
             <h2>{t("audit.protocol")}</h2>
           </div>
           <Button variant="primary" type="button" disabled={busy} onClick={onRefresh}>
@@ -743,7 +736,6 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
     <Card as="section" className="protocol-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.observationIR")}</p>
           <h2>{t("audit.protocol")}</h2>
         </div>
         <div className="trace-tag-group">
@@ -831,7 +823,6 @@ function AuditPanel({ findings, InlineTag, CodeBlock, t }) {
     <Card as="section" className="audit-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.deterministicAudit")}</p>
           <h2>{t("overview.findings")}</h2>
         </div>
         <InlineTag tone={items.length ? "danger" : "green"}>{t(items.length === 1 ? "traceDetail.findingCountOne" : "traceDetail.findingCount", { count: items.length })}</InlineTag>
@@ -942,7 +933,6 @@ function PerformancePanel({ performance, t }) {
     <Card as="section" className="performance-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.runtimeMetrics")}</p>
           <h2>{t("traceDetail.performanceTitle")}</h2>
         </div>
       </div>
@@ -993,7 +983,6 @@ function RawProtocolPanel({ raw, focusTarget = "", t }) {
     <Card as="section" className="raw-panel">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.rawHttpExchange")}</p>
           <h2>{t("traceDetail.requestResponse")}</h2>
         </div>
         <label className="wrap-toggle">
@@ -1028,7 +1017,6 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
     <Card as="section" ref={panelRef} className={focusTarget === "timeline" ? "timeline-panel timeline-panel-focused" : "timeline-panel"}>
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("traceDetail.providerTimeline")}</p>
           <h2>{t("traceDetail.unifiedEventStream")}</h2>
         </div>
       </div>

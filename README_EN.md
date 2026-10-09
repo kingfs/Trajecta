@@ -13,7 +13,8 @@ Turn real LLM API traffic into replayable, auditable, reviewable test assets.
 
 English | [简体中文](./README.md)
 
-<img src="./images/en/monitor-overview.png" alt="Trajecta Monitor overview" width="900">
+<img src="./images/en/monitor-overview.png" alt="Trajecta Monitor overview (dark theme)" width="900">
+<img src="./images/en/monitor-overview-light.png" alt="Trajecta Monitor overview (light theme)" width="900">
 
 </div>
 

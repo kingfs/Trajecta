@@ -74,7 +74,6 @@ export function ProvidersPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("providers.overview")}</p>
             <h2>{t("providers.managed")}</h2>
           </div>
         </div>
@@ -102,7 +101,6 @@ export function ProvidersPage() {
         <Card as="section">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("providers.configured")}</p>
               <h2>{t("providers.cards")}</h2>
             </div>
             <div className="panel-head-actions">

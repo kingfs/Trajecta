@@ -80,7 +80,6 @@
   /* Layout */
   --sidebar-width: 248px;
   --sidebar-width-collapsed: 68px;
-  --content-max: 1680px;
 
   /* Motion. `--ease-out-soft` is the curve the `motion` package's default
      spring settles onto, so CSS and JS animations agree. */

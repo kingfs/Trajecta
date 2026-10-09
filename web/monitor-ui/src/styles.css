@@ -223,7 +223,7 @@
     radial-gradient(circle at 50% 0%, var(--accent-soft), transparent 18rem);
   border-right: 1px solid var(--accent-soft);
   overflow-y: auto;
-  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-lg);
   backdrop-filter: blur(18px);
 }
 
@@ -665,8 +665,7 @@
 }
 
 :root[data-theme="light"] .ghost-button.active,
-:root[data-theme="light"] .view-toggle .ghost-button.active,
-:root[data-theme="light"] .badge-live {
+:root[data-theme="light"] .view-toggle .ghost-button.active {
   border-color: transparent;
   background: var(--surface-inverse);
   color: var(--on-inverse);
@@ -716,13 +715,6 @@ input:focus-visible,
 a:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.badge-live {
-  border-color: var(--accent-border);
-  background: linear-gradient(135deg, var(--accent-solid), var(--success-solid));
-  color: var(--on-accent);
-  font-weight: 700;
 }
 
 .hero-grid {
@@ -2435,7 +2427,7 @@ a:focus-visible {
   border-radius: var(--radius-lg);
   border: 1px solid var(--line);
   background: linear-gradient(180deg, var(--surface-1), var(--surface-1));
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46);
+  box-shadow: var(--shadow-lg);
   padding: 22px;
 }
 

@@ -226,7 +226,6 @@ export function ProviderDetailPage() {
         <Card as="section">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">{t("channelDetail.analytics")}</p>
               <h2>{t("channelDetail.providerUsage")}</h2>
             </div>
           </div>
@@ -269,7 +268,6 @@ export function ProviderDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("channelDetail.trend")}</p>
                   <h2>{t("channelDetail.tokenRequestBuckets")}</h2>
                 </div>
               </div>
@@ -279,7 +277,6 @@ export function ProviderDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("nav.models")}</p>
                   <h2>{t("channelDetail.modelRoutingUsage")}</h2>
                   <p className="trace-subline">{t("channelDetail.enableHint")}</p>
                   {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
@@ -308,7 +305,6 @@ export function ProviderDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("channelDetail.discovery")}</p>
                   <h2>{t("channelDetail.recentProbes")}</h2>
                 </div>
               </div>
@@ -324,7 +320,6 @@ export function ProviderDetailPage() {
             <Card as="section">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">{t("channelDetail.failures")}</p>
                   <h2>{t("channelDetail.recentFailedTraces")}</h2>
                 </div>
               </div>
@@ -440,7 +435,6 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
     <Card as="section">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("providers.detection")}</p>
           <h2>{t("providers.probeSuggestions")}</h2>
         </div>
         <div className="trace-tag-group">

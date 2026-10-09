@@ -190,8 +190,7 @@
    before there was a shared accent; the accent is the primary button now. */
 :root[data-theme="light"] .ghost-button.active,
 :root[data-theme="light"] .view-toggle .ghost-button.active,
-:root[data-theme="light"] .wrap-toggle.active,
-:root[data-theme="light"] .badge-live {
+:root[data-theme="light"] .wrap-toggle.active {
   border-color: transparent;
   background: var(--accent-solid);
   color: var(--on-accent);

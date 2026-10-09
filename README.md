@@ -13,7 +13,8 @@
 
 [English](./README_EN.md) | 简体中文
 
-<img src="./images/monitor-overview.png" alt="Trajecta Monitor 概览" width="900">
+<img src="./images/monitor-overview.png" alt="Trajecta Monitor 概览（深色主题）" width="900">
+<img src="./images/monitor-overview-light.png" alt="Trajecta Monitor 概览（浅色主题）" width="900">
 
 </div>
 

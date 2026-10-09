@@ -295,13 +295,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.badge-live {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  color: var(--accent);
-  font-weight: var(--weight-medium);
-}
-
 .inline-tag {
   min-height: 20px;
   padding: 0 8px;

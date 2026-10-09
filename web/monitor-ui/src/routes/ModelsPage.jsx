@@ -60,7 +60,6 @@ export function ModelsPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Catalog</p>
             <h2>{t("models.catalogTitle")}</h2>
           </div>
         </div>
@@ -109,7 +108,7 @@ function ModelCard({ item, windowValue }) {
     <Link className="model-market-card" to={buildModelLink(item.model, windowValue)}>
       <div className="model-market-card-head">
         <div>
-          <p className="eyebrow">Model</p>
+          <p className="eyebrow">{t("nav.models")}</p>
           <h2>{item.display_name || item.model}</h2>
         </div>
         <div className="trace-tag-group">

@@ -103,7 +103,6 @@ export function EventsPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Inbox filters</p>
             <h2>{t("events.runtimeExceptions")}</h2>
           </div>
           <span className="badge">{t("events.matching", { count: data?.total ?? 0 })}</span>
@@ -160,7 +159,6 @@ function EventDetail({ event, busyID, onAction }) {
     <div className="event-detail">
       <div className="panel-head event-detail-head">
         <div>
-          <p className="eyebrow">{event.source} / {formatFailureReason(event.category)}</p>
           <h2>{event.title || event.fingerprint}</h2>
         </div>
         <div className="trace-tag-group">

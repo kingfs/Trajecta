@@ -92,7 +92,6 @@ export function RoutingPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("routing.gateway")}</p>
             <h2>{t("routing.workspace")}</h2>
           </div>
         </div>
@@ -114,7 +113,6 @@ export function RoutingPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{t("routing.decisionLog")}</p>
                 <h2>{t("routing.recent")}</h2>
               </div>
             </div>
@@ -214,7 +212,6 @@ function RoutingSettingsPanel() {
     <Card as="section">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("routing.systemPolicy")}</p>
           <h2>{t("routing.settings")}</h2>
         </div>
         {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
@@ -403,7 +400,6 @@ function ModelAliasesPanel() {
     <Card as="section">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("routing.modelResolution")}</p>
           <h2>{t("routing.modelAliases")}</h2>
         </div>
         <InlineTag>{t("routing.aliasCount", { count: formatCount(items.length) })}</InlineTag>
@@ -473,7 +469,6 @@ function RouteInspectorPanel() {
     <Card as="section">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("routing.dryRun")}</p>
           <h2>{t("routing.routeInspector")}</h2>
         </div>
       </div>
@@ -767,7 +762,6 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
     <Card as="section">
       <div className="panel-head">
         <div>
-          <p className="eyebrow">{t("routing.credentialRouting")}</p>
           <h2>{t("routing.credentialSummary")}</h2>
         </div>
         <div className="trace-tag-group">

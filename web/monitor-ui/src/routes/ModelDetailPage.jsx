@@ -76,8 +76,7 @@ export function ModelDetailPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Analytics</p>
-            <h2>Usage window</h2>
+            <h2>{t("models.usage")}</h2>
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">
@@ -96,7 +95,6 @@ export function ModelDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Trend</p>
                 <h2>{t("models.requestsTokens")}</h2>
               </div>
             </div>
@@ -106,7 +104,6 @@ export function ModelDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Channels</p>
                 <h2>{t("models.providerCoverage")}</h2>
               </div>
             </div>
@@ -118,7 +115,6 @@ export function ModelDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Codex</p>
                 <h2>{t("models.codexConfig")}</h2>
               </div>
               {spec.data?.suggestion ? <InlineTag tone={spec.data.matched ? "green" : "accent"}>{spec.data.matched ? t("models.specMatched") : t("models.specCandidate")}</InlineTag> : null}

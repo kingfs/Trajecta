@@ -118,7 +118,6 @@ export function UpstreamDetailPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("upstreamDetail.analyticsFilters")}</p>
             <h2>{t("upstreamDetail.windowAndModel")}</h2>
           </div>
         </div>
@@ -155,7 +154,6 @@ export function UpstreamDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{t("upstreamDetail.trafficSummary")}</p>
                 <h2>{t("upstreamDetail.routingHealth")}</h2>
               </div>
             </div>
@@ -169,7 +167,6 @@ export function UpstreamDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{t("upstreamDetail.routerHealth")}</p>
                 <h2>{t("upstreamDetail.decisionSignals")}</h2>
               </div>
             </div>
@@ -236,7 +233,6 @@ export function UpstreamDetailPage() {
           <Card as="section">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{t("upstreamDetail.distribution")}</p>
                 <h2>{t("upstreamDetail.modelsAndEndpoints")}</h2>
               </div>
             </div>
@@ -248,7 +244,6 @@ export function UpstreamDetailPage() {
           <Card as="section" id="models">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">{t("upstreamDetail.modelCatalog")}</p>
                 <h2>{t("upstreamDetail.fullRoutingSurface")}</h2>
               </div>
               <div className="panel-head-actions">
@@ -307,7 +302,6 @@ export function UpstreamDetailPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("upstreamDetail.failureTrend")}</p>
             <h2>{t("upstreamDetail.timeBucketedFailures")}</h2>
           </div>
         </div>
@@ -321,7 +315,6 @@ export function UpstreamDetailPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("upstreamDetail.recentFailures")}</p>
             <h2>{t("upstreamDetail.latestFailedTraces")}</h2>
           </div>
         </div>
@@ -348,7 +341,6 @@ export function UpstreamDetailPage() {
       <Card as="section">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">{t("upstreamDetail.recentRequests")}</p>
             <h2>{t("upstreamDetail.latestRoutedTraces")}</h2>
           </div>
         </div>
