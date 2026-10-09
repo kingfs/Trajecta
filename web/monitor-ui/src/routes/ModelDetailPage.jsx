@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
@@ -233,37 +234,49 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
         </label>
         <label>
           <span>{t("models.adoption")}</span>
-          <select value={form.profile_adoption_status} onChange={(event) => update("profile_adoption_status", event.target.value)}>
-            <option value="">{t("models.reportOnly")}</option>
-            <option value="adopted">{t("models.adopted")}</option>
-          </select>
+          <Select value={form.profile_adoption_status} onValueChange={(next) => update("profile_adoption_status", next)}>
+            <SelectTrigger aria-label={t("models.adoption")} className="w-full"><SelectValue placeholder={t("models.reportOnly")} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t("models.reportOnly")}</SelectItem>
+              <SelectItem value="adopted">{t("models.adopted")}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
       </div>
       <div className="model-capability-toggles">
         <label><input type="checkbox" checked={form.enabled} onChange={(event) => update("enabled", event.target.checked)} />{t("overview.enabled")}</label>
         <label>
           <span>Responses</span>
-          <select value={form.supports_responses} onChange={(event) => update("supports_responses", event.target.value)}>
-            <option value="">{t("models.capabilityInherit")}</option>
-            <option value="on">{t("models.capabilitySupported")}</option>
-            <option value="off">{t("models.capabilityUnsupported")}</option>
-          </select>
+          <Select value={form.supports_responses} onValueChange={(next) => update("supports_responses", next)}>
+            <SelectTrigger aria-label="Responses" className="w-full"><SelectValue placeholder={t("models.capabilityInherit")} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t("models.capabilityInherit")}</SelectItem>
+              <SelectItem value="on">{t("models.capabilitySupported")}</SelectItem>
+              <SelectItem value="off">{t("models.capabilityUnsupported")}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label>
           <span>Chat Completions</span>
-          <select value={form.supports_chat_completions} onChange={(event) => update("supports_chat_completions", event.target.value)}>
-            <option value="">{t("models.capabilityInherit")}</option>
-            <option value="on">{t("models.capabilitySupported")}</option>
-            <option value="off">{t("models.capabilityUnsupported")}</option>
-          </select>
+          <Select value={form.supports_chat_completions} onValueChange={(next) => update("supports_chat_completions", next)}>
+            <SelectTrigger aria-label="Chat Completions" className="w-full"><SelectValue placeholder={t("models.capabilityInherit")} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t("models.capabilityInherit")}</SelectItem>
+              <SelectItem value="on">{t("models.capabilitySupported")}</SelectItem>
+              <SelectItem value="off">{t("models.capabilityUnsupported")}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label>
           <span>Embeddings</span>
-          <select value={form.supports_embeddings} onChange={(event) => update("supports_embeddings", event.target.value)}>
-            <option value="">{t("models.capabilityInherit")}</option>
-            <option value="on">{t("models.capabilitySupported")}</option>
-            <option value="off">{t("models.capabilityUnsupported")}</option>
-          </select>
+          <Select value={form.supports_embeddings} onValueChange={(next) => update("supports_embeddings", next)}>
+            <SelectTrigger aria-label="Embeddings" className="w-full"><SelectValue placeholder={t("models.capabilityInherit")} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">{t("models.capabilityInherit")}</SelectItem>
+              <SelectItem value="on">{t("models.capabilitySupported")}</SelectItem>
+              <SelectItem value="off">{t("models.capabilityUnsupported")}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
       </div>
     </form>

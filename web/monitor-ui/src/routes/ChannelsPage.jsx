@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -288,7 +289,14 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           </DialogHeader>
           <div className="provider-form provider-form-modal">
             <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
-          <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label>{t("providers.preset")}
+            <Select value={form.provider_preset} onValueChange={(next) => updateForm("provider_preset", next)}>
+              <SelectTrigger aria-label={t("providers.preset")} className="w-full"><SelectValue placeholder={presetState.options[0] || ""} /></SelectTrigger>
+              <SelectContent>
+                {presetState.options.map((preset) => <SelectItem key={preset} value={preset}>{preset}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
@@ -509,16 +517,51 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
   const discoveryOptions = presetState.modelDiscoveryOptions.length ? presetState.modelDiscoveryOptions : ["list_models", "disabled"];
   return (
     <>
-      <label>{t("providers.apiType")}<select value={form.api_type || "chat_completions"} onChange={(event) => onChange("api_type", event.target.value)}>{API_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-      <label>{t("providers.apiMode")}<select value={form.mode || "proxy"} onChange={(event) => onChange("mode", event.target.value)}>{API_MODE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-      <label>{t("providers.protocol")}<select value={form.protocol_family || ""} onChange={(event) => onChange("protocol_family", event.target.value)}>{presetState.protocolOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-      <label>{t("providers.routingProfile")}<select value={form.routing_profile || ""} onChange={(event) => onChange("routing_profile", event.target.value)}>{presetState.routingOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label>{t("providers.apiType")}
+        <Select value={form.api_type || "chat_completions"} onValueChange={(next) => onChange("api_type", next)}>
+          <SelectTrigger aria-label={t("providers.apiType")} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {API_TYPE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </label>
+      <label>{t("providers.apiMode")}
+        <Select value={form.mode || "proxy"} onValueChange={(next) => onChange("mode", next)}>
+          <SelectTrigger aria-label={t("providers.apiMode")} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {API_MODE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </label>
+      <label>{t("providers.protocol")}
+        <Select value={form.protocol_family || ""} onValueChange={(next) => onChange("protocol_family", next)}>
+          <SelectTrigger aria-label={t("providers.protocol")} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </label>
+      <label>{t("providers.routingProfile")}
+        <Select value={form.routing_profile || ""} onValueChange={(next) => onChange("routing_profile", next)}>
+          <SelectTrigger aria-label={t("providers.routingProfile")} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {presetState.routingOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </label>
       {presetState.needsAPIVersion ? <label>{t("providers.apiVersion")}<Input value={form.api_version || ""} onChange={(event) => onChange("api_version", event.target.value)} placeholder={presetState.apiVersionPlaceholder} /></label> : null}
       {presetState.needsDeployment ? <label>{t("providers.deployment")}<Input value={form.deployment || ""} onChange={(event) => onChange("deployment", event.target.value)} placeholder="gpt-4o-mini" /></label> : null}
       {presetState.needsProject ? <label>{t("providers.project")}<Input value={form.project || ""} onChange={(event) => onChange("project", event.target.value)} placeholder="my-gcp-project" /></label> : null}
       {presetState.needsLocation ? <label>{t("providers.location")}<Input value={form.location || ""} onChange={(event) => onChange("location", event.target.value)} placeholder="us-central1" /></label> : null}
       {presetState.needsModelResource ? <label className="provider-form-wide">{t("providers.modelResource")}<Input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
-      <label>{t("providers.modelDiscovery")}<select value={form.model_discovery || "list_models"} onChange={(event) => onChange("model_discovery", event.target.value)}>{discoveryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label>{t("providers.modelDiscovery")}
+        <Select value={form.model_discovery || "list_models"} onValueChange={(next) => onChange("model_discovery", next)}>
+          <SelectTrigger aria-label={t("providers.modelDiscovery")} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {discoveryOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </label>
       <label>{t("providers.priority")}<Input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>{t("providers.weight")}<Input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>{t("providers.capacity")}<Input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
@@ -619,7 +662,14 @@ function CapabilitySelect({ form, name, label, onChange }) {
     onChange("capabilities", next);
   };
   return (
-    <label>{label}<select value={value} onChange={(event) => setValue(event.target.value)}>{CAPABILITY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{t(item.labelKey)}</option>)}</select></label>
+    <label>{label}
+      <Select value={value} onValueChange={setValue}>
+        <SelectTrigger aria-label={label} className="w-full"><SelectValue placeholder={t("providers.autoInherit")} /></SelectTrigger>
+        <SelectContent>
+          {CAPABILITY_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{t(item.labelKey)}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </label>
   );
 }
 

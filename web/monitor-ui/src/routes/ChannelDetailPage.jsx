@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -380,7 +381,14 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
         </DialogHeader>
         <div className="provider-form provider-form-modal">
           <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
-          <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label>{t("providers.preset")}
+            <Select value={form.provider_preset} onValueChange={(next) => updateForm("provider_preset", next)}>
+              <SelectTrigger aria-label={t("providers.preset")} className="w-full"><SelectValue placeholder={presetState.options[0] || ""} /></SelectTrigger>
+              <SelectContent>
+                {presetState.options.map((preset) => <SelectItem key={preset} value={preset}>{preset}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>

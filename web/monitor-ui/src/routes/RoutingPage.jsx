@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
@@ -226,27 +227,36 @@ function RoutingSettingsPanel() {
       <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
         <label className="filter-label">
           {t("routing.responsesStrategy")}
-          <select className="filter-input" value={settings.responses_strategy || "auto"} onChange={(event) => update("responses_strategy", event.target.value)}>
-            <option value="auto">{t("routing.strategyAuto")}</option>
-            <option value="prefer_native">{t("routing.strategyPreferNative")}</option>
-            <option value="prefer_local_server">{t("routing.strategyPreferLocalServer")}</option>
-            <option value="native_only">{t("routing.strategyNativeOnly")}</option>
-            <option value="local_server_only">{t("routing.strategyLocalServerOnly")}</option>
-          </select>
+          <Select value={settings.responses_strategy || "auto"} onValueChange={(next) => update("responses_strategy", next)}>
+            <SelectTrigger aria-label={t("routing.responsesStrategy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{t("routing.strategyAuto")}</SelectItem>
+              <SelectItem value="prefer_native">{t("routing.strategyPreferNative")}</SelectItem>
+              <SelectItem value="prefer_local_server">{t("routing.strategyPreferLocalServer")}</SelectItem>
+              <SelectItem value="native_only">{t("routing.strategyNativeOnly")}</SelectItem>
+              <SelectItem value="local_server_only">{t("routing.strategyLocalServerOnly")}</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="filter-label">
           {t("routing.selectionPolicy")}
-          <select className="filter-input" value={settings.selection_policy || "p2c"} onChange={(event) => update("selection_policy", event.target.value)}>
-            <option value="p2c">p2c</option>
-            <option value="first_available">first_available</option>
-          </select>
+          <Select value={settings.selection_policy || "p2c"} onValueChange={(next) => update("selection_policy", next)}>
+            <SelectTrigger aria-label={t("routing.selectionPolicy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="p2c">p2c</SelectItem>
+              <SelectItem value="first_available">first_available</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="filter-label">
           {t("routing.missingModel")}
-          <select className="filter-input" value={settings.missing_model_policy || "reject"} onChange={(event) => update("missing_model_policy", event.target.value)}>
-            <option value="reject">reject</option>
-            <option value="fallback">fallback</option>
-          </select>
+          <Select value={settings.missing_model_policy || "reject"} onValueChange={(next) => update("missing_model_policy", next)}>
+            <SelectTrigger aria-label={t("routing.missingModel")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="reject">reject</SelectItem>
+              <SelectItem value="fallback">fallback</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <Button variant="ghost" type="submit">{t("common.save")}</Button>
       </form>
@@ -472,11 +482,14 @@ function RouteInspectorPanel() {
         </div>
       </div>
       <form className="filter-bar routing-filter-bar" onSubmit={runInspect}>
-        <select className="filter-input" value={form.endpoint} onChange={(event) => update("endpoint", event.target.value)}>
-          <option value="chat_completions">chat_completions</option>
-          <option value="responses">responses</option>
-          <option value="anthropic_messages">anthropic_messages</option>
-        </select>
+        <Select value={form.endpoint} onValueChange={(next) => update("endpoint", next)}>
+          <SelectTrigger aria-label={t("routing.endpoint")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="chat_completions">chat_completions</SelectItem>
+            <SelectItem value="responses">responses</SelectItem>
+            <SelectItem value="anthropic_messages">anthropic_messages</SelectItem>
+          </SelectContent>
+        </Select>
         <Input className="min-w-[180px]" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
         <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> {t("routing.stream")}</label>
         <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>

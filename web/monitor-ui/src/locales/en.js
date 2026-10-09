@@ -367,6 +367,7 @@ export default {
   "routing.recent": "Recent selected routes",
   "routing.window": "Routing window",
   "routing.model": "Model",
+  "routing.endpoint": "Endpoint",
   "routing.channelUpstream": "Channel / upstream",
   "routing.anyStatus": "Any status",
   "routing.statusSuccess": "Success",

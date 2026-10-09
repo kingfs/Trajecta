@@ -183,7 +183,7 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
-  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
   // The form starts from an explicit API type + protocol family surface, which
   // is allowed to be created without a validation round-trip.
   await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
@@ -192,10 +192,12 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Detect provider" }).click();
   await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
   await page.getByRole("button", { name: "Apply suggestions" }).click();
-  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
-  await expect(page.getByLabel("API mode")).toHaveValue("proxy");
-  await expect(page.getByLabel("protocol")).toHaveValue("openai_compatible");
-  await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
+  // These four are listboxes now, so what they show is the option's label
+  // rather than the DOM value a native select carried.
+  await expect(page.getByLabel("API type")).toHaveText("Chat Completions");
+  await expect(page.getByLabel("API mode")).toHaveText("Proxy");
+  await expect(page.getByLabel("protocol")).toHaveText("openai_compatible");
+  await expect(page.getByLabel("Routing profile")).toHaveText("openai_default");
   await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
   await page.getByRole("button", { name: "Validate setup" }).click();
   await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
@@ -222,14 +224,14 @@ test("provider management renders and supports core actions", async ({ page }) =
 
   await page.getByRole("button", { name: "Edit provider" }).click();
   await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
-  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
   await expect(page.getByLabel("Provider enabled")).toBeVisible();
   await expect(page.locator(".provider-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
-  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
-  await expect(page.getByLabel("API mode")).toHaveValue("responses_server");
-  await expect(page.getByLabel("protocol")).toHaveValue("openai_compatible");
-  await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
+  await expect(page.getByLabel("API type")).toHaveText("Chat Completions");
+  await expect(page.getByLabel("API mode")).toHaveText("Responses server");
+  await expect(page.getByLabel("protocol")).toHaveText("openai_compatible");
+  await expect(page.getByLabel("Routing profile")).toHaveText("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await page.getByRole("button", { name: "Cancel" }).click();
 
@@ -1799,4 +1801,26 @@ test("the migrated inputs keep the form-control box", async ({ page }) => {
   // `.filter-input-wide` was a 260px floor and `.filter-input` a 180px one.
   expect(box.minWidth).toBe("260px");
   await expect(page.getByPlaceholder("Provider").first()).toHaveCSS("min-width", "180px");
+});
+
+// A native select can carry an empty-string option and show its label; Radix
+// treats "" as "nothing is selected" and shows the placeholder instead, so the
+// option that used to be <option value="">Inherit</option> is an item with an
+// empty value plus a placeholder carrying the same label. This is the part of
+// that translation an edit could quietly get wrong.
+test("the migrated selects keep the empty option and its label", async ({ page }) => {
+  await page.goto("/models");
+  await page.getByRole("link", { name: /gpt-5/i }).first().click();
+  await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
+
+  const responses = page.getByRole("combobox", { name: "Responses" });
+  await expect(responses).toBeVisible();
+  await responses.click();
+  await page.getByRole("option", { name: "Unsupported" }).click();
+  await expect(responses).toHaveText(/Unsupported/);
+
+  await responses.click();
+  await page.getByRole("option", { name: "Inherit" }).click();
+  await expect(responses).toHaveText(/Inherit/);
+  await expect(responses).toHaveAttribute("aria-expanded", "false");
 });

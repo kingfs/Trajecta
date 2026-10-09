@@ -367,6 +367,7 @@ export default {
   "routing.recent": "最近路由",
   "routing.window": "路由时间窗口",
   "routing.model": "模型",
+  "routing.endpoint": "端点",
   "routing.channelUpstream": "通道 / 上游",
   "routing.anyStatus": "任意状态",
   "routing.statusSuccess": "成功",

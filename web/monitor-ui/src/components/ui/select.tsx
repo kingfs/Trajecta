@@ -4,23 +4,41 @@ import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /*
- * Radix Select replaces the native <select> in the forms that need one, on the
- * grounds that a native popup cannot be themed and renders differently in every
- * browser. It has no call sites yet.
+ * Radix Select replaces the native <select> in the forms and settings panels,
+ * on the grounds that a native popup cannot be themed, renders differently in
+ * every browser, and needed two `linear-gradient` triangles to draw an arrow.
  *
- * The list filters are deliberately left native. They are real <select>
- * elements submitting with the surrounding form, and the platform picker is an
- * advantage on a phone; a portalled listbox would trade that away for theming.
+ * The six list filters are deliberately still native `<select>` elements. They
+ * filter a list, one of them submits with the form around it, and the platform
+ * picker is the right control on a phone; a portalled listbox would trade that
+ * away for theming.
+ *
+ * Two translation rules live here. A `<SelectItem value="">` is allowed and is
+ * how "inherit" is spelled, but Radix treats an empty value as "nothing
+ * selected" and shows the placeholder, so that option's label is passed as the
+ * placeholder as well. And the placeholder is coloured faint, because here it
+ * is often a real choice rather than an absence.
  */
 export const Select = SelectPrimitive.Root;
-export const SelectValue = SelectPrimitive.Value;
+// Radix renders the placeholder through this element and marks it with
+// `data-placeholder`. Without the faint colour the placeholder is
+// indistinguishable from a chosen value, which matters here because the empty
+// value is a real choice in three of these selects ("inherit").
+export function SelectValue({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Value>) {
+  return <SelectPrimitive.Value className={cn("data-[placeholder]:text-faint", className)} {...props} />;
+}
 export const SelectGroup = SelectPrimitive.Group;
 
 export function SelectTrigger({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "inline-flex h-8 cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-card px-3 font-sans text-sm text-foreground outline-none transition-colors hover:border-border-strong focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+        // The same box as the input primitive, because a select sits next to
+        // one in every form it appears in: 32px, the sunken surface, the same
+        // accent ring. Width is left to the call site - `.provider-form select`
+        // used to stretch it to the grid cell, and a button does not inherit
+        // that rule.
+        "inline-flex h-8 min-w-0 cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-secondary px-3 font-sans text-sm leading-[1.4] text-foreground outline-none transition-colors hover:border-border-strong focus:border-[color:var(--accent-solid)] focus:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
