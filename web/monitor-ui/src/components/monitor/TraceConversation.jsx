@@ -144,6 +144,53 @@ function ConversationResult({ result, open, onToggle, renderMarkdown, t }) {
   );
 }
 
+// A tool call that arrived inside a message - every OpenAI chat trace records
+// one this way - drawn as the action it is: what ran, with what arguments, and
+// the result that came back.
+function ConversationCall({ call, open, onToggle, renderMarkdown, t }) {
+  const failed = call.failed || (call.results || []).some(resultFailed);
+  const args = toolArgumentsOf(call);
+  const raw = call.raw && typeof call.raw === "object" ? call.raw : {};
+  return (
+    <div className="conversation-call" data-conversation-call="" data-kind={call.kind} data-failed={failed ? "true" : "false"}>
+      <span className="conversation-anchor" id={call.id} aria-hidden="true" />
+      <div className="conversation-call-head">
+        <InlineTag tone={kindTone(call.kind)}>{kindLabel(call.kind, t)}</InlineTag>
+        {toolNameOf(call) ? <span className="conversation-name mono">{toolNameOf(call)}</span> : null}
+        {failed ? <InlineTag tone="danger">{t("conversation.failed")}</InlineTag> : null}
+        <span className="conversation-dim mono">{call.path}</span>
+      </div>
+      <div className="conversation-call-meta">
+        <span className="conversation-dim mono">{t("conversation.callID")}</span>
+        <span className="mono">{String((raw.call_id || raw.id || "") || "-")}</span>
+      </div>
+      {args ? (
+        <TextBlock
+          text={args}
+          format="text"
+          renderMarkdown={false}
+          open={open}
+          onToggle={() => onToggle(call.id)}
+          t={t}
+        />
+      ) : (
+        <p className="conversation-empty">{t("conversation.noArguments")}</p>
+      )}
+      {(call.parts || []).map((part) =>
+        part.text ? (
+          <div className="conversation-part" key={part.id}>
+            <span className="conversation-anchor" id={part.id} aria-hidden="true" />
+            <TextBlock text={part.text} format="text" renderMarkdown={renderMarkdown} open={open} onToggle={() => onToggle(part.id)} t={t} />
+          </div>
+        ) : null,
+      )}
+      {(call.results || []).map((result) => (
+        <ConversationResult key={result.id} result={result} open={open} onToggle={() => onToggle(result.id)} renderMarkdown={renderMarkdown} t={t} />
+      ))}
+    </div>
+  );
+}
+
 function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, t }) {
   const failed = step.failed || step.results.some(resultFailed);
   const kind = step.kind;
@@ -172,6 +219,11 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
         .filter((part) => !extraParts.includes(part))
         .map((part) => (
           <span key={part.id} className="conversation-anchor" id={part.id} aria-hidden="true" data-part-path={part.path} />
+        ))}
+      {(step.calls || [])
+        .filter((call) => !call.id)
+        .map((call) => (
+          <span key={call.path} className="conversation-anchor" aria-hidden="true" data-part-path={call.path} />
         ))}
 
       <header className="conversation-step-head">
@@ -237,11 +289,22 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             onToggle={() => onToggleOpen(step.id)}
             t={t}
           />
-        ) : (
+        ) : step.calls.length ? null : (
           <pre className="conversation-pre conversation-pre-raw">
             {step.raw ? JSON.stringify(step.raw, null, 2) : t("conversation.noContent")}
           </pre>
         )}
+
+        {step.calls.map((call) => (
+          <ConversationCall
+            key={call.id}
+            call={call}
+            open={open}
+            onToggle={onToggleOpen}
+            renderMarkdown={renderMarkdown}
+            t={t}
+          />
+        ))}
 
         {extraParts.map((part) => (
           <div className="conversation-part" key={part.id}>

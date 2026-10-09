@@ -82,6 +82,32 @@ test("real monitor server serves trace routing links", async ({ page }) => {
   await expect(page.locator(".conversation-list, .message-list")).toBeVisible();
 });
 
+// The conversation is built from the Observation IR, and the IR for a real
+// trace is produced by the real parser reading the real cassette. This is the
+// test that says the shape the UI expects is the shape the parser emits: a chat
+// tool call arrives nested under `function`, and the conversation has to show
+// its arguments and the result that answers it, not an empty card.
+test("real monitor server renders a parsed tool call as one conversation step", async ({ page }) => {
+  const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
+  await page.goto(`/traces/${fixture.tools_trace_id}`);
+
+  // The call is a child of the assistant message in the IR, so the message is
+  // the step and the call is the action inside it.
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(4);
+  const call = page.locator("[data-conversation-call]");
+  await expect(call).toHaveCount(1);
+  await expect(call).toContainText("exec_command");
+  await expect(call).toContainText("ls -la");
+  // The result is merged into the call rather than standing beside it.
+  await expect(call).toContainText("permission denied");
+  await expect(page.locator('[data-conversation-step][data-kind="tool_result"]')).toHaveCount(0);
+  await expect(page.locator('[data-conversation-step]').nth(3)).toContainText("I could not list the files.");
+  // The nested call is new markup in a flex column, so the widest thing on the
+  // page is checked rather than assumed.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 // The console has no refresh timers: a page becomes fresh because the server
 // pushed a topic at it. This drives the real Go server rather than a mock - the
 // socket the browser opens is the one the binary serves, and the write that

@@ -144,6 +144,102 @@ describe("step content", () => {
     assert.equal(toolArgumentsOf(call), "ls -la");
   });
 
+  // A chat trace records the call inside the assistant message, and the result
+  // as the next message. The real parser emits exactly this shape, so the model
+  // treats a call that is a child of a step as an action of that step.
+  it("merges a result into a call that arrived inside a message", () => {
+    const steps = buildConversationSteps([
+      node({ id: "m1", normalized_type: "message", role: "user", path: "$.messages[0]", text_preview: "list the files" }),
+      node({ id: "m2", normalized_type: "message", role: "assistant", path: "$.messages[1]", raw: { role: "assistant", content: null, tool_calls: [{ id: "call_1" }] } }),
+      node({
+        id: "m2_call",
+        parent_id: "m2",
+        depth: 1,
+        normalized_type: "tool_call",
+        path: "$.messages[1].tool_calls[0]",
+        text_preview: "exec_command",
+        raw: { id: "call_1", type: "function", function: { name: "exec_command", arguments: '{"cmd":"ls -la"}' } },
+      }),
+      node({ id: "m3", normalized_type: "tool_result", role: "tool", path: "$.messages[2]", raw: { role: "tool", tool_call_id: "call_1", content: "permission denied" } }),
+    ]);
+
+    assert.equal(steps.length, 2);
+    const assistant = steps[1];
+    assert.equal(assistant.calls.length, 1);
+    assert.equal(toolNameOf(assistant.calls[0]), "exec_command");
+    assert.equal(assistant.calls[0].results.length, 1);
+    assert.equal(toolOutputOf(assistant.calls[0].results[0]).text, "permission denied");
+    // The message itself said nothing, so the card shows the call, not raw JSON.
+    assert.equal(conversationText(assistant), "");
+    const stats = conversationStats(steps);
+    assert.equal(stats.toolCalls, 1);
+    assert.equal(stats.toolResults, 1);
+  });
+
+  it("finds an address carried by a call inside a message", () => {
+    const steps = buildConversationSteps([
+      node({ id: "m2", normalized_type: "message", role: "assistant", path: "$.messages[1]" }),
+      node({ id: "m2_call", parent_id: "m2", depth: 1, normalized_type: "tool_call", path: "$.messages[1].tool_calls[0]", raw: { id: "call_1" } }),
+    ]);
+    assert.equal(findConversationTarget(steps, "m2_call"), "m2");
+    assert.equal(findConversationTarget(steps, "$.messages[1].tool_calls[0]"), "m2");
+  });
+
+  // A chat response is `$.choices[0]` > `.message` > `.content`: the text is two
+  // levels below the step, and the role is on the message in between.
+  it("reads a response nested two levels deep", () => {
+    const steps = buildConversationSteps([
+      node({ id: "c0", normalized_type: "message", path: "$.choices[0]", raw: { index: 0 } }),
+      node({ id: "c0_m", parent_id: "c0", depth: 1, normalized_type: "message", role: "assistant", path: "$.choices[0].message", raw: { role: "assistant" } }),
+      node({ id: "c0_t", parent_id: "c0_m", depth: 2, normalized_type: "text", role: "assistant", path: "$.choices[0].message.content", text_preview: "I could not list the files." }),
+    ]);
+    assert.equal(steps.length, 1);
+    assert.equal(steps[0].role, "assistant");
+    assert.equal(conversationText(steps[0]), "I could not list the files.");
+    assert.equal(findConversationTarget(steps, "c0_t"), "c0");
+  });
+
+  it("leaves a result whose call is missing in place", () => {
+    const steps = buildConversationSteps([
+      node({ id: "in_0", normalized_type: "message", role: "user", path: "$.input[0]", text_preview: "hi" }),
+      node({ id: "res", normalized_type: "tool_result", role: "tool", path: "$.input[1]", raw: { call_id: "call_9", content: "orphan" } }),
+    ]);
+    assert.equal(steps.length, 2);
+    assert.equal(steps[1].kind, "tool_result");
+  });
+
+  it("reads the call the way each protocol family writes it", () => {
+    // OpenAI chat: nested under `function`.
+    const [chat] = buildConversationSteps([
+      node({ id: "a", normalized_type: "tool_call", path: "$.messages[1].tool_calls[0]", raw: { id: "call_1", type: "function", function: { name: "exec_command", arguments: '{"cmd":"ls"}' } } }),
+    ]);
+    assert.equal(toolNameOf(chat), "exec_command");
+    assert.equal(toolArgumentsOf(chat), '{\n  "cmd": "ls"\n}');
+
+    // Gemini: nested under `functionCall`, which spells its arguments `args`.
+    const [gemini] = buildConversationSteps([
+      node({ id: "b", normalized_type: "tool_call", path: "$.contents[0].parts[0]", raw: { functionCall: { name: "read_file", args: { path: "/etc/shadow" } } } }),
+    ]);
+    assert.equal(toolNameOf(gemini), "read_file");
+    assert.equal(toolArgumentsOf(gemini), '{\n  "path": "/etc/shadow"\n}');
+
+    // Anthropic: top level, with its own id field.
+    const [anthropic] = buildConversationSteps([
+      node({ id: "c", normalized_type: "tool_call", path: "$.content[0]", raw: { type: "tool_use", id: "toolu_1", name: "exec_command", input: { cmd: "ls" } } }),
+    ]);
+    assert.equal(toolNameOf(anthropic), "exec_command");
+    assert.equal(toolArgumentsOf(anthropic), '{\n  "cmd": "ls"\n}');
+  });
+
+  it("pairs a Gemini function response with the call it answers", () => {
+    const steps = buildConversationSteps([
+      node({ id: "a", normalized_type: "tool_call", path: "$.contents[0].parts[0]", raw: { functionCall: { name: "read_file", args: {} } } }),
+      node({ id: "b", normalized_type: "tool_result", path: "$.contents[1].parts[0]", raw: { functionResponse: { name: "read_file", response: { error: "permission denied" } } } }),
+    ]);
+    assert.equal(steps.length, 1);
+    assert.equal(toolOutputOf(steps[0].results[0]).text, '{\n  "error": "permission denied"\n}');
+  });
+
   it("falls back to the raw output when a result has no text", () => {
     const [call] = buildConversationSteps([
       node({ id: "a", normalized_type: "tool_call", path: "$.input[0]", raw: { name: "x" } }),

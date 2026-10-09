@@ -224,13 +224,13 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 
 一条 trace 有五个标签页，同一时刻只挂载正在读的那一个：
 
-- 会话：由 Observation IR 渲染出的对话。一个节点一张卡片、按 payload 顺序排列；工具调用与应答它的工具结果合并成一张卡片（按 `call_id` 配对，参数与输出在一起），失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。
+- 会话：由 Observation IR 渲染出的对话。顶层节点（`depth: 0`）各是一张卡片、按 payload 顺序排列；卡片内部的整棵子树都会被读进去——消息里的文本成为正文，工具调用成为卡片内的一个调用块（名称、`call_id`、参数），应答它的工具结果并进同一个调用块（按 `call_id` 配对），因此 OpenAI Chat 那种「调用写在 assistant 消息里」的记录也能正确显示，而不是显示成空卡片或原始 JSON。响应侧的两层嵌套（`$.choices[0]` → `.message` → `.content`）同样会被展开，卡片角色取自其中第一条带 role 的节点。失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。
 - 协议：Observation IR 的语义节点、归一化类型、JSON 路径与原始 payload。
 - 审计：确定性 findings；每一项给出可读的定位（`$.input[4] · tool result · tool`）并可直接跳到会话中对应的那一步。
 - 请求信息：已选路由目标、路由决策、上游健康、请求工具与延迟/TTFT/Token 吞吐/缓存比例等本次请求自身的事实。
 - 原始数据：原始 HTTP 请求/响应字节与 headers，以及统一事件时间线。
 
-会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
+会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。锚点落在卡片内部（消息里的调用、并进调用块的结果）时同样定位到承载它的那张卡片。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
 
 可执行动作：
 

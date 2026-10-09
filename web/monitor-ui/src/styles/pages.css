@@ -435,6 +435,30 @@
   min-width: 0;
 }
 
+.conversation-call {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--accent-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  scroll-margin-top: 5.5rem;
+}
+
+.conversation-call[data-failed="true"] {
+  border-color: var(--danger);
+}
+
+.conversation-call-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .conversation-result,
 .conversation-part {
   display: flex;

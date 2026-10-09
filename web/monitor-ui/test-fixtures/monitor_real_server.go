@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
@@ -62,12 +63,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	toolTrace, err := st.GetByRequestID("trace-tools")
+	if err != nil {
+		return err
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__fixture/state", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"routed_trace_id": routedTrace.ID,
+			"tools_trace_id":  toolTrace.ID,
 		})
 	})
 	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{ChannelService: channel.NewService(st)})
@@ -159,6 +165,46 @@ func seedStore(outputDir string, st *store.Store, upstreamURL string) error {
 		Usage:  recordfile.UsageInfo{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
 		Layout: traceLayout(`/v1/responses`, `{"model":"gpt-5","input":"hello"}`, `{"output_text":"done"}`, false),
 	}, `{"model":"gpt-5","input":"hello"}`, `{"output_text":"done"}`, false); err != nil {
+		return err
+	}
+	// A chat-completions exchange with a tool call and its result. The Monitor
+	// does not store the node tree - the cassette is the source of truth for
+	// detail - so this body is what the real parser turns into the two nodes the
+	// conversation merges into one card.
+	toolRequest := `{"model":"gpt-4.1","messages":[` +
+		`{"role":"system","content":"You are a careful agent."},` +
+		`{"role":"user","content":"list the files"},` +
+		`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"ls -la\"}"}}]},` +
+		`{"role":"tool","tool_call_id":"call_1","content":"permission denied"}]}`
+	toolResponse := `{"id":"chatcmpl-e2e","object":"chat.completion","model":"gpt-4.1","choices":[{"index":0,"message":{"role":"assistant","content":"I could not list the files."},"finish_reason":"stop"}],"usage":{"prompt_tokens":60,"completion_tokens":12,"total_tokens":72}}`
+	// The header has to classify the way the proxy classifies it, or the parser
+	// registry sees a provider it does not own: a plain OpenAI-compatible
+	// endpoint is recorded as `openai_compatible`, not `openai`.
+	semantics := llm.ClassifyPath("/v1/chat/completions", upstreamURL+"/v1")
+	if err := writeTrace(outputDir, st, recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:                      "trace-tools",
+			Time:                           now.Add(-45 * time.Minute),
+			Model:                          "gpt-4.1",
+			Provider:                       semantics.Provider,
+			Operation:                      semantics.Operation,
+			Endpoint:                       semantics.Endpoint,
+			URL:                            "/v1/chat/completions",
+			Method:                         "POST",
+			StatusCode:                     200,
+			DurationMs:                     900,
+			TTFTMs:                         90,
+			SelectedUpstreamID:             "openai-primary",
+			SelectedUpstreamBaseURL:        upstreamURL + "/v1",
+			SelectedUpstreamProviderPreset: "openai",
+			RoutingPolicy:                  "p2c",
+			RoutingScore:                   0.71,
+			RoutingCandidateCount:          2,
+		},
+		Usage:  recordfile.UsageInfo{PromptTokens: 60, CompletionTokens: 12, TotalTokens: 72},
+		Layout: traceLayout("/v1/chat/completions", toolRequest, toolResponse, false),
+	}, toolRequest, toolResponse, false); err != nil {
 		return err
 	}
 	return writeTrace(outputDir, st, recordfile.RecordHeader{

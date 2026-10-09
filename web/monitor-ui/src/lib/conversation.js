@@ -89,19 +89,52 @@ export function nodeRaw(node) {
   return null;
 }
 
+// The same call is written differently by each protocol family, and the UI is
+// handed the provider's own JSON: OpenAI chat nests it under `function`, Gemini
+// under `functionCall` / `functionResponse`, Anthropic and the Responses API put
+// it at the top level. Reading all three here is what keeps a tool card from
+// rendering "No arguments" for two providers out of three.
+function protocolCallOf(raw) {
+  if (!isObject(raw)) {
+    return {};
+  }
+  const keys = [
+    // calls
+    "function",
+    "functionCall",
+    "toolCall",
+    "function_call",
+    "tool_call",
+    // results
+    "functionResponse",
+    "toolResponse",
+    "function_response",
+    "tool_response",
+  ];
+  for (const key of keys) {
+    if (isObject(raw[key])) {
+      return raw[key];
+    }
+  }
+  return {};
+}
+
 function callIDOf(step) {
   const raw = isObject(step.raw) ? step.raw : {};
-  return String(raw.call_id || raw.tool_call_id || raw.callId || raw.id || "").trim();
+  const nested = protocolCallOf(raw);
+  return String(raw.call_id || raw.tool_call_id || raw.callId || raw.tool_use_id || raw.id || nested.id || nested.call_id || "").trim();
 }
 
 export function toolNameOf(step) {
   const raw = isObject(step.raw) ? step.raw : {};
-  return String(raw.name || raw.function_name || raw.tool_name || step.text || "").trim();
+  const nested = protocolCallOf(raw);
+  return String(raw.name || raw.function_name || raw.tool_name || nested.name || step.text || "").trim();
 }
 
 export function toolArgumentsOf(step) {
   const raw = isObject(step.raw) ? step.raw : {};
-  const value = raw.arguments ?? raw.args ?? raw.input ?? raw.parameters;
+  const nested = protocolCallOf(raw);
+  const value = raw.arguments ?? raw.args ?? raw.input ?? raw.parameters ?? nested.arguments ?? nested.args ?? nested.input ?? nested.parameters;
   if (value === undefined || value === null || value === "") {
     return "";
   }
@@ -125,7 +158,18 @@ export function toolOutputOf(step) {
     return { text, structured: false };
   }
   const raw = isObject(step.raw) ? step.raw : {};
-  const value = raw.output ?? raw.content ?? raw.stdout ?? raw.result;
+  // Gemini wraps the payload of a function response, so its own object is
+  // unwrapped before the generic output fields are tried.
+  const nested = protocolCallOf(raw);
+  const value =
+    raw.output ??
+    raw.content ??
+    raw.stdout ??
+    raw.result ??
+    nested.response ??
+    nested.output ??
+    nested.content ??
+    nested.result;
   if (value === undefined || value === null) {
     return { text: "", structured: false };
   }
@@ -186,65 +230,151 @@ function partsText(step) {
     .join("\n\n");
 }
 
+// A call entry is a tool call that arrived as a *part* of a message - which is
+// how every OpenAI chat trace records one: the assistant message holds the
+// `tool_calls` array, so the call is a child of the message node, not a node of
+// its own. It is still an action, with arguments and a result to show, so it
+// becomes an entry on the step rather than a paragraph of the message.
+function callEntry(node) {
+  return { ...partFromNode(node), results: [], parts: [] };
+}
+
+function descendantsOf(node, childrenOf) {
+  const out = [];
+  const walk = (parent) => {
+    for (const child of childrenOf.get(String(parent.id || "")) || []) {
+      out.push(child);
+      walk(child);
+    }
+  };
+  walk(node);
+  return out;
+}
+
 /**
  * buildConversationSteps turns the flattened Observation IR into the list the
  * tab renders.
  *
  * A step is a top-level node (`depth: 0`), i.e. one item of the request's
- * conversation array or one item of the response's output. Its children are
- * content parts: the IR emits both a message and the text inside it, so parts
- * are carried as anchors and only rendered when they add content of their own.
+ * conversation array or one item of the response's output. Everything under it
+ * is carried by the step: text and reasoning become parts, a tool call becomes
+ * a call entry, and a tool result becomes a result of the call it answers. The
+ * nesting is not uniformly one level deep - a chat response is
+ * `$.choices[0]` > `.message` > `.content` - so the whole subtree is walked
+ * rather than just the direct children.
  */
 export function buildConversationSteps(nodes = []) {
   if (!Array.isArray(nodes)) {
     return [];
   }
-  const steps = [];
-  const byId = new Map();
-  for (const node of nodes) {
-    const depth = Number(node?.depth || 0);
-    if (depth === 0) {
-      if (NON_STEP_KINDS.has(nodeKind(node))) {
-        continue;
-      }
-      const step = { ...partFromNode(node), index: Number(node?.index || 0), parts: [], results: [] };
-      byId.set(step.id, step);
-      steps.push(step);
+  const rows = nodes.filter((node) => node && typeof node === "object");
+  const childrenOf = new Map();
+  for (const node of rows) {
+    const parentID = String(node.parent_id || node.parentId || "");
+    if (!parentID) {
       continue;
     }
-    if (depth === 1) {
-      const parent = byId.get(String(node?.parent_id || node?.parentId || ""));
-      if (parent) {
-        parent.parts.push(partFromNode(node));
-      }
+    const siblings = childrenOf.get(parentID);
+    if (siblings) {
+      siblings.push(node);
+    } else {
+      childrenOf.set(parentID, [node]);
     }
   }
-  return mergeToolPairs(steps);
+
+  const units = [];
+  for (const node of rows) {
+    if (Number(node.depth || 0) !== 0) {
+      continue;
+    }
+    const kind = nodeKind(node);
+    if (NON_STEP_KINDS.has(kind)) {
+      continue;
+    }
+    if (RESULT_KINDS.has(kind)) {
+      units.push({ ...partFromNode(node), isResultUnit: true, parts: [], results: [] });
+      continue;
+    }
+    const step = { ...partFromNode(node), index: Number(node.index || 0), parts: [], calls: [], results: [] };
+    for (const child of descendantsOf(node, childrenOf)) {
+      const childKind = nodeKind(child);
+      if (CALL_KINDS.has(childKind)) {
+        const entry = callEntry(child);
+        for (const grandchild of descendantsOf(child, childrenOf)) {
+          entry.parts.push(partFromNode(grandchild));
+        }
+        step.calls.push(entry);
+        continue;
+      }
+      if (RESULT_KINDS.has(childKind)) {
+        step.results.push({ ...partFromNode(child), isResultUnit: true, parts: [], results: [] });
+        continue;
+      }
+      step.parts.push(partFromNode(child));
+    }
+    // A response container - the chat `choice`, the Responses output item - has
+    // no role of its own: the role is on the message inside it, and that is the
+    // one a reader needs on the card.
+    if (!step.role) {
+      step.role = step.parts.find((part) => part.role)?.role || "";
+    }
+    units.push(step);
+  }
+  return mergeToolResults(units);
+}
+
+function callEntriesOf(step) {
+  const entries = [];
+  if (CALL_KINDS.has(step.kind)) {
+    entries.push(step);
+  }
+  for (const call of step.calls || []) {
+    entries.push(call);
+  }
+  return entries;
 }
 
 /**
- * mergeToolPairs puts a call and its result in one card.
+ * mergeToolResults puts a call and its result in one card.
  *
  * They are two nodes - they were two lines of the request or the response - but
  * they are one action to a reader: what was run, and what came back. The result
  * keeps its own anchor inside the card, so an audit finding pointing at either
- * node still lands on it.
+ * node still lands on it. A result that names a call this conversation does not
+ * hold stays where it was rather than being attached to the wrong one.
  */
-function mergeToolPairs(steps) {
+function mergeToolResults(units) {
   const merged = [];
-  for (const step of steps) {
-    const previous = merged[merged.length - 1];
-    if (previous && RESULT_KINDS.has(step.kind) && CALL_KINDS.has(previous.kind)) {
-      const resultID = callIDOf(step);
-      const callID = callIDOf(previous);
-      // A result without an id pairs with the call right above it; two results
-      // that both name a different call do not pair at all.
-      if (!resultID || !callID || resultID === callID) {
-        previous.results.push(step);
-        continue;
+  const ownerByCallID = new Map();
+  let lastCallStep = null;
+  for (const unit of units) {
+    if (!unit.isResultUnit) {
+      const entries = callEntriesOf(unit);
+      if (entries.length) {
+        lastCallStep = unit;
+        // The id-less call is registered under the empty key as well, so a
+        // result that names an id can still find a call that has none.
+        for (const entry of entries) {
+          ownerByCallID.set(callIDOf(entry) || "", unit);
+        }
       }
+      merged.push(unit);
+      continue;
     }
-    merged.push(step);
+    const resultID = callIDOf(unit);
+    let owner = resultID ? ownerByCallID.get(resultID) : lastCallStep;
+    if (!owner && resultID && lastCallStep && callEntriesOf(lastCallStep).some((entry) => !callIDOf(entry))) {
+      owner = lastCallStep;
+    }
+    const entry = owner
+      ? callEntriesOf(owner).find((candidate) => (callIDOf(candidate) || "") === (resultID || "")) || null
+      : null;
+    if (entry) {
+      entry.results = entry.results || [];
+      entry.results.push(unit);
+      continue;
+    }
+    merged.push(unit);
   }
   return merged;
 }
@@ -281,36 +411,54 @@ export function distinctParts(step) {
   });
 }
 
-export function stepHaystack(step) {
-  const chunks = [step.text, step.role, step.path, conversationText(step)];
-  for (const part of step.parts) {
+function haystackOf(step, chunks) {
+  chunks.push(step.text, step.role, step.path, conversationText(step), toolNameOf(step));
+  const called = CALL_KINDS.has(step.kind) ? toolArgumentsOf(step) : "";
+  if (called) {
+    chunks.push(called);
+  }
+  for (const part of step.parts || []) {
     chunks.push(part.text);
   }
-  for (const result of step.results) {
-    chunks.push(result.text, conversationText(result));
+  for (const call of step.calls || []) {
+    haystackOf(call, chunks);
   }
-  return chunks.filter(Boolean).join("\n").toLowerCase();
+  for (const result of step.results || []) {
+    haystackOf(result, chunks);
+  }
+  return chunks;
+}
+
+export function stepHaystack(step) {
+  return haystackOf(step, []).filter(Boolean).join("\n").toLowerCase();
 }
 
 export function conversationStats(steps = []) {
   const stats = { steps: steps.length, toolCalls: 0, toolResults: 0, reasoning: 0, failed: 0, truncated: 0 };
-  for (const step of steps) {
+  const countCalls = (step) => {
     if (CALL_KINDS.has(step.kind)) {
       stats.toolCalls += 1;
     }
+    stats.toolCalls += (step.calls || []).length;
     if (RESULT_KINDS.has(step.kind)) {
       stats.toolResults += 1;
     }
-    stats.toolResults += step.results.length;
+    stats.toolResults += (step.results || []).length;
+    for (const call of step.calls || []) {
+      stats.toolResults += (call.results || []).length;
+    }
     if (step.kind === "reasoning") {
       stats.reasoning += 1;
     }
-    if (step.failed || step.results.some((result) => result.failed)) {
+    if (step.failed || (step.results || []).some((result) => result.failed)) {
       stats.failed += 1;
     }
     if (step.kind === "unknown" && !step.text) {
       stats.truncated += 1;
     }
+  };
+  for (const step of steps) {
+    countCalls(step);
   }
   return stats;
 }
@@ -398,33 +546,33 @@ export function formatEvidenceTarget(value = "") {
  * findConversationTarget answers "which anchor does this focus value name",
  * preferring the node id (exact) and falling back to the path.
  */
+// Whether a step carries the address anywhere in its subtree: its own parts, a
+// call entry, a result, or a part of either.
+function carriedAddress(step, field, value) {
+  const entries = [...(step.parts || []), ...(step.calls || []), ...(step.results || [])];
+  for (const entry of entries) {
+    if (entry[field] === value) {
+      return true;
+    }
+    const nested = [...(entry.parts || []), ...(entry.results || [])];
+    if (nested.some((child) => child[field] === value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function findConversationTarget(steps = [], focus = "") {
   const { nodeID, path } = parseConversationAnchor(focus);
   if (!nodeID && !path) {
     return "";
   }
   const matches = (step) => {
-    if (nodeID) {
-      if (step.id === nodeID) {
-        return true;
-      }
-      if (step.parts.some((part) => part.id === nodeID)) {
-        return true;
-      }
-      if (step.results.some((result) => result.id === nodeID || result.parts.some((part) => part.id === nodeID))) {
-        return true;
-      }
+    if (nodeID && (step.id === nodeID || carriedAddress(step, "id", nodeID))) {
+      return true;
     }
-    if (path) {
-      if (step.path === path) {
-        return true;
-      }
-      if (step.parts.some((part) => part.path === path)) {
-        return true;
-      }
-      if (step.results.some((result) => result.path === path || result.parts.some((part) => part.path === path))) {
-        return true;
-      }
+    if (path && (step.path === path || carriedAddress(step, "path", path))) {
+      return true;
     }
     return false;
   };
