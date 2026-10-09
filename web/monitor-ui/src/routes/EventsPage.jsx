@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { InlineTag } from "../components/common/Badges";
@@ -118,7 +119,7 @@ export function EventsPage() {
           <select className="filter-input" value={currentFilter(searchParams, "source", "all")} onChange={(event) => setFilter("source", event.target.value)} aria-label={t("events.source")}>
             {SOURCE_OPTIONS.map((option) => <option key={option} value={option}>{formatEventOption(option, t, language)}</option>)}
           </select>
-          <input className="filter-input filter-input-wide" type="search" value={searchParams.get("q") || ""} onChange={(event) => setFilter("q", event.target.value)} placeholder={t("events.search")} />
+          <Input className="min-w-[260px]" type="search" value={searchParams.get("q") || ""} onChange={(event) => setFilter("q", event.target.value)} placeholder={t("events.search")} />
         </div>
       </section>
 

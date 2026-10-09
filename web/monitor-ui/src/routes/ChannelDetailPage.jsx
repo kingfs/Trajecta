@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -286,7 +287,7 @@ export function ProviderDetailPage() {
                 </div>
               </div>
               <form className="filter-bar" onSubmit={submitAddModel}>
-                <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
+                <Input className="min-w-[260px]" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
                 <Button variant="primary" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</Button>
                 <Button variant="ghost" type="button" onClick={() => toggleModels(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</Button>
               </form>
@@ -378,10 +379,10 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
           </DialogClose>
         </DialogHeader>
         <div className="provider-form provider-form-modal">
-          <label>{t("providers.name")}<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
+          <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
           <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="provider-form-wide">{t("providers.baseURL")}<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
-          <label className="provider-form-wide">{t("providers.apiKey")}<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
+          <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
+          <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
         <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>

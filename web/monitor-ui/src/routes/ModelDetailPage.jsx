@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -212,23 +213,23 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
       <div className="model-config-fields">
         <label>
           <span>{t("models.displayName")}</span>
-          <input value={form.display_name} onChange={(event) => update("display_name", event.target.value)} />
+          <Input value={form.display_name} onChange={(event) => update("display_name", event.target.value)} />
         </label>
         <label>
           <span>{t("models.upstreamModel")}</span>
-          <input value={form.upstream_model} onChange={(event) => update("upstream_model", event.target.value)} placeholder={model} />
+          <Input value={form.upstream_model} onChange={(event) => update("upstream_model", event.target.value)} placeholder={model} />
         </label>
         <label>
           <span>{t("models.contextWindow")}</span>
-          <input type="number" min="0" value={form.context_window} onChange={(event) => update("context_window", event.target.value)} />
+          <Input type="number" min="0" value={form.context_window} onChange={(event) => update("context_window", event.target.value)} />
         </label>
         <label>
           <span>{t("models.maxOutput")}</span>
-          <input type="number" min="0" value={form.max_output_tokens} onChange={(event) => update("max_output_tokens", event.target.value)} />
+          <Input type="number" min="0" value={form.max_output_tokens} onChange={(event) => update("max_output_tokens", event.target.value)} />
         </label>
         <label>
           <span>{t("models.compactThreshold")}</span>
-          <input type="number" min="0" value={form.compact_history_item_threshold} onChange={(event) => update("compact_history_item_threshold", event.target.value)} />
+          <Input type="number" min="0" value={form.compact_history_item_threshold} onChange={(event) => update("compact_history_item_threshold", event.target.value)} />
         </label>
         <label>
           <span>{t("models.adoption")}</span>

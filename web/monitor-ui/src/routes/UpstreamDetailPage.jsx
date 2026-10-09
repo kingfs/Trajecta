@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -125,8 +126,8 @@ export function UpstreamDetailPage() {
           </div>
         </div>
         <form className="filter-bar" onSubmit={applyModel}>
-          <input
-            className="filter-input filter-input-wide"
+          <Input
+            className="min-w-[260px]"
             type="search"
             name="model"
             value={modelDraft}
@@ -263,8 +264,8 @@ export function UpstreamDetailPage() {
               </div>
             </div>
             <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
-              <input
-                className="filter-input filter-input-wide"
+              <Input
+                className="min-w-[260px]"
                 type="search"
                 value={catalogQuery}
                 onChange={(event) => setCatalogQuery(event.target.value)}

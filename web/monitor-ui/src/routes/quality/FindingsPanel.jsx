@@ -1,4 +1,5 @@
 import React from "react";
+import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -45,7 +46,7 @@ export function FindingsPanel() {
           <InlineTag tone={items.length ? "danger" : "green"}>{t("audit.totalFindings", { count: findings.data?.total ?? 0 })}</InlineTag>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
-          <input className="filter-input" type="search" placeholder={t("audit.category")} value={category} onChange={(event) => setFilter("category", event.target.value)} />
+          <Input className="min-w-[180px]" type="search" placeholder={t("audit.category")} value={category} onChange={(event) => setFilter("category", event.target.value)} />
           <select className="filter-input" aria-label={t("common.severity")} value={severity} onChange={(event) => setFilter("severity", event.target.value)}>
             <option value="">{t("audit.anySeverity")}</option>
             <option value="critical">{t("audit.severityCritical")}</option>

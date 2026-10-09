@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -71,7 +72,7 @@ export function ModelsPage() {
           </div>
         </div>
         <form className="filter-bar" onSubmit={applySearch}>
-          <input className="filter-input filter-input-wide" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={t("models.search")} />
+          <Input className="min-w-[260px]" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={t("models.search")} />
           <Button variant="ghost" type="submit">{t("common.apply")}</Button>
           <Button 
             variant="ghost"

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
@@ -95,9 +96,9 @@ function App() {
           <p className="eyebrow">{t("auth.eyebrow")}</p>
           <h1>{t("auth.signInTitle")}</h1>
           <label htmlFor="monitor-username">{t("auth.username")}</label>
-          <input id="monitor-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
+          <Input id="monitor-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
           <label htmlFor="monitor-password">{t("auth.password")}</label>
-          <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <Input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
           <Button variant="primary" type="submit">{t("auth.signIn")}</Button>
         </form>

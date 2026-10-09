@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { InlineTag, PlusIcon } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
@@ -80,15 +81,15 @@ export function TokensPanel() {
         <form className="token-form" onSubmit={submitToken}>
           <label className="token-field" htmlFor="token-name">
             <span>{t("tokens.name")}</span>
-            <input id="token-name" type="text" value={name} onChange={(event) => setName(event.target.value)} />
+            <Input id="token-name" type="text" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
           <label className="token-field" htmlFor="token-ttl">
             <span>{t("tokens.ttl")}</span>
-            <input id="token-ttl" type="text" placeholder={t("tokens.ttlPlaceholder")} value={ttl} onChange={(event) => setTTL(event.target.value)} />
+            <Input id="token-ttl" type="text" placeholder={t("tokens.ttlPlaceholder")} value={ttl} onChange={(event) => setTTL(event.target.value)} />
           </label>
           <label className="token-field" htmlFor="token-scope">
             <span>{t("tokens.scope")}</span>
-            <input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
+            <Input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
           </label>
           <Button variant="default" size="icon" className="token-create-button" type="submit" disabled={createToken.isPending} title={createToken.isPending ? t("tokens.creating") : t("tokens.create")} aria-label={createToken.isPending ? t("tokens.creating") : t("tokens.create")}>
             <PlusIcon />

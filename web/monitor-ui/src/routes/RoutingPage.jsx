@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
@@ -121,19 +122,19 @@ export function RoutingPage() {
               </div>
             </div>
             <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
-          <input className="filter-input" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
-          <input className="filter-input" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
+          <Input className="min-w-[180px]" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
+          <Input className="min-w-[180px]" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
           <select className="filter-input" name="routing_status" aria-label={t("routing.statusLabel")} value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
             <option value="">{t("routing.anyStatus")}</option>
             <option value="success">{t("routing.statusSuccess")}</option>
             <option value="error">{t("routing.statusError")}</option>
           </select>
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_duration" placeholder={t("routing.minDuration")} value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_duration" placeholder={t("routing.maxDuration")} value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_ttft" placeholder={t("routing.minTTFT")} value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_ttft" placeholder={t("routing.maxTTFT")} value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_tokens" placeholder={t("routing.minTokens")} value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_tokens" placeholder={t("routing.maxTokens")} value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_duration" placeholder={t("routing.minDuration")} value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_duration" placeholder={t("routing.maxDuration")} value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_ttft" placeholder={t("routing.minTTFT")} value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_ttft" placeholder={t("routing.maxTTFT")} value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_tokens" placeholder={t("routing.minTokens")} value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
+          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_tokens" placeholder={t("routing.maxTokens")} value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
           <Button variant="ghost" type="submit">{t("common.apply")}</Button>
           <Button variant="ghost" type="button" onClick={resetFilters}>{t("common.reset")}</Button>
         </form>
@@ -403,9 +404,9 @@ function ModelAliasesPanel() {
       </div>
       {aliases.error ? <EmptyState title={t("routing.aliasesUnavailable")} detail={aliases.error} compact /> : null}
       <form className="filter-bar routing-filter-bar" onSubmit={create}>
-        <input className="filter-input" placeholder={t("routing.aliasPlaceholder")} value={form.alias} onChange={(event) => update("alias", event.target.value)} />
-        <input className="filter-input" placeholder={t("routing.targetModelPlaceholder")} value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
-        <input className="filter-input" placeholder={t("routing.optionalChannel")} value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
+        <Input className="min-w-[180px]" placeholder={t("routing.aliasPlaceholder")} value={form.alias} onChange={(event) => update("alias", event.target.value)} />
+        <Input className="min-w-[180px]" placeholder={t("routing.targetModelPlaceholder")} value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
+        <Input className="min-w-[180px]" placeholder={t("routing.optionalChannel")} value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
         <Button variant="ghost" type="submit" disabled={createDisabled}>{t("routing.create")}</Button>
       </form>
       <AliasValidationMessages state={validation} />
@@ -416,9 +417,9 @@ function ModelAliasesPanel() {
               {editID === item.id && editForm ? (
                 <form className="routing-summary-stack" onSubmit={saveEdit}>
                   <div className="breakdown-title">{t("routing.editAlias")}</div>
-                  <input className="filter-input" placeholder={t("routing.alias")} value={editForm.alias} onChange={(event) => updateEdit("alias", event.target.value)} />
-                  <input className="filter-input" placeholder={t("routing.targetModel")} value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
-                  <input className="filter-input" placeholder={t("routing.optionalChannel")} value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
+                  <Input className="min-w-[180px]" placeholder={t("routing.alias")} value={editForm.alias} onChange={(event) => updateEdit("alias", event.target.value)} />
+                  <Input className="min-w-[180px]" placeholder={t("routing.targetModel")} value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
+                  <Input className="min-w-[180px]" placeholder={t("routing.optionalChannel")} value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
                   <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> {t("routing.enabled")}</label>
                   <AliasValidationMessages state={editValidation} compact />
                   <div className="trace-tag-group">
@@ -476,7 +477,7 @@ function RouteInspectorPanel() {
           <option value="responses">responses</option>
           <option value="anthropic_messages">anthropic_messages</option>
         </select>
-        <input className="filter-input" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
+        <Input className="min-w-[180px]" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
         <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> {t("routing.stream")}</label>
         <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>
         <Button variant="ghost" type="submit">{t("routing.inspect")}</Button>

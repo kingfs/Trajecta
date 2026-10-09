@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -80,15 +81,15 @@ export function LineagePanel() {
           ) : null}
         </div>
         <form className="filter-bar responses-audit-query" onSubmit={applyTraceQuery}>
-          <input
-            className="filter-input"
+          <Input
+            className="min-w-[180px]"
             type="search"
             placeholder={t("audit.responseId")}
             value={traceForm.responseID}
             onChange={(event) => setTraceForm((current) => ({ ...current, responseID: event.target.value }))}
           />
-          <input
-            className="filter-input"
+          <Input
+            className="min-w-[180px]"
             type="search"
             placeholder={t("audit.requestAuditId")}
             value={traceForm.requestAuditID}

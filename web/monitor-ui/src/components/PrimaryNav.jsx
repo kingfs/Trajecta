@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { NavLink } from "react-router-dom";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -362,11 +363,11 @@ function PasswordDialog({ onClose, returnFocusTo }) {
           </DialogHeader>
           <label className="nav-field">
             {t("password.current")}
-            <input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+            <Input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
           </label>
           <label className="nav-field">
             {t("password.next")}
-            <input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+            <Input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
           </label>
           <DialogFooter>
             <Button variant="ghost" type="button" onClick={onClose}>

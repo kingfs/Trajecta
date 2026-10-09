@@ -1761,3 +1761,42 @@ test("reduced motion turns the dialog animation off", async ({ page }) => {
 
 
 
+
+// The text controls were styled by one element rule in the legacy sheet, which
+// fifty-five sites relied on without saying so. They are the input primitive
+// now, and this pins the box the rule produced: 32px tall, the sunken surface
+// rather than the card surface, and the plain border at rest.
+test("the migrated inputs keep the form-control box", async ({ page }) => {
+  await page.goto("/traces");
+  const input = page.getByRole("searchbox").first();
+  await expect(input).toBeVisible();
+
+  const box = await input.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      height: style.height,
+      background: style.backgroundColor,
+      border: style.borderTopColor,
+      radius: style.borderRadius,
+      // A filter input keeps its width floor; the classes that used to carry
+      // the three floors are utilities on the primitive now.
+      minWidth: style.minWidth,
+    };
+  });
+  const tokens = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--surface-2)";
+    probe.style.borderTopColor = "var(--border)";
+    document.body.append(probe);
+    const style = getComputedStyle(probe);
+    const colours = { surface: style.backgroundColor, border: style.borderTopColor };
+    probe.remove();
+    return colours;
+  });
+  expect(box.height).toBe("32px");
+  expect(box.background).toBe(tokens.surface);
+  expect(box.border).toBe(tokens.border);
+  // `.filter-input-wide` was a 260px floor and `.filter-input` a 180px one.
+  expect(box.minWidth).toBe("260px");
+  await expect(page.getByPlaceholder("Provider").first()).toHaveCSS("min-width", "180px");
+});

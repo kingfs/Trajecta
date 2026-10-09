@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
@@ -97,22 +98,22 @@ export function SessionsPanel() {
           </div>
         </div>
         <form className="filter-bar" onSubmit={applyFilters}>
-          <input
-            className="filter-input filter-input-wide"
+          <Input
+            className="min-w-[260px]"
             type="search"
             placeholder={t("sessions.search")}
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           />
-          <input
-            className="filter-input"
+          <Input
+            className="min-w-[180px]"
             type="text"
             placeholder={t("sessions.provider")}
             value={filters.provider}
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
           />
-          <input
-            className="filter-input"
+          <Input
+            className="min-w-[180px]"
             type="text"
             placeholder={t("sessions.model")}
             value={filters.model}
