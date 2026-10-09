@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "../ui/button";
 import { Link } from "react-router-dom";
 import { InlineTag, StackIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
@@ -50,9 +51,11 @@ export function SessionList({ items }) {
             <span>{t("sessions.duration")} {formatDuration(item.total_duration_ms ?? 0)}</span>
           </div>
           <div className="action-group">
-            <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
-              <StackIcon />
-            </Link>
+            <Button asChild variant="default" size="icon">
+              <Link to={`/sessions/${encodeURIComponent(item.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
+                <StackIcon />
+              </Link>
+            </Button>
           </div>
         </article>
       ))}

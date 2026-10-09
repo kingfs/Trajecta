@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "./ui/button";
 import { NavLink } from "react-router-dom";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -354,9 +355,9 @@ function PasswordDialog({ onClose, returnFocusTo }) {
               <DialogTitle id="password-title">{t("password.title")}</DialogTitle>
             </div>
             <DialogClose asChild>
-              <button className="icon-button" type="button" aria-label={t("common.close")}>
+              <Button variant="default" size="icon" type="button" aria-label={t("common.close")}>
                 <X size={14} aria-hidden="true" />
-              </button>
+              </Button>
             </DialogClose>
           </DialogHeader>
           <label className="nav-field">

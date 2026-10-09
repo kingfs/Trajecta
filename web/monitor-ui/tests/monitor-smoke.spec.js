@@ -1459,6 +1459,42 @@ test("page tabs are reachable and operable from the keyboard", async ({ page }) 
   await expect(page).toHaveURL(/\/traces$/);
 });
 
+// The toolbar icon buttons were `<button className="icon-button">` and are the
+// button primitive now. The primitive's variant has to keep the box the class
+// described - a 32px square with no fill and the subtle hairline - because a
+// variant edit is invisible in review and would only show up as a toolbar whose
+// icons sit slightly differently from the text buttons beside them.
+test("the migrated icon buttons keep the icon-button box", async ({ page }) => {
+  await page.goto("/providers/openai-primary");
+  const icon = page.getByRole("button", { name: "Edit provider" });
+  await expect(icon).toBeVisible();
+
+  const box = await icon.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      width: style.width,
+      height: style.height,
+      background: style.backgroundColor,
+      border: style.borderTopColor,
+      radius: style.borderRadius,
+    };
+  });
+  expect(box.width).toBe("32px");
+  expect(box.height).toBe("32px");
+  // No fill: `.icon-button` set `background: transparent` over the shared shell.
+  expect(box.background).toBe("rgba(0, 0, 0, 0)");
+  // `--border-subtle` rather than the `--border` of the text button.
+  const subtle = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.borderTopColor = "var(--border-subtle)";
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).borderTopColor;
+    probe.remove();
+    return colour;
+  });
+  expect(box.border).toBe(subtle);
+});
+
 // The window strips used to declare role="tablist" over a row of plain
 // buttons: no role="tab" child, no aria-selected, no tabpanel, so the strip
 // announced itself as a widget whose parts it could not describe. They are

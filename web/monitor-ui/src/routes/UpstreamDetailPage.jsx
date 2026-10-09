@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
@@ -98,9 +99,11 @@ export function UpstreamDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to={buildRoutingLink(windowValue, modelValue)} title={t("upstreamDetail.backToRouting")} aria-label={t("upstreamDetail.backToRouting")}>
-              <HomeIcon />
-            </Link>
+            <Button asChild variant="default" size="icon">
+              <Link to={buildRoutingLink(windowValue, modelValue)} title={t("upstreamDetail.backToRouting")} aria-label={t("upstreamDetail.backToRouting")}>
+                <HomeIcon />
+              </Link>
+            </Button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label={t("metric.ttft")} value={target?.avg_ttft ?? 0} icon="duration" format="duration" />

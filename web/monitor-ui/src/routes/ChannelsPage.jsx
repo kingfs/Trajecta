@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
@@ -281,7 +282,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
               <DialogTitle>{t("providers.create")}</DialogTitle>
             </div>
             <DialogClose asChild>
-              <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+              <Button variant="default" size="icon" type="button" aria-label={t("common.close")}>x</Button>
             </DialogClose>
           </DialogHeader>
           <div className="provider-form provider-form-modal">
@@ -350,9 +351,9 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         </div>
         <div className="trace-tag-group">
           <Switch checked={Boolean(item.enabled)} onChange={(enabled) => setEnabled.mutate(enabled)} disabled={saving} label={`${item.name || item.id} enabled`} />
-          <button className="icon-button" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
+          <Button variant="default" size="icon" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
             <DeleteIcon />
-          </button>
+          </Button>
           <button
             className="ghost-button provider-card-probe-button"
             type="button"
@@ -426,7 +427,7 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
             <DialogTitle id="provider-probe-title">{t("providers.probeTitle")}</DialogTitle>
           </div>
           <DialogClose asChild>
-            <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+            <Button variant="default" size="icon" type="button" aria-label={t("common.close")}>x</Button>
           </DialogClose>
         </DialogHeader>
         <div className="provider-probe-dialog-summary">

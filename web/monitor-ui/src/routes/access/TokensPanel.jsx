@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Button } from "../../components/ui/button";
 import { InlineTag, PlusIcon } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -89,9 +90,9 @@ export function TokensPanel() {
             <span>{t("tokens.scope")}</span>
             <input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
           </label>
-          <button className="icon-button token-create-button" type="submit" disabled={createToken.isPending} title={createToken.isPending ? t("tokens.creating") : t("tokens.create")} aria-label={createToken.isPending ? t("tokens.creating") : t("tokens.create")}>
+          <Button variant="default" size="icon" className="token-create-button" type="submit" disabled={createToken.isPending} title={createToken.isPending ? t("tokens.creating") : t("tokens.create")} aria-label={createToken.isPending ? t("tokens.creating") : t("tokens.create")}>
             <PlusIcon />
-          </button>
+          </Button>
         </form>
         
         {created?.token ? (

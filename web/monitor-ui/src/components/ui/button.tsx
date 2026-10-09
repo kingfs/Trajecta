@@ -20,12 +20,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // .icon-button
-        default: "border-border bg-secondary text-foreground hover:border-border-strong hover:bg-accent",
+        // .icon-button: the shared button shell with a transparent fill and the
+        // subtle line, which is what tells a toolbar icon apart from the text
+        // button beside it.
+        default: "border-border-subtle bg-transparent text-foreground hover:border-border-strong hover:bg-accent",
         // .primary-button
         primary: "border-transparent bg-primary text-primary-foreground hover:border-transparent hover:bg-brand-hover",
         // .ghost-button
-        ghost: "border-border bg-card text-foreground hover:border-border-strong hover:bg-accent",
+        ghost: "border-border bg-secondary text-foreground hover:border-border-strong hover:bg-accent",
         subtle: "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
         danger: "border-transparent bg-danger text-primary-foreground hover:border-transparent hover:opacity-90",
         link: "border-transparent bg-transparent p-0 text-brand underline-offset-4 hover:underline",

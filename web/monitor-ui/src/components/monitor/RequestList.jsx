@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Button } from "../ui/button";
 import { Link } from "react-router-dom";
 import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
@@ -247,9 +248,11 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
   return (
     <div className="action-group trace-row-actions">
       {item.session_id ? (
-        <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
-          <StackIcon />
-        </Link>
+        <Button asChild variant="default" size="icon">
+          <Link to={`/sessions/${encodeURIComponent(item.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
+            <StackIcon />
+          </Link>
+        </Button>
       ) : null}
       {fromSessionID ? (
         <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
@@ -261,12 +264,16 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
           {t("requests.raw")}
         </Link>
       ) : null}
-      <Link className="icon-button" to={buildTraceLink(itemID, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
-        <ViewIcon />
-      </Link>
-      <a className="icon-button" href={apiPaths.traceDownload(itemID)} title={t("requests.downloadTrace")} aria-label={t("requests.downloadTrace")}>
-        <DownloadIcon />
-      </a>
+      <Button asChild variant="default" size="icon">
+        <Link to={buildTraceLink(itemID, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
+          <ViewIcon />
+        </Link>
+      </Button>
+      <Button asChild variant="default" size="icon">
+        <a href={apiPaths.traceDownload(itemID)} title={t("requests.downloadTrace")} aria-label={t("requests.downloadTrace")}>
+          <DownloadIcon />
+        </a>
+      </Button>
     </div>
   );
 }

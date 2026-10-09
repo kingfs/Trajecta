@@ -1,5 +1,6 @@
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
+import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
@@ -184,17 +185,21 @@ export function TraceDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to={backLink} title={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")} aria-label={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")}>
-              <HomeIcon />
-            </Link>
-            {session?.session_id ? (
-              <Link className="icon-button" to={`/sessions/${encodeURIComponent(session.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
-                <StackIcon />
+            <Button asChild variant="default" size="icon">
+              <Link to={backLink} title={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")} aria-label={fromSessionID ? t("traceDetail.backToSession") : t("traceDetail.backToList")}>
+                <HomeIcon />
               </Link>
+            </Button>
+            {session?.session_id ? (
+              <Button asChild variant="default" size="icon">
+                <Link to={`/sessions/${encodeURIComponent(session.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
+                  <StackIcon />
+                </Link>
+              </Button>
             ) : null}
-            <button className="icon-button" type="button" onClick={downloadTrace} title={t("traceDetail.downloadHttp")} aria-label={t("requests.downloadTrace")}>
+            <Button variant="default" size="icon" type="button" onClick={downloadTrace} title={t("traceDetail.downloadHttp")} aria-label={t("requests.downloadTrace")}>
               <DownloadIcon />
-            </button>
+            </Button>
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
             <button className="ghost-button" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceActionWith("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
@@ -665,9 +670,9 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
                 <DialogTitle>{schemaTool.name}</DialogTitle>
               </div>
               <DialogClose asChild>
-                <button className="icon-button" aria-label={t("traceDetail.closeToolDefinition")}>
+                <Button variant="default" size="icon" aria-label={t("traceDetail.closeToolDefinition")}>
                   <span className="tool-modal-close">x</span>
-                </button>
+                </Button>
               </DialogClose>
             </DialogHeader>
             <div className="trace-tag-group">

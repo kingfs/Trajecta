@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "./button";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -47,11 +48,10 @@ export function DialogContent({ className, children, showClose = false, closeLab
       >
         {children}
         {showClose ? (
-          <DialogPrimitive.Close
-            aria-label={closeLabel || t("common.close")}
-            className="icon-button absolute top-4 right-4"
-          >
-            <X size={14} aria-hidden="true" />
+          <DialogPrimitive.Close asChild>
+            <Button variant="default" size="icon" aria-label={closeLabel || t("common.close")} className="absolute top-4 right-4">
+              <X size={14} aria-hidden="true" />
+            </Button>
           </DialogPrimitive.Close>
         ) : null}
       </DialogPrimitive.Content>

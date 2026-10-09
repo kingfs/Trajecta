@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
@@ -203,14 +204,16 @@ export function ProviderDetailPage() {
           </div>
           <div className="topbar-meta detail-toolbar">
             <div className="detail-toolbar-actions">
-              <Link className="icon-button" to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
-                <HomeIcon />
-              </Link>
-              <button className="icon-button" type="button" onClick={() => probe.mutate()} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></button>
+              <Button asChild variant="default" size="icon">
+                <Link to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
+                  <HomeIcon />
+                </Link>
+              </Button>
+              <Button variant="default" size="icon" type="button" onClick={() => probe.mutate()} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></Button>
               <DialogTrigger asChild>
-                <button className="icon-button" type="button" title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></button>
+                <Button variant="default" size="icon" type="button" title={t("channelDetail.editProvider")} aria-label={t("channelDetail.editProvider")}><EditIcon /></Button>
               </DialogTrigger>
-              <button className="icon-button" type="button" onClick={confirmDeleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></button>
+              <Button variant="default" size="icon" type="button" onClick={confirmDeleteProvider} disabled={busy === "delete-provider"} title={t("providers.deleteTitle")} aria-label={t("providers.deleteTitle")}><DeleteIcon /></Button>
               <Switch checked={Boolean(provider.enabled)} onChange={(enabled) => setProviderEnabled.mutate(enabled)} disabled={busy === "provider"} label={t("channelDetail.providerEnabled")} />
             </div>
             <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
@@ -371,7 +374,7 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
             <DialogTitle>{t("channelDetail.editProvider")}</DialogTitle>
           </div>
           <DialogClose asChild>
-            <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+            <Button variant="default" size="icon" type="button" aria-label={t("common.close")}>x</Button>
           </DialogClose>
         </DialogHeader>
         <div className="provider-form provider-form-modal">
@@ -466,9 +469,9 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
         <div className="action-group">
           {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={t("channelDetail.modelEnabled", { model: item.model })} /> : <span>{t("channelDetail.historyOnly")}</span>}
           {canDelete ? (
-            <button className="icon-button" type="button" onClick={onDelete} disabled={deleting} title={t("channelDetail.deleteModel")} aria-label={t("channelDetail.deleteModelAria", { model: item.model })}>
+            <Button variant="default" size="icon" type="button" onClick={onDelete} disabled={deleting} title={t("channelDetail.deleteModel")} aria-label={t("channelDetail.deleteModelAria", { model: item.model })}>
               <DeleteIcon />
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>

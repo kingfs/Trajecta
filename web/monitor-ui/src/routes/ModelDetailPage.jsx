@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -60,9 +61,11 @@ export function ModelDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/models" title={t("models.back")} aria-label={t("models.back")}>
-              <HomeIcon />
-            </Link>
+            <Button asChild variant="default" size="icon">
+              <Link to="/models" title={t("models.back")} aria-label={t("models.back")}>
+                <HomeIcon />
+              </Link>
+            </Button>
           </div>
           <span className="badge">{detail.data?.refreshed_at ? formatTime(detail.data.refreshed_at) : "..."}</span>
         </div>

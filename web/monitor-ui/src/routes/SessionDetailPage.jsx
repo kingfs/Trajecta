@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -113,9 +114,11 @@ export function SessionDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/traces?tab=sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
-              <HomeIcon />
-            </Link>
+            <Button asChild variant="default" size="icon">
+              <Link to="/traces?tab=sessions" title={t("sessionDetail.backToSessions")} aria-label={t("sessionDetail.backToSessions")}>
+                <HomeIcon />
+              </Link>
+            </Button>
             <button className="ghost-button" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportTrajectory.mutate()}>
               {exportTrajectory.isPending ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
             </button>
@@ -216,9 +219,11 @@ export function SessionDetailPage() {
                     <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
                       {t("requests.raw")}
                     </Link>
-                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
-                      <ViewIcon />
-                    </Link>
+                    <Button asChild variant="default" size="icon">
+                      <Link to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
+                        <ViewIcon />
+                      </Link>
+                    </Button>
                   </div>
                 </div>
               </article>
@@ -464,9 +469,11 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
         <Link className="ghost-button" to={rawLink}>
           {t("requests.raw")}
         </Link>
-        <Link className="icon-button" to={traceLink} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
-          <ViewIcon />
-        </Link>
+        <Button asChild variant="default" size="icon">
+          <Link to={traceLink} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
+            <ViewIcon />
+          </Link>
+        </Button>
       </div>
     </div>
   );
