@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
-import { I18nProvider } from "./lib/i18n";
+import { I18nProvider, bootstrapI18n } from "./lib/i18n";
 import { applyTheme } from "./lib/theme";
 
 // tokens.css stays outside the cascade layers: it only declares custom
@@ -14,12 +14,17 @@ import "./styles/tailwind.css";
 
 applyTheme();
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <I18nProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </I18nProvider>
-  </React.StrictMode>,
-);
+// The active locale is a separate chunk, so the app cannot render before it has
+// been fetched. bootstrapI18n falls back to English if that fetch fails, so a
+// broken locale degrades to English instead of a blank page.
+bootstrapI18n().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <React.StrictMode>
+      <I18nProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </I18nProvider>
+    </React.StrictMode>,
+  );
+});

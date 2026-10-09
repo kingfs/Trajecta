@@ -1119,3 +1119,76 @@ test("trace detail toolbar shows token chips and the cache rate", async ({ page 
   await expect(toolbar.getByTitle(/^total tokens · [\d,]+$/)).toBeVisible();
   await expect(toolbar.getByTitle(/^cache hit rate · .*% \([\d,]+ \/ [\d,]+\)$/)).toBeVisible();
 });
+
+// Messages live in per-language chunks that are fetched on demand. Before the
+// split every Chinese and English string was inlined in the entry chunk, so both
+// languages were downloaded by every reader.
+function recordLocaleChunks(page) {
+  const locales = [];
+  page.on("request", (request) => {
+    const match = new URL(request.url()).pathname.match(/\/(zh-CN|en)-[A-Za-z0-9_-]+\.js$/);
+    if (match) {
+      locales.push(match[1]);
+    }
+  });
+  return locales;
+}
+
+test("only the active language chunk is fetched", async ({ page }) => {
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  expect(locales).toContain("en");
+  expect(locales).not.toContain("zh-CN");
+});
+
+test("pinning the other language fetches only that chunk", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("trajecta.monitor.language", "zh-CN");
+  });
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  expect(locales).toContain("zh-CN");
+  expect(locales).not.toContain("en");
+});
+
+// Switching at runtime loads the other chunk and re-renders without a reload.
+// Desktop only: the mobile project's emulated viewport scales pointer
+// coordinates against a 412px document inside an 826px layout viewport, so
+// Playwright's click lands on the dialog container instead of the button.
+// elementFromPoint at the button's own centre does resolve to the button, so
+// this is an emulation artifact rather than a hit-testing bug.
+test("switching language at runtime loads the other chunk", async ({ page, isMobile }) => {
+  test.skip(isMobile, "mobile emulation scales click coordinates off the button");
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Account" }).first().click();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("button", { name: "中文" }).click();
+  await page.locator(".nav-modal .nav-modal-actions .ghost-button").first().click();
+
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  expect(locales).toContain("zh-CN");
+});
+
+// i18next is configured with single-brace interpolation and with both the key
+// and namespace separators disabled, because the keys are flat names that
+// contain dots. Each of these is a case that configuration exists for, observed
+// through the rendered UI rather than through the module.
+test("flat dotted keys and single-brace interpolation render through the UI", async ({ page }) => {
+  await page.goto("/traces");
+
+  // A dotted key resolves literally, not as a path into a nested object.
+  await expect(page.getByTitle(/^total duration · /).first()).toBeVisible();
+  // Interpolation uses single braces. `/models` renders providers.missingUsage,
+  // which passes a `count`; there is no plural key, so i18next must resolve the
+  // base key rather than falling back to the key name.
+  await page.goto("/models");
+  await expect(page.getByText(/^1 missing usage$/).first()).toBeVisible();
+  // The remaining edge cases - a message whose whole value is a brace pair, and
+  // a key no language defines - have no screen that renders them on demand, so
+  // they live in tests-unit/i18n.test.js instead.
+});

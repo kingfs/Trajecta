@@ -32,11 +32,19 @@ tasks:
       - bun run build
 
   ui:test:
-    desc: Run browser smoke tests for the Monitor UI
+    desc: Run unit and browser smoke tests for the Monitor UI
     dir: web/monitor-ui
     cmds:
       - bun install --frozen-lockfile
+      - bun run test:unit
       - bun run test:ui
+
+  ui:test:unit:
+    desc: Run the Monitor UI unit tests
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run test:unit
 
   ui:test:real:
     desc: Run browser tests against the real Go Monitor server fixture
