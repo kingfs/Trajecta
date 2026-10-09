@@ -492,33 +492,6 @@ input[type="radio"] {
 }
 
 /* The switch keeps its pill shape but adopts the semantic palette. */
-.switch-control {
-  width: 36px;
-  height: 20px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
-}
-
-.switch-control span {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  background: var(--text-tertiary);
-  transition: transform var(--transition-fast), background var(--transition-fast);
-}
-
-.switch-control-on {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.switch-control-on span {
-  background: var(--on-accent);
-  transform: translateX(16px);
-}
-
 /* --------------------------------------------------------------- tables */
 
 .trace-table {

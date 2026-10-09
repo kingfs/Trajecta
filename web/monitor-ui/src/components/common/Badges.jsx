@@ -1,4 +1,27 @@
 import React from "react";
+import {
+  ArrowLeftToLine,
+  ArrowRightFromLine,
+  CircleAlert,
+  Clock,
+  ClockArrowUp,
+  Download,
+  Eye,
+  Gauge,
+  House,
+  Layers,
+  Layers3,
+  Menu,
+  Pencil,
+  Percent,
+  Plus,
+  Radar,
+  Sigma,
+  Sparkles,
+  Timer,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { formatDuration, formatRawDuration, formatRawNumber, formatTokenCount } from "../../lib/monitor";
 
 export function InlineTag({ children, tone = "default" }) {
@@ -53,210 +76,112 @@ export function DetailMetaPill({ label, value, mono = false }) {
   );
 }
 
+/*
+ * The metric glyphs come from lucide-react rather than from the twelve ad-hoc
+ * 16x16 paths that used to live here. Each one keeps the meaning its
+ * predecessor was drawn to carry, so the icon still tells the reader which
+ * number it belongs to:
+ *
+ *   duration -> Clock            total wall time
+ *   ttft     -> Timer            time to first token
+ *   pp       -> Zap              prefill (prompt processing) speed
+ *   tg       -> Sparkles         generation speed
+ *   rate     -> Gauge            generic throughput
+ *   avg      -> ClockArrowUp     mean over the rows above
+ *   input    -> ArrowLeftToLine  prompt tokens going in
+ *   output   -> ArrowRightFromLine completion tokens coming out
+ *   cached   -> Layers           the part served from cache
+ *   total    -> Sigma            the sum
+ *   percent  -> Percent          a ratio
+ *   failed   -> CircleAlert      requests that did not complete
+ *
+ * `size` is 13px because that is the width the metric row was designed around;
+ * the chip measurements in the smoke suite depend on it.
+ */
+const METRIC_ICONS = {
+  duration: Clock,
+  ttft: Timer,
+  pp: Zap,
+  tg: Sparkles,
+  rate: Gauge,
+  avg: ClockArrowUp,
+  input: ArrowLeftToLine,
+  output: ArrowRightFromLine,
+  cached: Layers,
+  total: Sigma,
+  percent: Percent,
+  failed: CircleAlert,
+};
+
+function MetricIcon({ type = "total" }) {
+  const Icon = METRIC_ICONS[type] || Menu;
+  return <Icon size={13} aria-hidden="true" />;
+}
+
 function IconFrame({ children }) {
   return <span className="icon-frame">{children}</span>;
 }
 
-function MetricIcon({ type = "total" }) {
-  if (type === "duration") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M8 4.7v3.6l2.4 1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "ttft") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M8 2.5v3.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="M4.6 7.2 8 3.8l3.4 3.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M3 9.3h10M3 12.2h7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === "rate") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M3 11.7a5.6 5.6 0 1 1 10 0" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="m8.2 9.2 2.9-2.9" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <circle cx="8" cy="9.4" r="1" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (type === "pp") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M2 10V4a2 2 0 012-2h4l2 2h4a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2z" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M10 5v1.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="m8.8 6.2 1.2-1.2 1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "tg") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M3 3.5h4M3 6.5h6M3 9.5h5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="M13 10.5V7.3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="m11.5 8.5 1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "input") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M14 3.5h-4.5M14 12.5h-4.5M6 8H14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="m6.5 4.5-3.5 3.5 3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "output") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M2 3.5h4.5M2 12.5h4.5M2 8H10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="m9.5 4.5 3.5 3.5-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "cached") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M5 5.5h7v7H5z" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M3.5 3.5h7v7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === "percent") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="m4 12 8-8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <circle cx="5.2" cy="5.2" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <circle cx="10.8" cy="10.8" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      </svg>
-    );
-  }
-  if (type === "total") {
-    // Sigma: the sum a "total tokens" chip reports.
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M11.5 3.5H5l3.4 4.5L5 12.5h6.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (type === "avg") {
-    // A mean line between two extremes.
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M2.5 4.5h11M2.5 11.5h11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" />
-        <path d="M2.5 8h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (type === "failed") {
-    return (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M8 5.2v3.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <circle cx="8" cy="11" r="0.8" fill="currentColor" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3 4.5h10M3 8h10M3 11.5h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-export function PlusIcon() {
+export function PlusIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 5v14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M5 12h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
+      <Plus size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function EditIcon() {
+export function EditIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        <path d="m14 8 2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
+      <Pencil size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function DeleteIcon() {
+export function DeleteIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 7h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M10 11v6M14 11v6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M8 7l1-3h6l1 3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M7 7l1 14h8l1-14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      </svg>
+      <Trash2 size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function ProbeIcon() {
+export function ProbeIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="11" cy="11" r="5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-        <path d="m15 15 4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M11 8v3l2 1.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <Radar size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function ViewIcon() {
+export function ViewIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-        <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      </svg>
+      <Eye size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function DownloadIcon() {
+export function DownloadIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4v10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="m8 11.5 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5 19h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
+      <Download size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function HomeIcon() {
+export function HomeIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 11.5 12 5l8 6.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M7.5 10.5V19h9v-8.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <House size={size} aria-hidden="true" />
     </IconFrame>
   );
 }
 
-export function StackIcon() {
+export function StackIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4 4 8l8 4 8-4-8-4Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="m4 12 8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="m4 16 8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <Layers3 size={size} aria-hidden="true" />
     </IconFrame>
   );
 }

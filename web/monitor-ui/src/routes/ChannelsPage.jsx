@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
@@ -275,18 +275,21 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
     }
   };
 
-  return createPortal(
-    <div className="nav-modal-backdrop" role="presentation">
-      <form className="nav-modal provider-create-modal" onSubmit={submit}>
-        <div className="nav-modal-head">
-          <div>
-            <p className="eyebrow">{t("providers.configuration")}</p>
-            <h2>{t("providers.create")}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>x</button>
-        </div>
-        <div className="provider-form provider-form-modal">
-          <label>{t("providers.name")}<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
+  return (
+    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent className="provider-create-modal">
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <div>
+              <p className="eyebrow">{t("providers.configuration")}</p>
+              <DialogTitle>{t("providers.create")}</DialogTitle>
+            </div>
+            <DialogClose asChild>
+              <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+            </DialogClose>
+          </DialogHeader>
+          <div className="provider-form provider-form-modal">
+            <label>{t("providers.name")}<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
           <label>{t("providers.preset")}<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
           <label className="provider-form-wide">{t("providers.baseURL")}<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
@@ -305,13 +308,13 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           </div>
         ) : null}
         {error ? <p className="auth-error">{error}</p> : null}
-        <div className="nav-modal-actions">
-          <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? t("providers.creating") : t("providers.create")}</button>
-        </div>
-      </form>
-    </div>,
-    document.body,
+          <DialogFooter>
+            <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
+            <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? t("providers.creating") : t("providers.create")}</button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -322,9 +325,9 @@ function ProviderCard({ item, windowValue, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [probeOpen, setProbeOpen] = useState(false);
-  const setEnabled = async (enabled, event) => {
-    event?.preventDefault();
-    event?.stopPropagation();
+  // Called with the next value only. Bubble suppression lives in the Switch,
+  // which is the only place that knows it is nested in a clickable card.
+  const setEnabled = async (enabled) => {
     setSaving(true);
     setError("");
     try {
@@ -443,16 +446,18 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
     previewReport();
   }, []);
 
-  return createPortal(
-    <div className="nav-modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="nav-modal provider-probe-modal" role="dialog" aria-modal="true" aria-labelledby="provider-probe-title" onClick={(event) => event.stopPropagation()}>
-        <div className="nav-modal-head">
+  return (
+    <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent className="provider-probe-modal" aria-labelledby="provider-probe-title">
+        <DialogHeader>
           <div>
             <p className="eyebrow">{provider.provider_preset || "provider"}</p>
-            <h2 id="provider-probe-title">{t("providers.probeTitle")}</h2>
+            <DialogTitle id="provider-probe-title">{t("providers.probeTitle")}</DialogTitle>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>x</button>
-        </div>
+          <DialogClose asChild>
+            <button className="icon-button" type="button" aria-label={t("common.close")}>x</button>
+          </DialogClose>
+        </DialogHeader>
         <div className="provider-probe-dialog-summary">
           <Metric label={t("providers.providerFallback")} value={provider.name || provider.id} />
           <Metric label={t("providers.detected")} value={formatCount(summary.detected)} />
@@ -463,13 +468,12 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
         {report && !row ? <EmptyState title={t("providers.noProbe")} detail={t("providers.noProbeDetail")} compact /> : null}
         {applyResult ? <p className="trace-subline">{t("providers.applyAccepted", { result: formatProviderProbeApplyResult(applyResult, t) })}</p> : null}
         {error ? <EmptyState title={t("providers.probeFailed")} detail={error} tone="danger" compact /> : null}
-        <div className="nav-modal-actions">
+        <DialogFooter>
           <button className="ghost-button" type="button" onClick={previewReport} disabled={busy === "preview"}>{busy === "preview" ? t("providers.probing") : t("providers.runAgain")}</button>
           <button className="ghost-button active" type="button" onClick={applyDetected} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? t("providers.applying") : t("providers.applySuggestions")}</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

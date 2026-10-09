@@ -1,3 +1,4 @@
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
@@ -652,25 +653,29 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
         )}
       </section>
       {schemaTool ? (
-        <div className="tool-modal-backdrop" role="presentation" onClick={() => setSchemaToolName("")}>
-          <div className="tool-modal" role="dialog" aria-modal="true" aria-label={t("traceDetail.toolDefinitionAria", { name: schemaTool.name })} onClick={(event) => event.stopPropagation()}>
-            <div className="tool-modal-head">
+        <Dialog open onOpenChange={(next) => (next ? undefined : setSchemaToolName(""))}>
+          {/* Radix generates the aria-labelledby pair from DialogTitle, so the
+              hand-written aria-label and its interpolation key are gone. */}
+          <DialogContent className="tool-modal" aria-describedby={undefined}>
+            <DialogHeader className="tool-modal-head">
               <div>
                 <p className="eyebrow">{t("traceDetail.toolDefinition")}</p>
-                <h3>{schemaTool.name}</h3>
+                <DialogTitle>{schemaTool.name}</DialogTitle>
               </div>
-              <button className="icon-button" onClick={() => setSchemaToolName("")} aria-label={t("traceDetail.closeToolDefinition")}>
-                <span className="tool-modal-close">x</span>
-              </button>
-            </div>
+              <DialogClose asChild>
+                <button className="icon-button" aria-label={t("traceDetail.closeToolDefinition")}>
+                  <span className="tool-modal-close">x</span>
+                </button>
+              </DialogClose>
+            </DialogHeader>
             <div className="trace-tag-group">
               <InlineTag tone="accent">{schemaTool.source || schemaTool.type || t("traceDetail.toolLabel")}</InlineTag>
               <InlineTag>{buildToolSchemaSummary(schemaTool.parameters)}</InlineTag>
             </div>
             {schemaTool.description ? <p className="tool-description">{schemaTool.description}</p> : null}
             <CodeBlock value={schemaTool.parameters || "{}"} />
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </>
   );

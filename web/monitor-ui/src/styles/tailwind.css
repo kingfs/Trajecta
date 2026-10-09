@@ -60,6 +60,19 @@
   }
 }
 
+/*
+ * Hides the scrollbar on a container that still scrolls. Tailwind has no
+ * built-in for this and the console needs it on the tab strip and the metric
+ * row, both of which overflow horizontally on a phone without wanting a
+ * visible track.
+ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @theme inline {
   /* --- Surfaces ------------------------------------------------------- */
   --color-background: var(--bg-canvas);
@@ -121,9 +134,30 @@
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-pill: var(--radius-pill);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+
+  /*
+   * The project's own type scale, deliberately overriding Tailwind's. These
+   * names already exist in tokens.css and drive every legacy sheet, so without
+   * this the same `text-sm` would mean 13px in a migrated component and 14px in
+   * the legacy rule sitting next to it. A primitive written with utilities and
+   * the sheet it replaces have to agree on the scale.
+   */
+  --text-label: var(--text-label);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+
+  /* The spacing scale, for the same reason: `gap-3` is 12px here and 12px in
+     the legacy sheets, and `p-4` is the same 16px every panel already uses. */
+  --spacing: 4px;
 
   --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
 }

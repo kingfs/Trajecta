@@ -1240,3 +1240,57 @@ test("a write refetches the read it invalidates", async ({ page }) => {
   await page.getByRole("button", { name: "Mark all read" }).click();
   await expect.poll(() => listReads.length).toBe(2);
 });
+
+
+// The tab strip used to declare role="tablist" and a roving tabindex without
+// implementing any of the keyboard behaviour that goes with them, so with only
+// the active tab focusable the other tabs on a page could only be reached with
+// a mouse. Radix implements the pattern; these three assertions are the parts
+// of it that would silently regress.
+test("page tabs are reachable and operable from the keyboard", async ({ page }) => {
+  await page.goto("/traces");
+  const requests = page.getByRole("tab", { name: "Requests" });
+  const sessions = page.getByRole("tab", { name: "Sessions" });
+
+  // The strip is one stop in the tab order: Radix makes the list itself the tab
+  // stop and moves focus to the active tab when it is entered, so the triggers
+  // carry tabindex="-1" until then. Tab therefore reaches the strip, and lands
+  // on the tab that is selected rather than on the first one.
+  await expect(page.getByRole("tablist")).toHaveAttribute("tabindex", "0");
+  await expect(sessions).toHaveAttribute("tabindex", "-1");
+  await page.getByRole("tablist").focus();
+  await expect(requests).toBeFocused();
+
+  await page.keyboard.press("ArrowRight");
+
+  await expect(sessions).toBeFocused();
+  await expect(sessions).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\/traces\?tab=sessions$/);
+
+  // Home and End are part of the pattern too.
+  await page.keyboard.press("Home");
+  await expect(requests).toBeFocused();
+  await expect(page).toHaveURL(/\/traces$/);
+});
+
+// A hand-rolled modal handled Escape and the backdrop, and left everything else
+// to the reader: focus stayed on the page behind it, Tab could walk out, and
+// the background kept scrolling. Radix does all of it, so all of it is asserted.
+test("dialogs trap focus, close on Escape and restore focus to the trigger", async ({ page }) => {
+  await page.goto("/providers");
+  const trigger = page.getByRole("button", { name: "Account" }).first();
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "local" });
+  await expect(dialog).toBeVisible();
+  // Focus moved into the dialog rather than staying on the page behind it.
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  // The page behind cannot scroll while a modal is open.
+  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+

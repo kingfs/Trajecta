@@ -1,7 +1,7 @@
 import React from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "./common/PageHeader";
-import { TabStrip } from "./common/Tabs";
+import { TabStrip, Tabs, TabsContent } from "./common/Tabs";
 import { useI18n } from "../lib/i18n";
 
 /**
@@ -42,10 +42,15 @@ export function TabbedPage({ eyebrow, title, subtitle, tabs, defaultTab, meta })
   return (
     <main className="shell shell-list">
       <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} meta={meta} actions={active.actions} />
-      <TabStrip tabs={tabs} activeId={activeId} onSelect={selectTab} label={t("common.pageSections")} />
-      <div className="page-body" role="tabpanel" id={`tabpanel-${active.id}`} aria-labelledby={`tab-${active.id}`}>
-        {active.element}
-      </div>
+      {/* Radix owns the tab semantics end to end now, so the trigger and the
+          panel it controls are generated from one value and the aria-controls
+          pair is real. The active value still comes from `?tab=`. */}
+      <Tabs value={activeId} onValueChange={selectTab}>
+        <TabStrip tabs={tabs} activeId={activeId} onSelect={selectTab} label={t("common.pageSections")} />
+        <TabsContent value={active.id} className="page-body">
+          {active.element}
+        </TabsContent>
+      </Tabs>
     </main>
   );
 }

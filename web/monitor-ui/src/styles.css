@@ -776,40 +776,6 @@
   gap: 8px;
 }
 
-.switch-control {
-  width: 44px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--border-strong);
-  cursor: pointer;
-}
-
-.switch-control span {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--muted);
-  transition: transform 0.16s ease, background 0.16s ease;
-}
-
-.switch-control-on {
-  border-color: var(--success-border);
-  background: var(--success-border);
-}
-
-.switch-control-on span {
-  transform: translateX(20px);
-  background: var(--green);
-}
-
-.switch-control:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
 
 button:focus-visible,
 input:focus-visible,
@@ -2603,18 +2569,6 @@ a:focus-visible {
 
 .message-jump-link:hover {
   text-decoration: underline;
-}
-
-.tool-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--surface-inset);
-  backdrop-filter: blur(8px);
 }
 
 .tool-modal {

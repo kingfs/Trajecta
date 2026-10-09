@@ -1,38 +1,47 @@
 import React from "react";
 import { MONITOR_WINDOW_OPTIONS } from "../../lib/monitor";
 import { useI18n } from "../../lib/i18n";
+import { TabsContent, TabsList, TabsTrigger, Tabs } from "../ui/tabs";
 
-// TabStrip is the page-level section switch: one row of underline tabs bound to
-// the `?tab=` query parameter by TabbedPage, so every panel of a page is a
-// linkable URL rather than a piece of component state.
+/*
+ * TabStrip is the page-level section switch: one row of underline tabs bound to
+ * the `?tab=` query parameter by TabbedPage, so every panel of a page is a
+ * linkable URL rather than a piece of component state.
+ *
+ * It is a thin adapter over the Radix Tabs primitive now. The hand-written
+ * version had the right ARIA attributes but none of the keyboard behaviour they
+ * imply: with only the active tab focusable and no arrow-key handling, every
+ * other tab was unreachable from the keyboard. Radix implements the pattern.
+ *
+ * The controlled `value`/`onValueChange` pair is what keeps the URL the source
+ * of truth; `Tabs` holds no state of its own here.
+ */
 export function TabStrip({ tabs, activeId, onSelect, label }) {
   return (
-    <div className="tab-strip" role="tablist" aria-label={label}>
-      {tabs.map((tab) => {
-        const selected = tab.id === activeId;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`tab-${tab.id}`}
-            aria-selected={selected}
-            aria-controls={`tabpanel-${tab.id}`}
-            tabIndex={selected ? 0 : -1}
-            className={selected ? "tab-strip-item tab-strip-item-active" : "tab-strip-item"}
-            onClick={() => onSelect(tab.id)}
-          >
-            <span>{tab.label}</span>
-            {tab.count === undefined || tab.count === null ? null : <span className="tab-strip-count">{tab.count}</span>}
-          </button>
-        );
-      })}
-    </div>
+    <TabsList aria-label={label}>
+      {tabs.map((tab) => (
+        <TabsTrigger key={tab.id} value={tab.id} onClick={() => onSelect(tab.id)}>
+          <span>{tab.label}</span>
+          {tab.count === undefined || tab.count === null ? null : (
+            <span className="rounded-pill bg-accent px-1.5 text-label leading-4 font-medium text-muted-foreground">
+              {tab.count}
+            </span>
+          )}
+        </TabsTrigger>
+      ))}
+    </TabsList>
   );
 }
 
+export { Tabs, TabsContent };
+
 // SegmentedControl is the in-card sibling of TabStrip: filters, window pickers
 // and small mutually exclusive choices that should not look like navigation.
+//
+// It stays a hand-written group of buttons on purpose. Radix's ToggleGroup is
+// the equivalent primitive, but these are `aria-pressed` buttons rather than
+// tabs, they carry no keyboard pattern beyond Tab and Enter, and the pill
+// styling is already shared with the legacy `.view-toggle` in four pages.
 export function SegmentedControl({ options = [], value, onChange, label }) {
   if (!options.length) {
     return null;
