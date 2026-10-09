@@ -1,28 +1,40 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
-import { I18nProvider } from "./lib/i18n";
-import { applyTheme } from "./lib/theme";
+import { I18nProvider, bootstrapI18n } from "./lib/i18n";
+import { queryClient } from "./lib/queryClient";
+import { MotionProvider } from "./lib/motion";
+import { applyTheme, watchSystemTheme } from "./lib/theme";
 
-// Load order matters: tokens define the vocabulary, styles.css holds the
-// pre-redesign page rules, and the three layers after it re-declare the frame
-// and the shared primitives on top of those rules.
+// tokens.css stays outside the cascade layers: it only declares custom
+// properties, and the theme attribute selectors it uses have to keep beating
+// the `:root` defaults. Everything else is imported by tailwind.css, which
+// demotes it into a `legacy` layer below Tailwind's utilities.
 import "./styles/tokens.css";
-import "./styles.css";
-import "./styles/base.css";
-import "./styles/layout.css";
-import "./styles/components.css";
-import "./styles/pages.css";
+import "./styles/tailwind.css";
 
 applyTheme();
+// index.html sets the same value before first paint; this keeps "system" honest
+// when the OS preference changes while the page is open.
+watchSystemTheme();
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <I18nProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </I18nProvider>
-  </React.StrictMode>,
-);
+// The active locale is a separate chunk, so the app cannot render before it has
+// been fetched. bootstrapI18n falls back to English if that fetch fails, so a
+// broken locale degrades to English instead of a blank page.
+bootstrapI18n().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <MotionProvider>
+          <I18nProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </I18nProvider>
+        </MotionProvider>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+});

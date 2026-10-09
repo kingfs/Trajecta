@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>trajecta monitor</title>
+    <!--
+      Set the theme before the stylesheet paints. applyTheme() in main.jsx does the
+      same thing, but it runs after the first paint, which showed a dark frame to
+      anyone who had chosen light. Kept in step with resolveTheme() by hand: it has
+      to be inline, because a fetched module is a request too late.
+    -->
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = window.localStorage.getItem("trajecta.monitor.theme");
+        } catch (error) {
+          /* private mode: fall through to the system preference */
+        }
+        var theme =
+          stored === "dark" || stored === "light"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </head>
   <body>

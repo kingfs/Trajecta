@@ -72,7 +72,7 @@ samp,
 
 /* Every interactive element shares one visible focus ring. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-solid);
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }

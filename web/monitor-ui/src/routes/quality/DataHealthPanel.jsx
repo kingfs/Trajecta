@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -20,14 +20,8 @@ export function DataHealthPanel() {
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const [refreshTick, setRefreshTick] = useState(0);
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue, refreshTick]);
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue, refreshTick]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
 
   const observation = data?.observation || {};
   const analysis = data?.analysis || {};

@@ -227,8 +227,8 @@
 
 .ghost-button.active,
 .wrap-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: var(--on-accent);
 }
 
@@ -432,7 +432,7 @@ select:focus,
 textarea:focus,
 .filter-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -449,7 +449,7 @@ input[type="checkbox"],
 input[type="radio"] {
   width: 15px;
   height: 15px;
-  accent-color: var(--accent);
+  accent-color: var(--accent-solid);
   cursor: pointer;
 }
 
@@ -492,33 +492,6 @@ input[type="radio"] {
 }
 
 /* The switch keeps its pill shape but adopts the semantic palette. */
-.switch-control {
-  width: 36px;
-  height: 20px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
-}
-
-.switch-control span {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  background: var(--text-tertiary);
-  transition: transform var(--transition-fast), background var(--transition-fast);
-}
-
-.switch-control-on {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.switch-control-on span {
-  background: var(--on-accent);
-  transform: translateX(16px);
-}
-
 /* --------------------------------------------------------------- tables */
 
 .trace-table {
@@ -658,7 +631,7 @@ input[type="radio"] {
 }
 
 .empty-state-danger {
-  border-color: var(--danger);
+  border-color: var(--danger-solid);
   border-style: solid;
   background: var(--danger-soft);
 }
@@ -732,8 +705,76 @@ input[type="radio"] {
   display: grid;
   place-items: center;
   padding: var(--space-6);
-  background: rgba(6, 8, 12, 0.62);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
+}
+
+/*
+ * Dialog enter and exit.
+ *
+ * Keyframes rather than the motion library: Radix already publishes
+ * `data-state`, and its Presence keeps a closing element mounted until the
+ * animation on it ends, so a CSS animation gets a real exit transition for free.
+ * Driving this from JavaScript would mean holding the exit in AnimatePresence
+ * and rendering the content through `forceMount`, which is more moving parts for
+ * the same result.
+ *
+ * The transform composes with the `translate` property Tailwind uses to centre
+ * the card (individual transform properties apply before `transform`), so the
+ * card stays centred while it scales.
+ */
+@keyframes nav-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes nav-modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+}
+
+@keyframes nav-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes nav-backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.nav-modal-backdrop[data-state="open"] {
+  animation: nav-backdrop-in 160ms var(--ease-out-soft);
+}
+
+.nav-modal-backdrop[data-state="closed"] {
+  animation: nav-backdrop-out 120ms var(--ease-out-soft);
+}
+
+.nav-modal[data-state="open"] {
+  animation: nav-modal-in 200ms var(--ease-out-soft);
+}
+
+.nav-modal[data-state="closed"] {
+  animation: nav-modal-out 120ms var(--ease-out-soft);
+}
+
+/* The operating system setting wins in both directions: no enter, no exit, and
+   no waiting for one. The motion library is told the same thing through
+   MotionConfig's reducedMotion="user". */
+@media (prefers-reduced-motion: reduce) {
+  /* `[data-state]` rather than a bare class: a media query adds no specificity,
+     so these have to weigh the same as the rules they are switching off. */
+  .nav-modal-backdrop[data-state],
+  .nav-modal[data-state] {
+    animation: none;
+  }
 }
 
 .nav-modal {
@@ -745,6 +786,17 @@ input[type="radio"] {
   border-radius: var(--radius-xl);
   background: var(--surface-1);
   box-shadow: var(--shadow-lg);
+}
+
+/* Width modifiers for a modal, next to the .nav-modal rule they modify rather
+   than in styles.css: that file loads first, so a width declared there lost to
+   .nav-modal's own and the modifier silently did nothing. */
+.provider-create-modal {
+  width: min(620px, 100%);
+}
+
+.provider-edit-modal {
+  width: min(720px, 100%);
 }
 
 .nav-modal-head {
@@ -983,7 +1035,7 @@ input[type="radio"] {
   gap: 6px;
   margin: var(--space-3) 0;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--warning);
+  border: 1px solid var(--warning-solid);
   border-radius: var(--radius-lg);
   background: var(--warning-soft);
   font-size: var(--text-sm);
@@ -1036,16 +1088,16 @@ input[type="radio"] {
 .meter-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--accent-solid);
   transition: width var(--transition-base);
 }
 
 .meter-warning .meter-fill {
-  background: var(--warning);
+  background: var(--warning-solid);
 }
 
 .meter-danger .meter-fill {
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 
 /* Per-core CPU strip: one thin meter per core, read left to right. */

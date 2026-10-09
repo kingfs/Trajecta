@@ -55,7 +55,7 @@
 
 .auth-panel input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-solid);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -152,7 +152,7 @@
 }
 
 .trace-row-group {
-  box-shadow: inset 2px 0 0 var(--danger);
+  box-shadow: inset 2px 0 0 var(--danger-solid);
 }
 
 .trace-failure-panel {
@@ -166,7 +166,7 @@
 }
 
 .routing-timeline-bar-active {
-  background: var(--accent);
+  background: var(--accent-solid);
 }
 
 .timeline-node {
@@ -193,20 +193,10 @@
 :root[data-theme="light"] .wrap-toggle.active,
 :root[data-theme="light"] .badge-live {
   border-color: transparent;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
 }
 
-@media (prefers-color-scheme: light) {
-  :root[data-theme="system"] .ghost-button.active,
-  :root[data-theme="system"] .view-toggle .ghost-button.active,
-  :root[data-theme="system"] .wrap-toggle.active,
-  :root[data-theme="system"] .badge-live {
-    border-color: transparent;
-    background: var(--accent);
-    color: var(--on-accent);
-  }
-}
 
 /* Recharts renders a fixed-size wrapper; keep the legend from overlapping the
    plot when a chart has more than two series. */

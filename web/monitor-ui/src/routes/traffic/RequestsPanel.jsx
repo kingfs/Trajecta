@@ -19,7 +19,6 @@ export function RequestsPanel() {
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
   const observation = searchParams.get("observation") || "";
-  const [refreshTick, setRefreshTick] = useState(0);
   const [filters, setFilters] = useState({ query, provider, model, observation });
   const requestParams = new URLSearchParams({
     page: String(page),
@@ -37,14 +36,7 @@ export function RequestsPanel() {
   if (observation) {
     requestParams.set("observation", observation);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation, refreshTick]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRefreshTick((tick) => tick + 1);
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation], { refetchInterval: REFRESH_MS });
 
   useEffect(() => {
     setFilters({ query, provider, model, observation });

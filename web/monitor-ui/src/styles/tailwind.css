@@ -1,0 +1,177 @@
+/*
+ * Tailwind CSS v4 entry point.
+ *
+ * The Monitor is being migrated from a hand-written stylesheet to Tailwind plus
+ * shadcn-style primitives, and the two have to coexist while that happens. The
+ * mechanism is a cascade layer: every pre-existing sheet is imported into
+ * `legacy`, which is declared first and therefore has the lowest priority, so a
+ * utility class always wins over a page rule without anyone having to reason
+ * about specificity or source order.
+ *
+ *   layer order: legacy < theme < base < components < utilities
+ *
+ * The order is established by the sequence of the imports below, not by the
+ * `@layer` statement at the top: the minifier drops that statement as redundant
+ * because every layer is declared by an actual block, and CSS creates layers in
+ * order of first appearance. Moving an import above another therefore changes
+ * who wins.
+ *
+ * Tailwind's preflight is deliberately not imported. It resets element defaults
+ * (margins, list markers, heading sizes, border colors) that 3800 lines of
+ * `styles.css` were written against, so adopting it would be a restyle of every
+ * page rather than a migration. `base.css` already carries the reset the
+ * Monitor actually needs.
+ *
+ * `@theme inline` is the bridge between the two vocabularies: the raw semantic
+ * tokens in `tokens.css` stay the single source of truth for colour, and the
+ * names below are what Tailwind utilities and copied shadcn/ui components
+ * reference. `inline` matters — without it Tailwind would emit a second,
+ * frozen copy of each value instead of resolving through the variable that the
+ * theme layer swaps.
+ */
+
+@layer legacy, theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@import "../styles.css" layer(legacy);
+@import "./base.css" layer(legacy);
+@import "./layout.css" layer(legacy);
+@import "./components.css" layer(legacy);
+@import "./pages.css" layer(legacy);
+
+@source "../**/*.{js,jsx,ts,tsx}";
+@source "../index.html";
+
+/*
+ * Dark mode is driven by the `data-theme` attribute `lib/theme.ts` writes, not
+ * by a `.dark` class or a bare media query, and "system" has to keep following
+ * the OS. Both spellings are declared so `dark:` utilities work on any page.
+ */
+/* `data-theme` always carries the theme in use: applyTheme() resolves "system"
+   against prefers-color-scheme, so `dark:` needs one selector rather than a
+   selector plus a media query that would have to be kept in step with it. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+}
+
+/*
+ * Hides the scrollbar on a container that still scrolls. Tailwind has no
+ * built-in for this and the console needs it on the tab strip and the metric
+ * row, both of which overflow horizontally on a phone without wanting a
+ * visible track.
+ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@theme inline {
+  /* --- Surfaces ------------------------------------------------------- */
+  --color-background: var(--bg-canvas);
+  --color-card: var(--surface-1);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--surface-1);
+  --color-popover-foreground: var(--text-primary);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--text-secondary);
+  --color-input: var(--surface-inset);
+
+  /* shadcn/ui spells "hover surface" as `accent`; the raw brand hue keeps the
+     name it has in tokens.css, so `bg-accent` and `text-brand` never collide. */
+  --color-accent: var(--surface-3);
+  --color-accent-foreground: var(--text-primary);
+
+  /* --- Text ----------------------------------------------------------- */
+  --color-foreground: var(--text-primary);
+  --color-faint: var(--text-tertiary);
+  --color-inverse: var(--text-inverse);
+
+  /* --- Lines ---------------------------------------------------------- */
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
+  /* --- Brand and status ----------------------------------------------- */
+  /* Each hue has four jobs and therefore four names: the tone used for text and
+     icons (`brand`, `success`), the fill (`-solid`), the tint and its border
+     (`-soft`, `-border`), and the label that goes on the tint (`-strong`). */
+  --color-brand: var(--accent);
+  --color-brand-strong: var(--accent-strong);
+  --color-brand-solid: var(--accent-solid);
+  --color-brand-hover: var(--accent-hover);
+  --color-brand-soft: var(--accent-soft);
+  --color-brand-border: var(--accent-border);
+  --color-primary: var(--accent-solid);
+  --color-primary-foreground: var(--on-accent);
+  --color-ring: var(--accent-border);
+
+  --color-success: var(--success);
+  --color-success-strong: var(--success-strong);
+  --color-success-solid: var(--success-solid);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-strong: var(--warning-strong);
+  --color-warning-solid: var(--warning-solid);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-warning-foreground: var(--on-warning);
+  --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --color-destructive: var(--danger-solid);
+  --color-destructive-foreground: var(--on-danger);
+  --color-info: var(--info);
+  --color-info-strong: var(--info-strong);
+  --color-info-solid: var(--info-solid);
+  --color-info-soft: var(--info-soft);
+  --color-info-border: var(--info-border);
+  --color-violet: var(--violet);
+  --color-violet-strong: var(--violet-strong);
+  --color-violet-solid: var(--violet-solid);
+  --color-violet-soft: var(--violet-soft);
+  --color-violet-border: var(--violet-border);
+
+  /* --- Radius, type, motion ------------------------------------------- */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-pill: var(--radius-pill);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /*
+   * The project's own type scale, deliberately overriding Tailwind's. These
+   * names already exist in tokens.css and drive every legacy sheet, so without
+   * this the same `text-sm` would mean 13px in a migrated component and 14px in
+   * the legacy rule sitting next to it. A primitive written with utilities and
+   * the sheet it replaces have to agree on the scale.
+   */
+  --text-label: var(--text-label);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+
+  /* The spacing scale, for the same reason: `gap-3` is 12px here and 12px in
+     the legacy sheets, and `p-4` is the same 16px every panel already uses. */
+  --spacing: 4px;
+
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}

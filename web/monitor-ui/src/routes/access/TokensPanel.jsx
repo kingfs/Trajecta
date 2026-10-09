@@ -3,11 +3,13 @@ import { InlineTag, PlusIcon } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
+import { useRefresh } from "../../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 
 export function TokensPanel() {
+  const refresh = useRefresh();
   const { t } = useI18n();
   const [name, setName] = useState("local-dev");
   const [ttl, setTTL] = useState("");
@@ -16,9 +18,8 @@ export function TokensPanel() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [busyToken, setBusyToken] = useState(0);
-  const [refreshTick, setRefreshTick] = useState(0);
   const [showAll, setShowAll] = useState(false);
-  const tokens = useJSON(apiPaths.authTokens, [refreshTick]);
+  const tokens = useJSON(apiPaths.authTokens, []);
   const items = tokens.data?.items || [];
   const visibleItems = showAll ? items : items.filter((item) => item.status === "active");
   const summary = useMemo(() => summarizeTokens(items), [items]);
@@ -31,7 +32,7 @@ export function TokensPanel() {
     try {
       const payload = await postJSON(apiPaths.authTokens, { name, ttl, scope });
       setCreated(payload);
-      setRefreshTick((tick) => tick + 1);
+      refresh();
     } catch (err) {
       setError(err.message || t("tokens.createError"));
     } finally {
@@ -44,7 +45,7 @@ export function TokensPanel() {
     setError("");
     try {
       await requestJSON(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { method: "DELETE" });
-      setRefreshTick((tick) => tick + 1);
+      refresh();
     } catch (err) {
       setError(err.message || t("tokens.revokeError"));
     } finally {
@@ -60,7 +61,7 @@ export function TokensPanel() {
     setError("");
     try {
       await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(item.id)}`, { delete: "1" }));
-      setRefreshTick((tick) => tick + 1);
+      refresh();
     } catch (err) {
       setError(err.message || t("tokens.deleteError"));
     } finally {

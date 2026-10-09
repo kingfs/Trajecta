@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { MultiLineChart } from "../components/common/Charts";
@@ -39,17 +39,9 @@ export function OverviewPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const [refreshTick, setRefreshTick] = useState(0);
   const [breakdownKind, setBreakdownKind] = useState("models");
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue, refreshTick]);
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue, refreshTick]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRefreshTick((tick) => tick + 1);
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue], { refetchInterval: REFRESH_MS });
 
   const summary = data?.summary || {};
   const breakdown = data?.breakdown || {};

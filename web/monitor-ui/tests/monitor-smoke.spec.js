@@ -17,6 +17,9 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/events/summary") {
       return route.fulfill({ json: eventSummaryPayload() });
     }
+    if (path === "/api/events/read-all" && method === "POST") {
+      return route.fulfill({ json: { updated: 3 } });
+    }
     if (path === "/api/events") {
       expect(url.searchParams.get("window")).toBe("all");
       expect(url.searchParams.get("status")).toBe("unread");
@@ -1118,4 +1121,346 @@ test("trace detail toolbar shows token chips and the cache rate", async ({ page 
   await expect(toolbar.getByTitle(/^input tokens · [\d,]+$/)).toBeVisible();
   await expect(toolbar.getByTitle(/^total tokens · [\d,]+$/)).toBeVisible();
   await expect(toolbar.getByTitle(/^cache hit rate · .*% \([\d,]+ \/ [\d,]+\)$/)).toBeVisible();
+});
+
+// Messages live in per-language chunks that are fetched on demand. Before the
+// split every Chinese and English string was inlined in the entry chunk, so both
+// languages were downloaded by every reader.
+function recordLocaleChunks(page) {
+  const locales = [];
+  page.on("request", (request) => {
+    const match = new URL(request.url()).pathname.match(/\/(zh-CN|en)-[A-Za-z0-9_-]+\.js$/);
+    if (match) {
+      locales.push(match[1]);
+    }
+  });
+  return locales;
+}
+
+test("only the active language chunk is fetched", async ({ page }) => {
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  expect(locales).toContain("en");
+  expect(locales).not.toContain("zh-CN");
+});
+
+test("pinning the other language fetches only that chunk", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("trajecta.monitor.language", "zh-CN");
+  });
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  expect(locales).toContain("zh-CN");
+  expect(locales).not.toContain("en");
+});
+
+// Switching at runtime loads the other chunk and re-renders without a reload.
+// Desktop only: the mobile project's emulated viewport scales pointer
+// coordinates against a 412px document inside an 826px layout viewport, so
+// Playwright's click lands on the dialog container instead of the button.
+// elementFromPoint at the button's own centre does resolve to the button, so
+// this is an emulation artifact rather than a hit-testing bug.
+test("switching language at runtime loads the other chunk", async ({ page, isMobile }) => {
+  test.skip(isMobile, "mobile emulation scales click coordinates off the button");
+  const locales = recordLocaleChunks(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Account" }).first().click();
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("button", { name: "中文" }).click();
+  await page.locator(".nav-modal .nav-modal-actions .ghost-button").first().click();
+
+  await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+  expect(locales).toContain("zh-CN");
+});
+
+// i18next is configured with single-brace interpolation and with both the key
+// and namespace separators disabled, because the keys are flat names that
+// contain dots. Each of these is a case that configuration exists for, observed
+// through the rendered UI rather than through the module.
+test("flat dotted keys and single-brace interpolation render through the UI", async ({ page }) => {
+  await page.goto("/traces");
+
+  // A dotted key resolves literally, not as a path into a nested object.
+  await expect(page.getByTitle(/^total duration · /).first()).toBeVisible();
+  // Interpolation uses single braces. `/models` renders providers.missingUsage,
+  // which passes a `count`; there is no plural key, so i18next must resolve the
+  // base key rather than falling back to the key name.
+  await page.goto("/models");
+  await expect(page.getByText(/^1 missing usage$/).first()).toBeVisible();
+  // The remaining edge cases - a message whose whole value is a brace pair, and
+  // a key no language defines - have no screen that renders them on demand, so
+  // they live in tests-unit/i18n.test.js instead.
+});
+
+// recharts and its dependency tree are about 360 kB, a third of the bundle, and
+// only four pages draw a chart. They are a lazy chunk now, so the entry stays
+// free of them and a reader who never opens a chart page never downloads them.
+test("the chart library is a lazy chunk fetched only where a chart is drawn", async ({ page }) => {
+  const charts = [];
+  page.on("response", (response) => {
+    if (/\/ChartsImpl-[A-Za-z0-9_-]+\.js$/.test(new URL(response.url()).pathname)) {
+      charts.push(response.url());
+    }
+  });
+
+  // The events page has no chart on it.
+  await page.goto("/events");
+  await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible();
+  expect(charts).toEqual([]);
+
+  // The providers page draws two of them, and the placeholder is replaced by the
+  // real thing once the chunk resolves.
+  await page.goto("/providers");
+  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  await expect(page.locator(".recharts-surface").first()).toBeVisible();
+  expect(charts.length).toBe(1);
+});
+
+// Every write handler used to bump a per-page `refreshTick` counter that the
+// reads were keyed on. That counter is gone: a write now invalidates the query
+// cache. If invalidation did not reach the read, the page would silently keep
+// showing pre-write data, so the refetch itself is what this asserts.
+test("a write refetches the read it invalidates", async ({ page }) => {
+  const listReads = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/events" && request.method() === "GET") {
+      listReads.push(url.search);
+    }
+  });
+
+  await page.goto("/events");
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+  expect(listReads.length).toBe(1);
+
+  await page.getByRole("button", { name: "Mark all read" }).click();
+  await expect.poll(() => listReads.length).toBe(2);
+});
+
+
+// The tab strip used to declare role="tablist" and a roving tabindex without
+// implementing any of the keyboard behaviour that goes with them, so with only
+// the active tab focusable the other tabs on a page could only be reached with
+// a mouse. Radix implements the pattern; these three assertions are the parts
+// of it that would silently regress.
+test("page tabs are reachable and operable from the keyboard", async ({ page }) => {
+  await page.goto("/traces");
+  const requests = page.getByRole("tab", { name: "Requests" });
+  const sessions = page.getByRole("tab", { name: "Sessions" });
+
+  // The strip is one stop in the tab order: Radix makes the list itself the tab
+  // stop and moves focus to the active tab when it is entered, so the triggers
+  // carry tabindex="-1" until then. Tab therefore reaches the strip, and lands
+  // on the tab that is selected rather than on the first one.
+  await expect(page.getByRole("tablist")).toHaveAttribute("tabindex", "0");
+  await expect(sessions).toHaveAttribute("tabindex", "-1");
+  await page.getByRole("tablist").focus();
+  await expect(requests).toBeFocused();
+
+  await page.keyboard.press("ArrowRight");
+
+  await expect(sessions).toBeFocused();
+  await expect(sessions).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\/traces\?tab=sessions$/);
+
+  // Home and End are part of the pattern too.
+  await page.keyboard.press("Home");
+  await expect(requests).toBeFocused();
+  await expect(page).toHaveURL(/\/traces$/);
+});
+
+// A hand-rolled modal handled Escape and the backdrop, and left everything else
+// to the reader: focus stayed on the page behind it, Tab could walk out, and
+// the background kept scrolling. Radix does all of it, so all of it is asserted.
+test("dialogs trap focus, close on Escape and restore focus to the trigger", async ({ page }) => {
+  await page.goto("/providers");
+  const trigger = page.getByRole("button", { name: "Account" }).first();
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "local" });
+  await expect(dialog).toBeVisible();
+  // Focus moved into the dialog rather than staying on the page behind it.
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  // The page behind cannot scroll while a modal is open.
+  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+// The provider edit form on the channel detail page was the last dialog still
+// written by hand - a `createPortal` into `.nav-modal-backdrop` with no focus
+// trap and no focus restore - so it is the one that a future edit could quietly
+// leave behind when the shared primitive changes.
+test("the provider edit dialog is the shared dialog primitive", async ({ page }) => {
+  await page.goto("/providers/openai-primary");
+  const trigger = page.getByRole("button", { name: "Edit provider" }).first();
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog", { name: "Edit provider" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  // It keeps its own width rather than the default card's 560px. Below 720px the
+  // viewport is the cap, which is what `min(720px, 100%)` means.
+  const width = await dialog.evaluate((e) => ({
+    actual: parseFloat(getComputedStyle(e).width),
+    cap: Math.min(720, window.innerWidth),
+  }));
+  expect(Math.round(width.actual)).toBe(Math.round(width.cap));
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+
+
+// The palette is generated OKLCH: custom properties in two theme blocks that
+// `applyTheme()` and an inline script in index.html select between. None of that
+// is visible to a build, so these assert the two ways it can silently break -
+// a colour syntax the browser rejects, which leaves the property empty, and a
+// theme that is not the one the reader asked for.
+// The light-theme overrides used to be written twice: once for
+// `data-theme="light"` and once inside `@media (prefers-color-scheme: light)`
+// for `data-theme="system"`. Resolving the theme in JavaScript left the second
+// copy unreachable, and folding the two together is the kind of edit that can
+// hand one component another's declaration. This sweeps every route in light
+// mode and asserts that nothing that should be a light surface came out dark:
+// the panels, cards, tables, filters, buttons and tags are all near-white.
+test("no light-mode surface resolves dark on any route", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/providers", "/routing", "/connect", "/system"];
+  // Elements with no intentional dark state. `.ghost-button.active`, `.badge-live`
+  // and the accent fills are deliberately inverted or coloured and are excluded.
+  const SURFACES = [
+    "header",
+    ".panel",
+    ".stat-card",
+    ".trace-table",
+    ".filter-bar",
+    ".ghost-button:not(.active)",
+    ".icon-button",
+    ".inline-tag",
+    ".detail-meta-pill",
+    ".provider-model-card",
+    ".model-catalog-row",
+    ".timeline-card",
+    ".payload-card",
+    ".breakdown-card",
+  ];
+  const offenders = [];
+  for (const route of ROUTES) {
+    await page.goto(route);
+    await expect(page.locator("main, .auth-screen, .app-shell").first()).toBeVisible();
+    const found = await page.evaluate((selectors) => {
+      // Chromium reports a colour declared in OKLCH back as `oklch()`, so the
+      // lightness is read from it directly; anything else is converted.
+      const lightness = (colour) => {
+        const oklch = colour.match(/^oklch\(([\d.]+)/);
+        if (oklch) return Number(oklch[1]);
+        const nums = colour.match(/[\d.]+/g);
+        if (!nums || nums.length < 3) return null;
+        const [r, g, b] = nums.map(Number).map((c) => c / 255);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const out = [];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          const background = getComputedStyle(el).backgroundColor;
+          if (background === "rgba(0, 0, 0, 0)" || background === "transparent") continue;
+          const l = lightness(background);
+          if (l !== null && l < 0.7) out.push(`${selector} -> ${background}`);
+        }
+      }
+      return [...new Set(out)];
+    }, SURFACES);
+    if (found.length) offenders.push(`${route}: ${found.join(", ")}`);
+  }
+  expect(offenders).toEqual([]);
+});
+
+test("each theme resolves to real colours", async ({ page }) => {
+  const seen = {};
+  for (const scheme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("/overview");
+    await expect(page.getByRole("heading", { name: "Overview", exact: true }).first()).toBeVisible();
+    const state = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        attribute: document.documentElement.dataset.theme,
+        colorScheme: root.colorScheme,
+        canvas: root.getPropertyValue("--bg-canvas").trim(),
+        text: root.getPropertyValue("--text-primary").trim(),
+        // color-mix() output, so a rejected value would read as an empty string.
+        border: root.getPropertyValue("--border").trim(),
+        bodyBackground: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    expect(state.attribute).toBe(scheme);
+    expect(state.colorScheme).toBe(scheme);
+    for (const token of ["canvas", "text", "border"]) {
+      expect(state[token], `--${token} is empty in the ${scheme} theme`).not.toBe("");
+    }
+    expect(state.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+    seen[scheme] = state.bodyBackground;
+  }
+  // Dark really is the darker of the two, not just a differently named theme.
+  const luminance = (rgb) => rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map((c) => c / 255).reduce((sum, c) => sum + c, 0);
+  expect(luminance(seen.dark)).toBeLessThan(luminance(seen.light));
+});
+
+// A stored preference beats the OS setting, in either direction.
+test("the stored theme preference overrides the system one", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.addInitScript(() => window.localStorage.setItem("trajecta.monitor.theme", "dark"));
+  await page.goto("/overview");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("following the system theme picks up a change while the page is open", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/overview");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+// The tab underline is one element shared by the strip: motion's `layoutId`
+// moves it between triggers rather than each trigger owning a copy. These assert
+// the arrangement the animation depends on, which a CSS-only regression would
+// not catch - a per-trigger underline would look identical standing still.
+test("the tab strip shares a single indicator, under the active tab", async ({ page }) => {
+  await page.goto("/traces");
+  const under = async () => page.evaluate(() =>
+    [...document.querySelectorAll("[data-tab-indicator]")].map((e) => e.parentElement.textContent.trim()),
+  );
+  // The strip renders after the page's first data request, so poll rather than
+  // reading the DOM the instant the document is ready.
+  await expect.poll(under).toEqual(["Requests"]);
+  const requests = await page.evaluate(() => document.querySelector("[data-tab-indicator]")?.getBoundingClientRect().width);
+  const tabWidth = await page.getByRole("tab", { name: "Requests" }).evaluate((e) => e.getBoundingClientRect().width);
+  expect(Math.round(requests)).toBe(Math.round(tabWidth));
+
+  await page.getByRole("tab", { name: "Sessions" }).click();
+  await expect(page).toHaveURL(/tab=sessions$/);
+  // Still exactly one, and it has followed the selection.
+  await expect.poll(under).toEqual(["Sessions"]);
+});
+
+test("reduced motion turns the dialog animation off", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/providers");
+  await page.getByRole("button", { name: "Account" }).first().click();
+  const content = page.getByRole("dialog", { name: "local" });
+  await expect(content).toBeVisible();
+  expect(await content.evaluate((e) => getComputedStyle(e).animationName)).toBe("none");
+  // And the dialog still closes, which is the part an exit animation can break.
+  await page.keyboard.press("Escape");
+  await expect(content).toHaveCount(0);
 });

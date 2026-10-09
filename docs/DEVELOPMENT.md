@@ -89,6 +89,10 @@ Monitor UI 位于 `web/monitor-ui`，使用 Bun 作为包管理器（`packageMan
 - `task ui:build`：构建 UI 并写入 embed 目标目录。
 - `cd web/monitor-ui && bun run build`：等价于 `vite build`，`vite.config.js` 把产物写到 `internal/monitor/ui/dist`；`task` 未包装。
 - `cd web/monitor-ui && bun run dev`：启动 Vite dev server；Taskfile 中没有对应的 dev task，只有直接命令。
+- `task ui:typecheck`：对 `src/` 下已迁移到 `.ts`/`.tsx` 的模块跑 `tsc --noEmit`。`tsconfig.json` 打开 `strict`，`checkJs` 保持关闭，因此只有显式改名的模块参与检查，未迁移的 `.jsx` 仍照常构建。
+- `task ui:test:unit`：`node --test tests-unit/**/*.test.js`。Node 直接执行 `.ts` 模块（原生类型剥离），所以单元测试可以 import 前端源码；`tests-unit/color-math.js` 是这些测试共用的 OKLCH/sRGB 与 WCAG 对比度换算。
+- `task ui:test`：依次跑 `tsc --noEmit`、单元测试与 mock 套件，类型错误会让该 target 失败。
+- `task ui:screenshots`：用真实 fixture server 重新生成 README 引用的截图（`images/` 与 `images/en/`）。
 
 Playwright 有两套套件：
 
@@ -106,6 +110,8 @@ task ui:test:real
 go test ./internal/monitor
 task build:go
 ```
+
+`task ui:test` 覆盖类型检查、单元测试（含 `src/styles/tokens.css` 的 WCAG 对比度断言）与 mock 套件；改动样式、主题或共享组件后如果画面确实变化，用 `task ui:screenshots` 重新生成 README 截图，并在提交信息里说明。
 
 ## 构建产物（Go 二进制、UI dist 与 go:embed 的关系）
 

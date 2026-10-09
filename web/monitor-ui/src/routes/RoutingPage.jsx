@@ -6,6 +6,7 @@ import { InlineTag } from "../components/common/Badges";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
+import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, patchJSON, postJSON, requestJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
@@ -21,7 +22,6 @@ export function RoutingPage() {
   const windowValue = normalizeRoutingWindow(searchParams.get("window"));
   const activeTab = normalizeRoutingTab(searchParams.get("tab"));
   const activeFilters = readRoutingFilters(searchParams);
-  const [refreshTick, setRefreshTick] = useState(0);
   const [filters, setFilters] = useState(activeFilters);
   const params = new URLSearchParams();
   params.set("page", "1");
@@ -36,16 +36,11 @@ export function RoutingPage() {
   if (activeFilters.model) {
     summaryParams.set("model", activeFilters.model);
   }
-  const traces = useJSON(apiURL(apiPaths.routingExchanges, params), [refreshTick, windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
-  const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [refreshTick, windowValue, activeFilters.model]);
+  const traces = useJSON(apiURL(apiPaths.routingExchanges, params), [windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
+  const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [windowValue, activeFilters.model]);
   const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
   const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
   const credentialSummary = useMemo(() => normalizeCredentialRoutingSummary(routingSummary.data), [routingSummary.data]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     setFilters(activeFilters);
@@ -258,9 +253,10 @@ function RoutingSettingsPanel() {
 }
 
 function ModelAliasesPanel() {
+  const refresh = useRefresh();
   const { t } = useI18n();
-  const [refreshTick, setRefreshTick] = useState(0);
-  const aliases = useJSON(apiPaths.modelAliases, [refreshTick]);
+  const [setRefreshTick] = useState(0);
+  const aliases = useJSON(apiPaths.modelAliases, []);
   const [form, setForm] = useState({ alias: "", target_model: "", channel_id: "" });
   const [validation, setValidation] = useState(emptyAliasValidationState());
   const [editID, setEditID] = useState("");
@@ -340,7 +336,7 @@ function ModelAliasesPanel() {
       await postJSON(apiPaths.modelAliases, form);
       setForm({ alias: "", target_model: "", channel_id: "" });
       setValidation(emptyAliasValidationState());
-      setRefreshTick((tick) => tick + 1);
+      refresh();
     } catch (error) {
       setSubmitError(error.message);
     }
@@ -375,7 +371,7 @@ function ModelAliasesPanel() {
       }
       await patchJSON(apiPaths.modelAlias(editID), editForm);
       cancelEdit();
-      setRefreshTick((tick) => tick + 1);
+      refresh();
     } catch (error) {
       setSubmitError(error.message);
     }

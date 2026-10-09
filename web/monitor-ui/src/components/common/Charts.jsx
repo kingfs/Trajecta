@@ -1,118 +1,44 @@
-import React from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { formatCount, formatTimelineBucketLabel } from "../../lib/monitor";
-import { useI18n } from "../../lib/i18n";
+import React, { Suspense, lazy } from "react";
+import { Skeleton } from "../ui/skeleton";
 
-// Series palette. It has to stay legible on both themes, so the hues are the
-// desaturated cousins of the semantic colours rather than the raw tokens: the
-// accent leads, then green/amber/rose/violet, then supporting teals.
-const COLORS = ["#5b8cff", "#3ecf8e", "#e3a008", "#f2555a", "#a78bfa", "#22a7c4", "#e07b39", "#4f9d7a"];
+/*
+ * The charts are the single heaviest dependency in the Monitor: recharts plus
+ * the store, selector and d3 packages it pulls in is around 315 kB of the
+ * bundle, a third of it, and it is only needed on the four pages that draw a
+ * trend line. Both wrappers below point at the same module, so the browser
+ * fetches and parses that chunk once, on the first page that needs it.
+ *
+ * The public surface is unchanged - callers still import MultiLineChart and
+ * SingleUsageCharts from here - so no page had to learn about the split.
+ */
+const MultiLineChartImpl = lazy(() => import("./ChartsImpl").then((module) => ({ default: module.MultiLineChart })));
+const SingleUsageChartsImpl = lazy(() => import("./ChartsImpl").then((module) => ({ default: module.SingleUsageCharts })));
 
-export function MultiLineChart({ items = [], series = [], metric = "request_count", height = 260 }) {
-  const { t } = useI18n();
-  const data = buildChartData(items, series, metric);
-  if (!data.length || !series.length) {
-    return <div className="chart-empty">{t("common.noTrend")}</div>;
-  }
+// Sized like the real thing so resolving the chunk does not move the page.
+function ChartFallback({ height, panels = 1 }) {
   return (
-    <div className="line-chart-card" style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 10, right: 18, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
-          <YAxis tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={formatCount} width={48} />
-          <Tooltip content={<ChartTooltip />} />
-          <Legend wrapperStyle={{ color: "var(--text-secondary)", fontSize: 12, paddingTop: 8 }} />
-          {series.map((item, index) => (
-            <Line
-              key={item.key}
-              type="monotone"
-              dataKey={item.key}
-              name={item.name || item.key}
-              stroke={COLORS[index % COLORS.length]}
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4 }}
-              connectNulls
-            />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-export function SingleUsageCharts({ items = [], height = 240 }) {
-  const { t } = useI18n();
-  const requestSeries = [
-    { key: "requests", name: "requests" },
-    { key: "errors", name: "errors" },
-  ];
-  const tokenSeries = [{ key: "value", name: "tokens" }];
-  return (
-    <div className="usage-chart-grid">
-      <section className="usage-chart-panel">
-        <div className="breakdown-title">{t("common.requests")}</div>
-        <MultiLineChart
-          items={items.map((item) => ({
-            time: item.time,
-            series: {
-              requests: { value: item.request_count },
-              errors: { value: item.failed_request },
-            },
-          }))}
-          series={requestSeries}
-          metric="value"
-          height={height}
-        />
-      </section>
-      <section className="usage-chart-panel">
-        <div className="breakdown-title">{t("common.tokens")}</div>
-        <MultiLineChart items={items.map((item) => ({ time: item.time, value: item.total_tokens }))} series={tokenSeries} metric="value" height={height} />
-      </section>
-    </div>
-  );
-}
-
-function buildChartData(items, series, metric) {
-  return items.map((item) => {
-    const row = {
-      time: item.time,
-      label: formatTimelineBucketLabel(item.time),
-    };
-    if (item.series && typeof item.series === "object") {
-      for (const s of series) {
-        row[s.key] = Number(item.series[s.key]?.[metric] || 0);
-      }
-    } else {
-      row.value = Number(item[metric] || item.value || 0);
-    }
-    return row;
-  });
-}
-
-function ChartTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) {
-    return null;
-  }
-  return (
-    <div className="chart-tooltip">
-      <strong>{label}</strong>
-      {payload.map((item) => (
-        <span key={item.dataKey}>
-          <i style={{ background: item.color }} />
-          {item.name}: {formatCount(item.value)}
-        </span>
+    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${panels}, minmax(0, 1fr))` }}>
+      {Array.from({ length: panels }, (_, index) => (
+        <div key={index} className="rounded-lg border border-border-subtle bg-card p-4">
+          <Skeleton className="w-full" style={{ height: height - 32 }} />
+        </div>
       ))}
     </div>
+  );
+}
+
+export function MultiLineChart({ height = 260, ...props }) {
+  return (
+    <Suspense fallback={<ChartFallback height={height} />}>
+      <MultiLineChartImpl height={height} {...props} />
+    </Suspense>
+  );
+}
+
+export function SingleUsageCharts({ height = 240, ...props }) {
+  return (
+    <Suspense fallback={<ChartFallback height={height} panels={2} />}>
+      <SingleUsageChartsImpl height={height} {...props} />
+    </Suspense>
   );
 }

@@ -18,7 +18,6 @@ export function SessionsPanel() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
-  const [refreshTick, setRefreshTick] = useState(0);
   const [filters, setFilters] = useState({ query, provider, model });
   const requestParams = new URLSearchParams({
     page: String(page),
@@ -33,14 +32,7 @@ export function SessionsPanel() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model, refreshTick]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRefreshTick((tick) => tick + 1);
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model], { refetchInterval: REFRESH_MS });
 
   useEffect(() => {
     setFilters({ query, provider, model });

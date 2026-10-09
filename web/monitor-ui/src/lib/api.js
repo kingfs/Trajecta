@@ -81,6 +81,11 @@ export function apiURL(path, params = null) {
   return query ? `${path}?${query}` : path;
 }
 
+/**
+ * @param {string} path
+ * @param {{ method?: string, headers?: Record<string, string>, body?: BodyInit | null, signal?: AbortSignal }} [options]
+ * @returns {Promise<any>}
+ */
 export async function requestJSON(path, { method = "GET", headers = {}, body, signal } = {}) {
   const requestHeaders = {
     ...monitorAuthHeaders(),

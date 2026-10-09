@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
@@ -18,15 +18,9 @@ const REFRESH_MS = 60_000;
  */
 export function RuntimePanel() {
   const { t } = useI18n();
-  const [refreshTick, setRefreshTick] = useState(0);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const host = useJSON(apiPaths.systemHost, [refreshTick]);
-  const runtime = useJSON(apiPaths.systemRuntime, [refreshTick]);
+  const host = useJSON(apiPaths.systemHost, [], { refetchInterval: REFRESH_MS });
+  const runtime = useJSON(apiPaths.systemRuntime, [], { refetchInterval: REFRESH_MS });
   const live = host.data;
   const facts = runtime.data;
   const pool = facts?.db_pool;

@@ -3,17 +3,18 @@ import { Link } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
 import { useJSON } from "../../hooks/useJSON";
+import { useRefresh } from "../../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 
 export function AnalysisPanel() {
+  const refresh = useRefresh();
   const { t } = useI18n();
-  const [refreshTick, setRefreshTick] = useState(0);
   const [batchBusy, setBatchBusy] = useState(false);
   const [jobNotice, setJobNotice] = useState(null);
-  const analysis = useJSON(apiURL(apiPaths.analysis, { limit: "50" }), [refreshTick]);
-  const jobs = useJSON(apiURL(apiPaths.analysisJobs, { limit: "50" }), [refreshTick]);
+  const analysis = useJSON(apiURL(apiPaths.analysis, { limit: "50" }), []);
+  const jobs = useJSON(apiURL(apiPaths.analysisJobs, { limit: "50" }), []);
   const items = analysis.data?.items || [];
   const jobItems = jobs.data?.items || [];
 
@@ -23,7 +24,7 @@ export function AnalysisPanel() {
     try {
       const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", missing_usage: true, limit: 1000, repair_usage: true });
       setJobNotice({ tone: "green", text: t("analysis.queuedJob", { id: response.job?.id || "-" }) });
-      setRefreshTick((value) => value + 1);
+      refresh();
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
     } finally {
@@ -40,7 +41,7 @@ export function AnalysisPanel() {
         postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
       ]);
       setJobNotice({ tone: "green", text: t("analysis.queuedJobs", { count: batchResponses.length }) });
-      setRefreshTick((value) => value + 1);
+      refresh();
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || t("sessionDetail.requestFailed") });
     } finally {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths } from "../../lib/api";
@@ -19,14 +19,8 @@ const REFRESH_MS = 60_000;
  */
 export function SlowQueryPanel() {
   const { t } = useI18n();
-  const [refreshTick, setRefreshTick] = useState(0);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const slowQueries = useJSON(apiPaths.systemSlowQueries, [refreshTick]);
+  const slowQueries = useJSON(apiPaths.systemSlowQueries, [], { refetchInterval: REFRESH_MS });
   const slow = slowQueries.data;
 
   return (
