@@ -7,6 +7,7 @@ import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import { buildTraceLink, formatDateTime, formatFailureReason, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
@@ -20,7 +21,6 @@ export function EventsPage() {
   const { language, t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedID, setSelectedID] = useState("");
-  const [busyID, setBusyID] = useState("");
   const params = useMemo(() => eventQueryParams(searchParams), [searchParams]);
   const { loading, data, error } = useJSON(apiURL(apiPaths.events, params), [params.toString()]);
   const summaryWindow = params.get("window") || DEFAULT_EVENT_WINDOW;
@@ -38,7 +38,28 @@ export function EventsPage() {
     setSearchParams(next);
   };
 
-  const mutateEvent = async (eventID, action) => {
+  // Success stays quiet here on purpose: the row and the badge change in front of
+  // the reader, so a toast per click would be noise. Failure used to be quieter
+  // still - the old `finally` only cleared the busy flag, so an action that the
+  // server rejected did nothing visible at all.
+  const announce = () => {
+    refresh();
+    window.dispatchEvent(new Event("trajecta:events-refresh"));
+  };
+
+  const mutateEvent = useWriteMutation({
+    mutationFn: ({ path }) => postJSON(path, {}),
+    error: "common.actionFailed",
+    onSuccess: announce,
+  });
+
+  const markAllRead = useWriteMutation({
+    mutationFn: () => postJSON(apiURL(apiPaths.eventsReadAll, params), {}),
+    error: "common.actionFailed",
+    onSuccess: announce,
+  });
+
+  const mutateEventAction = (eventID, action) => {
     const path = {
       read: apiPaths.eventRead(eventID),
       resolve: apiPaths.eventResolve(eventID),
@@ -47,26 +68,10 @@ export function EventsPage() {
     if (!path) {
       return;
     }
-    setBusyID(`${eventID}:${action}`);
-    try {
-      await postJSON(path, {});
-      refresh();
-      window.dispatchEvent(new Event("trajecta:events-refresh"));
-    } finally {
-      setBusyID("");
-    }
+    mutateEvent.mutate({ key: `${eventID}:${action}`, path });
   };
 
-  const markAllRead = async () => {
-    setBusyID("read-all");
-    try {
-      await postJSON(apiURL(apiPaths.eventsReadAll, params), {});
-      refresh();
-      window.dispatchEvent(new Event("trajecta:events-refresh"));
-    } finally {
-      setBusyID("");
-    }
-  };
+  const busyID = mutateEvent.isPending ? mutateEvent.variables?.key || "" : markAllRead.isPending ? "read-all" : "";
 
   return (
     <div className="shell shell-list">
@@ -83,7 +88,7 @@ export function EventsPage() {
               </button>
             ))}
           </div>
-          <button className="ghost-button" type="button" onClick={markAllRead} disabled={busyID === "read-all"}>
+          <button className="ghost-button" type="button" onClick={() => markAllRead.mutate()} disabled={busyID === "read-all"}>
             {t("events.markAllRead")}
           </button>
           <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
@@ -144,7 +149,7 @@ export function EventsPage() {
 
         <section className="panel event-detail-panel">
           {selected ? (
-            <EventDetail event={selected} busyID={busyID} onAction={mutateEvent} />
+            <EventDetail event={selected} busyID={busyID} onAction={mutateEventAction} />
           ) : (
             <EmptyState title={t("events.noSelected")} detail={t("events.noSelectedDetail")} />
           )}

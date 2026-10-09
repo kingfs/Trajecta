@@ -6,6 +6,7 @@ import { useJSON } from "../../hooks/useJSON";
 import { useRefresh } from "../../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
+import { useWriteMutation } from "../../lib/mutations";
 import { formatDateTime } from "../../lib/monitor";
 
 export function TokensPanel() {
@@ -15,59 +16,49 @@ export function TokensPanel() {
   const [ttl, setTTL] = useState("");
   const [scope, setScope] = useState("api");
   const [created, setCreated] = useState(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [busyToken, setBusyToken] = useState(0);
   const [showAll, setShowAll] = useState(false);
   const tokens = useJSON(apiPaths.authTokens, []);
   const items = tokens.data?.items || [];
   const visibleItems = showAll ? items : items.filter((item) => item.status === "active");
   const summary = useMemo(() => summarizeTokens(items), [items]);
 
-  const createToken = async (event) => {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    setCreated(null);
-    try {
-      const payload = await postJSON(apiPaths.authTokens, { name, ttl, scope });
+  // Success is quiet: creating a token reveals it and the table refetches, so the
+  // result is already on screen. The three failures share one surface, which is
+  // the toast now instead of a paragraph under the form.
+  const createToken = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.authTokens, { name, ttl, scope }),
+    error: "tokens.createError",
+    onSuccess: (payload) => {
       setCreated(payload);
       refresh();
-    } catch (err) {
-      setError(err.message || t("tokens.createError"));
-    } finally {
-      setLoading(false);
+    },
+  });
+
+  const revokeToken = useWriteMutation({
+    mutationFn: ({ tokenID }) => requestJSON(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { method: "DELETE" }),
+    error: "tokens.revokeError",
+    onSuccess: refresh,
+  });
+
+  const deleteToken = useWriteMutation({
+    mutationFn: ({ tokenID }) => deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { delete: "1" })),
+    error: "tokens.deleteError",
+    onSuccess: refresh,
+  });
+
+  const submitToken = (event) => {
+    event.preventDefault();
+    setCreated(null);
+    createToken.mutate();
+  };
+
+  const confirmDelete = (item) => {
+    if (window.confirm(t("tokens.deleteConfirm", { name: item.name || item.id }))) {
+      deleteToken.mutate({ tokenID: item.id });
     }
   };
 
-  const revokeToken = async (tokenID) => {
-    setBusyToken(tokenID);
-    setError("");
-    try {
-      await requestJSON(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { method: "DELETE" });
-      refresh();
-    } catch (err) {
-      setError(err.message || t("tokens.revokeError"));
-    } finally {
-      setBusyToken(0);
-    }
-  };
-
-  const deleteToken = async (item) => {
-    if (!window.confirm(t("tokens.deleteConfirm", { name: item.name || item.id }))) {
-      return;
-    }
-    setBusyToken(item.id);
-    setError("");
-    try {
-      await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(item.id)}`, { delete: "1" }));
-      refresh();
-    } catch (err) {
-      setError(err.message || t("tokens.deleteError"));
-    } finally {
-      setBusyToken(0);
-    }
-  };
+  const busyToken = revokeToken.isPending ? revokeToken.variables?.tokenID : deleteToken.isPending ? deleteToken.variables?.tokenID : 0;
 
   return (
     <>
@@ -85,7 +76,7 @@ export function TokensPanel() {
           </div>
         </div>
         <p className="system-note">{`${t("tokens.currentUser")} · ${t("tokens.scopeHint")}`}</p>
-        <form className="token-form" onSubmit={createToken}>
+        <form className="token-form" onSubmit={submitToken}>
           <label className="token-field" htmlFor="token-name">
             <span>{t("tokens.name")}</span>
             <input id="token-name" type="text" value={name} onChange={(event) => setName(event.target.value)} />
@@ -98,11 +89,11 @@ export function TokensPanel() {
             <span>{t("tokens.scope")}</span>
             <input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
           </label>
-          <button className="icon-button token-create-button" type="submit" disabled={loading} title={loading ? t("tokens.creating") : t("tokens.create")} aria-label={loading ? t("tokens.creating") : t("tokens.create")}>
+          <button className="icon-button token-create-button" type="submit" disabled={createToken.isPending} title={createToken.isPending ? t("tokens.creating") : t("tokens.create")} aria-label={createToken.isPending ? t("tokens.creating") : t("tokens.create")}>
             <PlusIcon />
           </button>
         </form>
-        {error ? <p className="auth-error">{error}</p> : null}
+        
         {created?.token ? (
           <div className="token-result">
             <span>{t("tokens.shownOnce")}</span>
@@ -128,7 +119,7 @@ export function TokensPanel() {
         <p className="system-note">{t("tokens.lifecycleHint")}</p>
         {tokens.error ? <EmptyState title={t("tokens.loadError")} detail={tokens.error} tone="danger" /> : null}
         {tokens.loading && !tokens.data ? <EmptyState title={t("tokens.loading")} detail={t("tokens.loadingDetail")} /> : null}
-        {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={revokeToken} onDelete={deleteToken} /> : null}
+        {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={(tokenID) => revokeToken.mutate({ tokenID })} onDelete={confirmDelete} /> : null}
       </section>
     </>
   );

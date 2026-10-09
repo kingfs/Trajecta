@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
@@ -7,6 +8,7 @@ import { SingleUsageCharts } from "../components/common/Charts";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, patchJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useWriteMutation } from "../lib/mutations";
 import {
   buildProviderLink,
   formatCount,
@@ -156,8 +158,6 @@ function ModelChannelRow({ item, windowValue, t }) {
 
 function ModelConfigCard({ item, model, suggestion, language, t }) {
   const [form, setForm] = useState(() => modelConfigFormFromItem(item));
-  const [status, setStatus] = useState("");
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(modelConfigFormFromItem(item));
@@ -165,7 +165,6 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
 
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
-    setStatus("");
   };
 
   const applySuggestion = () => {
@@ -183,27 +182,20 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
       profile_source: "go-llm-specs",
       profile_adoption_status: current.profile_adoption_status || "adopted",
     }));
-    setStatus(t("models.specApplied"));
+    toast.success(t("models.specApplied"));
   };
 
-  const save = async (event) => {
-    event.preventDefault();
-    setSaving(true);
-    setStatus("");
-    try {
-      const payload = modelConfigPayload(form);
-      const updated = await patchJSON(apiPaths.providerModel(item.channel_id, model), payload);
-      setForm(modelConfigFormFromItem({ ...item, ...updated }));
-      setStatus(t("models.saved"));
-    } catch (error) {
-      setStatus(error.message || t("models.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  // The form takes the server's copy of the row rather than assuming its own,
+  // which is why the write keeps an onSuccess of its own.
+  const save = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.providerModel(item.channel_id, model), modelConfigPayload(form)),
+    success: "models.saved",
+    error: "models.saveFailed",
+    onSuccess: (updated) => setForm(modelConfigFormFromItem({ ...item, ...updated })),
+  });
 
   return (
-    <form className="model-config-card" onSubmit={save}>
+    <form className="model-config-card" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
       <div className="model-config-card-head">
         <div>
           <strong>{item.channel_id}</strong>
@@ -211,7 +203,7 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
         </div>
         <div className="action-group">
           <button className="ghost-button" type="button" onClick={applySuggestion} disabled={!suggestion}>{t("models.applySpec")}</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? t("common.saving") : t("common.save")}</button>
+          <button className="ghost-button active" type="submit" disabled={save.isPending}>{save.isPending ? t("common.saving") : t("common.save")}</button>
         </div>
       </div>
       {suggestion ? (
@@ -276,7 +268,6 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
           </select>
         </label>
       </div>
-      {status ? <div className="model-config-status">{status}</div> : null}
     </form>
   );
 }
