@@ -96,6 +96,7 @@ func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 }
 
 func (s *Store) MarkParseJobRunning(id int64) error {
+	s.notifyChange(ChangeTraffic)
 	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'running', attempts = attempts + 1, updated_at = ?
@@ -138,6 +139,7 @@ func (s *Store) ClaimParseJobs(limit int) ([]ParseJobRecord, error) {
 }
 
 func (s *Store) MarkParseJobDone(id int64) error {
+	s.notifyChange(ChangeTraffic)
 	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'parsed', last_error = '', updated_at = ?
@@ -147,6 +149,7 @@ func (s *Store) MarkParseJobDone(id int64) error {
 }
 
 func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
+	s.notifyChange(ChangeTraffic)
 	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'failed', last_error = ?, updated_at = ?

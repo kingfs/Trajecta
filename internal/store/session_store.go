@@ -313,6 +313,14 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 		clauses = append(clauses, `LOWER(s.last_model) LIKE LOWER(?) ESCAPE '\'`)
 		args = append(args, "%"+escapeLike(model)+"%")
 	}
+	// `last_seen` is the session's newest request, written in the same layout as
+	// `logs.recorded_at` (it is MAX() over it), so the window is the same
+	// comparison the trace list makes: a session that was active since the
+	// window opened is in it, however old its first request is.
+	if !filter.Since.IsZero() {
+		clauses = append(clauses, `s.last_seen >= ?`)
+		args = append(args, filter.Since.UTC().Format(timeLayout))
+	}
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
 		clauses = append(clauses, `s.failed_request = 0`)

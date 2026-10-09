@@ -1218,18 +1218,23 @@ test("the theme and language picks are radio groups with a roving tab stop", asy
   const unchecked = themes.getByRole("radio", { checked: false }).first();
   expect(await unchecked.getAttribute("tabindex")).toBe("-1");
 
+  // The picks are strips now, so the arrow that moves within them is the
+  // horizontal one, and each option is a glyph whose name comes from its label.
+  await expect(themes.getByRole("radio", { name: "Light" })).toBeVisible();
+  await expect(languages.getByRole("radio", { name: "English" })).toBeVisible();
+
   // Arrow keys move the selection inside the group without leaving the panel,
   // and picking does not dismiss it: both picks can be set in one visit.
-  const before = await themes.getByRole("radio", { checked: true }).textContent();
+  const before = await themes.getByRole("radio", { checked: true }).getAttribute("aria-label");
   await themes.getByRole("radio", { checked: true }).focus();
   // Held across a frame rather than sent as an instant press: Radix moves focus
   // from a deferred callback and only selects the item it lands on if the arrow
   // is still down when that runs. A real key press always spans that gap.
-  await page.keyboard.down("ArrowDown");
+  await page.keyboard.down("ArrowRight");
   await page.waitForTimeout(100);
-  await page.keyboard.up("ArrowDown");
+  await page.keyboard.up("ArrowRight");
   await expect
-    .poll(async () => themes.getByRole("radio", { checked: true }).textContent())
+    .poll(async () => themes.getByRole("radio", { checked: true }).getAttribute("aria-label"))
     .not.toBe(before);
   await expect(panel).toBeVisible();
 
@@ -1323,6 +1328,32 @@ test("switching language at runtime loads the other chunk", async ({ page, isMob
 
   await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
   expect(locales).toContain("zh-CN");
+});
+
+// The traffic page is the one windowed view that starts on 全部: it answers
+// "where is that request I recorded", so the range has to reach both tabs'
+// requests, and switching it has to re-ask the server rather than filter a page
+// the browser already holds.
+test("the traffic range reaches both tabs' requests", async ({ page }) => {
+  const asked = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/traces" || url.pathname === "/api/sessions") {
+      asked.push(`${url.pathname}?${url.searchParams.get("window")}`);
+    }
+  });
+
+  await page.goto("/traces");
+  await expect(page.getByRole("heading", { name: "Traffic" })).toBeVisible();
+  await expect.poll(() => asked.some((entry) => entry === "/api/traces?all")).toBe(true);
+
+  await page.getByRole("radiogroup").getByRole("radio", { name: "Last 7 days", exact: true }).click();
+  // `page` is dropped with the range: page 3 of 全部 is not page 3 of 近 7 天.
+  await expect.poll(() => asked.some((entry) => entry === "/api/traces?7d")).toBe(true);
+  await expect(page).toHaveURL(/window=7d/);
+
+  await page.getByRole("tab", { name: /Sessions|会话/ }).click();
+  await expect.poll(() => asked.some((entry) => entry === "/api/sessions?7d")).toBe(true);
 });
 
 // The console has no refresh timers: the unread badge and every list are
@@ -1885,8 +1916,8 @@ test("the card sections keep the panel box", async ({ page }) => {
 // pushed the content down; the range control that used to sit in whichever
 // panel happened to own it now sits at the right of the title.
 test("every page has one heading layer and its range control in the header", async ({ page }) => {
-  const WINDOWED = ["/overview", "/events", "/providers", "/models", "/routing", "/audit?tab=health"];
-  const PLAIN = ["/traces", "/system", "/connect"];
+  const WINDOWED = ["/overview", "/events", "/traces", "/providers", "/models", "/routing", "/audit?tab=health"];
+  const PLAIN = ["/system", "/connect"];
   for (const route of [...WINDOWED, ...PLAIN]) {
     await page.goto(route);
     const header = page.locator(".page-header");

@@ -73,3 +73,47 @@ test("real monitor server serves trace routing links", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/providers/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
 });
+
+// The console has no refresh timers: a page becomes fresh because the server
+// pushed a topic at it. This drives the real Go server rather than a mock - the
+// socket the browser opens is the one the binary serves, and the write that
+// triggers the push is made out of band through the HTTP API, so the frame
+// cannot be an echo of something the page itself did.
+test("real monitor server pushes a store change to the console socket", async ({ page }) => {
+  const socketOpened = page.waitForEvent("websocket", (ws) => ws.url().includes("/api/events/ws"));
+  await page.goto("/traces");
+  await expect(page.getByRole("heading", { name: "Traffic" })).toBeVisible();
+
+  const socket = await socketOpened;
+  const received = [];
+  const sent = [];
+  socket.on("framereceived", (frame) => received.push(String(frame.payload)));
+  socket.on("framesent", (frame) => sent.push(String(frame.payload)));
+
+  // The browser has to tell the server what it is showing, or there is nothing
+  // to push to it.
+  await expect
+    .poll(() => sent.some((payload) => payload.includes("traffic")), { timeout: 8_000 })
+    .toBe(true);
+
+  const traceID = (await (await page.request.get("/api/traces?page_size=1")).json())?.items?.[0]?.id;
+  expect(traceID, "the fixture server seeded no traces").toBeTruthy();
+
+  const listRequests = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/traces") {
+      listRequests.push(Date.now());
+    }
+  });
+  const before = listRequests.length;
+
+  // A reanalysis writes an analysis run, which is a traffic change. Nothing in
+  // the page asked for it, so a refetch afterwards can only come from the push.
+  const response = await page.request.post(`/api/traces/${encodeURIComponent(traceID)}/reanalyze`, { data: {} });
+  expect(response.ok(), `reanalyze answered ${response.status()}`).toBeTruthy();
+
+  await expect
+    .poll(() => received.some((payload) => payload.includes("traffic")), { timeout: 10_000 })
+    .toBe(true);
+  await expect.poll(() => listRequests.length, { timeout: 10_000 }).toBeGreaterThan(before);
+});

@@ -238,6 +238,15 @@ export function buildRoutingLink(upstreamWindow = "today", upstreamModel = "") {
   return query ? `/routing?${query}` : "/routing";
 }
 
+// The traffic list is the one windowed view whose default is 全部. Every other
+// page answers "what is happening", where 今天 is the honest default; this one
+// answers "where is that request I recorded", and a window that hides it by
+// default would be the wrong first impression. The server agrees: `window` is
+// opt-in there, and an absent parameter still means every recorded request.
+export function normalizeListWindow(value = "") {
+  return normalizeAnalyticsWindow(value || "all");
+}
+
 export function normalizeAnalyticsWindow(value = "") {
   switch (value) {
     case "today":

@@ -231,6 +231,50 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/* The socket's state. It sits above the account button rather than in the scroll
+   area, because it describes the whole console rather than a page.
+   The dot is the state at a glance and the label is the sentence; the label is
+   what the collapsed rail and the phone layout drop, and there the tooltip and
+   the accessible name carry it. */
+.realtime-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  cursor: default;
+}
+
+.realtime-indicator svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.realtime-indicator[data-connected="true"] svg {
+  color: var(--success);
+}
+
+.realtime-indicator[data-connected="false"] svg {
+  color: var(--warning);
+}
+
+.app-shell-collapsed .realtime-indicator,
+.realtime-indicator-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell-collapsed .realtime-indicator {
+  justify-content: center;
+  padding: 0 0 var(--space-1);
+}
+
+.app-shell-collapsed .realtime-indicator-label {
+  display: none;
+}
+
 .account-trigger {
   width: 100%;
   display: flex;
@@ -334,6 +378,7 @@
   .nav-brand-copy strong,
   .nav-section-label,
   .account-copy,
+  .realtime-indicator-label,
   .sidebar-toggle {
     display: none;
   }
@@ -494,27 +539,6 @@
   color: var(--text-primary);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
-}
-
-/* Theme swatches, used by the theme radio group in the account panel. */
-.theme-dot {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-strong);
-}
-
-.theme-dot-dark {
-  background: linear-gradient(135deg, var(--surface-3), var(--bg-canvas));
-}
-
-.theme-dot-light {
-  background: linear-gradient(135deg, var(--surface-1), var(--surface-3));
-}
-
-.theme-dot-system {
-  background: linear-gradient(135deg, var(--surface-1) 0 50%, var(--bg-canvas) 50% 100%);
 }
 
 /* Tabs render their panel inside this wrapper so every tab's content stack has

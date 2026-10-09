@@ -140,3 +140,43 @@ export function subscribeRealtimeRegistry(listener) {
     registryListeners.delete(listener);
   };
 }
+
+/*
+ * Connection state, for the indicator in the sidebar.
+ *
+ * The console has no refresh timers left, so "is anything pushing to me?" is a
+ * question a reader can reasonably ask and cannot answer by watching a spinner.
+ * The state is a module value with a listener set for the same reason the
+ * registry is: the provider owns the socket and does not re-render on it, and
+ * the one component that shows the state should not pull the whole app into a
+ * render per reconnect.
+ *
+ * It is deliberately two states and not an enum. A socket that is opening,
+ * retrying or backing off means the same thing to a reader - what is on screen
+ * is not being pushed to right now - and the indicator only has to say that.
+ */
+export const RealtimeStatus = { CONNECTED: "connected", DISCONNECTED: "disconnected" };
+
+let realtimeStatus = RealtimeStatus.DISCONNECTED;
+const statusListeners = new Set();
+
+export function currentRealtimeStatus() {
+  return realtimeStatus;
+}
+
+export function setRealtimeStatus(next) {
+  if (realtimeStatus === next) {
+    return;
+  }
+  realtimeStatus = next;
+  for (const listener of statusListeners) {
+    listener();
+  }
+}
+
+export function subscribeRealtimeStatus(listener) {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}

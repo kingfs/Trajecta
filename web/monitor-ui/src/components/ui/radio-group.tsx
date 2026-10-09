@@ -32,7 +32,7 @@ export function RadioGroupItem({
   return (
     <RadioGroupPrimitive.Item
       className={cn(
-        "relative flex cursor-pointer items-center gap-2 rounded-md py-2 pr-2 pl-8 font-sans text-sm text-foreground outline-none select-none",
+        "relative flex cursor-pointer items-center gap-2 rounded-md bg-transparent py-2 pr-2 pl-8 font-sans text-sm text-foreground outline-none select-none",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "hover:bg-accent data-[state=checked]:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
         className,

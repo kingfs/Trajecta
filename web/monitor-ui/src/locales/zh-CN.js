@@ -29,6 +29,8 @@ export default {
   "account.openAccount": "账户",
   "preferences.language": "语言",
   "preferences.theme": "主题",
+  "realtime.connected": "实时：服务端会主动把变化推送到本标签页",
+  "realtime.disconnected": "未连接：正在重连服务端",
   "theme.system": "跟随系统",
   "theme.dark": "深色",
   "theme.light": "浅色",

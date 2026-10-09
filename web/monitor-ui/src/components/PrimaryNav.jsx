@@ -4,11 +4,15 @@ import { Button } from "./ui/button";
 import { NavLink } from "react-router-dom";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
+import { SegmentedControl, SegmentedControlItem } from "./ui/segmented-control";
 import { Separator } from "./ui/separator";
 import {
   Activity,
   Bell,
+  Monitor,
+  Moon,
+  Radio,
+  Sun,
   LayoutGrid,
   Lock,
   LogOut,
@@ -23,7 +27,9 @@ import {
 } from "lucide-react";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useJSON } from "../hooks/useJSON";
+import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 import { languageOptions, useI18n } from "../lib/i18n";
+import { RealtimeStatus } from "../lib/realtime";
 import { useWriteMutation } from "../lib/mutations";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 import { cn } from "../lib/utils";
@@ -93,6 +99,11 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   // changed. This replaced a `setInterval(refresh, 60_000)` and a subscription
   // to the SSE stream, both of which the console socket makes redundant.
   const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
+  // The console has no refresh timers left, so "is anything pushing to me?" is a
+  // question the sidebar has to answer rather than one a spinner or a timer
+  // used to. See lib/realtime.js for what the two states mean.
+  const realtime = useRealtimeStatus();
+  const realtimeLabel = t(realtime === RealtimeStatus.CONNECTED ? "realtime.connected" : "realtime.disconnected");
 
   return (
     <nav className="primary-nav" aria-label={t("nav.primary")}>
@@ -144,6 +155,20 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           works when the two share a root. */}
       <Popover open={accountOpen} onOpenChange={setAccountOpen}>
         <div className="nav-account">
+          {/* A status, not a control: the glyph is the state, the tooltip is the
+              sentence, and `aria-live` announces a reconnect to a reader who is
+              not looking at it. */}
+          <span
+            className="realtime-indicator"
+            role="status"
+            aria-live="polite"
+            data-connected={realtime === RealtimeStatus.CONNECTED ? "true" : "false"}
+            title={realtimeLabel}
+            aria-label={realtimeLabel}
+          >
+            <Radio size={14} aria-hidden="true" />
+            <span className="realtime-indicator-label">{realtimeLabel}</span>
+          </span>
           <PopoverTrigger asChild>
             <button
               ref={accountButtonRef}
@@ -191,11 +216,19 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
  * should not have to open one to get it. The panel stays open across a pick, so
  * both can be set before it is dismissed, and the arrows move within a group
  * instead of walking out of the panel.
+ *
+ * Both are segmented strips rather than lists of full-width rows. Three stacked
+ * 39px rows for one three-way choice read as three buttons to press, and the
+ * glyph is the affordance: the theme picker is the sun, the moon and the
+ * display, each with its name in the tooltip and as its accessible name, and the
+ * language picker is the two language tags. Neither is a row of `aria-pressed`
+ * buttons - they are one radio group each - so the keyboard and the announced
+ * state stay what they were.
  */
 // One row of the account panel. Utilities rather than a legacy class so the row
 // and the radio items above it hover the same way.
 const PANEL_ACTION =
-  "flex w-full cursor-pointer items-center gap-3 rounded-md px-2 py-2 font-sans text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
+  "flex w-full cursor-pointer items-center gap-3 rounded-md bg-transparent px-2 py-2 font-sans text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
 export function AccountPanel({ user, onLogout, onPassword }) {
   const { t } = useI18n();
@@ -229,6 +262,10 @@ export function AccountPanel({ user, onLogout, onPassword }) {
   );
 }
 
+// The glyph for a theme preference. `system` is the display itself rather than
+// a third colour, because that is what the option means: follow the machine.
+const THEME_ICONS = { system: Monitor, dark: Moon, light: Sun };
+
 function ThemePicker() {
   const { t } = useI18n();
   const [theme, setTheme] = useState(() => currentTheme());
@@ -238,7 +275,8 @@ function ThemePicker() {
   }, [theme]);
 
   return (
-    <RadioGroup
+    <SegmentedControl
+      className="w-full"
       value={theme}
       aria-label={t("preferences.theme")}
       onValueChange={(next) => {
@@ -246,26 +284,51 @@ function ThemePicker() {
         setTheme(next);
       }}
     >
-      {themeOptions.map((option) => (
-        <RadioGroupItem key={option.value} value={option.value}>
-          <span className={`theme-dot theme-dot-${option.value}`} aria-hidden="true" />
-          <span>{t(`theme.${option.value}`)}</span>
-        </RadioGroupItem>
-      ))}
-    </RadioGroup>
+      {themeOptions.map((option) => {
+        const Icon = THEME_ICONS[option.value] || Sun;
+        const label = t(`theme.${option.value}`);
+        return (
+          <SegmentedControlItem
+            key={option.value}
+            value={option.value}
+            active={theme === option.value}
+            className="flex-1 justify-center py-1.5"
+            aria-label={label}
+            title={label}
+          >
+            <Icon size={16} aria-hidden="true" />
+          </SegmentedControlItem>
+        );
+      })}
+    </SegmentedControl>
   );
 }
 
 function LanguagePicker() {
   const { language, setLanguage, t } = useI18n();
   return (
-    <RadioGroup value={language} aria-label={t("preferences.language")} onValueChange={setLanguage}>
+    <SegmentedControl
+      className="w-full"
+      value={language}
+      aria-label={t("preferences.language")}
+      onValueChange={setLanguage}
+    >
       {languageOptions.map((option) => (
-        <RadioGroupItem key={option.value} value={option.value}>
-          <span>{option.label}</span>
-        </RadioGroupItem>
+        // The tag is the label here: "中" and "EN" say which language a pick
+        // switches to faster than a flag or a glyph could, and the tooltip has
+        // the full name the dictionary gives it.
+        <SegmentedControlItem
+          key={option.value}
+          value={option.value}
+          active={language === option.value}
+          className="flex-1 justify-center py-1.5"
+          aria-label={option.label}
+          title={option.label}
+        >
+          {option.short || option.label}
+        </SegmentedControlItem>
       ))}
-    </RadioGroup>
+    </SegmentedControl>
   );
 }
 

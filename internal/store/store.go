@@ -375,6 +375,11 @@ type ListFilter struct {
 	MaxTTFTMs         int64
 	MinTokens         int
 	MaxTokens         int
+	// Since bounds the list to records written at or after it, which is what the
+	// Monitor's 今天/近 7 天/近 30 天 control sends. The zero value means "no
+	// bound", so a caller that sends no window - including every existing API
+	// caller - keeps the list it had.
+	Since time.Time
 }
 
 type GroupingInfo struct {
@@ -2573,6 +2578,7 @@ func (s *Store) upsertLogWithGrouping(path string, header recordfile.RecordHeade
 }
 
 func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error {
+	s.notifyChange(ChangeTraffic)
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
 		return errors.New("update log usage: trace id is required")
@@ -4187,6 +4193,9 @@ func splitProviders(value string) []string {
 
 func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	var predicates []predicate.TraceLog
+	if !filter.Since.IsZero() {
+		predicates = append(predicates, tracelog.RecordedAtGTE(filter.Since))
+	}
 	if provider := strings.TrimSpace(filter.Provider); provider != "" {
 		predicates = append(predicates, tracelog.ProviderEqualFold(provider))
 	}
@@ -4420,6 +4429,13 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		args    []any
 	)
 
+	// The raw path is what Stats and the session log path use, and the ent path
+	// above is what the list uses; both have to answer the same window or the
+	// count above a list would disagree with the list.
+	if !filter.Since.IsZero() {
+		clauses = append(clauses, column("recorded_at")+` >= ?`)
+		args = append(args, filter.Since.UTC().Format(timeLayout))
+	}
 	if provider := strings.TrimSpace(filter.Provider); provider != "" {
 		clauses = append(clauses, `LOWER(`+column("provider")+`) = LOWER(?)`)
 		args = append(args, provider)

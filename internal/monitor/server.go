@@ -2618,7 +2618,16 @@ func parseListFilter(r *http.Request) store.ListFilter {
 		return store.ListFilter{}
 	}
 	query := r.URL.Query()
+	// The window is opt-in rather than defaulted: `GET /api/traces` without the
+	// parameter means "every recorded request" and always has, and the console
+	// sends the parameter explicitly. Defaulting it here would silently
+	// reinterpret every existing caller's request as "today".
+	var since time.Time
+	if raw := strings.TrimSpace(query.Get("window")); raw != "" {
+		_, since = parseAnalyticsWindow(raw)
+	}
 	return store.ListFilter{
+		Since:             since,
 		Query:             strings.TrimSpace(query.Get("q")),
 		Provider:          strings.TrimSpace(query.Get("provider")),
 		Model:             strings.TrimSpace(query.Get("model")),

@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  RealtimeStatus,
   realtimeSocketURL,
   registeredRealtimeQueries,
   registeredRealtimeTopics,
+  setRealtimeStatus,
   subscribeRealtimeRegistry,
 } from "../lib/realtime";
 
@@ -91,6 +93,7 @@ export function RealtimeProvider({ children = null }) {
 
       opened.onopen = () => {
         retryDelay = RECONNECT_MIN_MS;
+        setRealtimeStatus(RealtimeStatus.CONNECTED);
         sendSubscription();
       };
       opened.onmessage = (event) => {
@@ -108,9 +111,17 @@ export function RealtimeProvider({ children = null }) {
         if (socket === opened) {
           socketRef.current = null;
         }
+        setRealtimeStatus(RealtimeStatus.DISCONNECTED);
         if (disposed) {
           return;
         }
+        // The console has no refresh timers, so a socket that cannot connect is
+        // the one failure a reader cannot see: say it once, with the delay the
+        // retry will use, and let the sidebar indicator carry the state from
+        // there.
+        console.warn(
+          `[realtime] the console socket closed; retrying /api/events/ws in ${retryDelay}ms`,
+        );
         reconnectTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, RECONNECT_MAX_MS);
       };
@@ -125,6 +136,7 @@ export function RealtimeProvider({ children = null }) {
 
     return () => {
       disposed = true;
+      setRealtimeStatus(RealtimeStatus.DISCONNECTED);
       unsubscribeRegistry();
       window.clearTimeout(reconnectTimer);
       window.clearTimeout(flushTimer);

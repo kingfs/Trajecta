@@ -29,6 +29,8 @@ export default {
   "account.openAccount": "Account",
   "preferences.language": "Language",
   "preferences.theme": "Theme",
+  "realtime.connected": "Live: the server pushes changes to this tab",
+  "realtime.disconnected": "Not live: reconnecting to the server",
   "theme.system": "System",
   "theme.dark": "Dark",
   "theme.light": "Light",

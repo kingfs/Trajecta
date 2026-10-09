@@ -9,7 +9,7 @@ import { RequestList } from "../../components/monitor/RequestList";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { formatDuration, formatTokenCount, setOrDeleteParam } from "../../lib/monitor";
+import { formatDuration, formatTokenCount, normalizeListWindow, setOrDeleteParam } from "../../lib/monitor";
 
 const PAGE_SIZE = 50;
 
@@ -21,6 +21,7 @@ export function RequestsPanel() {
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
   const observation = searchParams.get("observation") || "";
+  const windowValue = normalizeListWindow(searchParams.get("window"));
   const [filters, setFilters] = useState({ query, provider, model, observation });
   const requestParams = new URLSearchParams({
     page: String(page),
@@ -38,7 +39,8 @@ export function RequestsPanel() {
   if (observation) {
     requestParams.set("observation", observation);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation]);
+  requestParams.set("window", windowValue);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation, windowValue]);
 
   useEffect(() => {
     setFilters({ query, provider, model, observation });

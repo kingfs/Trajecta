@@ -9,7 +9,7 @@ import { SessionList } from "../../components/monitor/SessionList";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { setOrDeleteParam, summarizeSessionItems } from "../../lib/monitor";
+import { normalizeListWindow, setOrDeleteParam, summarizeSessionItems } from "../../lib/monitor";
 
 const PAGE_SIZE = 50;
 
@@ -20,6 +20,7 @@ export function SessionsPanel() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
+  const windowValue = normalizeListWindow(searchParams.get("window"));
   const [filters, setFilters] = useState({ query, provider, model });
   const requestParams = new URLSearchParams({
     page: String(page),
@@ -34,7 +35,8 @@ export function SessionsPanel() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model]);
+  requestParams.set("window", windowValue);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model, windowValue]);
 
   useEffect(() => {
     setFilters({ query, provider, model });
