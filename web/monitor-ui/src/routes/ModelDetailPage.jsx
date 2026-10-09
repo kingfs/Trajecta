@@ -199,8 +199,8 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
           <span>{item.source || t("providers.providerFallback")}</span>
         </div>
         <div className="action-group">
-          <button className="ghost-button" type="button" onClick={applySuggestion} disabled={!suggestion}>{t("models.applySpec")}</button>
-          <button className="ghost-button active" type="submit" disabled={save.isPending}>{save.isPending ? t("common.saving") : t("common.save")}</button>
+          <Button variant="ghost" type="button" onClick={applySuggestion} disabled={!suggestion}>{t("models.applySpec")}</Button>
+          <Button variant="primary" type="submit" disabled={save.isPending}>{save.isPending ? t("common.saving") : t("common.save")}</Button>
         </div>
       </div>
       {suggestion ? (

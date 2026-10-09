@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
@@ -93,8 +94,8 @@ export function LineagePanel() {
             value={traceForm.requestAuditID}
             onChange={(event) => setTraceForm((current) => ({ ...current, requestAuditID: event.target.value }))}
           />
-          <button className="ghost-button active" type="submit" disabled={!traceForm.responseID.trim() && !traceForm.requestAuditID.trim()}>{t("audit.loadTrace")}</button>
-          <button className="ghost-button" type="button" onClick={resetTraceQuery}>{t("audit.clear")}</button>
+          <Button variant="primary" type="submit" disabled={!traceForm.responseID.trim() && !traceForm.requestAuditID.trim()}>{t("audit.loadTrace")}</Button>
+          <Button variant="ghost" type="button" onClick={resetTraceQuery}>{t("audit.clear")}</Button>
         </form>
         {!responseID && !requestAuditID ? <EmptyState title={t("audit.noResponsesTrace")} detail={t("audit.noResponsesTraceDetail")} compact /> : null}
         {traceState.loading ? <EmptyState title={t("audit.loadingResponsesTrace")} detail={t("audit.loadingResponsesTraceDetail")} compact /> : null}

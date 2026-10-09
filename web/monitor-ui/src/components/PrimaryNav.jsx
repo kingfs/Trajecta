@@ -369,12 +369,12 @@ function PasswordDialog({ onClose, returnFocusTo }) {
             <input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
           </label>
           <DialogFooter>
-            <button className="ghost-button" type="button" onClick={onClose}>
+            <Button variant="ghost" type="button" onClick={onClose}>
               {t("password.cancel")}
-            </button>
-            <button className="ghost-button active" type="submit">
+            </Button>
+            <Button variant="primary" type="submit">
               {t("password.update")}
-            </button>
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

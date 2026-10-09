@@ -202,12 +202,12 @@ export function TraceDetailPage() {
             </Button>
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
-            <button className="ghost-button" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceActionWith("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
+            <Button variant="ghost" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceActionWith("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
               {jobBusy === "repair" ? t("traceDetail.repairing") : t("traceDetail.repairStats")}
-            </button>
-            <button className="ghost-button active" type="button" disabled={!traceExists || jobBusy === "reanalyze"} onClick={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
+            </Button>
+            <Button variant="primary" type="button" disabled={!traceExists || jobBusy === "reanalyze"} onClick={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
               {jobBusy === "reanalyze" ? t("traceDetail.reanalyzing") : t("traceDetail.reanalyze")}
-            </button>
+            </Button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label={t("metric.inputTokens")} value={usage?.prompt_tokens || 0} icon="input" />
@@ -240,16 +240,18 @@ export function TraceDetailPage() {
             <span>{t("traceDetail.metaRate")} {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
           </div>
           <div className="trace-failure-actions">
-            <button className={tab === "conversation" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("conversation", "timeline_error")}>
+            <Button variant={tab === "conversation" ? "primary" : "ghost"} onClick={() => applyTraceFocus("conversation", "timeline_error")}>
               {t("traceDetail.openConversation")}
-            </button>
-            <button className={tab === "raw" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("raw", "response")}>
+            </Button>
+            <Button variant={tab === "raw" ? "primary" : "ghost"} onClick={() => applyTraceFocus("raw", "response")}>
               {t("traceDetail.openRawProtocol")}
-            </button>
+            </Button>
             {session?.session_id ? (
-              <Link className="ghost-button" to={`/sessions/${encodeURIComponent(session.session_id)}`}>
-                {t("traceDetail.backToSession")}
-              </Link>
+              <Button asChild variant="ghost" to={`/sessions/${encodeURIComponent(session.session_id)}`}>
+                <Link to={`/sessions/${encodeURIComponent(session.session_id)}`}>
+                  {t("traceDetail.backToSession")}
+                </Link>
+              </Button>
             ) : null}
           </div>
           {failureSummary.detail ? <pre className="trace-failure-detail">{failureSummary.detail}</pre> : null}
@@ -265,9 +267,11 @@ export function TraceDetailPage() {
             </div>
             {responsesAuditLink ? (
               <div className="panel-head-actions">
-                <Link className="ghost-button active" to={responsesAuditLink}>
-                  {t("traceDetail.responsesAudit")}
-                </Link>
+                <Button asChild variant="primary" to={responsesAuditLink}>
+                  <Link to={responsesAuditLink}>
+                    {t("traceDetail.responsesAudit")}
+                  </Link>
+                </Button>
               </div>
             ) : null}
           </div>
@@ -315,14 +319,18 @@ export function TraceDetailPage() {
                 </div>
                 <div className="panel-head-actions">
                   {selectedChannelID ? (
-                    <Link className="ghost-button active" to={buildProviderLink(selectedChannelID)}>
-                      {t("traceDetail.openChannel")}
-                    </Link>
+                    <Button asChild variant="primary" to={buildProviderLink(selectedChannelID)}>
+                      <Link to={buildProviderLink(selectedChannelID)}>
+                        {t("traceDetail.openChannel")}
+                      </Link>
+                    </Button>
                   ) : null}
                   {selectedUpstreamID ? (
-                    <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
-                      {t("traceDetail.openUpstream")}
-                    </Link>
+                    <Button asChild variant="ghost" to={buildUpstreamLink(selectedUpstreamID)}>
+                      <Link to={buildUpstreamLink(selectedUpstreamID)}>
+                        {t("traceDetail.openUpstream")}
+                      </Link>
+                    </Button>
                   ) : null}
                 </div>
               </div>
@@ -547,14 +555,18 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
               {call.error_text ? <pre className="timeline-message responses-audit-error">{call.error_text}</pre> : null}
               <div className="related-upstream-actions">
                 {traceID && traceID !== currentTraceID ? (
-                  <Link className="ghost-button active" to={buildTraceLink(traceID, "requests", fromSessionID, "", failed ? "failure" : "")}>
-                    {t("traceDetail.openChildTrace")}
-                  </Link>
+                  <Button asChild variant="primary" to={buildTraceLink(traceID, "requests", fromSessionID, "", failed ? "failure" : "")}>
+                    <Link to={buildTraceLink(traceID, "requests", fromSessionID, "", failed ? "failure" : "")}>
+                      {t("traceDetail.openChildTrace")}
+                    </Link>
+                  </Button>
                 ) : null}
                 {traceID ? (
-                  <Link className="ghost-button" to={buildTraceLink(traceID, "requests", fromSessionID, "raw", failed ? "response" : "")}>
-                    {t("requests.raw")}
-                  </Link>
+                  <Button asChild variant="ghost" to={buildTraceLink(traceID, "requests", fromSessionID, "raw", failed ? "response" : "")}>
+                    <Link to={buildTraceLink(traceID, "requests", fromSessionID, "raw", failed ? "response" : "")}>
+                      {t("requests.raw")}
+                    </Link>
+                  </Button>
                 ) : null}
               </div>
             </article>
@@ -637,9 +649,9 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
                   </div>
                   <p className="tool-description">{selectedTool.description || t("traceDetail.noDescription")}</p>
                   <div className="tool-detail-actions">
-                    <button className="ghost-button" onClick={() => setSchemaToolName(selectedTool.name)}>
+                    <Button variant="ghost" onClick={() => setSchemaToolName(selectedTool.name)}>
                       {t("traceDetail.viewDefinition")}
-                    </button>
+                    </Button>
                   </div>
                   {selectedToolCalls.length ? (
                     <section className="breakdown-card">
@@ -697,9 +709,9 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
             <p className="eyebrow">{t("traceDetail.observationIR")}</p>
             <h2>{t("audit.protocol")}</h2>
           </div>
-          <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
+          <Button variant="primary" type="button" disabled={busy} onClick={onRefresh}>
             {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
-          </button>
+          </Button>
         </div>
         <EmptyState title={t("traceDetail.protocolUnavailable")} detail={observation.error} tone="danger" compact />
       </section>
@@ -718,9 +730,9 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
             <p className="eyebrow">{t("traceDetail.observationIR")}</p>
             <h2>{t("audit.protocol")}</h2>
           </div>
-          <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
+          <Button variant="primary" type="button" disabled={busy} onClick={onRefresh}>
             {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
-          </button>
+          </Button>
         </div>
         <EmptyState title={t("traceDetail.noProtocolObservation")} detail={t("traceDetail.noProtocolObservationDetail")} compact />
       </section>
@@ -738,9 +750,9 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
           <InlineTag>{summary?.parser || t("traceDetail.parser")}</InlineTag>
           <InlineTag>{summary?.provider || t("providers.providerFallback")}</InlineTag>
         </div>
-        <button className="ghost-button" type="button" disabled={busy} onClick={onRefresh}>
+        <Button variant="ghost" type="button" disabled={busy} onClick={onRefresh}>
           {busy ? t("traceDetail.refreshing") : t("traceDetail.refreshAnalysis")}
-        </button>
+        </Button>
       </div>
       <div className="detail-meta-strip">
         <DetailMetaPill label={t("traceDetail.metaModel")} value={summary?.model || "-"} />

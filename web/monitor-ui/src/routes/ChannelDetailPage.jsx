@@ -287,8 +287,8 @@ export function ProviderDetailPage() {
               </div>
               <form className="filter-bar" onSubmit={submitAddModel}>
                 <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
-                <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</button>
-                <button className="ghost-button" type="button" onClick={() => toggleModels(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</button>
+                <Button variant="primary" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</Button>
+                <Button variant="ghost" type="button" onClick={() => toggleModels(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</Button>
               </form>
               <div className="provider-model-card-grid">
                 {modelsUsage.length ? modelsUsage.map((model) => (
@@ -384,16 +384,16 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
           <label className="provider-form-wide">{t("providers.apiKey")}<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
-        <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</button>
+        <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
           </div>
         ) : null}
         <DialogFooter>
-          <button className="ghost-button" type="button" onClick={onReset}>{t("common.reset")}</button>
-          <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? t("common.saving") : t("channelDetail.saveChanges")}</button>
+          <Button variant="ghost" type="button" onClick={onReset}>{t("common.reset")}</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>{t("providers.cancel")}</Button>
+          <Button variant="primary" type="submit" disabled={saving}>{saving ? t("common.saving") : t("channelDetail.saveChanges")}</Button>
         </DialogFooter>
       </form>
     </DialogContent>
@@ -448,7 +448,7 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
       </div>
       {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
       <div className="provider-form-actions">
-        <button className="ghost-button active" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? t("providers.applying") : t("providers.applySuggestions")}</button>
+        <Button variant="primary" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? t("providers.applying") : t("providers.applySuggestions")}</Button>
       </div>
     </section>
   );

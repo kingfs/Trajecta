@@ -112,9 +112,9 @@ export function TokensPanel() {
           <div className="panel-head-actions">
             <span className="badge">{t("tokens.activeBadge", { count: summary.active })}</span>
             <span className="badge">{t("tokens.totalBadge", { count: summary.total })}</span>
-            <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>
+            <Button variant={showAll ? "primary" : "ghost"} type="button" onClick={() => setShowAll((value) => !value)}>
               {showAll ? t("tokens.showActive") : t("tokens.showAll")}
-            </button>
+            </Button>
           </div>
         </div>
         <p className="system-note">{t("tokens.lifecycleHint")}</p>
@@ -153,12 +153,12 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
           <span>{item.expires_at ? formatDateTime(item.expires_at) : t("common.never")}</span>
           <span>{item.last_used_at ? formatDateTime(item.last_used_at) : t("common.never")}</span>
           <div className="action-group">
-            <button className="ghost-button" type="button" disabled={item.status !== "active" || busyToken === item.id} onClick={() => onRevoke(item.id)}>
+            <Button variant="ghost" type="button" disabled={item.status !== "active" || busyToken === item.id} onClick={() => onRevoke(item.id)}>
               {busyToken === item.id ? t("tokens.revoking") : t("tokens.revoke")}
-            </button>
-            <button className="ghost-button" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item)}>
+            </Button>
+            <Button variant="ghost" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item)}>
               {busyToken === item.id ? t("tokens.deleting") : t("tokens.delete")}
-            </button>
+            </Button>
           </div>
         </article>
       ))}

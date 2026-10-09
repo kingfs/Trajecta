@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "../../components/ui/button";
 import { Link } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
@@ -47,12 +48,12 @@ export function AnalysisPanel() {
           </div>
           <div className="panel-head-actions" role="group" aria-label={t("analysis.batchRepair")}>
             <InlineTag>{t("analysis.jobs", { count: jobs.data?.total ?? 0 })}</InlineTag>
-            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={() => runAnalysisRepairBatch.mutate()}>
+            <Button variant="primary" type="button" disabled={batchBusy} onClick={() => runAnalysisRepairBatch.mutate()}>
               {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
-            </button>
-            <button className="ghost-button active" type="button" disabled={batchBusy} onClick={() => runMissingUsageBatch.mutate()}>
+            </Button>
+            <Button variant="primary" type="button" disabled={batchBusy} onClick={() => runMissingUsageBatch.mutate()}>
               {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}
-            </button>
+            </Button>
           </div>
         </div>
         {jobs.error ? <EmptyState title={t("analysis.loadJobsError")} detail={jobs.error} tone="danger" /> : null}
@@ -109,8 +110,8 @@ export function AnalysisPanel() {
                   <DetailMetaPill label={t("analysis.metaCreated")} value={formatDateTime(run.created_at)} />
                 </div>
                 <div className="action-group action-group-start">
-                  {run.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(run.session_id)}`}>{t("analysis.openSession")}</Link> : null}
-                  {run.trace_id ? <Link className="ghost-button" to={`/traces/${encodeURIComponent(run.trace_id)}`}>{t("analysis.openTrace")}</Link> : null}
+                  {run.session_id ? <Button asChild variant="ghost" to={`/sessions/${encodeURIComponent(run.session_id)}`}><Link to={`/sessions/${encodeURIComponent(run.session_id)}`}>{t("analysis.openSession")}</Link></Button> : null}
+                  {run.trace_id ? <Button asChild variant="ghost" to={`/traces/${encodeURIComponent(run.trace_id)}`}><Link to={`/traces/${encodeURIComponent(run.trace_id)}`}>{t("analysis.openTrace")}</Link></Button> : null}
                 </div>
               </article>
             ))}

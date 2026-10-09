@@ -269,7 +269,9 @@ test("routing page renders selected route records", async ({ page }) => {
 test("events page opens the all-window unread inbox", async ({ page }) => {
   await page.goto("/events");
   await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "all", exact: true })).toHaveClass(/active/);
+  // The window picker is a radio group, so the selected window is a checked
+  // radio rather than a button carrying an `active` class.
+  await expect(page.getByRole("radio", { name: "All time", exact: true })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText("18").first()).toBeVisible();
   await expect(page.getByText("analysis job failed").first()).toBeVisible();
 });

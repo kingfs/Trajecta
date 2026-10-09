@@ -219,9 +219,9 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
       </div>
       <TokenMetrics item={group} />
       <div className="action-group trace-row-actions">
-        <button className="ghost-button" type="button" onClick={onToggle}>
+        <Button variant="ghost" type="button" onClick={onToggle}>
           {isOpen ? t("requests.collapse") : t("requests.expand")}
-        </button>
+        </Button>
       </div>
     </article>
   );
@@ -255,14 +255,18 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
         </Button>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
-          {t("requests.timeline")}
-        </Link>
+        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
+          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
+            {t("requests.timeline")}
+          </Link>
+        </Button>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
-          {t("requests.raw")}
-        </Link>
+        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
+          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
+            {t("requests.raw")}
+          </Link>
+        </Button>
       ) : null}
       <Button asChild variant="default" size="icon">
         <Link to={buildTraceLink(itemID, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>

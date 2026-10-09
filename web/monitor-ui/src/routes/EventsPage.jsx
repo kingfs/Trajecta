@@ -1,16 +1,17 @@
 import React, { useMemo, useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { WindowToggle } from "../components/common/Tabs";
 import { StatCard } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildTraceLink, formatDateTime, formatFailureReason, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatDateTime, formatFailureReason, setOrDeleteParam } from "../lib/monitor";
 
-const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const DEFAULT_EVENT_WINDOW = "all";
 const STATUS_OPTIONS = ["unread", "read", "resolved", "ignored", "all"];
 const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
@@ -81,16 +82,10 @@ export function EventsPage() {
           <h1>{t("events.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <div className="view-toggle" aria-label={t("events.window")}>
-            {WINDOW_OPTIONS.map((option) => (
-              <button key={option} className={`ghost-button ${currentFilter(searchParams, "window", DEFAULT_EVENT_WINDOW) === option ? "active" : ""}`.trim()} type="button" onClick={() => setFilter("window", option)}>
-                {option}
-              </button>
-            ))}
-          </div>
-          <button className="ghost-button" type="button" onClick={() => markAllRead.mutate()} disabled={busyID === "read-all"}>
+          <WindowToggle value={currentFilter(searchParams, "window", DEFAULT_EVENT_WINDOW)} onChange={(next) => setFilter("window", next)} label={t("events.window")} />
+          <Button variant="ghost" type="button" onClick={() => markAllRead.mutate()} disabled={busyID === "read-all"}>
             {t("events.markAllRead")}
-          </button>
+          </Button>
           <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
@@ -181,14 +176,14 @@ function EventDetail({ event, busyID, onAction }) {
         <Meta label="fingerprint" value={event.fingerprint} mono />
       </div>
       <div className="trace-tag-group event-links">
-        {event.trace_id ? <Link className="ghost-button" to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}>{t("events.trace")}</Link> : null}
-        {event.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(event.session_id)}`}>{t("events.session")}</Link> : null}
-        {event.upstream_id ? <Link className="ghost-button" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>{t("events.upstream")}</Link> : null}
+        {event.trace_id ? <Button asChild variant="ghost" to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}><Link to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}>{t("events.trace")}</Link></Button> : null}
+        {event.session_id ? <Button asChild variant="ghost" to={`/sessions/${encodeURIComponent(event.session_id)}`}><Link to={`/sessions/${encodeURIComponent(event.session_id)}`}>{t("events.session")}</Link></Button> : null}
+        {event.upstream_id ? <Button asChild variant="ghost" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}><Link to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>{t("events.upstream")}</Link></Button> : null}
       </div>
       <div className="event-actions">
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</button>
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</button>
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{t("events.ignore")}</button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{t("events.ignore")}</Button>
       </div>
       <pre className="code-block event-details-json">{formatJSON(event.details_json)}</pre>
     </div>

@@ -119,15 +119,15 @@ export function SessionDetailPage() {
                 <HomeIcon />
               </Link>
             </Button>
-            <button className="ghost-button" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportTrajectory.mutate()}>
+            <Button variant="ghost" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportTrajectory.mutate()}>
               {exportTrajectory.isPending ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectory")}
-            </button>
-            <button className="ghost-button" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportFullTrajectory.mutate()}>
+            </Button>
+            <Button variant="ghost" type="button" disabled={exportTrajectory.isPending || exportFullTrajectory.isPending || !detail.data} onClick={() => exportFullTrajectory.mutate()}>
               {exportFullTrajectory.isPending ? t("sessionDetail.exporting") : t("sessionDetail.exportTrajectoryFull")}
-            </button>
-            <button className="ghost-button active" type="button" disabled={reanalyzeSession.isPending} onClick={() => reanalyzeSession.mutate()}>
+            </Button>
+            <Button variant="primary" type="button" disabled={reanalyzeSession.isPending} onClick={() => reanalyzeSession.mutate()}>
               {reanalyzeSession.isPending ? t("analysis.queueing") : t("sessionDetail.refreshAnalysis")}
-            </button>
+            </Button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label={t("metric.ttft")} value={summary?.avg_ttft ?? 0} icon="duration" format="duration" />
@@ -210,15 +210,22 @@ export function SessionDetailPage() {
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
-                    <Link
-                      className="ghost-button"
+                    <Button asChild 
+                      variant="ghost"
                       to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "conversation", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
                     >
-                      {t("requests.timeline")}
-                    </Link>
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
-                      {t("requests.raw")}
-                    </Link>
+                      <Link
+                     
+                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "conversation", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
+                    >
+                        {t("requests.timeline")}
+                      </Link>
+                    </Button>
+                    <Button asChild variant="ghost" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
+                      <Link to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
+                        {t("requests.raw")}
+                      </Link>
+                    </Button>
                     <Button asChild variant="default" size="icon">
                       <Link to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
                         <ViewIcon />
@@ -354,8 +361,8 @@ function SessionAuditPanel({ failedCount, traces, sessionID }) {
                 </div>
               </div>
               <div className="action-group action-group-start">
-                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "audit", "failure")}>{t("nav.audit")}</Link>
-                <Link className="ghost-button" to={buildTraceLink(trace.id, "", sessionID, "raw", "response")}>{t("requests.raw")}</Link>
+                <Button asChild variant="ghost" to={buildTraceLink(trace.id, "", sessionID, "audit", "failure")}><Link to={buildTraceLink(trace.id, "", sessionID, "audit", "failure")}>{t("nav.audit")}</Link></Button>
+                <Button asChild variant="ghost" to={buildTraceLink(trace.id, "", sessionID, "raw", "response")}><Link to={buildTraceLink(trace.id, "", sessionID, "raw", "response")}>{t("requests.raw")}</Link></Button>
               </div>
             </article>
           ))}
@@ -463,12 +470,16 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
       ) : null}
       {detail ? <div className="failure-node-detail">{detail}</div> : null}
       <div className="action-group action-group-start">
-        <Link className="ghost-button" to={timelineLink}>
-          {t("requests.timeline")}
-        </Link>
-        <Link className="ghost-button" to={rawLink}>
-          {t("requests.raw")}
-        </Link>
+        <Button asChild variant="ghost" to={timelineLink}>
+          <Link to={timelineLink}>
+            {t("requests.timeline")}
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" to={rawLink}>
+          <Link to={rawLink}>
+            {t("requests.raw")}
+          </Link>
+        </Button>
         <Button asChild variant="default" size="icon">
           <Link to={traceLink} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
             <ViewIcon />

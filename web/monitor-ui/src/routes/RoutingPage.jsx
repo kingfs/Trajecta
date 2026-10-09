@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -133,8 +134,8 @@ export function RoutingPage() {
           <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_ttft" placeholder={t("routing.maxTTFT")} value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
           <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_tokens" placeholder={t("routing.minTokens")} value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
           <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_tokens" placeholder={t("routing.maxTokens")} value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
-          <button className="ghost-button" type="submit">{t("common.apply")}</button>
-          <button className="ghost-button" type="button" onClick={resetFilters}>{t("common.reset")}</button>
+          <Button variant="ghost" type="submit">{t("common.apply")}</Button>
+          <Button variant="ghost" type="button" onClick={resetFilters}>{t("common.reset")}</Button>
         </form>
         <div className="hero-grid hero-grid-compact">
           <StatCard label={t("routing.routedRequests")} value={formatCount(summary.requests)} />
@@ -246,7 +247,7 @@ function RoutingSettingsPanel() {
             <option value="fallback">fallback</option>
           </select>
         </label>
-        <button className="ghost-button" type="submit">{t("common.save")}</button>
+        <Button variant="ghost" type="submit">{t("common.save")}</Button>
       </form>
     </section>
   );
@@ -405,7 +406,7 @@ function ModelAliasesPanel() {
         <input className="filter-input" placeholder={t("routing.aliasPlaceholder")} value={form.alias} onChange={(event) => update("alias", event.target.value)} />
         <input className="filter-input" placeholder={t("routing.targetModelPlaceholder")} value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
         <input className="filter-input" placeholder={t("routing.optionalChannel")} value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
-        <button className="ghost-button" type="submit" disabled={createDisabled}>{t("routing.create")}</button>
+        <Button variant="ghost" type="submit" disabled={createDisabled}>{t("routing.create")}</Button>
       </form>
       <AliasValidationMessages state={validation} />
       {items.length ? (
@@ -421,8 +422,8 @@ function ModelAliasesPanel() {
                   <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> {t("routing.enabled")}</label>
                   <AliasValidationMessages state={editValidation} compact />
                   <div className="trace-tag-group">
-                    <button className="ghost-button" type="submit" disabled={editDisabled}>{t("common.save")}</button>
-                    <button className="ghost-button" type="button" onClick={cancelEdit}>{t("providers.cancel")}</button>
+                    <Button variant="ghost" type="submit" disabled={editDisabled}>{t("common.save")}</Button>
+                    <Button variant="ghost" type="button" onClick={cancelEdit}>{t("providers.cancel")}</Button>
                   </div>
                 </form>
               ) : (
@@ -434,7 +435,7 @@ function ModelAliasesPanel() {
                     {item.source ? <InlineTag>{item.source}</InlineTag> : null}
                   </div>
                   {item.description ? <span className="trace-subline">{item.description}</span> : null}
-                  <button className="ghost-button" type="button" onClick={() => startEdit(item)}>{t("routing.edit")}</button>
+                  <Button variant="ghost" type="button" onClick={() => startEdit(item)}>{t("routing.edit")}</Button>
                 </div>
               )}
             </section>
@@ -478,7 +479,7 @@ function RouteInspectorPanel() {
         <input className="filter-input" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
         <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> {t("routing.stream")}</label>
         <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>
-        <button className="ghost-button" type="submit">{t("routing.inspect")}</button>
+        <Button variant="ghost" type="submit">{t("routing.inspect")}</Button>
       </form>
       {result ? <RouteInspectorResult result={result} /> : null}
       {!result && !error ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}

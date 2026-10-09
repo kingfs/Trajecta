@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { MultiLineChart } from "../components/common/Charts";
@@ -181,15 +182,19 @@ export function OverviewPage() {
             <h2>{t("overview.needsReview")}</h2>
           </div>
           <div className="panel-head-actions">
-            <Link className="ghost-button icon-text-button" to="/audit">
-              <span>{t("overview.audit")}</span>
-              <span className="nav-item-badge">{formatCount(findingCount)}</span>
-            </Link>
-            <Link className="ghost-button icon-text-button" to="/events">
-              <span>{t("overview.systemEvents")}</span>
-              <span className={`nav-item-badge${Number(eventSummary?.unread || 0) > 0 ? " nav-item-badge-alert" : ""}`}>{formatCount(eventSummary?.unread ?? 0)}</span>
-            </Link>
-            <Link className="ghost-button" to={buildRoutingLink(normalizeUpstreamWindow(windowValue))}>{t("overview.routing")}</Link>
+            <Button asChild variant="ghost" className="icon-text-button" to="/audit">
+              <Link to="/audit">
+                <span>{t("overview.audit")}</span>
+                <span className="nav-item-badge">{formatCount(findingCount)}</span>
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" className="icon-text-button" to="/events">
+              <Link to="/events">
+                <span>{t("overview.systemEvents")}</span>
+                <span className={`nav-item-badge${Number(eventSummary?.unread || 0) > 0 ? " nav-item-badge-alert" : ""}`}>{formatCount(eventSummary?.unread ?? 0)}</span>
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" to={buildRoutingLink(normalizeUpstreamWindow(windowValue))}><Link to={buildRoutingLink(normalizeUpstreamWindow(windowValue))}>{t("overview.routing")}</Link></Button>
           </div>
         </div>
         <div className="overview-attention-grid">

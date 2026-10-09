@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -38,9 +39,11 @@ export function DataHealthPanel() {
             <h2>{t("health.parsed")}</h2>
           </div>
           <div className="panel-head-actions">
-            <Link className="ghost-button" to="/events">
-              {t("health.openEvents")}
-            </Link>
+            <Button asChild variant="ghost" to="/events">
+              <Link to="/events">
+                {t("health.openEvents")}
+              </Link>
+            </Button>
           </div>
         </div>
         <p className="system-note">{t("health.subtitle")}</p>
@@ -61,9 +64,11 @@ export function DataHealthPanel() {
           <StatCard label={t("nav.analysis")} value={analysis.total ?? 0} detail={t("health.analysisFailed", { count: analysis.failed ?? 0 })} accent={(analysis.failed ?? 0) ? "accent-red" : "accent-gold"} />
         </div>
         <div className="panel-foot-actions">
-          <Link className="ghost-button" to="/traces?observation=unparsed">
-            {t("health.viewUnparsed")}
-          </Link>
+          <Button asChild variant="ghost" to="/traces?observation=unparsed">
+            <Link to="/traces?observation=unparsed">
+              {t("health.viewUnparsed")}
+            </Link>
+          </Button>
         </div>
       </section>
     </>

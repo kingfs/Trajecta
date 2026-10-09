@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
@@ -52,7 +53,7 @@ export function FindingsPanel() {
             <option value="medium">{t("audit.severityMedium")}</option>
             <option value="low">{t("audit.severityLow")}</option>
           </select>
-          <button className="ghost-button" type="button" onClick={resetFilters}>{t("common.reset")}</button>
+          <Button variant="ghost" type="button" onClick={resetFilters}>{t("common.reset")}</Button>
         </form>
         {findings.error ? <EmptyState title={t("audit.loadFindingsError")} detail={findings.error} tone="danger" /> : null}
         {findings.loading && !findings.data ? <EmptyState title={t("audit.loadingFindings")} detail={t("audit.loadingFindingsDetail")} /> : null}
@@ -76,8 +77,8 @@ export function FindingsPanel() {
                   <DetailMetaPill label={t("common.detector")} value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
                 </div>
                 <div className="action-group action-group-start">
-                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}>{t("audit.openFinding")}</Link>
-                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=protocol`}>{t("audit.protocol")}</Link>
+                  <Button asChild variant="ghost" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}><Link to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}>{t("audit.openFinding")}</Link></Button>
+                  <Button asChild variant="ghost" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=protocol`}><Link to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=protocol`}>{t("audit.protocol")}</Link></Button>
                 </div>
               </article>
             ))}

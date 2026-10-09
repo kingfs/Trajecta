@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
@@ -98,7 +99,7 @@ function App() {
           <label htmlFor="monitor-password">{t("auth.password")}</label>
           <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
-          <button className="ghost-button active" type="submit">{t("auth.signIn")}</button>
+          <Button variant="primary" type="submit">{t("auth.signIn")}</Button>
         </form>
       </div>
     );

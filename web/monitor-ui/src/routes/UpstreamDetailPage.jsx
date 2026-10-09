@@ -133,9 +133,9 @@ export function UpstreamDetailPage() {
             onChange={(event) => setModelDraft(event.target.value)}
             placeholder={t("upstreamDetail.filterByModel")}
           />
-          <button className="ghost-button" type="submit">{t("common.apply")}</button>
-          <button
-            className="ghost-button"
+          <Button variant="ghost" type="submit">{t("common.apply")}</Button>
+          <Button 
+            variant="ghost"
             type="button"
             onClick={() => {
               setModelDraft("");
@@ -145,7 +145,7 @@ export function UpstreamDetailPage() {
             }}
           >
             {t("common.reset")}
-          </button>
+          </Button>
         </form>
       </section>
 

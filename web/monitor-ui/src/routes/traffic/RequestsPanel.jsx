@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../../components/ui/button";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -88,15 +89,15 @@ export function RequestsPanel() {
             <span className="badge badge-live">{t("common.refresh60")}</span>
             <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
             <div className="pager">
-              <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+              <Button variant="ghost" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
                 {t("common.previous")}
-              </button>
+              </Button>
               <span className="pager-label">
                 {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
               </span>
-              <button className="ghost-button" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
+              <Button variant="ghost" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
                 {t("common.next")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -135,12 +136,12 @@ export function RequestsPanel() {
             <option value="queued">{t("requests.parseQueued")}</option>
             <option value="running">{t("requests.parseRunning")}</option>
           </select>
-          <button className="ghost-button" type="submit">
+          <Button variant="ghost" type="submit">
             {t("common.apply")}
-          </button>
-          <button className="ghost-button" type="button" onClick={resetFilters}>
+          </Button>
+          <Button variant="ghost" type="button" onClick={resetFilters}>
             {t("common.reset")}
-          </button>
+          </Button>
         </form>
 
         {error ? <EmptyState title={t("requests.loadError")} detail={error} tone="danger" /> : null}

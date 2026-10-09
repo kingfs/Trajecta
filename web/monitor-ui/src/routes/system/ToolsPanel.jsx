@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
 import { useJSON } from "../../hooks/useJSON";
@@ -60,8 +61,8 @@ export function ToolsPanel() {
                 {t("audit.enableServerTools")}
               </label>
               <div className="provider-form-actions">
-                <button className="ghost-button" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(true)}>{t("audit.validate")}</button>
-                <button className="ghost-button active" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(false)}>{t("common.apply")}</button>
+                <Button variant="ghost" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(true)}>{t("audit.validate")}</Button>
+                <Button variant="primary" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(false)}>{t("common.apply")}</Button>
               </div>
               {writeState.message ? <InlineTag tone="green">{writeState.message}</InlineTag> : null}
               {writeState.error ? <InlineTag tone="danger">{writeState.error}</InlineTag> : null}

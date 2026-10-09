@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
@@ -71,9 +72,9 @@ export function ModelsPage() {
         </div>
         <form className="filter-bar" onSubmit={applySearch}>
           <input className="filter-input filter-input-wide" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={t("models.search")} />
-          <button className="ghost-button" type="submit">{t("common.apply")}</button>
-          <button
-            className="ghost-button"
+          <Button variant="ghost" type="submit">{t("common.apply")}</Button>
+          <Button 
+            variant="ghost"
             type="button"
             onClick={() => {
               setQueryDraft("");
@@ -83,7 +84,7 @@ export function ModelsPage() {
             }}
           >
             {t("common.reset")}
-          </button>
+          </Button>
         </form>
         <div className="hero-grid hero-grid-compact">
           <StatCard label={t("models.title")} value={formatCount(items.length)} />

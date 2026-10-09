@@ -110,10 +110,10 @@ export function ProvidersPage() {
               <h2>{t("providers.cards")}</h2>
             </div>
             <div className="panel-head-actions">
-              <button className="ghost-button active icon-text-button" type="button" onClick={() => setFormOpen(true)}>
+              <Button variant="primary" className="icon-text-button" type="button" onClick={() => setFormOpen(true)}>
                 <PlusIcon />
                 <span>{t("providers.new")}</span>
-              </button>
+              </Button>
             </div>
           </div>
           <div className="provider-grid">
@@ -293,9 +293,9 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
         <div className="provider-form-actions">
-          <button className="ghost-button" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</button>
-          <button className="ghost-button active" type="button" onClick={() => validateSetup.mutate()} disabled={validateSetup.isPending || !form.base_url.trim()}>{validateSetup.isPending ? t("providers.validating") : t("providers.validate")}</button>
-          <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</button>
+          <Button variant="ghost" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</Button>
+          <Button variant="primary" type="button" onClick={() => validateSetup.mutate()} disabled={validateSetup.isPending || !form.base_url.trim()}>{validateSetup.isPending ? t("providers.validating") : t("providers.validate")}</Button>
+          <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
         </div>
         {setupResult ? <ProviderSetupStatusPanel result={setupResult} status={setupStatus} /> : <p className="trace-subline">{t("providers.validateBeforeCreate")}</p>}
         {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
@@ -305,8 +305,8 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           </div>
         ) : null}
           <DialogFooter>
-            <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-            <button className="ghost-button active" type="submit" disabled={createProvider.isPending || !setupStatus.canApply}>{createProvider.isPending ? t("providers.creating") : t("providers.create")}</button>
+            <Button variant="ghost" type="button" onClick={onClose}>{t("providers.cancel")}</Button>
+            <Button variant="primary" type="submit" disabled={createProvider.isPending || !setupStatus.canApply}>{createProvider.isPending ? t("providers.creating") : t("providers.create")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -354,8 +354,8 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           <Button variant="default" size="icon" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
             <DeleteIcon />
           </Button>
-          <button
-            className="ghost-button provider-card-probe-button"
+          <Button 
+            variant="ghost" className="provider-card-probe-button"
             type="button"
             onClick={(event) => {
               event.preventDefault();
@@ -364,7 +364,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
             }}
           >
             {t("providers.probe")}
-          </button>
+          </Button>
           <InlineTag tone={modeTag.tone}>{modeTag.label(t)}</InlineTag>
           <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
@@ -440,8 +440,8 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
         {report && !row ? <EmptyState title={t("providers.noProbe")} detail={t("providers.noProbeDetail")} compact /> : null}
         {applyResult ? <p className="trace-subline">{t("providers.applyAccepted", { result: formatProviderProbeApplyResult(applyResult, t) })}</p> : null}
         <DialogFooter>
-          <button className="ghost-button" type="button" onClick={() => previewReport.mutate()} disabled={busy === "preview"}>{busy === "preview" ? t("providers.probing") : t("providers.runAgain")}</button>
-          <button className="ghost-button active" type="button" onClick={() => applyDetected.mutate()} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? t("providers.applying") : t("providers.applySuggestions")}</button>
+          <Button variant="ghost" type="button" onClick={() => previewReport.mutate()} disabled={busy === "preview"}>{busy === "preview" ? t("providers.probing") : t("providers.runAgain")}</Button>
+          <Button variant="primary" type="button" onClick={() => applyDetected.mutate()} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? t("providers.applying") : t("providers.applySuggestions")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -582,7 +582,7 @@ function ProviderProbeSuggestionPanel({ report, onApply }) {
       </div>
       {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
       <div className="provider-form-actions">
-        <button className="ghost-button active" type="button" onClick={onApply} disabled={report.status !== "detected"}>{t("providers.applySuggestions")}</button>
+        <Button variant="primary" type="button" onClick={onApply} disabled={report.status !== "detected"}>{t("providers.applySuggestions")}</Button>
       </div>
     </div>
   );
