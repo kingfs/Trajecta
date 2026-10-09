@@ -4,7 +4,7 @@ import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon 
 import { EmptyState } from "../common/EmptyState";
 import { apiPaths } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatGenerationSpeed, formatPrefillSpeed, formatProviderTag } from "../../lib/monitor";
+import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatRate, formatRawCacheRate, formatRawDuration, formatRawRate, formatProviderTag, generationTokensPerSecond, prefillTokensPerSecond } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false, groupSessionFailures = false }) {
   const { t } = useI18n();
@@ -69,6 +69,10 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
   const failed = item.status_code < 200 || item.status_code >= 300;
   const focus = focusFailures && failed ? "failure" : "";
   const upstreamCallCount = Number(item.upstream_call_count || 0);
+  // Computed once each: the chip shows the compacted rate and the tooltip the
+  // raw one, and both must come from the same number.
+  const prefillRate = prefillTokensPerSecond(item.prompt_tokens, item.ttft_ms, item.duration_ms, item.is_stream);
+  const generationRate = generationTokensPerSecond(item.completion_tokens, item.duration_ms, item.ttft_ms, item.is_stream);
 
   return (
     <article className={`${failed ? "trace-row trace-row-failed" : "trace-row"}${groupedChild ? " trace-row-grouped-child" : ""}`}>
@@ -98,10 +102,10 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
         <span>{item.method || "POST"}</span>
       </div>
       <div className="latency-metric-stack">
-        <LatencyMetric label="total" value={formatDuration(item.duration_ms)} icon="duration" title={`${item.duration_ms || 0} ms`} />
-        <LatencyMetric label="ttft" value={formatDuration(item.ttft_ms)} icon="ttft" title={`${item.ttft_ms || 0} ms`} />
-        <LatencyMetric label="pp" value={formatPrefillSpeed(item.prompt_tokens, item.ttft_ms, item.duration_ms, item.is_stream)} icon="pp" title={`prefill speed`} />
-        <LatencyMetric label="tg" value={formatGenerationSpeed(item.completion_tokens, item.duration_ms, item.ttft_ms, item.is_stream)} icon="tg" title={`generation speed`} />
+        <LatencyMetric label={t("metric.totalDuration")} value={formatDuration(item.duration_ms)} raw={formatRawDuration(item.duration_ms)} icon="duration" />
+        <LatencyMetric label={t("metric.ttft")} value={formatDuration(item.ttft_ms)} raw={formatRawDuration(item.ttft_ms)} icon="ttft" />
+        <LatencyMetric label={t("metric.prefillSpeed")} value={formatRate(prefillRate)} raw={formatRawRate(prefillRate)} icon="pp" />
+        <LatencyMetric label={t("metric.generationSpeed")} value={formatRate(generationRate)} raw={formatRawRate(generationRate)} icon="tg" />
       </div>
       <TokenMetrics item={item} />
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
@@ -209,8 +213,8 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
         <span>HTTP</span>
       </div>
       <div className="latency-metric-stack">
-        <LatencyMetric label="total" value={formatDuration(group.totalDuration)} icon="duration" title={`${group.totalDuration} ms combined`} />
-        <LatencyMetric label="avg" value={formatDuration(group.avgDuration)} icon="ttft" title={`${group.avgDuration} ms average`} />
+        <LatencyMetric label={t("metric.combinedDuration")} value={formatDuration(group.totalDuration)} raw={formatRawDuration(group.totalDuration)} icon="duration" />
+        <LatencyMetric label={t("metric.averageDuration")} value={formatDuration(group.avgDuration)} raw={formatRawDuration(group.avgDuration)} icon="avg" />
       </div>
       <TokenMetrics item={group} />
       <div className="action-group trace-row-actions">
@@ -223,14 +227,15 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
 }
 
 function TokenMetrics({ item }) {
+  const { t } = useI18n();
   return (
     <div>
       <div className="token-inline-row">
-        <MiniToken metric="in" value={item.prompt_tokens} tone="accent" icon="input" />
-        <MiniToken metric="out" value={item.completion_tokens} tone="green" icon="output" />
-        <MiniToken metric="total" value={item.total_tokens} tone="default" icon="total" />
-        <MiniToken metric="cached" value={item.cached_tokens} tone="gold" icon="cached" />
-        <MiniToken metric="cache%" value={formatCacheRate(item.cached_tokens, item.total_tokens)} tone="gold" icon="cached" />
+        <MiniToken metric={t("metric.inputTokens")} value={item.prompt_tokens} tone="accent" icon="input" />
+        <MiniToken metric={t("metric.outputTokens")} value={item.completion_tokens} tone="green" icon="output" />
+        <MiniToken metric={t("metric.totalTokens")} value={item.total_tokens} tone="default" icon="total" />
+        <MiniToken metric={t("metric.cachedTokens")} value={item.cached_tokens} tone="gold" icon="cached" />
+        <MiniToken metric={t("metric.cacheRate")} value={formatCacheRate(item.cached_tokens, item.total_tokens)} raw={formatRawCacheRate(item.cached_tokens, item.total_tokens)} tone="gold" icon="percent" />
       </div>
     </div>
   );

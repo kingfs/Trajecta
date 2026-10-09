@@ -285,44 +285,6 @@
   color: var(--text-tertiary);
 }
 
-.account-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 60;
-  padding: var(--space-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-1);
-  box-shadow: var(--shadow-lg);
-}
-
-.account-menu-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-1);
-}
-
-.account-menu-head strong {
-  display: block;
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-}
-
-.account-menu-head span {
-  font-size: var(--text-label);
-  color: var(--text-tertiary);
-}
-
-.account-avatar-menu {
-  width: 30px;
-  height: 30px;
-}
-
 .account-menu-item {
   width: 100%;
   display: flex;
@@ -361,16 +323,30 @@
 }
 
 /* Collapsed rail: icons only, labels and section headings removed. */
-.app-shell-collapsed .nav-brand-copy strong,
+.app-shell-collapsed .nav-brand-copy,
 .app-shell-collapsed .nav-item-label,
 .app-shell-collapsed .nav-section-label,
-.app-shell-collapsed .account-copy,
-.app-shell-collapsed .sidebar-toggle {
+.app-shell-collapsed .account-copy {
   display: none;
 }
 
+/* The toggle must survive the collapse: it is the only way back out of the rail,
+   so the brand mark steps aside and the button takes its place. */
 .app-shell-collapsed .nav-brand {
   justify-content: center;
+}
+
+.app-shell-collapsed .sidebar-toggle {
+  width: 30px;
+  height: 30px;
+  border-color: var(--border-subtle);
+  background: var(--surface-2);
+}
+
+.app-shell-collapsed .sidebar-toggle:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .app-shell-collapsed .nav-item,

@@ -261,6 +261,7 @@ button:disabled {
 .badge,
 .inline-tag,
 .detail-meta-pill,
+.metric,
 .mini-token,
 .token-badge,
 .latency-metric {
@@ -325,18 +326,37 @@ button:disabled {
 }
 
 .detail-meta-pill,
+.metric,
 .mini-token,
 .token-badge,
 .latency-metric {
   gap: var(--space-2);
   min-height: 26px;
   padding: 0 var(--space-3);
+  /* The token badge used to inherit this from .badge; a chip is an icon and a
+     number and must never break across two lines. */
+  white-space: nowrap;
 }
 
-.detail-meta-label,
-.mini-token-label,
-.token-badge-label,
-.latency-metric-label {
+/* The metric chips carry an icon and a number only, so the icon tint is what
+   separates an input count from an output count at a glance. */
+.metric-accent .metric-icon-wrap {
+  color: var(--accent);
+}
+
+.metric-green .metric-icon-wrap {
+  color: var(--success);
+}
+
+.metric-gold .metric-icon-wrap {
+  color: var(--warning);
+}
+
+.metric-danger .metric-icon-wrap {
+  color: var(--danger);
+}
+
+.detail-meta-label {
   color: var(--text-tertiary);
   font-size: var(--text-label);
   text-transform: uppercase;
@@ -344,6 +364,7 @@ button:disabled {
 }
 
 .detail-meta-pill strong,
+.metric strong,
 .mini-token strong,
 .token-badge strong,
 .latency-metric strong {
@@ -738,6 +759,36 @@ input[type="radio"] {
   margin: 0;
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
+}
+
+/* The account surface is a centred modal, not a rail-anchored popover: anchored,
+   its content was clamped to the sidebar width. It is narrower than the default
+   dialog because it holds three actions. See AccountDialog in PrimaryNav.
+   These rules live here, after .nav-modal, because an equal-specificity override
+   in layout.css would lose to the .nav-modal width that precedes it in the
+   cascade. */
+.account-modal {
+  width: min(420px, 100%);
+}
+
+.account-modal-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.account-modal-role {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-label);
+  color: var(--text-tertiary);
+}
+
+.account-avatar-menu {
+  width: 34px;
+  height: 34px;
+  font-size: var(--text-sm);
 }
 
 .nav-modal-actions {

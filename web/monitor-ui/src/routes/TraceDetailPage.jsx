@@ -14,6 +14,8 @@ import {
   buildUpstreamLink,
   formatDateTime,
   formatDuration,
+  formatCacheRate,
+  formatRawCacheRate,
   formatEndpointTag,
   formatFailureReason,
   formatHealthLabel,
@@ -198,10 +200,11 @@ export function TraceDetailPage() {
             </button>
           </div>
           <div className="detail-toolbar-tokens">
-            <TokenBadge label="in" value={usage?.prompt_tokens || 0} icon="input" />
-            <TokenBadge label="out" value={usage?.completion_tokens || 0} icon="output" />
-            <TokenBadge label="total" value={usage?.total_tokens || 0} icon="total" accent="token-badge-strong" />
-            <TokenBadge label="cached" value={usage?.prompt_tokens_details?.cached_tokens || 0} icon="cached" />
+            <TokenBadge label={t("metric.inputTokens")} value={usage?.prompt_tokens || 0} icon="input" />
+            <TokenBadge label={t("metric.outputTokens")} value={usage?.completion_tokens || 0} icon="output" />
+            <TokenBadge label={t("metric.totalTokens")} value={usage?.total_tokens || 0} icon="total" accent="token-badge-strong" />
+            <TokenBadge label={t("metric.cachedTokens")} value={usage?.prompt_tokens_details?.cached_tokens || 0} icon="cached" />
+            <TokenBadge label={t("metric.cacheRate")} value={formatCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} raw={formatRawCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} icon="percent" />
           </div>
         </div>
       </header>

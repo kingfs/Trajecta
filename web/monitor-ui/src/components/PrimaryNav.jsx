@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
 import { apiPaths, apiURL, postJSON, requestJSON, streamSystemEvents } from "../lib/api";
@@ -64,17 +64,6 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [eventSummary, setEventSummary] = useState(null);
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    const close = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setAccountOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +129,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           aria-label={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
           title={collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar")}
         >
-          <NavIcon name="sidebar" />
+          <NavIcon name={collapsed ? "sidebar" : "sidebar-collapse"} />
         </button>
       </div>
 
@@ -169,29 +158,14 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
         ))}
       </div>
 
-      <div className="nav-account" ref={menuRef}>
-        {accountOpen ? (
-          <div className="account-menu">
-            <AccountMenuContent
-              user={user}
-              onLogout={onLogout}
-              onPreferences={() => {
-                setPreferencesOpen(true);
-                setAccountOpen(false);
-              }}
-              onPassword={() => {
-                setPasswordOpen(true);
-                setAccountOpen(false);
-              }}
-            />
-          </div>
-        ) : null}
+      <div className="nav-account">
         <button
           className="account-trigger"
           type="button"
-          onClick={() => setAccountOpen((open) => !open)}
-          aria-haspopup="menu"
+          onClick={() => setAccountOpen(true)}
+          aria-haspopup="dialog"
           aria-expanded={accountOpen}
+          aria-label={t("account.openAccount")}
           title={collapsed ? displayName(user) : undefined}
         >
           <span className="account-avatar">{initials(user)}</span>
@@ -202,25 +176,76 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
         </button>
       </div>
 
+      {accountOpen ? (
+        <AccountDialog
+          user={user}
+          onClose={() => setAccountOpen(false)}
+          onLogout={onLogout}
+          onPreferences={() => {
+            setPreferencesOpen(true);
+            setAccountOpen(false);
+          }}
+          onPassword={() => {
+            setPasswordOpen(true);
+            setAccountOpen(false);
+          }}
+        />
+      ) : null}
+
       {preferencesOpen ? <PreferencesDialog onClose={() => setPreferencesOpen(false)} /> : null}
       {passwordOpen ? <PasswordDialog onClose={() => setPasswordOpen(false)} /> : null}
     </nav>
   );
 }
 
-function AccountMenuContent({ user, onLogout, onPreferences, onPassword }) {
+/**
+ * The account surface is a centred dialog rather than a popover.
+ *
+ * Anchored to the trigger at the bottom of the rail, its content was clamped to
+ * the sidebar's own width, which left the language picker and the account fields
+ * fighting for ~200px. The modal reuses the same backdrop the preferences and
+ * password dialogs already use, so the sidebar keeps one overlay pattern.
+ */
+function AccountDialog({ user, onClose, onLogout, onPreferences, onPassword }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="nav-modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="nav-modal account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title" onClick={(event) => event.stopPropagation()}>
+        <div className="nav-modal-head">
+          <div className="account-modal-identity">
+            <span className="account-avatar account-avatar-menu">{initials(user)}</span>
+            <div>
+              <h2 id="account-title">{displayName(user)}</h2>
+              <span className="account-modal-role">
+                {user?.role || t("account.roleFallback")} · {user?.scope || t("account.scopeFallback")}
+              </span>
+            </div>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={t("common.close")}>
+            <CloseIcon />
+          </button>
+        </div>
+        <AccountMenuContent onLogout={onLogout} onPreferences={onPreferences} onPassword={onPassword} />
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function AccountMenuContent({ onLogout, onPreferences, onPassword }) {
   const { t } = useI18n();
   return (
     <>
-      <div className="account-menu-head">
-        <span className="account-avatar account-avatar-menu">{initials(user)}</span>
-        <div>
-          <strong>{displayName(user)}</strong>
-          <span>
-            {user?.role || t("account.roleFallback")} · {user?.scope || t("account.scopeFallback")}
-          </span>
-        </div>
-      </div>
       <button className="account-menu-item" type="button" onClick={onPreferences}>
         <NavIcon name="settings" />
         <span>{t("account.preferences")}</span>
@@ -257,6 +282,16 @@ function NavIcon({ name }) {
           <rect x="3" y="4" width="18" height="16" rx="3" />
           <path d="M9 4v16" />
           <path d="M14 9l3 3-3 3" />
+        </svg>
+      );
+    case "sidebar-collapse":
+      // Mirror of "sidebar": the chevron points at the edge the rail will retreat
+      // to, so the expanded button reads as "collapse" and the rail one as "expand".
+      return (
+        <svg {...common} width={15} height={15}>
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="M9 4v16" />
+          <path d="M17 9l-3 3 3 3" />
         </svg>
       );
     case "grid":

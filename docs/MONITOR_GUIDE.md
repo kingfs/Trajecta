@@ -19,7 +19,7 @@ go run ./cmd/server auth init-user -c config/config.yaml --username admin --pass
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
-右上角账号菜单提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
+左侧导航底部的账号入口（`aria-label` 为「账户」）打开居中的模态对话框，与偏好设置、修改密码共用同一套遮罩，按 Esc 或点击遮罩关闭。对话框提供偏好设置（语言、主题，保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。账号入口固定在导航栏内，而对话框渲染到 `document.body` 并用视口定位，因此内容不再被侧边栏宽度截断。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
 ## 个人 API token
 
@@ -44,6 +44,10 @@ Monitor 同时使用两类数据：
 ## 页面
 
 左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。下面按导航顺序说明路由与用途。
+
+侧边栏可以折叠成只有图标的窄栏，折叠状态保存在浏览器 localStorage（`trajecta.monitor.sidebar.collapsed`）。折叠后品牌区块整体让位给展开按钮，因此折叠始终可逆；宽度不足 1000px 时布局固定为窄栏，与折叠状态无关，此时展开按钮不显示。
+
+trace 列表、trace 详情、会话详情与上游详情上的指标统一渲染为「图标 + 数值」的紧凑标签：可见部分只有图标和格式化后的数值，人类标签与未格式化的原始值放在 `title` 悬停提示里（以 ` · ` 连接）。数值按可读宽度自动换算——耗时超过 60 秒改用分钟/小时（`125000` ms → `2m 5s`，`3725000` ms → `1h 2m`），token 速率超过 1000 后按 `k`/`M` 缩写且百位以上取整（`112055` tok/s → `112k tok/s`），token 数量沿用 `k`/`M`/`B` 缩写（`112055` → `112.1K`）。
 
 ### 监控
 

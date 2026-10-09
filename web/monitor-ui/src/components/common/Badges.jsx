@@ -1,48 +1,47 @@
 import React from "react";
-import { formatDuration, formatRawNumber, formatTokenCount } from "../../lib/monitor";
+import { formatDuration, formatRawDuration, formatRawNumber, formatTokenCount } from "../../lib/monitor";
 
 export function InlineTag({ children, tone = "default" }) {
   return <span className={`inline-tag inline-tag-${tone}`}>{children}</span>;
 }
 
-export function MiniToken({ metric, value, tone = "default", icon = "total" }) {
-  const displayValue = typeof value === "number" ? formatTokenCount(value) : value || 0;
-  const rawTitle = typeof value === "number" ? formatRawNumber(value) : "";
+/**
+ * The shared read-only metric chip: an icon plus the already-formatted value.
+ *
+ * The human label and the unformatted value live in the tooltip instead of the
+ * row, because a trace row carries up to nine of these and a visible label on
+ * each one is what pushes the table past the viewport. `raw` is the author's
+ * exact number, so hovering answers "how long really" without a second lookup.
+ */
+export function Metric({ icon = "total", label = "", value, raw = "", tone = "default", className = "" }) {
+  const tooltip = [label, raw].filter((part) => part !== "" && part !== undefined && part !== null).join(" · ");
   return (
-    <span className={`mini-token mini-token-${tone}`} title={rawTitle}>
+    <span className={`metric metric-${tone} ${className}`.trim()} title={tooltip}>
       <span className="metric-icon-wrap">
         <MetricIcon type={icon} />
       </span>
-      <span className="mini-token-label">{metric}</span>
-      <strong>{displayValue}</strong>
-    </span>
-  );
-}
-
-export function TokenBadge({ label, value, accent = "", icon = "total" }) {
-  const displayValue = label === "ttft" ? formatDuration(value) : formatTokenCount(value);
-  const rawTitle = label === "ttft" ? `${Math.round(Number(value || 0))} ms` : formatRawNumber(value);
-  return (
-    <span className={`badge token-badge ${accent}`.trim()} title={rawTitle}>
-      <span className="metric-icon-wrap token-badge-icon">
-        <MetricIcon type={icon} />
-      </span>
-      <span className="token-badge-label">{label}</span>
-      <strong>{displayValue}</strong>
-    </span>
-  );
-}
-
-export function LatencyMetric({ label, value, icon = "duration", title = "" }) {
-  return (
-    <span className="latency-metric" title={title}>
-      <span className="metric-icon-wrap latency-metric-icon">
-        <MetricIcon type={icon} />
-      </span>
-      <span className="latency-metric-label">{label}</span>
       <strong>{value}</strong>
     </span>
   );
+}
+
+export function MiniToken({ metric, value, raw = "", tone = "default", icon = "total" }) {
+  const displayValue = typeof value === "number" ? formatTokenCount(value) : value || 0;
+  const rawValue = raw || (typeof value === "number" ? formatRawNumber(value) : "");
+  return <Metric icon={icon} label={metric} raw={rawValue} value={displayValue} tone={tone} className="mini-token" />;
+}
+
+export function TokenBadge({ label, value, raw = "", accent = "", icon = "total", format = "count" }) {
+  // The caller states whether the number is a token count or a duration: it is
+  // the only side that knows, and the icon is presentation, not a type tag.
+  const isDuration = format === "duration";
+  const displayValue = isDuration ? formatDuration(value) : formatTokenCount(value);
+  const rawValue = raw || (isDuration ? formatRawDuration(value) : formatRawNumber(value));
+  return <Metric icon={icon} label={label} raw={rawValue} value={displayValue} className={`token-badge ${accent}`} />;
+}
+
+export function LatencyMetric({ label, value, icon = "duration", raw = "", title = "" }) {
+  return <Metric icon={icon} label={label} raw={raw || title} value={value} className="latency-metric" />;
 }
 
 export function DetailMetaPill({ label, value, mono = false }) {
@@ -124,6 +123,41 @@ function MetricIcon({ type = "total" }) {
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path d="M5 5.5h7v7H5z" fill="none" stroke="currentColor" strokeWidth="1.3" />
         <path d="M3.5 3.5h7v7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "percent") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="m4 12 8-8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="5.2" cy="5.2" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <circle cx="10.8" cy="10.8" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      </svg>
+    );
+  }
+  if (type === "total") {
+    // Sigma: the sum a "total tokens" chip reports.
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M11.5 3.5H5l3.4 4.5L5 12.5h6.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "avg") {
+    // A mean line between two extremes.
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.5 4.5h11M2.5 11.5h11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" />
+        <path d="M2.5 8h11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "failed") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M8 5.2v3.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11" r="0.8" fill="currentColor" />
       </svg>
     );
   }

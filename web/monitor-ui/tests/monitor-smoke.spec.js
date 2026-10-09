@@ -717,6 +717,26 @@ function traceListPayload() {
       completion_tokens: 0,
       cached_tokens: 0,
       is_stream: false,
+    },
+    // The metric chips format for width: this row is slow enough to need minutes
+    // and its prefill is fast enough to need the "k" rate suffix.
+    {
+      id: "trace-long",
+      recorded_at: new Date().toISOString(),
+      model: "gpt-5",
+      provider: "openai",
+      selected_upstream_id: "openai-primary",
+      operation: "responses.create",
+      endpoint: "/v1/responses",
+      method: "POST",
+      status_code: 200,
+      duration_ms: 125000,
+      ttft_ms: 1000,
+      total_tokens: 208110,
+      prompt_tokens: 112055,
+      completion_tokens: 96055,
+      cached_tokens: 96055,
+      is_stream: true,
     }],
   };
 }
@@ -999,4 +1019,103 @@ test("provider toggle failure is visible and preserves the displayed choice", as
   await page.getByLabel("OpenAI Primary enabled", { exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Upstreams are managed by YAML credentials");
   await expect(page.getByLabel("OpenAI Primary enabled", { exact: true })).toBeChecked();
+});
+
+// Collapsing the rail hides every label by design, but a previous version also
+// hid the toggle itself and left no way to expand the sidebar again.
+test("collapsed sidebar keeps a visible expand control", async ({ page, isMobile }) => {
+  // Below 1000px the shell is always a rail, so the collapsed flag changes
+  // nothing and the toggle is deliberately hidden there.
+  test.skip(isMobile, "the rail is width-forced below 1000px");
+  await page.addInitScript(() => {
+    window.localStorage.setItem("trajecta.monitor.sidebar.collapsed", "true");
+  });
+  await page.goto("/overview");
+
+  const shell = page.locator(".app-shell");
+  await expect(shell).toHaveClass(/app-shell-collapsed/);
+
+  const expand = page.getByRole("button", { name: "Expand sidebar" });
+  await expect(expand).toBeVisible();
+  await expand.click();
+
+  await expect(shell).not.toHaveClass(/app-shell-collapsed/);
+  const collapse = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(collapse).toBeVisible();
+
+  // The round trip is the regression: collapsing must stay reversible.
+  await collapse.click();
+  await expect(shell).toHaveClass(/app-shell-collapsed/);
+  await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+});
+
+// The account surface used to be a popover anchored inside the rail, so its
+// content was clamped to the sidebar width. It is a centred dialog now.
+test("the account trigger opens a centred modal with a backdrop", async ({ page }) => {
+  await page.goto("/overview");
+
+  await page.getByRole("button", { name: "Account" }).click();
+
+  const backdrop = page.locator(".nav-modal-backdrop");
+  const dialog = page.getByRole("dialog", { name: "local" });
+  await expect(backdrop).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Preferences" })).toBeVisible();
+
+  // Centred in the overlay, and wider than the ~232px rail that used to clip it.
+  // The comparison is against the backdrop rather than page.viewportSize()
+  // because a mobile layout viewport is not reported at the same scale.
+  const box = await dialog.boundingBox();
+  const overlay = await backdrop.boundingBox();
+  expect(Math.abs(box.x + box.width / 2 - (overlay.x + overlay.width / 2))).toBeLessThanOrEqual(2);
+  expect(box.width).toBeGreaterThan(320);
+  expect(box.width).toBeLessThanOrEqual(420);
+  // Nothing spills past the overlay: the old popover was clamped, not overflowing.
+  expect(box.x).toBeGreaterThanOrEqual(overlay.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(overlay.x + overlay.width + 1);
+
+  await page.keyboard.press("Escape");
+  await expect(backdrop).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Account" }).click();
+  await expect(backdrop).toBeVisible();
+  await backdrop.click({ position: { x: 4, y: 4 } });
+  await expect(page.locator(".nav-modal-backdrop")).toHaveCount(0);
+});
+
+// Trace rows carry nine metrics; the chips show the icon and the number only and
+// keep the label plus the unformatted value in the hover tooltip.
+test("trace metric chips hide the label in the tooltip and scale their values", async ({ page }) => {
+  await page.goto("/traces");
+
+  await expect(page.locator(".trace-row").first()).toBeVisible();
+  // No chip renders its label any more; the label lives in the title attribute.
+  await expect(page.locator(".latency-metric-label, .mini-token-label, .token-badge-label")).toHaveCount(0);
+  await expect(page.getByTitle(/^total duration · 1,200 ms$/)).toHaveAttribute("title", /^total duration · [\d,]+ ms$/);
+
+  // 125000 ms renders as minutes, 1000 ms stays in seconds.
+  await expect(page.getByTitle(/^total duration · 125,000 ms$/)).toHaveText("2m 5s");
+  await expect(page.getByTitle(/^time to first token · 1,000 ms$/)).toHaveText("1s");
+
+  // 112055 tok/s compacts to "112k tok/s" while the raw number stays on hover.
+  await expect(page.getByTitle(/^prefill speed · 112,055 tok\/s$/)).toHaveText("112k tok/s");
+
+  // Token counts keep their own formatting, with the operand pair on hover.
+  await expect(page.getByTitle(/^cache hit rate · 46\.16% \(96,055 \/ 208,110\)$/)).toHaveText("46.2%");
+  await expect(page.getByTitle(/^input tokens · 112,055$/)).toHaveText("112.1K");
+  await expect(page.getByTitle(/^cached tokens · 96,055$/)).toHaveText("96.1K");
+});
+
+// The trace detail toolbar reuses the same chips, plus the cache hit rate that
+// used to exist only on the request rows.
+test("trace detail toolbar shows token chips and the cache rate", async ({ page }) => {
+  await page.goto("/traces/trace-routed");
+
+  const toolbar = page.locator(".detail-toolbar-tokens");
+  await expect(toolbar.locator(".token-badge")).toHaveCount(5);
+  await expect(toolbar.locator(".token-badge-label")).toHaveCount(0);
+  await expect(toolbar.getByTitle(/^input tokens · [\d,]+$/)).toBeVisible();
+  await expect(toolbar.getByTitle(/^total tokens · [\d,]+$/)).toBeVisible();
+  await expect(toolbar.getByTitle(/^cache hit rate · .*% \([\d,]+ \/ [\d,]+\)$/)).toBeVisible();
 });

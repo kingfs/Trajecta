@@ -103,9 +103,9 @@ export function UpstreamDetailPage() {
             </Link>
           </div>
           <div className="detail-toolbar-tokens">
-            <TokenBadge label="ttft" value={target?.avg_ttft ?? 0} icon="total" />
-            <TokenBadge label={t("common.tokens")} value={target?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
-            <TokenBadge label={t("common.failed")} value={target?.failed_request ?? 0} icon="cached" />
+            <TokenBadge label={t("metric.ttft")} value={target?.avg_ttft ?? 0} icon="duration" format="duration" />
+            <TokenBadge label={t("metric.totalTokens")} value={target?.total_tokens ?? 0} icon="total" accent="token-badge-strong" />
+            <TokenBadge label={t("common.failed")} value={target?.failed_request ?? 0} icon="failed" />
           </div>
         </div>
       </header>

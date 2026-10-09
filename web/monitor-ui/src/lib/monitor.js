@@ -271,14 +271,40 @@ export function buildFailureContexts(timeline = []) {
   return failures;
 }
 
+// Durations scale up on their own so a slow trace stays readable in a narrow
+// metric chip: 1200 ms -> "1.2s", 120000 ms -> "2m", 3725000 ms -> "1h 2m".
 export function formatDuration(value, { precise = false } = {}) {
   const ms = Number(value || 0);
   const safeMs = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
-  let label = `${formatSeconds(safeMs / 1000)}s`;
+  const label = formatDurationShort(safeMs);
   if (precise && safeMs > 0) {
     return `${label} (${safeMs} ms)`;
   }
   return label;
+}
+
+function formatDurationShort(ms) {
+  if (ms < 60_000) {
+    return `${formatSeconds(ms / 1000)}s`;
+  }
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+// The unshortened counterpart for tooltips, where the exact millisecond value is
+// what the reader is hovering for.
+export function formatRawDuration(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "0 ms";
+  }
+  return `${Math.round(ms).toLocaleString()} ms`;
 }
 
 export function formatRawNumber(value = 0) {
@@ -289,35 +315,96 @@ export function formatRawNumber(value = 0) {
   return Math.round(number).toLocaleString();
 }
 
-export function formatTokenRate(tokens = 0, durationMs = 0) {
+export function totalTokensPerSecond(tokens = 0, durationMs = 0) {
   const tokenCount = Number(tokens || 0);
   const ms = Number(durationMs || 0);
   if (!Number.isFinite(tokenCount) || !Number.isFinite(ms) || tokenCount <= 0 || ms <= 0) {
-    return "-";
+    return 0;
   }
-  return `${formatCompactNumber(tokenCount / (ms / 1000))} tok/s`;
+  return tokenCount / (ms / 1000);
 }
 
-export function formatPrefillSpeed(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
+export function prefillTokensPerSecond(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
   // stream: prefill ≈ ttft; non-stream: ttft == total, use total as denominator
   const ms = isStream ? Number(ttftMs || 0) : Number(durationMs || 0);
   const tokens = Number(promptTokens || 0);
   if (!Number.isFinite(tokens) || !Number.isFinite(ms) || tokens <= 0 || ms <= 0) {
-    return "-";
+    return 0;
   }
-  return `${formatCompactNumber(tokens / (ms / 1000))} tok/s`;
+  return tokens / (ms / 1000);
 }
 
-export function formatGenerationSpeed(completionTokens = 0, durationMs = 0, ttftMs = 0, isStream = false) {
+export function generationTokensPerSecond(completionTokens = 0, durationMs = 0, ttftMs = 0, isStream = false) {
   const totalMs = Number(durationMs || 0);
   const tokens = Number(completionTokens || 0);
   // non-stream: all tokens arrive at once, denominator = total
   // stream: tokens generated after ttft, denominator = total - ttft
   const genMs = isStream ? totalMs - Number(ttftMs || 0) : totalMs;
   if (!Number.isFinite(tokens) || !Number.isFinite(genMs) || tokens <= 0 || genMs < 10) {
+    return 0;
+  }
+  return tokens / (genMs / 1000);
+}
+
+// Rates compact harder than counts do: a decimal on a four-digit magnitude keeps
+// the chip as wide as the raw number, so anything past 100 whole units is rounded.
+function formatRateMagnitude(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  const abs = Math.abs(number);
+  if (abs >= 1_000_000_000) {
+    return `${trimRateMagnitude(number / 1_000_000_000)}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${trimRateMagnitude(number / 1_000_000)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${trimRateMagnitude(number / 1_000)}k`;
+  }
+  if (abs >= 100) {
+    return String(Math.round(number));
+  }
+  if (abs >= 10) {
+    return number.toFixed(1).replace(/\.0$/, "");
+  }
+  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function trimRateMagnitude(scaled) {
+  if (Math.abs(scaled) >= 100) {
+    return String(Math.round(scaled));
+  }
+  return scaled.toFixed(1).replace(/\.0$/, "");
+}
+
+export function formatRate(value, unit = "tok/s") {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) {
     return "-";
   }
-  return `${formatCompactNumber(tokens / (genMs / 1000))} tok/s`;
+  return `${formatRateMagnitude(number)} ${unit}`;
+}
+
+export function formatRawRate(value, unit = "tok/s") {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) {
+    return `0 ${unit}`;
+  }
+  return `${Math.round(number).toLocaleString()} ${unit}`;
+}
+
+export function formatTokenRate(tokens = 0, durationMs = 0) {
+  return formatRate(totalTokensPerSecond(tokens, durationMs));
+}
+
+export function formatPrefillSpeed(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
+  return formatRate(prefillTokensPerSecond(promptTokens, ttftMs, durationMs, isStream));
+}
+
+export function formatGenerationSpeed(completionTokens = 0, durationMs = 0, ttftMs = 0, isStream = false) {
+  return formatRate(generationTokensPerSecond(completionTokens, durationMs, ttftMs, isStream));
 }
 
 export function formatCacheRate(cachedTokens = 0, totalTokens = 0) {
@@ -333,18 +420,16 @@ export function formatCacheRate(cachedTokens = 0, totalTokens = 0) {
   return `${rate.toFixed(1)}%`;
 }
 
-function formatCompactNumber(value = 0) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number)) {
-    return "0";
+// The tooltip form of the cache hit rate: two decimals plus the operand pair, so
+// "45.2%" can be checked against the numbers it came from without a second look.
+export function formatRawCacheRate(cachedTokens = 0, totalTokens = 0) {
+  const cached = Number(cachedTokens || 0);
+  const total = Number(totalTokens || 0);
+  if (!Number.isFinite(cached) || !Number.isFinite(total) || total <= 0) {
+    return "";
   }
-  if (number >= 100 || Number.isInteger(number)) {
-    return String(Math.round(number));
-  }
-  if (number >= 10) {
-    return number.toFixed(1).replace(/\.0$/, "");
-  }
-  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  const rate = (cached / total) * 100;
+  return `${rate.toFixed(2)}% (${Math.round(cached).toLocaleString()} / ${Math.round(total).toLocaleString()})`;
 }
 
 export function formatCount(value = 0) {
