@@ -709,6 +709,74 @@ input[type="radio"] {
   backdrop-filter: blur(3px);
 }
 
+/*
+ * Dialog enter and exit.
+ *
+ * Keyframes rather than the motion library: Radix already publishes
+ * `data-state`, and its Presence keeps a closing element mounted until the
+ * animation on it ends, so a CSS animation gets a real exit transition for free.
+ * Driving this from JavaScript would mean holding the exit in AnimatePresence
+ * and rendering the content through `forceMount`, which is more moving parts for
+ * the same result.
+ *
+ * The transform composes with the `translate` property Tailwind uses to centre
+ * the card (individual transform properties apply before `transform`), so the
+ * card stays centred while it scales.
+ */
+@keyframes nav-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes nav-modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+}
+
+@keyframes nav-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes nav-backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.nav-modal-backdrop[data-state="open"] {
+  animation: nav-backdrop-in 160ms var(--ease-out-soft);
+}
+
+.nav-modal-backdrop[data-state="closed"] {
+  animation: nav-backdrop-out 120ms var(--ease-out-soft);
+}
+
+.nav-modal[data-state="open"] {
+  animation: nav-modal-in 200ms var(--ease-out-soft);
+}
+
+.nav-modal[data-state="closed"] {
+  animation: nav-modal-out 120ms var(--ease-out-soft);
+}
+
+/* The operating system setting wins in both directions: no enter, no exit, and
+   no waiting for one. The motion library is told the same thing through
+   MotionConfig's reducedMotion="user". */
+@media (prefers-reduced-motion: reduce) {
+  /* `[data-state]` rather than a bare class: a media query adds no specificity,
+     so these have to weigh the same as the rules they are switching off. */
+  .nav-modal-backdrop[data-state],
+  .nav-modal[data-state] {
+    animation: none;
+  }
+}
+
 .nav-modal {
   width: min(560px, 100%);
   max-height: 86vh;

@@ -20,7 +20,12 @@ export function TabStrip({ tabs, activeId, onSelect, label }) {
   return (
     <TabsList aria-label={label}>
       {tabs.map((tab) => (
-        <TabsTrigger key={tab.id} value={tab.id} onClick={() => onSelect(tab.id)}>
+        <TabsTrigger
+          key={tab.id}
+          value={tab.id}
+          active={tab.id === activeId}
+          onClick={() => onSelect(tab.id)}
+        >
           <span>{tab.label}</span>
           {tab.count === undefined || tab.count === null ? null : (
             <span className="rounded-pill bg-accent px-1.5 text-label leading-4 font-medium text-muted-foreground">

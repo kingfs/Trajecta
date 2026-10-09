@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { I18nProvider, bootstrapI18n } from "./lib/i18n";
 import { queryClient } from "./lib/queryClient";
+import { MotionProvider } from "./lib/motion";
 import { applyTheme, watchSystemTheme } from "./lib/theme";
 
 // tokens.css stays outside the cascade layers: it only declares custom
@@ -26,11 +27,13 @@ bootstrapI18n().finally(() => {
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
-        <I18nProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </I18nProvider>
+        <MotionProvider>
+          <I18nProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </I18nProvider>
+        </MotionProvider>
       </QueryClientProvider>
     </React.StrictMode>,
   );

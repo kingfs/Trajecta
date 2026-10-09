@@ -1346,3 +1346,37 @@ test("following the system theme picks up a change while the page is open", asyn
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
+
+// The tab underline is one element shared by the strip: motion's `layoutId`
+// moves it between triggers rather than each trigger owning a copy. These assert
+// the arrangement the animation depends on, which a CSS-only regression would
+// not catch - a per-trigger underline would look identical standing still.
+test("the tab strip shares a single indicator, under the active tab", async ({ page }) => {
+  await page.goto("/traces");
+  const under = async () => page.evaluate(() =>
+    [...document.querySelectorAll("[data-tab-indicator]")].map((e) => e.parentElement.textContent.trim()),
+  );
+  // The strip renders after the page's first data request, so poll rather than
+  // reading the DOM the instant the document is ready.
+  await expect.poll(under).toEqual(["Requests"]);
+  const requests = await page.evaluate(() => document.querySelector("[data-tab-indicator]")?.getBoundingClientRect().width);
+  const tabWidth = await page.getByRole("tab", { name: "Requests" }).evaluate((e) => e.getBoundingClientRect().width);
+  expect(Math.round(requests)).toBe(Math.round(tabWidth));
+
+  await page.getByRole("tab", { name: "Sessions" }).click();
+  await expect(page).toHaveURL(/tab=sessions$/);
+  // Still exactly one, and it has followed the selection.
+  await expect.poll(under).toEqual(["Sessions"]);
+});
+
+test("reduced motion turns the dialog animation off", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/providers");
+  await page.getByRole("button", { name: "Account" }).first().click();
+  const content = page.getByRole("dialog", { name: "local" });
+  await expect(content).toBeVisible();
+  expect(await content.evaluate((e) => getComputedStyle(e).animationName)).toBe("none");
+  // And the dialog still closes, which is the part an exit animation can break.
+  await page.keyboard.press("Escape");
+  await expect(content).toHaveCount(0);
+});
