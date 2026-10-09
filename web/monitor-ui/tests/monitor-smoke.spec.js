@@ -131,6 +131,23 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-routed/observation" || path === "/api/traces/trace-routed/findings" || path === "/api/traces/trace-routed/performance") {
       return route.fulfill({ json: {} });
     }
+    // A trace whose observation has been parsed: the 会话 tab renders its nodes,
+    // and its one finding names a node to jump to.
+    if (path === "/api/traces/trace-parsed") {
+      return route.fulfill({ json: parsedTracePayload() });
+    }
+    if (path === "/api/traces/trace-parsed/raw") {
+      return route.fulfill({ json: { data: { request_protocol: "{}", response_protocol: "{}" } } });
+    }
+    if (path === "/api/traces/trace-parsed/observation") {
+      return route.fulfill({ json: parsedObservationPayload() });
+    }
+    if (path === "/api/traces/trace-parsed/findings") {
+      return route.fulfill({ json: parsedFindingsPayload() });
+    }
+    if (path === "/api/traces/trace-parsed/performance") {
+      return route.fulfill({ json: { performance: { duration_ms: 1200, ttft_ms: 120, tokens_per_sec: 18.5 } } });
+    }
     if (path === "/api/traces") {
       return route.fulfill({ json: traceListPayload() });
     }
@@ -144,7 +161,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: systemRuntimePayload() });
     }
     if (path === "/api/findings") {
-      return route.fulfill({ json: { total: 0, items: [] } });
+      return route.fulfill({ json: parsedFindingsPayload() });
     }
     if (path === "/api/responses/audit/trace") {
       expect(["resp_123", "resp 123/encoded"]).toContain(url.searchParams.get("response_id"));
@@ -284,18 +301,145 @@ test("events page opens the all-window unread inbox", async ({ page }) => {
 });
 
 test("trace routing links to channel and upstream views", async ({ page }) => {
-  await page.goto("/traces/trace-routed");
+  await page.goto("/traces/trace-routed?tab=request");
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/providers/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
   await expect(page.getByRole("link", { name: "Responses audit" })).toHaveAttribute("href", "/audit?response_id=resp+123%2Fencoded");
-  await expect(page.getByRole("button", { name: "Show all" })).toBeVisible();
-  await page.getByRole("button", { name: "Show all" }).click();
-  await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
   await page.getByRole("button", { name: "Reanalyze" }).click();
   // The queued job is reported as a toast, and the toast layer is a live region,
   // so the outcome is announced as well as shown.
   await expect(page.getByRole("region", { name: /Notifications/ })).toContainText(/job #301 completed/);
+});
+
+// The recorded messages are the fallback the 会话 tab shows when a trace has no
+// parsed nodes; a long one is collapsed until the reader asks for it.
+test("the conversation tab collapses a long recorded message until asked", async ({ page }) => {
+  await page.goto("/traces/trace-routed");
+  await expect(page.getByRole("button", { name: "Show all" })).toBeVisible();
+  await page.getByRole("button", { name: "Show all" }).click();
+  await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+});
+
+// One trace, five readings, one visible at a time. The tabs replaced a grid of
+// five cards that made the reader walk past four summaries to reach the one
+// they came for, and 已选路由目标 left the conversation for the request's tab.
+test("a trace is read through five tabs, one panel at a time", async ({ page }) => {
+  await page.goto("/traces/trace-parsed");
+  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Audit/, /^Request info$/, /^Raw data$/]);
+  // The routing card is not on the conversation tab any more.
+  await expect(page.getByRole("heading", { name: "Selected route target" })).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Request info" }).click();
+  await expect(page).toHaveURL(/tab=request$/);
+  await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request metrics" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Raw data" }).click();
+  await expect(page).toHaveURL(/tab=raw$/);
+  // The raw tab holds the bytes and the event timeline; this fixture has no
+  // events, and the panel says so rather than rendering nothing.
+  await expect(page.getByText("No timeline events")).toBeVisible();
+});
+
+// The conversation is built from the Observation IR, so a tool call and the
+// result that answers it are one card, a failed run is marked, and a
+// declaration - which is not part of a dialogue - has no step.
+test("the conversation renders the parsed steps instead of the flat messages", async ({ page }) => {
+  await page.goto("/traces/trace-parsed");
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
+
+  const call = page.locator("[data-conversation-step]").filter({ hasText: "exec_command" });
+  await expect(call).toContainText("ls -la");
+  await expect(call.locator(".conversation-result")).toContainText("total 12");
+
+  const failed = page.locator('[data-conversation-step][data-failed="true"]');
+  await expect(failed).toHaveCount(1);
+  await expect(failed).toContainText("permission denied");
+  await expect(failed).toContainText("failed");
+
+  // A declaration has no place in the dialogue.
+  await expect(page.locator('[data-conversation-step][data-kind="tool_declaration"]')).toHaveCount(0);
+  // The step number is the conversation's own, not the payload index: the two
+  // calls sit at $.input[1] and $.input[3] and are steps 3 and 6.
+  await expect(page.locator("#node_call .conversation-index")).toHaveText("#3");
+  await expect(page.locator("#node_call_failed .conversation-index")).toHaveText("#6");
+
+  // The toolbar narrows the list rather than the page.
+  await page.getByPlaceholder("Search messages, arguments and output").fill("permission");
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(1);
+  await page.getByPlaceholder("Search messages, arguments and output").fill("");
+  await page.getByRole("checkbox", { name: "Failed only" }).check();
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(1);
+});
+
+// A finding names a node with an evidence path, which is precise and unreadable.
+// The audit row says where it is in the same words the conversation uses, and
+// opens it there.
+test("an audit finding opens the conversation at the step it names", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?tab=audit");
+  const finding = page.locator(".finding-card");
+  await expect(finding).toContainText("Attempt to read a credential file");
+  const open = finding.getByRole("button", { name: /Open the conversation at this step/ });
+  await expect(open).toContainText("$.input[4] · tool result · tool");
+
+  await open.click();
+  await expect(page).toHaveURL(/node=node_result_failed/);
+  await expect(page).not.toHaveURL(/tab=audit/);
+  const target = page.locator('[data-conversation-step][data-focused="true"]');
+  await expect(target).toContainText("permission denied");
+  // It is scrolled to, not merely rendered: the step has to be inside the
+  // viewport and below the sticky topbar, or the link did nothing a reader
+  // would notice.
+  const viewport = page.viewportSize();
+  await expect
+    .poll(
+      async () => {
+        const y = Math.round((await target.boundingBox()).y);
+        return y > 0 && y < viewport.height;
+      },
+      { message: "the step settles inside the viewport, below the sticky topbar" },
+    )
+    .toBe(true);
+});
+
+// The same anchor travels in the URL, so a finding can be shared as a link - in
+// either the node form or the path form the evidence path carries.
+test("a conversation anchor in the URL lands on its step", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?node=$.input[1]");
+  await expect(page.locator('[data-conversation-step][data-focused="true"]')).toContainText("exec_command");
+});
+
+// The cross-trace findings list is the other way into a finding: it has no
+// observation loaded, so it names the place by the path the evidence path
+// carries, and links to the conversation step.
+test("the findings list links a finding to its conversation step", async ({ page }) => {
+  await page.goto("/audit?tab=findings");
+  const row = page.locator(".finding-card");
+  await expect(row).toContainText("Attempt to read a credential file");
+  const link = row.getByRole("link", { name: /Open the conversation at this step/ });
+  await expect(link).toContainText("$.input[4] · #5");
+  await expect(link).toHaveAttribute("href", "/traces/trace-parsed?view=quality&node=node_result_failed");
+});
+
+// Landing on a long step opens it, because the reader came for the sentence.
+test("an anchor opens the long text it landed on", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?node=$.output[1]");
+  const step = page.locator('[data-conversation-step][data-focused="true"]');
+  await expect(step).toContainText("line 16 of the listing report");
+  await expect(step.locator(".message-content")).not.toHaveClass(/message-content-collapsed/);
+});
+
+// A conversation is a column of long unbroken strings - JSON arguments, file
+// paths, tool output - which is exactly what widens a page.
+test("the conversation fits the viewport", async ({ page }) => {
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/traces/trace-parsed");
+    await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, `the ${width}px conversation overflows`).toBeLessThanOrEqual(1);
+  }
 });
 
 // Markdown is react-markdown + remark-gfm now. The renderer it replaced escaped
@@ -722,6 +866,88 @@ function tracePayload() {
     ],
     events: [],
     tools: [],
+  };
+}
+
+// A trace with a parsed observation: two calls, one of which failed, and the
+// parts the IR emits inside the messages. The conversation is built from these
+// nodes, so the shapes here are the ones `GET /api/traces/{id}/observation`
+// returns - depth 0 for a step, depth 1 for a part of one.
+function parsedObservationPayload() {
+  const node = (overrides) => ({ parent_id: "", provider_type: "openai", role: "", depth: 0, raw: null, children: [], ...overrides });
+  return {
+    id: "trace-parsed",
+    summary: { total: 7, failed: 1 },
+    nodes: [
+      node({ id: "node_instr", normalized_type: "instruction", role: "system", path: "$.instructions", index: 0, text_preview: "You are a careful agent." }),
+      node({ id: "node_in", normalized_type: "message", role: "user", path: "$.input[0]", index: 0, text_preview: "list the files" }),
+      node({ id: "node_in_part", parent_id: "node_in", depth: 1, normalized_type: "text", path: "$.input[0].content[0]", index: 0, text_preview: "list the files" }),
+      node({
+        id: "node_call",
+        normalized_type: "tool_call",
+        role: "assistant",
+        path: "$.input[1]",
+        index: 1,
+        text_preview: "exec_command",
+        raw: { name: "exec_command", call_id: "call_1", arguments: '{"cmd":"ls -la"}' },
+      }),
+      node({ id: "node_result", normalized_type: "tool_result", role: "tool", path: "$.input[2]", index: 2, text_preview: "total 12\ndrwxr-xr-x  4 agent staff", raw: { call_id: "call_1", exit_code: 0 } }),
+      node({ id: "node_reasoning", normalized_type: "reasoning", path: "$.output[0]", index: 0, text_preview: "They asked for a listing." }),
+      node({ id: "node_out", normalized_type: "message", role: "assistant", path: "$.output[1]", index: 1, text_preview: longAssistantMessage() }),
+      node({
+        id: "node_call_failed",
+        normalized_type: "tool_call",
+        role: "assistant",
+        path: "$.input[3]",
+        index: 3,
+        text_preview: "read_file",
+        raw: { name: "read_file", call_id: "call_2", arguments: '{"path":"/etc/shadow"}' },
+      }),
+      node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: "permission denied", raw: { call_id: "call_2", status: "failed" } }),
+      // A declaration is not part of the dialogue and has no step.
+      node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command" }),
+    ],
+    tree: [],
+  };
+}
+
+function parsedFindingsPayload() {
+  return {
+    total: 1,
+    items: [
+      {
+        id: "finding-1",
+        trace_id: "trace-parsed",
+        node_id: "node_result_failed",
+        evidence_path: "trace#trace-parsed#node#node_result_failed#path#$.input[4]",
+        category: "secret_access",
+        severity: "high",
+        title: "Attempt to read a credential file",
+        description: "The agent tried to read /etc/shadow.",
+        detector: "secret_path_scan",
+        detector_version: "1",
+        confidence: 0.91,
+        evidence_excerpt: '{"path":"/etc/shadow"}',
+      },
+    ],
+  };
+}
+
+// Long enough that the conversation clamps it: landing on this step has to open
+// it, or the sentence the finding named stays hidden behind "Show all".
+function longAssistantMessage() {
+  return Array.from({ length: 16 }, (_, index) => `line ${index + 1} of the listing report`).join("\n");
+}
+
+function parsedTracePayload() {
+  const payload = tracePayload();
+  return {
+    ...payload,
+    header: { ...payload.header, meta: { ...payload.header.meta, request_id: "trace-parsed" } },
+    // Empty on purpose: the conversation must come from the observation nodes,
+    // not from the messages the recorder extracted.
+    messages: [],
+    ai_reasoning: "",
   };
 }
 
@@ -2160,4 +2386,29 @@ test("the system page's charts fit the viewport", async ({ page }) => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, `the ${viewport.width}px layout overflows`).toBeLessThanOrEqual(1);
   }
+});
+
+// A row used to list five or more tags, and the same word twice: the provider
+// and the upstream it was routed to, the session that the subline already names
+// and the row action already opens, and the observation status whose happy path
+// is the default. What is left answers three questions and one exception.
+test("a request row shows the protocol, the target and the exceptions only", async ({ page }) => {
+  await page.goto("/traces");
+  const row = page.locator(".trace-row").first();
+  await expect(row).toBeVisible();
+
+  // trace-routed: provider openai, upstream openai-primary, no exchange kind, no
+  // observation, not streaming. One tag for the surface, one for the target.
+  await expect(row.locator(".trace-tag-group .inline-tag")).toHaveText(["resp", "openai-primary"]);
+  await expect(row.getByTitle("openai · openai-primary")).toHaveCount(1);
+
+  // The session tag is gone, and so is the happy-path parse tag.
+  await expect(row.getByText("Sessions", { exact: true })).toHaveCount(0);
+  await expect(row.getByText("parsed", { exact: true })).toHaveCount(0);
+
+  // A streaming row still says so. The streaming fixture is the third row, and
+  // it carries a session id too, which no longer gets a tag of its own: the
+  // protocol, the target and the stream.
+  const streaming = page.locator(".trace-row").nth(2);
+  await expect(streaming.locator(".trace-tag-group .inline-tag")).toHaveText(["resp", "openai-primary", "stream"]);
 });

@@ -59,24 +59,29 @@ export function CodeBlock({ value }) {
   return <pre className="code-block">{value}</pre>;
 }
 
-export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10 }) {
+export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10, forceExpanded = false }) {
   const [expanded, setExpanded] = useState(false);
-  const collapsible = useMemo(() => shouldCollapseContent(value, collapsedLines), [value, collapsedLines]);
+  // `forceExpanded` is how a caller that jumped to this content - the trace
+  // page's conversation, landing on a finding's anchor - shows it open without
+  // owning the disclosure state: a clamped block would hide the very sentence
+  // the link was about.
+  const collapsible = useMemo(() => shouldCollapseContent(value, collapsedLines) && !forceExpanded, [value, collapsedLines, forceExpanded]);
   const bodyClassName = [
     className,
     "message-content",
     collapsible && !expanded ? "message-content-collapsed" : "",
   ].filter(Boolean).join(" ");
 
+  const showAll = expanded || forceExpanded;
   if (renderMarkdown && format === "markdown") {
     return (
-      <ExpandableContent expanded={expanded} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
+      <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
         <MarkdownContent value={value} className={bodyClassName} />
       </ExpandableContent>
     );
   }
   return (
-    <ExpandableContent expanded={expanded} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
+    <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
       <div className={`${bodyClassName} prose-block`.trim()}>{value}</div>
     </ExpandableContent>
   );

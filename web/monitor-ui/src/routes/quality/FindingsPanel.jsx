@@ -8,7 +8,8 @@ import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { setOrDeleteParam } from "../../lib/monitor";
+import { buildTraceLink, setOrDeleteParam } from "../../lib/monitor";
+import { formatEvidenceTarget } from "../../lib/conversation";
 
 export function FindingsPanel() {
   const { t } = useI18n();
@@ -77,6 +78,12 @@ export function FindingsPanel() {
                   <DetailMetaPill label={t("common.trace")} value={finding.trace_id} mono />
                   <DetailMetaPill label={t("common.node")} value={finding.node_id || "-"} mono />
                   <DetailMetaPill label={t("common.detector")} value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
+                </div>
+                <div className="finding-card-where">
+                  <Link className="mono" to={buildTraceLink(finding.trace_id, "quality", "", "conversation", "", finding.node_id || finding.evidence_path || "")} title={finding.evidence_path || finding.node_id}>
+                    {t("conversation.openStep")}
+                    <span className="finding-card-where-label mono">{formatEvidenceTarget(finding.evidence_path || finding.node_id)}</span>
+                  </Link>
                 </div>
                 <div className="action-group action-group-start">
                   <Button asChild variant="ghost" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}><Link to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}>{t("audit.openFinding")}</Link></Button>

@@ -68,10 +68,18 @@ test("real monitor server renders routing decision records", async ({ page }) =>
 
 test("real monitor server serves trace routing links", async ({ page }) => {
   const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
-  await page.goto(`/traces/${fixture.routed_trace_id}`);
+  // The routing decision is the request's own fact, so it lives on the request
+  // tab now that the first tab is the conversation alone.
+  await page.goto(`/traces/${fixture.routed_trace_id}?tab=request`);
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/providers/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
+
+  // The conversation reads the trace whether or not its observation has been
+  // parsed: the parsed steps when there are nodes, the recorded messages when
+  // there are not.
+  await page.getByRole("tab", { name: "Conversation" }).click();
+  await expect(page.locator(".conversation-list, .message-list")).toBeVisible();
 });
 
 // The console has no refresh timers: a page becomes fresh because the server

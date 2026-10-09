@@ -115,7 +115,7 @@ Trajecta 自身的事件收件箱：
 
 四个标签页：发现项、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
 
-**发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，可跳转到对应 trace 的审计或协议视图。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
+**发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤；每条发现项给出可读的定位（`$.input[4] · #5`）并直接跳到对应 trace 会话中的那一步（`?node=`），另有入口进入该 trace 的审计页与协议页。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 
 **请求链路**：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
 
@@ -222,20 +222,22 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 
 ## Trace 详情
 
-Reading guide 提供五个视图：
+一条 trace 有五个标签页，同一时刻只挂载正在读的那一个：
 
-- Routing & Conversation：路由选择、prompt 消息、最终输出和 timeline 事件。
-- Protocol：Observation IR 的语义节点、归一化类型、JSON 路径与原始 payload。
-- Audit：确定性 findings、证据路径。
-- Performance：延迟、TTFT、Token 吞吐、缓存比例、状态与路由上下文。
-- Raw：原始 HTTP 请求/响应字节与 headers。
+- 会话：由 Observation IR 渲染出的对话。一个节点一张卡片、按 payload 顺序排列；工具调用与应答它的工具结果合并成一张卡片（按 `call_id` 配对，参数与输出在一起），失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。
+- 协议：Observation IR 的语义节点、归一化类型、JSON 路径与原始 payload。
+- 审计：确定性 findings；每一项给出可读的定位（`$.input[4] · tool result · tool`）并可直接跳到会话中对应的那一步。
+- 请求信息：已选路由目标、路由决策、上游健康、请求工具与延迟/TTFT/Token 吞吐/缓存比例等本次请求自身的事实。
+- 原始数据：原始 HTTP 请求/响应字节与 headers，以及统一事件时间线。
+
+会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
 
 可执行动作：
 
 - `Refresh analysis`（`POST /api/traces/:id/reanalyze`）：从本地 cassette 重新生成 Observation 和 findings，仅在自动处理异常或结果明显不对时使用。
 - `Repair stats`（`POST /api/traces/:id/repair-usage`）：从本地响应重新抽取 usage/token 统计，仅在 token/cost 统计缺失或错误时使用。
 
-Deep link 支持 query 参数 `tab`、`from_session`、`view`（`sessions` / `requests`）和 `focus`（`failure`、`timeline`、`timeline_error`、`request`、`response`）。当 trace 携带 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id 时，Reading guide 会显示 `Responses audit` 入口，跳转到 `/audit` 中同一条请求链路。
+Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`audit`、`request`、`raw`）、`node`、`from_session`、`view`（`sessions` / `requests`）和 `focus`（`failure`、`timeline`、`timeline_error`、`request`、`response`）。`tab=timeline` 与 `tab=performance` 是旧地址，分别按 `conversation` 与 `request` 处理。当 trace 携带 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id 时，页面会显示 `Responses audit` 入口，跳转到 `/audit` 中同一条请求链路。
 
 ## Responses function executors
 

@@ -82,15 +82,22 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
           {childRole === "upstream" ? <span className="trace-child-rail" aria-hidden="true" /> : null}
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
-            {childRole === "upstream" ? <InlineTag tone="gold">Child</InlineTag> : null}
-            <ExchangeTag item={item} />
+            {/* Five tags per row was the old count and the row said the same
+                thing three times: the provider and the upstream target it was
+                routed to, the session that the subline already names and the
+                row action already opens, and the observation status whose
+                happy path is the default. What is left is the protocol, where
+                it went, and the two exceptions worth interrupting a scan for -
+                a stream, and a parse that did not land on "parsed". */}
+            {childRole === "upstream" ? <InlineTag tone="gold">{t("requests.childTag")}</InlineTag> : null}
+            {noteworthyExchange(item) ? <ExchangeTag item={item} /> : null}
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
-            <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
-            {item.selected_upstream_id ? <UpstreamTag item={item} /> : null}
-            {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} child</InlineTag> : null}
-            {item.session_id ? <InlineTag tone="green">{t("sessions.title")}</InlineTag> : null}
+            <UpstreamTag item={item} />
+            {!groupedChild && upstreamCallCount > 1 ? <InlineTag tone="gold">{upstreamCallCount} child</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
-            <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
+            {item.observation?.status && String(item.observation.status).toLowerCase() !== "parsed" ? (
+              <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
+            ) : null}
           </div>
         </div>
         <div className="trace-subline-group">
@@ -143,11 +150,35 @@ function exchangeLabel(value = "") {
   }
 }
 
+// Where the request went, as one tag: the provider family and the upstream it
+// was routed to were two tags that usually read the same word twice. The
+// upstream is the more specific of the two, so it leads when it already names
+// the provider ("openai-primary"), and the provider leads when it does not
+// ("azure · eastus-2"). Both full values stay in the tooltip.
 function UpstreamTag({ item }) {
   const id = String(item.selected_upstream_id || "").trim();
   const preset = String(item.selected_upstream_provider_preset || "").trim();
-  const label = preset || compactUpstreamID(id);
-  return <span title={id}><InlineTag tone="green">{label}</InlineTag></span>;
+  const provider = formatProviderTag(item.provider);
+  const upstream = preset || compactUpstreamID(id);
+  if (!id) {
+    return <InlineTag>{provider}</InlineTag>;
+  }
+  const title = [item.provider, id].filter(Boolean).join(" · ");
+  const redundant = upstream.toLowerCase().startsWith(provider.toLowerCase());
+  return <span title={title}><InlineTag tone="green">{redundant ? upstream : `${provider} · ${upstream}`}</InlineTag></span>;
+}
+
+// The exchange role only earns a tag when it is not the default one. Every row
+// in this list is the client's request unless it is an upstream call shown
+// underneath one, and those already carry the child tag and the rail.
+function noteworthyExchange(item) {
+  const kind = String(item.exchange_kind || "").trim();
+  const role = String(item.exchange_role || "").trim();
+  if (!kind && !role) {
+    return false;
+  }
+  const label = exchangeLabel(role || kind);
+  return label !== "Request" && label !== "client";
 }
 
 function compactUpstreamID(value = "") {
@@ -255,8 +286,8 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
         </Button>
       ) : null}
       {fromSessionID ? (
-        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
-          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
+        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "timeline_error" : "timeline")}>
+          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "timeline_error" : "timeline")}>
             {t("requests.timeline")}
           </Link>
         </Button>

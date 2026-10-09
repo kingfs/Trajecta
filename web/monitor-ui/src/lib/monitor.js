@@ -175,7 +175,7 @@ export function summarizeSessionItems(items = []) {
   };
 }
 
-export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "", focus = "") {
+export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "", focus = "", anchor = "") {
   const params = new URLSearchParams();
   const normalizedTab = normalizeTraceTab(tab);
   if (fromView) {
@@ -189,6 +189,13 @@ export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab =
   }
   if (focus) {
     params.set("focus", focus);
+  }
+  // `anchor` is a node id, a JSON path such as `$.input[159]`, or the composed
+  // evidence path a finding stores. It travels in its own parameter because
+  // `focus` is a pane sentinel (`failure`, `timeline_error`) and mixing the two
+  // would make both undecidable.
+  if (anchor) {
+    params.set("node", anchor);
   }
   const query = params.toString();
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
@@ -268,11 +275,17 @@ export function normalizeTraceTab(value = "") {
     case "conversation":
     case "protocol":
     case "audit":
-    case "performance":
+    case "request":
     case "raw":
       return value;
+    // `timeline` was the event list's own tab before it became the conversation
+    // tab, and `performance` is what the request-info tab was called when it
+    // held nothing but timings. Both keep working, because both are in links
+    // people have already shared.
     case "timeline":
       return "conversation";
+    case "performance":
+      return "request";
     default:
       return "conversation";
   }

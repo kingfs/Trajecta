@@ -241,3 +241,257 @@
 .line-chart-card .recharts-surface {
   overflow: visible;
 }
+
+/* --------------------------------------------------------------------------
+   The 会话 tab's trajectory.
+
+   One card per Observation node, in payload order: a chronology rather than a
+   list of extracted messages. The rules that carry meaning are the left border
+   (which reddens on failure so a scan finds it without reading), the focus ring
+   (where a finding link landed), and the clamp on long text, which is what
+   keeps a two-hundred-step conversation skimmable.
+   -------------------------------------------------------------------------- */
+.conversation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.conversation-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.conversation-search {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  max-width: 24rem;
+}
+
+.conversation-count {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  white-space: nowrap;
+}
+
+.conversation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.conversation-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  /* The console's topbar is sticky; without this a target scrolls under it. */
+  scroll-margin-top: 5.5rem;
+}
+
+.conversation-step[data-kind="reasoning"] {
+  border-left-color: var(--accent-solid);
+}
+
+.conversation-step[data-kind="tool_call"],
+.conversation-step[data-kind="server_tool_call"] {
+  border-left-color: var(--warning-solid);
+}
+
+.conversation-step[data-kind="tool_result"],
+.conversation-step[data-kind="server_tool_result"] {
+  border-left-color: var(--success-solid, var(--accent-solid));
+}
+
+.conversation-step[data-failed="true"] {
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface-1));
+}
+
+/* Where a finding's link landed. The outline lasts while the URL names the step,
+   and the ring animates away so the page is not left looking selected; the
+   outline is not a border because a failed step keeps its red edge. */
+.conversation-step[data-focused="true"] {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -1px;
+  animation: conversation-step-focus 2400ms ease-out both;
+}
+
+@keyframes conversation-step-focus {
+  0% {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    background: color-mix(in srgb, var(--accent-solid) 8%, var(--surface-1));
+  }
+
+  100% {
+    box-shadow: none;
+    background: var(--surface-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-step[data-focused="true"] {
+    animation: none;
+  }
+}
+
+.conversation-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.conversation-index {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.conversation-name {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+}
+
+.conversation-head-spacer {
+  flex: 1 1 auto;
+}
+
+.conversation-anchor-chip {
+  max-width: 16rem;
+  overflow: hidden;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.conversation-anchor-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.conversation-anchor {
+  display: block;
+  height: 0;
+  scroll-margin-top: 5.5rem;
+}
+
+.conversation-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.conversation-block {
+  min-width: 0;
+}
+
+.conversation-text {
+  font-size: var(--text-base);
+}
+
+.conversation-dim {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.conversation-more {
+  margin-top: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--accent-solid);
+  font-size: var(--text-label);
+  cursor: pointer;
+}
+
+.conversation-call-head,
+.conversation-part-head,
+.conversation-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.conversation-result,
+.conversation-part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  scroll-margin-top: 5.5rem;
+}
+
+.conversation-result[data-failed="true"] {
+  border-color: var(--danger);
+}
+
+.conversation-pre {
+  max-height: 42vh;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conversation-pre-raw {
+  max-height: 24vh;
+}
+
+.conversation-empty {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  font-style: italic;
+}
+
+/* The audit row's link into the conversation: the readable place, with the
+   storage form of the target kept in the tooltip. */
+.finding-card-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.finding-card-where-label {
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+}
+
+.finding-card-where-meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}

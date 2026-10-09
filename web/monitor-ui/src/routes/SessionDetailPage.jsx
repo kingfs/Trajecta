@@ -210,11 +210,11 @@ export function SessionDetailPage() {
                   <div className="action-group action-group-start">
                     <Button asChild 
                       variant="ghost"
-                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "conversation", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
+                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
                     >
                       <Link
                      
-                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "conversation", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
+                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
                     >
                         {t("requests.timeline")}
                       </Link>
@@ -440,7 +440,7 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
   const { t } = useI18n();
   const focus = tone === "danger" ? "failure" : "";
   const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
-  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "conversation", tone === "danger" ? "timeline_error" : "timeline");
+  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "raw", tone === "danger" ? "timeline_error" : "timeline");
   const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus === "failure" ? "response" : focus);
 
   return (

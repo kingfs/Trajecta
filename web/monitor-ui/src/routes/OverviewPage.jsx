@@ -28,6 +28,7 @@ import {
   normalizeUpstreamWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
+import { formatEvidenceTarget } from "../lib/conversation";
 
 // The overview answers three questions in order: how much traffic and how did it
 // go (the tiles), what does the shape of that traffic look like (trends and
@@ -223,10 +224,10 @@ function FindingQueue({ items }) {
   return (
     <div className="overview-queue">
       {items.map((item) => (
-        <Link className="overview-queue-row" key={item.id} to={buildTraceLink(item.trace_id, "overview", "", "audit", item.node_id || item.evidence_path || "finding")}>
+        <Link className="overview-queue-row" key={item.id} to={buildTraceLink(item.trace_id, "overview", "", "conversation", "", item.node_id || item.evidence_path || "")}>
           <div>
             <strong>{item.title || item.category || t("overview.finding")}</strong>
-            <span>{item.evidence_path || item.trace_id}</span>
+            <span>{formatEvidenceTarget(item.evidence_path || item.node_id) || item.trace_id}</span>
           </div>
           <div className="trace-tag-group">
             <InlineTag tone={item.severity === "critical" ? "danger" : "gold"}>{item.severity}</InlineTag>
