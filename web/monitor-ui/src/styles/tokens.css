@@ -77,9 +77,13 @@
   --radius-xl: 16px;
   --radius-pill: 999px;
 
-  /* Layout */
-  --sidebar-width: 248px;
-  --sidebar-width-collapsed: 68px;
+  /* Layout. The rail is a little wider than the 248px it was because the
+     longest label it has to hold is "模型服务商" plus its icon and the unread
+     badge; the collapsed width is what the icon and a 30px toggle fit in. Both
+     are declared here and nowhere else: the shell used to hardcode a second pair
+     of numbers in pages.css, and the two drifted. */
+  --sidebar-width: 264px;
+  --sidebar-width-collapsed: 72px;
 
   /* Motion. `--ease-out-soft` is the curve the `motion` package's default
      spring settles onto, so CSS and JS animations agree. */
@@ -96,22 +100,29 @@
  */
 :root {
   /* Surfaces. A dark theme lifts a card off the canvas; the light theme below
-     turns the pair around. */
-  --bg-canvas: var(--slate-1);
-  --bg-base: var(--slate-1);
-  --surface-1: var(--slate-2);
-  --surface-2: var(--slate-3);
-  --surface-3: var(--slate-4);
-  --surface-inset: var(--slate-1);
+     turns the pair around.
+     Each dark step is pulled a few percent towards the brand ramp. A pure
+     neutral slate beside a blue accent reads as unstyled chrome, and at these
+     lightnesses a few percent of blue is all it takes to make the frame and the
+     accent look like one palette. The tint is deliberately small: the surface
+     steps still have to stay 1.05:1 apart and every text step still has to clear
+     AA on all five of them, which tests-unit/tokens.test.js asserts on the
+     resolved values rather than on the mix. */
+  --bg-canvas: color-mix(in oklab, var(--slate-1) 88%, var(--blue-9));
+  --bg-base: color-mix(in oklab, var(--slate-1) 93%, var(--blue-9));
+  --surface-1: color-mix(in oklab, var(--slate-2) 90%, var(--blue-9));
+  --surface-2: color-mix(in oklab, var(--slate-3) 90%, var(--blue-9));
+  --surface-3: color-mix(in oklab, var(--slate-4) 90%, var(--blue-9));
+  --surface-inset: color-mix(in oklab, var(--slate-1) 96%, var(--blue-9));
   --surface-hover: var(--slate-a3);
   --surface-inverse: var(--slate-12);
   --on-inverse: var(--slate-1);
 
   /* Borders. Solid steps, not a translucent white: the reason light mode read
      as one flat sheet was a 9% hairline that vanished against a white card. */
-  --border-subtle: var(--slate-6);
-  --border: var(--slate-7);
-  --border-strong: var(--slate-8);
+  --border-subtle: color-mix(in oklab, var(--slate-6) 88%, var(--blue-9));
+  --border: color-mix(in oklab, var(--slate-7) 88%, var(--blue-9));
+  --border-strong: color-mix(in oklab, var(--slate-8) 88%, var(--blue-9));
 
   --text-primary: var(--slate-12);
   --text-secondary: var(--slate-11);
@@ -190,16 +201,26 @@
  * through lightness.
  */
 :root[data-theme="light"] {
-  --bg-canvas: var(--slate-2);
-  --bg-base: var(--slate-2);
+  /* The canvas is a step darker than the cards, so a panel is a surface rather
+     than a border floating on white. It carries the same brand tint the dark
+     theme uses, in the opposite direction: a cool desk under white paper. */
+  --bg-canvas: color-mix(in oklab, var(--slate-2) 95%, var(--blue-9));
+  --bg-base: var(--bg-canvas);
   /* A card is paper, so it is white rather than slate's step 1: the step is
      #fcfcfd, three channel values off the canvas, which is the flat sheet the
      light theme used to be. Everything else stays on the ramp. */
   --surface-1: #ffffff;
-  --surface-2: var(--slate-3);
-  --surface-3: var(--slate-4);
-  --surface-inset: var(--slate-2);
+  --surface-2: color-mix(in oklab, var(--slate-3) 94%, var(--blue-9));
+  --surface-3: color-mix(in oklab, var(--slate-4) 94%, var(--blue-9));
+  --surface-inset: color-mix(in oklab, var(--slate-2) 96%, var(--blue-9));
   --surface-hover: var(--slate-3);
+
+  /* The hairline keeps its contrast against the cooler canvas by staying close
+     to the neutral ramp: mixing it any further towards blue lifts it off the
+     canvas and the 1.2:1 floor below fails. */
+  --border-subtle: color-mix(in oklab, var(--slate-6) 94%, var(--blue-9));
+  --border: color-mix(in oklab, var(--slate-7) 94%, var(--blue-9));
+  --border-strong: color-mix(in oklab, var(--slate-8) 94%, var(--blue-9));
 
   /* The ramps publish two text steps, so the middle of the three levels is
      pulled towards step 12 and the dimmest is step 11 itself - the darkest ink
@@ -209,9 +230,15 @@
 
   /* Green's and amber's step 11 sit just under AA on a near-white page -
      4.49:1 and 4.38:1 - so the light theme pulls that ink slightly towards step
-     12 rather than shipping status colours that fail by a rounding error. */
+     12 rather than shipping status colours that fail by a rounding error. Blue's
+     step 11 is the third: it clears AA on white and on the old near-white
+     canvas, but the canvas is a shade cooler now and 4.32:1 is a fail. */
+  --accent: color-mix(in oklab, var(--blue-11) 90%, var(--blue-12));
+  --info: color-mix(in oklab, var(--cyan-11) 90%, var(--cyan-12));
   --success: color-mix(in oklab, var(--green-11) 92%, var(--green-12));
   --warning: color-mix(in oklab, var(--amber-11) 88%, var(--amber-12));
+  --violet: color-mix(in oklab, var(--violet-11) 94%, var(--violet-12));
+  --danger: color-mix(in oklab, var(--red-11) 94%, var(--red-12));
 
   --shadow-xs: 0 1px 2px oklch(0.25 0.02 265 / 0.05);
   --shadow-sm: 0 1px 2px oklch(0.25 0.02 265 / 0.06), 0 1px 3px oklch(0.25 0.02 265 / 0.04);
@@ -219,6 +246,29 @@
   --shadow-lg: 0 20px 48px oklch(0.25 0.02 265 / 0.12);
   --scrim: oklch(0.20 0.02 265 / 0.42);
   color-scheme: light;
+}
+
+/*
+ * Chrome. These are composites rather than ramp steps, because the sticky
+ * header, the rail and the page glow are all derived from the canvas: naming
+ * them once here is what stops a later `--bg-canvas` edit from leaving the
+ * frame behind. The two themes need different mixes - a translucent dark header
+ * has to lift, a translucent light one has to stay paper - so both are stated.
+ */
+:root {
+  --chrome-bg: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --chrome-blur: saturate(150%) blur(14px);
+  --page-glow: radial-gradient(1100px 520px at 76% -14%, color-mix(in srgb, var(--accent-solid) 17%, transparent), transparent 68%);
+  --rail-bg: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 94%, var(--accent-solid)) 0%, var(--bg-base) 76%);
+  --rail-shadow: 24px 0 56px -38px oklch(0 0 0 / 0.7);
+  --edge-highlight: inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+:root[data-theme="light"] {
+  --page-glow: radial-gradient(1000px 460px at 78% -16%, color-mix(in srgb, var(--accent-solid) 9%, transparent), transparent 66%);
+  --rail-bg: linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--bg-canvas) 72%, #ffffff) 100%);
+  --rail-shadow: 20px 0 44px -40px oklch(0.35 0.05 250 / 0.4);
+  --edge-highlight: inset 0 1px 0 #ffffff;
 }
 
 /*

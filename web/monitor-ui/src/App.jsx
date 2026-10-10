@@ -185,7 +185,7 @@ class MonitorErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <main className="shell shell-list">
+        <div className="shell shell-list">
           <Card as="section">
             <div className="panel-head">
               <div>
@@ -194,7 +194,7 @@ class MonitorErrorBoundary extends React.Component {
             </div>
             <p className="event-message">{this.state.error.message || "The monitor UI hit a rendering error."}</p>
           </Card>
-        </main>
+        </div>
       );
     }
     return this.props.children;

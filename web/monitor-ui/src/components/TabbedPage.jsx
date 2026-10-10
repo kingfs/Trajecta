@@ -40,7 +40,7 @@ export function TabbedPage({ title, tabs, defaultTab }) {
   }
 
   return (
-    <main className="shell shell-list">
+    <div className="shell shell-list">
       <PageHeader title={title} actions={active.actions} />
       {/* Radix owns the tab semantics end to end now, so the trigger and the
           panel it controls are generated from one value and the aria-controls
@@ -51,6 +51,6 @@ export function TabbedPage({ title, tabs, defaultTab }) {
           {active.element}
         </TabsContent>
       </Tabs>
-    </main>
+    </div>
   );
 }

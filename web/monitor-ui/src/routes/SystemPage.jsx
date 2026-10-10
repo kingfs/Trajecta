@@ -1,6 +1,7 @@
 import React from "react";
 import { TabbedPage } from "../components/TabbedPage";
-import { RuntimePanel } from "./system/RuntimePanel";
+import { HostPanel } from "./system/HostPanel";
+import { ServerPanel } from "./system/ServerPanel";
 import { DatabasePanel } from "./system/DatabasePanel";
 import { SlowQueryPanel } from "./system/SlowQueryPanel";
 import { ToolsPanel } from "./system/ToolsPanel";
@@ -11,13 +12,22 @@ import { useI18n } from "../lib/i18n";
 // tool bindings. Each is its own request and its own tab, so a slow statement
 // collector that was never armed cannot hold up the database view, and the
 // database view cannot hold up the process view.
+//
+// 运行时 was one tab holding both halves of the runtime picture. That is why it
+// was twice the length of every other tab and why the page read as though it said
+// the same thing several times. Host resources and the server process are two
+// questions with two different failure modes - /proc can be missing, the Go
+// runtime cannot - so they are two tabs. The host tab keeps the id `runtime` so
+// existing links land where they did.
 export function SystemPage() {
   const { t } = useI18n();
   return (
     <TabbedPage
       title={t("system.title")}
+      defaultTab="runtime"
       tabs={[
-        { id: "runtime", label: t("system.tabRuntime"), element: <RuntimePanel /> },
+        { id: "runtime", label: t("system.tabHost"), element: <HostPanel /> },
+        { id: "server", label: t("system.tabServer"), element: <ServerPanel /> },
         { id: "database", label: t("system.tabDatabase"), element: <DatabasePanel /> },
         { id: "slow", label: t("system.tabSlowQueries"), element: <SlowQueryPanel /> },
         { id: "tools", label: t("system.tabTools"), element: <ToolsPanel /> },

@@ -43,14 +43,18 @@ type systemHostResponse struct {
 }
 
 // systemHostPoint is one reading in the trend the page draws. It is a much
-// smaller shape than the sample it comes from: the chart needs the timestamp
-// and the two percentages it plots, and copying the counters would put a
-// per-core array in every point of a sixty-point series.
+// smaller shape than the sample it comes from: the chart needs the timestamp,
+// the percentages and the throughput it plots, and copying the counters would
+// put a per-core array and every interface in each point of a sixty-point
+// series. The network rates are the aggregate, so the line keeps its shape when
+// an interface appears or disappears while the tab is open.
 type systemHostPoint struct {
 	At            time.Time `json:"at"`
 	CPUPercent    float64   `json:"cpu_percent"`
 	MemoryPercent float64   `json:"memory_percent"`
 	Load1         float64   `json:"load1"`
+	RxBytesPerSec float64   `json:"rx_bytes_per_sec"`
+	TxBytesPerSec float64   `json:"tx_bytes_per_sec"`
 }
 
 // systemHostHistoryLimit is how many readings the trend keeps. The server
@@ -264,6 +268,8 @@ func (s *systemHostSampler) appendHistoryLocked(response systemHostResponse) {
 		CPUPercent:    response.CPU.UsagePercent,
 		MemoryPercent: response.Memory.UsedPercent,
 		Load1:         response.CPU.Load1,
+		RxBytesPerSec: response.Network.RxBytesPerSec,
+		TxBytesPerSec: response.Network.TxBytesPerSec,
 	})
 	if len(s.history) > systemHostHistoryLimit {
 		s.history = append([]systemHostPoint(nil), s.history[len(s.history)-systemHostHistoryLimit:]...)

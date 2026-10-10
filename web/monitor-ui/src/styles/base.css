@@ -130,3 +130,36 @@ samp,
   white-space: nowrap;
   border: 0;
 }
+
+/*
+ * Skip link. Nine destinations sit above the content on every page, so a
+ * keyboard reader had to walk the whole rail to reach the thing they came for.
+ * The link is only in the tab order while it is focused, which is the standard
+ * pattern: it is first in the document rather than hidden behind a script.
+ */
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-md);
+  transform: translateY(calc(-100% - var(--space-4)));
+  transition: transform var(--transition-fast);
+}
+
+.skip-link:focus-visible {
+  transform: none;
+}
+
+/* The content column is focused programmatically after a route change, so it is
+   a tab stop for a screen reader and not a ring drawn around the whole page. */
+.app-main:focus {
+  outline: none;
+}

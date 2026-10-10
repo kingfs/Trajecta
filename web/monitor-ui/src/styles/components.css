@@ -113,10 +113,14 @@
   min-width: 0;
   padding: var(--space-4);
   border-radius: var(--radius-lg);
+  /* The top edge takes a one-pixel highlight rather than a gradient fill: a
+     tile is a data surface and has to keep a flat background for its text to
+     sit on, but on a dark canvas a card with no lit edge reads as a hole. */
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
+  box-shadow: var(--edge-highlight);
   overflow: visible;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
 
 /* The shimmer and the gradient rule at the bottom of every tile are gone: the
@@ -159,9 +163,20 @@
   line-height: 1.45;
 }
 
-.stat-card-link:hover {
-  border-color: var(--border-strong);
-  transform: none;
+/* A tile that is a link to the thing it counts answers the pointer. The lift is
+   behind `hover: hover` so a touch device does not leave a card stuck two pixels
+   up after a tap, and the whole state is a transform plus a shadow, so it never
+   moves its neighbours. */
+@media (hover: hover) and (pointer: fine) {
+  .stat-card-link:hover {
+    border-color: var(--accent-border);
+    box-shadow: var(--edge-highlight), var(--shadow-md);
+    transform: translateY(-2px);
+  }
+}
+
+.stat-card-link:focus-visible {
+  border-color: var(--accent-border);
 }
 
 .stat-card.accent-green strong {
@@ -600,6 +615,10 @@ input[type="radio"] {
 /* ------------------------------------------------------- empty / notice */
 
 .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
   border: 1px dashed var(--border);
   border-radius: var(--radius-lg);
   background: transparent;
@@ -608,9 +627,39 @@ input[type="radio"] {
   font-family: var(--font-sans);
 }
 
+/* The glyph is a plate rather than a bare icon: at 18px a line icon alone
+   dissolves into the dashed border it sits inside. */
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+}
+
+.empty-state-body {
+  min-width: 0;
+  max-width: 56ch;
+}
+
 .empty-state-inline {
+  display: block;
   padding: var(--space-4);
   text-align: left;
+}
+
+.empty-state-action {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.empty-state-inline .empty-state-action {
+  justify-content: flex-start;
 }
 
 .empty-state-title {
@@ -625,6 +674,7 @@ input[type="radio"] {
   color: var(--text-tertiary);
   font-size: var(--text-sm);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .empty-state-danger {
@@ -634,6 +684,11 @@ input[type="radio"] {
 }
 
 .empty-state-danger .empty-state-title {
+  color: var(--danger);
+}
+
+.empty-state-danger .empty-state-icon {
+  background: color-mix(in srgb, var(--danger-solid) 16%, transparent);
   color: var(--danger);
 }
 
@@ -1013,55 +1068,45 @@ input[type="radio"] {
   height: 13px;
 }
 
-/* --------------------------------------------------------------- meters */
+/* --------------------------------------------------------------- gauges */
 
-.meter {
-  position: relative;
-  width: 100%;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
-  overflow: hidden;
-}
+/* Memory and disk are the same question asked about two different pools, so
+   they sit on one row and are drawn with the same ring. Two columns is the
+   point: stacked, the reader compares 25 % against 46.7 % by memory across a
+   scrolling page instead of by eye across a row.
 
-.meter-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent-solid);
-  transition: width var(--transition-base);
-}
-
-.meter-warning .meter-fill {
-  background: var(--warning-solid);
-}
-
-.meter-danger .meter-fill {
-  background: var(--danger-solid);
-}
-
-/* Per-core CPU strip: one thin meter per core, read left to right. */
-.core-grid {
+   `auto-fit` with a 320px floor is what makes that survive a phone, and the floor
+   is clamped to the container: `minmax(320px, 1fr)` cannot shrink below 320px, so
+   on a 390px phone it would push both rings - and the page's scroll width - past
+   the viewport, which is the one thing a gauge must not do. */
+.system-split {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 6px var(--space-3);
-  margin-top: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  align-items: start;
 }
 
-.core-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.system-gauge {
+  display: grid;
+  gap: var(--space-2);
   min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-inset);
 }
 
-.core-cell .meter {
-  min-width: 0;
+/* The subhead's own top margin exists to separate it from a block above it; the
+   gauge already provides that separation. */
+.system-gauge .system-subhead {
+  margin-top: 0;
 }
 
-.core-cell span {
-  flex: none;
-  color: var(--text-tertiary);
-  font-size: var(--text-label);
+/* Inside a gauge the facts are a footnote to the ring, so the responsive
+   two-per-row grid would leave them dangling at half width. */
+.system-kv-tight {
+  grid-template-columns: 1fr;
 }
 
 /* System tables: the legacy stylesheet sized these as grid rows, but the column
@@ -1073,14 +1118,35 @@ input[type="radio"] {
   gap: var(--space-3);
 }
 
-.system-table-head--net,
-.system-table-row--net {
-  grid-template-columns: minmax(120px, 1.2fr) minmax(74px, 0.7fr) minmax(74px, 0.7fr) minmax(80px, 0.8fr) minmax(80px, 0.8fr);
+/* The network table is the one statistic table whose columns fit a phone, so it
+   drops the 660px floor the legacy stylesheet puts on `.system-table` rows (see
+   styles.css) - that floor is there so a cell never drifts out from under its
+   header, and at three columns it is three times the width the headers need. The
+   floor needs the parent in the selector to outrank `.system-table .system-row`.
+   What remains still scrolls on a 390px phone rather than wrapping a rate onto
+   two lines; the two rate columns are the point of the row. */
+.system-table--net .system-table-head--net,
+.system-table--net .system-table-row--net {
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 0.8fr));
+  min-width: 340px;
 }
 
-.system-table-head--net,
-.system-table-row--net {
-  min-width: 620px;
+/* `.trace-table` clips its contents, and it is declared after the legacy
+   `.system-table { overflow-x: auto }`, so without this the third column of a
+   scrolled row would be cut off with no way to reach it. The other wide system
+   tables opt in the same way. */
+.system-table--net {
+  overflow-x: auto;
+}
+
+/* The interface's loopback marker, inline rather than in a column of its own. */
+.system-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
 }
 
 .system-row-warn,

@@ -67,7 +67,7 @@ export function OverviewPage() {
   const activeBreakdown = breakdownOptions.find((option) => option.id === breakdownKind) || breakdownOptions[0];
 
   return (
-    <main className="shell shell-list">
+    <div className="shell shell-list">
       <PageHeader
         title={t("overview.title")}
         actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("overview.window")} />}
@@ -205,7 +205,7 @@ export function OverviewPage() {
           </AttentionPanel>
         </div>
       </Card>
-    </main>
+    </div>
   );
 }
 

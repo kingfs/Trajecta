@@ -30,6 +30,7 @@ import {
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useJSON } from "../hooks/useJSON";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
+import { isLegacyActive, navGroups } from "../lib/nav";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { RealtimeStatus } from "../lib/realtime";
 import { useWriteMutation } from "../lib/mutations";
@@ -37,58 +38,12 @@ import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme"
 import { cn } from "../lib/utils";
 
 /**
- * The sidebar is grouped by what the operator is doing, not by which table the
- * data comes from: 监控 answers "what is happening", 配置 answers "what is it
- * pointed at", 系统 answers "is the machine healthy". Pages that used to be
- * separate destinations now live behind the tab strip of one of these entries,
- * which is why the list is nine items instead of twelve.
+ * The rail.
+ *
+ * The destinations themselves are declared in lib/nav.js, because the page
+ * header names the group a page belongs to and that label has to come from the
+ * same list this renders.
  */
-const NAV_GROUPS = [
-  {
-    id: "observe",
-    labelKey: "nav.group.observe",
-    items: [
-      { to: "/overview", labelKey: "nav.overview", icon: "grid" },
-      { to: "/traces", labelKey: "nav.traffic", icon: "activity" },
-      { to: "/events", labelKey: "nav.events", icon: "bell", badge: "events" },
-      { to: "/audit", labelKey: "nav.quality", icon: "shield" },
-    ],
-  },
-  {
-    id: "configure",
-    labelKey: "nav.group.configure",
-    items: [
-      { to: "/providers", labelKey: "nav.providers", icon: "plug" },
-      { to: "/models", labelKey: "nav.models", icon: "box" },
-      { to: "/routing", labelKey: "nav.routing", icon: "route" },
-      { to: "/connect", labelKey: "nav.access", icon: "terminal" },
-    ],
-  },
-  {
-    id: "system",
-    labelKey: "nav.group.system",
-    items: [{ to: "/system", labelKey: "nav.system", icon: "settings", adminOnly: true }],
-  },
-];
-
-// The system page exposes process internals, database statistics and (when the
-// slow-query collector is armed) statement text, so the API behind it is
-// admin-only. The entry follows the same rule: an admin sees it, and so does
-// the "local" pseudo-user of a Monitor running without auth, which is the only
-// deployment whose API answers without a role.
-function canOpenSystemPage(user) {
-  const role = String(user?.role || "").trim().toLowerCase();
-  return role === "admin" || role === "local";
-}
-
-function navGroups(user) {
-  const systemAllowed = canOpenSystemPage(user);
-  return NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => !item.adminOnly || systemAllowed),
-  })).filter((group) => group.items.length > 0);
-}
-
 export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
   const { t } = useI18n();
   const [accountOpen, setAccountOpen] = useState(false);
@@ -105,7 +60,6 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   // question the sidebar has to answer rather than one a spinner or a timer
   // used to. See lib/realtime.js for what the three states mean.
   const realtime = useRealtimeStatus();
-
   return (
     <nav className="primary-nav" aria-label={t("nav.primary")}>
       <div className="nav-brand">
@@ -134,7 +88,9 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  title={collapsed ? label : undefined}
+                  // The rail is icons only below 1000px, where the label is in the
+                  // accessibility tree but clipped out of sight (see styles/layout.css).
+                  title={label}
                   className={({ isActive }) => (isActive || isLegacyActive(item.to) ? "nav-item nav-item-active" : "nav-item")}
                 >
                   <NavIcon name={item.icon} />
@@ -467,24 +423,4 @@ function initials(user) {
 function formatBadgeCount(value) {
   const count = Number(value || 0);
   return count > 99 ? "99+" : String(count);
-}
-
-// /requests, /sessions, /analysis and /tokens are the pre-redesign addresses of
-// pages that are now tabs of another entry. They redirect, but a redirect still
-// has to light up the entry it lands on while it is in flight.
-function isLegacyActive(path) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const current = window.location.pathname;
-  if (path === "/traces") {
-    return current === "/requests" || current === "/sessions" || current.startsWith("/traces/");
-  }
-  if (path === "/audit") {
-    return current === "/analysis" || current.startsWith("/audit");
-  }
-  if (path === "/connect") {
-    return current === "/tokens";
-  }
-  return false;
 }

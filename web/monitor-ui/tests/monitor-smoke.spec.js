@@ -6,6 +6,49 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("trajecta.monitor.language", "en");
   });
+  // Reading a colour by parsing its computed string stopped working once the
+  // palette started resolving through `color-mix()`: Chromium reports those as
+  // `oklab(...)`, and `match(/[\d.]+/g)` then reads three fractional channel
+  // values as if they were 0-255 sRGB. Painting the colour into a one-pixel
+  // canvas and reading the pixel back resolves whatever syntax Chromium
+  // accepted into the sRGB channels the compositor would actually use.
+  await page.addInitScript(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    window.__paint = (colour) => {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = "#000";
+      ctx.fillStyle = String(colour);
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, a: a / 255 };
+    };
+    // WCAG relative luminance of whatever `__paint` resolved.
+    window.__luminance = (colour) => {
+      const { r, g, b } = window.__paint(colour);
+      const channel = (value) => {
+        const v = value / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    // OKLab lightness, which is the scale a "is this surface dark?" threshold
+    // was written against. Same maths as tests-unit/color-math.js.
+    window.__oklabLightness = (colour) => {
+      const { r, g, b } = window.__paint(colour);
+      const linear = (value) => {
+        const v = value / 255;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      const [lr, lg, lb] = [r, g, b].map(linear);
+      const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+      const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+      const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+      return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+    };
+  });
   // The console keeps one realtime socket open. The mock layer answers /api/**
   // but not the WebSocket upgrade, so without this every test would spend its
   // run in the reconnect backoff and log a failed connection per attempt. A
@@ -438,28 +481,16 @@ test("the conversation has no dark surface in the light theme", async ({ page })
   await page.goto("/traces/trace-parsed?node=$.output[1]");
   await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
   const surfaces = await page.evaluate(() => {
-    const luminance = (colour) => {
-      const nums = String(colour).match(/[\d.]+/g);
-      if (!nums || nums.length < 3) {
-        return null;
-      }
-      const [r, g, b] = nums.slice(0, 3).map((part) => {
-        const channel = Number(part) / 255;
-        return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
     return [".conversation-step", ".conversation-result", ".conversation-anchor-chip", ".conversation-toolbar"].map((selector) => {
       const element = document.querySelector(selector);
       const background = element ? getComputedStyle(element).backgroundColor : "";
-      const alpha = element ? getComputedStyle(element).backgroundColor.match(/[\d.]+/g) : null;
       return {
         selector,
         found: Boolean(element),
         // A fully transparent fill has nothing to judge; the ones that paint are
         // the two surfaces that must stay light.
-        opaque: Boolean(alpha) && Number(alpha[3] ?? 1) > 0,
-        luminance: luminance(background),
+        opaque: Boolean(element) && window.__paint(background).a > 0,
+        luminance: element ? window.__luminance(background) : null,
       };
     });
   });
@@ -587,21 +618,23 @@ test("traffic page merges requests and sessions behind a tab strip", async ({ pa
 });
 
 // The system page reads the host, the process and Postgres through three
-// independent endpoints, one per tab.
-test("system runtime tab renders host, disk and network metrics", async ({ page }) => {
+// independent endpoints, one per tab. Host resources and the server process used
+// to share one 运行时 tab, which is why the page repeated itself: the same CPU and
+// memory numbers were rendered as tiles, as chart series and again as fact rows.
+test("the system info tab renders host, disk and network metrics", async ({ page }) => {
   await page.goto("/system");
+  await expect(page.getByRole("tab", { name: "System info", selected: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "System", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Host resources" })).toBeVisible();
-  await expect(page.getByText("CPU usage")).toBeVisible();
-  await expect(page.getByText("12.5 %")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Go process" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "CPU split and host" })).toBeVisible();
+  // The CPU breakdown is a fact row now, not a section of its own.
+  await expect(page.getByText("9.0 %")).toBeVisible();
 
-  // The disk table is a ring now, and the two overlay mounts on one device are
+  // The disk table is a ring, and the two overlay mounts on one device are
   // folded into the machine's total before it is drawn.
   await expect(page.locator(".system-table-row--disk")).toHaveCount(0);
-  const donut = page.locator(".usage-donut");
-  await expect(donut).toBeVisible();
-  await expect(donut.locator(".usage-donut-center span")).toHaveText("70.0 GiB / 150 GiB");
+  await expect(page.locator(".system-gauge--disk .usage-donut")).toBeVisible();
+  await expect(page.locator(".system-gauge--disk .usage-donut-center span")).toHaveText("70.0 GiB / 150 GiB");
 
   // Idle container bridges are dropped; only interfaces that moved bytes show.
   const networkRows = page.locator(".system-table-row--net");
@@ -609,6 +642,58 @@ test("system runtime tab renders host, disk and network metrics", async ({ page 
   // Busiest interface first; the bridge that never carried a byte is gone.
   await expect(networkRows.first()).toContainText("eth0");
   await expect(networkRows.last()).toContainText("lo");
+
+  // The server's own view is its own tab, and the host metrics are not on it.
+  await page.getByRole("tab", { name: "Server", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Go process" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Host resources" })).toHaveCount(0);
+});
+
+// Memory and disk are the same question about two pools, so they are one row of
+// two rings. The memory ring splits the page cache out of used: `used` is total
+// minus available, so it already contains the cache, and drawing both against
+// the total would count it twice.
+test("the memory and disk rings sit side by side and do not double-count the cache", async ({ page }) => {
+  // Both viewports are set explicitly: this asserts a breakpoint, so it must not
+  // inherit the one its project happens to run at.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/system");
+  const memory = page.locator(".system-gauge--memory .usage-donut");
+  const disk = page.locator(".system-gauge--disk .usage-donut");
+  await expect(memory).toBeVisible();
+  await expect(disk).toBeVisible();
+
+  const boxes = await Promise.all([memory.boundingBox(), disk.boundingBox()]);
+  expect(Math.abs(boxes[0].y - boxes[1].y), "the two rings are on one row").toBeLessThan(8);
+  expect(boxes[0].x, "memory is the left-hand ring").toBeLessThan(boxes[1].x);
+
+  // 4 GiB used, 6 GiB reclaimable cache, 12 GiB available, 16 GiB total. The
+  // cache lives inside available, not inside used, so the three slices are used,
+  // cache and the remainder - and they have to add up to the total, which the old
+  // "used minus cache" arithmetic did not: it produced a zero slice and a ring
+  // worth 18 GiB on a 16 GiB machine.
+  await expect(memory.locator(".recharts-pie-sector")).toHaveCount(3);
+  await expect(memory.locator(".usage-donut-center strong")).toContainText("25.0");
+  await expect(memory.locator(".usage-donut-center span")).toHaveText("4.00 GiB / 16.0 GiB");
+  // textContent, not innerText: the label is uppercased by the stylesheet and
+  // innerText applies that transform, which makes the keys depend on CSS.
+  const memoryFacts = await page.locator(".system-gauge--memory .system-fact").evaluateAll(
+    (rows) => rows.map((row) => [...row.children].map((cell) => cell.textContent.trim())),
+  );
+  const facts = Object.fromEntries(memoryFacts);
+  expect(facts).toMatchObject({
+    Used: "4.00 GiB",
+    "Page cache": "6.00 GiB",
+    Free: "6.00 GiB",
+    Available: "12.0 GiB",
+  });
+
+  // Below two usable columns each ring takes the full width, so a phone gets
+  // two readable rings rather than two unreadable ones.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrow = await Promise.all([memory.boundingBox(), disk.boundingBox()]);
+  expect(narrow[1].y, "the rings stack on a phone").toBeGreaterThan(narrow[0].y);
+  await expect(memory).toBeVisible();
 });
 
 test("server-side tool bindings live on the system page", async ({ page }) => {
@@ -1145,9 +1230,13 @@ function systemHostPayload() {
       idle_percent: 87.5, load1: 0.4, load5: 0.3, load15: 0.2,
       per_core_percent: [10, 11, 12, 13, 14, 15, 16, 17],
     },
+    // Deliberately the shape a real host reports: `used_bytes` is MemTotal minus
+    // MemAvailable and so excludes the reclaimable cache, which leaves the cache
+    // larger than used. A fixture where the cache is the smaller of the two makes
+    // a wrong model of these three numbers add up anyway.
     memory: {
       total_bytes: 16 * 1024 ** 3, used_bytes: 4 * 1024 ** 3, available_bytes: 12 * 1024 ** 3,
-      used_percent: 25, cached_bytes: 2 * 1024 ** 3, swap_total_bytes: 1024 ** 3,
+      used_percent: 25, cached_bytes: 6 * 1024 ** 3, swap_total_bytes: 1024 ** 3,
       swap_used_bytes: 0, swap_used_percent: 0,
     },
     // Two mount points on the same device, plus one that stands alone.
@@ -1165,12 +1254,15 @@ function systemHostPayload() {
       rx_bytes_per_sec: 30, tx_bytes_per_sec: 50,
     },
     process: { pid: 4321, rss_bytes: 64 * 1024 ** 2, vs_z_bytes: 1024 ** 3, cpu_percent: 1.5, threads: 12, open_fds: 21, started_at: new Date().toISOString() },
-    // The server's own readings while the tab was watching, oldest first.
+    // The server's own readings while the tab was watching, oldest first. The
+    // throughput rides along so the network trend has more than one point.
     history: Array.from({ length: 6 }, (_, index) => ({
       at: new Date(Date.now() - (5 - index) * 5_000).toISOString(),
       cpu_percent: 10 + index * 2,
       memory_percent: 24 + index,
       load1: 0.4,
+      rx_bytes_per_sec: 1024 * (index + 1),
+      tx_bytes_per_sec: 512 * (index + 1),
     })),
     warnings: [],
   };
@@ -1920,14 +2012,7 @@ test("the provider edit dialog is the shared dialog primitive", async ({ page })
 // sweep it by the same rule.
 async function darkSurfaces(page, selectors) {
   return page.evaluate((selectors) => {
-    const lightness = (colour) => {
-      const oklch = colour.match(/^oklch\(([\d.]+)/);
-      if (oklch) return Number(oklch[1]);
-      const nums = colour.match(/[\d.]+/g);
-      if (!nums || nums.length < 3) return null;
-      const [r, g, b] = nums.map(Number).map((c) => c / 255);
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
+    const lightness = (colour) => (colour === "rgba(0, 0, 0, 0)" ? null : window.__oklabLightness(colour));
     const out = [];
     for (const selector of selectors) {
       for (const el of document.querySelectorAll(selector)) {
@@ -2006,7 +2091,8 @@ test("the account panel is a light surface in light mode", async ({ page }) => {
   expect(colours.background).not.toBe(colours.text);
   // Dark ink on a light surface, read from whichever colour space Chromium
   // reports - the tokens resolve to hex now, so the serialisation is rgb().
-  const ink = colours.text.match(/[\d.]+/g).slice(0, 3).map(Number);
+  const { r, g, b } = await panel.evaluate((el) => window.__paint(getComputedStyle(el.querySelector("strong")).color));
+  const ink = [r, g, b];
   expect(Math.max(...ink)).toBeLessThan(90);
 });
 
@@ -2026,6 +2112,13 @@ test("each theme resolves to real colours", async ({ page }) => {
         // color-mix() output, so a rejected value would read as an empty string.
         border: root.getPropertyValue("--border").trim(),
         bodyBackground: getComputedStyle(document.body).backgroundColor,
+        // Read where the colour resolves: the body fill is a `color-mix()`, so
+        // its computed string is `oklab(...)` and only the browser can say what
+        // that is worth as light.
+        bodyBrightness: (() => {
+          const { r, g, b } = window.__paint(getComputedStyle(document.body).backgroundColor);
+          return (r + g + b) / 255;
+        })(),
       };
     });
     expect(state.attribute).toBe(scheme);
@@ -2034,11 +2127,10 @@ test("each theme resolves to real colours", async ({ page }) => {
       expect(state[token], `--${token} is empty in the ${scheme} theme`).not.toBe("");
     }
     expect(state.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
-    seen[scheme] = state.bodyBackground;
+    seen[scheme] = state;
   }
   // Dark really is the darker of the two, not just a differently named theme.
-  const luminance = (rgb) => rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map((c) => c / 255).reduce((sum, c) => sum + c, 0);
-  expect(luminance(seen.dark)).toBeLessThan(luminance(seen.light));
+  expect(seen.dark.bodyBrightness).toBeLessThan(seen.light.bodyBrightness);
 });
 
 // A stored preference beats the OS setting, in either direction.
@@ -2159,6 +2251,59 @@ test("the migrated selects keep the empty option and its label", async ({ page }
   await expect(responses).toHaveAttribute("aria-expanded", "false");
 });
 
+/*
+ * Every route, and every tab of every route, rendered for real.
+ *
+ * The routing inspector shipped with a bare `error` identifier in a JSX
+ * condition. Opening /routing?tab=inspect threw a ReferenceError on the first
+ * render, the error boundary caught it, and the reader got "Unable to render this
+ * page" instead of a form. Nothing here noticed: the suite visited /routing,
+ * which defaults to the decisions tab, and no test ever asked for a tab.
+ *
+ * So this walks the tabs the app declares and asserts the two things a crashed
+ * page fails at - it has no page title, and it complains on the console. It is
+ * deliberately cheap: a page that renders is the whole assertion.
+ */
+test("every route and every tab renders without reaching the error boundary", async ({ page }) => {
+  const PAGES = [
+    ["/overview", []],
+    ["/traces", ["requests", "sessions"]],
+    ["/events", []],
+    ["/audit", ["findings", "lineage", "analysis", "health"]],
+    ["/providers", []],
+    ["/models", []],
+    ["/routing", ["decisions", "settings", "aliases", "inspect"]],
+    ["/connect", ["clients", "tokens"]],
+    ["/system", ["runtime", "server", "database", "slow", "tools"]],
+  ];
+  for (const [path, tabs] of PAGES) {
+    for (const tab of [null, ...tabs]) {
+      const url = tab ? `${path}?tab=${tab}` : path;
+      const errors = [];
+      const collect = (message) => {
+        // The harness answers an endpoint this mock does not stub with a 404, and
+        // Chromium reports that on the console. It means the mock is incomplete,
+        // not that the page failed, and seven routes hit one.
+        if (message.type() === "error" && !message.text().includes("Failed to load resource")) {
+          errors.push(message.text());
+        }
+      };
+      const collectCrash = (error) => errors.push(`uncaught: ${error.message || error}`);
+      page.on("console", collect);
+      page.on("pageerror", collectCrash);
+      await page.goto(url);
+      // The boundary renders an h2, so a missing h1 is the crash itself.
+      await expect.soft(page.locator("h1"), `${url} renders a page title`).toBeVisible();
+      await expect.soft(page.getByText("Unable to render this page"), `${url} stays off the boundary`).toHaveCount(0);
+      // A page whose panels throw after their first response has not thrown yet.
+      await page.waitForTimeout(150);
+      expect.soft(errors, `${url} logs no render error`).toEqual([]);
+      page.off("console", collect);
+      page.off("pageerror", collectCrash);
+    }
+  }
+});
+
 // The page sections were `.panel` elements: 20px of padding, no shadow, and a
 // 16px gap between stacked sections that the layout sheet cancels for a section
 // sitting directly under the page body. All three are easy to lose in a
@@ -2198,9 +2343,16 @@ test("every page has one heading layer and its range control in the header", asy
     await page.goto(route);
     const header = page.locator(".page-header");
     await expect(header, `${route} has a page header`).toHaveCount(1);
-    // Exactly one heading, and no eyebrow and no subtitle in the header.
+    // Exactly one heading, and no eyebrow and no subtitle in the header. The
+    // rail-group label that briefly sat above the title is gone for the same
+    // reason the eyebrow before it was: the rail already marks where the reader
+    // is, so a second name for the same thing was one more line to read.
     await expect(page.locator("h1"), `${route} has one page title`).toHaveCount(1);
     await expect(header.locator(".eyebrow, .page-header-subtitle"), `${route} stacks no second layer`).toHaveCount(0);
+    await expect(header.locator(".page-header-eyebrow"), `${route} keeps the header one line`).toHaveCount(0);
+    // One line means the title plus, at most, the page's own control cluster -
+    // never a third block of text.
+    expect(await header.evaluate((element) => element.children.length), `${route} keeps the title first`).toBeLessThanOrEqual(2);
     const range = header.getByRole("radiogroup");
     if (WINDOWED.includes(route)) {
       await expect(range, `${route} offers a time range in the header`).toHaveCount(1);
@@ -2227,8 +2379,8 @@ test("both themes keep their surfaces and borders legible", async ({ page }) => 
     await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
     seen[scheme] = await page.evaluate(() => {
       const toRgb = (colour) => {
-        const nums = colour.match(/[\d.]+/g);
-        return nums ? nums.slice(0, 3).map(Number) : null;
+        const { r, g, b } = window.__paint(colour);
+        return [r, g, b];
       };
       const root = getComputedStyle(document.documentElement);
       const card = document.querySelector('[data-slot="card"]');
@@ -2361,18 +2513,27 @@ test("the account panel's rows carry no native button chrome", async ({ page }) 
 // The dynamic half of the system page is a chart fed by the server's own
 // samples: the host response carries the trend and the realtime tick is what
 // makes the open tab fetch the next point.
-test("the runtime panel draws the host trend and a disk ring", async ({ page }) => {
+test("the host panel draws the utilisation trend, the throughput trend and two rings", async ({ page }) => {
   await page.goto("/system");
-  const chart = page.locator(".line-chart-card").first();
-  await expect(chart).toBeVisible();
-  await expect(chart.locator(".recharts-line")).toHaveCount(2);
+  // CPU and memory share a chart because they share a unit; throughput does not,
+  // so it is a second chart rather than a second y-axis.
+  const charts = page.locator(".line-chart-card");
+  await expect(charts).toHaveCount(2);
+  await expect(charts.first().locator(".recharts-line")).toHaveCount(2);
   await expect(page.getByText("CPU usage", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Memory", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("The server samples every 5 seconds while this page is open")).toBeVisible();
 
+  // The throughput chart plots the rates the host endpoint reports, and the
+  // history carries them so the line has a shape rather than a single point.
+  const network = charts.last();
+  await expect(network.locator(".recharts-line")).toHaveCount(2);
+  await expect(page.getByText("Rx rate", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Tx rate", { exact: true }).first()).toBeVisible();
+
   // The ring folds the two mounts on the same device, so the machine reads
   // 70 GiB of 150 GiB rather than counting the container layer twice.
-  const donut = page.locator(".usage-donut");
+  const donut = page.locator(".system-gauge--disk .usage-donut");
   await expect(donut).toBeVisible();
   // The formatter separates the number from the sign with a non-breaking space.
   await expect(donut.locator(".usage-donut-center strong")).toContainText("46.7");
@@ -2381,10 +2542,14 @@ test("the runtime panel draws the host trend and a disk ring", async ({ page }) 
 });
 
 test("the system page does not report thread or handle counts", async ({ page }) => {
-  await page.goto("/system");
-  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
-  await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Open FDs", { exact: true })).toHaveCount(0);
+  // Neither tab: splitting the runtime view in two is not a reason to bring back
+  // the process internals that were deliberately dropped.
+  for (const tab of ["", "?tab=server"]) {
+    await page.goto(`/system${tab}`);
+    await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
+    await expect(page.getByText("Threads", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Open FDs", { exact: true })).toHaveCount(0);
+  }
 });
 
 // The chart is live because of the topic, not because of a timer: the server
@@ -2425,7 +2590,7 @@ test("the system page's charts fit the viewport", async ({ page }) => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await page.goto("/system");
-    await expect(page.locator(".usage-donut")).toBeVisible();
+    await expect(page.locator(".usage-donut").first()).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, `the ${viewport.width}px layout overflows`).toBeLessThanOrEqual(1);
   }

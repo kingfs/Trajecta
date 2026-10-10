@@ -182,6 +182,14 @@ func TestSystemHostHistoryGrowsAndStaysBounded(t *testing.T) {
 	if !second.History[2].At.Equal(second.GeneratedAt) {
 		t.Errorf("the newest point is %v, want the reading's own %v", second.History[2].At, second.GeneratedAt)
 	}
+	// The trend carries the throughput the reading reported, so the network
+	// chart plots the same numbers the interface table lists.
+	if second.History[2].RxBytesPerSec != second.Network.RxBytesPerSec ||
+		second.History[2].TxBytesPerSec != second.Network.TxBytesPerSec {
+		t.Errorf("newest history point reports %v/%v bytes per second, want the reading's %v/%v",
+			second.History[2].RxBytesPerSec, second.History[2].TxBytesPerSec,
+			second.Network.RxBytesPerSec, second.Network.TxBytesPerSec)
+	}
 
 	// Inside the minimum interval the rates are reused, but the trend is still
 	// the trend: a reader refreshing quickly sees the series, not an empty one.

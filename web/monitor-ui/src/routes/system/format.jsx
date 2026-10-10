@@ -113,16 +113,3 @@ export function formatUptime(seconds) {
   }
   return `${minutes}m ${Math.floor(total % 60)}s`;
 }
-
-// A single-value meter. Colour only escalates at the points where an operator
-// would actually want to look: 75% and 90%.
-export function Meter({ percent, label }) {
-  const value = Number(percent);
-  const safe = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-  const tone = safe >= 90 ? "meter-danger" : safe >= 75 ? "meter-warning" : "";
-  return (
-    <div className={`meter ${tone}`.trim()} role="img" aria-label={label || `${safe.toFixed(1)}%`}>
-      <div className="meter-fill" style={{ width: `${safe}%` }} />
-    </div>
-  );
-}

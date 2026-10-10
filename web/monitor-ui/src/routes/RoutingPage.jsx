@@ -6,9 +6,8 @@ import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
-import { PageHeader } from "../components/common/PageHeader";
+import { TabbedPage } from "../components/TabbedPage";
 import { WindowToggle } from "../components/common/Tabs";
-import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { EmptyState } from "../components/common/EmptyState";
 import { InlineTag } from "../components/common/Badges";
 import { BreakdownList } from "../components/monitor/BreakdownList";
@@ -22,13 +21,56 @@ import { formatCount, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/mo
 
 const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
-const ROUTING_TABS = ["decisions", "settings", "aliases", "inspect"];
+
 
 export function RoutingPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeRoutingWindow(searchParams.get("window"));
-  const activeTab = normalizeRoutingTab(searchParams.get("tab"));
+
+  const setWindow = (nextWindow) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
+    setSearchParams(next);
+  };
+
+  // The same tab strip as every other merged page, through TabbedPage: one row
+  // of underline tabs under the page title, bound to `?tab=`. This page used to
+  // hand-roll a segmented pill inside a "工作区" card, so the identical choice
+  // looked like a different control here than on /traces or /system, and it
+  // cost a card whose only content was that one row.
+  return (
+    <TabbedPage
+      title={t("routing.title")}
+      defaultTab="decisions"
+      tabs={[
+        {
+          id: "decisions",
+          label: t("routing.tabDecisions"),
+          // Only the decisions tab is windowed, so the range control is that
+          // tab's own header action rather than a fixture of the page.
+          actions: <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />,
+          element: <RouteDecisionsPanel windowValue={windowValue} />,
+        },
+        { id: "settings", label: t("routing.tabSettings"), element: <RoutingSettingsPanel /> },
+        { id: "aliases", label: t("routing.tabAliases"), element: <ModelAliasesPanel /> },
+        { id: "inspect", label: t("routing.tabInspector"), element: <RouteInspectorPanel /> },
+      ]}
+    />
+  );
+}
+
+/**
+ * The recent-routing view, filters and all.
+ *
+ * It is its own component because TabbedPage only mounts the tab that is
+ * showing: the two routing lists used to be fetched on every tab, so opening
+ * the settings form still pulled two hundred exchanges and a credential
+ * summary that the form never displayed.
+ */
+function RouteDecisionsPanel({ windowValue }) {
+  const { t } = useI18n();
+  const [searchParams, setSearchParams] = useSearchParams();
   const activeFilters = readRoutingFilters(searchParams);
   const [filters, setFilters] = useState(activeFilters);
   const params = new URLSearchParams();
@@ -54,16 +96,6 @@ export function RoutingPage() {
     setFilters(activeFilters);
   }, [searchParams]);
 
-  const setWindow = (nextWindow) => {
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
-    setSearchParams(next);
-  };
-  const setTab = (nextTab) => {
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "tab", nextTab === "decisions" ? "" : nextTab);
-    setSearchParams(next);
-  };
   const applyFilters = (event) => {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
@@ -79,44 +111,14 @@ export function RoutingPage() {
   const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
 
   return (
-    <div className="shell shell-list">
-      <PageHeader
-        title={t("routing.title")}
-        actions={
-          activeTab === "decisions" ? (
-            <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />
-          ) : null
-        }
-      />
-
+    <>
       <Card as="section">
         <div className="panel-head">
           <div>
-            <h2>{t("routing.workspace")}</h2>
+            <h2>{t("routing.recent")}</h2>
           </div>
         </div>
-        <SegmentedControl type="single" className="routing-mode-toggle" value={activeTab} onValueChange={setTab} aria-label={t("routing.workspaceLabel")}>
-          {ROUTING_TABS.map((tab) => (
-            <SegmentedControlItem key={tab} value={tab} active={activeTab === tab}>
-              {routingTabLabel(tab, t)}
-            </SegmentedControlItem>
-          ))}
-        </SegmentedControl>
-      </Card>
-
-      {activeTab === "settings" ? <RoutingSettingsPanel /> : null}
-      {activeTab === "aliases" ? <ModelAliasesPanel /> : null}
-      {activeTab === "inspect" ? <RouteInspectorPanel /> : null}
-
-      {activeTab === "decisions" ? (
-        <>
-          <Card as="section">
-            <div className="panel-head">
-              <div>
-                <h2>{t("routing.recent")}</h2>
-              </div>
-            </div>
-            <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
+        <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
           <Input className="min-w-[180px]" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
           <Input className="min-w-[180px]" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
           <select className="filter-input" name="routing_status" aria-label={t("routing.statusLabel")} value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
@@ -139,34 +141,15 @@ export function RoutingPage() {
           <StatCard label={t("common.errors")} value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing, t)} />
         </div>
-          </Card>
+      </Card>
 
-          {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
-          {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
-          {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
-          {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
-          {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
-        </>
-      ) : null}
-    </div>
+      {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
+      {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
+      {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
+      {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
+      {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
+    </>
   );
-}
-
-function normalizeRoutingTab(value) {
-  return ROUTING_TABS.includes(value) ? value : "decisions";
-}
-
-function routingTabLabel(tab, t) {
-  switch (tab) {
-    case "settings":
-      return t("routing.tabSettings");
-    case "aliases":
-      return t("routing.tabAliases");
-    case "inspect":
-      return t("routing.tabInspector");
-    default:
-      return t("routing.tabDecisions");
-  }
 }
 
 function RoutingSettingsPanel() {
@@ -487,7 +470,11 @@ function RouteInspectorPanel() {
         <Button variant="ghost" type="submit">{t("routing.inspect")}</Button>
       </form>
       {result ? <RouteInspectorResult result={result} /> : null}
-      {!result && !error ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
+      {/* The failure is reported by the toast the write already raises, so the
+          hint stands only while there is nothing else to read. `error` here used
+          to be an undefined identifier, which took the whole route down through
+          the error boundary the moment the tab was opened. */}
+      {!result && !inspect.isError ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
     </Card>
   );
 }

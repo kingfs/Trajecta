@@ -88,12 +88,13 @@ export function MessageContent({ value, format, renderMarkdown, className = "", 
 }
 
 function ExpandableContent({ expanded, collapsible, onToggle, children }) {
+  const { t } = useI18n();
   return (
     <div className={collapsible ? "message-content-wrap message-content-wrap-collapsible" : "message-content-wrap"}>
       {children}
       {collapsible ? (
-        <button className="message-expand-button" type="button" onClick={onToggle}>
-          {expanded ? "Show less" : "Show all"}
+        <button className="message-expand-button" type="button" onClick={onToggle} aria-expanded={expanded}>
+          {expanded ? t("common.showLess") : t("common.showAll")}
         </button>
       ) : null}
     </div>
