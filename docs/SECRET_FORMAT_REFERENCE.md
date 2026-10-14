@@ -1207,7 +1207,7 @@ func checksumSuffix(body string) string {
 
 因此完整判定为：`^(gh[pousr])_([0-9A-Za-z]{30})([0-9A-Za-z]{6})$` 且 `suffix == checksumSuffix(body)`。
 
-细粒度 PAT（`github_pat_`）**不使用**该 CRC32 方案：形态为 `github_pat_` + 22 字符 + `_` + 59 字符（共 4+22+1+59 = 86，gitleaks 记作 `github_pat_\w{82}`），只能靠前缀 + 长度判定。
+细粒度 PAT（`github_pat_`）**不使用**该 CRC32 方案：形态为 `github_pat_` + 22 字符 + `_` + 59 字符，只能靠前缀 + 精确长度判定。总长是 **93**：前缀 `github_pat_` 本身 11 个字符（含末尾下划线），与 gitleaks 记作 `github_pat_\w{82}` 一致；本文早先写作 86，是把前缀误记为 4 个字符。
 
 ### 8.3 第二优先级：强前缀 + 精确长度（无需上下文）
 
@@ -1321,17 +1321,21 @@ Trajecta 当前的凭据识别发生在两处：
 `Detector.AppendFindings` 依次走四层，越往后越贵，只有前一层放行的候选才进入下一层：
 
 1. **L1 词法**：编译好的 DFA 单遍扫描，最长匹配，不回溯。
-2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。
+2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`；`github_pat` 重算 30 位 body 的 CRC32-IEEE 并比对末 6 位 base62；`jwe` 要求五段式头部解码为含 `enc` 的 JSON 对象；`bech32` 验证 age 私钥的 BIP-173 校验和。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。
+
+**「足以认定」是校验器的准入线，比「看起来像」高得多。** 通过校验器的 finding 会被自动改写，所以只缩小范围而不构成证明的判据不能写进这里：例如「base64 解码后正好 64 字节」会接受转录里每一个 64 字节块（Azure Storage Key、Cosmos Key、Service Bus Key 与普通哈希、nonce 共用该形状），因此它只是 §8.4 的弱形态，不是校验器。
 3. **L3 上下文**：在匹配位置前后各 96 字节窗口内搜索凭据词汇，来源是 `context.go` 的固定全局词表，加上该规则自己的 `Keywords`。
 4. **L4 置信度门限**：按下面的权重打分并分档。
 
 打分权重（`finding.go`）：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；窗口内出现凭据词汇加 40 分；校验器通过则分数抬到不低于 70 分。总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。`Finding.Maskable()` 只放行 Medium 及以上自动改写；Low 仍然上报，让审计能看到看见了什么、以及故意没动什么。
 
-规则集共 67 条：Strong 28、Anchored 23、Generic 16。范围刻意只覆盖结构形状（JWT、PEM 头）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池。**第 5、6、7 章的云、CI、IM 与支付类形状不在其中**；`internal/analyzer` 里另有 7 条自己的正则（AWS `AKIA`、GitHub `ghp_`、DSN、Cookie、Bearer 等），本引擎在这些形状上目前弱于该 analyzer，不能当作它的替代品。
+规则集共 75 条：Strong 35、Anchored 24、Generic 16。范围是结构形状（JWT、JWE、PEM 头、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`。
 
-引擎不做的事同样属于当前事实：不做熵估计、不做校验和、除上述结构校验外不做 base64 或 JWT 载荷解码、不支持 look-behind。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；任何需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）拿着假值都无法进行。
+**刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64 是哈希、对象 ID 与密钥共用的形状，而通过校验器会把分数抬到可改写档，所以这类规则一旦加入就会改写转录里每一个同形块。它们要成为可改写的，需要先有「上下文必需」这一档语义——当前打法是上下文加分而非必需。**DSN 与 Cookie 也暂不覆盖**：只有一部分是秘密，而 vault 的替换粒度是整个命中跨度，整段改写会改变连接目标、破坏结构，需要子跨度机制。`internal/analyzer` 保留这些正则用于事后上报，那里可以有误报，自动改写不能。
 
-实测：约 72 KB 载荷的词法扫描约 1.16 ms，约 63 MB/s。精度用仓库自身度量：467 个源文件、13.3 MB，共 7 处命中——5 处是刻意的测试夹具，2 处是 Go 标识符误命中 `ek_` 前缀；该规则最小长度其后从 12 提到 30 字节，这 2 处误命中随之消失。
+引擎不做的事同样属于当前事实：不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；任何需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）拿着假值都无法进行。
+
+实测：约 72 KB 载荷的词法扫描约 1.25 ms，约 58 MB/s。精度用仓库自身度量：757 个文本文件、13.4 MB，共 27 处命中、分布在 12 个文件——24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2 等），1 处是 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key。新增的 8 条规则没有引入任何误报。
 
 ### 9.4 遮蔽与还原
 
@@ -1368,7 +1372,7 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 | 模块 | 现状 |
 | --- | --- |
 | `internal/proxy` | 已对接。请求侧把命中值换成保形假值再发往上游，cassette 仍记录原始体；响应侧在 `UsageSniffer` 之内还原。见 §9.4 |
-| `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。这 7 条正则覆盖 AWS `AKIA`、GitHub `gh[pousr]_`、私钥块、Bearer、DB 连接串、Cookie 等形状，而 `pkg/secretmask` 的规则集只覆盖结构形状与 LLM 厂商前缀（§9.3）。在补齐云、CI、IM、支付类形状之前替换会**降低**覆盖率，所以两者并存：analyzer 继续负责审计侧 findings，secretmask 负责转发侧改写 |
+| `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。7 条正则里有 4 条（AWS `AKIA`、GitHub `gh[pousr]_`、私钥块、Bearer）已由 `pkg/secretmask` 覆盖，另 3 条（DB 连接串、Cookie、凭据化 URL）**刻意不覆盖**：前两者只有一部分是秘密，而 vault 的替换粒度是整个命中跨度（§9.3）。两者并存的分工是 analyzer 负责审计侧 findings（可以有误报），secretmask 负责转发侧改写（不能有误报） |
 | `internal/redaction/url.go` | **未改动**。它按 URL 查询参数名与 userinfo 脱敏，依赖字段名而非值，与按字节 span 识别凭据是两件不同的事 |
 | `pkg/observe` | 未新增节点类型。命中与还原目前只写 cassette prelude 事件 `secret.masked` / `secret.restored` |
 | CLI（`cmd/trajecta`） | 未提供 `secrets scan` 子命令。`Detector` 与 `Vault` 是导出 API，可离线调用 |
@@ -1376,7 +1380,7 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 
 ### 9.6 测试策略
 
-- **正样本**：对每条规则生成"显然伪造但格式合法"的样例。带校验位的规则必须**真实计算**校验位（例如用 §8.2 的算法生成 `ghp_` 样例），否则测试会误判实现有 bug。
+- **正样本**：对每条规则准备"显然伪造但格式合法"的样例。带校验位的规则，其样例的校验位由**本包之外的实现**算出并硬编码进测试（GitHub 的用 `zlib.crc32`，age 的用一份 BIP-173 实现），而不是调用被测函数生成——否则校验器写错时会自我一致地通过。`TestBech32Checksum` 另外用 BIP-173 公布的向量直接验证校验和原语。`TestGitHubPATChecksumCoversTheBody` 逐字节改动 30 位 body 并要求全部被拒，证明校验位确实覆盖整个 body 而不只是长度。
 - **负样本（必须有，否则误报会失控）**：
   - git commit SHA-1（40 hex）与 SHA-256（64 hex）；
   - UUID v4；
@@ -1393,7 +1397,7 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 
 | 输入规模 | 现状 |
 | --- | --- |
-| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，约 63 MB/s |
+| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，75 条规则下约 58 MB/s |
 | 10 MB 以上 | **没有**关键词预筛或分段跳过：`Detector` 会扫描整个缓冲区。这是有意为之的取舍——先保证语义正确，规模优化留到出现真实需求时再做 |
 | 规则数 | 规则越多，DFA 状态数与生成代码越大，而扫描循环仍是按输入字节推进，与规则数无关。这也是长度上下界放在原生代码里判断的原因（§9.2 的状态数对比） |
 
