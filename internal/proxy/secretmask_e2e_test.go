@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
@@ -324,5 +326,114 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 				t.Error("the client never received the real key")
 			}
 		})
+	}
+}
+
+// TestHandlerMasksAndRestoresOnTheLocalResponsesPath covers the second real
+// upstream send path: a /v1/responses request with no native Responses target
+// is orchestrated by the local runtime as an internal chat completion, and that
+// hop has its own mask and restore wiring in responses_server.go.
+//
+// The chat backend echoes whatever stood in for the key, so the assertion that
+// the client's Responses output carries the real key proves both that the
+// stand-in travelled through the local runtime and that the nested response was
+// restored.
+func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var chatBody, standIn string
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		chatBody = string(body)
+
+		// Slicing the stand-in out at the real key's offset and length is what
+		// makes this a length assertion as well as a shape one.
+		if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 && i+len(testOpenAIProjectKey) <= len(body) {
+			standIn = string(body[i : i+len(testOpenAIProjectKey)])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"gpt-5",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"echo `+standIn+`"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer chatServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{{
+			ID:             "chat-backend",
+			Enabled:        boolPtr(true),
+			Priority:       100,
+			ModelDiscovery: router.ModelDiscoveryStaticOnly,
+			StaticModels:   []string{"gpt-5"},
+			Upstream: config.UpstreamConfig{
+				BaseURL:        chatServer.URL + "/v1",
+				ProviderPreset: "openai",
+				APIType:        "chat_completions",
+				Mode:           "responses_server",
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					ChatCompletions: boolPtr(true),
+				},
+			},
+		}},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": "prefer_local_server"}); err != nil {
+		t.Fatalf("SaveAppSettingJSON() error = %v", err)
+	}
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	reqBody := `{"model":"gpt-5","input":"here is my key ` + testOpenAIProjectKey + `"}`
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(reqBody))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	clientBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, clientBody)
+	}
+
+	if chatBody == "" {
+		t.Fatal("the chat backend received no request; the local runtime did not run")
+	}
+	if strings.Contains(chatBody, testOpenAIProjectKey) {
+		t.Errorf("the chat backend received the real key: %s", chatBody)
+	}
+	if !strings.Contains(chatBody, "sk-proj-") || !strings.Contains(chatBody, "T3BlbkFJ") {
+		t.Errorf("the stand-in lost its prefix or watermark: %s", chatBody)
+	}
+	// The stand-in kept the prefix, the watermark and the length, so it is
+	// distinguishable from the real key only by its body bytes. Comparing
+	// against the stand-in itself is therefore the assertion that separates
+	// "restored" from "leaked through".
+	if standIn == "" {
+		t.Fatal("the chat backend never saw a stand-in to echo")
+	}
+	if standIn == testOpenAIProjectKey {
+		t.Fatal("the stand-in is byte-identical to the real key")
+	}
+	if !strings.Contains(string(clientBody), testOpenAIProjectKey) {
+		t.Errorf("the client never received the real key back: %s", clientBody)
+	}
+	if strings.Contains(string(clientBody), standIn) {
+		t.Errorf("the client received the stand-in instead of the real key: %s", clientBody)
 	}
 }
