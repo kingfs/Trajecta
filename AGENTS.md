@@ -33,6 +33,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
+- Credential shape detection: the Ragel-compiled DFA and its rule table in `pkg/secretmask`
 
 ## Storage
 
@@ -66,6 +67,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
 - Keep recorded `.http` payloads human-inspectable.
 - Prefer additive evolution over destructive migration of existing cassettes.
 - The application database is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
+- `pkg/secretmask/rules_ragel.go` is generated from `pkg/secretmask/rules.rl` by Ragel and is committed. Never open, read, or edit it: it is a ~320 KB state-table blob whose contents are not reviewable by a human or an agent, and any hand edit is silently destroyed by the next generation. Change `rules.rl` (patterns) and `rule.go` (rule metadata) instead, then run `task generate:secretmask`. Regeneration needs `ragel-go`; the generic `ragel` binary emits C for this machine, so `ragel-go -G2` is not interchangeable with it. Commit `rules.rl`, `rule.go` and the regenerated `rules_ragel.go` in the same change, and never commit a hand-written substitute for the generated file.
 
 ## Common Workflows
 

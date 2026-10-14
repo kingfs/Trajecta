@@ -73,6 +73,11 @@ tasks:
     cmds:
       - go generate ./ent/...
 
+  generate:secretmask:
+    desc: Regenerate the Ragel credential DFA (pkg/secretmask/rules_ragel.go) from rules.rl; requires the ragel-go binary
+    cmds:
+      - go generate ./pkg/secretmask/...
+
   migrate:ent:sqlite:
     desc: Generate a SQLite ent migration, pass NAME=change_name
     cmds:
