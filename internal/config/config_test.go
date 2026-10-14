@@ -1905,25 +1905,25 @@ func TestMaskKeyDefaultsToTheDocumentedValue(t *testing.T) {
 	}
 }
 
-// TestSecretMaskingIsOptIn pins the documented default of
-// secret_masking.enabled.
+// TestSecretMaskingDefaultsOn pins the contract an operator relies on: masking
+// is on unless the configuration says otherwise.
 //
-// Body masking changes what the model is asked, not just what is written to
-// disk, so it must not switch on as a side effect of upgrading: the zero value
-// is the documented default, and only an explicit YAML key or environment
-// variable turns it on.
-func TestSecretMaskingIsOptIn(t *testing.T) {
+// The field's zero value is false, so a configuration that simply omitted the
+// key would have run with the protection off while the documents said it was
+// on. Load seeds the field before decoding the YAML, which keeps an explicit
+// `enabled: false` and the environment override authoritative.
+func TestSecretMaskingDefaultsOn(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
 		env  string
 		want bool
 	}{
-		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-secretmask\n", want: false},
-		{name: "empty section", body: "secret_masking: {}\n", want: false},
-		{name: "explicitly false", body: "secret_masking:\n  enabled: false\n", want: false},
+		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-secretmask\n", want: true},
+		{name: "empty section", body: "secret_masking: {}\n", want: true},
 		{name: "explicitly true", body: "secret_masking:\n  enabled: true\n", want: true},
-		{name: "env true", body: "secret_masking: {}\n", env: "true", want: true},
+		{name: "explicitly false", body: "secret_masking:\n  enabled: false\n", want: false},
+		{name: "env false overrides the default", body: "secret_masking: {}\n", env: "false", want: false},
 		{name: "env false overrides the file", body: "secret_masking:\n  enabled: true\n", env: "false", want: false},
 		{name: "env true overrides the file", body: "secret_masking:\n  enabled: false\n", env: "true", want: true},
 	} {

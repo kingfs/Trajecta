@@ -1339,7 +1339,7 @@ Trajecta 当前的凭据识别发生在两处：
 
 ### 9.4 遮蔽与还原
 
-遮蔽是开关控制的能力：YAML 的 `secret_masking.enabled`，或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED`，**默认关闭**，因为它改变模型实际看到的内容，属于语义变更而非日志细节。
+遮蔽是开关控制的能力：YAML 的 `secret_masking.enabled`，或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED`，**默认开启**（省略该键即开启，显式 `false` 关闭）。它改变模型实际看到的内容，属于语义变更而非日志细节，所以每个被改写的值都落一条 `secret.masked` 事件、每次还原落一条 `secret.restored`，运维可以从 cassette 直接看出它是否在生效。
 
 假值必须同时满足三条性质：
 

@@ -220,8 +220,11 @@ type LimitConfig struct {
 // process's memory. The cassette still records the original bytes, so replay
 // and a human reading a trace see the real values.
 //
-// It is off by default. Turning it on changes what the model is asked, so it is
-// a deliberate operator decision rather than a side effect of upgrading.
+// It is on by default, and Load seeds the field before decoding the YAML so an
+// omitted key means the documented default while an explicit `enabled: false`
+// remains authoritative. Turning it off is a one-line change for an operator who
+// would rather see the real values reach the provider, or who is validating the
+// stand-ins over a longer period before trusting them.
 type SecretMaskingConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
@@ -395,6 +398,12 @@ func Load(path string) (*Config, error) {
 	// means the documented default.
 	cfg := Config{}
 	cfg.Debug.MaskKey = true
+	// Credential masking is on by default for the same reason: the zero value of the field is
+	// false, so a configuration that simply omitted the key would run with the protection off
+	// while the documents said it was on. An explicit `enabled: false` (or
+	// TRAJECTA_SECRET_MASKING_ENABLED=false) still wins, because the seed happens before the
+	// YAML is decoded and the environment override happens after.
+	cfg.SecretMasking.Enabled = true
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}

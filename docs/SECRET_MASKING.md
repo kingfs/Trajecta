@@ -10,16 +10,18 @@
 
 ## 开关
 
-默认关闭。开启方式二选一：
+**默认开启。** 关闭方式二选一：
 
 ```yaml
 secret_masking:
-  enabled: true
+  enabled: false
 ```
 
-或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED=true`。
+或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED=false`。
 
-之所以默认关闭：它会改变模型实际看到的内容，属于语义变更，不是日志细节，因此应由运维显式决定，而不是升级后被动生效。
+之所以默认开启：扫描本身几乎不花时间（见「度量」），而漏掉一个真实 key 的代价是它永久进入上游与模型上下文。开启它改变的是模型实际看到的内容，属于语义变更，因此运维需要能一眼看出它在工作——每个被改写的值都会落一条 `secret.masked` 事件，响应里每次还原落一条 `secret.restored`。
+
+默认值由 `internal/config.Load` 在解码 YAML **之前**给字段播种实现（与 `debug.mask_key` 同一手法）。这样省略该键即取默认值，而显式 `enabled: false` 与环境变量仍然优先——环境变量在解码**之后**应用，因此始终覆盖文件。
 
 ## 假值形态
 

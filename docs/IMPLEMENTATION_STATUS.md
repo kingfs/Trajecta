@@ -143,7 +143,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 - 判定分四层：词法 DFA（最长匹配）→ 离线结构校验（`jwt`、`anthropic_key`、`github_pat` 的 CRC32、`jwe` 的头部、`bech32`）→ 96 字节窗口内的凭据词汇 → 置信度门限。`Strength` 分 Strong/Anchored/Generic 三档，只有 Medium 及以上允许自动改写，Low 仍然上报。
 - 假值与真值等长，并保留前缀、标点、厂商水印与分段字母表；它是 `(进程种子, 规则, 真值)` 的纯函数，因此同一凭据每轮渲染结果一致。映射只存在于内存（`Vault`，`crypto/rand` 种子，4096 条上限，最旧优先淘汰）。
 - cassette 记录**原始**请求体，上游只收到假值；响应路径在 `UsageSniffer` 之内还原，并能把被 SSE delta 切开、中间夹着 JSON 信封的假值重组回真值（整条凑齐才改写，凑不齐原样放行）。命中与还原写入 cassette prelude 事件 `secret.masked` / `secret.restored`，不携带凭据字节。
-- 开关 `secret_masking.enabled` / `TRAJECTA_SECRET_MASKING_ENABLED`，默认关闭。
+- 开关 `secret_masking.enabled` / `TRAJECTA_SECRET_MASKING_ENABLED`，**默认开启**（`Load` 在解码 YAML 前播种字段，显式 `false` 与环境变量仍然优先）。
 - 规则集 75 条：结构形状与 LLM 厂商前缀（格式参考第 3、4 节），外加 §8.1 里锚点足够窄的离线可判定形状（AWS AccessKeyId、GitHub PAT、PyPI token、age 私钥、PowerShell SecureString）。**刻意不含 §8.4 的弱形态**（裸 hex、UUID、无锚点 base64）：校验器通过即可改写，弱形态会改写哈希与对象 ID。DSN 与 Cookie 需要子跨度遮蔽，暂不覆盖，仍由 `internal/analyzer` 的正则用于事后上报。PEM 私钥只识别头行且不改写，正文无规则覆盖。
 
 细节与已知边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
