@@ -1,20 +1,80 @@
+# Docker never reads .gitignore: a file that `git` leaves alone is still shipped
+# into the build context by `COPY . .` unless it is named here. Everything below
+# is local scratch, build output, or a secret.
+#
+# Matching rules matter here (moby/patternmatcher): a pattern with no slash and
+# no wildcard, like `node_modules`, is an exact match against the whole path, so
+# it only covers the repo root. Use `**/name` for "at any depth".
+
+# --- Version control and editor state -----------------------------------
 .git
 .github
 .idea
 .vscode
-logs
+
+# --- Build output and runtime state ------------------------------------
+# `server` and `trajecta` are the local `task build:go` binaries (43 MB and
+# 11 MB), data/logs are runtime state, the sqlite files are legacy local indexes.
+server
+trajecta
 tmp
 dist
-trajecta
-trace_index.sqlite3
-*.sqlite3
-*.sqlite3-shm
-*.sqlite3-wal
-# Local scratch: .dsh-cache is ~1.9 GB of build caches and captured logs and
-# .dsh-bin holds prebuilt binaries and helper scripts. Both are gitignored and
-# neither is an input to the image, but `COPY . .` in the builder stage shipped
-# them into the build context on every build.
+data
+docker-data
+logs
+**/trace_index.sqlite3
+**/*.sqlite3
+**/*.sqlite3-shm
+**/*.sqlite3-wal
+
+# --- Local secrets ------------------------------------------------------
+# .env is gitignored, but `COPY . .` would still copy it into the builder layer.
+**/.env
+**/.env.*
+
+# --- Local scratch: DSH harness caches ---------------------------------
+# .dsh-cache is ~8 GB of Go build/module caches and captured command logs,
+# .dsh-bin holds prebuilt binaries and helper scripts, .gocache-dsh is the
+# harness GOCACHE (~2.2 GB and 13k files that change on every tool invocation)
+# and .golangci-cache-dsh its lint cache. None is an input to the image, yet
+# `COPY . .` shipped them anyway: the build context was 2.32 GB, and because the
+# Go cache is rewritten continuously the `COPY . .` layer hash changed on every
+# build, re-running `go build` from scratch each time. The trailing globs are
+# deliberate, so a future harness cache directory cannot leak back in.
 .dsh-cache
 .dsh-bin
-docker-data
-web/monitor-ui/node_modules
+.gocache*
+.golangci-cache*
+*-dsh
+
+# --- Agent, worktree, and test scratch ---------------------------------
+.codex
+worktrees
+.cache
+.integration-logs
+.playwright-cli
+.playwright
+.venv-atif
+**/__pycache__
+**/*.pyc
+**/*.tgz
+
+# --- Node and UI build artifacts ---------------------------------------
+**/node_modules
+web/monitor-ui/test-results
+web/monitor-ui/playwright-report
+
+# --- Present in the repo, but not build inputs -------------------------
+# `go list -deps ./cmd/server ./cmd/trajecta` resolves every in-module
+# dependency inside cmd/, internal/, pkg/ and ent/, and the only //go:embed
+# targets are ent/migrations, ent/postgres-migrations and
+# internal/monitor/ui/dist. The Dockerfile therefore copies exactly those four
+# trees, and everything here only ever cost context bytes and hashing time. The
+# Monitor frontend reaches the image as the committed internal/monitor/ui/dist;
+# web/ is never built inside Docker. Remove a line if a Dockerfile step starts
+# reading one of these paths.
+docs
+.agents
+web
+images
+*.md
