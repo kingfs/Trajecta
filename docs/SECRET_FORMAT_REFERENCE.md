@@ -1297,8 +1297,8 @@ Trajecta 当前的凭据识别发生在两处：
 | --- | --- |
 | `rules.rl` | Ragel 源，词法模式（字符类、前缀、结构形状）的唯一事实源 |
 | `rule.go` | 规则元数据表，每条规则一项：`Kind`、`Grade`、`Strength`、`MinLen`、`MaxLen`、`Validator`、`Keywords`、`Prefixes`、`PrefixSkip`、`Literals` |
-| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，约 320 KB 状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
-| `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key` 命名 |
+| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，31201 行 / 349944 字节（约 342 KiB）的状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
+| `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key`、`github_pat`、`jwe`、`bech32` 命名 |
 | `context.go` | 全局凭据词表与 96 字节上下文窗口 |
 | `finding.go` | `Finding`、`Confidence`、`Reason` 与打分权重 |
 | `vault.go` | 假值的渲染与反查 |
@@ -1314,7 +1314,7 @@ Trajecta 当前的凭据识别发生在两处：
 
 匹配语义由 scanner 的 `|* ... *|` 决定：**最长匹配优先，等长时先声明者优先**。`rules.rl` 中规则顺序因此具有语义，文件注释也写明了这一点——`T3BlbkFJ` 系形态必须排在 `sk-` 通用池之前，否则同一段 `sk-` 文本会先被通用池吃掉。
 
-长度上下界**不写进状态机**，而是在 `scan.go` 的 `collector.emit` 里用原生代码判断。把 `{n,m}` 写进机器是实测更差的选择：3364 个状态 / 159703 行生成代码 / 25.7 s 生成 / 单次扫描 1958560 ns，而 `prefix + charset+` 配原生长度检查是 287 个状态 / 15472 行 / 1.0 s / 836946 ns——状态多 11.7 倍、生成代码多 10 倍、慢 2.34 倍。原生长度检查是承重设计，不是风格偏好。
+长度上下界**不写进状态机**，而是在 `scan.go` 的 `collector.emit` 里用原生代码判断。固定重复 `{n}` 交给状态机在宽字符类上展开，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间同步变长；同一形态改用「`+` 加原生长度检查」后回到 25238 行量级。原生长度检查是承重设计，不是风格偏好。
 
 ### 9.3 检测分层、置信度与覆盖边界
 
@@ -1335,7 +1335,7 @@ Trajecta 当前的凭据识别发生在两处：
 
 引擎不做的事同样属于当前事实：不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；任何需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）拿着假值都无法进行。
 
-实测：约 72 KB 载荷的词法扫描约 1.25 ms，约 58 MB/s。精度用仓库自身度量：757 个文本文件、13.4 MB，共 27 处命中、分布在 12 个文件——24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2 等），1 处是 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key。新增的 8 条规则没有引入任何误报。
+实测（`-count=3` 稳定值）：约 73 KB 载荷的词法扫描约 1.32 ms，约 57 MB/s。精度用仓库自身度量：757 个文本文件、13.4 MB，共 27 处命中、分布在 12 个文件——24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2 等），1 处是 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key（干净检出上为 25 处 / 11 个文件）。新增的 8 条规则没有引入任何误报。
 
 ### 9.4 遮蔽与还原
 
@@ -1349,7 +1349,7 @@ Trajecta 当前的凭据识别发生在两处：
 
 映射只存在于内存（`vault.go` 的 `Vault`）：默认用 `crypto/rand` 播种，每个进程不同；上限 4096 条，超出按最旧优先淘汰。从线路上读到的假值离开这个进程就无从还原。遮蔽是幂等的，vault 已认识的假值会被跳过。
 
-PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，头行不含密钥材料，而真正承载密钥的 base64 正文没有任何规则覆盖；改写头行既保护不了私钥，又会破坏文件语法。`policySkipMask` 对 `KindPrivateKey` 返回 true，即为此。
+PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，头行不含密钥材料，而真正承载密钥的 base64 正文没有任何规则覆盖；改写头行既保护不了私钥，又会破坏文件语法。`policySkipMask` 因此**只对 `structural.pem_private_key` 这一条规则 ID** 返回 true——早先它按 `KindPrivateKey` 判断，把同属该 Kind 的 age 私钥一起豁免了，而 age 私钥是整条命中就是要保护的完整秘密，已修正为按规则 ID 豁免。
 
 请求体走拆分：cassette 记录**原始字节**，上游只收到假值。这是有意选择——replay 按请求字节匹配，人读 trace 也需要看到真实请求。
 
@@ -1357,13 +1357,15 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 
 厂商把一条消息拆成许多 JSON delta 并在 token 边界切断字符串，所以模型回显的假值会带 JSON 信封分段到达。一段至少 8 字节且与某条假值开头吻合的 run 会开一条链，跳过中间的信封字节等后续 run 补齐；整条凑齐后各 run 原地改写，凑不齐则原样放回。**要么整条还原、要么完全不动**，因此「长得像假值」不会改写它所在的文本。两段之间最多 512 字节间隔，超过即放弃。
 
+链开着时，**一整条假值的优先级高于链**。否则两种错都会发生：厂商在链的窗口里重复同一个值时，那段字节会被当信封跳过而原样交给客户端；截断的一份后面跟着完整的一份时，后者的开头恰好落在链期待的下一个偏移上，会被当成链的续接，把两份拼成前半真值、后半假值的怪值。因此扫描每到一个可能起头假值的字节，先判断它能否凑成完整的一条；能就改写它并放弃该链（链的字节原样放行）。流式下这个判断可能要等更多字节，此时扫描等待而不是先消费该字节——字节判过就不再回看。
+
 链从第一段开始跟，所以被切成小于 8 字节的片（逐 token 下发）不会被重组，客户端会拿到拼接后的假值——功能上失败，但没有改写无关字节。
 
 还原器装在现有 `UsageSniffer` **之内**而不是之外，因为 sniffer 会把读到的字节写进 cassette。两者等长，所以还原是对调用方缓冲区的原地覆盖。
 
 审计事件 `secret.masked` 与 `secret.restored` 追加到 cassette prelude 事件：前者记录规则、厂商、kind、偏移、长度、分数、置信度与原因，后者记录一次响应里的还原条数；两者都不携带凭据字节。
 
-实测吞吐：109 KB 载荷遮蔽约 216 MB/s（热态）、205 MB/s（冷态，含渲染假值）；还原约 198 MB/s，流式还原约 190 MB/s。
+实测吞吐（`-count=3`）：109 KB 载荷遮蔽约 200 MB/s（热态）、189 MB/s（冷态，含渲染假值）；还原约 295 MB/s，流式还原约 302 MB/s。「整条假值优先于链」的逐字节判定是相对不做它时约 13% 的还原开销。
 
 ### 9.5 与现有模块的对接
 
@@ -1372,7 +1374,7 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 | 模块 | 现状 |
 | --- | --- |
 | `internal/proxy` | 已对接。请求侧把命中值换成保形假值再发往上游，cassette 仍记录原始体；响应侧在 `UsageSniffer` 之内还原。见 §9.4 |
-| `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。7 条正则里有 4 条（AWS `AKIA`、GitHub `gh[pousr]_`、私钥块、Bearer）已由 `pkg/secretmask` 覆盖，另 3 条（DB 连接串、Cookie、凭据化 URL）**刻意不覆盖**：前两者只有一部分是秘密，而 vault 的替换粒度是整个命中跨度（§9.3）。两者并存的分工是 analyzer 负责审计侧 findings（可以有误报），secretmask 负责转发侧改写（不能有误报） |
+| `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。7 条正则分别是 OpenAI `sk-`、AWS `AKIA`、GitHub `gh[pousr]_`、私钥块头行、Bearer、DB 连接串、Cookie；表外的「凭据化 URL」检查走 `url.Parse` 的 userinfo，不是正则。其中 4 条（OpenAI `sk-`、AWS、GitHub、Bearer）已由 `pkg/secretmask` 覆盖并会改写，私钥块只覆盖头行且只上报不改写（§9.4），DB 连接串与 Cookie 连同一并的 URL 检查**刻意不覆盖**：它们只有一部分是秘密，而 vault 的替换粒度是整个命中跨度（§9.3）。两者并存的分工是 analyzer 负责审计侧 findings（可以有误报），secretmask 负责转发侧改写（不能有误报） |
 | `internal/redaction/url.go` | **未改动**。它按 URL 查询参数名与 userinfo 脱敏，依赖字段名而非值，与按字节 span 识别凭据是两件不同的事 |
 | `pkg/observe` | 未新增节点类型。命中与还原目前只写 cassette prelude 事件 `secret.masked` / `secret.restored` |
 | CLI（`cmd/trajecta`） | 未提供 `secrets scan` 子命令。`Detector` 与 `Vault` 是导出 API，可离线调用 |
