@@ -236,3 +236,93 @@ func recordfileEventText(event recordfile.RecordEvent) string {
 	}
 	return string(raw)
 }
+
+// TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries covers the path a
+// non-streamed body cannot: an SSE body arrives in many small reads, so the
+// restorer has to hold back enough of each read to never emit a partial
+// stand-in, and it has to release what it held when the stream ends.
+//
+// The upstream writes the stand-in in three-byte pieces with a flush after
+// each, which is what makes the stand-in straddle read boundaries, and the last
+// case ends the body on the stand-in itself so the end-of-stream flush is the
+// only thing that can deliver those bytes.
+func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		suffix string
+	}{
+		{name: "stand-in followed by a terminator", suffix: "\n\n"},
+		{name: "stand-in is the last bytes of the stream", suffix: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				standIn := ""
+				if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 && i+len(testOpenAIProjectKey) <= len(body) {
+					standIn = string(body[i : i+len(testOpenAIProjectKey)])
+				}
+				if standIn == testOpenAIProjectKey {
+					t.Errorf("the upstream received the real key")
+				}
+
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				flusher, ok := w.(http.Flusher)
+				if !ok {
+					t.Errorf("httptest ResponseWriter does not flush")
+					return
+				}
+				_, _ = io.WriteString(w, "data: ")
+				flusher.Flush()
+				for i := 0; i < len(standIn); i += 3 {
+					end := i + 3
+					if end > len(standIn) {
+						end = len(standIn)
+					}
+					_, _ = io.WriteString(w, standIn[i:end])
+					flusher.Flush()
+				}
+				if tc.suffix != "" {
+					_, _ = io.WriteString(w, tc.suffix)
+					flusher.Flush()
+				}
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{}
+			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+			cfg.Debug.OutputDir = outputDir
+			cfg.SecretMasking.Enabled = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+				strings.NewReader(secretMaskingBody()))
+			if err != nil {
+				t.Fatalf("client.Post() error = %v", err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			want := "data: " + testOpenAIProjectKey + tc.suffix
+			if string(got) != want {
+				t.Fatalf("streamed body\n got %q\nwant %q", got, want)
+			}
+			if !strings.Contains(string(got), testOpenAIProjectKey) {
+				t.Error("the client never received the real key")
+			}
+		})
+	}
+}
