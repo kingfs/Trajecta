@@ -718,12 +718,13 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 	if logInfo == nil || logInfo.File == nil {
 		return nil, false, errors.New("responses chat completions log file is required")
 	}
-	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
+	sniffer, isStream, restorer, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
 	if err != nil {
 		return nil, false, err
 	}
 	respBody, readErr := io.ReadAll(sniffer)
 	closeErr := sniffer.Close()
+	recordSecretRestored(logInfo, restorer, startedAt)
 	if readErr != nil {
 		return respBody, isStream, fmt.Errorf("read chat completion response body: %w", readErr)
 	}
@@ -733,16 +734,28 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 	return respBody, isStream, nil
 }
 
+// recordSecretRestored notes on the cassette how many stand-ins the response
+// carried. It runs even when reading or closing failed, because the restore has
+// already happened by then and the trace is more useful with the count than
+// without it.
+func recordSecretRestored(logInfo *recorder.LogInfo, restorer *secretmask.Restorer, at time.Time) {
+	if logInfo == nil || restorer == nil || restorer.Restored() == 0 {
+		return
+	}
+	logInfo.Events = append(logInfo.Events, secretRestoredEvent(restorer.Restored(), at))
+}
+
 func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, handle runtime.ChatStreamCallback, vault *secretmask.Vault) (runtime.ChatCompletionResponse, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
 		return runtime.ChatCompletionResponse{}, false, errors.New("responses chat completions log file is required")
 	}
-	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
+	sniffer, isStream, restorer, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, false, err
 	}
 	chatResp, readErr := chatclient.AggregateChatCompletionStreamWithCallback(sniffer, handle)
 	closeErr := sniffer.Close()
+	recordSecretRestored(logInfo, restorer, startedAt)
 	if readErr != nil {
 		return runtime.ChatCompletionResponse{}, isStream, readErr
 	}
@@ -752,16 +765,16 @@ func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *ht
 	return chatResp, isStream, nil
 }
 
-func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) (*UsageSniffer, bool, error) {
+func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) (*UsageSniffer, bool, *secretmask.Restorer, error) {
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
-		return nil, false, fmt.Errorf("write chat completion response separator: %w", err)
+		return nil, false, nil, fmt.Errorf("write chat completion response separator: %w", err)
 	}
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
 	resp.Header.Write(headerBuf)
 	headerBuf.WriteString("\r\n")
 	nHead, err := logInfo.File.Write(headerBuf.Bytes())
 	if err != nil {
-		return nil, false, fmt.Errorf("write chat completion response header: %w", err)
+		return nil, false, nil, fmt.Errorf("write chat completion response header: %w", err)
 	}
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 
@@ -769,8 +782,10 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 	// The restorer goes underneath the sniffer for the same reason as on the
 	// pass-through path: the sniffer writes what it read to the cassette.
 	respBody := resp.Body
+	var restorer *secretmask.Restorer
 	if vault != nil {
-		respBody = secretmask.NewRestorer(resp.Body, vault)
+		restorer = secretmask.NewRestorer(resp.Body, vault)
+		respBody = restorer
 	}
 	return &UsageSniffer{
 		Source:   respBody,
@@ -781,7 +796,7 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 		Events:   &logInfo.Events,
 		Start:    startedAt,
 		TTFTMs:   &logInfo.Header.Meta.TTFTMs,
-	}, isStream, nil
+	}, isStream, restorer, nil
 }
 
 func chatCompletionResponseError(statusCode int, status string, body []byte) error {

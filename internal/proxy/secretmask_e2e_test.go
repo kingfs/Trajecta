@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/replay"
 )
 
 const (
@@ -437,6 +438,36 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 	if strings.Contains(string(clientBody), standIn) {
 		t.Errorf("the client received the stand-in instead of the real key: %s", clientBody)
 	}
+
+	// The local path is a separate code path from the pass-through one, and it
+	// used to build its restorer and drop it, so the restore happened but left
+	// no trace on the cassette. Asserting the count here keeps that from
+	// regressing: a session reading the trace has to be able to tell that a
+	// credential passed through it.
+	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	var masked, restored int
+	var restoredCount float64
+	for _, event := range parsed.Events {
+		switch event.Type {
+		case "secret.masked":
+			masked++
+		case "secret.restored":
+			restored++
+			restoredCount, _ = event.Attributes["count"].(float64)
+		}
+	}
+	if masked != 1 {
+		t.Errorf("recorded %d secret.masked events, want 1", masked)
+	}
+	if restored != 1 {
+		t.Errorf("recorded %d secret.restored events, want 1; the local Responses path dropped its restorer", restored)
+	}
+	if restoredCount != 1 {
+		t.Errorf("secret.restored count = %v, want 1", restoredCount)
+	}
 }
 
 // assembledSSE returns the text a client ends up with after it applies the
@@ -573,5 +604,89 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMaskedCassetteStillReplays is what makes "the cassette records the
+// original body" a testable claim rather than a comment. The replay transport in
+// strict mode compares the request body against the cassette, so replaying the
+// request the client actually sent has to succeed and replaying what really went
+// on the wire has to fail. If the cassette held the stand-in instead, those two
+// outcomes would swap - which is the compatibility break this pins down.
+func TestMaskedCassetteStillReplays(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var standIn string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 && i+len(testOpenAIProjectKey) <= len(body) {
+			standIn = string(body[i : i+len(testOpenAIProjectKey)])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"gpt-5",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	original := secretMaskingBody()
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(original))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if standIn == "" {
+		t.Fatal("the upstream never received a stand-in, so nothing was masked")
+	}
+
+	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/chat/completions", time.Second)
+	rt := replay.NewTransport(recordPath)
+	rt.StrictRequest = true
+
+	replay := func(body string) error {
+		req, err := http.NewRequest(http.MethodPost, "http://replay.invalid/v1/chat/completions", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := rt.RoundTrip(req)
+		if err != nil {
+			return err
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil
+	}
+
+	if err := replay(original); err != nil {
+		t.Fatalf("replaying the request the client sent did not match the cassette: %v", err)
+	}
+	masked := strings.Replace(original, testOpenAIProjectKey, standIn, 1)
+	if masked == original {
+		t.Fatal("the fixture does not contain the key, so the check below proves nothing")
+	}
+	if err := replay(masked); err == nil {
+		t.Fatal("replaying the stand-in matched the cassette, so the cassette did not record the original body")
 	}
 }
