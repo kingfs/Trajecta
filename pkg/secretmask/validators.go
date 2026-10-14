@@ -1,13 +1,26 @@
 package secretmask
 
-import "encoding/base64"
+import (
+	"encoding/base64"
+	"hash/crc32"
+)
 
 // Validator names used by the rule table. A rule with a validator only reports
 // matches that pass it, and a pass is by itself enough to treat the match as
 // conclusive.
+//
+// "Conclusive" is the bar a validator has to clear, and it is a higher bar than
+// "plausible". A check that merely narrows a weak form is not a validator: a
+// finding that passes one is rewritten automatically, so a check such as
+// "base64 that decodes to 64 bytes" would turn every 64-byte blob in a
+// transcript into a masked value. The validators here recompute a checksum the
+// issuer published, or decode a field whose content is self-describing.
 const (
 	validatorJWT          = "jwt"
 	validatorAnthropicKey = "anthropic_key"
+	validatorGitHubPAT    = "github_pat"
+	validatorJWE          = "jwe"
+	validatorBech32       = "bech32"
 )
 
 // runValidator dispatches to the named offline check. An unrecognised name
@@ -21,9 +34,137 @@ func runValidator(name string, tok []byte) bool {
 		return validateJWT(tok)
 	case validatorAnthropicKey:
 		return validateAnthropicKey(tok)
+	case validatorGitHubPAT:
+		return validateGitHubPAT(tok)
+	case validatorJWE:
+		return validateJWE(tok)
+	case validatorBech32:
+		return validateBech32(tok)
 	default:
 		return false
 	}
+}
+
+// githubBase62 is the alphabet GitHub uses to spell the checksum suffix:
+// digits, then uppercase, then lowercase. The order is part of the scheme, so
+// getting it wrong rejects every real token rather than accepting bad ones.
+const githubBase62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// githubPATBodyLen is the random part between the prefix and the checksum.
+const githubPATBodyLen = 30
+
+// validateGitHubPAT recomputes the CRC32-IEEE checksum GitHub appends to a
+// classic personal access token and compares it with the six characters that
+// follow the body. The scheme is published, and a run of the right shape passes
+// it by accident with probability 62^-6, so a pass is proof rather than a hint.
+func validateGitHubPAT(tok []byte) bool {
+	const total = 4 + githubPATBodyLen + 6
+	if len(tok) != total {
+		return false
+	}
+	sum := crc32.ChecksumIEEE(tok[4 : 4+githubPATBodyLen])
+	var want [6]byte
+	for i := 5; i >= 0; i-- {
+		want[i] = githubBase62[sum%62]
+		sum /= 62
+	}
+	return bytesEqual(tok[4+githubPATBodyLen:], want[:])
+}
+
+// validateJWE checks the protected header of a five-segment compact
+// serialization: it has to decode to a JSON object naming a content encryption
+// algorithm. A JWT is three segments and carries no "enc", so the two cannot be
+// confused in either direction. The segment count is not checked here because
+// the pattern that reaches this function already pins it.
+func validateJWE(tok []byte) bool {
+	first := indexByte(tok, '.')
+	if first <= 0 {
+		return false
+	}
+	header, ok := decodeBase64URL(tok[:first], 4096)
+	if !ok || !looksLikeJSONObject(header) {
+		return false
+	}
+	_, ok = jsonStringMember(header, "enc")
+	return ok
+}
+
+// bech32Generators are the coefficients of the BIP-173 checksum generator.
+var bech32Generators = [5]uint32{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+
+// bech32Charset is the BIP-173 data alphabet, in order. It deliberately omits
+// 1, b, i and o, which is why the separator cannot be confused with data.
+const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+// bech32MaxLen is the BIP-173 length limit.
+const bech32MaxLen = 90
+
+// validateBech32 verifies the BIP-173 checksum. age spells its secret keys as
+// an uppercase bech32 string whose human-readable part is age-secret-key-, so
+// the checksum is a real offline proof: a key with one wrong character fails
+// it, and no other format in reach shares that prefix.
+func validateBech32(tok []byte) bool {
+	if len(tok) > bech32MaxLen {
+		return false
+	}
+	sep := lastIndexByte(tok, '1')
+	if sep < 1 || sep+7 > len(tok) {
+		return false
+	}
+	hrp := tok[:sep]
+	chk := uint32(1)
+	for _, c := range hrp {
+		lc := lowerASCII(c)
+		if lc < 33 || lc > 126 {
+			return false
+		}
+		chk = bech32Step(chk, lc>>5)
+	}
+	chk = bech32Step(chk, 0)
+	for _, c := range hrp {
+		chk = bech32Step(chk, lowerASCII(c)&31)
+	}
+	for _, c := range tok[sep+1:] {
+		v := bech32Value(lowerASCII(c))
+		if v < 0 {
+			return false
+		}
+		chk = bech32Step(chk, byte(v))
+	}
+	return chk == 1
+}
+
+// bech32Step folds one five-bit value into the running checksum.
+func bech32Step(chk uint32, v byte) uint32 {
+	b := chk >> 25
+	chk = (chk&0x1ffffff)<<5 ^ uint32(v)
+	for i, g := range bech32Generators {
+		if (b>>uint(i))&1 == 1 {
+			chk ^= g
+		}
+	}
+	return chk
+}
+
+// bech32Value maps one character to its five-bit value, or -1.
+func bech32Value(c byte) int {
+	for i := 0; i < len(bech32Charset); i++ {
+		if bech32Charset[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// lastIndexByte is bytes.LastIndexByte for the single-byte case, without the
+// import.
+func lastIndexByte(b []byte, c byte) int {
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 // validateAnthropicKey checks the trailing "AA" that all published Anthropic

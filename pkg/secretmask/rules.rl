@@ -30,6 +30,13 @@ lalnum = [a-z0-9];
 # --- structural --------------------------------------------------------
 jwt = 'eyJ' b64u+ '.' 'eyJ' b64u+ '.' b64u+;
 pem = '-----BEGIN ' [A-Z ]* 'PRIVATE KEY-----';
+# JWE is the five-segment compact serialization. It is listed before jwt
+# because on the rare input that is both, the longer match has to win.
+jwe = 'eyJ' b64u+ '.' b64u* '.' b64u* '.' b64u* '.' b64u*;
+# RFC 6750 spells the scheme with a capital B, but "bearer" is common enough
+# that both literals are listed rather than using a case-insensitive literal,
+# which would also match a spelling no Prefixes entry could protect.
+bearer = ('Bearer ' | 'bearer ') [0-9A-Za-z._~+/\-]+;
 
 # --- OpenAI ------------------------------------------------------------
 # T3BlbkFJ ("OpenAI" in base64) is what separates these from the sk- pool.
@@ -112,6 +119,21 @@ baidu_qianfan  = 'bce-v3/ALTAK-' b62+ '/' b62+;
 minimax_api    = 'sk-api-' b62+;
 minimax_cp     = 'sk-cp-' b62+;
 
+# --- cloud, VCS and tooling credentials --------------------------------
+# Section 8.1 of the format reference: the shapes that can be decided offline.
+# Each carries a published checksum, a self-describing field, or a literal that
+# ordinary text does not produce, which is what lets them be masked on their own
+# evidence instead of on context.
+github_classic = 'gh' [pousr] '_' b62{30} b62{6};
+# The body is matched as one run and the exact 93-character length is checked
+# natively in collector.emit. Spelling out b62u{22} '_' b62u{59} instead is
+# ambiguous - '_' is itself a body character - and that ambiguity is what makes
+# the generated table explode.
+github_fine    = 'github_pat_' b62u+;
+aws_akid       = ('AKIA' | 'ASIA') [0-9A-Z]{16};
+pypi_token     = 'pypi-AgEIcHlwaS5vcmc' b64u+;
+age_key        = 'AGE-SECRET-KEY-1' [0-9A-Z]+;
+powershell_ss  = '01000000d08c9ddf0115d1118c7a00c04fc297eb' hexl+;
 # Generic pools. Every concrete rule above outranks these on longest match;
 # sk_dash and sk_under are declared last on purpose.
 sk_dash  = 'sk-' b62+;
@@ -122,7 +144,9 @@ sk_under = 'sk_' b62+;
 # sk_dash pool (they match the same span on an OpenAI legacy key).
 main := |*
     pem             => { sink.emit(RulePEMPrivateKey, ts, te) };
+    jwe             => { sink.emit(RuleJWE, ts, te) };
     jwt             => { sink.emit(RuleJWT, ts, te) };
+    bearer          => { sink.emit(RuleBearerToken, ts, te) };
     openai_legacy   => { sink.emit(RuleOpenAILegacy, ts, te) };
     openai_project  => { sink.emit(RuleOpenAIProject, ts, te) };
     openai_svc      => { sink.emit(RuleOpenAIServiceAccount, ts, te) };
@@ -193,6 +217,13 @@ main := |*
     langflow     => { sink.emit(RuleLangflowAPIKey, ts, te) };
     dify         => { sink.emit(RuleDifyAPIKey, ts, te) };
     portkey      => { sink.emit(RulePortkeyAPIKey, ts, te) };
+
+    github_fine   => { sink.emit(RuleGitHubFineGrainedPAT, ts, te) };
+    github_classic => { sink.emit(RuleGitHubPAT, ts, te) };
+    aws_akid      => { sink.emit(RuleAWSAccessKeyID, ts, te) };
+    pypi_token    => { sink.emit(RulePyPIToken, ts, te) };
+    age_key       => { sink.emit(RuleAgePrivateKey, ts, te) };
+    powershell_ss => { sink.emit(RulePowerShellSecureString, ts, te) };
 
     sk_under => { sink.emit(RuleSkUnderscoreGeneric, ts, te) };
     sk_dash  => { sink.emit(RuleSkDashGeneric, ts, te) };

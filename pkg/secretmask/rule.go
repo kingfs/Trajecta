@@ -213,6 +213,26 @@ const (
 	RuleMiniMaxAPIKey
 	RuleMiniMaxCodingKey
 
+	// Cloud, VCS and tooling credentials. These are appended rather than
+	// grouped with the vendor families above so that the numeric values
+	// already assigned to the earlier rules never move.
+	//
+	// They are the formats the format reference lists as decidable offline
+	// (section 8.1): each carries a published checksum, a self-describing
+	// field, or a literal that ordinary text does not produce. That is what
+	// separates them from the weak forms in section 8.4 - a bare 32- or 64-hex
+	// run, a UUID, or an unanchored base64 blob - which are deliberately absent
+	// here, because a finding that passes a validator is rewritten
+	// automatically and a weak form would rewrite hashes and object ids.
+	RuleAWSAccessKeyID
+	RuleGitHubPAT
+	RuleGitHubFineGrainedPAT
+	RulePyPIToken
+	RuleAgePrivateKey
+	RulePowerShellSecureString
+	RuleJWE
+	RuleBearerToken
+
 	// Generic pools. These match a prefix shared by many vendors plus a
 	// charset run; the owning vendor can only be resolved from context.
 	RuleSkDashGeneric
@@ -301,6 +321,29 @@ var ruleTable = [ruleIDCount]Rule{
 	RuleBaiduQianfanAPIKey:    {Name: "baidu.qianfan_api_key", Vendor: "Baidu", Kind: KindAPIKey, Grade: GradeC, Strength: StrengthStrong, MinLen: 35, Keywords: []string{"qianfan", "baidu", "bce"}, Prefixes: []string{"bce-v3/ALTAK-"}},
 	RuleMiniMaxAPIKey:         {Name: "minimax.api_key", Vendor: "MiniMax", Kind: KindAPIKey, Grade: GradeC, Strength: StrengthAnchored, MinLen: 20, Keywords: []string{"minimax", "minimaxi"}, Prefixes: []string{"sk-api-"}},
 	RuleMiniMaxCodingKey:      {Name: "minimax.coding_key", Vendor: "MiniMax", Kind: KindAPIKey, Grade: GradeC, Strength: StrengthAnchored, MinLen: 20, Keywords: []string{"minimax", "minimaxi"}, Prefixes: []string{"sk-cp-"}},
+
+	// The access key id is the public half of an AWS credential pair. It has no
+	// checksum, but AKIA or ASIA followed by exactly sixteen uppercase
+	// alphanumerics is not a shape ordinary text produces.
+	RuleAWSAccessKeyID: {Name: "aws.access_key_id", Vendor: "AWS", Kind: KindAccessKeyID, Grade: GradeA, Strength: StrengthStrong, MinLen: 20, MaxLen: 20, Keywords: []string{"aws", "amazon", "accesskeyid", "s3", "bedrock", "iam"}, Prefixes: []string{"AKIA", "ASIA"}},
+	// The CRC32 suffix is what makes this rule conclusive; see validateGitHubPAT.
+	RuleGitHubPAT: {Name: "github.pat", Vendor: "GitHub", Kind: KindPersonalAccessToken, Grade: GradeA, Strength: StrengthStrong, MinLen: 40, MaxLen: 40, Validator: validatorGitHubPAT, Keywords: []string{"github", "gh_token", "gh_pat"}, Prefixes: []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"}},
+	// Fine-grained tokens carry no checksum, so the exact length is all the
+	// evidence there is. It is 11 + 82, not 4 + 82: the separator counted in
+	// the format reference's 22 + 1 + 59 is the underscore already inside
+	// "github_pat_".
+	RuleGitHubFineGrainedPAT:   {Name: "github.fine_grained_pat", Vendor: "GitHub", Kind: KindPersonalAccessToken, Grade: GradeC, Strength: StrengthStrong, MinLen: 93, MaxLen: 93, Keywords: []string{"github", "gh_token", "gh_pat"}, Prefixes: []string{"github_pat_"}},
+	RulePyPIToken:              {Name: "package.pypi_token", Vendor: "PyPI", Kind: KindAPIKey, Grade: GradeB, Strength: StrengthStrong, MinLen: 30, Keywords: []string{"pypi", "twine", "pip"}, Prefixes: []string{"pypi-AgEIcHlwaS5vcmc"}},
+	RuleAgePrivateKey:          {Name: "age.private_key", Vendor: "age", Kind: KindPrivateKey, Grade: GradeA, Strength: StrengthStrong, MinLen: 74, MaxLen: 74, Validator: validatorBech32, Keywords: []string{"age", "sops"}, Prefixes: []string{"AGE-SECRET-KEY-1"}},
+	RulePowerShellSecureString: {Name: "powershell.secure_string", Vendor: "Microsoft", Kind: KindGenericKey, Grade: GradeB, Strength: StrengthStrong, MinLen: 48, Keywords: []string{"securestring", "convertto-securestring", "powershell"}, Prefixes: []string{"01000000d08c9ddf0115d1118c7a00c04fc297eb"}},
+	RuleJWE:                    {Name: "structural.jwe", Kind: KindJSONWebToken, Grade: GradeA, Strength: StrengthStrong, MinLen: 40, Validator: validatorJWE, Keywords: []string{"jwe", "encrypted"}, Prefixes: []string{"eyJ"}},
+	// A bearer token has no shape of its own, so the anchor is the scheme name
+	// from RFC 6750 and the evidence is that name appearing in the window.
+	// "bearer " is already global credential vocabulary, and the window spans
+	// the match itself, so the anchored score plus the context score is what
+	// makes this maskable. The scheme name is protected in the stand-in, so the
+	// rewritten header still reads as a bearer header.
+	RuleBearerToken: {Name: "structural.bearer_token", Kind: KindAccessToken, Grade: GradeB, Strength: StrengthAnchored, MinLen: 27, Keywords: []string{"oauth"}, Prefixes: []string{"Bearer ", "bearer "}},
 
 	RuleSkDashGeneric:       {Name: "generic.sk_dash", Kind: KindGenericKey, Grade: GradeD, Strength: StrengthGeneric, MinLen: 35, Keywords: []string{"deepseek", "dashscope", "moonshot", "kimi", "siliconflow"}, Prefixes: []string{"sk-"}},
 	RuleSkUnderscoreGeneric: {Name: "generic.sk_underscore", Kind: KindGenericKey, Grade: GradeD, Strength: StrengthGeneric, MinLen: 35, Keywords: []string{"novita", "elevenlabs"}, Prefixes: []string{"sk_"}},

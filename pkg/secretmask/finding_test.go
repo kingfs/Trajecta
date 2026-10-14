@@ -9,7 +9,14 @@ import (
 // unrecognised validator name fails closed, which would silently drop every
 // match for that rule, so it must be caught here.
 func TestValidatorsKnown(t *testing.T) {
-	known := map[string]bool{"": true, validatorJWT: true, validatorAnthropicKey: true}
+	known := map[string]bool{
+		"":                    true,
+		validatorJWT:          true,
+		validatorAnthropicKey: true,
+		validatorGitHubPAT:    true,
+		validatorJWE:          true,
+		validatorBech32:       true,
+	}
 	for id := RuleUnknown + 1; id < ruleIDCount; id++ {
 		r := ruleTable[id]
 		if !known[r.Validator] {
@@ -235,4 +242,62 @@ func TestStrengthCoverage(t *testing.T) {
 	}
 	t.Logf("strength distribution: strong=%d anchored=%d generic=%d",
 		counts[StrengthStrong], counts[StrengthAnchored], counts[StrengthGeneric])
+}
+
+// TestBech32Checksum checks the checksum primitive against the vectors BIP-173
+// publishes, rather than against a key this package produced. Without that, a
+// wrong generator constant would make every age key fail and the rule's own
+// sample would still look self-consistent.
+func TestBech32Checksum(t *testing.T) {
+	valid := []string{
+		"A12UEL5L",
+		"a12uel5l",
+		"abcdef1qpzry9x8gf2tvdw0s3jn54khce6mua7lmqqqxw",
+		"split1checkupstagehandshakeupstreamerranterredcaperred2y9e3w",
+	}
+	for _, v := range valid {
+		if !validateBech32([]byte(v)) {
+			t.Errorf("validateBech32(%q) = false, want true", v)
+		}
+	}
+	invalid := []string{
+		"A12UEL5M",                           // last checksum character changed
+		"a12uel5l1",                          // trailing character past the checksum
+		"fi1",                                // too short to carry a checksum
+		"A12UEL5L" + strings.Repeat("q", 90), // over the BIP-173 length limit
+	}
+	for _, v := range invalid {
+		if validateBech32([]byte(v)) {
+			t.Errorf("validateBech32(%q) = true, want false", v)
+		}
+	}
+}
+
+// TestGitHubPATChecksumCoversTheBody changes one character at each position of
+// the body and requires the check to reject it. A validator that only looked at
+// the length, or at part of the body, would accept some of these.
+func TestGitHubPATChecksumCoversTheBody(t *testing.T) {
+	const good = "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"
+	if !validateGitHubPAT([]byte(good)) {
+		t.Fatalf("validateGitHubPAT(%q) = false, want true", good)
+	}
+	flip := func(i int) []byte {
+		b := []byte(good)
+		if b[i] == 'A' {
+			b[i] = 'B'
+		} else {
+			b[i] = 'A'
+		}
+		return b
+	}
+	for i := 4; i < 4+githubPATBodyLen; i++ {
+		if validateGitHubPAT(flip(i)) {
+			t.Errorf("validateGitHubPAT accepted a token with body byte %d changed", i-4)
+		}
+	}
+	for i := 4 + githubPATBodyLen; i < len(good); i++ {
+		if validateGitHubPAT(flip(i)) {
+			t.Errorf("validateGitHubPAT accepted a token with checksum byte %d changed", i-4-githubPATBodyLen)
+		}
+	}
 }

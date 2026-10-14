@@ -89,6 +89,20 @@ var positiveSamples = []struct {
 	{RuleMiniMaxAPIKey, "sk-api-" + rep("A", 20)},
 	{RuleMiniMaxCodingKey, "sk-cp-" + rep("A", 20)},
 
+	// Cloud, VCS and tooling credentials. The GitHub and age samples are not
+	// made up on the spot: their checksums were computed outside this package
+	// (zlib.crc32 and a BIP-173 implementation respectively), so the validators
+	// are checked against an independent implementation rather than against
+	// themselves.
+	{RuleAWSAccessKeyID, "AKIA" + rep("A", 16)},
+	{RuleGitHubPAT, "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"},
+	{RuleGitHubFineGrainedPAT, "github_pat_" + rep("A", 22) + "_" + rep("B", 59)},
+	{RulePyPIToken, "pypi-AgEIcHlwaS5vcmc" + rep("A", 40)},
+	{RuleAgePrivateKey, "AGE-SECRET-KEY-1QQQSYQCYQ5RQWZQFPG9SCRGWPUGPZYSNZS23V9CCRYDPK8QARC0SWRYDWG"},
+	{RulePowerShellSecureString, "01000000d08c9ddf0115d1118c7a00c04fc297eb" + rep("a", 40)},
+	{RuleJWE, "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiMjAyNiJ9..aXYtMTYtYnl0ZXMtaGVyZQ.Y2lwaGVydGV4dC1hbmQtdGFnLTE2.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"},
+	{RuleBearerToken, "Bearer " + rep("A", 40)},
+
 	{RuleSkDashGeneric, "sk-" + rep("a1", 16)},
 	{RuleSkUnderscoreGeneric, "sk_" + rep("A1", 16)},
 }
@@ -106,6 +120,17 @@ var noiseSamples = []string{
 	"sk-short", "as-well-as", "ak-", "pk-", "pl_",
 	"the quick brown fox jumps over the lazy dog",
 	"func handleRequest(w http.ResponseWriter, r *http.Request) {}",
+
+	// These have the shape of a rule above but fail its validator or its
+	// bounds, which is the point: the machine matches them and the check
+	// rejects them, so a regression that drops a validator shows up here.
+	"ghp_Dq4Kj8mZ2pRv7TnW1yBcX5GhLpQeS61ERdpa",                                   // last checksum character changed
+	"github_pat_" + rep("A", 22) + "_" + rep("B", 58),                            // one character short
+	"AKIA" + rep("A", 15),                                                        // one character short
+	"AGE-SECRET-KEY-1QQQSYQCYQHRQWZQFPG9SCRGWPUGPZYSNZS23V9CCRYDPK8QARC0SWRYDWG", // one data character changed
+	"eyJhbGciOiJIUzI1NiJ9.aaaa.bbbb.cccc.dddd",                                   // five segments, no "enc"
+	"Bearer short", // token below the length floor
+	"01000000d08c9ddf0115d1118c7a00c04fc297eb", // the PowerShell header alone
 }
 
 func TestPositiveSamples(t *testing.T) {
