@@ -178,9 +178,11 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	}
 }
 
-// TestHandlerLeavesBodiesAloneWhenMaskingIsOff pins that the feature is opt-in
-// and that a disabled vault costs nothing: the upstream sees the exact client
-// bytes and no masking event is written.
+// TestHandlerLeavesBodiesAloneWhenMaskingIsOff pins that the switch is
+// authoritative in both directions and that a disabled vault costs nothing: the
+// upstream sees the exact client bytes and no masking event is written. The
+// feature is on by default, so this covers the explicit opt-out - a bare
+// config.Config has the zero value and the proxy treats that as off.
 func TestHandlerLeavesBodiesAloneWhenMaskingIsOff(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -444,9 +446,28 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 	// no trace on the cassette. Asserting the count here keeps that from
 	// regressing: a session reading the trace has to be able to tell that a
 	// credential passed through it.
-	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+	// The cassette's response section carries the restored value, not the
+	// stand-in. This is the assertion that makes the restorer's position
+	// underneath UsageSniffer load-bearing rather than incidental: the sniffer
+	// writes the bytes it read into the cassette, so a restorer wrapped around
+	// it instead would record the stand-in while the client still received the
+	// real value, and every replay and audit view would be wrong in a way the
+	// client-facing assertions above cannot see.
+	cassettePath := findRecordedHTTP(t, outputDir)
+	raw, err := os.ReadFile(cassettePath)
+	if err != nil {
+		t.Fatalf("read cassette %q: %v", cassettePath, err)
+	}
+	parsed, err := waitForRecordedPrelude(cassettePath, time.Second)
 	if err != nil {
 		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	_, _, _, recordedRespBody := recordfile.ExtractSections(raw, parsed)
+	if !strings.Contains(string(recordedRespBody), testOpenAIProjectKey) {
+		t.Errorf("the cassette response body did not record the restored value: %s", recordedRespBody)
+	}
+	if standIn != "" && strings.Contains(string(recordedRespBody), standIn) {
+		t.Errorf("the cassette response body recorded the stand-in instead of the value: %s", recordedRespBody)
 	}
 	var masked, restored int
 	var restoredCount float64
