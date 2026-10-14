@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+- The session-export browser spec follows the trajectory preview and the toast reporting. `tests/trajectory-export.spec.js` still assumed the export was the first read of `/api/sessions/{id}/trajectory` and that a failure was printed once, but the session page has previewed the reconstructed trajectory on mount ever since the trajectory view was refactored, and the export's outcome has been a toast ever since the writes moved onto `useMutation` - so `expect(calls).toBe(0)` failed on the panel's own read, and the 404 message matched twice, in the panel and in the notification, which strict mode rejects. The spec waits for that read now, asserts the single request the click adds rather than a count from zero, keeps the authentication assertion on every request, and scopes the failure assertion to the page so it does not collide with the notification.
+
 ## [3.2.0] - 2026-10-10
 
 ### Added
