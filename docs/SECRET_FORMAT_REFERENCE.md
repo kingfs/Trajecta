@@ -69,7 +69,7 @@
 | §6 | **常见业务系统（研发平台 / IM / SaaS / 支付）**：GitHub、GitLab、npm、PyPI、Slack、Discord、Telegram、Stripe、Twilio、Datadog、Sentry、Supabase、Firebase、Okta、Auth0 等 |
 | §7 | **常见业务系统（国内）**：飞书、声网、钉钉、企业微信、微信公众号、微信支付、支付宝、推送、短信、地图 |
 | §8 | **校验能力矩阵**：哪些能离线判定、GitHub PAT 的 CRC32 算法、强前缀清单、弱形态清单、在线校验 |
-| §9 | **工程落地建议**：规则数据模型、扫描引擎骨架、与 Trajecta 现有模块的对接、测试与性能预算 |
+| §9 | **在 Trajecta 中的落地实现**：包结构与规则生成、检测分层与置信度门限、遮蔽与还原、与现有模块的边界、测试策略、性能与维护流程 |
 | 附录 A | gitleaks 222 条内置规则全量清单 |
 | 附录 B | Nosey Parker 189 条内置规则清单 |
 | 附录 C | trufflehog 19 个 AI/LLM 检测器（含前缀与关键词） |
@@ -1276,7 +1276,7 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 
 ---
 
-## 9. 工程落地建议（以 Trajecta 为例）
+## 9. 在 Trajecta 中的落地实现
 
 ### 9.1 现状与差距
 
@@ -1289,127 +1289,84 @@ Trajecta 当前的凭据识别发生在两处：
 
 差距集中在三点：**规则表示力不足（缺长度/校验/上下文）**、**覆盖面窄（缺国内厂商与结构性 token）**、**输出无置信度与 span**。
 
-### 9.2 建议的包结构
+### 9.2 包结构与规则生成
 
-```
-internal/secretformat/          # 规则表 + 状态机引擎（可被 analyzer / CLI / monitor 复用）
-  rules.yaml                    # 规则数据（本文档第 3~7 章的机器可读版本）
-  rule.go                       # Rule / Grade / CharClass 类型与校验
-  trie.go                       # 前缀 trie + 关键词 Aho-Corasick 预筛
-  engine.go                     # 单遍扫描器：Scan([]byte) []Finding
-  validator.go                  # 校验位与解码判定（CRC32 / base64 长度 / JWT / Discord）
-  rules_test.go                 # 表驱动：正样本 + 负样本
-  engine_fuzz_test.go           # go test -fuzz：保证线性、无回溯
-```
+能力全部落在 `pkg/secretmask`，没有 YAML 规则文件，也不在运行时构造正则：
 
-### 9.3 规则的数据模型
+| 文件 | 作用 |
+| --- | --- |
+| `rules.rl` | Ragel 源，词法模式（字符类、前缀、结构形状）的唯一事实源 |
+| `rule.go` | 规则元数据表，每条规则一项：`Kind`、`Grade`、`Strength`、`MinLen`、`MaxLen`、`Validator`、`Keywords`、`Prefixes`、`PrefixSkip`、`Literals` |
+| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，约 320 KB 状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
+| `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key` 命名 |
+| `context.go` | 全局凭据词表与 96 字节上下文窗口 |
+| `finding.go` | `Finding`、`Confidence`、`Reason` 与打分权重 |
+| `vault.go` | 假值的渲染与反查 |
+| `restore.go` | `Vault.Restore`、`Vault.RestoreInPlace` 与流式 `Restorer` |
+| `scan.go` | `collector` 与 `Detector` API（`AppendFindings` / `Scan`） |
 
-```go
-type Grade string // "A" | "B" | "C" | "D"
+生成入口是 `task generate:secretmask`，实际执行 `ragel-go -G2 -o rules_ragel.go rules.rl`，随后 gofmt 一次。两个容易踩的点：
 
-type CharClass string
+- **宿主语言由 Ragel 二进制名决定，不是命令行开关。** `ragel-go` 产出 Go；本机上的通用 `ragel` 二进制产出 C，二者不可互换。
+- **Ragel 7.1 已移除 `-Z`**，因此 `ragel -Z` 与 `ragel-go -Z` 都直接报 `-Z is an invalid argument`。`-G2` 是 goto 驱动的表风格，在试过的几种风格里实测最快。
 
-const (
-    Base62     CharClass = "base62"      // [0-9A-Za-z]
-    Base62Low  CharClass = "base62_lower"// [0-9a-z]
-    Base64URL  CharClass = "base64url"   // [A-Za-z0-9_-]
-    Base64Std  CharClass = "base64_std"  // [A-Za-z0-9+/] + '='
-    HexLower   CharClass = "hex_lower"   // [0-9a-f]
-    HexAny     CharClass = "hex_any"     // [0-9a-fA-F]
-    Base32AWS  CharClass = "base32_aws"  // [A-Z2-7]
-    UpperAlnum CharClass = "upper_alnum" // [A-Z0-9]
-    Printable  CharClass = "printable"   // 无空格可打印 ASCII（密码类）
-)
+状态机与 `rule.go` 必须覆盖同一套 `RuleID`，`TestRuleMetadataComplete` 校验这一点。日常构建不需要 Ragel，生成文件已在仓库中。
 
-type Rule struct {
-    ID         string    `yaml:"id"`          // 稳定主键，如 "openai.project_key"
-    Vendor     string    `yaml:"vendor"`
-    Kind       string    `yaml:"kind"`        // api_key / oauth_token / private_key / dsn ...
-    Prefixes   []string  `yaml:"prefixes"`    // 任一命中即可进入词法状态
-    PrefixCase bool      `yaml:"prefix_case"` // 前缀是否大小写敏感
-    Charset    CharClass `yaml:"charset"`
-    Lengths    []int     `yaml:"lengths"`     // 精确长度集合（优先于区间）
-    MinLen     int       `yaml:"min_len"`
-    MaxLen     int       `yaml:"max_len"`
-    Terminators string   `yaml:"terminators"` // 额外允许的终止字符（默认：非字符集成员或 EOF）
-    Validator  string    `yaml:"validator"`   // "github_crc32" / "b64_len:64" / "jwt_json" / "discord_id" ...
-    Keywords   []string  `yaml:"keywords"`    // 预筛与上下文加分
-    ContextWin int       `yaml:"context_window"`
-    Grade      Grade     `yaml:"grade"`
-    Severity   string    `yaml:"severity"`
-    Docs       []string  `yaml:"docs"`        // 证据 URL，便于审计
-}
-```
+匹配语义由 scanner 的 `|* ... *|` 决定：**最长匹配优先，等长时先声明者优先**。`rules.rl` 中规则顺序因此具有语义，文件注释也写明了这一点——`T3BlbkFJ` 系形态必须排在 `sk-` 通用池之前，否则同一段 `sk-` 文本会先被通用池吃掉。
 
-对应 YAML 片段示例：
+长度上下界**不写进状态机**，而是在 `scan.go` 的 `collector.emit` 里用原生代码判断。把 `{n,m}` 写进机器是实测更差的选择：3364 个状态 / 159703 行生成代码 / 25.7 s 生成 / 单次扫描 1958560 ns，而 `prefix + charset+` 配原生长度检查是 287 个状态 / 15472 行 / 1.0 s / 836946 ns——状态多 11.7 倍、生成代码多 10 倍、慢 2.34 倍。原生长度检查是承重设计，不是风格偏好。
 
-```yaml
-- id: openai.legacy_key
-  vendor: OpenAI
-  kind: api_key
-  prefixes: ["sk-"]
-  charset: base62
-  lengths: [51]              # "sk-" + 48
-  validator: contains_base64:T3BlbkFJ
-  keywords: ["T3BlbkFJ", "openai", "OPENAI_API_KEY"]
-  grade: C
-  severity: critical
-  docs: ["https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml"]
+### 9.3 检测分层、置信度与覆盖边界
 
-- id: github.pat_crc
-  vendor: GitHub
-  kind: personal_access_token
-  prefixes: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
-  charset: base62
-  lengths: [40]
-  validator: github_crc32
-  keywords: ["ghp_", "gho_", "github"]
-  grade: B
-  severity: critical
-```
+`Detector.AppendFindings` 依次走四层，越往后越贵，只有前一层放行的候选才进入下一层：
 
-### 9.4 扫描引擎骨架
+1. **L1 词法**：编译好的 DFA 单遍扫描，最长匹配，不回溯。
+2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。
+3. **L3 上下文**：在匹配位置前后各 96 字节窗口内搜索凭据词汇，来源是 `context.go` 的固定全局词表，加上该规则自己的 `Keywords`。
+4. **L4 置信度门限**：按下面的权重打分并分档。
 
-```go
-// Scan 单遍扫描：预筛 → 词法 → 结构 → 上下文
-func (e *Engine) Scan(data []byte) []Finding {
-    var out []Finding
-    // 活跃候选：同一位置可能同时有多条规则在推进（如 sk- 同时是 OpenAI/DeepSeek）
-    active := e.matcher.Start(data)          // 返回所有关键词/前缀命中的起始位置
-    for _, cand := range active {
-        for _, r := range e.rulesFor(cand.Prefix) {
-            end, ok := e.consumeCharset(data, cand.End, r.Charset)
-            if !ok { continue }
-            if !r.acceptsLength(end - cand.Start) { continue }
-            if r.Validator != "" && !e.validate(r.Validator, data[cand.Start:end]) {
-                continue
-            }
-            score := e.scoreContext(data, cand.Start, end, r)
-            if score < e.minScore(r) { continue }
-            out = append(out, Finding{RuleID: r.ID, Vendor: r.Vendor, Span: [2]int{cand.Start, end}, Score: score})
-        }
-    }
-    return dedupeOverlapping(out)  // 同 span 取最高分；重叠 span 取最长前缀规则
-}
-```
+打分权重（`finding.go`）：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；窗口内出现凭据词汇加 40 分；校验器通过则分数抬到不低于 70 分。总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。`Finding.Maskable()` 只放行 Medium 及以上自动改写；Low 仍然上报，让审计能看到看见了什么、以及故意没动什么。
 
-关键实现约束：
+规则集共 67 条：Strong 28、Anchored 23、Generic 16。范围刻意只覆盖结构形状（JWT、PEM 头）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池。**第 5、6、7 章的云、CI、IM 与支付类形状不在其中**；`internal/analyzer` 里另有 7 条自己的正则（AWS `AKIA`、GitHub `ghp_`、DSN、Cookie、Bearer 等），本引擎在这些形状上目前弱于该 analyzer，不能当作它的替代品。
 
-1. **禁止回溯**：`consumeCharset` 只向前推进，长度不合法即丢弃；不要在失败后回退重扫。
-2. **活跃状态上限**：最长前缀长度即最大活跃状态数，实践中不会超过几十；可据此预估内存。
-3. **大小写**：前缀匹配用 `strings.EqualFold` 一类的小写化比较；但**校验位计算必须使用原始字节**（GitHub CRC32 对大小写敏感）。
-4. **去重**：同一 span 命中多条规则时保留置信度最高者，但把其他候选写进 `Findings[].reasons` 以便人工复核。
-5. **流式输入**：Trajecta 处理的是 HTTP body，可能很大（几十 MB 的 base64 图片）。建议对超过阈值的 body 只扫描前 N MB + 随机采样，或先做"是否含关键词"的快速判定。
+引擎不做的事同样属于当前事实：不做熵估计、不做校验和、除上述结构校验外不做 base64 或 JWT 载荷解码、不支持 look-behind。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；任何需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）拿着假值都无法进行。
+
+实测：约 72 KB 载荷的词法扫描约 1.16 ms，约 63 MB/s。精度用仓库自身度量：467 个源文件、13.3 MB，共 7 处命中——5 处是刻意的测试夹具，2 处是 Go 标识符误命中 `ek_` 前缀；该规则最小长度其后从 12 提到 30 字节，这 2 处误命中随之消失。
+
+### 9.4 遮蔽与还原
+
+遮蔽是开关控制的能力：YAML 的 `secret_masking.enabled`，或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED`，**默认关闭**，因为它改变模型实际看到的内容，属于语义变更而非日志细节。
+
+假值必须同时满足三条性质：
+
+- **确定性**：假值是 `(seed, 规则名, 真值)` 的纯函数，同一个凭据永远渲染成同一个假值。多轮对话的一致性依赖它，上游 prompt cache 的前缀稳定性也依赖它。
+- **与真值等长**：代理把上游返回的 `Content-Length` 原样透传给客户端，而请求体长度由 net/http 从实际交给它的字节切片推导（`internal/proxy/handler.go`）。长度一变，请求与响应两侧都会静默错位。因此这条是承重约束。
+- **保留形状**：保留真值的前缀、全部非字母数字字符与分段字母表（整段小写 hex 仍取小写 hex），按形状校验的下游工具仍接受假值。
+
+映射只存在于内存（`vault.go` 的 `Vault`）：默认用 `crypto/rand` 播种，每个进程不同；上限 4096 条，超出按最旧优先淘汰。从线路上读到的假值离开这个进程就无从还原。遮蔽是幂等的，vault 已认识的假值会被跳过。
+
+PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，头行不含密钥材料，而真正承载密钥的 base64 正文没有任何规则覆盖；改写头行既保护不了私钥，又会破坏文件语法。`policySkipMask` 对 `KindPrivateKey` 返回 true，即为此。
+
+请求体走拆分：cassette 记录**原始字节**，上游只收到假值。这是有意选择——replay 按请求字节匹配，人读 trace 也需要看到真实请求。
+
+响应路径把假值还原成真值。体是流式的，假值可能跨越两次 `Read`，因此 `restore.go` 的 `Restorer` 每次读取都扣留「最长假值 − 1」字节，直到下一次读取到达才释放，从而保证凡是它已吐出的首字节，其所在假值必然完整。还原器装在现有 `UsageSniffer` **之内**而不是之外，因为 sniffer 会把读到的字节写进 cassette。两者等长，所以还原是对调用方缓冲区的原地覆盖。
+
+审计事件 `secret.masked` 与 `secret.restored` 追加到 cassette prelude 事件：前者记录规则、厂商、kind、偏移、长度、分数、置信度与原因，后者记录一次响应里的还原条数；两者都不携带凭据字节。
+
+实测吞吐：109 KB 载荷遮蔽约 211 MB/s（热态）、198 MB/s（冷态，含渲染假值）；还原约 242 MB/s，流式还原约 205 MB/s。
 
 ### 9.5 与现有模块的对接
 
-| 模块 | 改动 |
+`pkg/secretmask` 与既有模块目前的边界如下。已经对接的部分描述事实；尚未对接的部分说明为什么不接。
+
+| 模块 | 现状 |
 | --- | --- |
-| `internal/analyzer` | 把 `credentialPatterns` 替换为 `secretformat.Engine` 调用；新增 finding category `credential_exposure`；`Severity` 直接取自规则的 `severity`，`Confidence` 由上下文得分映射 |
-| `internal/redaction` | 保留 URL/DSN 的**参数名**脱敏（这部分依赖字段名而非值，逻辑不同）；正文脱敏改为按 `secretformat` 的 span 精确替换，避免正则误伤 |
-| `pkg/observe` | 若需要把命中的凭据作为结构化语义节点，新增 `NodeCredential` 类型，携带 `vendor`/`kind`/`grade` |
-| CLI（`cmd/trajecta`） | 可加 `trajecta secrets scan <path>` 做离线仓库扫描；本文档附录 A–D 可直接转成规则数据文件 |
-| Monitor | Findings 列表增加"凭据"过滤器；详情页展示脱敏后的上下文（前后各 40 字符） |
+| `internal/proxy` | 已对接。请求侧把命中值换成保形假值再发往上游，cassette 仍记录原始体；响应侧在 `UsageSniffer` 之内还原。见 §9.4 |
+| `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。这 7 条正则覆盖 AWS `AKIA`、GitHub `gh[pousr]_`、私钥块、Bearer、DB 连接串、Cookie 等形状，而 `pkg/secretmask` 的规则集只覆盖结构形状与 LLM 厂商前缀（§9.3）。在补齐云、CI、IM、支付类形状之前替换会**降低**覆盖率，所以两者并存：analyzer 继续负责审计侧 findings，secretmask 负责转发侧改写 |
+| `internal/redaction/url.go` | **未改动**。它按 URL 查询参数名与 userinfo 脱敏，依赖字段名而非值，与按字节 span 识别凭据是两件不同的事 |
+| `pkg/observe` | 未新增节点类型。命中与还原目前只写 cassette prelude 事件 `secret.masked` / `secret.restored` |
+| CLI（`cmd/trajecta`） | 未提供 `secrets scan` 子命令。`Detector` 与 `Vault` 是导出 API，可离线调用 |
+| Monitor | 未新增过滤器。事件的属性含 `rule`、`vendor`、`kind`、`score`、`confidence`、`reasons`，可在 trace 事件列表直接读到 |
 
 ### 9.6 测试策略
 
@@ -1426,17 +1383,21 @@ func (e *Engine) Scan(data []byte) []Finding {
 
 ### 9.7 性能预算（经验值）
 
-| 输入规模 | 目标 |
+实测值见 §9.3 与 §9.4，这里只记两条与规模有关的性质。
+
+| 输入规模 | 现状 |
 | --- | --- |
-| 1 KB ~ 1 MB 请求/响应体 | 全量扫描 < 1 ms/MB（纯前缀 trie + 字符类推进，无正则引擎回溯） |
-| 10 MB 以上 | 关键词快速否决后跳过；或只扫 header + 前 1 MB |
-| 规则数 | 数百条规则对性能影响很小（前缀索引 + 关键词 Aho-Corasick 预筛），瓶颈在关键词数量而非规则数量 |
+| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，约 63 MB/s |
+| 10 MB 以上 | **没有**关键词预筛或分段跳过：`Detector` 会扫描整个缓冲区。这是有意为之的取舍——先保证语义正确，规模优化留到出现真实需求时再做 |
+| 规则数 | 规则越多，DFA 状态数与生成代码越大，而扫描循环仍是按输入字节推进，与规则数无关。这也是长度上下界放在原生代码里判断的原因（§9.2 的状态数对比） |
 
 ### 9.8 规则维护流程
 
-1. 从厂商官方文档新增/更新规则 → 更新 `rules.yaml` 并附 `docs:` URL；
-2. 跑正/负样本测试与上游规则覆盖率统计；
-3. 每次发布在 `CHANGELOG.md` 记录规则增删（便于追溯漏报来源）。
+1. 从厂商官方文档确认形状 → 改 `pkg/secretmask/rules.rl` 的模式，并在 `pkg/secretmask/rule.go` 补齐该规则的元数据（`Name`、`Vendor`、`Kind`、`Grade`、`Strength`、`MinLen`/`MaxLen`、`Keywords`，需要时还有 `Validator`、`Prefixes`、`PrefixSkip`、`Literals`）；
+2. 在 `pkg/secretmask/secretmask_test.go` 的 `positiveSamples` 加一条"显然伪造但格式合法"的样例——`TestRuleMetadataComplete` 要求每条规则都有样例，缺一条就会失败；
+3. 跑 `task generate:secretmask` 重新生成 `rules_ragel.go`，并把 `rules.rl`、`rule.go` 与生成文件一起提交；
+4. 跑 `go test ./pkg/secretmask/`，其中 `TestFakeKeepsShapeAndLength` 会验证新规则的假值仍然等长、保留前缀与标点；
+5. 在 `CHANGELOG.md` 记录规则增删（便于追溯漏报来源）。
 
 ---
 
