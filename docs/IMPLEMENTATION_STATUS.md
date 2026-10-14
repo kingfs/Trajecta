@@ -135,6 +135,19 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 
 工具用法见 [./MCP_GUIDE.md](./MCP_GUIDE.md)。
 
+## 敏感凭据遮蔽
+
+`pkg/secretmask` 把凭据形状编译成 Ragel DFA，并在请求体离开本机前把命中的值替换为**保形假值**：
+
+- 规则来源是 `pkg/secretmask/rules.rl`（模式）与 `rule.go`（元数据），生成的 `rules_ragel.go` 已提交，`task generate:secretmask` 重生成。
+- 判定分四层：词法 DFA（最长匹配）→ 离线结构校验（`jwt`、`anthropic_key`）→ 96 字节窗口内的凭据词汇 → 置信度门限。`Strength` 分 Strong/Anchored/Generic 三档，只有 Medium 及以上允许自动改写，Low 仍然上报。
+- 假值与真值等长，并保留前缀、标点、厂商水印与分段字母表；它是 `(进程种子, 规则, 真值)` 的纯函数，因此同一凭据每轮渲染结果一致。映射只存在于内存（`Vault`，`crypto/rand` 种子，4096 条上限，最旧优先淘汰）。
+- cassette 记录**原始**请求体，上游只收到假值；响应路径在 `UsageSniffer` 之内还原。命中与还原写入 cassette prelude 事件 `secret.masked` / `secret.restored`，不携带凭据字节。
+- 开关 `secret_masking.enabled` / `TRAJECTA_SECRET_MASKING_ENABLED`，默认关闭。
+- 覆盖范围限于结构形状与 LLM 厂商前缀，不含云、CI、IM 与支付类形状（即格式参考第 5、6、7 节）；这些形状目前仍由 `internal/analyzer` 的 7 条正则覆盖。PEM 私钥只识别头行且不改写，正文无规则覆盖。
+
+细节与已知边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
+
 ## 语义解析、审计与重分析
 
 语义解析与派生分析层已实现：

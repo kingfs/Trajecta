@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/responses/runtime"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/secretmask"
 )
 
 const (
@@ -35,6 +36,7 @@ type responsesChatCompletionsAdapter struct {
 	httpClient    *http.Client
 	auditor       responsesaudit.UpstreamExchangeRecorder
 	events        responsesaudit.ExecutionEventRecorder
+	secretVault   *secretmask.Vault
 }
 
 var _ runtime.ChatCompletionsClient = (*responsesChatCompletionsAdapter)(nil)
@@ -75,6 +77,18 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		body = rewrittenBody
 	}
 
+	// Same split as the pass-through path: the cassette records the original
+	// bytes, the upstream gets stand-ins. The routing selection above already
+	// used the original body, so routing is unaffected.
+	sendBody := body
+	var maskedEvents []secretmask.MaskEvent
+	if a.secretVault != nil {
+		if masked, events := a.secretVault.Mask(body); len(events) > 0 {
+			sendBody = masked
+			maskedEvents = events
+		}
+	}
+
 	start := time.Now()
 	completed := false
 	defer func() {
@@ -83,7 +97,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		}
 	}()
 
-	httpReq, recordReq, err := buildResponsesServerChatRequest(ctx, selection, body)
+	httpReq, recordReq, err := buildResponsesServerChatRequest(ctx, selection, sendBody)
 	if err != nil {
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
@@ -137,6 +151,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	})
 	logInfo.Events = append(logInfo.Events, routePlanEventForSelection(routeReq, selection, start, a.routingPolicy, "responses_server"))
 	logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+	logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
 	a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
 		EventType: "response.model_call",
 		Phase:     "model_call",
@@ -177,9 +192,9 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	var isStream bool
 	var chatResp runtime.ChatCompletionResponse
 	if handle != nil && statusCode >= 200 && statusCode < 300 && llm.DetectStreamingResponse(httpResp.Header) {
-		chatResp, isStream, err = recordResponsesServerChatStreamResponse(logInfo, httpResp, start, handle)
+		chatResp, isStream, err = recordResponsesServerChatStreamResponse(logInfo, httpResp, start, handle, a.secretVault)
 	} else {
-		respBody, isStream, err = recordResponsesServerChatResponse(logInfo, httpResp, start)
+		respBody, isStream, err = recordResponsesServerChatResponse(logInfo, httpResp, start, a.secretVault)
 	}
 	if err != nil {
 		logInfo.Header.Meta.Error = err.Error()
@@ -699,11 +714,11 @@ func applyCorrelationHeaders(dst http.Header, ctx context.Context) {
 	}
 }
 
-func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time) ([]byte, bool, error) {
+func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) ([]byte, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
 		return nil, false, errors.New("responses chat completions log file is required")
 	}
-	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt)
+	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
 	if err != nil {
 		return nil, false, err
 	}
@@ -718,11 +733,11 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 	return respBody, isStream, nil
 }
 
-func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, bool, error) {
+func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, handle runtime.ChatStreamCallback, vault *secretmask.Vault) (runtime.ChatCompletionResponse, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
 		return runtime.ChatCompletionResponse{}, false, errors.New("responses chat completions log file is required")
 	}
-	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt)
+	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp, startedAt, vault)
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, false, err
 	}
@@ -737,7 +752,7 @@ func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *ht
 	return chatResp, isStream, nil
 }
 
-func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time) (*UsageSniffer, bool, error) {
+func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) (*UsageSniffer, bool, error) {
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
 		return nil, false, fmt.Errorf("write chat completion response separator: %w", err)
 	}
@@ -751,8 +766,14 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 
 	isStream := llm.DetectStreamingResponse(resp.Header)
+	// The restorer goes underneath the sniffer for the same reason as on the
+	// pass-through path: the sniffer writes what it read to the cassette.
+	respBody := resp.Body
+	if vault != nil {
+		respBody = secretmask.NewRestorer(resp.Body, vault)
+	}
 	return &UsageSniffer{
-		Source:   resp.Body,
+		Source:   respBody,
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,

@@ -98,6 +98,8 @@ type Config struct {
 
 	Tools ToolsConfig `yaml:"tools"`
 
+	SecretMasking SecretMaskingConfig `yaml:"secret_masking"`
+
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
 		// MaskKey replaces the credential-carrying request headers with placeholders
@@ -207,6 +209,21 @@ type LimitConfig struct {
 	MaxConcurrent    int    `yaml:"max_concurrent"`
 	MaxQueued        int    `yaml:"max_queued"`
 	ChannelKeyHeader string `yaml:"channel_key_header"`
+}
+
+// SecretMaskingConfig controls replacing credentials found in a request body
+// with format-preserving stand-ins before the request leaves the machine.
+//
+// The stand-ins keep the real value's length, prefix and punctuation, so a
+// Content-Length stays valid and a tool that validates on shape still accepts
+// the value, and they are reversible only through the mapping held in this
+// process's memory. The cassette still records the original bytes, so replay
+// and a human reading a trace see the real values.
+//
+// It is off by default. Turning it on changes what the model is asked, so it is
+// a deliberate operator decision rather than a side effect of upgrading.
+type SecretMaskingConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type ResponsesServerConfig struct {
@@ -686,6 +703,7 @@ func applyEnvOverrides(cfg *Config) {
 	envStringPair(&cfg.Debug.OutputDir, &cfg.Trace.OutputDir, "TRAJECTA_OUTPUT_DIR")
 	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
+	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
 	envString(&cfg.ResponsesServer.DefaultModel, "TRAJECTA_RESPONSES_DEFAULT_MODEL")
 	envBool(&cfg.ResponsesServer.ForceStore, "TRAJECTA_RESPONSES_FORCE_STORE")
 	envInt64(&cfg.ResponsesServer.MaxRequestBodyBytes, "TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES")

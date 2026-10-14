@@ -235,6 +235,7 @@ func TestChat(t *testing.T) {
 | 把 SDK / CLI 接到代理上 | [代理使用示例](./docs/PROXY_USAGE_EXAMPLES.md) |
 | 接入上游 provider、看协议矩阵 | [协议族与上游 Provider](./docs/PROTOCOLS_AND_PROVIDERS.md)、[协议参考](./docs/protocol-reference/README.md) |
 | 管理渠道、模型、凭据与限流 | [路由、渠道与凭据](./docs/ROUTING_AND_CREDENTIALS.md) |
+| 避免把真实 API key 发给上游 | [敏感凭据遮蔽](./docs/SECRET_MASKING.md) |
 | 用 Codex 或本地 Responses runtime | [本地 Responses Runtime](./docs/RESPONSES_RUNTIME.md) |
 | 使用 Monitor 界面 | [Monitor 使用指南](./docs/MONITOR_GUIDE.md) |
 | 让 agent 通过 MCP 查询轨迹 | [MCP 使用指南](./docs/MCP_GUIDE.md) |

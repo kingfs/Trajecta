@@ -33,7 +33,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
-- Credential shape detection: the Ragel-compiled DFA and its rule table in `pkg/secretmask`
+- Credential shape detection and masking: the Ragel-compiled DFA, the rule table, the offline validators, the context scorer and the format-preserving stand-in vault in `pkg/secretmask`; wired into `internal/proxy` on both the pass-through and the local Responses paths, gated by `secret_masking.enabled`
 
 ## Storage
 
@@ -67,6 +67,18 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
 - Keep recorded `.http` payloads human-inspectable.
 - Prefer additive evolution over destructive migration of existing cassettes.
 - The application database is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
+- `pkg/secretmask` renders the stand-ins for masked credentials and reverses them. A stand-in MUST stay
+  exactly as long as the value it replaces and MUST keep that value's prefix, punctuation and per-segment
+  alphabet: the proxy copies the upstream `Content-Length` to the client verbatim and derives the outbound
+  request length from the body slice it is handed, so a length-changing replacement desynchronises both
+  silently, and a prefix change breaks every tool that validates on shape. The cassette records the original
+  body by design while the upstream receives the stand-in, so the two must never be collapsed back into one
+  variable: `internal/proxy/handler.go` keeps `upstreamBodyBytes` for the recorder and `sendBodyBytes` for the
+  wire, and `internal/proxy/responses_server.go` passes the stand-in to `buildResponsesServerChatRequest` and
+  the original as the third argument of `PrepareLogFileWithOptionsAndBody`. On the response side the restorer
+  goes underneath `UsageSniffer`, never around it, because the sniffer writes the bytes it read into the
+  cassette. Adding or changing a rule means editing `rules.rl` and `rule.go`, including `Strength`,
+  `Prefixes`, `PrefixSkip`, `Literals` and any `Validator`, then running `task generate:secretmask`.
 - `pkg/secretmask/rules_ragel.go` is generated from `pkg/secretmask/rules.rl` by Ragel and is committed. Never open, read, or edit it: it is a ~320 KB state-table blob whose contents are not reviewable by a human or an agent, and any hand edit is silently destroyed by the next generation. Change `rules.rl` (patterns) and `rule.go` (rule metadata) instead, then run `task generate:secretmask`. Regeneration needs `ragel-go`; the generic `ragel` binary emits C for this machine, so `ragel-go -G2` is not interchangeable with it. Commit `rules.rl`, `rule.go` and the regenerated `rules_ragel.go` in the same change, and never commit a hand-written substitute for the generated file.
 
 ## Common Workflows
@@ -108,6 +120,7 @@ All files under `docs/` are written in Chinese and describe current code facts o
 - `docs/PROTOCOLS_AND_PROVIDERS.md`: 协议族、请求入口、provider preset 与能力声明
 - `docs/ROUTING_AND_CREDENTIALS.md`: 配置来源与所有权、路由选择、凭据与 limit scope
 - `docs/RESPONSES_RUNTIME.md`: 本地 Responses runtime、Codex 兼容面、hosted tools
+- `docs/SECRET_MASKING.md`: 凭据遮蔽的规则来源、置信度门限、保形假值与流式还原、接入点与已知边界
 - `docs/OBSERVATION_AND_AUDIT.md`: 语义解析管道、Observation IR、findings 与重分析
 - `docs/STORAGE_AND_DEPLOYMENT.md`: 存储分层、迁移命令、生产部署与派生数据重算
 - `docs/MONITOR_GUIDE.md`: Monitor 当前用户可见能力与操作流程

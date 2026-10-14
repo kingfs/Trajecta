@@ -39,6 +39,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/secretmask"
 )
 
 type aggregatedModelListResponse struct {
@@ -434,6 +435,11 @@ type Handler struct {
 	responsesBuilder func() (http.Handler, error)
 	responsesMu      sync.Mutex
 	responsesHandler http.Handler
+
+	// secretVault renders and reverses the stand-ins for credentials in request
+	// and response bodies. It is nil when secret_masking is off, which is the
+	// only check each call site makes.
+	secretVault *secretmask.Vault
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -463,6 +469,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	// somewhere other than the configured directory, and a read-only working directory failed
 	// every request, because a recording error returns 500.
 	rec := recorder.New(cfg.TraceOutputDir(), cfg.Debug.MaskKey, st)
+	secretVault := newSecretVault(cfg)
 	cm := chaos.New(cfg)
 	localLimiter := limit.New(limit.Config{
 		MaxConcurrent: cfg.Limits.MaxConcurrent,
@@ -643,6 +650,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			routingPolicy: routerPolicy(rtr),
 			auditor:       upstreamExchangeRecorder,
 			events:        executionEventRecorder,
+			secretVault:   secretVault,
 		}, responseStore, runtimeOptions...)
 		return httpapi.NewHandler(
 			rt,
@@ -663,6 +671,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		limiter:          localLimiter,
 		responsesPath:    responsesPath,
 		responsesBuilder: buildLocalResponses,
+		secretVault:      secretVault,
 	}, nil
 }
 
@@ -1003,6 +1012,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			upstreamBodyBytes = rewrittenBody
 		}
 
+		// Masking splits the recorded body from the body sent upstream: the cassette
+		// keeps the original bytes, so replay and a human reading a trace see the
+		// real values, while the upstream only ever receives stand-ins. The bytes
+		// handed to the router above are deliberately left alone, so routing keys,
+		// fingerprints and every failure cassette are unaffected.
+		sendBodyBytes := upstreamBodyBytes
+		var maskedEvents []secretmask.MaskEvent
+		if h.secretVault != nil {
+			if masked, events := h.secretVault.Mask(upstreamBodyBytes); len(events) > 0 {
+				sendBodyBytes = masked
+				maskedEvents = events
+			}
+		}
+
 		// 准备日志
 		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
 			SiteURL:                        selection.Target.Upstream.BaseURL,
@@ -1036,6 +1059,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+		logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
 
 		// Chaos
 		chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)
@@ -1060,7 +1084,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, upstreamBodyBytes)
+		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, sendBodyBytes)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()
@@ -1949,9 +1973,18 @@ func (h *Handler) writeUpstreamResponse(
 	isStream := llm.DetectStreamingResponse(resp.Header)
 	logInfo.Header.Layout.IsStream = isStream
 
-	// Wrap response body with UsageSniffer.
+	// Wrap response body with UsageSniffer. The restorer goes underneath the
+	// sniffer rather than around it: UsageSniffer writes the bytes it read into
+	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
+	// the recorded response while the client saw the real values.
+	respBody := resp.Body
+	var secretRestorer *secretmask.Restorer
+	if h.secretVault != nil {
+		secretRestorer = secretmask.NewRestorer(resp.Body, h.secretVault)
+		respBody = secretRestorer
+	}
 	resp.Body = &UsageSniffer{
-		Source:   resp.Body,
+		Source:   respBody,
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,
@@ -1981,6 +2014,9 @@ func (h *Handler) writeUpstreamResponse(
 
 	// Close the sniffer so Finalize() runs before we call UpdateLogFile.
 	resp.Body.Close()
+	if secretRestorer != nil && secretRestorer.Restored() > 0 {
+		logInfo.Events = append(logInfo.Events, secretRestoredEvent(secretRestorer.Restored(), start))
+	}
 
 	// Finalize metrics and log (equivalent to old defer block).
 	duration := time.Since(start)

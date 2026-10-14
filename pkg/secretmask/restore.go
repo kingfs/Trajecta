@@ -24,27 +24,29 @@ func (v *Vault) Restore(src []byte) []byte {
 }
 
 // RestoreInPlace rewrites every fake in buf back to its real value, starting
-// the search at from. Bytes before from are left alone, which lets a caller
-// that appends to buf restore only what it just added.
-func (v *Vault) RestoreInPlace(buf []byte, from int) {
+// the search at from, and reports how many values it replaced. Bytes before
+// from are left alone, which lets a caller that appends to buf restore only
+// what it just added.
+func (v *Vault) RestoreInPlace(buf []byte, from int) int {
 	if len(buf) == 0 {
-		return
+		return 0
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if len(v.byFake) == 0 {
-		return
+		return 0
 	}
-	v.restoreLocked(buf, from)
+	return v.restoreLocked(buf, from)
 }
 
 // restoreLocked performs the replacement in place. Because a fake is exactly as
 // long as the value it stands for, this never moves any bytes after it, which
 // is what makes in-place restoration safe on a stream.
-func (v *Vault) restoreLocked(buf []byte, from int) {
+func (v *Vault) restoreLocked(buf []byte, from int) int {
 	if from < 0 {
 		from = 0
 	}
+	replaced := 0
 	for i := from; i < len(buf); {
 		if !v.firstFit[buf[i]] {
 			i++
@@ -62,12 +64,14 @@ func (v *Vault) restoreLocked(buf []byte, from int) {
 			copy(buf[i:i+n], v.byFake[e.text])
 			i += n
 			matched = true
+			replaced++
 			break
 		}
 		if !matched {
 			i++
 		}
 	}
+	return replaced
 }
 
 func bytesEqual(a, b []byte) bool {
@@ -94,18 +98,34 @@ func bytesEqual(a, b []byte) bool {
 // A Restorer is not safe for concurrent use. It is not an io.Closer; wrap a
 // body with NewRestorer and close the body underneath it.
 type Restorer struct {
-	src   io.Reader
-	v     *Vault
-	buf   []byte
-	off   int
-	eof   bool
-	err   error
-	chunk []byte
+	src      io.Reader
+	v        *Vault
+	buf      []byte
+	off      int
+	eof      bool
+	err      error
+	chunk    []byte
+	restored int
 }
 
 // NewRestorer wraps src so that reads return restored bytes.
 func NewRestorer(src io.Reader, v *Vault) *Restorer {
 	return &Restorer{src: src, v: v}
+}
+
+// Restored reports how many values have been rewritten so far. A caller uses it
+// to record that a response carried stand-ins, which is otherwise invisible:
+// the restored body is byte-identical to what a session without masking would
+// have produced.
+func (r *Restorer) Restored() int { return r.restored }
+
+// Close forwards to the source when it is an io.Closer, so wrapping a response
+// body does not leak the connection.
+func (r *Restorer) Close() error {
+	if c, ok := r.src.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
 }
 
 // Read returns restored bytes. It returns io.EOF only after everything withheld
@@ -156,7 +176,7 @@ func (r *Restorer) Read(p []byte) (int, error) {
 			if from < r.off {
 				from = r.off
 			}
-			r.v.RestoreInPlace(r.buf, from)
+			r.restored += r.v.RestoreInPlace(r.buf, from)
 		}
 		if err != nil {
 			r.eof = true

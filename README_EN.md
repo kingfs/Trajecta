@@ -235,6 +235,7 @@ Data flow, concurrency guarantees and source-of-truth boundaries are documented 
 | Point an SDK or CLI at the proxy | [Proxy usage examples](./docs/PROXY_USAGE_EXAMPLES.md) |
 | Add an upstream provider, see the protocol matrix | [Protocols and providers](./docs/PROTOCOLS_AND_PROVIDERS.md), [protocol reference](./docs/protocol-reference/README.md) |
 | Manage channels, models, credentials and limits | [Routing, channels and credentials](./docs/ROUTING_AND_CREDENTIALS.md) |
+| Keep real API keys away from the provider | [Secret masking](./docs/SECRET_MASKING.md) (Chinese) |
 | Use Codex or the local Responses runtime | [Local Responses runtime](./docs/RESPONSES_RUNTIME.md) |
 | Use the monitor | [Monitor guide](./docs/MONITOR_GUIDE.md) |
 | Let an agent query trajectories over MCP | [MCP guide](./docs/MCP_GUIDE.md) |

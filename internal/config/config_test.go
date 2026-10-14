@@ -1904,3 +1904,38 @@ func TestMaskKeyDefaultsToTheDocumentedValue(t *testing.T) {
 		})
 	}
 }
+
+// TestSecretMaskingIsOptIn pins the documented default of
+// secret_masking.enabled.
+//
+// Body masking changes what the model is asked, not just what is written to
+// disk, so it must not switch on as a side effect of upgrading: the zero value
+// is the documented default, and only an explicit YAML key or environment
+// variable turns it on.
+func TestSecretMaskingIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		env  string
+		want bool
+	}{
+		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-secretmask\n", want: false},
+		{name: "empty section", body: "secret_masking: {}\n", want: false},
+		{name: "explicitly false", body: "secret_masking:\n  enabled: false\n", want: false},
+		{name: "explicitly true", body: "secret_masking:\n  enabled: true\n", want: true},
+		{name: "env true", body: "secret_masking: {}\n", env: "true", want: true},
+		{name: "env false overrides the file", body: "secret_masking:\n  enabled: true\n", env: "false", want: false},
+		{name: "env true overrides the file", body: "secret_masking:\n  enabled: false\n", env: "true", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TRAJECTA_SECRET_MASKING_ENABLED", tc.env)
+			cfg, err := Load(writeTempConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.SecretMasking.Enabled != tc.want {
+				t.Fatalf("SecretMasking.Enabled = %v, want %v", cfg.SecretMasking.Enabled, tc.want)
+			}
+		})
+	}
+}
