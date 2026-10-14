@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -435,5 +436,142 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 	}
 	if strings.Contains(string(clientBody), standIn) {
 		t.Errorf("the client received the stand-in instead of the real key: %s", clientBody)
+	}
+}
+
+// assembledSSE returns the text a client ends up with after it applies the
+// deltas of a streamed body: the message content in order, and the tool-call
+// arguments per index. Providers cut the logical string at token boundaries, so
+// this concatenation - not the raw body - is what has to carry the real value.
+func assembledSSE(t *testing.T, body []byte) (content, arguments string) {
+	t.Helper()
+	for _, line := range strings.Split(string(body), "\n") {
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok || payload == "[DONE]" {
+			continue
+		}
+		var event struct {
+			Choices []struct {
+				Delta struct {
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Function struct {
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			t.Fatalf("streamed payload is not JSON: %q", payload)
+		}
+		for _, choice := range event.Choices {
+			content += choice.Delta.Content
+			for _, call := range choice.Delta.ToolCalls {
+				arguments += call.Function.Arguments
+			}
+		}
+	}
+	return content, arguments
+}
+
+// TestHandlerRestoresAStreamedStandInSplitAcrossDeltas is the realistic version
+// of the streamed case. A provider streams one message as many JSON deltas and
+// cuts the string at token boundaries, so a stand-in arrives in pieces with the
+// JSON envelope between them - which a matcher that only accepts contiguous
+// bytes cannot see. Content and tool-call arguments are both covered, because
+// both are how a model hands a value back to the client.
+func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
+	// A tool-call arguments value is JSON nested inside a JSON string, so its
+	// own quotes are escaped on the wire; argsHead and argsTail are the wire
+	// form and argsWant is what they decode to once a client applies the deltas.
+	const (
+		argsHead = `{\"path\":\"/tmp/k\",\"content\":\"`
+		argsTail = `\"}`
+		argsWant = `{"path":"/tmp/k","content":"`
+	)
+	for _, field := range []string{"content", "tool_calls"} {
+		t.Run(field, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			var standIn string
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 && i+len(testOpenAIProjectKey) <= len(body) {
+					standIn = string(body[i : i+len(testOpenAIProjectKey)])
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				flusher, _ := w.(http.Flusher)
+				emit := func(delta string) {
+					fmt.Fprintf(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-5\","+
+						"\"choices\":[{\"index\":0,\"delta\":%s,\"finish_reason\":null}]}\n\n", delta)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+				// The split is the whole point: one half per delta.
+				half := len(standIn) / 2
+				if field == "content" {
+					emit(`{"content":"` + standIn[:half] + `"}`)
+					emit(`{"content":"` + standIn[half:] + `"}`)
+				} else {
+					emit(`{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_file","arguments":"` +
+						argsHead + standIn[:half] + `"}}]}`)
+					emit(`{"tool_calls":[{"index":0,"function":{"arguments":"` + standIn[half:] + argsTail + `"}}]}`)
+				}
+				emit(`{}`)
+				fmt.Fprint(w, "data: [DONE]\n\n")
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{}
+			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+			cfg.Debug.OutputDir = outputDir
+			cfg.SecretMasking.Enabled = true
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+				strings.NewReader(secretMaskingBody()))
+			if err != nil {
+				t.Fatalf("client.Post() error = %v", err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if standIn == "" {
+				t.Fatal("the upstream never received a stand-in")
+			}
+			// Neither half of the stand-in may survive anywhere in the stream.
+			half := len(standIn) / 2
+			for _, piece := range []string{standIn[:half], standIn[half:]} {
+				if strings.Contains(string(got), piece) {
+					t.Errorf("a piece of the stand-in reached the client: %q", piece)
+				}
+			}
+
+			content, arguments := assembledSSE(t, got)
+			switch field {
+			case "content":
+				if content != testOpenAIProjectKey {
+					t.Errorf("assembled content\n got %q\nwant %q", content, testOpenAIProjectKey)
+				}
+			case "tool_calls":
+				want := argsWant + testOpenAIProjectKey + `"}`
+				if arguments != want {
+					t.Errorf("assembled tool-call arguments\n got %q\nwant %q", arguments, want)
+				}
+			}
+		})
 	}
 }

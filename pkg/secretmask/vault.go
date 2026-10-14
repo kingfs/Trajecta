@@ -88,9 +88,12 @@ func (v *Vault) Len() int {
 	return len(v.byReal)
 }
 
-// Holdback is the number of trailing bytes a streaming restore must withhold
-// before it can be sure no fake starts in them. It is zero while the vault is
-// empty, so a request that masked nothing pays nothing.
+// Holdback is the worst case number of trailing bytes a caretaker of this vault
+// has to keep before it can be sure no fake starts in them, which is one byte
+// short of the longest fake. It bounds a buffer a caller sizes up front; the
+// Restorer itself withholds only the runs and tails its scan cannot yet judge,
+// which is normally no more than the stand-in it is waiting on. It is zero
+// while the vault is empty, so a request that masked nothing pays nothing.
 func (v *Vault) Holdback() int {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

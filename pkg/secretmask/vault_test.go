@@ -426,3 +426,179 @@ func BenchmarkRestoreStreaming(b *testing.B) {
 		}
 	}
 }
+
+// streamEnvelope is what a streamed provider response puts between two pieces of
+// one message: the tail of the first JSON delta and the head of the next. A
+// client concatenates the delta strings, so the pieces of a stand-in that a
+// provider cut at a token boundary arrive with this between them.
+const streamEnvelope = `"}}]}` + "\n\ndata: " +
+	`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"`
+
+// cutIntoRuns splits a value into n pieces with the streaming envelope between
+// each pair, which is the shape the restorer has to reassemble.
+func cutIntoRuns(value string, n int) string {
+	step := (len(value) + n - 1) / n
+	var b strings.Builder
+	for i := 0; i < len(value); i += step {
+		end := i + step
+		if end > len(value) {
+			end = len(value)
+		}
+		if i > 0 {
+			b.WriteString(streamEnvelope)
+		}
+		b.WriteString(value[i:end])
+	}
+	return b.String()
+}
+
+// withoutEnvelope is the text a client ends up with once it has applied every
+// delta: the pieces joined back together with nothing between them.
+func withoutEnvelope(s string) string {
+	return strings.ReplaceAll(s, streamEnvelope, "")
+}
+
+// TestRestoreReassemblesAStandInSplitAcrossRuns covers the shape a real stream
+// produces. A provider streams one message as many JSON deltas and cuts the
+// string at token boundaries, so a stand-in arrives in pieces with the envelope
+// between them. The pieces are what has to be rewritten: the value is restored
+// run by run, in place, so the client that joins the deltas gets the real one.
+func TestRestoreReassemblesAStandInSplitAcrossRuns(t *testing.T) {
+	v := testVault()
+	real := "sk-proj-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)
+	masked, _ := v.Mask([]byte(real))
+	fake := string(masked)
+
+	for _, runs := range []int{2, 3, 5, 9} {
+		t.Run(fmt.Sprint(runs), func(t *testing.T) {
+			body := "data: " + cutIntoRuns(fake, runs) + `"}}]}`
+			want := "data: " + cutIntoRuns(real, runs) + `"}}]}`
+
+			got := string(v.Restore([]byte(body)))
+			if got != want {
+				t.Fatalf("restore across %d runs\n got %q\nwant %q", runs, got, want)
+			}
+			if joined := withoutEnvelope(got); !strings.Contains(joined, real) {
+				t.Errorf("the client that joins the deltas does not see the real value: %q", joined)
+			}
+			if strings.Contains(withoutEnvelope(got), fake) {
+				t.Errorf("the stand-in survived the restore: %q", withoutEnvelope(got))
+			}
+		})
+	}
+}
+
+// TestRestoreKeepsAFailedChainUntouched is the property that makes a chain
+// acceptable at all. A run that matches the start of a stand-in but whose
+// continuation never arrives must be released byte for byte: a value is
+// rewritten completely or not at all, so resembling a stand-in can never corrupt
+// the text it sits in.
+func TestRestoreKeepsAFailedChainUntouched(t *testing.T) {
+	v := testVault()
+	real := "sk-proj-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)
+	masked, _ := v.Mask([]byte(real))
+	fake := []byte(masked)
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{
+			// The first half really is the stand-in; the continuation never is.
+			name: "truncated stand-in",
+			body: append(append([]byte(nil), fake[:70]...), []byte(`"}`)...),
+		},
+		{
+			// Every keystream byte of the tail is wrong, so the value is not ours.
+			name: "near miss",
+			body: append(append([]byte(nil), fake[:100]...), 'Z'),
+		},
+		{
+			name: "run shorter than the entry threshold",
+			body: append(append([]byte(nil), fake[:12]...), []byte(`"}}]}`)...),
+		},
+		{
+			// Two runs that never add up to the whole stand-in.
+			name: "runs that stop short",
+			body: []byte(fake[:40]),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := v.Restore(tc.body)
+			if !bytes.Equal(got, tc.body) {
+				t.Fatalf("restore rewrote an incomplete stand-in:\n got %q\nwant %q", got, tc.body)
+			}
+		})
+	}
+}
+
+// TestRestoreChainsThroughAStreamingReader runs the reassembly through the
+// streaming path, where the runs of one stand-in are split across reads as well
+// as across deltas, so the scan state has to survive both at once.
+func TestRestoreChainsThroughAStreamingReader(t *testing.T) {
+	v := testVault()
+	real := "sk-proj-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)
+	masked, _ := v.Mask([]byte(real))
+	fake := string(masked)
+
+	body := "data: " + cutIntoRuns(fake, 2) + `"}}]}`
+	want := "data: " + cutIntoRuns(real, 2) + `"}}]}`
+
+	for _, chunk := range []int{1, 2, 3, 17, 40, 41, 64, 65, 133, len(body)} {
+		t.Run(fmt.Sprint(chunk), func(t *testing.T) {
+			r := NewRestorer(&chunkReader{data: []byte(body), n: chunk}, v)
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
+			if string(got) != want {
+				t.Fatalf("restore at %d bytes per read\n got %q\nwant %q", chunk, got, want)
+			}
+			if r.Restored() != 1 {
+				t.Errorf("Restored() = %d, want 1", r.Restored())
+			}
+		})
+	}
+}
+
+// TestRestoreLeavesRunsSmallerThanTheEntryThresholdAlone pins the boundary of
+// the reassembly rather than pretending it has none. Reassembly follows a
+// stand-in from its first run, so a provider that cuts the value into pieces
+// shorter than chainMinEntry - which token-by-token streaming can do - never
+// presents a run long enough to start one. Nothing is rewritten in that case,
+// which is the safe outcome: the client assembles the stand-in instead of the
+// value, and no unrelated bytes are touched on the way.
+func TestRestoreLeavesRunsSmallerThanTheEntryThresholdAlone(t *testing.T) {
+	v := testVault()
+	real := "sk-proj-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)
+	masked, _ := v.Mask([]byte(real))
+	fake := string(masked)
+
+	step := chainMinEntry - 4
+	body := "data: " + cutIntoFixedRuns(fake, step) + `"}}]}`
+
+	got := v.Restore([]byte(body))
+	if !bytes.Equal(got, []byte(body)) {
+		t.Fatalf("restore rewrote a stand-in cut into %d-byte runs:\n got %q\nwant %q", step, got, body)
+	}
+	if joined := withoutEnvelope(string(got)); !strings.Contains(joined, fake) {
+		t.Errorf("expected the client to assemble the stand-in, got %q", joined)
+	}
+}
+
+// cutIntoFixedRuns is cutIntoRuns with a fixed piece size instead of a piece
+// count, so a test can drive the run length below chainMinEntry.
+func cutIntoFixedRuns(value string, step int) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i += step {
+		end := i + step
+		if end > len(value) {
+			end = len(value)
+		}
+		if i > 0 {
+			b.WriteString(streamEnvelope)
+		}
+		b.WriteString(value[i:end])
+	}
+	return b.String()
+}
