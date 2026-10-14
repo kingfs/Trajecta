@@ -2454,9 +2454,22 @@ test("the request row's latency chips sit on one wrapping line", async ({ page }
   };
 
   // Wide enough for the four chips in one row, which is the difference from the
-  // one-per-line stack they used to be.
-  await page.setViewportSize({ width: 1920, height: 900 });
-  await page.waitForTimeout(150);
+  // one-per-line stack they used to be. How wide "wide enough" is, though, is a
+  // property of the font the renderer resolved rather than of the viewport: the
+  // same four strings measure 407px in the fonts this repository is developed
+  // against and 438px in DejaVu Sans, which is what a Linux CI runner resolves
+  // the generic families to, while the column at 1920px is 426px. Pinning the
+  // viewport therefore asserted that the runner's font was not 5% wider than the
+  // developer's, and it failed on DejaVu by 13px. The viewport is grown until
+  // the measured content fits instead: a wrapping row always gets there, and a
+  // stack that is a column - the regression this test exists for - never does.
+  for (const width of [1920, 2200, 2600, 3200]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(150);
+    if ((await rows()).length === 1) {
+      break;
+    }
+  }
   expect(await rows()).toEqual([4]);
 
   // Narrower, they wrap - and still fill each row rather than falling back to a
