@@ -17,14 +17,14 @@ var positiveSamples = []struct {
 	text string
 }{
 	{RulePEMPrivateKey, "-----BEGIN RSA PRIVATE KEY-----"},
-	{RuleJWT, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"},
+	{RuleJWT, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"},
 	{RuleWebhookSecret, "whsec_" + rep("A", 43) + "="},
 
 	{RuleOpenAILegacy, "sk-" + rep("A", 20) + "T3BlbkFJ" + rep("B", 20)},
 	{RuleOpenAIProject, "sk-proj-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)},
 	{RuleOpenAIServiceAccount, "sk-svcacct-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)},
 	{RuleOpenAIAdmin, "sk-admin-" + rep("A", 58) + "T3BlbkFJ" + rep("B", 58)},
-	{RuleOpenAIEphemeralKey, "ek_" + "0123456789abcdef0123"},
+	{RuleOpenAIEphemeralKey, "ek_" + rep("0123456789abcdef", 1) + rep("0123456789abc", 1)},
 
 	{RuleAnthropicAPIKey, "sk-ant-api03-" + rep("A", 95)},
 	{RuleAnthropicAdminKey, "sk-ant-admin01-" + rep("A", 95)},
@@ -242,16 +242,16 @@ func BenchmarkScan(b *testing.B) {
 	}
 }
 
-// BenchmarkAppendSpans measures the steady-state cost when a caller reuses one
+// BenchmarkAppendFindings measures the steady-state cost when a caller reuses one
 // span buffer, which is how the proxy will drive the detector.
-func BenchmarkAppendSpans(b *testing.B) {
+func BenchmarkAppendFindings(b *testing.B) {
 	payload := benchmarkPayload()
-	dst := make([]Span, 0, 32)
+	dst := make([]Finding, 0, 32)
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		dst = Detector{}.AppendSpans(dst[:0], payload)
+		dst = Detector{}.AppendFindings(dst[:0], payload)
 	}
 }
 
