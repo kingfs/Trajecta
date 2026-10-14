@@ -1,3 +1,19 @@
+// Package secretmask finds credential-shaped values in a byte buffer and
+// replaces them with reversible stand-ins that keep the original length,
+// prefix, punctuation and per-segment alphabet.
+//
+// Detection is a Ragel-compiled DFA over the patterns in rules.rl, scored by
+// rule strength, an offline structural validator and the credential vocabulary
+// around the match; only findings at or above the maskable band are rewritten,
+// so a bare `sk-` value with nothing else to go on is reported and left alone
+// while the same value next to a variable name is replaced. A stand-in is a
+// pure function of the process seed, the rule and the real value, so one
+// credential always renders to the same stand-in, and the mapping back to the
+// real value exists only in this process's memory (Vault).
+//
+// The package is stdlib-only and never writes anything: a caller decides what
+// to do with a Finding, and Restorer reverses stand-ins as bytes flow through
+// it, including stand-ins that a provider split across several streamed deltas.
 package secretmask
 
 // Span is one credential-shaped region of a scanned buffer. Start and End are

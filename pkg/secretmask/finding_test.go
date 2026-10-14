@@ -237,11 +237,17 @@ func TestStrengthCoverage(t *testing.T) {
 			t.Errorf("rule %q has no strength", ruleTable[id].Name)
 		}
 	}
-	if counts[StrengthStrong] == 0 || counts[StrengthAnchored] == 0 || counts[StrengthGeneric] == 0 {
-		t.Errorf("unexpected strength distribution: %v", counts)
+	// The exact numbers are pinned because two documents state them and the total
+	// is part of the coverage claim. Adding a rule moves a tier here and in
+	// docs/SECRET_MASKING.md together, which is the point: silently changing how
+	// conclusive a shape is, is how a rule starts masking something it should
+	// only have reported.
+	const wantStrong, wantAnchored, wantGeneric = 35, 24, 16
+	if counts[StrengthStrong] != wantStrong || counts[StrengthAnchored] != wantAnchored || counts[StrengthGeneric] != wantGeneric {
+		t.Errorf("strength distribution: strong=%d anchored=%d generic=%d, want %d/%d/%d",
+			counts[StrengthStrong], counts[StrengthAnchored], counts[StrengthGeneric],
+			wantStrong, wantAnchored, wantGeneric)
 	}
-	t.Logf("strength distribution: strong=%d anchored=%d generic=%d",
-		counts[StrengthStrong], counts[StrengthAnchored], counts[StrengthGeneric])
 }
 
 // TestBech32Checksum checks the checksum primitive against the vectors BIP-173
@@ -265,6 +271,8 @@ func TestBech32Checksum(t *testing.T) {
 		"a12uel5l1",                          // trailing character past the checksum
 		"fi1",                                // too short to carry a checksum
 		"A12UEL5L" + strings.Repeat("q", 90), // over the BIP-173 length limit
+		"A12uel5l",                           // mixed case, which BIP-173 forbids
+		"a12UEL5L",                           // and the same mix the other way round
 	}
 	for _, v := range invalid {
 		if validateBech32([]byte(v)) {

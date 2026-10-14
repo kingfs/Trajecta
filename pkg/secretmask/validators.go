@@ -107,6 +107,21 @@ func validateBech32(tok []byte) bool {
 	if len(tok) > bech32MaxLen {
 		return false
 	}
+	// BIP-173 forbids mixing case: a string is either all lower or all upper,
+	// and the decoder folds case only after that rule is satisfied. Folding
+	// unconditionally would accept a chimera that no encoder produces.
+	var upper, lower bool
+	for _, c := range tok {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= 'a' && c <= 'z':
+			lower = true
+		}
+	}
+	if upper && lower {
+		return false
+	}
 	sep := lastIndexByte(tok, '1')
 	if sep < 1 || sep+7 > len(tok) {
 		return false

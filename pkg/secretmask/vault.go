@@ -150,7 +150,7 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 		if !f.Maskable() {
 			continue
 		}
-		if policySkipMask(&ruleTable[f.ID]) {
+		if policySkipMask(f.ID) {
 			continue
 		}
 		if alreadyFake && v.isFake(src[f.Start:f.End]) {
@@ -184,11 +184,15 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 // policySkipMask reports whether a rule's match must never be rewritten, even
 // though it is reported.
 //
-// structural.pem_private_key matches only the "-----BEGIN ... PRIVATE KEY-----"
-// line. That line carries no key material: the base64 body after it does, and
-// no rule covers that body. Rewriting the header would corrupt the file without
-// protecting anything, because the real key would still leave the machine.
-func policySkipMask(r *Rule) bool { return r.Kind == KindPrivateKey }
+// Only structural.pem_private_key is skipped, and it is named rather than
+// selected by Kind. That rule matches the "-----BEGIN ... PRIVATE KEY-----"
+// line alone: the line carries no key material, the base64 body after it does,
+// and no rule covers that body, so rewriting the header would corrupt the file
+// without protecting anything - the real key would still leave the machine.
+// Selecting by Kind used to sweep in age.private_key as well, which is a
+// complete, self-contained, checksummed secret whose whole value is the match,
+// so the BIP-173 validator was gating a rewrite that never happened.
+func policySkipMask(id RuleID) bool { return id == RulePEMPrivateKey }
 
 func (v *Vault) isFake(tok []byte) bool {
 	v.mu.RLock()
@@ -283,7 +287,7 @@ func protectedHead(r *Rule, tok []byte) int {
 		// A JWT's header names the algorithm the signature length is checked
 		// against, so it stays readable; the claims and the signature do not.
 		if i := bytes.IndexByte(tok, '.'); i >= 0 {
-			return clampHead(i+1, tok)
+			return clampHead(i+1, 0, tok)
 		}
 		return 0
 	}
@@ -299,14 +303,23 @@ func protectedHead(r *Rule, tok []byte) int {
 	if best == 0 {
 		return 0
 	}
-	return clampHead(best+r.PrefixSkip, tok)
+	return clampHead(best+r.PrefixSkip, best, tok)
 }
 
-// clampHead keeps at least half of a match replaceable. Without it a rule whose
-// declared prefix covers the whole match would render the value unchanged.
-func clampHead(head int, tok []byte) int {
-	if half := len(tok) / 2; head > half {
-		return half
+// clampHead keeps at least half of a match replaceable, so a stand-in never
+// hands the provider more than half of the value it stands in for, but it never
+// truncates a declared prefix. Those bytes are format constants - the pypi
+// macaroon header, the ConvertTo-SecureString magic - which a downstream shape
+// check matches on and which disclose nothing, since they are the same in every
+// real value. literal is the length of the declared prefix that matched, or 0
+// for a head that was inferred rather than declared.
+func clampHead(head, literal int, tok []byte) int {
+	limit := len(tok) / 2
+	if literal > limit {
+		limit = literal
+	}
+	if head > limit {
+		return limit
 	}
 	return head
 }

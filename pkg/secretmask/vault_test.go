@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -33,6 +34,20 @@ func TestFakeKeepsShapeAndLength(t *testing.T) {
 			if fake[:head] != tt.text[:head] {
 				t.Errorf("kept head %q, want %q (%q -> %q)", fake[:head], tt.text[:head], real, fake)
 			}
+			// And against the rule's own declaration, not against protectedHead:
+			// that is the function which computes head, so a head of 0 would make
+			// the comparison above pass without checking anything.
+			for _, pfx := range r.Prefixes {
+				if !strings.HasPrefix(tt.text, pfx) {
+					continue
+				}
+				if !strings.HasPrefix(fake, pfx) {
+					t.Errorf("declared prefix %q was not kept: %q -> %q", pfx, real, fake)
+				}
+				if end := len(pfx) + r.PrefixSkip; r.PrefixSkip > 0 && end <= len(real) && fake[len(pfx):end] != tt.text[len(pfx):end] {
+					t.Errorf("PrefixSkip bytes were not kept: %q -> %q", real, fake)
+				}
+			}
 			for i := range real {
 				if !isAlnumByte(real[i]) && real[i] != fake[i] {
 					t.Errorf("position %d: separator %q became %q (%q -> %q)", i, real[i], fake[i], real, fake)
@@ -58,7 +73,15 @@ func TestFakeKeepsSegmentAlphabet(t *testing.T) {
 		r := &ruleTable[id]
 		sample := sampleFor(id)
 		fake := v.fakeFor(r, []byte(sample))
-		head := protectedHead(r, []byte(sample))
+		// Start after the declared prefix, computed from the rule rather than
+		// from protectedHead, so a rule that stopped declaring its prefix would
+		// fail here instead of skipping the loop.
+		head := 0
+		for _, pfx := range r.Prefixes {
+			if strings.HasPrefix(sample, pfx) && len(pfx) > head {
+				head = len(pfx)
+			}
+		}
 		for i := head; i < len(fake); i++ {
 			c := fake[i]
 			if !isAlnumByte(c) {
@@ -601,4 +624,279 @@ func cutIntoFixedRuns(value string, step int) string {
 		b.WriteString(value[i:end])
 	}
 	return b.String()
+}
+
+// fakeOf masks one value and returns the stand-in the vault rendered for it.
+func fakeOf(t *testing.T, v *Vault, id RuleID, real string) string {
+	t.Helper()
+	masked, events := v.Mask([]byte(real))
+	if len(events) != 1 {
+		t.Fatalf("Mask(%s %q) produced %d events, want 1 (rule %s)", ruleTable[id].Name, real, len(events), ruleTable[id].Name)
+	}
+	if string(masked) == real {
+		t.Fatalf("Mask left %s unchanged: %q", ruleTable[id].Name, real)
+	}
+	return string(masked)
+}
+
+// TestMaskRewritesAnAgePrivateKey pins the rule that policySkipMask used to
+// swallow. The skip exists for the PEM header, which is matched without its
+// body; selecting it by Kind also caught age.private_key, which is a complete
+// secret with a working BIP-173 proof, so the rule was reported and never
+// rewritten.
+func TestMaskRewritesAnAgePrivateKey(t *testing.T) {
+	v := testVault()
+	real := sampleFor(RuleAgePrivateKey)
+	masked, events := v.Mask([]byte(real))
+	if len(events) != 1 {
+		t.Fatalf("Mask produced %d events for an age key, want 1", len(events))
+	}
+	if string(masked) == real {
+		t.Fatalf("the age key was not rewritten: %q", real)
+	}
+	if len(masked) != len(real) {
+		t.Fatalf("stand-in length %d, want %d", len(masked), len(real))
+	}
+	if !strings.HasPrefix(string(masked), "AGE-SECRET-KEY-1") {
+		t.Fatalf("stand-in lost the age prefix: %q", masked)
+	}
+}
+
+// TestMaskStillSkipsThePrivateKeyHeader keeps the other half of that policy: the
+// PEM header is reported, never rewritten, because the body it introduces is
+// what carries the key and no rule covers it.
+func TestMaskStillSkipsThePrivateKeyHeader(t *testing.T) {
+	v := testVault()
+	body := []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n")
+	found := v.det.Scan(body)
+	if len(found) == 0 {
+		t.Fatal("the PEM header was not detected at all")
+	}
+	masked, events := v.Mask(body)
+	if len(events) != 0 {
+		t.Errorf("the PEM header was rewritten: %d events", len(events))
+	}
+	if !bytes.Equal(masked, body) {
+		t.Errorf("Mask changed a PEM header it must leave alone")
+	}
+}
+
+// TestFakeKeepsADeclaredPrefixAtTheShortestMatch is the case the positive
+// samples miss: they are longer than MinLen, so clampHead never bound them.
+// At the shortest legal match a prefix longer than half the value used to be
+// truncated, which is exactly the shape check the invariant exists to serve.
+func TestFakeKeepsADeclaredPrefixAtTheShortestMatch(t *testing.T) {
+	v := testVault()
+	for id := RuleUnknown + 1; id < ruleIDCount; id++ {
+		r := &ruleTable[id]
+		if len(r.Prefixes) == 0 || r.MinLen == 0 {
+			continue
+		}
+		if r.Validator != "" {
+			// A validator needs a real check digit, so the shortest synthetic
+			// match would be rejected before it reached rendering. Those rules
+			// keep their prefix through the positive sample instead.
+			continue
+		}
+		for _, pfx := range r.Prefixes {
+			if len(pfx) >= r.MinLen {
+				continue
+			}
+			// Render directly rather than masking: a synthetic value that is
+			// exactly MinLen long will not satisfy a pattern that also requires
+			// a watermark or a check digit, and the defect under test is in
+			// rendering, not in detection.
+			real := pfx + strings.Repeat("a", r.MinLen-len(pfx))
+			fake := v.fakeFor(r, []byte(real))
+			if len(fake) != len(real) {
+				t.Errorf("%s: length %d, want %d", r.Name, len(fake), len(real))
+			}
+			if !strings.HasPrefix(fake, pfx) {
+				t.Errorf("%s: stand-in %q dropped the declared prefix %q (real %q)", r.Name, fake, pfx, real)
+			}
+			if fake == real {
+				t.Errorf("%s: stand-in is the real value %q", r.Name, real)
+			}
+		}
+	}
+}
+
+// TestRestorePrefersAWholeStandInOverAnOpenChain covers the gap window. Ordinary
+// text can open a chain on its own, because a stand-in keeps the rule's literal
+// prefix and eight bytes are enough to open one; a whole stand-in inside the
+// window that followed must still be restored rather than stepped over as
+// envelope and handed to the client as a stand-in.
+func TestRestorePrefersAWholeStandInOverAnOpenChain(t *testing.T) {
+	v := testVault()
+	fakeA := fakeOf(t, v, RuleOpenAIProject, sampleFor(RuleOpenAIProject))
+	realB := sampleFor(RuleGoogleAPIKey)
+	fakeB := fakeOf(t, v, RuleGoogleAPIKey, realB)
+
+	body := fakeA[:8] + strings.Repeat("x", 20) + fakeB + strings.Repeat("x", 400)
+	// The control shows the fixture is sound: without the chain opener the value
+	// is restored, so a failure below is about the open chain and nothing else.
+	if control := v.Restore([]byte(fakeB)); !bytes.Contains(control, []byte(realB)) {
+		t.Fatalf("control failed: a lone stand-in was not restored")
+	}
+	got := v.Restore([]byte(body))
+	if !bytes.Contains(got, []byte(realB)) {
+		t.Errorf("a whole stand-in inside an open chain's gap was not restored\nbody=%q\ngot =%q", body, got)
+	}
+	if bytes.Contains(got, []byte(fakeB)) {
+		t.Errorf("the stand-in reached the client unrestored\nbody=%q\ngot =%q", body, got)
+	}
+	if len(got) != len(body) {
+		t.Errorf("restore changed the length %d -> %d", len(body), len(got))
+	}
+}
+
+// TestRestoreStreamsAWholeStandInInsideAnOpenChain is the same case through the
+// path the proxy actually uses, at several chunk sizes.
+func TestRestoreStreamsAWholeStandInInsideAnOpenChain(t *testing.T) {
+	v := testVault()
+	fakeA := fakeOf(t, v, RuleOpenAIProject, sampleFor(RuleOpenAIProject))
+	realB := sampleFor(RuleGoogleAPIKey)
+	fakeB := fakeOf(t, v, RuleGoogleAPIKey, realB)
+	body := []byte(fakeA[:8] + strings.Repeat("x", 20) + fakeB + strings.Repeat("x", 400))
+
+	for _, chunk := range []int{1, 3, 8, 17, 64, 512} {
+		t.Run(fmt.Sprintf("chunk%d", chunk), func(t *testing.T) {
+			r := NewRestorer(&chunkReader{data: append([]byte(nil), body...), n: chunk}, v)
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if !bytes.Contains(got, []byte(realB)) {
+				t.Errorf("chunk %d: stand-in not restored\ngot =%q", chunk, got)
+			}
+			if bytes.Contains(got, []byte(fakeB)) {
+				t.Errorf("chunk %d: stand-in reached the client\ngot =%q", chunk, got)
+			}
+		})
+	}
+}
+
+// TestRestoreDoesNotSpliceTwoOccurrencesOfOneStandIn covers a truncated copy
+// followed by a complete one. The chain used to accept the second copy's head as
+// its own continuation - the run does match at the offset it expects next - and
+// then rewrote both halves, leaving a value that was neither the real value nor
+// the stand-in. A whole stand-in outranking the chain is what prevents it.
+func TestRestoreDoesNotSpliceTwoOccurrencesOfOneStandIn(t *testing.T) {
+	v := testVault()
+	realA := sampleFor(RuleOpenAIProject)
+	fakeA := fakeOf(t, v, RuleOpenAIProject, realA)
+
+	body := []byte(fakeA[:70] + `"}}]}` + fakeA)
+	got := v.Restore(body)
+	if !bytes.Contains(got, []byte(realA)) {
+		t.Errorf("the complete copy was not restored whole\nbody=%q\ngot =%q", body, got)
+	}
+	if bytes.Contains(got, []byte(fakeA)) {
+		t.Errorf("a complete stand-in survived the restore\nbody=%q\ngot =%q", body, got)
+	}
+	if got[0] != fakeA[0] {
+		t.Errorf("the incomplete first run was rewritten even though it never completed")
+	}
+}
+
+// TestRestoreAgreesWithWholeBodyScan is a differential test: the streaming
+// restorer has to produce exactly what the whole-body scan produces, for every
+// chunking. A disagreement is bytes dropped, duplicated, rewritten twice, or one
+// path preferring a different interpretation of an ambiguous buffer.
+func TestRestoreAgreesWithWholeBodyScan(t *testing.T) {
+	v := testVault()
+	fakeA := fakeOf(t, v, RuleOpenAIProject, sampleFor(RuleOpenAIProject))
+	fakeB := fakeOf(t, v, RuleGoogleAPIKey, sampleFor(RuleGoogleAPIKey))
+	pieces := []string{
+		fakeA, fakeB,
+		fakeA[:8], fakeA[:20], fakeA[:70], fakeA[3:40], fakeA[:len(fakeA)-1],
+		fakeB[:4], fakeB[:15], fakeB[:len(fakeB)-1],
+		`"}}]}`, "\n\ndata: ", `{"delta":{"content":"`, "orange fox", "xxxxxx",
+	}
+	rng := uint64(0x5eed)
+	next := func(n int) int {
+		rng ^= rng << 13
+		rng ^= rng >> 7
+		rng ^= rng << 17
+		return int(rng % uint64(n))
+	}
+	for iter := 0; iter < 300; iter++ {
+		var b strings.Builder
+		for n := next(12); n > 0; n-- {
+			b.WriteString(pieces[next(len(pieces))])
+		}
+		body := []byte(b.String())
+		want := v.Restore(body)
+		if len(want) != len(body) {
+			t.Fatalf("iter %d: Restore changed the length %d -> %d", iter, len(body), len(want))
+		}
+		for _, chunk := range []int{1, 2, 3, 5, 7, 13, 64, 257} {
+			r := NewRestorer(&chunkReader{data: append([]byte(nil), body...), n: chunk}, v)
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("iter %d chunk %d: %v", iter, chunk, err)
+			}
+			if len(got) != len(body) {
+				t.Fatalf("iter %d chunk %d: stream length %d, want %d\nbody=%q\ngot =%q",
+					iter, chunk, len(got), len(body), body, got)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("iter %d chunk %d: stream disagrees with Restore\nbody=%q\nwant=%q\ngot =%q",
+					iter, chunk, body, want, got)
+			}
+		}
+	}
+}
+
+// TestRestoreReleasesAChainPastTheGapLimit drives the gap past chainMaxGap and
+// requires the withheld bytes to come out untouched, which is the all-or-nothing
+// rule at the point where the chain gives up.
+func TestRestoreReleasesAChainPastTheGapLimit(t *testing.T) {
+	v := testVault()
+	fakeA := fakeOf(t, v, RuleOpenAIProject, sampleFor(RuleOpenAIProject))
+	gap := strings.Repeat("x", chainMaxGap+64)
+	body := []byte(fakeA[:8] + gap)
+	got := v.Restore(body)
+	if !bytes.Equal(got, body) {
+		t.Errorf("a chain the gap limit abandoned was rewritten\nwant=%q\ngot =%q", body, got)
+	}
+	if len(got) != len(body) {
+		t.Errorf("length changed %d -> %d", len(body), len(got))
+	}
+}
+
+// TestVaultIsSafeForConcurrentMaskAndRestore is the test that would have caught
+// the unguarded streaming reader. One process-wide Vault serves every request,
+// so a response being restored while another request masks is the normal case;
+// run under -race, which is how the suite runs it.
+func TestVaultIsSafeForConcurrentMaskAndRestore(t *testing.T) {
+	v := testVault()
+	body := realisticBody()
+	parts := realSecrets()
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < 40; i++ {
+				switch (worker + i) % 3 {
+				case 0:
+					v.Mask([]byte(body))
+				case 1:
+					v.Restore([]byte(body))
+				default:
+					r := NewRestorer(&chunkReader{data: []byte(body), n: 64}, v)
+					if _, err := io.Copy(io.Discard, r); err != nil {
+						t.Errorf("worker %d: %v", worker, err)
+						return
+					}
+				}
+				// Keep the vault growing while the readers run, so the maps are
+				// written rather than only read.
+				v.Mask([]byte(parts[(worker+i)%len(parts)]))
+			}
+		}(worker)
+	}
+	wg.Wait()
 }

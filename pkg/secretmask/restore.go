@@ -122,6 +122,14 @@ func (v *Vault) RestoreInPlace(buf []byte, from int) int {
 // input before it can be judged. Withholding starts at the first run of an open
 // chain, so the bytes between that run and the cursor are held too and are
 // released untouched once the chain is abandoned.
+//
+// The caller must hold v.mu for reading. This function and its helpers read the
+// vault's maps directly and take no lock of their own, because the whole-body
+// entry points already hold one and an RWMutex is not reentrant; the streaming
+// Restorer takes the read lock around each call instead. One process-wide Vault
+// serves every request, so a response being restored while another request masks
+// is the normal case, and an unguarded map read there is a fatal error rather
+// than a stale value.
 func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 	replaced := 0
 	i := st.cursor
@@ -133,6 +141,33 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 	}
 	for i < len(buf) {
 		if st.frag != nil {
+			// A whole stand-in outranks an open chain, and this check has to come
+			// first: the chain has no claim on bytes that already spell one.
+			// Stepping over them as envelope is how a stand-in that the provider
+			// repeated inside the gap used to reach the client unrestored, and
+			// accepting them as the chain's own continuation - which is what
+			// happens when a truncated copy is followed by a complete one, since
+			// the run matches at the offset the chain expects next - is how two
+			// occurrences used to be spliced into one chimera, half real value
+			// and half stand-in. The chain is dropped rather than kept pending,
+			// which releases its bytes exactly as they are, so the all-or-nothing
+			// rule still holds: nothing of it was rewritten before it completed.
+			if full, n := v.completeAt(buf, i); full != nil {
+				copy(buf[i:i+n], v.byFake[full.text])
+				st.frag = nil
+				i += n
+				replaced++
+				continue
+			}
+			// The byte could still turn out to begin a stand-in, but the stream
+			// has not delivered enough of it to tell. Consuming it as envelope
+			// now would answer a question the stream has not answered, and the
+			// scan never revisits a byte, so the stand-in would be lost. Wait for
+			// more input instead; the chain stays open and its bytes stay held.
+			if v.undecidedAt(buf, i) {
+				st.cursor = i
+				return st.frag.start, replaced
+			}
 			next, outcome := v.feedFragment(buf, i, st)
 			switch outcome {
 			case fragmentWaiting:
@@ -233,6 +268,66 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 	return len(buf), replaced
 }
 
+// completeAt returns the longest whole stand-in that begins at buf[off], or nil,
+// along with its length. Buckets are ordered longest first, so the first match
+// is also the longest.
+//
+// This is the cold-path counterpart of the candidate loop in restoreScan, which
+// is inlined there because it runs once per byte of every response; this one is
+// reached only while a chain is open, and only for a byte that could begin a
+// stand-in at all. The two must agree on what counts as a match, so a change to
+// that rule belongs in both.
+func (v *Vault) completeAt(buf []byte, off int) (*fakeEntry, int) {
+	if off >= len(buf) || !v.firstFit[buf[off]] {
+		return nil, 0
+	}
+	entries := v.index[buf[off]]
+	avail := len(buf) - off
+	for idx := range entries {
+		cand := &entries[idx]
+		n := len(cand.raw)
+		if n > avail {
+			continue
+		}
+		if bytesEqual(buf[off:off+n], cand.raw) {
+			return cand, n
+		}
+	}
+	return nil, 0
+}
+
+// undecidedAt reports whether buf[off:] could still turn out to be the head of a
+// stand-in, because the buffer ends inside a candidate rather than before one.
+//
+// It is consulted only while a chain is open, where a byte that is not this
+// chain's continuation has to be classified before it can be stepped over. A
+// candidate that fits entirely in the buffer and did not match is decided - that
+// is what completeAt just established - so only a candidate longer than what is
+// left can still be undecided.
+func (v *Vault) undecidedAt(buf []byte, off int) bool {
+	if off >= len(buf) || !v.firstFit[buf[off]] {
+		return false
+	}
+	avail := len(buf) - off
+	if avail >= v.fakeLen {
+		// Every stand-in in the vault fits inside what is left, and completeAt
+		// has already ruled all of them out for this position, so no candidate
+		// can still be waiting on more input. This is the whole-body case, where
+		// the buffer holds the entire response.
+		return false
+	}
+	for idx := range v.index[buf[off]] {
+		cand := &v.index[buf[off]][idx]
+		if len(cand.raw) <= avail {
+			continue
+		}
+		if commonPrefix(buf[off:], cand.raw) == avail {
+			return true
+		}
+	}
+	return false
+}
+
 // fragmentOutcome is what feeding one position to an open chain produced.
 type fragmentOutcome int
 
@@ -310,8 +405,11 @@ func bytesEqual(a, b []byte) bool {
 // that never masked anything settles every byte as it arrives, so an untouched
 // stream is not delayed at all.
 //
-// A Restorer is not safe for concurrent use. It is not an io.Closer; wrap a
-// body with NewRestorer and close the body underneath it.
+// A Restorer is not safe for concurrent use, but the Vault it reads from is: the
+// restorer takes the vault's read lock around each scan, so several responses
+// can be restored while other requests render and record new stand-ins. It is
+// not an io.Closer; wrap a body with NewRestorer and close the body underneath
+// it.
 type Restorer struct {
 	src      io.Reader
 	v        *Vault
@@ -384,7 +482,12 @@ func (r *Restorer) Read(p []byte) (int, error) {
 		n, err := r.src.Read(r.chunk)
 		if n > 0 {
 			r.buf = append(r.buf, r.chunk[:n]...)
+			// The lock is taken per scan rather than held across the read: the
+			// scan touches the vault's maps, the read above does not, and holding
+			// it over the network would stall every request that wants to mask.
+			r.v.mu.RLock()
 			settled, replaced := r.v.restoreScan(r.buf, &r.st)
+			r.v.mu.RUnlock()
 			r.settled = settled
 			r.restored += replaced
 		}
