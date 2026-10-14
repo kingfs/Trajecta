@@ -39,6 +39,7 @@
 | `task auth:init-user` | `go run ./cmd/server auth init-user -c {{.CONFIG}} --username "$USER" --password "$PASSWORD"` |
 | `task auth:create-token` | `go run ./cmd/server auth create-token -c {{.CONFIG}} --username "$USER" --name "$NAME"` |
 | `task generate:ent` | `go generate ./ent/...` |
+| `task generate:secretmask` | `go generate ./pkg/secretmask/...`，即 `ragel-go -G2 -o rules_ragel.go rules.rl` + `gofmt`；需要 `ragel-go` 二进制 |
 | `task migrate:ent:sqlite NAME=x` | `ent/migrate/main.go --dialect sqlite --dir ent/migrations` + `update_hash.go`；Postgres 版为 `migrate:ent:postgres NAME=x DEV_URL=...`，写 `ent/postgres-migrations`；两个方向的完整生成流程与提交要求见 [Ent Migration Workflow](../ent/migrate/README.md) |
 | `task docker:build` / `docker:up` | `scripts/docker-build-env.sh` + `docker build -t trajecta:local .`；`docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d` |
 | `task clean` | `rm -f {{.SERVER_BIN}} {{.CLI_BIN}}`，即删除 `server` 与 `trajecta` 两个产物 |
@@ -125,6 +126,7 @@ task build:go
 - Go：`task deps:verify` 只校验不改文件（`go mod verify` + `go list -mod=readonly ./...`）；只有依赖确实变化时才用 `task deps:tidy`（会改写 `go.mod` / `go.sum`）。`go.mod` 声明 `go 1.25.0`。
 - 前端：依赖锁定在 `web/monitor-ui/bun.lock`，task 与 CI 都使用 `bun install --frozen-lockfile`。
 - ent 代码生成：`task generate:ent` 重新生成 `ent` 控制面 DAO；新增 SQLite / Postgres migration 分别用 `task migrate:ent:sqlite NAME=...` 和 `task migrate:ent:postgres NAME=... DEV_URL=...`。
+- 凭据 DFA 代码生成：`task generate:secretmask` 从 `pkg/secretmask/rules.rl` 重新生成 `pkg/secretmask/rules_ragel.go`。**需要 `ragel-go` 二进制**：通用 `ragel` 对这台机器输出 C，两者不可互换。生成文件已提交，因此常规构建、测试与 `task check:full` 都不需要它；只有改规则时才要装，并须同时改 `rules.rl`（模式）与 `rule.go`（元数据），把生成文件一起提交，不要手工编辑生成文件。
 
 ## 数据库与认证初始化
 
