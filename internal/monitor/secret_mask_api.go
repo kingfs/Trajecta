@@ -19,9 +19,14 @@ import (
 // are original_value and stand_in_value; the view shortens them and always
 // carries storage_mode, so a reader can tell an encrypted value from a
 // plaintext one without asking the configuration endpoint.
+//
+// event_index is the replacement's ordinal within the exchange that wrote it,
+// which is the only stable ordering the replacements of one trace have: the
+// table's own ORDER BY is by detection time and then by a random uuid.
 type credentialMaskAuditView struct {
 	ID          string    `json:"id"`
 	TraceID     string    `json:"trace_id"`
+	EventIndex  int       `json:"event_index"`
 	Rule        string    `json:"rule"`
 	Vendor      string    `json:"vendor"`
 	Kind        string    `json:"kind"`
@@ -51,6 +56,7 @@ func credentialMaskAuditViewOf(item store.CredentialMaskAudit) credentialMaskAud
 	return credentialMaskAuditView{
 		ID:          item.ID,
 		TraceID:     item.TraceID,
+		EventIndex:  item.EventIndex,
 		Rule:        item.Rule,
 		Vendor:      item.Vendor,
 		Kind:        item.Kind,

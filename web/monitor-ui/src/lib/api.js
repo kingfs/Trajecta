@@ -21,6 +21,10 @@ export const apiPaths = {
   eventIgnore: (eventID) => `/api/events/${encodeURIComponent(eventID)}/ignore`,
   traces: "/api/traces",
   findings: "/api/findings",
+  // The credential-masking audit table. It is the only read that returns the
+  // masked value next to the stand-in that replaced it; the event feed
+  // deliberately carries neither.
+  secretMasks: "/api/secret-masks",
   responsesAuditTrace: "/api/responses/audit/trace",
   responsesFunctionExecutors: "/api/responses/function-executors",
   analysis: "/api/analysis",

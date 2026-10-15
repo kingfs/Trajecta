@@ -7,6 +7,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { TabStrip, Tabs, TabsContent } from "../components/common/Tabs";
 import { TraceConversation } from "../components/monitor/TraceConversation";
+import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -361,14 +362,17 @@ export function TraceDetailPage() {
           </TabsContent>
 
           <TabsContent value="audit">
-            <AuditPanel
-              findings={findings}
-              observation={observation.data}
-              onOpenAnchor={openConversationAnchor}
-              InlineTag={InlineTag}
-              CodeBlock={CodeBlock}
-              t={t}
-            />
+            <div className="audit-tab">
+              <CredentialMaskSection traceID={traceID} t={t} InlineTag={InlineTag} />
+              <AuditPanel
+                findings={findings}
+                observation={observation.data}
+                onOpenAnchor={openConversationAnchor}
+                InlineTag={InlineTag}
+                CodeBlock={CodeBlock}
+                t={t}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="request">
@@ -889,6 +893,10 @@ function TraceMessagesFallback({ detail, raw, renderMarkdown, onRenderMarkdownCh
  * observation nodes are already loaded on this page, so the node the finding
  * names is resolved to the same words the conversation uses ("#160 · tool call ·
  * exec_command") and the row opens the conversation at that step.
+ *
+ * It is the second card of the audit tab now: the credential replacements sit
+ * above it, because "these bytes left the machine" is a fact about the request
+ * while a finding is a detector's reading of it.
  */
 function AuditPanel({ findings, observation, onOpenAnchor, InlineTag, CodeBlock, t }) {
   if (findings.error) {

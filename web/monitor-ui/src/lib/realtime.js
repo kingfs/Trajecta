@@ -32,6 +32,10 @@ export const REALTIME_TOPIC_PREFIXES = {
     "/api/sessions",
     "/api/overview",
     "/api/findings",
+    // The masked-credential pairs are written in the same finalize step that
+    // indexes the trace, so a screen showing them is exactly as stale as the
+    // traffic lists and belongs on the same topic.
+    "/api/secret-masks",
     "/api/analysis",
     "/api/routing",
     "/api/upstreams",

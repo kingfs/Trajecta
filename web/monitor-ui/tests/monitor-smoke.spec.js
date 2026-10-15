@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+// The pair the credential-masking audit table holds for the fixtures below: a
+// 132-character project key as the client sent it, and the same-length stand-in
+// the upstream received. Both are built rather than written out so the file
+// carries no credential-shaped literal, and the two ends differ everywhere they
+// can, which is the property the screens have to show.
+const MASK_ORIGINAL = `sk-proj-${"a".repeat(60)}T3BlbkFJ${"b".repeat(56)}`;
+const MASK_STAND_IN = `sk-proj-${"s".repeat(60)}T3BlbkFJ${"c".repeat(56)}`;
+
 test.beforeEach(async ({ page }) => {
   // The Monitor UI defaults to Chinese when no language is persisted, while
   // this smoke suite asserts English labels. Pin the language for every test.
@@ -205,6 +213,17 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/findings") {
       return route.fulfill({ json: parsedFindingsPayload() });
+    }
+    if (path === "/api/secret-masks") {
+      // Both callers narrow the read by trace; the events page adds the rule the
+      // notification named. Anything else would return rows from another
+      // request, which is the bug this endpoint's filters exist to prevent.
+      expect(url.searchParams.get("trace_id")).toBe("trace-parsed");
+      const rule = url.searchParams.get("rule");
+      if (rule !== null) {
+        expect(rule).toBe("openai.project_key");
+      }
+      return route.fulfill({ json: credentialMaskPayload() });
     }
     if (path === "/api/responses/audit/trace") {
       expect(["resp_123", "resp 123/encoded"]).toContain(url.searchParams.get("response_id"));
@@ -421,7 +440,10 @@ test("the conversation renders the parsed steps instead of the flat messages", a
 // opens it there.
 test("an audit finding opens the conversation at the step it names", async ({ page }) => {
   await page.goto("/traces/trace-parsed?tab=audit");
-  const finding = page.locator(".finding-card");
+  // The audit tab's other card lists the credentials this request replaced, and
+  // a replacement row shares the finding card's styling. The finding this test
+  // drives is the one in the findings list.
+  const finding = page.locator(".finding-list .finding-card");
   await expect(finding).toContainText("Attempt to read a credential file");
   const open = finding.getByRole("button", { name: /Open the conversation at this step/ });
   await expect(open).toContainText("$.input[4] · tool result · tool");
@@ -444,6 +466,39 @@ test("an audit finding opens the conversation at the step it names", async ({ pa
       { message: "the step settles inside the viewport, below the sticky topbar" },
     )
     .toBe(true);
+});
+
+// The notification says a key was replaced; the request's audit tab says by
+// what. The pair only exists in the audit table, because the event feed and the
+// cassette prelude both carry no credential bytes, so this is the read that has
+// to reach the two screens a reader actually visits.
+test("the audit tab lists the credentials replaced in a request", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?tab=audit");
+
+  await expect(page.getByRole("heading", { name: "Credential masking" })).toBeVisible();
+  const row = page.locator(".credential-mask-card");
+  await expect(row).toContainText("openai.project_key");
+  await expect(row).toContainText("offset 148");
+  // Both ends in full, and visibly different: the reader is here to confirm
+  // which value was swapped for which.
+  await expect(row.getByText(MASK_ORIGINAL, { exact: true })).toBeVisible();
+  await expect(row.getByText(MASK_STAND_IN, { exact: true })).toBeVisible();
+
+  // The findings card is still on the tab, below the replacements.
+  await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
+});
+
+// The inbox half: the notification names a rule and a trace, and the detail
+// panel answers it without leaving the page. Its trace link lands on the audit
+// tab, which is where that answer lives.
+test("a credential-masked event shows the pair it points at", async ({ page }) => {
+  await page.goto("/events");
+  await page.getByRole("button", { name: /credential masked/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Replaced credential" })).toBeVisible();
+  await expect(page.getByText(MASK_ORIGINAL, { exact: true })).toBeVisible();
+  await expect(page.getByText(MASK_STAND_IN, { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Trace" })).toHaveAttribute("href", /tab=audit/);
 });
 
 // The same anchor travels in the URL, so a finding can be shared as a link - in
@@ -954,6 +1009,66 @@ function eventListPayload() {
       created_at: new Date(Date.now() - 60_000).toISOString(),
       updated_at: new Date().toISOString(),
       details_json: { job_id: 101 },
+    }, {
+      // The masking notification, which carries no credential bytes: only the
+      // rule, the offsets, the length and the trace. The pair it points at comes
+      // from GET /api/secret-masks.
+      id: "event-masked-1",
+      fingerprint: "secretmask:rule:openai.project_key",
+      source: "secretmask",
+      category: "credential_masked",
+      severity: "warning",
+      status: "unread",
+      title: "credential masked",
+      message: "1 credential matched openai.project_key and was replaced before forwarding",
+      trace_id: "trace-parsed",
+      occurrence_count: 4,
+      first_seen_at: new Date(Date.now() - 60_000).toISOString(),
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      updated_at: new Date().toISOString(),
+      details_json: {
+        rule: "openai.project_key",
+        vendor: "OpenAI",
+        kind: "api_key",
+        confidence: "high",
+        score: 100,
+        length: MASK_ORIGINAL.length,
+        offset: 148,
+        trace_id: "trace-parsed",
+      },
+    }],
+  };
+}
+
+// One replacement: the value the client sent, the stand-in that left the
+// machine, and the offsets that say where in the body it was. The two ends are
+// the whole point of the endpoint, so the fixture keeps them distinct and the
+// same length.
+function credentialMaskPayload() {
+  return {
+    page: 1,
+    page_size: 50,
+    total: 1,
+    total_pages: 1,
+    storage_mode: "encrypted-local",
+    items: [{
+      id: "mask-1",
+      trace_id: "trace-parsed",
+      event_index: 0,
+      rule: "openai.project_key",
+      vendor: "OpenAI",
+      kind: "api_key",
+      confidence: "high",
+      score: 100,
+      reasons: "strong_shape,context",
+      start: 148,
+      end: 148 + MASK_ORIGINAL.length,
+      value_length: MASK_ORIGINAL.length,
+      original: MASK_ORIGINAL,
+      stand_in: MASK_STAND_IN,
+      storage_mode: "encrypted-local",
+      detected_at: "2026-06-22T08:00:01Z",
     }],
   };
 }

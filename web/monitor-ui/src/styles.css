@@ -327,8 +327,69 @@
   gap: 16px;
 }
 
+/* The audit tab stacks the request's own fact (which bytes were replaced) above
+   the detectors' findings, so the two cards need the same gap the panels use. */
+.audit-tab {
+  display: grid;
+  gap: 16px;
+}
+
+/* One replaced credential: the label says which direction each value travelled,
+   and both are printed in full because the reader is here to confirm them. */
+.credential-mask-pair {
+  display: grid;
+  gap: 10px;
+}
+
+.credential-mask-value {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.credential-mask-label {
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+}
+
+.credential-mask-code {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  /* A 132-character key must wrap instead of widening the card. */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.credential-mask-missing {
+  color: var(--muted);
+  font-size: var(--text-label);
+}
+
+.credential-mask-foot {
+  gap: 8px;
+}
+
+.credential-mask-event {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.credential-mask-event-head h3 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+}
+
 .semantic-tree,
-.finding-list {
+.finding-list,
+.credential-mask-list {
   display: grid;
   gap: 12px;
 }

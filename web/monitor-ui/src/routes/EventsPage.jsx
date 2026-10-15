@@ -8,6 +8,8 @@ import { EmptyState } from "../components/common/EmptyState";
 import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { StatCard } from "../components/common/Display";
+import { CredentialMaskEventSection } from "../components/monitor/CredentialMasks";
+import { isCredentialMaskedEvent } from "../lib/credentialMasks";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
@@ -18,7 +20,7 @@ import { buildTraceLink, formatDateTime, formatFailureReason, setOrDeleteParam }
 const DEFAULT_EVENT_WINDOW = "all";
 const STATUS_OPTIONS = ["unread", "read", "resolved", "ignored", "all"];
 const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
-const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp"];
+const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp", "secretmask"];
 
 export function EventsPage() {
   const refresh = useRefresh();
@@ -155,6 +157,12 @@ export function EventsPage() {
 
 function EventDetail({ event, busyID, onAction }) {
   const { t } = useI18n();
+  // A credential_masked notice is the one event whose answer lives in the
+  // trace's audit tab rather than in the protocol view: the replacement pair is
+  // an audit row, not a recorded message. Every other event keeps the default
+  // landing, where its own protocol evidence is.
+  const traceTab = isCredentialMaskedEvent(event) ? "audit" : "protocol";
+  const traceLink = event.trace_id ? buildTraceLink(event.trace_id, "events", event.session_id || "", traceTab, "observation") : "";
   return (
     <div className="event-detail">
       <div className="panel-head event-detail-head">
@@ -174,7 +182,7 @@ function EventDetail({ event, busyID, onAction }) {
         <Meta label="fingerprint" value={event.fingerprint} mono />
       </div>
       <div className="trace-tag-group event-links">
-        {event.trace_id ? <Button asChild variant="ghost" to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}><Link to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}>{t("events.trace")}</Link></Button> : null}
+        {traceLink ? <Button asChild variant="ghost" to={traceLink}><Link to={traceLink}>{t("events.trace")}</Link></Button> : null}
         {event.session_id ? <Button asChild variant="ghost" to={`/sessions/${encodeURIComponent(event.session_id)}`}><Link to={`/sessions/${encodeURIComponent(event.session_id)}`}>{t("events.session")}</Link></Button> : null}
         {event.upstream_id ? <Button asChild variant="ghost" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}><Link to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>{t("events.upstream")}</Link></Button> : null}
       </div>
@@ -183,6 +191,7 @@ function EventDetail({ event, busyID, onAction }) {
         <Button variant="ghost" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</Button>
         <Button variant="ghost" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{t("events.ignore")}</Button>
       </div>
+      {isCredentialMaskedEvent(event) ? <CredentialMaskEventSection event={event} t={t} InlineTag={InlineTag} /> : null}
       <pre className="code-block event-details-json">{formatJSON(event.details_json)}</pre>
     </div>
   );
@@ -206,6 +215,7 @@ function formatEventOption(option, t, language) {
     error: t("events.error"),
     warning: t("events.warning"),
     info: "信息",
+    secretmask: t("masks.source"),
   };
   return map[option] || option;
 }

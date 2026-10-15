@@ -106,14 +106,14 @@ session ID 的抽取顺序为：
 
 Trajecta 自身的事件收件箱：
 
-- 来源：代码当前只发出 `parser`、`analyzer`、`router`、`upstream` 四种来源；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
+- 来源：代码当前只发出 `parser`、`analyzer`、`router`、`upstream` 四种来源；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`、`secretmask`，即过滤项比实际发出的来源更宽。
 - 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
 
 支持按状态、级别、来源过滤和搜索 fingerprint / trace / model / 消息，支持单条标记已读、解决、忽略，以及「全部标为已读」。重复事件按 fingerprint 合并。导航上的未读角标由 `GET /api/events/summary` 与 SSE `GET /api/events/stream` 驱动。
 
-`credential_masked`（`source: secretmask`）是代理把请求里的凭据换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)）。
+`credential_masked`（`source: secretmask`）是代理把请求里的凭据换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)），事件详情面板会就地列出该规则的替换对（原始值与替换值各一行、完整打印，并带偏移、长度、置信度与落盘形态），因此不必离开事件页去确认；详情里的「追踪」链接指向该 trace 的「审计」标签页而不是默认的协议页，因为替换对属于审计面。其他事件保持默认落点。
 
 #### 质量 `/audit`
 
@@ -182,7 +182,7 @@ Trajecta 自身的事件收件箱：
 
 Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET /api/events/ws`），页面告诉服务端自己正在显示哪些主题，服务端在某主题的数据变化时推一条只带主题名的消息，浏览器据此只重新获取自己注册在这个主题下的请求：
 
-- `traffic`：有请求被索引、解析或重分析——trace / 会话列表、概览聚合、发现项、分析队列、路由与上游视图都归它；
+- `traffic`：有请求被索引、解析或重分析——trace / 会话列表、概览聚合、发现项、凭据替换对（`GET /api/secret-masks` 与 trace 索引在同一收尾步骤写入）、分析队列、路由与上游视图都归它；
 - `events`：运行时事件收据变化（侧边栏未读角标与事件页）；
 - `system`：主机、进程与数据库采样到期，这是唯一真正周期性的读数，由服务端定时器产生，且只在有标签页停在系统页时采样，多个标签页共用一份。
 
@@ -231,7 +231,7 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 
 - 会话：由 Observation IR 渲染出的对话。顶层节点（`depth: 0`）各是一张卡片、按 payload 顺序排列；卡片内部的整棵子树都会被读进去——消息里的文本成为正文，工具调用成为卡片内的一个调用块（名称、`call_id`、参数），应答它的工具结果并进同一个调用块（按 `call_id` 配对），因此 OpenAI Chat 那种「调用写在 assistant 消息里」的记录也能正确显示，而不是显示成空卡片或原始 JSON。响应侧的两层嵌套（`$.choices[0]` → `.message` → `.content`）同样会被展开，卡片角色取自其中第一条带 role 的节点。失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。
 - 协议：Observation IR 的语义节点、归一化类型、JSON 路径与原始 payload。
-- 审计：确定性 findings；每一项给出可读的定位（`$.input[4] · tool result · tool`）并可直接跳到会话中对应的那一步。
+- 审计：这条请求被替换的凭据（`GET /api/secret-masks?trace_id=`，真值与发往上游的假值成对列出，带偏移、长度、置信度与落盘形态），下面是确定性 findings；每一项给出可读的定位（`$.input[4] · tool result · tool`）并可直接跳到会话中对应的那一步。替换对排在发现项之上，因为「哪些字节离开了这台机器」是请求自身的事实，而 finding 是检测器的判断。没有命中凭据规则时该卡片显示空状态，不会因此隐藏 findings。
 - 请求信息：已选路由目标、路由决策、上游健康、请求工具与延迟/TTFT/Token 吞吐/缓存比例等本次请求自身的事实。
 - 原始数据：原始 HTTP 请求/响应字节与 headers，以及统一事件时间线。
 
