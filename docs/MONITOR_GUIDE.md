@@ -25,9 +25,13 @@ Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签�
 
 ## 个人 API token
 
-「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、scope、status、created、expires、last_used；TTL 只是创建表单的输入项（`ttl`），列表与 API 都不返回、也不显示 TTL。token 只在创建时显示一次，之后只保留 prefix。
+「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、scope、status、created、expires、last_used。
 
-个人 token 的用途：
+创建不是一个常驻卡片，而是列表页头部的按钮：点击后弹出对话框（`TokensPanel` 的 `CreateTokenDialog`）。表单只有两项——名称，以及**到期时间**（`datetime-local` 选择器）。到期时间默认为空，代表永不过期；填了就必须晚于当前时间，对话框把它换算成 API 接受的 `ttl` 时长（`<秒数>s`）再提交，`ttl` 本身不出现在表单和列表里。`scope` 只有 `api` 一个取值，因此表单不再提供这一项，创建时固定写 `api`，列表仍显示它。创建成功后表单原位换成 token 明文：令牌只显示这一次，对话框保持打开，明文右侧是复制按钮。取消、关闭或点「完成」后原文不可再取，只保留 prefix。
+
+复制按钮先用异步 Clipboard API，失败或该 API 不存在（例如 Monitor 通过纯 HTTP 的局域网地址访问时就不是安全上下文）时退回 `document.execCommand("copy")`；两条路都失败会提示手动复制，明文本身用 `user-select: all`，单击即整段选中，因此手工 Ctrl+C 始终可行（`web/monitor-ui/src/lib/clipboard.js`）。
+
+新签发的 token 形如 `sk-<base64url>`，与 OpenAI 的凭据形状一致；校验只看数据库里的 SHA-256 哈希，不看前缀，因此重命名之前签发的 `llmtl_` token 继续可用。个人 token 的用途：
 
 - 代理 API：`Authorization: Bearer <token>`，proxy 的每个请求都要通过该 token 鉴权。
 - MCP：`Authorization: Bearer <token>`。

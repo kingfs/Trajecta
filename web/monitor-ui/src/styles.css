@@ -83,20 +83,17 @@
   font-family: var(--font-sans);
 }
 
-.token-panel {
-  display: grid;
-  gap: 18px;
-}
-
 .token-summary-grid {
   margin-bottom: 20px;
 }
 
-.token-form {
+.token-create-modal {
+  width: min(520px, 100%);
+}
+
+.token-create-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.8fr) 44px;
-  align-items: end;
-  gap: 12px;
+  gap: 14px;
 }
 
 .token-field {
@@ -107,20 +104,12 @@
   color: var(--muted);
 }
 
-.token-form input {
-  min-height: 44px;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  padding: 0 12px;
-  background: var(--surface-inset);
-  color: var(--text);
-}
-
-.token-create-button {
-  width: 44px;
-  height: 44px;
+.token-field-hint {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 
 .token-result {
@@ -132,21 +121,44 @@
   background: var(--surface-2);
 }
 
-.token-result span {
+.token-result > span {
   font-family: var(--font-sans);
   color: var(--muted);
-}
-
-.token-result code {
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: 0.86rem;
 }
 
 .token-result small {
   color: var(--muted);
   line-height: 1.45;
   font-family: var(--font-sans);
+}
+
+/* The secret and its copy button share one row. */
+.token-secret {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.token-secret-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+  /* A single click selects the whole secret. The clipboard API does not exist
+     on a plain-HTTP origin, and the legacy copy command can be refused too, so
+     selecting by hand has to stay a working fallback. */
+  user-select: all;
+}
+
+.token-copy-button {
+  flex: 0 0 auto;
+  height: auto;
 }
 
 .token-table {
@@ -1475,7 +1487,6 @@ a:focus-visible {
 :root[data-theme="light"] .provider-form input,
 :root[data-theme="light"] .provider-form select,
 :root[data-theme="light"] .provider-form textarea,
-:root[data-theme="light"] .token-form input,
 :root[data-theme="light"] .auth-panel input
 {
   border-color: var(--border);
@@ -3447,7 +3458,6 @@ a:focus-visible {
   .overview-attention-panel .trace-row,
   .session-table-head,
   .session-row,
-  .token-form,
   .token-table-head,
   .token-row
 {

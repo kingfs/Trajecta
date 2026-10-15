@@ -29,7 +29,11 @@ import (
 
 const (
 	DefaultTokenScope = "all"
-	tokenPrefix       = "llmtl"
+	// tokenPrefix is the visible prefix of every API token this build issues. It
+	// follows the OpenAI convention so a token reads as a credential to the SDKs
+	// and tools that validate on shape. Verification is by SHA-256 hash, not by
+	// prefix, so tokens issued under the legacy "llmtl_" prefix keep working.
+	tokenPrefix = "sk-"
 )
 
 type Store struct {
@@ -450,7 +454,7 @@ func generateToken() (string, error) {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
-	return tokenPrefix + "_" + base64.RawURLEncoding.EncodeToString(b[:]), nil
+	return tokenPrefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 func hashToken(token string) string {

@@ -28,7 +28,7 @@ go run ./cmd/server -c config/examples/local-sqlite.yaml auth create-token --use
 
 ```bash
 export TRAJECTA_URL=http://localhost:8080
-export TRAJECTA_TOKEN=llmtl_xxx
+export TRAJECTA_TOKEN=sk-xxx
 ```
 
 ## 入口与端口

@@ -1516,7 +1516,7 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	if payload.Token == "" {
 		t.Fatalf("login token missing")
 	}
-	if strings.HasPrefix(payload.Token, "llmtl_") {
+	if strings.HasPrefix(payload.Token, "sk-") {
 		t.Fatalf("login returned api token prefix, want jwt")
 	}
 	if strings.Count(payload.Token, ".") != 2 {

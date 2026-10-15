@@ -87,6 +87,18 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
     }
+    if (path === "/api/auth/tokens" && method === "GET") {
+      return route.fulfill({ json: tokenListPayload() });
+    }
+    if (path === "/api/auth/tokens" && method === "POST") {
+      const body = route.request().postDataJSON();
+      // The dialog hides the single-valued scope and turns the picked expiry
+      // into the Go duration the API takes.
+      expect(body.name).toBe("local-dev");
+      expect(body.scope).toBe("api");
+      expect(body.ttl).toMatch(/^(\d+s)?$/);
+      return route.fulfill({ json: { token: `sk-${"a".repeat(40)}`, prefix: "sk-aaaaaaaa" } });
+    }
     if (path === "/api/models/gpt-5") {
       return route.fulfill({ json: modelDetailPayload() });
     }
@@ -331,6 +343,70 @@ test("provider management renders and supports core actions", async ({ page }) =
 
   await page.getByRole("button", { name: "Enable discovered (1)" }).click();
   await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
+});
+
+// The edit dialog used to call the mutation object as if it were the function
+// (`await onSave()`), so "Save changes" threw before any request was made and a
+// corrected base URL could never be persisted. It now submits through `.mutate()`.
+test("editing a provider persists a corrected base URL", async ({ page }) => {
+  await page.goto("/providers/openai-primary");
+
+  await page.getByRole("button", { name: "Edit provider" }).click();
+  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v2");
+
+  const patched = page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/channels/openai-primary");
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  const body = (await patched).postDataJSON();
+  expect(body.base_url).toBe("https://api.openai.example/v2");
+  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeHidden();
+});
+
+// Creating a token is a rare, deliberate act, so its form lives behind a button
+// in a dialog instead of occupying a card above the list it appends to.
+test("API tokens are created in a dialog and copied from it", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/connect?tab=tokens");
+  await expect(page.getByRole("heading", { name: "Active tokens" })).toBeVisible();
+
+  // The form is not on the page until the button opens it.
+  await expect(page.locator("#token-name")).toHaveCount(0);
+  await page.getByRole("button", { name: "Create token" }).click();
+  await expect(page.getByRole("heading", { name: "Create token" })).toBeVisible();
+
+  // Scope has exactly one value, so the form does not offer a choice, and the
+  // expiry is a time picker rather than a free-text TTL.
+  await expect(page.locator("#token-scope")).toHaveCount(0);
+  await expect(page.locator("#token-expiry")).toHaveAttribute("type", "datetime-local");
+  await page.locator("#token-expiry").fill("2030-01-02T10:30");
+  await page.getByRole("button", { name: "Generate token" }).click();
+
+  const secret = page.locator(".token-secret-value");
+  await expect(secret).toHaveText(`sk-${"a".repeat(40)}`);
+  // One click selects the whole secret, which is the fallback wherever the
+  // clipboard API is unavailable - a Monitor served over plain HTTP.
+  await expect(secret).toHaveCSS("user-select", "all");
+
+  await page.getByRole("button", { name: "Copy" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`sk-${"a".repeat(40)}`);
+
+  await page.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("heading", { name: "Create token" })).toBeHidden();
+});
+
+// The expiry field starts empty and empty means "never expires", so the request
+// has to carry no ttl at all rather than a zero one.
+test("a token with no expiry sends no ttl", async ({ page }) => {
+  await page.goto("/connect?tab=tokens");
+  await page.getByRole("button", { name: "Create token" }).click();
+
+  const created = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/auth/tokens");
+  await page.getByRole("button", { name: "Generate token" }).click();
+
+  expect((await created).postDataJSON().ttl).toBe("");
+  await expect(page.locator(".token-secret-value")).toBeVisible();
 });
 
 test("routing page renders selected route records", async ({ page }) => {
@@ -822,6 +898,19 @@ function channelListPayload() {
   return {
     refreshed_at: new Date().toISOString(),
     items: [channelDetailPayload()],
+  };
+}
+
+function tokenListPayload() {
+  const future = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+  const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  return {
+    total: 2,
+    items: [
+      { id: 1, name: "local-dev", prefix: "sk-aaaaaaa", scope: "api", enabled: true, status: "active", created_at: new Date().toISOString(), expires_at: future, last_used_at: new Date().toISOString() },
+      // A token minted before the sk- rename still lists under its old prefix.
+      { id: 2, name: "legacy-cli", prefix: "llmtl_bbbbb", scope: "api", enabled: true, status: "expired", created_at: past, expires_at: past },
+    ],
   };
 }
 

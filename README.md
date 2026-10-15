@@ -97,7 +97,7 @@ task build:go                    # 产出服务端 server 与 CLI trajecta
 **1. 让一次真实调用经过代理**（token 来自 Monitor 的 `接入 → API 令牌`）：
 
 ```bash
-export TRAJECTA_TOKEN=llmtl_xxx
+export TRAJECTA_TOKEN=sk-xxx
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H 'Content-Type: application/json' \

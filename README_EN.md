@@ -97,7 +97,7 @@ It reads `.env` and maps `LLM_TRACELAB_*` onto `TRAJECTA_*`, merges the legacy S
 **1. Send one real call through the proxy** (the token comes from the monitor's `Access -> API tokens` tab):
 
 ```bash
-export TRAJECTA_TOKEN=llmtl_xxx
+export TRAJECTA_TOKEN=sk-xxx
 curl -s http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer ${TRAJECTA_TOKEN}" \
   -H 'Content-Type: application/json' \

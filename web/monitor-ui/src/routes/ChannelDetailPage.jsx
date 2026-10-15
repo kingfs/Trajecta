@@ -259,7 +259,7 @@ export function ProviderDetailPage() {
             onChange={setEditForm}
             onReset={() => setEditForm(editFormFromProvider(provider))}
             onClose={() => setEditOpen(false)}
-            onSave={saveProvider}
+            onSave={() => saveProvider.mutate()}
           />
         ) : null}
 
@@ -355,9 +355,9 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
   const updateForm = (key, value) => {
     onChange((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
   };
-  const submit = async (event) => {
+  const submit = (event) => {
     event.preventDefault();
-    await onSave();
+    onSave();
   };
 
   return (

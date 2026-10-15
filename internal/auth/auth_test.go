@@ -242,6 +242,55 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 	}
 }
 
+func TestStoreIssuesOpenAIStyleTokenAndVerifiesLegacyPrefix(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("MigrateUp() error = %v", err)
+	}
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	issued, err := st.CreateToken(ctx, "admin", "local-dev", "api", 0)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+	if !strings.HasPrefix(issued.Token, "sk-") {
+		t.Fatalf("issued token = %q, want an sk- prefix", issued.Token)
+	}
+	if !strings.HasPrefix(issued.Prefix, "sk-") {
+		t.Fatalf("issued display prefix = %q, want an sk- prefix", issued.Prefix)
+	}
+
+	// A token issued before the rename keeps working. Verification looks the
+	// SHA-256 hash up, so the prefix the token was minted with is irrelevant.
+	legacy := "llmtl_" + strings.Repeat("A", 43)
+	userRow, err := st.client.User.Query().Where(user.UsernameEQ("admin")).Only(ctx)
+	if err != nil {
+		t.Fatalf("query admin error = %v", err)
+	}
+	if _, err := st.client.APIToken.Create().
+		SetName("legacy").
+		SetTokenHash(hashToken(legacy)).
+		SetPrefix(tokenDisplayPrefix(legacy)).
+		SetScope(DefaultTokenScope).
+		SetUser(userRow).
+		Save(ctx); err != nil {
+		t.Fatalf("insert legacy token error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, legacy); err != nil || !ok {
+		t.Fatalf("VerifyToken(legacy) = ok %v err %v, want ok true err nil", ok, err)
+	}
+}
+
 func TestStoreLoginReplacesPreviousMonitorLoginToken(t *testing.T) {
 	t.Parallel()
 
