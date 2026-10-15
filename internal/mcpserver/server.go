@@ -316,6 +316,42 @@ type systemEventListOutput struct {
 	RefreshedAt time.Time        `json:"refreshed_at"`
 }
 
+type listCredentialMasksInput struct {
+	Page     int    `json:"page,omitempty" jsonschema:"1-based page number"`
+	PageSize int    `json:"page_size,omitempty" jsonschema:"number of replacements per page, max 200"`
+	TraceID  string `json:"trace_id,omitempty" jsonschema:"optional trace id, to list the replacements of one recording"`
+	Rule     string `json:"rule,omitempty" jsonschema:"optional rule name filter, such as openai.project_key"`
+	Window   string `json:"window,omitempty" jsonschema:"time window: today, 7d, 30d, or all"`
+}
+
+type credentialMaskItemOutput struct {
+	ID          string    `json:"id"`
+	TraceID     string    `json:"trace_id"`
+	Rule        string    `json:"rule"`
+	Vendor      string    `json:"vendor"`
+	Kind        string    `json:"kind"`
+	Confidence  string    `json:"confidence"`
+	Score       int       `json:"score"`
+	Reasons     string    `json:"reasons"`
+	Start       int       `json:"start"`
+	End         int       `json:"end"`
+	ValueLength int       `json:"value_length"`
+	Original    string    `json:"original"`
+	StandIn     string    `json:"stand_in"`
+	StorageMode string    `json:"storage_mode"`
+	DetectedAt  time.Time `json:"detected_at"`
+}
+
+type credentialMaskListOutput struct {
+	Items       []credentialMaskItemOutput `json:"items"`
+	Page        int                        `json:"page"`
+	PageSize    int                        `json:"page_size"`
+	Total       int                        `json:"total"`
+	TotalPages  int                        `json:"total_pages"`
+	StorageMode string                     `json:"storage_mode"`
+	RefreshedAt time.Time                  `json:"refreshed_at"`
+}
+
 type systemEventSummaryOutput struct {
 	Total      int              `json:"total"`
 	Unread     int              `json:"unread"`
@@ -428,6 +464,12 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "get_analysis_job",
 		Description: "Get one reanalysis job by job_id.",
 	}, api.getAnalysisJob)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_credential_masks",
+		Description: "List credentials the proxy replaced with a format-preserving stand-in before the request left the machine. " +
+			"Each item carries the original value, the stand-in the upstream received, the rule that decided it and the trace id; " +
+			"storage_mode reports whether the values are encrypted at rest.",
+	}, api.listCredentialMasks)
 
 	return server
 }
@@ -1036,6 +1078,20 @@ func (a *serverAPI) reanalyzeSession(ctx context.Context, req *mcp.CallToolReque
 		return nil, nil, err
 	}
 	return nil, reanalysisResultMap(result), nil
+}
+
+func (a *serverAPI) listCredentialMasks(ctx context.Context, req *mcp.CallToolRequest, in *listCredentialMasksInput) (*mcp.CallToolResult, *credentialMaskListOutput, error) {
+	values := url.Values{}
+	values.Set("page", fmt.Sprintf("%d", normalizePage(in.Page)))
+	values.Set("page_size", fmt.Sprintf("%d", normalizePageSize(in.PageSize)))
+	setIfNotEmpty(values, "trace_id", in.TraceID)
+	setIfNotEmpty(values, "rule", in.Rule)
+	setIfNotEmpty(values, "window", in.Window)
+	var out credentialMaskListOutput
+	if err := a.getJSON(ctx, "/api/secret-masks", values, &out); err != nil {
+		return nil, nil, err
+	}
+	return nil, &out, nil
 }
 
 func (a *serverAPI) listAnalysisJobs(ctx context.Context, req *mcp.CallToolRequest, in *listAnalysisJobsInput) (*mcp.CallToolResult, map[string]any, error) {

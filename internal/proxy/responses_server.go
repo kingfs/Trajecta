@@ -152,6 +152,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	logInfo.Events = append(logInfo.Events, routePlanEventForSelection(routeReq, selection, start, a.routingPolicy, "responses_server"))
 	logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 	logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
+	logInfo.MaskAudit = secretMaskAuditRecords(maskedEvents)
 	a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
 		EventType: "response.model_call",
 		Phase:     "model_call",

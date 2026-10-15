@@ -255,6 +255,30 @@ func (f ChannelProbeRunMutationRuleFunc) EvalMutation(ctx context.Context, m dao
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ChannelProbeRunMutation", m)
 }
 
+// The CredentialMaskAuditQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type CredentialMaskAuditQueryRuleFunc func(context.Context, *dao.CredentialMaskAuditQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f CredentialMaskAuditQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.CredentialMaskAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.CredentialMaskAuditQuery", q)
+}
+
+// The CredentialMaskAuditMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type CredentialMaskAuditMutationRuleFunc func(context.Context, *dao.CredentialMaskAuditMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f CredentialMaskAuditMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.CredentialMaskAuditMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.CredentialMaskAuditMutation", m)
+}
+
 // The DatasetQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type DatasetQueryRuleFunc func(context.Context, *dao.DatasetQuery) error
@@ -806,6 +830,8 @@ func queryFilter(q dao.Query) (Filter, error) {
 		return q.Filter(), nil
 	case *dao.ChannelProbeRunQuery:
 		return q.Filter(), nil
+	case *dao.CredentialMaskAuditQuery:
+		return q.Filter(), nil
 	case *dao.DatasetQuery:
 		return q.Filter(), nil
 	case *dao.DatasetExampleQuery:
@@ -866,6 +892,8 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.ChannelModelMutation:
 		return m.Filter(), nil
 	case *dao.ChannelProbeRunMutation:
+		return m.Filter(), nil
+	case *dao.CredentialMaskAuditMutation:
 		return m.Filter(), nil
 	case *dao.DatasetMutation:
 		return m.Filter(), nil

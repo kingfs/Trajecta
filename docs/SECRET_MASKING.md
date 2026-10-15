@@ -104,17 +104,43 @@ vault 为空时每个字节当场判定，未发生遮蔽的流不引入任何�
 
 cassette 记录的是**原始值**，这是有意选择：replay 按请求字节匹配（`pkg/replay`），人读 trace 也需要看到真实请求。代价是 cassette 里存在真实凭据，与 `debug.mask_key` 只处理请求头不同，这一点在 `SECURITY.md` 中有运维提示。
 
-## 审计事件
+## 审计事件与审计表
 
-命中与还原都会写入 cassette prelude 事件，命名遵循 `<domain>.<event>` 约定：
+一次命中会在**三个地方**留下记录，各自承担不同职责，不能合并：
+
+**1. cassette prelude 事件**（命名遵循 `<domain>.<event>` 约定）：
 
 - `secret.masked`：每个被替换的值一条，属性为 `rule`、`vendor`、`kind`、`start`、`end`、`length`、`score`、`confidence`、`reasons`。
 - `secret.restored`：一次响应一条，属性为 `count` 与 `confidence`（当前恒为 `exact`：只有整条凑齐的假值才会被换回）。
 
-两者都**不携带凭据字节**，只描述改写过程，避免审计记录变成第二份密文。
+两者都**不携带凭据字节**。prelude 会被复制进 trace 索引、发给 Monitor 并被导出，把真值写进去等于把它再散播一份；`internal/proxy/secretmask_e2e_test.go` 与 `secretmask_audit_test.go` 都把这条不变量钉住了。
+
+**2. `credential_mask_audits` 表**——真值与假值唯一的落库位置。每个被替换的值一行：
+
+| 列 | 含义 |
+| --- | --- |
+| `trace_id` / `event_index` | 指向 trace 与 prelude 里第几条 `secret.masked`；两者唯一，重复索引同一份 cassette 会更新而不是新增 |
+| `rule` / `vendor` / `kind` / `confidence` / `score` / `reasons` | 判定依据，与 prelude 事件同源 |
+| `start_offset` / `end_offset` / `value_length` | 在原始请求体中的位置与长度 |
+| `original_value` / `stand_in_value` | 真值与实际上游收到的保形假值 |
+| `storage_mode` | 该行写入时的落盘形态，与 `GET /api/secrets/local-key` 报告的一致；`encrypted-local` 表示列里是 `tlsec:v1:` 本地密钥信封 |
+| `detected_at` | 改写时刻 |
+
+只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，seed 每进程随机，cassette 只记原始请求体，所以后台重建索引或回填**拿不到假值**。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
+
+**3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。
+
+读取面：
+
+- `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；返回值已解密，`storage_mode` 说明落盘形态。
+- `GET /api/secret-masks/{id}`：单条。
+- MCP 工具 `list_credential_masks`：同参数，返回同样的字段。
+
+密钥轮换或丢失时，无法解密的行仍会被列出，`original` 返回空——`rule`、`trace_id`、偏移仍能用于定位，旁边的 cassette 里就有原文；一条读不出来的行不该让整页查询失败。
 
 ## 已知边界
 
+- **审计表本身就是一份凭据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。它应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把它读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
 - **PEM 私钥正文不覆盖。** 规则只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，不含密钥材料；真正的 base64 正文没有任何规则覆盖。改写头行既不能保护私钥，又会破坏文件语法，因此该规则**只上报、不改写**。
 - **需要真值的操作会失败。** HMAC 签名、AWS SigV4、JWT 签名等必须在真值上运算的操作，拿着假值无法完成。
 - **逐 token 的极小分片不重组。** 链从假值的第一段开始跟，如果厂商把值切成小于 8 字节的片（逐 token 下发就可能这样），就永远等不到足够长的一段，链不会开。此时客户端拿到的是拼接后的**假值**而不是真值——功能上失败，但没有改写任何无关字节。（注意 `content` 与工具调用参数都走同一条路径，所以这一条对两者都成立。）

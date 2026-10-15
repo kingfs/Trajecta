@@ -257,6 +257,49 @@ var (
 			},
 		},
 	}
+	// CredentialMaskAuditsColumns holds the columns for the "credential_mask_audits" table.
+	CredentialMaskAuditsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "trace_id", Type: field.TypeString, Default: ""},
+		{Name: "event_index", Type: field.TypeInt, Default: 0},
+		{Name: "rule", Type: field.TypeString, Default: ""},
+		{Name: "vendor", Type: field.TypeString, Default: ""},
+		{Name: "kind", Type: field.TypeString, Default: ""},
+		{Name: "confidence", Type: field.TypeString, Default: ""},
+		{Name: "score", Type: field.TypeInt, Default: 0},
+		{Name: "reasons", Type: field.TypeString, Default: ""},
+		{Name: "start_offset", Type: field.TypeInt, Default: 0},
+		{Name: "end_offset", Type: field.TypeInt, Default: 0},
+		{Name: "value_length", Type: field.TypeInt, Default: 0},
+		{Name: "original_value", Type: field.TypeString, Default: ""},
+		{Name: "stand_in_value", Type: field.TypeString, Default: ""},
+		{Name: "storage_mode", Type: field.TypeString, Default: ""},
+		{Name: "detected_at", Type: field.TypeTime},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// CredentialMaskAuditsTable holds the schema information for the "credential_mask_audits" table.
+	CredentialMaskAuditsTable = &schema.Table{
+		Name:       "credential_mask_audits",
+		Columns:    CredentialMaskAuditsColumns,
+		PrimaryKey: []*schema.Column{CredentialMaskAuditsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "credentialmaskaudit_trace_id_event_index",
+				Unique:  true,
+				Columns: []*schema.Column{CredentialMaskAuditsColumns[1], CredentialMaskAuditsColumns[2]},
+			},
+			{
+				Name:    "credentialmaskaudit_detected_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{CredentialMaskAuditsColumns[15], CredentialMaskAuditsColumns[0]},
+			},
+			{
+				Name:    "credentialmaskaudit_rule_detected_at",
+				Unique:  false,
+				Columns: []*schema.Column{CredentialMaskAuditsColumns[3], CredentialMaskAuditsColumns[15]},
+			},
+		},
+	}
 	// DatasetsColumns holds the columns for the "datasets" table.
 	DatasetsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -1067,6 +1110,7 @@ var (
 		ChannelConfigsTable,
 		ChannelModelsTable,
 		ChannelProbeRunsTable,
+		CredentialMaskAuditsTable,
 		DatasetsTable,
 		DatasetExamplesTable,
 		EvalRunsTable,
@@ -1115,6 +1159,10 @@ func init() {
 	ChannelProbeRunsTable.Annotation = &entsql.Annotation{
 		Table:          "channel_probe_runs",
 		IncrementStart: func(i int) *int { return &i }(51539607552),
+	}
+	CredentialMaskAuditsTable.Annotation = &entsql.Annotation{
+		Table:          "credential_mask_audits",
+		IncrementStart: func(i int) *int { return &i }(120259084288),
 	}
 	DatasetsTable.Annotation = &entsql.Annotation{
 		Table:          "datasets",

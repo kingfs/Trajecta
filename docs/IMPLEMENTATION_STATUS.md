@@ -52,6 +52,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 当前应用库中的主要表：
 
 - trace 与观测：`logs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
+- 凭据遮蔽：`credential_mask_audits`（每个被替换的值一行，含真值、假值与落盘形态；见 [凭据遮蔽](./SECRET_MASKING.md)）。
 - Responses 与审计：`responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`。
 - 渠道与模型：`channel_configs`、`channel_models`、`channel_probe_runs`、`model_catalog`、`model_aliases`、`upstream_targets`、`upstream_models`。
 - eval 与实验：`datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`。
@@ -132,6 +133,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 - 系统事件：`list_system_events`、`get_system_event`、`summarize_system_events`、`query_unread_system_events`。
 - Responses 审计：`responses_audit_trace`、`responses_audit_tool_calls`。
 - 重分析：`reanalyze_trace`、`reanalyze_session`、`list_analysis_jobs`、`get_analysis_job`。
+- 凭据遮蔽：`list_credential_masks`。
 
 工具用法见 [./MCP_GUIDE.md](./MCP_GUIDE.md)。
 
@@ -143,6 +145,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 - 判定分四层：词法 DFA（最长匹配）→ 离线结构校验（`jwt`、`anthropic_key`、`github_pat` 的 CRC32、`jwe` 的头部、`bech32`）→ 96 字节窗口内的凭据词汇 → 置信度门限。`Strength` 分 Strong/Anchored/Generic 三档，只有 Medium 及以上允许自动改写，Low 仍然上报。
 - 假值与真值等长，并保留前缀、标点、厂商水印与分段字母表；它是 `(进程种子, 规则, 真值)` 的纯函数，因此同一凭据每轮渲染结果一致。映射只存在于内存（`Vault`，`crypto/rand` 种子，4096 条上限，最旧优先淘汰）。
 - cassette 记录**原始**请求体，上游只收到假值；响应路径在 `UsageSniffer` 之内还原，并能把被 SSE delta 切开、中间夹着 JSON 信封的假值重组回真值（整条凑齐才改写，凑不齐原样放行）。命中与还原写入 cassette prelude 事件 `secret.masked` / `secret.restored`，不携带凭据字节。
+- 真值与假值落在 `credential_mask_audits` 表（`original_value` / `stand_in_value`，写时按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），由 `GET /api/secret-masks` 与 MCP `list_credential_masks` 读出；改写当次请求还会往事件中心写一条 `credential_masked` 通知（`source: secretmask`，每条规则一条，不含凭据字节）。
 - 开关 `secret_masking.enabled` / `TRAJECTA_SECRET_MASKING_ENABLED`，**默认开启**（`Load` 在解码 YAML 前播种字段，显式 `false` 与环境变量仍然优先）。
 - 规则集 75 条：结构形状与 LLM 厂商前缀（格式参考第 3、4 节），外加 §8.1 里锚点足够窄的离线可判定形状（AWS AccessKeyId、GitHub PAT、PyPI token、age 私钥、PowerShell SecureString）。**刻意不含 §8.4 的弱形态**（裸 hex、UUID、无锚点 base64）：校验器通过即可改写，弱形态会改写哈希与对象 ID。DSN 与 Cookie 需要子跨度遮蔽，暂不覆盖，仍由 `internal/analyzer` 的正则用于事后上报。PEM 私钥只识别头行且不改写，正文无规则覆盖。
 

@@ -14,6 +14,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
 	"github.com/kingfs/Trajecta/ent/dao/dataset"
 	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 	"github.com/kingfs/Trajecta/ent/dao/evalrun"
@@ -254,6 +255,33 @@ func (f TraverseChannelProbeRun) Traverse(ctx context.Context, q dao.Query) erro
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *dao.ChannelProbeRunQuery", q)
+}
+
+// The CredentialMaskAuditFunc type is an adapter to allow the use of ordinary function as a Querier.
+type CredentialMaskAuditFunc func(context.Context, *dao.CredentialMaskAuditQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f CredentialMaskAuditFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.CredentialMaskAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.CredentialMaskAuditQuery", q)
+}
+
+// The TraverseCredentialMaskAudit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseCredentialMaskAudit func(context.Context, *dao.CredentialMaskAuditQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseCredentialMaskAudit) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseCredentialMaskAudit) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.CredentialMaskAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.CredentialMaskAuditQuery", q)
 }
 
 // The DatasetFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -838,6 +866,8 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.ChannelModelQuery, predicate.ChannelModel, channelmodel.OrderOption]{typ: dao.TypeChannelModel, tq: q}, nil
 	case *dao.ChannelProbeRunQuery:
 		return &query[*dao.ChannelProbeRunQuery, predicate.ChannelProbeRun, channelproberun.OrderOption]{typ: dao.TypeChannelProbeRun, tq: q}, nil
+	case *dao.CredentialMaskAuditQuery:
+		return &query[*dao.CredentialMaskAuditQuery, predicate.CredentialMaskAudit, credentialmaskaudit.OrderOption]{typ: dao.TypeCredentialMaskAudit, tq: q}, nil
 	case *dao.DatasetQuery:
 		return &query[*dao.DatasetQuery, predicate.Dataset, dataset.OrderOption]{typ: dao.TypeDataset, tq: q}, nil
 	case *dao.DatasetExampleQuery:

@@ -11,6 +11,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
 	"github.com/kingfs/Trajecta/ent/dao/dataset"
 	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 	"github.com/kingfs/Trajecta/ent/dao/evalrun"
@@ -367,6 +368,76 @@ func init() {
 	channelproberunDescID := channelproberunFields[0].Descriptor()
 	// channelproberun.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	channelproberun.IDValidator = channelproberunDescID.Validators[0].(func(string) error)
+	credentialmaskauditFields := schema.CredentialMaskAudit{}.Fields()
+	_ = credentialmaskauditFields
+	// credentialmaskauditDescTraceID is the schema descriptor for trace_id field.
+	credentialmaskauditDescTraceID := credentialmaskauditFields[1].Descriptor()
+	// credentialmaskaudit.DefaultTraceID holds the default value on creation for the trace_id field.
+	credentialmaskaudit.DefaultTraceID = credentialmaskauditDescTraceID.Default.(string)
+	// credentialmaskauditDescEventIndex is the schema descriptor for event_index field.
+	credentialmaskauditDescEventIndex := credentialmaskauditFields[2].Descriptor()
+	// credentialmaskaudit.DefaultEventIndex holds the default value on creation for the event_index field.
+	credentialmaskaudit.DefaultEventIndex = credentialmaskauditDescEventIndex.Default.(int)
+	// credentialmaskauditDescRule is the schema descriptor for rule field.
+	credentialmaskauditDescRule := credentialmaskauditFields[3].Descriptor()
+	// credentialmaskaudit.DefaultRule holds the default value on creation for the rule field.
+	credentialmaskaudit.DefaultRule = credentialmaskauditDescRule.Default.(string)
+	// credentialmaskauditDescVendor is the schema descriptor for vendor field.
+	credentialmaskauditDescVendor := credentialmaskauditFields[4].Descriptor()
+	// credentialmaskaudit.DefaultVendor holds the default value on creation for the vendor field.
+	credentialmaskaudit.DefaultVendor = credentialmaskauditDescVendor.Default.(string)
+	// credentialmaskauditDescKind is the schema descriptor for kind field.
+	credentialmaskauditDescKind := credentialmaskauditFields[5].Descriptor()
+	// credentialmaskaudit.DefaultKind holds the default value on creation for the kind field.
+	credentialmaskaudit.DefaultKind = credentialmaskauditDescKind.Default.(string)
+	// credentialmaskauditDescConfidence is the schema descriptor for confidence field.
+	credentialmaskauditDescConfidence := credentialmaskauditFields[6].Descriptor()
+	// credentialmaskaudit.DefaultConfidence holds the default value on creation for the confidence field.
+	credentialmaskaudit.DefaultConfidence = credentialmaskauditDescConfidence.Default.(string)
+	// credentialmaskauditDescScore is the schema descriptor for score field.
+	credentialmaskauditDescScore := credentialmaskauditFields[7].Descriptor()
+	// credentialmaskaudit.DefaultScore holds the default value on creation for the score field.
+	credentialmaskaudit.DefaultScore = credentialmaskauditDescScore.Default.(int)
+	// credentialmaskauditDescReasons is the schema descriptor for reasons field.
+	credentialmaskauditDescReasons := credentialmaskauditFields[8].Descriptor()
+	// credentialmaskaudit.DefaultReasons holds the default value on creation for the reasons field.
+	credentialmaskaudit.DefaultReasons = credentialmaskauditDescReasons.Default.(string)
+	// credentialmaskauditDescStartOffset is the schema descriptor for start_offset field.
+	credentialmaskauditDescStartOffset := credentialmaskauditFields[9].Descriptor()
+	// credentialmaskaudit.DefaultStartOffset holds the default value on creation for the start_offset field.
+	credentialmaskaudit.DefaultStartOffset = credentialmaskauditDescStartOffset.Default.(int)
+	// credentialmaskauditDescEndOffset is the schema descriptor for end_offset field.
+	credentialmaskauditDescEndOffset := credentialmaskauditFields[10].Descriptor()
+	// credentialmaskaudit.DefaultEndOffset holds the default value on creation for the end_offset field.
+	credentialmaskaudit.DefaultEndOffset = credentialmaskauditDescEndOffset.Default.(int)
+	// credentialmaskauditDescValueLength is the schema descriptor for value_length field.
+	credentialmaskauditDescValueLength := credentialmaskauditFields[11].Descriptor()
+	// credentialmaskaudit.DefaultValueLength holds the default value on creation for the value_length field.
+	credentialmaskaudit.DefaultValueLength = credentialmaskauditDescValueLength.Default.(int)
+	// credentialmaskauditDescOriginalValue is the schema descriptor for original_value field.
+	credentialmaskauditDescOriginalValue := credentialmaskauditFields[12].Descriptor()
+	// credentialmaskaudit.DefaultOriginalValue holds the default value on creation for the original_value field.
+	credentialmaskaudit.DefaultOriginalValue = credentialmaskauditDescOriginalValue.Default.(string)
+	// credentialmaskauditDescStandInValue is the schema descriptor for stand_in_value field.
+	credentialmaskauditDescStandInValue := credentialmaskauditFields[13].Descriptor()
+	// credentialmaskaudit.DefaultStandInValue holds the default value on creation for the stand_in_value field.
+	credentialmaskaudit.DefaultStandInValue = credentialmaskauditDescStandInValue.Default.(string)
+	// credentialmaskauditDescStorageMode is the schema descriptor for storage_mode field.
+	credentialmaskauditDescStorageMode := credentialmaskauditFields[14].Descriptor()
+	// credentialmaskaudit.DefaultStorageMode holds the default value on creation for the storage_mode field.
+	credentialmaskaudit.DefaultStorageMode = credentialmaskauditDescStorageMode.Default.(string)
+	// credentialmaskauditDescDetectedAt is the schema descriptor for detected_at field.
+	credentialmaskauditDescDetectedAt := credentialmaskauditFields[15].Descriptor()
+	// credentialmaskaudit.DefaultDetectedAt holds the default value on creation for the detected_at field.
+	credentialmaskaudit.DefaultDetectedAt = credentialmaskauditDescDetectedAt.Default.(func() time.Time)
+	// credentialmaskauditDescCreatedAt is the schema descriptor for created_at field.
+	credentialmaskauditDescCreatedAt := credentialmaskauditFields[16].Descriptor()
+	// credentialmaskaudit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	credentialmaskaudit.DefaultCreatedAt = credentialmaskauditDescCreatedAt.Default.(func() time.Time)
+	// credentialmaskauditDescID is the schema descriptor for id field.
+	credentialmaskauditDescID := credentialmaskauditFields[0].Descriptor()
+	// credentialmaskaudit.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	credentialmaskaudit.IDValidator = credentialmaskauditDescID.Validators[0].(func(string) error)
 	datasetFields := schema.Dataset{}.Fields()
 	_ = datasetFields
 	// datasetDescName is the schema descriptor for name field.

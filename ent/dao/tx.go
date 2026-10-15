@@ -26,6 +26,8 @@ type Tx struct {
 	ChannelModel *ChannelModelClient
 	// ChannelProbeRun is the client for interacting with the ChannelProbeRun builders.
 	ChannelProbeRun *ChannelProbeRunClient
+	// CredentialMaskAudit is the client for interacting with the CredentialMaskAudit builders.
+	CredentialMaskAudit *CredentialMaskAuditClient
 	// Dataset is the client for interacting with the Dataset builders.
 	Dataset *DatasetClient
 	// DatasetExample is the client for interacting with the DatasetExample builders.
@@ -205,6 +207,7 @@ func (tx *Tx) init() {
 	tx.ChannelConfig = NewChannelConfigClient(tx.config)
 	tx.ChannelModel = NewChannelModelClient(tx.config)
 	tx.ChannelProbeRun = NewChannelProbeRunClient(tx.config)
+	tx.CredentialMaskAudit = NewCredentialMaskAuditClient(tx.config)
 	tx.Dataset = NewDatasetClient(tx.config)
 	tx.DatasetExample = NewDatasetExampleClient(tx.config)
 	tx.EvalRun = NewEvalRunClient(tx.config)

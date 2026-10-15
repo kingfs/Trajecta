@@ -108,6 +108,12 @@ audit 表与查询语义（`internal/responses/audit.QueryService`）见 [本地
 - `list_analysis_jobs`：列出重分析 job；支持 `status`、`target_type`（`trace`、`session`、`batch`）、`target_id`、`limit`（默认 50）。
 - `get_analysis_job`：按 `job_id` 取单个重分析 job。
 
+### 凭据遮蔽
+
+- `list_credential_masks`：列出代理在上游请求前用保形假值替换掉的凭据，每条含真值 `original`、上游实际收到的 `stand_in`、判定规则与 `trace_id`；支持 `trace_id`、`rule`、`window`、`page`、`page_size`。`storage_mode` 说明落盘形态（`encrypted-local` 时列里是本地密钥信封）。
+
+事件中心里的 `credential_masked` 事件只描述「哪条规则改写了什么」，真值与假值从这个工具取；两者的分工见 [凭据遮蔽](./SECRET_MASKING.md)。
+
 重分析只读本地 cassette 并写 application DB 派生状态（生产为 Postgres，本地 fallback 为 SQLite），生成可审计的 `analysis_jobs`，不访问上游模型。
 
 常用参数与默认值（以 `internal/mcpserver/server.go` 为准）：
@@ -116,6 +122,7 @@ audit 表与查询语义（`internal/responses/audit.QueryService`）见 [本地
 | --- | --- |
 | `list_traces`、`list_sessions` | `page` 默认 1；`page_size` 默认 50，上限 200。 |
 | `query_sticky_routing`、`list_system_events`、`summarize_failure_clusters` | 接受 `page` / `page_size`（`page_size` 默认 50，上限 200）。 |
+| `list_credential_masks` | `page` 默认 1；`page_size` 默认 50，上限 200；`window` 与事件中心同一套取值。 |
 | `summarize_failure_clusters` | `limit` 默认 10；除 reason、status、model、provider、endpoint、upstream 与 route target 外，也按 channel 和 credential 分组。 |
 | `summarize_system_events` | `status` 默认 `unread`，并返回最新 5 条事件。 |
 | `query_unread_system_events` | `limit` 默认 20、上限 200；`min_severity` 默认 `warning`。 |
@@ -173,7 +180,7 @@ CODEX_HOME="$PWD/.codex" codex mcp add trajecta-remote \
 - MCP handler 在进程内复用 Monitor HTTP API 的 handler 语义：`mcpserver.New` 自己新建 `http.NewServeMux()`，并用 `monitor.RegisterRoutes(..., monitor.RouteOptions{Router: opts.Router})` 注册一套只带 Router 的路由，工具查询经进程内 `httptest.NewRequest` + `NewRecorder` 打到这套路由。它不是 management mux，注册时也没有 auth/channel service，但不为 MCP 建立第二套查询语义。
 - 只读工具不改变 replay 行为或 raw cassette。
 - 重分析工具必须生成可审计的 `analysis_jobs`。
-- 不通过 MCP 暴露 raw secret；`responses_audit_tool_calls` 的 payload 也默认不返回。
+- 默认不通过 MCP 暴露 raw secret；`responses_audit_tool_calls` 的 payload 默认不返回。唯一的例外是 `list_credential_masks`：遮蔽功能的整个目的就是让审计能对照真值与假值，因此该工具显式返回两者，落盘形态由 `storage_mode` 说明。它读的是遮蔽审计表，不是配置里的渠道凭据。
 - MCP 不是 Trajecta 的存储事实源：列表与聚合来自 application DB，trace 详情来自 raw cassette。
 - 修改 MCP 工具面必须同步更新本文档与测试。
 

@@ -103,18 +103,43 @@ func (v *Vault) Holdback() int {
 	return v.fakeLen - 1
 }
 
-// MaskEvent records one replacement. It deliberately carries no values: the
-// audit trail names the rule and the offsets and leaves the bytes where they
-// are, so a cassette prelude does not become a second copy of the secret.
+// MaskEvent records one replacement, and carries both sides of it so an audit
+// written at mask time can show what stood in for what.
+//
+// Original and StandIn must never reach a cassette prelude: Attributes is the
+// only rendering a record file may use, and it names the rule and the offsets
+// and leaves the bytes where they are. A prelude is copied into every trace
+// index, exported and read by the monitor, so writing the pair there would turn
+// the audit trail into a second, less protected copy of the secret. The pair is
+// persisted separately and encrypted; see the mask audit table in
+// internal/store.
 type MaskEvent struct {
 	Rule       RuleID
 	Start, End int
 	Score      int
 	Confidence Confidence
 	Reasons    Reason
+
+	// Original is the real credential and StandIn is the format-preserving
+	// replacement that left the machine. Neither is nil for an event Mask
+	// returned, and Attributes and AuditValues are the two supported ways to read
+	// them.
+	//
+	// Original is a view into the buffer Mask was handed, which Mask overwrites in
+	// place, so a caller that holds the slice across another pass over that buffer
+	// reads back the stand-in instead of the credential. StandIn is the event's own
+	// copy. AuditValues returns copies of both, which is why the audit write path
+	// goes through it.
+	Original []byte
+	StandIn  []byte
 }
 
 // Attributes renders the event as JSON-ready values for a record-file event.
+//
+// It deliberately omits Original and StandIn, which is the whole point of the
+// split between the record file and the audit table: the cassette says a
+// credential was rewritten and which rule decided that, and the audit table is
+// where an operator goes to see the value.
 func (e MaskEvent) Attributes() map[string]interface{} {
 	r := ruleTable[e.Rule]
 	return map[string]interface{}{
@@ -128,6 +153,29 @@ func (e MaskEvent) Attributes() map[string]interface{} {
 		"confidence": e.Confidence.String(),
 		"reasons":    e.Reasons.String(),
 	}
+}
+
+// AuditValues returns the pair a credential audit row stores, as strings so the
+// caller does not have to keep the buffer Mask worked on alive.
+func (e MaskEvent) AuditValues() (original, standIn string) {
+	return string(e.Original), string(e.StandIn)
+}
+
+// RuleName is the stable name of the rule that made the decision, for a row or a
+// system event that has to name the rule.
+func (e MaskEvent) RuleName() string {
+	return ruleTable[e.Rule].Name
+}
+
+// Vendor is the rule's vendor label, empty for the structural rules that have
+// none. It lets a row say "OpenAI" without the reader holding the rule table.
+func (e MaskEvent) Vendor() string {
+	return ruleTable[e.Rule].Vendor
+}
+
+// Kind is the rule's credential kind, such as "api_key".
+func (e MaskEvent) Kind() string {
+	return ruleTable[e.Rule].Kind.String()
 }
 
 // Mask rewrites every credential in src that the detector both recognises and
@@ -166,8 +214,12 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 	copy(out, src)
 	events := make([]MaskEvent, 0, len(usable))
 	for _, f := range usable {
-		real := src[f.Start:f.End]
-		fake := v.fakeFor(&ruleTable[f.ID], real)
+		// Own StandIn rather than pointing it into out. out is what the caller
+		// hands the wire, so a caller that keeps an event and lets the send
+		// overwrite its buffer would otherwise read back whatever replaced the
+		// stand-in. Original may stay a view of src: nothing in this package
+		// writes to src.
+		fake := v.fakeFor(&ruleTable[f.ID], src[f.Start:f.End])
 		copy(out[f.Start:f.End], fake)
 		events = append(events, MaskEvent{
 			Rule:       f.ID,
@@ -176,6 +228,8 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 			Score:      f.Score,
 			Confidence: f.Confidence,
 			Reasons:    f.Reasons,
+			Original:   src[f.Start:f.End],
+			StandIn:    []byte(fake),
 		})
 	}
 	return out, events

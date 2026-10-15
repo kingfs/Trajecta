@@ -24,6 +24,9 @@ type ChannelModel func(*sql.Selector)
 // ChannelProbeRun is the predicate function for channelproberun builders.
 type ChannelProbeRun func(*sql.Selector)
 
+// CredentialMaskAudit is the predicate function for credentialmaskaudit builders.
+type CredentialMaskAudit func(*sql.Selector)
+
 // Dataset is the predicate function for dataset builders.
 type Dataset func(*sql.Selector)
 

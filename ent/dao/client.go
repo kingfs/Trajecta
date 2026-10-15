@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
 	"github.com/kingfs/Trajecta/ent/dao/dataset"
 	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 	"github.com/kingfs/Trajecta/ent/dao/evalrun"
@@ -65,6 +66,8 @@ type Client struct {
 	ChannelModel *ChannelModelClient
 	// ChannelProbeRun is the client for interacting with the ChannelProbeRun builders.
 	ChannelProbeRun *ChannelProbeRunClient
+	// CredentialMaskAudit is the client for interacting with the CredentialMaskAudit builders.
+	CredentialMaskAudit *CredentialMaskAuditClient
 	// Dataset is the client for interacting with the Dataset builders.
 	Dataset *DatasetClient
 	// DatasetExample is the client for interacting with the DatasetExample builders.
@@ -124,6 +127,7 @@ func (c *Client) init() {
 	c.ChannelConfig = NewChannelConfigClient(c.config)
 	c.ChannelModel = NewChannelModelClient(c.config)
 	c.ChannelProbeRun = NewChannelProbeRunClient(c.config)
+	c.CredentialMaskAudit = NewCredentialMaskAuditClient(c.config)
 	c.Dataset = NewDatasetClient(c.config)
 	c.DatasetExample = NewDatasetExampleClient(c.config)
 	c.EvalRun = NewEvalRunClient(c.config)
@@ -237,35 +241,36 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:              ctx,
-		config:           cfg,
-		APIToken:         NewAPITokenClient(cfg),
-		AnalysisJob:      NewAnalysisJobClient(cfg),
-		AnalysisRun:      NewAnalysisRunClient(cfg),
-		ChannelConfig:    NewChannelConfigClient(cfg),
-		ChannelModel:     NewChannelModelClient(cfg),
-		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
-		Dataset:          NewDatasetClient(cfg),
-		DatasetExample:   NewDatasetExampleClient(cfg),
-		EvalRun:          NewEvalRunClient(cfg),
-		ExecutionEvent:   NewExecutionEventClient(cfg),
-		ExperimentRun:    NewExperimentRunClient(cfg),
-		ModelCatalog:     NewModelCatalogClient(cfg),
-		ParseJob:         NewParseJobClient(cfg),
-		ParserVersion:    NewParserVersionClient(cfg),
-		RequestAudit:     NewRequestAuditClient(cfg),
-		Response:         NewResponseClient(cfg),
-		ResponseItem:     NewResponseItemClient(cfg),
-		Score:            NewScoreClient(cfg),
-		SystemEvent:      NewSystemEventClient(cfg),
-		ToolCallAudit:    NewToolCallAuditClient(cfg),
-		TraceFinding:     NewTraceFindingClient(cfg),
-		TraceLog:         NewTraceLogClient(cfg),
-		TraceObservation: NewTraceObservationClient(cfg),
-		UpstreamExchange: NewUpstreamExchangeClient(cfg),
-		UpstreamModel:    NewUpstreamModelClient(cfg),
-		UpstreamTarget:   NewUpstreamTargetClient(cfg),
-		User:             NewUserClient(cfg),
+		ctx:                 ctx,
+		config:              cfg,
+		APIToken:            NewAPITokenClient(cfg),
+		AnalysisJob:         NewAnalysisJobClient(cfg),
+		AnalysisRun:         NewAnalysisRunClient(cfg),
+		ChannelConfig:       NewChannelConfigClient(cfg),
+		ChannelModel:        NewChannelModelClient(cfg),
+		ChannelProbeRun:     NewChannelProbeRunClient(cfg),
+		CredentialMaskAudit: NewCredentialMaskAuditClient(cfg),
+		Dataset:             NewDatasetClient(cfg),
+		DatasetExample:      NewDatasetExampleClient(cfg),
+		EvalRun:             NewEvalRunClient(cfg),
+		ExecutionEvent:      NewExecutionEventClient(cfg),
+		ExperimentRun:       NewExperimentRunClient(cfg),
+		ModelCatalog:        NewModelCatalogClient(cfg),
+		ParseJob:            NewParseJobClient(cfg),
+		ParserVersion:       NewParserVersionClient(cfg),
+		RequestAudit:        NewRequestAuditClient(cfg),
+		Response:            NewResponseClient(cfg),
+		ResponseItem:        NewResponseItemClient(cfg),
+		Score:               NewScoreClient(cfg),
+		SystemEvent:         NewSystemEventClient(cfg),
+		ToolCallAudit:       NewToolCallAuditClient(cfg),
+		TraceFinding:        NewTraceFindingClient(cfg),
+		TraceLog:            NewTraceLogClient(cfg),
+		TraceObservation:    NewTraceObservationClient(cfg),
+		UpstreamExchange:    NewUpstreamExchangeClient(cfg),
+		UpstreamModel:       NewUpstreamModelClient(cfg),
+		UpstreamTarget:      NewUpstreamTargetClient(cfg),
+		User:                NewUserClient(cfg),
 	}, nil
 }
 
@@ -283,35 +288,36 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:              ctx,
-		config:           cfg,
-		APIToken:         NewAPITokenClient(cfg),
-		AnalysisJob:      NewAnalysisJobClient(cfg),
-		AnalysisRun:      NewAnalysisRunClient(cfg),
-		ChannelConfig:    NewChannelConfigClient(cfg),
-		ChannelModel:     NewChannelModelClient(cfg),
-		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
-		Dataset:          NewDatasetClient(cfg),
-		DatasetExample:   NewDatasetExampleClient(cfg),
-		EvalRun:          NewEvalRunClient(cfg),
-		ExecutionEvent:   NewExecutionEventClient(cfg),
-		ExperimentRun:    NewExperimentRunClient(cfg),
-		ModelCatalog:     NewModelCatalogClient(cfg),
-		ParseJob:         NewParseJobClient(cfg),
-		ParserVersion:    NewParserVersionClient(cfg),
-		RequestAudit:     NewRequestAuditClient(cfg),
-		Response:         NewResponseClient(cfg),
-		ResponseItem:     NewResponseItemClient(cfg),
-		Score:            NewScoreClient(cfg),
-		SystemEvent:      NewSystemEventClient(cfg),
-		ToolCallAudit:    NewToolCallAuditClient(cfg),
-		TraceFinding:     NewTraceFindingClient(cfg),
-		TraceLog:         NewTraceLogClient(cfg),
-		TraceObservation: NewTraceObservationClient(cfg),
-		UpstreamExchange: NewUpstreamExchangeClient(cfg),
-		UpstreamModel:    NewUpstreamModelClient(cfg),
-		UpstreamTarget:   NewUpstreamTargetClient(cfg),
-		User:             NewUserClient(cfg),
+		ctx:                 ctx,
+		config:              cfg,
+		APIToken:            NewAPITokenClient(cfg),
+		AnalysisJob:         NewAnalysisJobClient(cfg),
+		AnalysisRun:         NewAnalysisRunClient(cfg),
+		ChannelConfig:       NewChannelConfigClient(cfg),
+		ChannelModel:        NewChannelModelClient(cfg),
+		ChannelProbeRun:     NewChannelProbeRunClient(cfg),
+		CredentialMaskAudit: NewCredentialMaskAuditClient(cfg),
+		Dataset:             NewDatasetClient(cfg),
+		DatasetExample:      NewDatasetExampleClient(cfg),
+		EvalRun:             NewEvalRunClient(cfg),
+		ExecutionEvent:      NewExecutionEventClient(cfg),
+		ExperimentRun:       NewExperimentRunClient(cfg),
+		ModelCatalog:        NewModelCatalogClient(cfg),
+		ParseJob:            NewParseJobClient(cfg),
+		ParserVersion:       NewParserVersionClient(cfg),
+		RequestAudit:        NewRequestAuditClient(cfg),
+		Response:            NewResponseClient(cfg),
+		ResponseItem:        NewResponseItemClient(cfg),
+		Score:               NewScoreClient(cfg),
+		SystemEvent:         NewSystemEventClient(cfg),
+		ToolCallAudit:       NewToolCallAuditClient(cfg),
+		TraceFinding:        NewTraceFindingClient(cfg),
+		TraceLog:            NewTraceLogClient(cfg),
+		TraceObservation:    NewTraceObservationClient(cfg),
+		UpstreamExchange:    NewUpstreamExchangeClient(cfg),
+		UpstreamModel:       NewUpstreamModelClient(cfg),
+		UpstreamTarget:      NewUpstreamTargetClient(cfg),
+		User:                NewUserClient(cfg),
 	}, nil
 }
 
@@ -342,11 +348,11 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
-		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
-		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
-		c.Response, c.ResponseItem, c.Score, c.SystemEvent, c.ToolCallAudit,
-		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
-		c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.ChannelProbeRun, c.CredentialMaskAudit, c.Dataset, c.DatasetExample,
+		c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog, c.ParseJob,
+		c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem, c.Score,
+		c.SystemEvent, c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -357,11 +363,11 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
-		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
-		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
-		c.Response, c.ResponseItem, c.Score, c.SystemEvent, c.ToolCallAudit,
-		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
-		c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.ChannelProbeRun, c.CredentialMaskAudit, c.Dataset, c.DatasetExample,
+		c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog, c.ParseJob,
+		c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem, c.Score,
+		c.SystemEvent, c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -382,6 +388,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ChannelModel.mutate(ctx, m)
 	case *ChannelProbeRunMutation:
 		return c.ChannelProbeRun.mutate(ctx, m)
+	case *CredentialMaskAuditMutation:
+		return c.CredentialMaskAudit.mutate(ctx, m)
 	case *DatasetMutation:
 		return c.Dataset.mutate(ctx, m)
 	case *DatasetExampleMutation:
@@ -1243,6 +1251,139 @@ func (c *ChannelProbeRunClient) mutate(ctx context.Context, m *ChannelProbeRunMu
 		return (&ChannelProbeRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown ChannelProbeRun mutation op: %q", m.Op())
+	}
+}
+
+// CredentialMaskAuditClient is a client for the CredentialMaskAudit schema.
+type CredentialMaskAuditClient struct {
+	config
+}
+
+// NewCredentialMaskAuditClient returns a client for the CredentialMaskAudit from the given config.
+func NewCredentialMaskAuditClient(c config) *CredentialMaskAuditClient {
+	return &CredentialMaskAuditClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `credentialmaskaudit.Hooks(f(g(h())))`.
+func (c *CredentialMaskAuditClient) Use(hooks ...Hook) {
+	c.hooks.CredentialMaskAudit = append(c.hooks.CredentialMaskAudit, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `credentialmaskaudit.Intercept(f(g(h())))`.
+func (c *CredentialMaskAuditClient) Intercept(interceptors ...Interceptor) {
+	c.inters.CredentialMaskAudit = append(c.inters.CredentialMaskAudit, interceptors...)
+}
+
+// Create returns a builder for creating a CredentialMaskAudit entity.
+func (c *CredentialMaskAuditClient) Create() *CredentialMaskAuditCreate {
+	mutation := newCredentialMaskAuditMutation(c.config, OpCreate)
+	return &CredentialMaskAuditCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of CredentialMaskAudit entities.
+func (c *CredentialMaskAuditClient) CreateBulk(builders ...*CredentialMaskAuditCreate) *CredentialMaskAuditCreateBulk {
+	return &CredentialMaskAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *CredentialMaskAuditClient) MapCreateBulk(slice any, setFunc func(*CredentialMaskAuditCreate, int)) *CredentialMaskAuditCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &CredentialMaskAuditCreateBulk{err: fmt.Errorf("calling to CredentialMaskAuditClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*CredentialMaskAuditCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &CredentialMaskAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for CredentialMaskAudit.
+func (c *CredentialMaskAuditClient) Update() *CredentialMaskAuditUpdate {
+	mutation := newCredentialMaskAuditMutation(c.config, OpUpdate)
+	return &CredentialMaskAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *CredentialMaskAuditClient) UpdateOne(_m *CredentialMaskAudit) *CredentialMaskAuditUpdateOne {
+	mutation := newCredentialMaskAuditMutation(c.config, OpUpdateOne, withCredentialMaskAudit(_m))
+	return &CredentialMaskAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *CredentialMaskAuditClient) UpdateOneID(id string) *CredentialMaskAuditUpdateOne {
+	mutation := newCredentialMaskAuditMutation(c.config, OpUpdateOne, withCredentialMaskAuditID(id))
+	return &CredentialMaskAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for CredentialMaskAudit.
+func (c *CredentialMaskAuditClient) Delete() *CredentialMaskAuditDelete {
+	mutation := newCredentialMaskAuditMutation(c.config, OpDelete)
+	return &CredentialMaskAuditDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *CredentialMaskAuditClient) DeleteOne(_m *CredentialMaskAudit) *CredentialMaskAuditDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *CredentialMaskAuditClient) DeleteOneID(id string) *CredentialMaskAuditDeleteOne {
+	builder := c.Delete().Where(credentialmaskaudit.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &CredentialMaskAuditDeleteOne{builder}
+}
+
+// Query returns a query builder for CredentialMaskAudit.
+func (c *CredentialMaskAuditClient) Query() *CredentialMaskAuditQuery {
+	return &CredentialMaskAuditQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeCredentialMaskAudit},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a CredentialMaskAudit entity by its id.
+func (c *CredentialMaskAuditClient) Get(ctx context.Context, id string) (*CredentialMaskAudit, error) {
+	return c.Query().Where(credentialmaskaudit.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *CredentialMaskAuditClient) GetX(ctx context.Context, id string) *CredentialMaskAudit {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *CredentialMaskAuditClient) Hooks() []Hook {
+	return c.hooks.CredentialMaskAudit
+}
+
+// Interceptors returns the client interceptors.
+func (c *CredentialMaskAuditClient) Interceptors() []Interceptor {
+	return c.inters.CredentialMaskAudit
+}
+
+func (c *CredentialMaskAuditClient) mutate(ctx context.Context, m *CredentialMaskAuditMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&CredentialMaskAuditCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&CredentialMaskAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&CredentialMaskAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&CredentialMaskAuditDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown CredentialMaskAudit mutation op: %q", m.Op())
 	}
 }
 
@@ -4062,19 +4203,19 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 type (
 	hooks struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
-		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
-		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SystemEvent, ToolCallAudit, TraceFinding, TraceLog,
-		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
-		User []ent.Hook
+		ChannelProbeRun, CredentialMaskAudit, Dataset, DatasetExample, EvalRun,
+		ExecutionEvent, ExperimentRun, ModelCatalog, ParseJob, ParserVersion,
+		RequestAudit, Response, ResponseItem, Score, SystemEvent, ToolCallAudit,
+		TraceFinding, TraceLog, TraceObservation, UpstreamExchange, UpstreamModel,
+		UpstreamTarget, User []ent.Hook
 	}
 	inters struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
-		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
-		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SystemEvent, ToolCallAudit, TraceFinding, TraceLog,
-		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
-		User []ent.Interceptor
+		ChannelProbeRun, CredentialMaskAudit, Dataset, DatasetExample, EvalRun,
+		ExecutionEvent, ExperimentRun, ModelCatalog, ParseJob, ParserVersion,
+		RequestAudit, Response, ResponseItem, Score, SystemEvent, ToolCallAudit,
+		TraceFinding, TraceLog, TraceObservation, UpstreamExchange, UpstreamModel,
+		UpstreamTarget, User []ent.Interceptor
 	}
 )
 

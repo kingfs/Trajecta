@@ -1060,6 +1060,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 		logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
+		logInfo.MaskAudit = secretMaskAuditRecords(maskedEvents)
 
 		// Chaos
 		chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)

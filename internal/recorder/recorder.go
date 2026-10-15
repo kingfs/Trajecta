@@ -34,6 +34,16 @@ type LogInfo struct {
 	Path   string
 	Header RecordHeader
 	Events []RecordEvent
+
+	// MaskAudit carries the credential replacements of this exchange, with the
+	// original and the stand-in, for the credential mask audit table.
+	//
+	// It is a sibling of Events rather than one of them on purpose: Events is
+	// serialized into the cassette prelude, and these values must never be. It is
+	// only ever populated by the request path that actually masked something, so
+	// a re-index of the same file from disk - which sees the prelude and not the
+	// pair - cannot duplicate or invent a row.
+	MaskAudit []store.CredentialMaskAuditRecord
 }
 
 type PrepareOptions struct {
@@ -435,12 +445,49 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		entry, err := r.store.GetByRequestID(info.Header.Meta.RequestID)
 		if err != nil {
 			slog.Warn("Trace parse job enqueue skipped: indexed trace not found", "request_id", info.Header.Meta.RequestID, "error", err)
-		} else if err := r.store.EnqueueParseJob(entry.ID); err != nil {
-			slog.Warn("Trace parse job enqueue failed", "trace_id", entry.ID, "error", err)
+		} else {
+			// The credential mask audit is written here rather than while the
+			// request is in flight because the trace id does not exist until the
+			// row above is indexed, and the audit list has to be able to join a
+			// replacement back to its recording.
+			//
+			// Best effort, like the parse job: the trace is already recorded and
+			// indexed, so a failure to write the audit must not turn a completed
+			// exchange into an error. The next request re-records its own rows.
+			r.writeCredentialMaskAudit(entry.ID, info)
+			if err := r.store.EnqueueParseJob(entry.ID); err != nil {
+				slog.Warn("Trace parse job enqueue failed", "trace_id", entry.ID, "error", err)
+			}
 		}
 	}
 
 	return nil
+}
+
+// writeCredentialMaskAudit persists the credential replacements of one exchange.
+//
+// It fills in the two fields the request path cannot know: the trace id, which
+// only exists once the cassette is indexed, and the detection time, which is the
+// moment the value was rewritten. Nothing is written when the exchange masked
+// nothing, which is the common case.
+func (r *Recorder) writeCredentialMaskAudit(traceID string, info *LogInfo) {
+	if len(info.MaskAudit) == 0 {
+		return
+	}
+	records := make([]store.CredentialMaskAuditRecord, 0, len(info.MaskAudit))
+	for _, record := range info.MaskAudit {
+		record.TraceID = traceID
+		if record.DetectedAt.IsZero() {
+			record.DetectedAt = info.Header.Meta.Time
+		}
+		if record.DetectedAt.IsZero() {
+			record.DetectedAt = time.Now().UTC()
+		}
+		records = append(records, record)
+	}
+	if err := r.store.UpsertCredentialMaskAudits(records); err != nil {
+		slog.Warn("Credential mask audit write failed", "trace_id", traceID, "count", len(records), "error", err)
+	}
 }
 
 // prependPrelude rewrites the cassette at info.Path as prelude followed by the

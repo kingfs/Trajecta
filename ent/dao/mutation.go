@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
 	"github.com/kingfs/Trajecta/ent/dao/dataset"
 	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 	"github.com/kingfs/Trajecta/ent/dao/evalrun"
@@ -50,33 +51,34 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypeAPIToken         = "APIToken"
-	TypeAnalysisJob      = "AnalysisJob"
-	TypeAnalysisRun      = "AnalysisRun"
-	TypeChannelConfig    = "ChannelConfig"
-	TypeChannelModel     = "ChannelModel"
-	TypeChannelProbeRun  = "ChannelProbeRun"
-	TypeDataset          = "Dataset"
-	TypeDatasetExample   = "DatasetExample"
-	TypeEvalRun          = "EvalRun"
-	TypeExecutionEvent   = "ExecutionEvent"
-	TypeExperimentRun    = "ExperimentRun"
-	TypeModelCatalog     = "ModelCatalog"
-	TypeParseJob         = "ParseJob"
-	TypeParserVersion    = "ParserVersion"
-	TypeRequestAudit     = "RequestAudit"
-	TypeResponse         = "Response"
-	TypeResponseItem     = "ResponseItem"
-	TypeScore            = "Score"
-	TypeSystemEvent      = "SystemEvent"
-	TypeToolCallAudit    = "ToolCallAudit"
-	TypeTraceFinding     = "TraceFinding"
-	TypeTraceLog         = "TraceLog"
-	TypeTraceObservation = "TraceObservation"
-	TypeUpstreamExchange = "UpstreamExchange"
-	TypeUpstreamModel    = "UpstreamModel"
-	TypeUpstreamTarget   = "UpstreamTarget"
-	TypeUser             = "User"
+	TypeAPIToken            = "APIToken"
+	TypeAnalysisJob         = "AnalysisJob"
+	TypeAnalysisRun         = "AnalysisRun"
+	TypeChannelConfig       = "ChannelConfig"
+	TypeChannelModel        = "ChannelModel"
+	TypeChannelProbeRun     = "ChannelProbeRun"
+	TypeCredentialMaskAudit = "CredentialMaskAudit"
+	TypeDataset             = "Dataset"
+	TypeDatasetExample      = "DatasetExample"
+	TypeEvalRun             = "EvalRun"
+	TypeExecutionEvent      = "ExecutionEvent"
+	TypeExperimentRun       = "ExperimentRun"
+	TypeModelCatalog        = "ModelCatalog"
+	TypeParseJob            = "ParseJob"
+	TypeParserVersion       = "ParserVersion"
+	TypeRequestAudit        = "RequestAudit"
+	TypeResponse            = "Response"
+	TypeResponseItem        = "ResponseItem"
+	TypeScore               = "Score"
+	TypeSystemEvent         = "SystemEvent"
+	TypeToolCallAudit       = "ToolCallAudit"
+	TypeTraceFinding        = "TraceFinding"
+	TypeTraceLog            = "TraceLog"
+	TypeTraceObservation    = "TraceObservation"
+	TypeUpstreamExchange    = "UpstreamExchange"
+	TypeUpstreamModel       = "UpstreamModel"
+	TypeUpstreamTarget      = "UpstreamTarget"
+	TypeUser                = "User"
 )
 
 // APITokenMutation represents an operation that mutates the APIToken nodes in the graph.
@@ -7517,6 +7519,1316 @@ func (m *ChannelProbeRunMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *ChannelProbeRunMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown ChannelProbeRun edge %s", name)
+}
+
+// CredentialMaskAuditMutation represents an operation that mutates the CredentialMaskAudit nodes in the graph.
+type CredentialMaskAuditMutation struct {
+	config
+	op              Op
+	typ             string
+	id              *string
+	trace_id        *string
+	event_index     *int
+	addevent_index  *int
+	rule            *string
+	vendor          *string
+	kind            *string
+	confidence      *string
+	score           *int
+	addscore        *int
+	reasons         *string
+	start_offset    *int
+	addstart_offset *int
+	end_offset      *int
+	addend_offset   *int
+	value_length    *int
+	addvalue_length *int
+	original_value  *string
+	stand_in_value  *string
+	storage_mode    *string
+	detected_at     *time.Time
+	created_at      *time.Time
+	clearedFields   map[string]struct{}
+	done            bool
+	oldValue        func(context.Context) (*CredentialMaskAudit, error)
+	predicates      []predicate.CredentialMaskAudit
+}
+
+var _ ent.Mutation = (*CredentialMaskAuditMutation)(nil)
+
+// credentialmaskauditOption allows management of the mutation configuration using functional options.
+type credentialmaskauditOption func(*CredentialMaskAuditMutation)
+
+// newCredentialMaskAuditMutation creates new mutation for the CredentialMaskAudit entity.
+func newCredentialMaskAuditMutation(c config, op Op, opts ...credentialmaskauditOption) *CredentialMaskAuditMutation {
+	m := &CredentialMaskAuditMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeCredentialMaskAudit,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withCredentialMaskAuditID sets the ID field of the mutation.
+func withCredentialMaskAuditID(id string) credentialmaskauditOption {
+	return func(m *CredentialMaskAuditMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *CredentialMaskAudit
+		)
+		m.oldValue = func(ctx context.Context) (*CredentialMaskAudit, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().CredentialMaskAudit.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withCredentialMaskAudit sets the old CredentialMaskAudit of the mutation.
+func withCredentialMaskAudit(node *CredentialMaskAudit) credentialmaskauditOption {
+	return func(m *CredentialMaskAuditMutation) {
+		m.oldValue = func(context.Context) (*CredentialMaskAudit, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m CredentialMaskAuditMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m CredentialMaskAuditMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of CredentialMaskAudit entities.
+func (m *CredentialMaskAuditMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *CredentialMaskAuditMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *CredentialMaskAuditMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().CredentialMaskAudit.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetTraceID sets the "trace_id" field.
+func (m *CredentialMaskAuditMutation) SetTraceID(s string) {
+	m.trace_id = &s
+}
+
+// TraceID returns the value of the "trace_id" field in the mutation.
+func (m *CredentialMaskAuditMutation) TraceID() (r string, exists bool) {
+	v := m.trace_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTraceID returns the old "trace_id" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldTraceID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTraceID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTraceID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTraceID: %w", err)
+	}
+	return oldValue.TraceID, nil
+}
+
+// ResetTraceID resets all changes to the "trace_id" field.
+func (m *CredentialMaskAuditMutation) ResetTraceID() {
+	m.trace_id = nil
+}
+
+// SetEventIndex sets the "event_index" field.
+func (m *CredentialMaskAuditMutation) SetEventIndex(i int) {
+	m.event_index = &i
+	m.addevent_index = nil
+}
+
+// EventIndex returns the value of the "event_index" field in the mutation.
+func (m *CredentialMaskAuditMutation) EventIndex() (r int, exists bool) {
+	v := m.event_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEventIndex returns the old "event_index" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldEventIndex(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEventIndex is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEventIndex requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEventIndex: %w", err)
+	}
+	return oldValue.EventIndex, nil
+}
+
+// AddEventIndex adds i to the "event_index" field.
+func (m *CredentialMaskAuditMutation) AddEventIndex(i int) {
+	if m.addevent_index != nil {
+		*m.addevent_index += i
+	} else {
+		m.addevent_index = &i
+	}
+}
+
+// AddedEventIndex returns the value that was added to the "event_index" field in this mutation.
+func (m *CredentialMaskAuditMutation) AddedEventIndex() (r int, exists bool) {
+	v := m.addevent_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEventIndex resets all changes to the "event_index" field.
+func (m *CredentialMaskAuditMutation) ResetEventIndex() {
+	m.event_index = nil
+	m.addevent_index = nil
+}
+
+// SetRule sets the "rule" field.
+func (m *CredentialMaskAuditMutation) SetRule(s string) {
+	m.rule = &s
+}
+
+// Rule returns the value of the "rule" field in the mutation.
+func (m *CredentialMaskAuditMutation) Rule() (r string, exists bool) {
+	v := m.rule
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRule returns the old "rule" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldRule(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRule is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRule requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRule: %w", err)
+	}
+	return oldValue.Rule, nil
+}
+
+// ResetRule resets all changes to the "rule" field.
+func (m *CredentialMaskAuditMutation) ResetRule() {
+	m.rule = nil
+}
+
+// SetVendor sets the "vendor" field.
+func (m *CredentialMaskAuditMutation) SetVendor(s string) {
+	m.vendor = &s
+}
+
+// Vendor returns the value of the "vendor" field in the mutation.
+func (m *CredentialMaskAuditMutation) Vendor() (r string, exists bool) {
+	v := m.vendor
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVendor returns the old "vendor" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldVendor(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVendor is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVendor requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVendor: %w", err)
+	}
+	return oldValue.Vendor, nil
+}
+
+// ResetVendor resets all changes to the "vendor" field.
+func (m *CredentialMaskAuditMutation) ResetVendor() {
+	m.vendor = nil
+}
+
+// SetKind sets the "kind" field.
+func (m *CredentialMaskAuditMutation) SetKind(s string) {
+	m.kind = &s
+}
+
+// Kind returns the value of the "kind" field in the mutation.
+func (m *CredentialMaskAuditMutation) Kind() (r string, exists bool) {
+	v := m.kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKind returns the old "kind" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKind: %w", err)
+	}
+	return oldValue.Kind, nil
+}
+
+// ResetKind resets all changes to the "kind" field.
+func (m *CredentialMaskAuditMutation) ResetKind() {
+	m.kind = nil
+}
+
+// SetConfidence sets the "confidence" field.
+func (m *CredentialMaskAuditMutation) SetConfidence(s string) {
+	m.confidence = &s
+}
+
+// Confidence returns the value of the "confidence" field in the mutation.
+func (m *CredentialMaskAuditMutation) Confidence() (r string, exists bool) {
+	v := m.confidence
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConfidence returns the old "confidence" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldConfidence(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConfidence is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConfidence requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConfidence: %w", err)
+	}
+	return oldValue.Confidence, nil
+}
+
+// ResetConfidence resets all changes to the "confidence" field.
+func (m *CredentialMaskAuditMutation) ResetConfidence() {
+	m.confidence = nil
+}
+
+// SetScore sets the "score" field.
+func (m *CredentialMaskAuditMutation) SetScore(i int) {
+	m.score = &i
+	m.addscore = nil
+}
+
+// Score returns the value of the "score" field in the mutation.
+func (m *CredentialMaskAuditMutation) Score() (r int, exists bool) {
+	v := m.score
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldScore returns the old "score" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldScore(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldScore is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldScore requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldScore: %w", err)
+	}
+	return oldValue.Score, nil
+}
+
+// AddScore adds i to the "score" field.
+func (m *CredentialMaskAuditMutation) AddScore(i int) {
+	if m.addscore != nil {
+		*m.addscore += i
+	} else {
+		m.addscore = &i
+	}
+}
+
+// AddedScore returns the value that was added to the "score" field in this mutation.
+func (m *CredentialMaskAuditMutation) AddedScore() (r int, exists bool) {
+	v := m.addscore
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetScore resets all changes to the "score" field.
+func (m *CredentialMaskAuditMutation) ResetScore() {
+	m.score = nil
+	m.addscore = nil
+}
+
+// SetReasons sets the "reasons" field.
+func (m *CredentialMaskAuditMutation) SetReasons(s string) {
+	m.reasons = &s
+}
+
+// Reasons returns the value of the "reasons" field in the mutation.
+func (m *CredentialMaskAuditMutation) Reasons() (r string, exists bool) {
+	v := m.reasons
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReasons returns the old "reasons" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldReasons(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReasons is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReasons requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReasons: %w", err)
+	}
+	return oldValue.Reasons, nil
+}
+
+// ResetReasons resets all changes to the "reasons" field.
+func (m *CredentialMaskAuditMutation) ResetReasons() {
+	m.reasons = nil
+}
+
+// SetStartOffset sets the "start_offset" field.
+func (m *CredentialMaskAuditMutation) SetStartOffset(i int) {
+	m.start_offset = &i
+	m.addstart_offset = nil
+}
+
+// StartOffset returns the value of the "start_offset" field in the mutation.
+func (m *CredentialMaskAuditMutation) StartOffset() (r int, exists bool) {
+	v := m.start_offset
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStartOffset returns the old "start_offset" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldStartOffset(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStartOffset is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStartOffset requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStartOffset: %w", err)
+	}
+	return oldValue.StartOffset, nil
+}
+
+// AddStartOffset adds i to the "start_offset" field.
+func (m *CredentialMaskAuditMutation) AddStartOffset(i int) {
+	if m.addstart_offset != nil {
+		*m.addstart_offset += i
+	} else {
+		m.addstart_offset = &i
+	}
+}
+
+// AddedStartOffset returns the value that was added to the "start_offset" field in this mutation.
+func (m *CredentialMaskAuditMutation) AddedStartOffset() (r int, exists bool) {
+	v := m.addstart_offset
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetStartOffset resets all changes to the "start_offset" field.
+func (m *CredentialMaskAuditMutation) ResetStartOffset() {
+	m.start_offset = nil
+	m.addstart_offset = nil
+}
+
+// SetEndOffset sets the "end_offset" field.
+func (m *CredentialMaskAuditMutation) SetEndOffset(i int) {
+	m.end_offset = &i
+	m.addend_offset = nil
+}
+
+// EndOffset returns the value of the "end_offset" field in the mutation.
+func (m *CredentialMaskAuditMutation) EndOffset() (r int, exists bool) {
+	v := m.end_offset
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEndOffset returns the old "end_offset" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldEndOffset(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEndOffset is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEndOffset requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEndOffset: %w", err)
+	}
+	return oldValue.EndOffset, nil
+}
+
+// AddEndOffset adds i to the "end_offset" field.
+func (m *CredentialMaskAuditMutation) AddEndOffset(i int) {
+	if m.addend_offset != nil {
+		*m.addend_offset += i
+	} else {
+		m.addend_offset = &i
+	}
+}
+
+// AddedEndOffset returns the value that was added to the "end_offset" field in this mutation.
+func (m *CredentialMaskAuditMutation) AddedEndOffset() (r int, exists bool) {
+	v := m.addend_offset
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEndOffset resets all changes to the "end_offset" field.
+func (m *CredentialMaskAuditMutation) ResetEndOffset() {
+	m.end_offset = nil
+	m.addend_offset = nil
+}
+
+// SetValueLength sets the "value_length" field.
+func (m *CredentialMaskAuditMutation) SetValueLength(i int) {
+	m.value_length = &i
+	m.addvalue_length = nil
+}
+
+// ValueLength returns the value of the "value_length" field in the mutation.
+func (m *CredentialMaskAuditMutation) ValueLength() (r int, exists bool) {
+	v := m.value_length
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldValueLength returns the old "value_length" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldValueLength(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldValueLength is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldValueLength requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldValueLength: %w", err)
+	}
+	return oldValue.ValueLength, nil
+}
+
+// AddValueLength adds i to the "value_length" field.
+func (m *CredentialMaskAuditMutation) AddValueLength(i int) {
+	if m.addvalue_length != nil {
+		*m.addvalue_length += i
+	} else {
+		m.addvalue_length = &i
+	}
+}
+
+// AddedValueLength returns the value that was added to the "value_length" field in this mutation.
+func (m *CredentialMaskAuditMutation) AddedValueLength() (r int, exists bool) {
+	v := m.addvalue_length
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetValueLength resets all changes to the "value_length" field.
+func (m *CredentialMaskAuditMutation) ResetValueLength() {
+	m.value_length = nil
+	m.addvalue_length = nil
+}
+
+// SetOriginalValue sets the "original_value" field.
+func (m *CredentialMaskAuditMutation) SetOriginalValue(s string) {
+	m.original_value = &s
+}
+
+// OriginalValue returns the value of the "original_value" field in the mutation.
+func (m *CredentialMaskAuditMutation) OriginalValue() (r string, exists bool) {
+	v := m.original_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOriginalValue returns the old "original_value" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldOriginalValue(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOriginalValue is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOriginalValue requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOriginalValue: %w", err)
+	}
+	return oldValue.OriginalValue, nil
+}
+
+// ResetOriginalValue resets all changes to the "original_value" field.
+func (m *CredentialMaskAuditMutation) ResetOriginalValue() {
+	m.original_value = nil
+}
+
+// SetStandInValue sets the "stand_in_value" field.
+func (m *CredentialMaskAuditMutation) SetStandInValue(s string) {
+	m.stand_in_value = &s
+}
+
+// StandInValue returns the value of the "stand_in_value" field in the mutation.
+func (m *CredentialMaskAuditMutation) StandInValue() (r string, exists bool) {
+	v := m.stand_in_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStandInValue returns the old "stand_in_value" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldStandInValue(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStandInValue is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStandInValue requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStandInValue: %w", err)
+	}
+	return oldValue.StandInValue, nil
+}
+
+// ResetStandInValue resets all changes to the "stand_in_value" field.
+func (m *CredentialMaskAuditMutation) ResetStandInValue() {
+	m.stand_in_value = nil
+}
+
+// SetStorageMode sets the "storage_mode" field.
+func (m *CredentialMaskAuditMutation) SetStorageMode(s string) {
+	m.storage_mode = &s
+}
+
+// StorageMode returns the value of the "storage_mode" field in the mutation.
+func (m *CredentialMaskAuditMutation) StorageMode() (r string, exists bool) {
+	v := m.storage_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStorageMode returns the old "storage_mode" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldStorageMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStorageMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStorageMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStorageMode: %w", err)
+	}
+	return oldValue.StorageMode, nil
+}
+
+// ResetStorageMode resets all changes to the "storage_mode" field.
+func (m *CredentialMaskAuditMutation) ResetStorageMode() {
+	m.storage_mode = nil
+}
+
+// SetDetectedAt sets the "detected_at" field.
+func (m *CredentialMaskAuditMutation) SetDetectedAt(t time.Time) {
+	m.detected_at = &t
+}
+
+// DetectedAt returns the value of the "detected_at" field in the mutation.
+func (m *CredentialMaskAuditMutation) DetectedAt() (r time.Time, exists bool) {
+	v := m.detected_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDetectedAt returns the old "detected_at" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldDetectedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDetectedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDetectedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDetectedAt: %w", err)
+	}
+	return oldValue.DetectedAt, nil
+}
+
+// ResetDetectedAt resets all changes to the "detected_at" field.
+func (m *CredentialMaskAuditMutation) ResetDetectedAt() {
+	m.detected_at = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *CredentialMaskAuditMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *CredentialMaskAuditMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the CredentialMaskAudit entity.
+// If the CredentialMaskAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *CredentialMaskAuditMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *CredentialMaskAuditMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// Where appends a list predicates to the CredentialMaskAuditMutation builder.
+func (m *CredentialMaskAuditMutation) Where(ps ...predicate.CredentialMaskAudit) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the CredentialMaskAuditMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *CredentialMaskAuditMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.CredentialMaskAudit, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *CredentialMaskAuditMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *CredentialMaskAuditMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (CredentialMaskAudit).
+func (m *CredentialMaskAuditMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *CredentialMaskAuditMutation) Fields() []string {
+	fields := make([]string, 0, 16)
+	if m.trace_id != nil {
+		fields = append(fields, credentialmaskaudit.FieldTraceID)
+	}
+	if m.event_index != nil {
+		fields = append(fields, credentialmaskaudit.FieldEventIndex)
+	}
+	if m.rule != nil {
+		fields = append(fields, credentialmaskaudit.FieldRule)
+	}
+	if m.vendor != nil {
+		fields = append(fields, credentialmaskaudit.FieldVendor)
+	}
+	if m.kind != nil {
+		fields = append(fields, credentialmaskaudit.FieldKind)
+	}
+	if m.confidence != nil {
+		fields = append(fields, credentialmaskaudit.FieldConfidence)
+	}
+	if m.score != nil {
+		fields = append(fields, credentialmaskaudit.FieldScore)
+	}
+	if m.reasons != nil {
+		fields = append(fields, credentialmaskaudit.FieldReasons)
+	}
+	if m.start_offset != nil {
+		fields = append(fields, credentialmaskaudit.FieldStartOffset)
+	}
+	if m.end_offset != nil {
+		fields = append(fields, credentialmaskaudit.FieldEndOffset)
+	}
+	if m.value_length != nil {
+		fields = append(fields, credentialmaskaudit.FieldValueLength)
+	}
+	if m.original_value != nil {
+		fields = append(fields, credentialmaskaudit.FieldOriginalValue)
+	}
+	if m.stand_in_value != nil {
+		fields = append(fields, credentialmaskaudit.FieldStandInValue)
+	}
+	if m.storage_mode != nil {
+		fields = append(fields, credentialmaskaudit.FieldStorageMode)
+	}
+	if m.detected_at != nil {
+		fields = append(fields, credentialmaskaudit.FieldDetectedAt)
+	}
+	if m.created_at != nil {
+		fields = append(fields, credentialmaskaudit.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *CredentialMaskAuditMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case credentialmaskaudit.FieldTraceID:
+		return m.TraceID()
+	case credentialmaskaudit.FieldEventIndex:
+		return m.EventIndex()
+	case credentialmaskaudit.FieldRule:
+		return m.Rule()
+	case credentialmaskaudit.FieldVendor:
+		return m.Vendor()
+	case credentialmaskaudit.FieldKind:
+		return m.Kind()
+	case credentialmaskaudit.FieldConfidence:
+		return m.Confidence()
+	case credentialmaskaudit.FieldScore:
+		return m.Score()
+	case credentialmaskaudit.FieldReasons:
+		return m.Reasons()
+	case credentialmaskaudit.FieldStartOffset:
+		return m.StartOffset()
+	case credentialmaskaudit.FieldEndOffset:
+		return m.EndOffset()
+	case credentialmaskaudit.FieldValueLength:
+		return m.ValueLength()
+	case credentialmaskaudit.FieldOriginalValue:
+		return m.OriginalValue()
+	case credentialmaskaudit.FieldStandInValue:
+		return m.StandInValue()
+	case credentialmaskaudit.FieldStorageMode:
+		return m.StorageMode()
+	case credentialmaskaudit.FieldDetectedAt:
+		return m.DetectedAt()
+	case credentialmaskaudit.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *CredentialMaskAuditMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case credentialmaskaudit.FieldTraceID:
+		return m.OldTraceID(ctx)
+	case credentialmaskaudit.FieldEventIndex:
+		return m.OldEventIndex(ctx)
+	case credentialmaskaudit.FieldRule:
+		return m.OldRule(ctx)
+	case credentialmaskaudit.FieldVendor:
+		return m.OldVendor(ctx)
+	case credentialmaskaudit.FieldKind:
+		return m.OldKind(ctx)
+	case credentialmaskaudit.FieldConfidence:
+		return m.OldConfidence(ctx)
+	case credentialmaskaudit.FieldScore:
+		return m.OldScore(ctx)
+	case credentialmaskaudit.FieldReasons:
+		return m.OldReasons(ctx)
+	case credentialmaskaudit.FieldStartOffset:
+		return m.OldStartOffset(ctx)
+	case credentialmaskaudit.FieldEndOffset:
+		return m.OldEndOffset(ctx)
+	case credentialmaskaudit.FieldValueLength:
+		return m.OldValueLength(ctx)
+	case credentialmaskaudit.FieldOriginalValue:
+		return m.OldOriginalValue(ctx)
+	case credentialmaskaudit.FieldStandInValue:
+		return m.OldStandInValue(ctx)
+	case credentialmaskaudit.FieldStorageMode:
+		return m.OldStorageMode(ctx)
+	case credentialmaskaudit.FieldDetectedAt:
+		return m.OldDetectedAt(ctx)
+	case credentialmaskaudit.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown CredentialMaskAudit field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *CredentialMaskAuditMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case credentialmaskaudit.FieldTraceID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTraceID(v)
+		return nil
+	case credentialmaskaudit.FieldEventIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEventIndex(v)
+		return nil
+	case credentialmaskaudit.FieldRule:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRule(v)
+		return nil
+	case credentialmaskaudit.FieldVendor:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetVendor(v)
+		return nil
+	case credentialmaskaudit.FieldKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKind(v)
+		return nil
+	case credentialmaskaudit.FieldConfidence:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConfidence(v)
+		return nil
+	case credentialmaskaudit.FieldScore:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetScore(v)
+		return nil
+	case credentialmaskaudit.FieldReasons:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReasons(v)
+		return nil
+	case credentialmaskaudit.FieldStartOffset:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStartOffset(v)
+		return nil
+	case credentialmaskaudit.FieldEndOffset:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEndOffset(v)
+		return nil
+	case credentialmaskaudit.FieldValueLength:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetValueLength(v)
+		return nil
+	case credentialmaskaudit.FieldOriginalValue:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOriginalValue(v)
+		return nil
+	case credentialmaskaudit.FieldStandInValue:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStandInValue(v)
+		return nil
+	case credentialmaskaudit.FieldStorageMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStorageMode(v)
+		return nil
+	case credentialmaskaudit.FieldDetectedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDetectedAt(v)
+		return nil
+	case credentialmaskaudit.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown CredentialMaskAudit field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *CredentialMaskAuditMutation) AddedFields() []string {
+	var fields []string
+	if m.addevent_index != nil {
+		fields = append(fields, credentialmaskaudit.FieldEventIndex)
+	}
+	if m.addscore != nil {
+		fields = append(fields, credentialmaskaudit.FieldScore)
+	}
+	if m.addstart_offset != nil {
+		fields = append(fields, credentialmaskaudit.FieldStartOffset)
+	}
+	if m.addend_offset != nil {
+		fields = append(fields, credentialmaskaudit.FieldEndOffset)
+	}
+	if m.addvalue_length != nil {
+		fields = append(fields, credentialmaskaudit.FieldValueLength)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *CredentialMaskAuditMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case credentialmaskaudit.FieldEventIndex:
+		return m.AddedEventIndex()
+	case credentialmaskaudit.FieldScore:
+		return m.AddedScore()
+	case credentialmaskaudit.FieldStartOffset:
+		return m.AddedStartOffset()
+	case credentialmaskaudit.FieldEndOffset:
+		return m.AddedEndOffset()
+	case credentialmaskaudit.FieldValueLength:
+		return m.AddedValueLength()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *CredentialMaskAuditMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case credentialmaskaudit.FieldEventIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEventIndex(v)
+		return nil
+	case credentialmaskaudit.FieldScore:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddScore(v)
+		return nil
+	case credentialmaskaudit.FieldStartOffset:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddStartOffset(v)
+		return nil
+	case credentialmaskaudit.FieldEndOffset:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEndOffset(v)
+		return nil
+	case credentialmaskaudit.FieldValueLength:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddValueLength(v)
+		return nil
+	}
+	return fmt.Errorf("unknown CredentialMaskAudit numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *CredentialMaskAuditMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *CredentialMaskAuditMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *CredentialMaskAuditMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown CredentialMaskAudit nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *CredentialMaskAuditMutation) ResetField(name string) error {
+	switch name {
+	case credentialmaskaudit.FieldTraceID:
+		m.ResetTraceID()
+		return nil
+	case credentialmaskaudit.FieldEventIndex:
+		m.ResetEventIndex()
+		return nil
+	case credentialmaskaudit.FieldRule:
+		m.ResetRule()
+		return nil
+	case credentialmaskaudit.FieldVendor:
+		m.ResetVendor()
+		return nil
+	case credentialmaskaudit.FieldKind:
+		m.ResetKind()
+		return nil
+	case credentialmaskaudit.FieldConfidence:
+		m.ResetConfidence()
+		return nil
+	case credentialmaskaudit.FieldScore:
+		m.ResetScore()
+		return nil
+	case credentialmaskaudit.FieldReasons:
+		m.ResetReasons()
+		return nil
+	case credentialmaskaudit.FieldStartOffset:
+		m.ResetStartOffset()
+		return nil
+	case credentialmaskaudit.FieldEndOffset:
+		m.ResetEndOffset()
+		return nil
+	case credentialmaskaudit.FieldValueLength:
+		m.ResetValueLength()
+		return nil
+	case credentialmaskaudit.FieldOriginalValue:
+		m.ResetOriginalValue()
+		return nil
+	case credentialmaskaudit.FieldStandInValue:
+		m.ResetStandInValue()
+		return nil
+	case credentialmaskaudit.FieldStorageMode:
+		m.ResetStorageMode()
+		return nil
+	case credentialmaskaudit.FieldDetectedAt:
+		m.ResetDetectedAt()
+		return nil
+	case credentialmaskaudit.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown CredentialMaskAudit field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *CredentialMaskAuditMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *CredentialMaskAuditMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *CredentialMaskAuditMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *CredentialMaskAuditMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *CredentialMaskAuditMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *CredentialMaskAuditMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *CredentialMaskAuditMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown CredentialMaskAudit unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *CredentialMaskAuditMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown CredentialMaskAudit edge %s", name)
 }
 
 // DatasetMutation represents an operation that mutates the Dataset nodes in the graph.

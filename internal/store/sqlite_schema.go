@@ -411,6 +411,33 @@ var sqliteSchemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen ON system_events(status, last_seen_at DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_system_events_source_category ON system_events(source, category, last_seen_at DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_system_events_trace_id ON system_events(trace_id, last_seen_at DESC) WHERE trace_id <> '';`,
+	// The credential masking audit table. The prelude records only that a
+	// replacement happened and which rule decided it, so this is where the pair
+	// an operator has to review - original and stand-in - is kept. See the
+	// Postgres migration of the same name for why the values are not in the
+	// prelude and what storage_mode means.
+	`CREATE TABLE IF NOT EXISTS credential_mask_audits (
+			id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL DEFAULT '',
+			event_index INTEGER NOT NULL DEFAULT 0,
+			rule TEXT NOT NULL DEFAULT '',
+			vendor TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL DEFAULT '',
+			confidence TEXT NOT NULL DEFAULT '',
+			score INTEGER NOT NULL DEFAULT 0,
+			reasons TEXT NOT NULL DEFAULT '',
+			start_offset INTEGER NOT NULL DEFAULT 0,
+			end_offset INTEGER NOT NULL DEFAULT 0,
+			value_length INTEGER NOT NULL DEFAULT 0,
+			original_value TEXT NOT NULL DEFAULT '',
+			stand_in_value TEXT NOT NULL DEFAULT '',
+			storage_mode TEXT NOT NULL DEFAULT '',
+			detected_at datetime NOT NULL,
+			created_at datetime NOT NULL
+		);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS credentialmaskaudit_trace_id_event_index ON credential_mask_audits(trace_id, event_index);`,
+	`CREATE INDEX IF NOT EXISTS credentialmaskaudit_detected_at_id ON credential_mask_audits(detected_at DESC, id DESC);`,
+	`CREATE INDEX IF NOT EXISTS credentialmaskaudit_rule_detected_at ON credential_mask_audits(rule, detected_at DESC);`,
 	`CREATE TABLE IF NOT EXISTS responses (
 			id TEXT PRIMARY KEY,
 			conversation_id TEXT NOT NULL DEFAULT '',

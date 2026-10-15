@@ -107,11 +107,13 @@ session ID 的抽取顺序为：
 Trajecta 自身的事件收件箱：
 
 - 来源：代码当前只发出 `parser`、`analyzer`、`router`、`upstream` 四种来源；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
-- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`。
+- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
 
 支持按状态、级别、来源过滤和搜索 fingerprint / trace / model / 消息，支持单条标记已读、解决、忽略，以及「全部标为已读」。重复事件按 fingerprint 合并。导航上的未读角标由 `GET /api/events/summary` 与 SSE `GET /api/events/stream` 驱动。
+
+`credential_masked`（`source: secretmask`）是代理把请求里的凭据换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)）。
 
 #### 质量 `/audit`
 

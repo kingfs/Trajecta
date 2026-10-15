@@ -81,6 +81,18 @@ func (f ChannelProbeRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Va
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ChannelProbeRunMutation", m)
 }
 
+// The CredentialMaskAuditFunc type is an adapter to allow the use of ordinary
+// function as CredentialMaskAudit mutator.
+type CredentialMaskAuditFunc func(context.Context, *dao.CredentialMaskAuditMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f CredentialMaskAuditFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.CredentialMaskAuditMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.CredentialMaskAuditMutation", m)
+}
+
 // The DatasetFunc type is an adapter to allow the use of ordinary
 // function as Dataset mutator.
 type DatasetFunc func(context.Context, *dao.DatasetMutation) (dao.Value, error)

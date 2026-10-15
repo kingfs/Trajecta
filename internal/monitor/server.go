@@ -659,6 +659,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secret-masks", monitorAuthRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secret-masks/", monitorAuthRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))

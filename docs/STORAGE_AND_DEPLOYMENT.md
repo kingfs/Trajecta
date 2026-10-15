@@ -41,7 +41,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 
 生产存储是 Postgres（compose 使用 `postgres:17-alpine`）。`database.driver` 接受 `postgres` / `postgresql`，并且必须提供显式 `database.dsn`：对非 SQLite driver，DSN 为空时 `DatabaseDSN()` 返回空串，迁移会直接报 `postgres application database dsn is required`。
 
-- 版本化迁移 SQL 签入在 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 通过 `golang-migrate` 应用，版本与 dirty 状态记录在 `schema_migrations`。该目录覆盖 trace index、routing/channel/model、Responses 状态、audit/correlation、observation/finding、analysis 与 system events 等表。
+- 版本化迁移 SQL 签入在 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 通过 `golang-migrate` 应用，版本与 dirty 状态记录在 `schema_migrations`。该目录覆盖 trace index、routing/channel/model、Responses 状态、audit/correlation、observation/finding、analysis、system events 与凭据遮蔽审计（`credential_mask_audits`）等表。
 - Postgres 生成新迁移使用 ent 生成器（需要临时开发库，禁止生产 DSN）：
 
   ```bash
@@ -208,6 +208,7 @@ server db summary rebuild sessions [--session-id <id>]
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
 - 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）以及 `overview_metric_buckets` / `overview_metric_bucket_members` 两张表及其数据仍然留在已有 Postgres/SQLite 库里；Postgres 的历史迁移也仍然创建这三张表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到三张空表。运行时代码、必需表检查与任何命令都不会读取或删除它们。是否回收空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`、`DROP TABLE overview_metric_buckets;`、`DROP TABLE overview_metric_bucket_members;`（先备份；删除不可逆，且代码不会代做）。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
+- `credential_mask_audits` 是这张规则的一个例外，两点都要知道：它是**唯一**保存真值与假值的表，假值由进程内 vault 生成、cassette 只记原始请求体，所以删掉这些行之后**无法重建**；反过来，它每天只随真正被改写的请求增长（每个被替换的值一行），量级远低于 `logs`，因此没有自动保留策略。长期保留真值是一项有意的运维取舍：需要缩短留存时按 `detected_at` 手工删除即可，删行不影响 replay 与 trace 详情。
 - 显式选择的 SQLite DB 默认位于输出目录内，备份时应把 SQLite DB 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 - `db migrate status --check-db` 对 SQLite 是只读的：不会创建缺失文件、不会修复 drift、不会重写用户数据。手工修复前先备份 SQLite DB 与 `.http` 目录。
 

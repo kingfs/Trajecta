@@ -120,7 +120,8 @@ application DB 是结构化查询源：
 
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、eval；
-- Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）。
+- Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）；
+- 凭据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成、每进程种子随机，cassette 只记原始请求体，所以后台重建索引拿不到假值、只会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
 
 生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
 

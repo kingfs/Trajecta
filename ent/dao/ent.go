@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelconfig"
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
+	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
 	"github.com/kingfs/Trajecta/ent/dao/dataset"
 	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
 	"github.com/kingfs/Trajecta/ent/dao/evalrun"
@@ -99,33 +100,34 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			apitoken.Table:         apitoken.ValidColumn,
-			analysisjob.Table:      analysisjob.ValidColumn,
-			analysisrun.Table:      analysisrun.ValidColumn,
-			channelconfig.Table:    channelconfig.ValidColumn,
-			channelmodel.Table:     channelmodel.ValidColumn,
-			channelproberun.Table:  channelproberun.ValidColumn,
-			dataset.Table:          dataset.ValidColumn,
-			datasetexample.Table:   datasetexample.ValidColumn,
-			evalrun.Table:          evalrun.ValidColumn,
-			executionevent.Table:   executionevent.ValidColumn,
-			experimentrun.Table:    experimentrun.ValidColumn,
-			modelcatalog.Table:     modelcatalog.ValidColumn,
-			parsejob.Table:         parsejob.ValidColumn,
-			parserversion.Table:    parserversion.ValidColumn,
-			requestaudit.Table:     requestaudit.ValidColumn,
-			response.Table:         response.ValidColumn,
-			responseitem.Table:     responseitem.ValidColumn,
-			score.Table:            score.ValidColumn,
-			systemevent.Table:      systemevent.ValidColumn,
-			toolcallaudit.Table:    toolcallaudit.ValidColumn,
-			tracefinding.Table:     tracefinding.ValidColumn,
-			tracelog.Table:         tracelog.ValidColumn,
-			traceobservation.Table: traceobservation.ValidColumn,
-			upstreamexchange.Table: upstreamexchange.ValidColumn,
-			upstreammodel.Table:    upstreammodel.ValidColumn,
-			upstreamtarget.Table:   upstreamtarget.ValidColumn,
-			user.Table:             user.ValidColumn,
+			apitoken.Table:            apitoken.ValidColumn,
+			analysisjob.Table:         analysisjob.ValidColumn,
+			analysisrun.Table:         analysisrun.ValidColumn,
+			channelconfig.Table:       channelconfig.ValidColumn,
+			channelmodel.Table:        channelmodel.ValidColumn,
+			channelproberun.Table:     channelproberun.ValidColumn,
+			credentialmaskaudit.Table: credentialmaskaudit.ValidColumn,
+			dataset.Table:             dataset.ValidColumn,
+			datasetexample.Table:      datasetexample.ValidColumn,
+			evalrun.Table:             evalrun.ValidColumn,
+			executionevent.Table:      executionevent.ValidColumn,
+			experimentrun.Table:       experimentrun.ValidColumn,
+			modelcatalog.Table:        modelcatalog.ValidColumn,
+			parsejob.Table:            parsejob.ValidColumn,
+			parserversion.Table:       parserversion.ValidColumn,
+			requestaudit.Table:        requestaudit.ValidColumn,
+			response.Table:            response.ValidColumn,
+			responseitem.Table:        responseitem.ValidColumn,
+			score.Table:               score.ValidColumn,
+			systemevent.Table:         systemevent.ValidColumn,
+			toolcallaudit.Table:       toolcallaudit.ValidColumn,
+			tracefinding.Table:        tracefinding.ValidColumn,
+			tracelog.Table:            tracelog.ValidColumn,
+			traceobservation.Table:    traceobservation.ValidColumn,
+			upstreamexchange.Table:    upstreamexchange.ValidColumn,
+			upstreammodel.Table:       upstreammodel.ValidColumn,
+			upstreamtarget.Table:      upstreamtarget.ValidColumn,
+			user.Table:                user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)
