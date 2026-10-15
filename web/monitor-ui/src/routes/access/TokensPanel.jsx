@@ -16,9 +16,9 @@ import { useI18n } from "../../lib/i18n";
 import { useWriteMutation } from "../../lib/mutations";
 import { formatDateTime } from "../../lib/monitor";
 
-// The only scope a Monitor-issued token can carry. The scope is still stored and
-// listed, but the create form does not offer a choice: there is exactly one
-// value, and a one-option field is noise.
+// The only scope a Monitor-issued token can carry. It is still stored with the
+// token, but it is not a choice and not worth a column: every row would read the
+// same word.
 const TOKEN_SCOPE = "api";
 
 export function TokensPanel() {
@@ -230,7 +230,6 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
       <div className="token-table-head">
         <span>{t("tokens.name")}</span>
         <span>{t("tokens.prefix")}</span>
-        <span>{t("tokens.scope")}</span>
         <span>{t("common.status")}</span>
         <span>{t("common.created")}</span>
         <span>{t("tokens.expires")}</span>
@@ -241,7 +240,6 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
         <article className="token-row" key={item.id}>
           <strong>{item.name || "api-token"}</strong>
           <code>{item.prefix || "-"}</code>
-          <span>{item.scope || TOKEN_SCOPE}</span>
           <InlineTag tone={statusTone(item.status)}>{item.status || "unknown"}</InlineTag>
           <span>{formatDateTime(item.created_at)}</span>
           <span>{item.expires_at ? formatDateTime(item.expires_at) : t("common.never")}</span>

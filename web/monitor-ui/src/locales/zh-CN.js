@@ -430,7 +430,6 @@ export default {
   "tokens.create": "创建令牌",
   "tokens.name": "名称",
   "tokens.namePlaceholder": "例如 local-dev",
-  "tokens.scope": "范围",
   "tokens.creating": "正在创建令牌",
   "tokens.generate": "生成令牌",
   "tokens.createError": "无法创建令牌。",

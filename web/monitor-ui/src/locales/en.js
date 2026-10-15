@@ -430,7 +430,6 @@ export default {
   "tokens.create": "Create token",
   "tokens.name": "Name",
   "tokens.namePlaceholder": "e.g. local-dev",
-  "tokens.scope": "Scope",
   "tokens.creating": "Creating token",
   "tokens.generate": "Generate token",
   "tokens.createError": "Unable to create token.",

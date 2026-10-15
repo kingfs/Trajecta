@@ -370,6 +370,10 @@ test("API tokens are created in a dialog and copied from it", async ({ page, con
   await page.goto("/connect?tab=tokens");
   await expect(page.getByRole("heading", { name: "Active tokens" })).toBeVisible();
 
+  // Scope is neither a choice nor a column: every row would read the same word.
+  await expect(page.locator(".token-table-head span")).toHaveCount(7);
+  await expect(page.locator(".token-table-head")).not.toContainText("Scope");
+
   // The form is not on the page until the button opens it.
   await expect(page.locator("#token-name")).toHaveCount(0);
   await page.getByRole("button", { name: "Create token" }).click();

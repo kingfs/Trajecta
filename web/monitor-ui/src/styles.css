@@ -172,7 +172,7 @@
 .token-table-head,
 .token-row {
   display: grid;
-  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(92px, 0.65fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 0.9fr);
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.9fr) minmax(92px, 0.65fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 0.9fr);
   gap: 12px;
   align-items: center;
 }
