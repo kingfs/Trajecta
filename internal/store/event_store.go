@@ -129,6 +129,16 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 		event.CreatedAt = now
 	}
 	event.UpdatedAt = now
+	// Every timestamp of this table goes in as a UTC time.Time. On Postgres the
+	// column is a timestamptz and the zone is noise, but on SQLite the column is
+	// text and the driver stringifies a time.Time itself, so the rows a window
+	// comparison reads are one wall-clock string per row: see systemEventTimeArg
+	// for why both the format and the zone have to be the same on the way in and
+	// on the way out.
+	event.FirstSeenAt = event.FirstSeenAt.UTC()
+	event.LastSeenAt = event.LastSeenAt.UTC()
+	event.CreatedAt = event.CreatedAt.UTC()
+	event.UpdatedAt = event.UpdatedAt.UTC()
 	if event.Status == "" {
 		event.Status = SystemEventStatusUnread
 	}
@@ -200,6 +210,43 @@ func (s *Store) GetSystemEventByFingerprint(fingerprint string) (SystemEvent, er
 	return s.getSystemEvent(`fingerprint = ?`, strings.TrimSpace(fingerprint))
 }
 
+// systemEventTimeArg normalizes a system-event timestamp for a SQL comparison
+// against `last_seen_at`, and every comparison in this file goes through it.
+//
+// The table is written and read with plain `database/sql` rather than through
+// ent, so on SQLite - where the column is text - the shape of the value is the
+// driver's choice, and it makes the same choice for the INSERT and for the
+// WHERE. Binding a time.Time is therefore what keeps the two sides in one
+// format, whatever that format turns out to be.
+//
+// Binding a preformatted RFC 3339 string instead is what made a day-based window
+// drop a day of events on SQLite. The driver had stored
+// `2026-10-15 07:23:35.78 +0000 UTC` and the filter compared it against
+// `2026-10-15T00:00:00Z`, so the comparison was decided by bytes and the first
+// difference is the separator between the seconds and the zone: ' ' (0x20) sorts
+// below 'T' (0x54), and '2026-10-15 07:23...' < '2026-10-15T00:00:00Z'. The
+// failure is therefore exactly one calendar day wide - it hits the rows that
+// share the boundary's UTC date, whatever their time of day, while rows on a
+// later date pass on their date prefix and earlier rows are excluded correctly by
+// theirs. That is why it could sit unnoticed: with the default Asia/Shanghai
+// display, "today" starts at 16:00 UTC of the previous day and the two prefixes
+// differ, so the feed looked right for most of the day and silently lost the
+// events written between local midnight and 08:00. With a UTC display the
+// boundary is today 00:00Z and 今天 is empty outright, and 近 7 天/近 30 天 pass only
+// because their boundaries land on earlier dates. Postgres compares a timestamptz
+// as an instant and was never affected, which is why only the SQLite path hid
+// this.
+//
+// Normalizing to UTC is the other half. The text comparison is only
+// order-preserving while every row carries the same offset (and the fractional
+// seconds compare correctly because the separator that follows them, a space,
+// sorts below every digit). A row stored as `-1100` would sort by its wall clock
+// against a `+0000` boundary, so the instant it denotes would decide nothing.
+// Postgres ignores this; SQLite needs it.
+func systemEventTimeArg(at time.Time) time.Time {
+	return at.UTC()
+}
+
 func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResult, error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	whereSQL, args := buildSystemEventFilterClause(filter)
@@ -215,7 +262,7 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 			return SystemEventPageResult{}, err
 		}
 		whereSQL += ` AND (last_seen_at < ? OR (last_seen_at = ? AND id < ?))`
-		cursorLastSeen := cursor.LastSeenAt.UTC()
+		cursorLastSeen := systemEventTimeArg(cursor.LastSeenAt)
 		queryArgs = append(queryArgs, cursorLastSeen, cursorLastSeen, cursor.ID)
 		offsetSQL = ``
 	}
@@ -267,7 +314,7 @@ func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) 
 	var args []any
 	if !since.IsZero() {
 		whereSQL = `last_seen_at >= ?`
-		args = append(args, since.UTC().Format(timeLayout))
+		args = append(args, systemEventTimeArg(since))
 	}
 	var summary SystemEventSummary
 	var lastSeen any
@@ -465,7 +512,7 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	}
 	if !filter.Since.IsZero() {
 		clauses = append(clauses, `last_seen_at >= ?`)
-		args = append(args, filter.Since.UTC().Format(timeLayout))
+		args = append(args, systemEventTimeArg(filter.Since))
 	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		pattern := "%" + escapeLike(query) + "%"

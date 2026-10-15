@@ -90,11 +90,10 @@ func TestServerListsCredentialMasks(t *testing.T) {
 	// since the feed is fanned out to every monitor session.
 	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "list_system_events",
-		// "all" rather than the default "today" window: on SQLite the day-window
-		// boundary and the stored timestamp disagree in format, so a Since filter
-		// matches nothing there. That is a pre-existing defect in the event feed,
-		// independent of this tool, and this test is about the audit pair.
-		Arguments: map[string]any{"category": "credential_masked", "window": "all"},
+		// The default window is deliberate: the event was just written, so a
+		// "today" bound has to include it, and that is the bound the event feed
+		// hands the operator by default.
+		Arguments: map[string]any{"category": "credential_masked"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(list_system_events) error = %v", err)
