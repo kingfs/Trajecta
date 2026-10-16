@@ -38,6 +38,13 @@ export function AppShell({ children, user, onLogout }) {
   // a title block, its actions and a tab strip, and either grows taller when the
   // text wraps. The content column is what gets observed, not the header, so a
   // page that renders its chrome after its first response is measured too.
+  //
+  // A page may pin more than its header: the trace detail page pins its tab strip
+  // under the title block, because landing on the newest turn of a long
+  // conversation scrolls the tabs out of reach. Every element marked
+  // `data-sticky-chrome` is measured into the same total, and is handed the
+  // offset it pins at - in DOM order, under the header and then under each other
+  // - through `--sticky-offset`.
   useEffect(() => {
     const main = mainRef.current;
     if (!main) {
@@ -45,10 +52,18 @@ export function AppShell({ children, user, onLogout }) {
     }
     const root = document.documentElement;
     let frame = 0;
+    let pinned = [];
     const apply = () => {
       frame = 0;
-      const chrome = main.querySelector(".page-header, .topbar");
-      root.style.setProperty("--sticky-chrome-h", `${chrome ? Math.ceil(chrome.getBoundingClientRect().height) : 0}px`);
+      const head = main.querySelector(".page-header, .topbar");
+      let offset = head ? Math.ceil(head.getBoundingClientRect().height) : 0;
+      const extras = Array.from(main.querySelectorAll("[data-sticky-chrome]"));
+      for (const element of extras) {
+        element.style.setProperty("--sticky-offset", `${offset}px`);
+        offset += Math.ceil(element.getBoundingClientRect().height);
+      }
+      pinned = extras;
+      root.style.setProperty("--sticky-chrome-h", `${offset}px`);
     };
     const schedule = () => {
       if (frame) {
@@ -64,6 +79,9 @@ export function AppShell({ children, user, onLogout }) {
         window.cancelAnimationFrame(frame);
       }
       observer.disconnect();
+      for (const element of pinned) {
+        element.style.removeProperty("--sticky-offset");
+      }
       root.style.removeProperty("--sticky-chrome-h");
     };
   }, [location.pathname]);

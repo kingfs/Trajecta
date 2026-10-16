@@ -583,6 +583,13 @@ func parseOpenAIChatMessages(raw json.RawMessage, section string, basePath strin
 		}
 		node.Children = append(node.Children, parseOpenAIContent(obj["content"], section, path+".content", role)...)
 		node.Children = append(node.Children, parseChatToolCalls(obj["tool_calls"], section, path+".tool_calls")...)
+		// A message is mostly the text it carries, and every reader shows a node's
+		// own text: `$.messages[0]` was the one message node the parsers left
+		// without it, so the protocol tab read "2 keys" where the system prompt
+		// was and the sentence had to be found one level down. Only text parts
+		// count, so a message that is nothing but a tool call keeps the call as
+		// its content instead of taking the call's name as its text.
+		node.Text = firstTextNodeText(node.Children)
 		if role == "tool" || stringField(obj, "tool_call_id") != "" {
 			node.NormalizedType = NodeToolResult
 		}
@@ -773,6 +780,10 @@ func parseOpenAIChatChoices(raw json.RawMessage, obs *TraceObservation) {
 		}
 		toolCalls := parseChatToolCalls(messageObj["tool_calls"], "response", path+".message.tool_calls")
 		messageNode.Children = append(messageNode.Children, toolCalls...)
+		// The answer belongs to the message, the same way the request's message
+		// carries the prompt it was sent: a reader of the protocol tree sees what
+		// the model said on the row for the message that said it.
+		messageNode.Text = firstTextNodeText(messageNode.Children)
 		node.Children = append(node.Children, messageNode)
 		obs.Response.Candidates = append(obs.Response.Candidates, node)
 		obs.Response.Nodes = append(obs.Response.Nodes, node)
@@ -872,8 +883,21 @@ func parseResponsesOutput(raw json.RawMessage, obs *TraceObservation) {
 
 func parseResponsesItem(raw json.RawMessage, section string, path string, index int) SemanticNode {
 	obj, _ := decodeJSONObject(raw)
-	providerType := firstNonEmpty(stringField(obj, "type"), "unknown")
+	providerType := stringField(obj, "type")
 	role := stringField(obj, "role")
+	// The Responses API also accepts a message in its shorthand form -
+	// `{"role": "system", "content": "..."}`, with no `type` - which is how the
+	// SDK examples write an input list, and how every caller that only wants to
+	// say something writes one. Reading the absent type as "unknown" labelled
+	// each of those messages unknown and, because the shorthand also allows a
+	// plain string as `content`, dropped the sentence with it.
+	if providerType == "" {
+		if role != "" {
+			providerType = "message"
+		} else {
+			providerType = "unknown"
+		}
+	}
 	node := SemanticNode{
 		ID:             StableNodeID(section, path, providerType, index),
 		ProviderType:   providerType,
@@ -900,6 +924,25 @@ func parseResponsesItem(raw json.RawMessage, section string, path string, index 
 		node.Children = append(node.Children, content...)
 		if node.Text == "" {
 			node.Text = firstNodeText(content)
+		}
+	} else if text, ok := rawJSONString(obj["content"]); ok {
+		// A string `content` gets the same child the array form produces, so a
+		// shorthand message and an expanded one read identically.
+		partType := "input_text"
+		if section == "response" {
+			partType = "output_text"
+		}
+		node.Children = append(node.Children, SemanticNode{
+			ID:             StableNodeID(section, path+".content", partType, 0),
+			ProviderType:   partType,
+			NormalizedType: NodeText,
+			Role:           role,
+			Path:           path + ".content",
+			Raw:            cloneRaw(obj["content"]),
+			Text:           text,
+		})
+		if node.Text == "" {
+			node.Text = text
 		}
 	}
 	return node
@@ -1175,6 +1218,17 @@ func unknownNode(section string, path string, providerType string, index int, ra
 func firstNodeText(nodes []SemanticNode) string {
 	for _, node := range nodes {
 		if node.Text != "" {
+			return node.Text
+		}
+	}
+	return ""
+}
+
+// firstTextNodeText is firstNodeText restricted to the text a node carries, for
+// the callers that mean "what does this say" rather than "what does it hold".
+func firstTextNodeText(nodes []SemanticNode) string {
+	for _, node := range nodes {
+		if node.NormalizedType == NodeText && node.Text != "" {
 			return node.Text
 		}
 	}

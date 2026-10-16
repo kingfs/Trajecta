@@ -75,6 +75,60 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 	}
 }
 
+// A message node carries the text of its content. The chat parser was the one
+// that left it empty, so a reader of the protocol tree saw `$.messages[0]` as an
+// object with "2 keys" where the system prompt was, and had to open the message
+// to find the sentence it had written.
+func TestOpenAIParserGivesChatMessagesTheirText(t *testing.T) {
+	parser := NewOpenAIParser()
+	input := ParseInput{
+		TraceID: "trace-chat-text",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody: []byte(`{"model":"gpt-4.1","messages":[
+			{"role":"system","content":"You are a careful agent."},
+			{"role":"user","content":[{"type":"text","text":"list the files"}]},
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"exec_command","arguments":"{}"}}]}
+		]}`),
+		ResponseBody: []byte(`{"id":"chatcmpl-text","object":"chat.completion","model":"gpt-4.1","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`),
+	}
+
+	obs, err := parser.Parse(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Request.Nodes) != 3 {
+		t.Fatalf("request nodes = %d", len(obs.Request.Nodes))
+	}
+	if text := obs.Request.Nodes[0].Text; text != "You are a careful agent." {
+		t.Fatalf("string-content message text = %q", text)
+	}
+	if text := obs.Request.Nodes[1].Text; text != "list the files" {
+		t.Fatalf("part-content message text = %q", text)
+	}
+	// The call is a child, not text: a message that is only a call keeps the call
+	// as its content instead of taking the tool's name as its own text.
+	called := obs.Request.Nodes[2]
+	if called.NormalizedType != NodeMessage || called.Text != "" {
+		t.Fatalf("call-only message = %q / %q", called.NormalizedType, called.Text)
+	}
+	if len(called.Children) != 1 || called.Children[0].NormalizedType != NodeToolCall {
+		t.Fatalf("call-only message children = %+v", called.Children)
+	}
+	// The response's message carries its answer for the same reason.
+	if len(obs.Response.Nodes) != 1 || len(obs.Response.Nodes[0].Children) != 1 {
+		t.Fatalf("response nodes = %+v", obs.Response.Nodes)
+	}
+	if text := obs.Response.Nodes[0].Children[0].Text; text != "done" {
+		t.Fatalf("response message text = %q", text)
+	}
+}
+
 func TestOpenAIParserParsesModelList(t *testing.T) {
 	registry := NewDefaultRegistry()
 	input := ParseInput{
@@ -181,6 +235,65 @@ func TestOpenAIParserParsesResponsesOutputAndUnknown(t *testing.T) {
 	}
 	if obs.Usage.InputTokens != 11 || obs.Usage.ReasoningTokens != 4 || obs.Usage.CacheReadTokens != 2 {
 		t.Fatalf("usage = %+v", obs.Usage)
+	}
+}
+
+// The Responses API accepts a message in its shorthand form -
+// `{"role": ..., "content": "..."}`, with no `type` - and a plain string as the
+// content. Reading the absent type as "unknown" made every one of those messages
+// an unknown node and dropped the sentence with it, so a request that opens with
+// a system prompt read as an anonymous unknown node in the protocol tab.
+func TestOpenAIParserReadsResponsesShorthandMessages(t *testing.T) {
+	parser := NewOpenAIParser()
+	input := ParseInput{
+		TraceID: "trace-responses-shorthand",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationResponses,
+				Endpoint:  "/v1/responses",
+			},
+		},
+		RequestBody: []byte(`{
+			"model":"gpt-5.1",
+			"input":[
+				{"role":"system","content":"You are a careful agent."},
+				{"role":"user","content":[{"type":"input_text","text":"list the files"}]}
+			]
+		}`),
+		ResponseBody: []byte(`{"id":"resp_2","object":"response","status":"completed","model":"gpt-5.1","output":[]}`),
+	}
+
+	obs, err := parser.Parse(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Request.Inputs) != 2 {
+		t.Fatalf("inputs = %d", len(obs.Request.Inputs))
+	}
+	shorthand := obs.Request.Inputs[0]
+	if shorthand.NormalizedType != NodeMessage || shorthand.ProviderType != "message" {
+		t.Fatalf("shorthand node = %q / %q", shorthand.NormalizedType, shorthand.ProviderType)
+	}
+	if shorthand.Role != "system" {
+		t.Fatalf("shorthand role = %q", shorthand.Role)
+	}
+	if shorthand.Text != "You are a careful agent." {
+		t.Fatalf("shorthand text = %q", shorthand.Text)
+	}
+	// The string content becomes the same text child the array form produces, so
+	// the node's own preview and its child agree.
+	if len(shorthand.Children) != 1 {
+		t.Fatalf("shorthand children = %+v", shorthand.Children)
+	}
+	child := shorthand.Children[0]
+	if child.NormalizedType != NodeText || child.ProviderType != "input_text" || child.Text != "You are a careful agent." {
+		t.Fatalf("shorthand child = %+v", child)
+	}
+	// The expanded form is untouched.
+	expanded := obs.Request.Inputs[1]
+	if expanded.NormalizedType != NodeMessage || expanded.Role != "user" || len(expanded.Children) != 1 {
+		t.Fatalf("expanded node = %+v", expanded)
 	}
 }
 

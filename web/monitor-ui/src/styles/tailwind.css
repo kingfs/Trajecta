@@ -28,6 +28,18 @@
  * reference. `inline` matters — without it Tailwind would emit a second,
  * frozen copy of each value instead of resolving through the variable that the
  * theme layer swaps.
+ *
+ * Two consequences of that order are worth knowing before adding a rule to a
+ * legacy sheet. A utility beats a legacy rule for the same property whatever the
+ * specificity, so a legacy rule cannot correct a utility another component
+ * already applies: the tool dialog's width in `styles.css` lost to the width
+ * inside `.nav-modal`, and it rendered 560px wide however wide its own rule said
+ * — the fix was to declare the width in `styles/components.css`, in the layer of
+ * the rule it corrects. And a legacy rule can only reach properties no utility
+ * touches: `.trace-tabs` takes its sticky offset and background from
+ * `styles/pages.css`, while the focused-panel mark beside it had to be a
+ * `box-shadow` rather than a `border-color`, because a Card's border colour is a
+ * utility.
  */
 
 @layer legacy, theme, base, components, utilities;

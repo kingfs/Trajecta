@@ -197,6 +197,56 @@
   background: var(--danger-soft);
 }
 
+/* The panel a deep link landed on. All three of these classes were applied and
+   none of them was styled, so following a link moved the page without marking
+   what it moved to. The ring is a shadow rather than a border because a Card's
+   border colour is a Tailwind utility, and a utility beats this layer whatever
+   the specificity - the one thing a page rule cannot win. */
+.protocol-panel-focused,
+.timeline-panel-focused,
+.trace-failure-panel-focused {
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+
+/* ------------------------------------------------- trace detail tab strip */
+
+/*
+ * The trace detail page is read from the bottom. Its 会话 tab lands on the newest
+ * turn of a conversation that is long by nature, and its 协议 and 工具调用 tabs are
+ * read by scrolling rather than by scanning, so a tab row that scrolled away left
+ * the reader with no way to change panels except going back to the top. The strip
+ * therefore pins itself under the page header, at the offset AppShell measured
+ * (`--sticky-offset`, set inline on every `data-sticky-chrome` row).
+ *
+ * It takes the header's own treatment - full bleed, the same translucent fill,
+ * the same rule along its bottom - so the two rows read as one piece of chrome
+ * that the page scrolls under. It is full bleed through the shell padding because
+ * the header is: a narrower band under a wider one would look like a mistake.
+ */
+.trace-tabs {
+  position: sticky;
+  top: var(--sticky-offset, 0px);
+  z-index: 15;
+  margin: 0 calc(-1 * var(--page-pad-x));
+  padding: var(--space-1) var(--page-pad-x) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  backdrop-filter: var(--chrome-blur);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .trace-tabs {
+    background: var(--bg-canvas);
+  }
+}
+
+/* The strip carries the space under it, so nothing transparent sits inside the
+   sticky box: a margin there would let the page show through the seam. */
+.trace-tabs ~ [role="tabpanel"] {
+  padding-top: var(--space-4);
+}
+
 .token-badge-strong {
   background: var(--accent-soft);
   color: var(--accent);
@@ -335,7 +385,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-1);
-  height: min(60vh, 460px);
+  height: min(60vh, 460px, calc(100vh - var(--sticky-chrome-h, 0px) - (2 * var(--space-4))));
   padding: var(--space-1) 4px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
@@ -388,6 +438,12 @@
   transform: scaleX(1.5);
 }
 
+/* The two toolbar jumps stand in for the rail's arrows, so exactly one of the
+   pair is ever on screen: the rail needs a column the phone does not have. */
+.conversation-jump {
+  display: none;
+}
+
 /* A rail beside a phone-sized transcript would leave the text too narrow. */
 @media (max-width: 720px) {
   .conversation-layout-railed {
@@ -396,6 +452,10 @@
 
   .conversation-rail {
     display: none;
+  }
+
+  .conversation-jump {
+    display: inline-flex;
   }
 }
 

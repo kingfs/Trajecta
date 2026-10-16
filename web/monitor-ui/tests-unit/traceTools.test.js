@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  buildToolSchemaSummary,
   collectToolOutputs,
   findDeclaredToolForCall,
   formatJSONValue,
@@ -33,26 +32,6 @@ describe("formatJSONValue", () => {
     assert.equal(formatJSONValue(""), "{}");
     assert.equal(formatJSONValue(null), "{}");
     assert.equal(formatJSONValue(undefined, ""), "");
-  });
-});
-
-describe("buildToolSchemaSummary", () => {
-  it("counts the fields of a decoded schema", () => {
-    assert.equal(buildToolSchemaSummary({ type: "object", properties: { cmd: {}, cwd: {} } }), "2 fields: cmd, cwd");
-  });
-
-  it("counts the fields of a schema still in text form", () => {
-    assert.equal(buildToolSchemaSummary('{"type":"object","properties":{"cmd":{}}}'), "1 field: cmd");
-  });
-
-  it("names the type when there are no properties", () => {
-    assert.equal(buildToolSchemaSummary({ type: "string" }), "Schema type string");
-  });
-
-  it("says a schema exists when the text does not parse", () => {
-    assert.equal(buildToolSchemaSummary("{broken"), "Schema available");
-    assert.equal(buildToolSchemaSummary(""), "No schema");
-    assert.equal(buildToolSchemaSummary(undefined), "No schema");
   });
 });
 

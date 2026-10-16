@@ -116,14 +116,67 @@ test("real monitor server shows the parsed request and response", async ({ page 
   const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
   await page.goto(`/traces/${fixture.tools_trace_id}?tab=protocol`);
 
-  await expect(page.getByRole("heading", { name: "Parsed request" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Parsed response" })).toBeVisible();
   const request = page.locator(".protocol-section").first();
-  // The conversation, not just the tool call that ended it.
-  await expect(request).toContainText("list the files");
-  await expect(request).toContainText("exec_command");
   const response = page.locator(".protocol-section").nth(1);
-  await expect(response).toContainText("I could not list the files.");
+  await expect(request.getByRole("heading", { name: "Parsed request" })).toBeVisible();
+  // Both halves are readable at once: the trees are collapsed, so the response
+  // is not below the end of a forty-message request.
+  await expect(response.getByRole("heading", { name: "Parsed response" })).toBeInViewport();
+
+  // The request half holds the whole conversation, not just the tool call that
+  // ended it: each message carries the name the parser gave it and the sentence
+  // it held, so the recorded text is readable without opening every level.
+  await request.getByRole("button", { name: "Expand messages" }).click();
+  const messages = request.locator(".json-node-children").first().locator(".json-node-row");
+  await expect(messages).toHaveCount(4);
+  await expect(messages.nth(0)).toContainText("message");
+  await expect(messages.nth(0)).toContainText("system");
+  await expect(messages.nth(0)).toContainText("You are a careful agent.");
+  await expect(messages.nth(1)).toContainText("list the files");
+  await expect(messages.nth(3)).toContainText("tool_result");
+  await expect(messages.nth(3)).toContainText("permission denied");
+
+  // The call the assistant made is nested inside the message that made it, which
+  // is the shape the parser read - and the shape the conversation merges into one
+  // card - rather than a node standing beside its message.
+  await request.getByRole("button", { name: "Expand 2" }).click();
+  await request.getByRole("button", { name: "Expand tool_calls" }).click();
+  await expect(request.locator(".json-node-row").filter({ hasText: "exec_command" }).first()).toContainText("tool_call");
+
+  // The response half is its own tree with the assistant's answer on the message
+  // that gave it.
+  await response.getByRole("button", { name: "Expand choices" }).click();
+  await response.getByRole("button", { name: "Expand 0" }).click();
+  const answered = response.locator(".json-node-row").filter({ has: page.locator(".json-node-key", { hasText: /^message$/ }) });
+  await expect(answered).toContainText("I could not list the files.");
+});
+
+// The Responses API accepts a message in its shorthand form - no `type`, and a
+// plain string as the content - and the recorder stores what the client sent. The
+// parser used to read the absent type as an unknown node with no text, so a
+// request that opened with a system prompt showed an anonymous `unknown` in the
+// protocol tab; the cassette this drives is written in that form.
+test("real monitor server reads a shorthand Responses message as a message", async ({ page }) => {
+  const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
+  await page.goto(`/traces/${fixture.shorthand_trace_id}?tab=protocol`);
+
+  const request = page.locator(".protocol-section").first();
+  await request.getByRole("button", { name: "Expand input" }).click();
+  const inputs = request.locator(".json-node-children").first().locator(".json-node-row");
+  await expect(inputs).toHaveCount(2);
+  await expect(inputs.nth(0)).toContainText("message");
+  await expect(inputs.nth(0)).toContainText("system");
+  await expect(inputs.nth(1)).toContainText("user");
+  await expect(request).not.toContainText("unknown");
+
+  // The sentence arrives with the message, as the text child the array form
+  // produces, rather than being dropped with the type.
+  await expect(inputs.nth(0)).toContainText("You are a careful agent.");
+  await expect(inputs.nth(1)).toContainText("list the files");
+
+  const response = page.locator(".protocol-section").nth(1);
+  await response.getByRole("button", { name: "Expand output" }).click();
+  await expect(response.locator(".json-node-row").filter({ hasText: "message" }).first()).toContainText("I would list the files.");
 });
 
 // The 工具调用 tab with a real cassette. This recording calls a tool without

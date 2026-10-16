@@ -577,6 +577,25 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
           <Button variant="ghost" size="sm" onClick={() => { setOverrides({}); setOpenAll(openAll === true ? false : true); }}>
             {openAll === true ? t("conversation.collapseAll") : t("conversation.expandAll")}
           </Button>
+          {/*
+            The rail's two arrows are the desktop way through a long transcript,
+            and the rail is hidden on a phone - which left the only two controls
+            that answer "where does this start" and "where did it end up" gone
+            exactly where scrolling is longest. These are the same two jumps in
+            the toolbar; CSS shows them only when the rail is not there.
+          */}
+          {railVisible ? (
+            <>
+              <Button variant="ghost" size="sm" className="conversation-jump" title={t("conversation.jumpTop")} aria-label={t("conversation.jumpTop")} onClick={jumpTop}>
+                <ChevronUp size={14} aria-hidden="true" />
+                {t("conversation.jumpTopShort")}
+              </Button>
+              <Button variant="ghost" size="sm" className="conversation-jump" title={t("conversation.jumpBottom")} aria-label={t("conversation.jumpBottom")} onClick={jumpBottom}>
+                <ChevronDown size={14} aria-hidden="true" />
+                {t("conversation.jumpLatestShort")}
+              </Button>
+            </>
+          ) : null}
           <span className="conversation-count mono">
             {t("conversation.count", { shown: visible.length, total: steps.length })}
           </span>

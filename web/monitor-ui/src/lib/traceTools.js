@@ -131,21 +131,3 @@ export function formatJSONValue(value, fallback = "{}") {
   }
 }
 
-export function buildToolSchemaSummary(parameters = "") {
-  if (!parameters) {
-    return "No schema";
-  }
-  let payload = parameters;
-  if (typeof parameters === "string") {
-    try {
-      payload = JSON.parse(parameters);
-    } catch {
-      return "Schema available";
-    }
-  }
-  const properties = payload?.properties ? Object.keys(payload.properties) : [];
-  if (properties.length) {
-    return `${properties.length} field${properties.length > 1 ? "s" : ""}: ${properties.slice(0, 3).join(", ")}${properties.length > 3 ? "..." : ""}`;
-  }
-  return payload?.type ? `Schema type ${payload.type}` : "JSON schema";
-}

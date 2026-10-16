@@ -67,13 +67,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	shorthandTrace, err := st.GetByRequestID("trace-shorthand")
+	if err != nil {
+		return err
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__fixture/state", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"routed_trace_id": routedTrace.ID,
-			"tools_trace_id":  toolTrace.ID,
+			"routed_trace_id":    routedTrace.ID,
+			"tools_trace_id":     toolTrace.ID,
+			"shorthand_trace_id": shorthandTrace.ID,
 		})
 	})
 	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{ChannelService: channel.NewService(st)})
@@ -205,6 +210,43 @@ func seedStore(outputDir string, st *store.Store, upstreamURL string) error {
 		Usage:  recordfile.UsageInfo{PromptTokens: 60, CompletionTokens: 12, TotalTokens: 72},
 		Layout: traceLayout("/v1/chat/completions", toolRequest, toolResponse, false),
 	}, toolRequest, toolResponse, false); err != nil {
+		return err
+	}
+	// A Responses request written the shorthand way: no `type` on the messages
+	// and a plain string as the content. The Responses API accepts it, so the
+	// parser has to read a message out of it - a request that opens with a system
+	// prompt used to parse as an anonymous unknown node with no text at all.
+	// It is the oldest seeded trace on purpose: the README's trace-detail
+	// screenshot is the newest one, and a fixture should not move it.
+	shorthandRequest := `{"model":"gpt-5","input":[` +
+		`{"role":"system","content":"You are a careful agent."},` +
+		`{"role":"user","content":"list the files"}]}`
+	shorthandResponse := `{"id":"resp_shorthand","object":"response","status":"completed","model":"gpt-5","output":[{"role":"assistant","content":[{"type":"output_text","text":"I would list the files."}]}],"usage":{"input_tokens":40,"output_tokens":9,"total_tokens":49}}`
+	shorthandSemantics := llm.ClassifyPath("/v1/responses", upstreamURL+"/v1")
+	if err := writeTrace(outputDir, st, recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:                      "trace-shorthand",
+			Time:                           now.Add(-2 * time.Hour),
+			Model:                          "gpt-5",
+			Provider:                       shorthandSemantics.Provider,
+			Operation:                      shorthandSemantics.Operation,
+			Endpoint:                       shorthandSemantics.Endpoint,
+			URL:                            "/v1/responses",
+			Method:                         "POST",
+			StatusCode:                     200,
+			DurationMs:                     700,
+			TTFTMs:                         70,
+			SelectedUpstreamID:             "openai-primary",
+			SelectedUpstreamBaseURL:        upstreamURL + "/v1",
+			SelectedUpstreamProviderPreset: "openai",
+			RoutingPolicy:                  "p2c",
+			RoutingScore:                   0.66,
+			RoutingCandidateCount:          2,
+		},
+		Usage:  recordfile.UsageInfo{PromptTokens: 40, CompletionTokens: 9, TotalTokens: 49},
+		Layout: traceLayout("/v1/responses", shorthandRequest, shorthandResponse, false),
+	}, shorthandRequest, shorthandResponse, false); err != nil {
 		return err
 	}
 	return writeTrace(outputDir, st, recordfile.RecordHeader{

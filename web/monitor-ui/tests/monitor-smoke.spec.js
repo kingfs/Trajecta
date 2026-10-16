@@ -553,6 +553,16 @@ test("the conversation rail navigates the turns and lands on the newest input", 
   if (viewport.width <= 720) {
     // A rail pinned over a phone transcript would hide the text it navigates.
     await expect(rail).toBeHidden();
+    // The two jumps it carries live in the toolbar instead, which is where a
+    // phone can reach them: without them the longest transcript had no way back
+    // to its first message.
+    const toTop = page.getByRole("button", { name: "Jump to the first message" });
+    const toBottom = page.getByRole("button", { name: "Jump to the bottom" });
+    await expect(toTop).toBeVisible();
+    await toBottom.click();
+    await expect(page.locator("#node_call_failed")).toBeInViewport();
+    await toTop.click();
+    await expect(page.locator("#node_instr")).toBeInViewport();
     return;
   }
   await expect(rail).toBeVisible();
@@ -573,21 +583,109 @@ test("the conversation rail navigates the turns and lands on the newest input", 
   expect(Math.round(stepRight)).toBeLessThanOrEqual(Math.round(railBox.x));
 });
 
-// The protocol tab draws both halves of the parsed exchange. It used to render
-// the response tree alone, which is what made a whole conversation look like the
-// parser had only seen the last turn.
-test("the protocol tab shows the parsed request and response", async ({ page }) => {
+// The protocol tab draws both halves of the parsed exchange as collapsed trees.
+// It used to render the response tree alone - which made a whole conversation
+// look like the parser had only seen the last turn - and then drew every node of
+// both trees at once, which buried the response half past the end of a long
+// request.
+test("the protocol tab shows both halves as collapsed trees", async ({ page }) => {
   await page.goto("/traces/trace-parsed?tab=protocol");
-  await expect(page.getByRole("heading", { name: "Parsed request" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Parsed response" })).toBeVisible();
-  // The request side carries the conversation and the tool declaration.
   const request = page.locator(".protocol-section").first();
-  await expect(request).toContainText("$.input[0]");
-  await expect(request).toContainText("$.tools[0]");
-  // The response side is its own section, not mixed into the request.
   const response = page.locator(".protocol-section").nth(1);
-  await expect(response).toContainText("$.output[1]");
-  await expect(response).not.toContainText("$.input[0]");
+  await expect(request.getByRole("heading", { name: "Parsed request" })).toBeVisible();
+  // The response half is a screen away at most, not past the end of a long
+  // request: the trees are collapsed, so the page is as long as its top-level
+  // keys. (One screen rather than none because a phone's chrome is tall.)
+  await expect(response.getByRole("heading", { name: "Parsed response" })).toBeVisible();
+  const screenHeight = page.viewportSize().height;
+  const distance = await page.evaluate(() => {
+    const heading = document.querySelectorAll(".protocol-section h3")[1];
+    return heading.getBoundingClientRect().top + window.scrollY;
+  });
+  expect(distance).toBeLessThan(screenHeight * 1.6);
+
+  // One row per top-level key, each closed, and the response keys are not in the
+  // request section.
+  await expect(request.locator(".json-node-row")).toHaveCount(3);
+  await expect(response.locator(".json-node-row")).toHaveCount(1);
+  await expect(response).not.toContainText("input");
+
+  // Opening a container shows the parser's name for each value, not just JSON.
+  await request.getByRole("button", { name: "Expand input" }).click();
+  const inputRows = request.locator(".json-node-children").first().locator(".json-node-row");
+  await expect(inputRows).toHaveCount(7);
+  await expect(inputRows.nth(0)).toContainText("message");
+  await expect(inputRows.nth(0)).toContainText("user");
+  // The row says what the message said, not how many keys its JSON has.
+  await expect(inputRows.nth(0)).toContainText("list the files");
+  await expect(inputRows.nth(1)).toContainText("tool_call");
+  await expect(inputRows.nth(2)).toContainText("tool_result");
+
+  // A node the parser had no name for is labelled by what it is, never by
+  // "unknown": the provider's own item type when there is one, and the shape
+  // otherwise - an object with a role is the message every protocol spells the
+  // same way.
+  await expect(request).toContainText("future_item");
+  await expect(request).not.toContainText("unknown");
+  await expect(inputRows.nth(6)).toContainText("message");
+
+  // Clicking a row opens the value in a dialog named by its path, holding that
+  // value alone - the response half is not in there.
+  await inputRows.nth(0).locator(".json-node-main").click();
+  const valueDialog = page.getByRole("dialog");
+  await expect(valueDialog).toContainText("$.input[0]");
+  await expect(valueDialog).not.toContainText("output");
+
+  // Drilling further stays in the dialog rather than closing it and looking for
+  // the same value in the page behind, and reaches the sentence itself.
+  await valueDialog.getByRole("button", { name: "Expand content" }).click();
+  await valueDialog.locator(".json-node-row").filter({ has: page.locator(".json-node-key", { hasText: /^0$/ }) }).locator(".json-node-main").click();
+  await expect(valueDialog).toContainText("$.input[0].content[0]");
+  await expect(valueDialog).toContainText("list the files");
+  await page.keyboard.press("Escape");
+  await expect(valueDialog).toHaveCount(0);
+});
+
+// A parse-failure notification links to the protocol tab with
+// `focus=observation`. Following that link used to change the tab and nothing
+// else: the panel the message was about was somewhere down the page and nothing
+// said which one it was.
+test("a link to a panel marks the panel it landed on", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?tab=protocol&focus=observation");
+  const panel = page.locator(".protocol-panel");
+  await expect(panel).toHaveClass(/protocol-panel-focused/);
+  // The mark is a ring rather than a border, because a Card's border colour is a
+  // Tailwind utility and a utility outranks the legacy sheet that would set it.
+  const ring = await panel.evaluate((element) => getComputedStyle(element).boxShadow);
+  expect(ring).not.toBe("none");
+  await expect(panel).toBeInViewport();
+
+  // The tab it belongs to is still the tab the address asked for, and the link
+  // carries no mark to a panel it did not name.
+  await expect(page.getByRole("tab", { name: "Protocol" })).toHaveAttribute("aria-selected", "true");
+  await page.goto("/traces/trace-parsed?tab=protocol");
+  await expect(page.locator(".protocol-panel-focused")).toHaveCount(0);
+});
+
+// The parsed payload is the one panel a reader scrolls, so the strip that changes
+// panels stays on screen: the conversation lands on its newest turn, which is the
+// bottom of the page, and a tab row that scrolled away would send the reader back
+// up to leave the panel they are reading.
+test("the tab strip stays on screen while the page scrolls", async ({ page }) => {
+  await page.goto("/traces/trace-parsed");
+  const strip = page.locator(".trace-tabs");
+  await expect(strip).toBeVisible();
+  // The default landing puts the newest input on screen, so the page is already
+  // scrolled and the strip has to be pinned under the header, not left behind.
+  await expect(page.locator("#node_in")).toBeInViewport();
+  const box = await strip.boundingBox();
+  const header = await page.locator(".topbar").boundingBox();
+  expect(Math.round(box.y)).toBeLessThanOrEqual(Math.round(header.height) + 1);
+
+  // And it holds the tabs for the panel being read.
+  await strip.getByRole("tab", { name: "Tool calls" }).click();
+  await expect(page.getByRole("heading", { name: "Request tools" })).toBeVisible();
+  await expect(strip).toBeInViewport();
 });
 
 // The declared tools are their own tab now: one row per tool, the row opens the
@@ -598,7 +696,7 @@ test("the tool calls tab lists one row per tool and opens the calls dialog", asy
   const viewport = page.viewportSize();
   await page.goto("/traces/trace-tools?tab=tools");
   const rows = page.locator(".tool-row");
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(6);
 
   const called = rows.filter({ hasText: "exec_command" });
   await expect(called).toContainText("Run a shell command.");
@@ -615,11 +713,29 @@ test("the tool calls tab lists one row per tool and opens the calls dialog", asy
   expect(rowBoxes[0].width).toBeGreaterThan(cardBox.width - 60);
   expect(rowBoxes[1].top).toBeGreaterThanOrEqual(rowBoxes[0].bottom - 1);
 
-  // The row itself opens the definition.
+  // The row itself opens the definition, drawn as the form the schema describes:
+  // one row per parameter with its type and whether it is required, nested
+  // parameters indented under the one that declares them.
   await called.locator(".tool-row-main").click();
   const definition = page.getByRole("dialog");
   await expect(definition).toContainText("Tool definition");
-  await expect(definition).toContainText('"cmd"');
+  await expect(definition.locator(".tool-schema-row")).toHaveCount(7);
+  const cmdRow = definition.locator(".tool-schema-row").first();
+  await expect(cmdRow.locator(".tool-schema-name")).toHaveText("cmd");
+  await expect(cmdRow).toContainText("required");
+  await expect(cmdRow).toContainText("string");
+  await expect(cmdRow).toContainText("The command line to run.");
+  // An enumeration, a default, a nested object and an array of objects all have
+  // to be readable as such.
+  await expect(definition).toContainText("Accepted values:");
+  await expect(definition).toContainText("fast");
+  await expect(definition).toContainText('default "."');
+  await expect(definition).toContainText("No undeclared fields accepted");
+  await expect(definition.locator(".tool-schema-nested").first()).toContainText("NO_COLOR");
+  await expect(definition).toContainText("Array elements");
+  // The raw declaration stays available behind its own fold.
+  await definition.getByRole("button", { name: /Raw JSON Schema/ }).click();
+  await expect(definition).toContainText('"additionalProperties": false');
   await page.keyboard.press("Escape");
   await expect(definition).toHaveCount(0);
 
@@ -638,6 +754,34 @@ test("the tool calls tab lists one row per tool and opens the calls dialog", asy
   // than an empty definition.
   await undeclared.locator(".tool-row-main").click();
   await expect(page.getByRole("dialog")).toContainText("wrote 3 bytes");
+});
+
+// A chat request can declare a catalog of tools. The panel filters it by name
+// and description, and says so when nothing matches rather than showing an empty
+// list under a full count.
+test("the tool calls tab filters a long catalog", async ({ page }) => {
+  await page.goto("/traces/trace-tools?tab=tools");
+  const rows = page.locator(".tool-row");
+  const filter = page.getByRole("searchbox", { name: "Filter tools" });
+  await expect(filter).toBeVisible();
+
+  await filter.fill("read");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: "read_file" })).toHaveCount(1);
+  await expect(rows.filter({ hasText: "read_env" })).toHaveCount(1);
+
+  // The description is searched too, so a reader who remembers what a tool does
+  // rather than what it is called still finds it.
+  await filter.fill("environment variable");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("read_env");
+
+  await filter.fill("no such tool");
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByText("No matching tools")).toBeVisible();
+
+  await filter.fill("");
+  await expect(rows).toHaveCount(6);
 });
 
 // A finding names a node with an evidence path, which is precise and unreadable.
@@ -1336,9 +1480,9 @@ function tracePayload() {
 // returns - depth 0 for a step, depth 1 for a part of one.
 function parsedObservationPayload() {
   const node = (overrides) => ({ parent_id: "", provider_type: "openai", role: "", depth: 0, raw: null, children: [], ...overrides });
-  const instruction = node({ id: "node_instr", normalized_type: "instruction", role: "system", path: "$.instructions", index: 0, text_preview: "You are a careful agent." });
-  const input = node({ id: "node_in", normalized_type: "message", role: "user", path: "$.input[0]", index: 0, text_preview: "list the files" });
-  const inputPart = node({ id: "node_in_part", parent_id: "node_in", depth: 1, normalized_type: "text", path: "$.input[0].content[0]", index: 0, text_preview: "list the files" });
+  const instruction = node({ id: "node_instr", normalized_type: "instruction", role: "system", path: "$.instructions", index: 0, text_preview: "You are a careful agent.", raw: { role: "system", content: "You are a careful agent." } });
+  const input = node({ id: "node_in", normalized_type: "message", role: "user", path: "$.input[0]", index: 0, text_preview: "list the files", raw: { role: "user", content: [{ type: "input_text", text: "list the files" }] } });
+  const inputPart = node({ id: "node_in_part", parent_id: "node_in", depth: 1, normalized_type: "text", path: "$.input[0].content[0]", index: 0, text_preview: "list the files", raw: { type: "input_text", text: "list the files" } });
   const call = node({
     id: "node_call",
     normalized_type: "tool_call",
@@ -1349,8 +1493,8 @@ function parsedObservationPayload() {
     raw: { name: "exec_command", call_id: "call_1", arguments: '{"cmd":"ls -la"}' },
   });
   const result = node({ id: "node_result", normalized_type: "tool_result", role: "tool", path: "$.input[2]", index: 2, text_preview: "total 12\ndrwxr-xr-x  4 agent staff", raw: { call_id: "call_1", exit_code: 0 } });
-  const reasoning = node({ id: "node_reasoning", normalized_type: "reasoning", path: "$.output[0]", index: 0, text_preview: "They asked for a listing." });
-  const out = node({ id: "node_out", normalized_type: "message", role: "assistant", path: "$.output[1]", index: 1, text_preview: longAssistantMessage() });
+  const reasoning = node({ id: "node_reasoning", normalized_type: "reasoning", path: "$.output[0]", index: 0, text_preview: "They asked for a listing.", raw: { type: "reasoning", summary: "They asked for a listing." } });
+  const out = node({ id: "node_out", normalized_type: "message", role: "assistant", path: "$.output[1]", index: 1, text_preview: longAssistantMessage(), raw: { role: "assistant", content: longAssistantMessage() } });
   const callFailed = node({
     id: "node_call_failed",
     normalized_type: "tool_call",
@@ -1362,7 +1506,14 @@ function parsedObservationPayload() {
   });
   const resultFailed = node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: "permission denied", raw: { call_id: "call_2", status: "failed" } });
   // A declaration is not part of the dialogue and has no step.
-  const toolDecl = node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command" });
+  const toolDecl = node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command", raw: { type: "function", function: { name: "exec_command" } } });
+  // Two ways a node arrives without a semantic name: an item type a newer
+  // provider invented, which the parser kept as the item's own type, and a
+  // message the parser had no name for but whose shape says what it is. The
+  // protocol tree labels them `future_item` and `message`; neither is drawn as
+  // a bare `unknown`.
+  const futureItem = node({ id: "node_future", normalized_type: "unknown", provider_type: "future_item", path: "$.input[5]", index: 5, raw: { type: "future_item", payload: { kind: "future" } } });
+  const unnamedMessage = node({ id: "node_unnamed", normalized_type: "unknown", provider_type: "unknown", role: "system", path: "$.input[6]", index: 6, raw: { role: "system", content: "You are a careful agent." } });
   return {
     id: "trace-parsed",
     summary: { status: "parsed", parser: "openai", parser_version: "1", provider: "openai", operation: "responses", model: "gpt-5", warnings: [] },
@@ -1370,7 +1521,7 @@ function parsedObservationPayload() {
     // The protocol tab draws the request and the response as two trees, so a
     // conversation longer than one turn is visible as a whole rather than as
     // the assistant's last message alone.
-    request_tree: [instruction, { ...input, children: [inputPart] }, call, result, callFailed, resultFailed, toolDecl],
+    request_tree: [instruction, { ...input, children: [inputPart] }, call, result, callFailed, resultFailed, toolDecl, futureItem, unnamedMessage],
     response_tree: [reasoning, out],
   };
 }
@@ -1434,8 +1585,32 @@ function toolsTracePayload() {
       { id: "call_2", type: "function", function: { name: "write_file", arguments: '{"path":"notes.txt"}' } },
     ],
     tools: [
-      { type: "function", function: { name: "exec_command", description: "Run a shell command.", parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] } } },
+      {
+        type: "function",
+        function: {
+          name: "exec_command",
+          description: "Run a shell command.",
+          // A declaration with everything the schema form has to draw: a required
+          // parameter, a default, an enumeration, a nested object, an array of
+          // objects, and a closed object.
+          parameters: {
+            type: "object",
+            required: ["cmd"],
+            additionalProperties: false,
+            properties: {
+              cmd: { type: "string", description: "The command line to run.", minLength: 1 },
+              cwd: { type: "string", description: "Where to run it.", default: "." },
+              mode: { type: "string", enum: ["fast", "safe"] },
+              env: { type: "object", properties: { NO_COLOR: { type: "boolean" } } },
+              args: { type: "array", items: { type: "object", properties: { value: { type: "string" } } } },
+            },
+          },
+        },
+      },
       { type: "function", function: { name: "read_file", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } } } } },
+      { type: "function", function: { name: "list_dir", description: "List a directory.", parameters: { type: "object", properties: { path: { type: "string" } } } } },
+      { type: "function", function: { name: "search_files", description: "Search the tree.", parameters: { type: "object", properties: { pattern: { type: "string" } } } } },
+      { type: "function", function: { name: "read_env", description: "Read an environment variable.", parameters: { type: "object", properties: { name: { type: "string" } } } } },
     ],
   };
 }

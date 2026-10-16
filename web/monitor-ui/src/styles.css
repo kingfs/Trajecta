@@ -399,7 +399,6 @@
   font-size: 1rem;
 }
 
-.semantic-tree,
 .finding-list,
 .credential-mask-list {
   display: grid;
@@ -602,7 +601,6 @@
   flex-wrap: wrap;
 }
 
-.semantic-node,
 .finding-card {
   display: grid;
   gap: 12px;
@@ -612,7 +610,6 @@
   background: var(--surface-2);
 }
 
-.semantic-node-head,
 .finding-card-head {
   display: flex;
   justify-content: space-between;
@@ -620,38 +617,17 @@
   gap: 14px;
 }
 
-.semantic-node-head strong,
 .finding-card-head strong {
   display: block;
   font-family: var(--font-sans);
   font-size: 0.98rem;
 }
 
-.semantic-node-head span,
 .finding-card-head span {
   display: block;
   color: var(--muted);
   font-family: var(--font-sans);
   font-size: 0.78rem;
-}
-
-.semantic-node-preview {
-  margin: 0;
-  color: var(--text);
-  font-family: var(--font-sans);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.semantic-node-meta {
-  align-items: stretch;
-}
-
-.semantic-children {
-  display: grid;
-  gap: 10px;
-  padding-left: 14px;
-  border-left: 2px solid var(--line);
 }
 
 /* The protocol tab draws the parsed exchange as two labelled halves - request
@@ -689,6 +665,203 @@
   font-family: var(--font-sans);
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+/*
+ * The parsed payload as a tree. A container is one row until it is opened, and
+ * the row carries the parser's own name for the value - `tool_call`, `message` -
+ * when it had one, so the shape of a request is readable without expanding it.
+ * The rows are indented under a guide line rather than padded, because a message
+ * nested four levels deep still has to line up with its siblings.
+ */
+.json-tree {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.json-tree-in-modal {
+  max-height: min(52vh, 620px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.json-node {
+  display: grid;
+  gap: 2px;
+}
+
+.json-node-children {
+  display: grid;
+  gap: 2px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.json-node-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.json-node-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.json-node-toggle:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.json-node-toggle-leaf {
+  cursor: default;
+}
+
+.json-node-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.json-node-main:hover {
+  background: var(--surface-2);
+}
+
+.json-node-key {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.json-node-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.json-node-tags {
+  flex: 0 0 auto;
+}
+
+.json-node-detached {
+  padding-left: 20px;
+}
+
+.json-value-text {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: min(52vh, 620px);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A tool declaration drawn as the form it describes. Indentation and a guide
+ * line carry the nesting, the parameter name is the row's anchor, and the type,
+ * the requiredness and the accepted values sit on the row rather than two
+ * object levels below it.
+ */
+/* The catalog's own filter: one row above the list, sized to the width a name
+   needs rather than the column. */
+.tool-filter {
+  display: block;
+  margin-bottom: var(--space-4);
+}
+
+.tool-filter input {
+  width: 260px;
+}
+
+.tool-schema {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tool-schema-row {
+  display: grid;
+  gap: 4px;
+}
+
+.tool-schema-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.tool-schema-name {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.tool-schema-description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tool-schema-constraint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+}
+
+.tool-schema-nested {
+  display: grid;
+  gap: var(--space-3);
+  margin: 4px 0 4px 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.tool-schema-empty {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
 }
 
 .session-tab-strip {
@@ -1498,7 +1671,6 @@ a:focus-visible {
 :root[data-theme="light"] .session-table,
 :root[data-theme="light"] .breakdown-card,
 :root[data-theme="light"] .payload-card,
-:root[data-theme="light"] .semantic-node,
 :root[data-theme="light"] .finding-card,
 :root[data-theme="light"] .trace-reading-card,
 :root[data-theme="light"] .tool-call-box,

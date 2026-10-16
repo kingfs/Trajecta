@@ -231,11 +231,11 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 
 ## Trace 详情
 
-一条 trace 有六个标签页，同一时刻只挂载正在读的那一个：
+一条 trace 有六个标签页，同一时刻只挂载正在读的那一个。标签条固定在页头下方（页头本身也是 sticky），因此在「会话」默认落到最后一轮、页面已经滚到底之后，切换标签仍然不需要先滚回顶部；页面滚动时内容从这条带子下面穿过。
 
-- 会话：由 Observation IR 渲染出的对话。顶层节点（`depth: 0`）各是一张卡片、按 payload 顺序排列；卡片内部的整棵子树都会被读进去——消息里的文本成为正文，工具调用成为卡片内的一个调用块（名称、`call_id`、参数），应答它的工具结果并进同一个调用块（按 `call_id` 配对），因此 OpenAI Chat 那种「调用写在 assistant 消息里」的记录也能正确显示，而不是显示成空卡片或原始 JSON。响应侧的两层嵌套（`$.choices[0]` → `.message` → `.content`）同样会被展开，卡片角色取自其中第一条带 role 的节点。失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。打开页面时默认落在最后一次「输入」上（`user` / `human` 角色的步骤或 `instruction` 节点），最新一轮输入与应答它的输出直接可见；URL 里的 `node=`、正在使用的搜索与「只看失败」优先，不会被这个默认落点覆盖。右侧常驻一条窄导航轨（随页面滚动保持在视口内，≤720px 时隐藏）：顶部箭头跳到最早的消息、底部箭头跳到最末一条，中间的刻度是每一轮输入在正文里的真实位置（不是等距编号），点击跳到该轮。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。
-- 协议：解析结果分成「请求解析」与「响应解析」两棵树。请求侧是整段已解析历史（每一轮消息、内容块与工具声明），响应侧是本次响应的推理、工具调用与最终输出。此前只渲染响应树，因此一整个会话看起来像是只解析了最后一轮。
-- 工具调用：请求声明的工具，每个工具占满一整行（名称、来源、调用次数或「未调用」、描述），右侧不留空白列。点击行打开工具定义弹窗（960px 宽），调用次数大于 0 时该行另有「查看 N 次调用」按钮，打开更宽的弹窗（1180px）逐条列出调用输入与按 `tool_call_id` 配对到的输出。这一块原本是「请求信息」的最后一张卡片，左列选工具、右列显示概览，而右列在常见情况下（工具没被调用、或定义只有一段 schema）几乎是空的。
+- 会话：由 Observation IR 渲染出的对话。顶层节点（`depth: 0`）各是一张卡片、按 payload 顺序排列；卡片内部的整棵子树都会被读进去——消息里的文本成为正文，工具调用成为卡片内的一个调用块（名称、`call_id`、参数），应答它的工具结果并进同一个调用块（按 `call_id` 配对），因此 OpenAI Chat 那种「调用写在 assistant 消息里」的记录也能正确显示，而不是显示成空卡片或原始 JSON。响应侧的两层嵌套（`$.choices[0]` → `.message` → `.content`）同样会被展开，卡片角色取自其中第一条带 role 的节点。失败的一步由错误标志、非零退出码或状态词判定并标红，`tool_declaration` 与 `usage` 不作为对话步骤。打开页面时默认落在最后一次「输入」上（`user` / `human` 角色的步骤或 `instruction` 节点），最新一轮输入与应答它的输出直接可见；URL 里的 `node=`、正在使用的搜索与「只看失败」优先，不会被这个默认落点覆盖。右侧常驻一条窄导航轨（随页面滚动保持在视口内，≤720px 时隐藏）：顶部箭头跳到最早的消息、底部箭头跳到最末一条，中间的刻度是每一轮输入在正文里的真实位置（不是等距编号），点击跳到该轮。工具条可以只搜文本（消息、参数、输出）、只看失败、全部展开/收起、切换 Markdown，并显示「已显示 / 总数」；筛选不会改变步骤编号。≤720px 时导航轨没有位置可放，它的两个跳转（最早 / 最新）改由工具条上的按钮承担，因此手机上仍能一键回到开头或跳到最新一轮。
+- 协议：解析结果分成「请求解析」与「响应解析」两棵树，默认折叠，因此长请求只占顶层几个键的高度，响应侧不用翻到页尾才看得到。每行是 payload 里的一个值，行上带解析器给它的名字（`message`、`tool_call`、`tool_result`…，角色跟在后面），有文本的节点直接在行上显示那句文本（消息正文、工具名），没有名字的节点按值本身的形态标注（`future_item`、`object`、`array`…），不会出现无意义的 `unknown`。点开一行展开它，点行本身则用弹窗（蒙版）显示该值：弹窗标题是 JSON 路径，内容仍是可继续点开的同一棵树，解析器读不出 JSON 的载荷（错误响应体、流分片）按原始文本显示。请求侧是整段已解析历史（每一轮消息、内容块与工具声明），响应侧是本次响应的推理、工具调用与最终输出；此前只渲染响应树，因此一整个会话看起来像是只解析了最后一轮。
+- 工具调用：请求声明的工具，每个工具占满一整行（名称、来源、调用次数或「未调用」、描述），右侧不留空白列。工具多于 3 个时面板顶部出现按名称/描述筛选的输入框，没有匹配项时给出空状态而不是空列表。点击行打开工具定义弹窗（960px 宽）：参数按 JSON Schema 描述的表单展示——每个参数一行，给出名称、类型、必填/选填、描述，以及枚举取值、默认值、格式、范围、`additionalProperties: false`，嵌套对象与数组元素缩进在声明它的那一行下面；原始 JSON Schema 仍保留在同一弹窗的折叠块里，供表单画不出的关键字查阅。调用次数大于 0 时该行另有「查看 N 次调用」按钮，打开更宽的弹窗（1180px）逐条列出调用输入与按 `tool_call_id` 配对到的输出。这一块原本是「请求信息」的最后一张卡片，左列选工具、右列显示概览，而右列在常见情况下（工具没被调用、或定义只有一段 schema）几乎是空的。
 - 审计：这条请求被替换的凭据（`GET /api/secret-masks?trace_id=`，真值与发往上游的假值成对列出，带偏移、长度、置信度与落盘形态），下面是确定性 findings；每一项给出可读的定位（`$.input[4] · tool result · tool`）并可直接跳到会话中对应的那一步。替换对排在发现项之上，因为「哪些字节离开了这台机器」是请求自身的事实，而 finding 是检测器的判断。没有命中凭据规则时该卡片显示空状态，不会因此隐藏 findings。
 - 请求信息：已选路由目标、路由决策、上游健康、请求工具与延迟/TTFT/Token 吞吐/缓存比例等本次请求自身的事实，以及记录事件流（事件类型、时间、状态/方法、URL、header/body 字节数与 `attributes` 里的路由决策与失败原因）。事件的 `timeline_items` 树不再展开，因为它复述的正是「会话」与「工具调用」两个标签页已经给出的内容。
 - 原始数据：只有原始 HTTP 请求/响应字节与 headers。它不再承载统一事件时间线。
@@ -247,7 +247,7 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 - `Refresh analysis`（`POST /api/traces/:id/reanalyze`）：从本地 cassette 重新生成 Observation 和 findings，仅在自动处理异常或结果明显不对时使用。
 - `Repair stats`（`POST /api/traces/:id/repair-usage`）：从本地响应重新抽取 usage/token 统计，仅在 token/cost 统计缺失或错误时使用。
 
-Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`tools`、`audit`、`request`、`raw`）、`node`、`from_session`、`view`（`sessions` / `requests`）和 `focus`（`failure`、`timeline`、`timeline_error`、`request`、`response`）。`tab=timeline` 与 `tab=performance` 是旧地址，分别按 `conversation` 与 `request` 处理。当 trace 携带 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id 时，页头动作区显示 `Responses audit` 入口，跳转到 `/audit` 中同一条请求链路。
+Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`tools`、`audit`、`request`、`raw`）、`node`、`from_session`、`view`（`sessions` / `requests`）和 `focus`（`failure`、`timeline`、`timeline_error`、`observation`、`request`、`response`）。`focus=observation` 落在「协议」标签页并把解析面板滚到视口内、加一圈强调描边，这是解析失败通知里那条链接的目标。`tab=timeline` 与 `tab=performance` 是旧地址，分别按 `conversation` 与 `request` 处理。当 trace 携带 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id 时，页头动作区显示 `Responses audit` 入口，跳转到 `/audit` 中同一条请求链路。
 
 ## Responses function executors
 

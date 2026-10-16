@@ -7,10 +7,14 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { TabStrip, Tabs, TabsContent } from "../components/common/Tabs";
 import { TraceConversation } from "../components/monitor/TraceConversation";
+import { ProtocolTree } from "../components/monitor/ProtocolTree";
+import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
+import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
 import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { Input } from "../components/ui/input";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -42,7 +46,6 @@ import {
 } from "../lib/monitor";
 import {
   buildToolMessageSummary,
-  buildToolSchemaSummary,
   collectToolOutputs,
   collectTraceToolCalls,
   findDeclaredToolForCall,
@@ -329,7 +332,16 @@ export function TraceDetailPage() {
       */}
       {detail.data ? (
         <Tabs value={tab} onValueChange={setTraceTab}>
-          <TabStrip tabs={traceTabs} activeId={tab} onSelect={setTraceTab} label={t("common.pageSections")} />
+          {/*
+            The strip pins itself under the page's sticky header. The reader
+            arrives at the bottom of a long conversation - that is where the
+            default landing puts them - and a tab row that scrolled away would
+            send them back to the top to change panels. AppShell measures every
+            `data-sticky-chrome` row and hands it the offset to pin at.
+          */}
+          <div className="trace-tabs [&_[role=tablist]]:mb-0" data-sticky-chrome>
+            <TabStrip tabs={traceTabs} activeId={tab} onSelect={setTraceTab} label={t("common.pageSections")} />
+          </div>
 
           <TabsContent value="conversation">
             <div className="detail-grid">
@@ -350,6 +362,7 @@ export function TraceDetailPage() {
               CodeBlock={CodeBlock}
               InlineTag={InlineTag}
               busy={jobBusy === "reanalyze"}
+              focusTarget={focusTarget}
               onRefresh={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
               t={t}
             />
@@ -607,6 +620,14 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
   const [definitionTool, setDefinitionTool] = useState(null);
   const [callsTool, setCallsTool] = useState(null);
   const callsOf = (name) => toolCalls.filter((call) => isSameToolName(call.function?.name, name));
+  // The declaration arrives wrapped, flat, as an Anthropic `input_schema`, or as
+  // the JSON text of any of those; the dialog reads it once and draws the form.
+  const definitionSchema = useMemo(() => parseSchemaDocument(definitionTool?.parameters), [definitionTool]);
+  // A chat request can declare forty tools. The rows are one per tool and the
+  // reader usually has a name in mind, so the list filters as they type - over
+  // the same words the description shows, plus the name of the tool that a call
+  // carries, because a call is how a reader arrives here knowing the name.
+  const [query, setQuery] = useState("");
 
   /*
    * The declared tools, plus any tool that was called without a recorded
@@ -636,6 +657,14 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
     return [...byName.values()];
   }, [tools, toolCalls, t]);
 
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) {
+      return rows;
+    }
+    return rows.filter(({ tool }) => [tool.name, tool.description, tool.source, tool.type].filter(Boolean).join(" ").toLowerCase().includes(needle));
+  }, [rows, query]);
+
   return (
     <>
       <Card as="section">
@@ -647,9 +676,22 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
             <InlineTag>{t(rows.length === 1 ? "traceDetail.toolsCountOne" : "traceDetail.toolsCount", { count: rows.length })}</InlineTag>
           ) : null}
         </div>
-        {rows.length ? (
+        {/* One name is enough to find a tool in a catalog of forty, so the field
+            only appears once the list is longer than a glance covers. */}
+        {rows.length > 3 ? (
+          <label className="tool-filter">
+            <span className="visually-hidden">{t("traceDetail.filterTools")}</span>
+            <Input
+              type="search"
+              value={query}
+              placeholder={t("traceDetail.filterToolsPlaceholder")}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+        ) : null}
+        {visible.length ? (
           <div className="tool-rows">
-            {rows.map(({ tool, declared }) => {
+            {visible.map(({ tool, declared }) => {
               const calls = callsOf(tool.name);
               const name = tool.name || t("traceDetail.toolFallback", { index: 1 });
               // A tool without a declaration has no definition to show, so its
@@ -681,6 +723,8 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
               );
             })}
           </div>
+        ) : rows.length ? (
+          <EmptyState title={t("traceDetail.noMatchingTools")} detail={t("traceDetail.noMatchingToolsDetail", { query: query.trim() })} compact />
         ) : (
           <EmptyState title={t("traceDetail.noDeclaredTools")} detail={t("traceDetail.noDeclaredToolsDetail")} />
         )}
@@ -703,10 +747,20 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
             </DialogHeader>
             <div className="trace-tag-group">
               <InlineTag tone="accent">{definitionTool.source || definitionTool.type || t("traceDetail.toolLabel")}</InlineTag>
-              <InlineTag>{buildToolSchemaSummary(definitionTool.parameters)}</InlineTag>
+              <InlineTag>{t("traceDetail.schemaParamCount", { count: countSchemaParameters(definitionSchema) })}</InlineTag>
             </div>
             {definitionTool.description ? <p className="tool-description">{definitionTool.description}</p> : null}
-            <CodeBlock value={formatJSONValue(definitionTool.parameters)} />
+            {/*
+              The declaration as the form it describes. The raw JSON Schema is
+              what the recorder stored, so it stays - folded - for the keywords a
+              form cannot draw; the form is what answers "what can I pass".
+            */}
+            <ToolSchemaForm schema={definitionSchema} t={t} />
+            {definitionTool.parameters ? (
+              <CollapsibleCard title={t("traceDetail.schemaRaw")} subtitle={definitionTool.name} defaultOpen={false}>
+                <CodeBlock value={formatJSONValue(definitionTool.parameters)} />
+              </CollapsibleCard>
+            ) : null}
           </DialogContent>
         </Dialog>
       ) : null}
@@ -756,7 +810,19 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
   );
 }
 
-function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefresh, t }) {
+function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, focusTarget = "", onRefresh, t }) {
+  const panelRef = useRef(null);
+
+  // A notification about a parse failure links here with `focus=observation`:
+  // the tab is already the answer, and scrolling the panel up is what puts the
+  // summary - status, parser, warnings - in front of the reader who followed it.
+  useEffect(() => {
+    if (focusTarget !== "observation" || !panelRef.current) {
+      return;
+    }
+    panelRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [focusTarget]);
+
   if (observation.error) {
     return (
       <Card as="section" className="protocol-panel">
@@ -794,7 +860,7 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
     );
   }
   return (
-    <Card as="section" className="protocol-panel">
+    <Card as="section" ref={panelRef} className={focusTarget === "observation" ? "protocol-panel protocol-panel-focused" : "protocol-panel"}>
       <div className="panel-head">
         <div>
           <h2>{t("audit.protocol")}</h2>
@@ -819,26 +885,25 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
         </CollapsibleCard>
       ) : null}
       {/*
-        Both halves of the parsed exchange. This panel used to render the
-        response tree alone, which is why reading it looked like the parser had
-        only seen the last turn: the request - every message of the conversation
-        plus the declared tools - was parsed and stored, but never drawn.
+        Both halves of the parsed exchange, each one a tree that stays collapsed
+        until a node is opened. This panel used to render the response tree alone,
+        which is why reading it looked like the parser had only seen the last
+        turn - and then rendered every node of both trees at once, which put the
+        response half of a long request past the end of the page.
       */}
       {requestTree.length || responseTree.length ? (
         <div className="protocol-sections">
-          <ProtocolNodeSection
+          <ProtocolSection
             title={t("traceDetail.parsedRequest")}
             hint={t("traceDetail.parsedRequestHint")}
             nodes={requestTree}
-            CodeBlock={CodeBlock}
             InlineTag={InlineTag}
             t={t}
           />
-          <ProtocolNodeSection
+          <ProtocolSection
             title={t("traceDetail.parsedResponse")}
             hint={t("traceDetail.parsedResponseHint")}
             nodes={responseTree}
-            CodeBlock={CodeBlock}
             InlineTag={InlineTag}
             t={t}
           />
@@ -850,7 +915,7 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
   );
 }
 
-function ProtocolNodeSection({ title, hint, nodes = [], CodeBlock, InlineTag, t }) {
+function ProtocolSection({ title, hint, nodes = [], InlineTag, t }) {
   return (
     <section className="protocol-section">
       <div className="protocol-section-head">
@@ -861,11 +926,7 @@ function ProtocolNodeSection({ title, hint, nodes = [], CodeBlock, InlineTag, t 
         <InlineTag>{t("traceDetail.nodeCount", { count: countSemanticNodes(nodes) })}</InlineTag>
       </div>
       {nodes.length ? (
-        <div className="semantic-tree">
-          {nodes.map((node) => (
-            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
-          ))}
-        </div>
+        <ProtocolTree nodes={nodes} t={t} />
       ) : (
         <EmptyState title={t("traceDetail.emptyProtocolSection")} detail={t("traceDetail.emptyProtocolSectionDetail")} compact />
       )}
@@ -879,47 +940,6 @@ function countSemanticNodes(nodes = []) {
     total += 1 + countSemanticNodes(node.children || []);
   }
   return total;
-}
-
-function SemanticNodeView({ node, CodeBlock, InlineTag, t }) {
-  const hasChildren = Boolean(node.children?.length);
-  const raw = node.raw ? JSON.stringify(node.raw, null, 2) : "";
-  const body = (
-    <>
-      {node.text_preview ? <p className="semantic-node-preview">{node.text_preview}</p> : null}
-      <div className="detail-meta-strip semantic-node-meta">
-        <DetailMetaPill label={t("traceDetail.metaPath")} value={node.path || "-"} mono />
-        <DetailMetaPill label={t("traceDetail.metaIndex")} value={node.index ?? 0} />
-      </div>
-      {raw ? (
-        <CollapsibleCard title={t("traceDetail.rawNode")} subtitle={node.path || node.id} defaultOpen={false}>
-          <CodeBlock value={raw} />
-        </CollapsibleCard>
-      ) : null}
-      {hasChildren ? (
-        <div className="semantic-children">
-          {node.children.map((child) => (
-            <SemanticNodeView key={child.id} node={child} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
-          ))}
-        </div>
-      ) : null}
-    </>
-  );
-  return (
-    <article className="semantic-node">
-      <div className="semantic-node-head">
-        <div>
-          <strong>{node.normalized_type || node.provider_type || t("traceDetail.nodeFallback")}</strong>
-          <span className="mono">{node.id}</span>
-        </div>
-        <div className="trace-tag-group">
-          <InlineTag tone="accent">{node.provider_type || t("providers.providerFallback")}</InlineTag>
-          {node.role ? <InlineTag>{node.role}</InlineTag> : null}
-        </div>
-      </div>
-      {body}
-    </article>
-  );
 }
 
 /*
