@@ -28,8 +28,8 @@ psql "$TRAJECTA_DATABASE_DSN" -v ON_ERROR_STOP=1
 改动前先确认迁移状态（Postgres 下两个命令都读取共享的 application `schema_migrations` namespace）：
 
 ```bash
-server -c config/config.yaml db migrate status --check-db
-server -c config/config.yaml auth migrate status --check-db
+trajecta -c config/config.yaml db migrate status --check-db
+trajecta -c config/config.yaml auth migrate status --check-db
 ```
 
 两者应报告 schema 健康且 non-dirty。若处于 dirty 状态，先处理迁移一致性，不进入优化流程。
@@ -777,7 +777,7 @@ Monitor 的 Overview 页面每 60 秒轮询一次（`overview.refresh` = `refres
 | `acceptance.sh` | 不变量验收：派生表无孤儿、`logs.path` 不越出已知根、无活动 SQLite、迁移不 dirty、无 invalid/not-ready 索引、`parse_jobs` 探测走索引、`parse_jobs` 去重语句仍计划为反连接（写成 `NOT IN (子查询)` 时 PostgreSQL 会保留 `SubPlan`，分组 id 超出 hash 预算后逐行重扫）、仅当 `semantic_nodes` 仍存在时其反连接仍为 `Merge Anti Join`（表已 `DROP` 的库打印一行 skipped，不计失败）、reconcile 干跑无 superseded 与待清理、Monitor API 可用。**任一项失败退出码为 1** | 迁移或修复后的门禁 |
 | `reconcile-apply.sh` | 跑 `upgrade db --reconcile-derived-trace-ids`（默认干跑，`--apply` 才写；可加 `--prune-superseded-index-rows`），完整日志落到 `backups/` | 派生 trace id 需要修复时 |
 | `vacuum-after-repair.sh` | 修复后的统计刷新与死元组回收：中小编制表 `VACUUM (ANALYZE)`，大表默认只 `ANALYZE` 并报出 dead tuples | 修复结束后紧接着 |
-| `optimize-indexes.sh` | 建热查询部分索引（`server db migrate optimize-indexes`，`CONCURRENTLY` 且幂等）并用 `EXPLAIN (ANALYZE)` 复测失败列表与慢请求列表 | 首次建索引、索引变更后 |
+| `optimize-indexes.sh` | 建热查询部分索引（`trajecta db migrate optimize-indexes`，`CONCURRENTLY` 且幂等）并用 `EXPLAIN (ANALYZE)` 复测失败列表与慢请求列表 | 首次建索引、索引变更后 |
 | `verify-after-rewrite.sh` | cassette 普查 → 结构校验（`--fail-on-legacy`，旧 magic 记为错误）→ 起服务 → 无活动 SQLite → API 探针 | magic 重写之后 |
 | `wait-for-rewrite.sh` | 等一个长时间重写容器退出，并校验其末行计数自洽：`scanned == rewritten + current + other` | 重写跑在一次性容器里时 |
 | `rebuild-image.sh` | 从工作树重建 `server`/`trajecta` 并烤进镜像；替换前把旧镜像打成 `<image>-prev-<utc>` 以便回滚 | 本地迭代后端改动 |

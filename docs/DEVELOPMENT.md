@@ -1,6 +1,6 @@
 # 开发与测试
 
-本文是 Trajecta 的开发、验证、构建与集成测试入口。所有命令以仓库根目录的 `Taskfile.yml`、`.github/workflows/ci.yml` 和 `cmd/server/**` 为准；本文只记录当前实际存在、可执行的命令。
+本文是 Trajecta 的开发、验证、构建与集成测试入口。所有命令以仓库根目录的 `Taskfile.yml`、`.github/workflows/ci.yml`、`cmd/server/**`、`cmd/trajecta/**` 与 `internal/cli/**` 为准；本文只记录当前实际存在、可执行的命令。
 
 相关阅读：[文档入口](./README.md)、[架构说明](./ARCHITECTURE.md)、[协议参考](./protocol-reference/README.md)、[Monitor 使用指南](./MONITOR_GUIDE.md)、[MCP 使用指南](./MCP_GUIDE.md)、[代理使用示例](./PROXY_USAGE_EXAMPLES.md)。
 
@@ -18,7 +18,7 @@
 | `task test` | `go test ./...` |
 | `task test:race` | `go test -race ./...` |
 | `task test:cover` | `go test -coverprofile=coverage.out ./...` |
-| `task test:e2e` | `go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest` |
+| `task test:e2e` | `go test ./internal/proxy ./internal/monitor ./cmd/server ./cmd/trajecta ./unittest` |
 | `task atif:validate` | `python3 scripts/validate_atif.py {{.CLI_ARGS}}`（需先安装 `scripts/atif-requirements.txt`） |
 | `task test:atif` | `go test ./internal/trajectory ./internal/monitor` + `python3 -m unittest discover -s scripts/atif_tests` |
 | `task test:codex-fixtures` | `env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1` |
@@ -33,11 +33,11 @@
 | `task ui:test` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui` |
 | `task ui:test:real` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui:real` |
 | `task ui:screenshots` | 在 `web/monitor-ui` 下 `bunx playwright test --config playwright.screenshots.config.js`，重新生成 README 截图 |
-| `task migrate` | `go run ./cmd/server migrate -c {{.CONFIG}}`（V2 cassette 重写为 V3 并重建索引） |
-| `task migrate:db:up` | `go run ./cmd/server db migrate up -c {{.CONFIG}}` |
+| `task migrate` | `go run ./cmd/trajecta migrate -c {{.CONFIG}}`（V2 cassette 重写为 V3 并重建索引） |
+| `task migrate:db:up` | `go run ./cmd/trajecta db migrate up -c {{.CONFIG}}` |
 | `task migrate:legacy` | `go run ./cmd/trajecta upgrade -c {{.CONFIG}} {{.ARGS}}`（默认 dry-run，`ARGS="--apply"` 才写盘） |
-| `task auth:init-user` | `go run ./cmd/server auth init-user -c {{.CONFIG}} --username "$USER" --password "$PASSWORD"` |
-| `task auth:create-token` | `go run ./cmd/server auth create-token -c {{.CONFIG}} --username "$USER" --name "$NAME"` |
+| `task auth:init-user` | `go run ./cmd/trajecta auth init-user -c {{.CONFIG}} --username "$USER" --password "$PASSWORD"` |
+| `task auth:create-token` | `go run ./cmd/trajecta auth create-token -c {{.CONFIG}} --username "$USER" --name "$NAME"` |
 | `task generate:ent` | `go generate ./ent/...` |
 | `task generate:secretmask` | `go generate ./pkg/secretmask/...`，即 `ragel-go -G2 -o rules_ragel.go rules.rl` + `gofmt`；需要 `ragel-go` 二进制 |
 | `task migrate:ent:sqlite NAME=x` | `ent/migrate/main.go --dialect sqlite --dir ent/migrations` + `update_hash.go`；Postgres 版为 `migrate:ent:postgres NAME=x DEV_URL=...`，写 `ent/postgres-migrations`；两个方向的完整生成流程与提交要求见 [Ent Migration Workflow](../ent/migrate/README.md) |
@@ -67,7 +67,7 @@ task run
 - `task check:quick` = `fmt:check` + `lint` + `test:short`：小范围代码改动的默认验证；`task check` 与它完全相同。`test:short` 的 `-short` 只影响 Postgres 门控集成用例，其余单测与全量一致。
 - `task check:full` = `check:quick` + `test` + `test:e2e` + `test:race` + `build:all`：发布前或大范围改动。
 - `task test:race`：全套单元测试加 Go race detector；代理、路由、录制、存储或 streaming 改动必须补跑。
-- `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`unittest`，不依赖外部网络。
+- `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`cmd/trajecta`、`unittest`，不依赖外部网络。
 - `task test:cover`：写 `coverage.out`。
 - `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`）。
 - `task lint:vet`：单独跑 `go vet ./...`，与 golangci-lint 互补。
@@ -116,7 +116,7 @@ task build:go
 
 ## 构建产物（Go 二进制、UI dist 与 go:embed 的关系）
 
-- Go 二进制：`task build:go` 在仓库根目录生成服务端 `server`（`./cmd/server`）与 CLI `trajecta`（`./cmd/trajecta`），都使用 `-trimpath`，并通过 ldflags 注入 `main.Version`、`main.Commit`、`main.Date`、`main.Branch`（分别来自 `git describe`、`git rev-parse --short=12 HEAD`、UTC 构建时间、当前分支）。两个 `package main` 各自声明这些变量，`task clean` 同时删除两个产物。
+- Go 二进制：`task build:go` 在仓库根目录生成服务端 `server`（`./cmd/server`）与 CLI `trajecta`（`./cmd/trajecta`），都使用 `-trimpath`，并通过 ldflags 注入 `main.Version`、`main.Commit`、`main.Date`、`main.Branch`（分别来自 `git describe`、`git rev-parse --short=12 HEAD`、UTC 构建时间、当前分支）。两个 `package main` 各自声明这些变量，`task clean` 同时删除两个产物。命令分工：`server` 只保留 `serve`（以及 `version`、`completion`），其余不需要代理进程的运维命令组（`analyze`、`audit`、`auth`、`config`、`db`、`doctor`、`migrate`、`models`、`provider`、`schema`、`tools`）都挂在 `trajecta` 下，实现在 `internal/cli`；application database 的打开与迁移入口在 `internal/appdb`。
 - UI 产物：`internal/monitor/ui/dist/`（`index.html` 与 `assets/`），由 `vite build` 生成，并已提交到仓库。
 - 二者关系：`internal/monitor/server.go` 用 `//go:embed ui/dist/*` 把该目录编译进二进制，因此 `go build ./cmd/server` 读取的是编译时刻 `internal/monitor/ui/dist` 的内容。前端改动后必须先 `task ui:build`（或直接用 `task build` / `task build:all`，它们会先跑 `ui:build`）再编译，否则二进制里仍是旧 UI。
 - 容器镜像：`task docker:build` 构建本地镜像 `trajecta:local`；`task docker:up` 用 compose 起本地栈。镜像内同时包含 `/app/bin/server`（entrypoint）与 `/app/bin/trajecta`（CLI），容器只有一个 entrypoint，用 `--entrypoint /app/bin/trajecta` 调用 CLI。
@@ -151,10 +151,10 @@ task auth:create-token USER=admin NAME=local
 渠道密钥的本地加密 key 通过 `db secret` 子命令管理：
 
 ```bash
-server -c config/config.yaml db secret status
-server -c config/config.yaml db secret export --out trace_index.secret.backup
-server -c config/config.yaml db secret rotate --yes
-server -c config/config.yaml --format json db secret status
+trajecta -c config/config.yaml db secret status
+trajecta -c config/config.yaml db secret export --out trace_index.secret.backup
+trajecta -c config/config.yaml db secret rotate --yes
+trajecta -c config/config.yaml --format json db secret status
 ```
 
 - `status` 只输出路径、可读性与 fingerprint，不打印密钥；`export --out` 以 `0600` 权限写备份文件，不带 `--out` 时把 key 写到 stdout。
@@ -171,10 +171,10 @@ server -c config/config.yaml --format json db secret status
 **预检命令**（按顺序）：
 
 ```bash
-server -c config/config.yaml --format json config inspect
-server -c config/config.yaml --format json doctor
-server -c config/config.yaml --format json tools status
-server -c config/config.yaml --format json models codex-config <model>
+trajecta -c config/config.yaml --format json config inspect
+trajecta -c config/config.yaml --format json doctor
+trajecta -c config/config.yaml --format json tools status
+trajecta -c config/config.yaml --format json models codex-config <model>
 ```
 
 判断标准：
@@ -195,21 +195,21 @@ codex -p dgx "搜索一下今日新闻"
 **失败时收集**：优先用 `client_request_id`、`response_id`、`request_audit_id` 或最新请求查询。
 
 ```bash
-server -c config/config.yaml --format json audit query --list --status failed --limit 20
+trajecta -c config/config.yaml --format json audit query --list --status failed --limit 20
 
-server -c config/config.yaml --format json audit query \
+trajecta -c config/config.yaml --format json audit query \
   --client-request-id <client_request_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-server -c config/config.yaml --format json audit query \
+trajecta -c config/config.yaml --format json audit query \
   --response-id <response_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-server -c config/config.yaml --format json audit query \
+trajecta -c config/config.yaml --format json audit query \
   --request-audit-id <request_audit_id> \
   --include-events --include-exchanges --include-tools --limit 200
 
-server -c config/config.yaml --format json audit tool-calls --latest-by-call --limit 100
+trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call --limit 100
 ```
 
 **日志定位字段**：服务日志会输出用于关联数据库与请求链路的结构化字段——`request_audit_id`、`response_id`、`conversation_id`、`client_request_id`、`trace_id`、`cassette_path`、`upstream_id`、`model`、`endpoint`、`status`、`status_code`、`duration_ms`、`ttft_ms`、`tool_type`、`tool_name`、`executor`、`call_id`、`stream`、`server_id`、`server_label`。

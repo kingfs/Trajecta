@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/config"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/spf13/cobra"
@@ -256,14 +257,14 @@ type auditToolCallLifecycleSummary struct {
 	ConversationID string    `json:"conversation_id,omitempty"`
 }
 
-func newAuditCommand(runtime *cliRuntime) *cobra.Command {
+func newAuditCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "audit",
 		Short:         "Query stored audit traces",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newAuditQueryCommand(runtime))
@@ -271,7 +272,7 @@ func newAuditCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
+func newAuditQueryCommand(runtime *Runtime) *cobra.Command {
 	opts := auditQueryOptions{}
 	cmd := &cobra.Command{
 		Use:     "query",
@@ -283,8 +284,8 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 			"Use --list with conversation or client request selectors to return matching request audit summaries instead of the latest trace.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.configPath = runtime.configPath()
-			opts.format = runtime.outputFormat()
+			opts.configPath = runtime.ConfigPath()
+			opts.format = runtime.OutputFormat()
 			opts.stdout = cmd.OutOrStdout()
 			return runAuditQueryWithOptions(opts)
 		},
@@ -303,7 +304,7 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuditToolCallsCommand(runtime *cliRuntime) *cobra.Command {
+func newAuditToolCallsCommand(runtime *Runtime) *cobra.Command {
 	opts := auditToolCallAuditsOptions{}
 	cmd := &cobra.Command{
 		Use:     "tool-calls",
@@ -313,8 +314,8 @@ func newAuditToolCallsCommand(runtime *cliRuntime) *cobra.Command {
 			"Multiple selectors are combined with AND semantics. JSON output defaults to payload summaries only; use --include-payloads to include raw input_json, output_json, and metadata_json, which may contain sensitive data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.configPath = runtime.configPath()
-			opts.format = runtime.outputFormat()
+			opts.configPath = runtime.ConfigPath()
+			opts.format = runtime.OutputFormat()
 			opts.stdout = cmd.OutOrStdout()
 			return runAuditToolCallAuditsWithOptions(opts)
 		},
@@ -340,38 +341,38 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 	conversationID := strings.TrimSpace(opts.conversationID)
 	status, ok := responsesaudit.NormalizeRequestAuditStatus(opts.status)
 	if !ok {
-		return cliUsageError(fmt.Sprintf("--status must be one of: %s", strings.Join(responsesaudit.RequestAuditStatusValues(), ", ")), "status")
+		return UsageError(fmt.Sprintf("--status must be one of: %s", strings.Join(responsesaudit.RequestAuditStatusValues(), ", ")), "status")
 	}
 	if status != "" && !opts.list {
-		return cliUsageError("--status can only be used with --list", "status")
+		return UsageError("--status can only be used with --list", "status")
 	}
 	operation, ok := responsesaudit.NormalizeRequestAuditOperation(opts.operation)
 	if !ok {
-		return cliUsageError(fmt.Sprintf("--operation must be one of: %s", strings.Join(responsesaudit.RequestAuditOperationValues(), ", ")), "operation")
+		return UsageError(fmt.Sprintf("--operation must be one of: %s", strings.Join(responsesaudit.RequestAuditOperationValues(), ", ")), "operation")
 	}
 	if operation != "" && !opts.list {
-		return cliUsageError("--operation can only be used with --list", "operation")
+		return UsageError("--operation can only be used with --list", "operation")
 	}
 	if responseID == "" && requestAuditID == "" && clientRequestID == "" && conversationID == "" && (!opts.list || status == "" && operation == "") {
-		return cliUsageError("--response-id, --request-audit-id, --client-request-id, or --conversation-id is required; --list may also use --status or --operation", "response-id")
+		return UsageError("--response-id, --request-audit-id, --client-request-id, or --conversation-id is required; --list may also use --status or --operation", "response-id")
 	}
 	if opts.limit < 0 {
-		return cliUsageError("--limit must be greater than or equal to 0", "limit")
+		return UsageError("--limit must be greater than or equal to 0", "limit")
 	}
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "CONFIG_LOAD_FAILED",
 			message:  err.Error(),
 		}
 	}
-	st, err := openApplicationDatabase(cfg)
+	st, err := appdb.Open(cfg)
 	if err != nil {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "STORE_OPEN_FAILED",
 			message:  err.Error(),
 		}
@@ -412,9 +413,9 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 			Limit:           opts.limit,
 		})
 		if err != nil {
-			return cliExitError{
-				code:     exitCodeAPI,
-				category: errorCategoryAPI,
+			return ExitError{
+				code:     ExitCodeAPI,
+				category: ErrorCategoryAPI,
 				errCode:  "RESPONSES_AUDIT_QUERY_FAILED",
 				message:  err.Error(),
 			}
@@ -425,13 +426,13 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		}
 		result.Count = len(result.RequestAudits)
 		result.Found = result.Count > 0
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
 			writeAuditQueryText(w, result)
 			return nil
 		}); err != nil {
-			return cliExitError{
-				code:     exitCodeInternal,
-				category: errorCategoryInternal,
+			return ExitError{
+				code:     ExitCodeInternal,
+				category: ErrorCategoryInternal,
 				errCode:  "OUTPUT_WRITE_FAILED",
 				message:  err.Error(),
 			}
@@ -448,18 +449,18 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		UpstreamExchangeLimit: opts.limit,
 	})
 	if err != nil {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "RESPONSES_AUDIT_QUERY_FAILED",
 			message:  err.Error(),
 		}
 	}
 	result.Found = found
 	if !found {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "RESPONSES_AUDIT_NOT_FOUND",
 			message:  "responses audit trace not found",
 		}
@@ -481,13 +482,13 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 			result.ToolCalls = append(result.ToolCalls, auditToolCallFromAudit(toolCall))
 		}
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
 		writeAuditQueryText(w, result)
 		return nil
 	}); err != nil {
-		return cliExitError{
-			code:     exitCodeInternal,
-			category: errorCategoryInternal,
+		return ExitError{
+			code:     ExitCodeInternal,
+			category: ErrorCategoryInternal,
 			errCode:  "OUTPUT_WRITE_FAILED",
 			message:  err.Error(),
 		}
@@ -505,25 +506,25 @@ func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
 	executor := strings.TrimSpace(opts.executor)
 	status, ok := responsesaudit.NormalizeToolCallAuditStatus(opts.status)
 	if !ok {
-		return cliUsageError(fmt.Sprintf("--status must be one of: %s", strings.Join(responsesaudit.ToolCallAuditStatusValues(), ", ")), "status")
+		return UsageError(fmt.Sprintf("--status must be one of: %s", strings.Join(responsesaudit.ToolCallAuditStatusValues(), ", ")), "status")
 	}
 	if opts.limit < 0 {
-		return cliUsageError("--limit must be greater than or equal to 0", "limit")
+		return UsageError("--limit must be greater than or equal to 0", "limit")
 	}
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "CONFIG_LOAD_FAILED",
 			message:  err.Error(),
 		}
 	}
-	st, err := openApplicationDatabase(cfg)
+	st, err := appdb.Open(cfg)
 	if err != nil {
-		return cliExitError{
-			code:     exitCodeAPI,
-			category: errorCategoryAPI,
+		return ExitError{
+			code:     ExitCodeAPI,
+			category: ErrorCategoryAPI,
 			errCode:  "STORE_OPEN_FAILED",
 			message:  err.Error(),
 		}
@@ -565,9 +566,9 @@ func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
 	if opts.latestByCall {
 		summaries, err := queryService.ListToolCallLifecycleSummaries(context.Background(), params)
 		if err != nil {
-			return cliExitError{
-				code:     exitCodeAPI,
-				category: errorCategoryAPI,
+			return ExitError{
+				code:     ExitCodeAPI,
+				category: ErrorCategoryAPI,
 				errCode:  "TOOL_CALL_AUDITS_QUERY_FAILED",
 				message:  err.Error(),
 			}
@@ -580,9 +581,9 @@ func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
 	} else {
 		records, err := queryService.ListToolCallAudits(context.Background(), params)
 		if err != nil {
-			return cliExitError{
-				code:     exitCodeAPI,
-				category: errorCategoryAPI,
+			return ExitError{
+				code:     ExitCodeAPI,
+				category: ErrorCategoryAPI,
 				errCode:  "TOOL_CALL_AUDITS_QUERY_FAILED",
 				message:  err.Error(),
 			}
@@ -592,13 +593,13 @@ func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
 		}
 		result.Count = len(result.ToolCallAudits)
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.tool_calls", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "audit.tool_calls", result, func(w io.Writer) error {
 		writeAuditToolCallAuditsText(w, result)
 		return nil
 	}); err != nil {
-		return cliExitError{
-			code:     exitCodeInternal,
-			category: errorCategoryInternal,
+		return ExitError{
+			code:     ExitCodeInternal,
+			category: ErrorCategoryInternal,
 			errCode:  "OUTPUT_WRITE_FAILED",
 			message:  err.Error(),
 		}

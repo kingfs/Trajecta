@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
 	"github.com/kingfs/Trajecta/internal/sessionanalysis"
@@ -90,14 +91,14 @@ type analyzeSessionOptions struct {
 	stdout     io.Writer
 }
 
-func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "analyze",
 		Short:         "Analyze recorded traces and rebuild derived observations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newAnalyzeReparseCommand(runtime))
@@ -111,7 +112,7 @@ func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeReparseCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeReparseCommand(runtime *Runtime) *cobra.Command {
 	var traceID string
 	cmd := &cobra.Command{
 		Use:           "reparse",
@@ -122,13 +123,13 @@ func newAnalyzeReparseCommand(runtime *cliRuntime) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if traceID == "" {
-				return cliUsageError("--trace-id is required", "trace-id")
+				return UsageError("--trace-id is required", "trace-id")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeReparse(analyzeReparseOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					traceID:    traceID,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -138,7 +139,7 @@ func newAnalyzeReparseCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeScanCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeScanCommand(runtime *Runtime) *cobra.Command {
 	var traceID string
 	cmd := &cobra.Command{
 		Use:           "scan",
@@ -149,13 +150,13 @@ func newAnalyzeScanCommand(runtime *cliRuntime) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if traceID == "" {
-				return cliUsageError("--trace-id is required", "trace-id")
+				return UsageError("--trace-id is required", "trace-id")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeScan(analyzeScanOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					traceID:    traceID,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -165,7 +166,7 @@ func newAnalyzeScanCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeRepairUsageCommand(runtime *Runtime) *cobra.Command {
 	var traceID string
 	var rewriteCassette bool
 	cmd := &cobra.Command{
@@ -177,14 +178,14 @@ func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if traceID == "" {
-				return cliUsageError("--trace-id is required", "trace-id")
+				return UsageError("--trace-id is required", "trace-id")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeRepairUsage(analyzeRepairUsageOptions{
-					configPath:      runtime.configPath(),
+					configPath:      runtime.ConfigPath(),
 					traceID:         traceID,
 					rewriteCassette: rewriteCassette,
-					format:          runtime.outputFormat(),
+					format:          runtime.OutputFormat(),
 					stdout:          cmd.OutOrStdout(),
 				})
 			})
@@ -195,7 +196,7 @@ func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeBackfillExchangesCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeBackfillExchangesCommand(runtime *Runtime) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:           "backfill-exchanges",
@@ -204,11 +205,11 @@ func newAnalyzeBackfillExchangesCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeBackfillExchanges(analyzeBackfillExchangesOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -218,7 +219,7 @@ func newAnalyzeBackfillExchangesCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeReanalyzeCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeReanalyzeCommand(runtime *Runtime) *cobra.Command {
 	var traceID string
 	var sessionID string
 	var repairUsage bool
@@ -233,20 +234,20 @@ func newAnalyzeReanalyzeCommand(runtime *cliRuntime) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if traceID == "" && sessionID == "" {
-				return cliUsageError("one of --trace-id or --session-id is required", "trace-id")
+				return UsageError("one of --trace-id or --session-id is required", "trace-id")
 			}
 			if traceID != "" && sessionID != "" {
-				return cliUsageError("--trace-id and --session-id are mutually exclusive", "trace-id")
+				return UsageError("--trace-id and --session-id are mutually exclusive", "trace-id")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeReanalyze(analyzeReanalyzeOptions{
-					configPath:  runtime.configPath(),
+					configPath:  runtime.ConfigPath(),
 					traceID:     traceID,
 					sessionID:   sessionID,
 					repairUsage: repairUsage,
 					reparse:     reparse,
 					scan:        scan,
-					format:      runtime.outputFormat(),
+					format:      runtime.OutputFormat(),
 					stdout:      cmd.OutOrStdout(),
 				})
 			})
@@ -260,7 +261,7 @@ func newAnalyzeReanalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeBatchCommand(runtime *Runtime) *cobra.Command {
 	var opts analyzeBatchOptions
 	cmd := &cobra.Command{
 		Use:           "batch",
@@ -270,24 +271,24 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.configPath = runtime.configPath()
-			opts.format = runtime.outputFormat()
+			opts.configPath = runtime.ConfigPath()
+			opts.format = runtime.OutputFormat()
 			opts.stdout = cmd.OutOrStdout()
 			opts.limitSet = cmd.Flags().Changed("limit")
 			if opts.rewriteCassette && !opts.repairUsage {
-				return cliUsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
+				return UsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
 			}
 			if opts.rewriteCassette && opts.enqueue {
-				return cliUsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
+				return UsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
 			}
 			if !opts.repairUsage && !opts.reparse && !opts.scan {
 				opts.reparse = true
 				opts.scan = true
 			}
 			if !opts.all && len(opts.traceIDs) == 0 && len(opts.requestIDs) == 0 && opts.sessionID == "" && !analyzeBatchHasFilter(opts) {
-				return cliUsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
+				return UsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeBatch(opts)
 			})
 		},
@@ -314,7 +315,7 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeRefreshCommand(runtime *Runtime) *cobra.Command {
 	var opts analyzeBatchOptions
 	cmd := &cobra.Command{
 		Use:           "refresh",
@@ -323,22 +324,22 @@ func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.configPath = runtime.configPath()
-			opts.format = runtime.outputFormat()
+			opts.configPath = runtime.ConfigPath()
+			opts.format = runtime.OutputFormat()
 			opts.stdout = cmd.OutOrStdout()
 			opts.limitSet = cmd.Flags().Changed("limit")
 			opts.reparse = true
 			opts.scan = true
 			if opts.rewriteCassette && !opts.repairUsage {
-				return cliUsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
+				return UsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
 			}
 			if opts.rewriteCassette && opts.enqueue {
-				return cliUsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
+				return UsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
 			}
 			if !opts.all && len(opts.traceIDs) == 0 && len(opts.requestIDs) == 0 && opts.sessionID == "" && !analyzeBatchHasFilter(opts) {
-				return cliUsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
+				return UsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeRefresh(opts)
 			})
 		},
@@ -363,7 +364,7 @@ func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAnalyzeSessionCommand(runtime *cliRuntime) *cobra.Command {
+func newAnalyzeSessionCommand(runtime *Runtime) *cobra.Command {
 	var sessionID string
 	cmd := &cobra.Command{
 		Use:           "session",
@@ -373,13 +374,13 @@ func newAnalyzeSessionCommand(runtime *cliRuntime) *cobra.Command {
 		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sessionID == "" {
-				return cliUsageError("--session-id is required", "session-id")
+				return UsageError("--session-id is required", "session-id")
 			}
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAnalyzeSession(analyzeSessionOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					sessionID:  sessionID,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -395,7 +396,7 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -417,7 +418,7 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 		"stream_events":  reanalysisResult.StreamEvents,
 		"job_id":         reanalysisResult.Job.ID,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reparse", output, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reparse", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "reparsed trace %s with %s@%s (%d request nodes, %d response nodes, %d stream events)\n",
 			opts.traceID, output["parser"], output["parser_version"], output["request_nodes"], output["response_nodes"], output["stream_events"])
 		return err
@@ -434,7 +435,7 @@ func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -458,7 +459,7 @@ func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
 		"total_tokens":      result.Usage.After.TotalTokens,
 		"job_id":            result.Job.ID,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze repair-usage", output, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze repair-usage", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "repaired usage for trace %s (total tokens %d, cassette rewrite %t)\n",
 			opts.traceID, result.Usage.After.TotalTokens, result.Usage.CassetteRewrote)
 		return err
@@ -475,7 +476,7 @@ func runAnalyzeBackfillExchanges(opts analyzeBackfillExchangesOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -489,7 +490,7 @@ func runAnalyzeBackfillExchanges(opts analyzeBackfillExchangesOptions) int {
 		slog.Error("Failed to backfill exchange metadata", "error", err)
 		return 1
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze backfill-exchanges", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze backfill-exchanges", result, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "backfilled exchange metadata: scanned=%d updated_model=%d updated_entry=%d legacy_or_unknown=%d missing_cassette=%d conflicts=%d dry_run=%t\n",
 			result.Scanned, result.UpdatedModel, result.UpdatedEntry, result.LegacyOrUnknown, result.MissingCassette, result.Conflicts, result.DryRun)
 		return err
@@ -506,7 +507,7 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -545,7 +546,7 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 			output["parser"] = result.Observation.Parser
 			output["parser_version"] = result.Observation.ParserVersion
 		}
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reanalyze", output, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reanalyze", output, func(w io.Writer) error {
 			_, err := fmt.Fprintf(w, "reanalyzed trace %s with job %d (%s)\n", opts.traceID, result.Job.ID, result.Job.JobType)
 			return err
 		}); err != nil {
@@ -568,7 +569,7 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 		"analysis_run_id": result.Session.AnalysisRunID,
 		"finding_refs":    result.Session.FindingRefs,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reanalyze", output, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reanalyze", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "reanalyzed session %s (%d traces)\n", opts.sessionID, result.Session.TraceCount)
 		return err
 	}); err != nil {
@@ -584,7 +585,7 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -608,7 +609,7 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		"scan":         opts.scan,
 		"results":      results,
 	}
-	writeErr := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze batch", output, func(w io.Writer) error {
+	writeErr := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze batch", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "processed %d traces (completed=%d queued=%d failed=%d)\n", len(traceIDs), completed, enqueued, failed)
 		return err
 	})
@@ -725,7 +726,7 @@ func runAnalyzeRefresh(opts analyzeBatchOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -744,7 +745,7 @@ func runAnalyzeRefresh(opts analyzeBatchOptions) int {
 			"status":     job.Status,
 			"enqueued":   1,
 		}
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
 			_, err := fmt.Fprintf(w, "queued session refresh %s with job %d\n", opts.sessionID, job.ID)
 			return err
 		}); err != nil {
@@ -779,7 +780,7 @@ func runAnalyzeRefresh(opts analyzeBatchOptions) int {
 		"analysis_run_id": result.Session.AnalysisRunID,
 		"finding_refs":    result.Session.FindingRefs,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "refreshed session %s (%d traces)\n", opts.sessionID, result.Session.TraceCount)
 		return err
 	}); err != nil {
@@ -795,7 +796,7 @@ func runAnalyzeSession(opts analyzeSessionOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -849,7 +850,7 @@ func runAnalyzeSession(opts analyzeSessionOptions) int {
 		"trace_count":      len(output.TraceRefs),
 		"finding_refs":     len(output.FindingRefs),
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze session", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze session", result, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "analyzed session %s (%d traces, %d finding refs)\n", opts.sessionID, len(output.TraceRefs), len(output.FindingRefs))
 		return err
 	}); err != nil {
@@ -1015,7 +1016,7 @@ func runAnalyzeScan(opts analyzeScanOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -1032,7 +1033,7 @@ func runAnalyzeScan(opts analyzeScanOptions) int {
 		"findings": result.FindingCount,
 		"job_id":   result.Job.ID,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze scan", output, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "analyze scan", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "scanned trace %s (%d findings)\n", opts.traceID, result.FindingCount)
 		return err
 	}); err != nil {

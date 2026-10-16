@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"database/sql"
@@ -209,21 +209,21 @@ type modelsCodexLocalFieldStatus struct {
 	Actual   string `json:"actual,omitempty"`
 }
 
-func newModelsCommand(runtime *cliRuntime) *cobra.Command {
+func newModelsCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "models",
 		Short:         "Inspect model-related local configuration",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newModelsCodexConfigCommand(runtime))
 	return cmd
 }
 
-func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
+func newModelsCodexConfigCommand(runtime *Runtime) *cobra.Command {
 	var codexConfigPath string
 	var checkDB bool
 	cmd := &cobra.Command{
@@ -231,12 +231,12 @@ func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Generate a Codex profile TOML suggestion from local Responses model profiles",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runModelsCodexConfigWithOptions(modelsCodexConfigOptions{
-					configPath:      runtime.configPath(),
+					configPath:      runtime.ConfigPath(),
 					codexConfigPath: codexConfigPath,
 					checkDB:         checkDB,
-					format:          runtime.outputFormat(),
+					format:          runtime.OutputFormat(),
 					stdout:          cmd.OutOrStdout(),
 					model:           args[0],
 				})
@@ -255,7 +255,7 @@ func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
 		return 1
 	}
 	result := buildModelsCodexConfigResult(cfg, opts.model, opts.codexConfigPath, opts.checkDB)
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, codexConfigCommand, result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, codexConfigCommand, result, func(w io.Writer) error {
 		writeModelsCodexConfigText(w, result)
 		return nil
 	}); err != nil {

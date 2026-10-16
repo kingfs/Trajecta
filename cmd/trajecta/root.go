@@ -1,13 +1,16 @@
-// Command trajecta is the Trajecta command-line tool: local, server-less
-// Trajecta deployment needs after the project was renamed from llm-tracelab:
-// it loads a pre-rename .env file, merges legacy SQLite application databases
-// into Postgres, and normalizes or validates existing .http cassettes.
+// Command trajecta is the Trajecta command-line tool. It is the operations CLI:
+// it runs the deployment work that never needs the proxy process.
 //
-// Every command is a dry run unless --apply is passed.
+// That is the one-off rename migration (.env prefix mapping, legacy SQLite
+// merge into Postgres, cassette magic rewrite and structural validation,
+// SQLite archiving), the cassette vault reorganisation, and every
+// server-management command group the server binary used to carry: analyze,
+// audit, auth, config, db, doctor, migrate, models, provider, schema and tools.
+//
+// Commands that write are dry runs unless --apply is passed.
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,16 +18,11 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/legacymigrate"
-)
-
-// Exit codes follow the trajecta CLI convention.
-const (
-	exitOK      = 0
-	exitFailure = 1
-	exitUsage   = 3
 )
 
 // options holds every flag value; it is shared by all subcommands.
@@ -45,93 +43,36 @@ type options struct {
 type cliRuntime struct {
 	opts *options
 
-	// resultWritten records that a command already emitted its result, so the
-	// top level error path does not print a second envelope.
-	resultWritten bool
-
-	// command is the command path being executed, used to label error output.
-	command string
+	// ops is the shared runtime the server-management command groups resolve
+	// --config and --format from. It is bound to the same two flags.
+	ops *cli.Runtime
 }
 
-// activeRuntime is the runtime of the command tree being executed. It lets the
-// top level error path render failures in the selected output format.
-var activeRuntime *cliRuntime
-
-// usageError marks an invalid invocation.
-type usageError struct {
-	field   string
-	message string
-}
-
-func (e *usageError) Error() string {
-	if e.field == "" {
-		return e.message
-	}
-	return fmt.Sprintf("%s: %s", e.field, e.message)
-}
-
-func usageErr(field, format string, args ...any) error {
-	return &usageError{field: field, message: fmt.Sprintf(format, args...)}
-}
-
-// exitCodeFor maps an error to a process exit code.
-func exitCodeFor(err error) int {
-	if err == nil {
-		return exitOK
-	}
-	var usage *usageError
-	if ok := asUsageError(err, &usage); ok {
-		return exitUsage
-	}
-	return exitFailure
-}
-
-func asUsageError(err error, target **usageError) bool {
-	for err != nil {
-		if typed, ok := err.(*usageError); ok {
-			*target = typed
-			return true
-		}
-		unwrapper, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		err = unwrapper.Unwrap()
-	}
-	return false
-}
-
-// failureError marks a command that ran correctly but reported a failed
-// outcome, such as a table that could not be merged.
-type failureError struct{ message string }
-
-func (e *failureError) Error() string { return e.message }
-
-// fail builds a failureError.
-func fail(format string, args ...any) error {
-	return &failureError{message: fmt.Sprintf(format, args...)}
-}
+// activeOpsRuntime is the shared runtime of the command tree being executed, so
+// the process entry point can hand it to cli.Execute.
+var activeOpsRuntime *cli.Runtime
 
 func newRootCommand() *cobra.Command {
 	opts := &options{}
 	runtime := &cliRuntime{opts: opts}
-	activeRuntime = runtime
 
 	root := &cobra.Command{
 		Use:   "trajecta",
 		Short: "Trajecta command-line tool",
 		Long: `trajecta is the Trajecta command-line tool.
 
-It runs operations that do not need the server process: reading a deployment
-.env file, migrating a pre-rename llm-tracelab deployment onto the current
-layout, and maintaining the recorded .http cassettes. Commands that talk to a
-running server are added here as well.
+It runs every operation that does not need the proxy process. That is the
+management command groups the server binary used to carry - analyze, audit,
+auth, config, db, doctor, migrate, models, provider, schema and tools - plus the
+deployment work specific to this CLI: reading a .env file, migrating a
+pre-rename llm-tracelab deployment onto the current layout, and reorganising the
+recorded .http cassette vault.
 
-Nothing is written unless --apply is passed.`,
+Only the rename-migration and vault-reorganisation commands are dry runs unless
+--apply is passed; the management commands act when they are invoked.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			runtime.command = cmd.CommandPath()
 			return runtime.validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -145,12 +86,28 @@ Nothing is written unless --apply is passed.`,
 	flags.StringVarP(&opts.configPath, "config", "c", "config.yaml", "path to the configuration file")
 	flags.StringVar(&opts.format, "format", "text", "output format: text or json")
 	flags.IntVar(&opts.jobs, "jobs", 0, "concurrent workers (default: number of CPUs)")
-	flags.BoolVar(&opts.apply, "apply", false, "write changes; without this flag every command only reports what it would do")
+	flags.BoolVar(&opts.apply, "apply", false, "write changes for the rename-migration and vault-reorganisation commands; those commands only report what they would do without it")
 	flags.StringVar(&opts.sqliteOpen, "sqlite-open", legacymigrate.OpenModeAuto,
 		"how to open a legacy SQLite database: auto, ro, immutable or rw")
 	flags.StringArrayVar(&opts.traceDirs, "trace-dir", nil, "directory holding legacy SQLite databases and cassettes (repeatable)")
 	flags.StringArrayVar(&opts.sqlitePaths, "sqlite", nil, "explicit legacy SQLite database path (repeatable)")
 	flags.IntVar(&opts.batchSize, "batch-size", 500, "rows per Postgres insert batch")
+
+	// The server-management groups read --config and --format through the shared
+	// runtime, which resolves the same two persistent flags.
+	settings := viper.New()
+	settings.SetEnvPrefix("TRAJECTA")
+	settings.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	settings.AutomaticEnv()
+	if err := settings.BindPFlag("config", flags.Lookup("config")); err != nil {
+		panic(err)
+	}
+	if err := settings.BindPFlag("format", flags.Lookup("format")); err != nil {
+		panic(err)
+	}
+	runtime.ops = cli.RuntimeFromViper(settings)
+	activeOpsRuntime = runtime.ops
+	cli.Register(root, runtime.ops, cli.Options{Name: "trajecta", Version: Version})
 
 	root.AddCommand(newUpgradeCommand(runtime))
 	root.AddCommand(newLayoutCommand(runtime))
@@ -180,8 +137,25 @@ func (r *cliRuntime) validate() error {
 	return nil
 }
 
+// usageErr marks an invalid invocation with the shared exit-3 contract.
+func usageErr(field, format string, args ...any) error {
+	return cli.UsageError(fmt.Sprintf(format, args...), field)
+}
+
+// fail marks a command that ran correctly but reported a failed outcome, such
+// as a table that could not be merged. It exits 1 with the shared error
+// envelope.
+func fail(format string, args ...any) error {
+	return cli.APIError(fmt.Sprintf(format, args...))
+}
+
 func (r *cliRuntime) jsonOutput() bool {
 	return strings.EqualFold(r.opts.format, "json")
+}
+
+// format is the normalized --format value handed to the shared writer.
+func (r *cliRuntime) format() string {
+	return strings.ToLower(strings.TrimSpace(r.opts.format))
 }
 
 func (r *cliRuntime) workers() int {
@@ -345,47 +319,12 @@ func (r *cliRuntime) progressFunc() legacymigrate.ProgressFunc {
 	}
 }
 
-type resultEnvelope struct {
-	OK       bool     `json:"ok"`
-	Command  string   `json:"command"`
-	Result   any      `json:"result,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
-}
-
 // writeResult renders a command result as JSON or as human-readable text. ok
 // reflects the command's own verdict (a check that found errors reports
 // ok=false) and is what callers turn into the exit code.
 func (r *cliRuntime) writeResult(w io.Writer, command string, ok bool, result any, text func(io.Writer) error, warnings []string) error {
-	r.resultWritten = true
-	if r.jsonOutput() {
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(resultEnvelope{OK: ok, Command: command, Result: result, Warnings: warnings})
-	}
-	if text == nil {
-		return nil
-	}
-	return text(w)
-}
-
-// writeError renders a failed command. When a command already wrote a result
-// (its envelope carries ok=false) nothing else is emitted, so a JSON consumer
-// always sees exactly one object on stdout.
-func (r *cliRuntime) writeError(w io.Writer, command string, err error) {
-	if r == nil || r.resultWritten || !r.jsonOutput() {
-		fmt.Fprintln(os.Stderr, "error: "+err.Error())
-		return
-	}
-	if command == "" {
-		command = "trajecta"
-	}
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(struct {
-		OK      bool   `json:"ok"`
-		Command string `json:"command"`
-		Error   string `json:"error"`
-	}{OK: false, Command: command, Error: err.Error()})
+	r.ops.MarkResultWritten()
+	return cli.WriteResultWithState(w, r.format(), command, ok, result, warnings, text)
 }
 
 // humanBytes renders a byte count for reports.

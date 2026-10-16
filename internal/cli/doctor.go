@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	appconfig "github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
@@ -88,7 +89,7 @@ type doctorCheck struct {
 	Detail  map[string]any `json:"detail,omitempty"`
 }
 
-func newDoctorCommand(runtime *cliRuntime) *cobra.Command {
+func newDoctorCommand(runtime *Runtime) *cobra.Command {
 	var checkDB bool
 	var codexConfigPath string
 	var probeProviders bool
@@ -99,11 +100,11 @@ func newDoctorCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Run offline startup diagnostics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runDoctorWithOptions(doctorOptions{
-					configPath:      runtime.configPath(),
+					configPath:      runtime.ConfigPath(),
 					codexConfigPath: codexConfigPath,
-					format:          runtime.outputFormat(),
+					format:          runtime.OutputFormat(),
 					stdout:          cmd.OutOrStdout(),
 					checkDB:         checkDB,
 					probeProviders:  probeProviders,
@@ -123,7 +124,7 @@ func newDoctorCommand(runtime *cliRuntime) *cobra.Command {
 
 func runDoctorWithOptions(opts doctorOptions) int {
 	result := buildDoctorResult(opts)
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "doctor", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "doctor", result, func(w io.Writer) error {
 		writeDoctorText(w, result)
 		return nil
 	}); err != nil {
@@ -231,7 +232,7 @@ func checkDoctorServerPort(cfg *appconfig.Config) doctorCheck {
 }
 
 func checkDoctorManagementConsistency(cfg *appconfig.Config) doctorCheck {
-	if err := validateServeConfig(cfg); err != nil {
+	if err := appconfig.ValidateServe(cfg); err != nil {
 		return doctorCheck{
 			Name:    "monitor_mcp.consistency",
 			Status:  doctorStatusFail,
@@ -401,7 +402,7 @@ func canonicalDoctorClientEntrypoint(path string) string {
 }
 
 func doctorResponsesHTTPGuardAuthDetail(cfg *appconfig.Config) map[string]any {
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	driver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	supported := driver == "sqlite" || driver == "postgres"
 	databasePathSource := "default"
 	if strings.TrimSpace(cfg.Auth.DatabasePath) != "" {
@@ -444,7 +445,7 @@ func doctorResponsesHTTPGuardManagement(cfg *appconfig.Config, normalizedPath st
 	mcpPath := ""
 	mcpPathOverlap := false
 	if cfg.MCP.Enabled {
-		if normalized, err := normalizeMCPPath(cfg.MCP.Path); err == nil {
+		if normalized, err := appconfig.NormalizeMCPPath(cfg.MCP.Path); err == nil {
 			mcpPath = normalized
 			mcpPathOverlap = httpPathsOverlap(normalizedPath, mcpPath)
 		} else {
@@ -513,14 +514,14 @@ func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {
 }
 
 func checkDoctorResponsesStoreReadiness(cfg *appconfig.Config) doctorCheck {
-	effectiveDriver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	effectiveDriver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	detail := map[string]any{
 		"force_store":               cfg.ResponsesForceStore(),
 		"database_driver":           effectiveDriver,
 		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
 		"database_dsn":              redactConfigInspectDSN(cfg.DatabaseDSN()),
 		"database_auto_migrate":     cfg.DatabaseAutoMigrate(),
-		"migration_mode":            appDBMigrationMode(effectiveDriver),
+		"migration_mode":            appdb.MigrationMode(effectiveDriver),
 		"production_storage_driver": appdbmigrate.ProductionStorageDriver,
 		"production_ready":          effectiveDriver == appdbmigrate.ProductionStorageDriver,
 		"storage_role":              configInspectDatabaseStorageRole(effectiveDriver),
@@ -567,7 +568,7 @@ var doctorResponsesAuditTables = []string{"request_audits", "execution_events", 
 var doctorResponsesSettingsTables = []string{"app_settings"}
 
 func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctorCheck {
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	driver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	requiredTables := doctorResponsesRequiredStoreHealthTables()
 	detail := map[string]any{
 		"force_store":               cfg.ResponsesForceStore(),
@@ -575,7 +576,7 @@ func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctor
 		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
 		"database_dsn":              redactConfigInspectDSN(cfg.DatabaseDSN()),
 		"database_auto_migrate":     cfg.DatabaseAutoMigrate(),
-		"migration_mode":            appDBMigrationMode(driver),
+		"migration_mode":            appdb.MigrationMode(driver),
 		"production_storage_driver": appdbmigrate.ProductionStorageDriver,
 		"production_ready":          driver == appdbmigrate.ProductionStorageDriver,
 		"storage_role":              configInspectDatabaseStorageRole(driver),
@@ -622,7 +623,7 @@ func doctorResponsesRequiredStoreHealthTables() []string {
 }
 
 func checkDoctorResponsesStoreTables(cfg *appconfig.Config, requiredTables []string) ([]string, error) {
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	driver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	switch driver {
 	case "sqlite":
 		return checkDoctorResponsesSQLiteTables(cfg.DatabaseDSN(), requiredTables)
@@ -1059,7 +1060,7 @@ func checkDoctorProviderConfig(cfg *appconfig.Config) doctorCheck {
 }
 
 func checkDoctorAuthMigrationScope(cfg *appconfig.Config) doctorCheck {
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	driver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	shared := driver == appdbmigrate.ProductionStorageDriver
 	effectiveNamespace := "auth"
 	schemaAuthority := "sqlite_auth_embedded_migrations"

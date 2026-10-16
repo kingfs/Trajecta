@@ -286,7 +286,7 @@ type Detector interface {
 - `ReparseTrace` 重建 Observation IR 并保存；`RescanTrace` 只读已存观测重跑检测器；`RepairTraceUsage` 用 `llm.ResponsePipeline` 从响应体重抽 usage 并更新索引（仅 `RewriteCassette` 时重写 V3 prelude，不改变 raw payload）。
 - 结果携带 `RequestNodes`、`ResponseNodes`、`StreamEvents`、`FindingCount`、`CriticalFindings`、`HighFindings`，并写入 `analysis_jobs`。
 
-CLI 入口（`cmd/server/analyze.go`）：`analyze reparse`、`analyze scan`、`analyze repair-usage`、`analyze reanalyze`、`analyze batch` 是 `Hidden: true` 的隐藏内部子命令（`analyze refresh`、`analyze session`、`analyze backfill-exchanges` 与 `audit query`、`audit tool-calls` 不隐藏）。完整命令清单由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 维护，这里只保留重分析相关入口。
+CLI 入口（`internal/cli/analyze.go`）：`analyze reparse`、`analyze scan`、`analyze repair-usage`、`analyze reanalyze`、`analyze batch` 是 `Hidden: true` 的隐藏内部子命令（`analyze refresh`、`analyze session`、`analyze backfill-exchanges` 与 `audit query`、`audit tool-calls` 不隐藏）。完整命令清单由 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md) 维护，这里只保留重分析相关入口。
 
 `analyze backfill-exchanges` 调用 `store.BackfillExchangeMetadata`，只更新 DB 索引、不重写 cassette，返回 `scanned`、`updated_model`、`updated_entry`、`legacy_or_unknown`、`missing_cassette`、`conflicts`、`dry_run`，并支持 `--dry-run`。
 
