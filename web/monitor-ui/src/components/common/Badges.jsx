@@ -55,11 +55,15 @@ export function MiniToken({ metric, value, raw = "", tone = "default", icon = "t
 }
 
 export function TokenBadge({ label, value, raw = "", accent = "", icon = "total", format = "count" }) {
-  // The caller states whether the number is a token count or a duration: it is
-  // the only side that knows, and the icon is presentation, not a type tag.
+  // The caller states what kind of number this is: `count` and `duration` are
+  // formatted here, while `text` is already formatted by the caller because its
+  // value is not a scalar (a cache-hit percentage, for example). Passing an
+  // already-formatted string through the count formatter is what turned
+  // "99.6%" into "0" on the trace header: Number("99.6%") is NaN.
   const isDuration = format === "duration";
-  const displayValue = isDuration ? formatDuration(value) : formatTokenCount(value);
-  const rawValue = raw || (isDuration ? formatRawDuration(value) : formatRawNumber(value));
+  const isText = format === "text";
+  const displayValue = isText ? value || "-" : isDuration ? formatDuration(value) : formatTokenCount(value);
+  const rawValue = raw || (isText ? "" : isDuration ? formatRawDuration(value) : formatRawNumber(value));
   return <Metric icon={icon} label={label} raw={rawValue} value={displayValue} className={`token-badge ${accent}`} />;
 }
 

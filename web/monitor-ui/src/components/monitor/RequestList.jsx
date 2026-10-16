@@ -286,8 +286,8 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
         </Button>
       ) : null}
       {fromSessionID ? (
-        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "timeline_error" : "timeline")}>
-          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "timeline_error" : "timeline")}>
+        <Button asChild variant="ghost" to={buildTraceLink(itemID, fromView, fromSessionID, "request", focus === "failure" ? "timeline_error" : "timeline")}>
+          <Link to={buildTraceLink(itemID, fromView, fromSessionID, "request", focus === "failure" ? "timeline_error" : "timeline")}>
             {t("requests.timeline")}
           </Link>
         </Button>

@@ -1,5 +1,5 @@
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
@@ -43,9 +43,10 @@ import {
 import {
   buildToolMessageSummary,
   buildToolSchemaSummary,
+  collectToolOutputs,
   collectTraceToolCalls,
-  countToolMatches,
   findDeclaredToolForCall,
+  formatJSONValue,
   normalizeDeclaredTool,
   isSameToolName,
 } from "../lib/traceTools";
@@ -82,9 +83,9 @@ export function TraceDetailPage() {
   const selectedUpstreamHealth = detail.data?.selected_upstream_health;
   const declaredTools = (detail.data?.tools || []).map((tool, index) => normalizeDeclaredTool(tool, index)).filter((tool) => tool.name || tool.description || tool.parameters);
   const traceToolCalls = collectTraceToolCalls(detail.data);
+  const toolOutputsByCallID = collectToolOutputs(detail.data);
   const focusTarget = searchParams.get("focus") || "";
   const anchor = searchParams.get("node") || "";
-  const hasDeclaredToolsTab = Boolean(declaredTools.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   // The request list and the session list are two tabs of /traces now, so a
@@ -104,14 +105,15 @@ export function TraceDetailPage() {
   const upstreamCalls = Array.isArray(detail.data?.upstream_calls) ? detail.data.upstream_calls : [];
   const findingsCount = Array.isArray(findings.data?.items) ? findings.data.items.length : Number(findings.data?.total || 0);
 
-  // 会话, 协议, 审计, 请求信息, 原始数据. The first tab used to be "Routing &
-  // Conversation", which is exactly the problem it had: half of it was the
-  // routing decision, and a reader who wanted to read the conversation had to
-  // scroll past a card about channel selection to find it. The routing facts
-  // live with the rest of the request's own facts now.
+  // 会话, 协议, 工具调用, 审计, 请求信息, 原始数据. The first tab used to be
+  // "Routing & Conversation", which is exactly the problem it had: half of it
+  // was the routing decision, and a reader who wanted to read the conversation
+  // had to scroll past a card about channel selection to find it. The routing
+  // facts live with the rest of the request's own facts now.
   const traceTabs = [
     { id: "conversation", label: t("traceDetail.tabConversation") },
     { id: "protocol", label: t("audit.protocol") },
+    { id: "tools", label: t("traceDetail.tabTools"), count: toolCount || undefined },
     { id: "audit", label: t("nav.audit"), count: findingsCount || undefined },
     { id: "request", label: t("traceDetail.tabRequest") },
     { id: "raw", label: t("traceDetail.tabRaw") },
@@ -248,6 +250,11 @@ export function TraceDetailPage() {
             <Button variant="default" size="icon" type="button" onClick={downloadTrace} title={t("traceDetail.downloadHttp")} aria-label={t("requests.downloadTrace")}>
               <DownloadIcon />
             </Button>
+            {responsesAuditLink ? (
+              <Button asChild variant="primary">
+                <Link to={responsesAuditLink}>{t("traceDetail.responsesAudit")}</Link>
+              </Button>
+            ) : null}
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
             <Button variant="ghost" type="button" disabled={!traceExists || jobBusy === "repair"} onClick={() => runTraceActionWith("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
@@ -262,7 +269,7 @@ export function TraceDetailPage() {
             <TokenBadge label={t("metric.outputTokens")} value={usage?.completion_tokens || 0} icon="output" />
             <TokenBadge label={t("metric.totalTokens")} value={usage?.total_tokens || 0} icon="total" accent="token-badge-strong" />
             <TokenBadge label={t("metric.cachedTokens")} value={usage?.prompt_tokens_details?.cached_tokens || 0} icon="cached" />
-            <TokenBadge label={t("metric.cacheRate")} value={formatCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} raw={formatRawCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} icon="percent" />
+            <TokenBadge label={t("metric.cacheRate")} value={formatCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} raw={formatRawCacheRate(usage?.prompt_tokens_details?.cached_tokens || 0, usage?.total_tokens || 0)} icon="percent" format="text" />
           </div>
         </div>
       </header>
@@ -291,7 +298,7 @@ export function TraceDetailPage() {
             <Button variant={tab === "conversation" ? "primary" : "ghost"} onClick={() => applyTraceFocus("conversation", "")}>
               {t("traceDetail.openConversation")}
             </Button>
-            <Button variant={tab === "raw" ? "primary" : "ghost"} onClick={() => applyTraceFocus("raw", "timeline_error")}>
+            <Button variant={tab === "request" ? "primary" : "ghost"} onClick={() => applyTraceFocus("request", "timeline_error")}>
               {t("requests.timeline")}
             </Button>
             <Button variant={tab === "raw" ? "primary" : "ghost"} onClick={() => applyTraceFocus("raw", "response")}>
@@ -313,29 +320,16 @@ export function TraceDetailPage() {
       {detail.loading && !detail.data ? <EmptyState title={t("traceDetail.loading")} detail={t("traceDetail.loadingDetail")} /> : null}
 
       {/*
-        The five readings of one trace are tabs, not a grid of five cards: at most
-        one of them is being read at a time, and the cards made the reader walk
-        past four summaries to reach the one they came for.
+        The readings of one trace are tabs, not a grid of cards: at most one of
+        them is being read at a time, and the cards made the reader walk past
+        every summary to reach the one they came for. The strip is rendered bare
+        - the same page-level tab row every other page uses - rather than inside
+        a titled card, which made this one page's tabs look like a panel of
+        their own.
       */}
       {detail.data ? (
         <Tabs value={tab} onValueChange={setTraceTab}>
-          <Card as="section" className="trace-reading-panel">
-            <div className="panel-head">
-              <div>
-                <h2>{t("traceDetail.traceInspector")}</h2>
-              </div>
-              {responsesAuditLink ? (
-                <div className="panel-head-actions">
-                  <Button asChild variant="primary" to={responsesAuditLink}>
-                    <Link to={responsesAuditLink}>
-                      {t("traceDetail.responsesAudit")}
-                    </Link>
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-            <TabStrip tabs={traceTabs} activeId={tab} onSelect={setTraceTab} label={t("common.pageSections")} />
-          </Card>
+          <TabStrip tabs={traceTabs} activeId={tab} onSelect={setTraceTab} label={t("common.pageSections")} />
 
           <TabsContent value="conversation">
             <div className="detail-grid">
@@ -359,6 +353,18 @@ export function TraceDetailPage() {
               onRefresh={() => runTraceActionWith("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
               t={t}
             />
+          </TabsContent>
+
+          {/*
+            The declared tools were the last card of 请求信息. They are not a
+            fact about the request's transport the way the routing decision is:
+            they are a catalog with one row per tool, and the tab is where a
+            reader goes when the question is "what could this model call".
+          */}
+          <TabsContent value="tools">
+            <div className="detail-grid">
+              <ToolsPanel tools={declaredTools} toolCalls={traceToolCalls} toolOutputs={toolOutputsByCallID} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
+            </div>
           </TabsContent>
 
           <TabsContent value="audit">
@@ -500,14 +506,20 @@ export function TraceDetailPage() {
                 </Card>
               ) : null}
               {upstreamCalls.length ? <RelatedUpstreamCallsPanel calls={upstreamCalls} currentTraceID={traceID} fromSessionID={fromSessionID || session?.session_id || ""} t={t} /> : null}
-              {hasDeclaredToolsTab ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} /> : null}
+              {/*
+                The recorded event stream lives here now. It was the second card
+                of 原始数据, where it duplicated the conversation: every chat
+                message and every tool call was re-expanded into a tree. What is
+                left is the event itself - what was recorded, when, and how it
+                ended - which is a fact about this request.
+              */}
+              <EventStreamPanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
             </div>
           </TabsContent>
 
           <TabsContent value="raw">
             <div className="detail-grid">
               <RawProtocolPanel raw={raw} focusTarget={focusTarget} t={t} />
-              <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
             </div>
           </TabsContent>
         </Tabs>
@@ -578,24 +590,51 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
   );
 }
 
-function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) {
-  const [selectedToolName, setSelectedToolName] = useState(() => tools[0]?.name || "");
-  const [schemaToolName, setSchemaToolName] = useState("");
+/*
+ * ToolsPanel is the 工具调用 tab: one row per tool this request involved, and the
+ * two things a reader can do with a row - read its definition, or read every
+ * call it received.
+ *
+ * Both used to live in one card: the list on the left, the selected tool's
+ * overview and its call arguments on the right. The right column was mostly
+ * empty for the common case (a tool that was never called, or a definition that
+ * is one schema), and a long transcript in it made the row tall instead of the
+ * dialog tall. Each row carries its own summary now, the definition opens as a
+ * modal, and the calls open as a second, wider modal with every input and the
+ * output that answered it.
+ */
+function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock, InlineTag, t }) {
+  const [definitionTool, setDefinitionTool] = useState(null);
+  const [callsTool, setCallsTool] = useState(null);
+  const callsOf = (name) => toolCalls.filter((call) => isSameToolName(call.function?.name, name));
 
-  useEffect(() => {
-    if (!tools.length) {
-      setSelectedToolName("");
-      return;
+  /*
+   * The declared tools, plus any tool that was called without a recorded
+   * declaration. A chat request can call a tool whose declaration the recorder
+   * never captured, and the tab is named for the calls: a reader who followed a
+   * call out of the conversation must not land on an empty list.
+   */
+  const rows = useMemo(() => {
+    const byName = new Map();
+    tools.forEach((tool, index) => {
+      const name = tool.name || t("traceDetail.toolFallback", { index: index + 1 });
+      const key = name.trim().toLowerCase();
+      if (!byName.has(key)) {
+        byName.set(key, { tool: { ...tool, name }, declared: true });
+      }
+    });
+    for (const call of toolCalls) {
+      const name = call.function?.name;
+      if (!name) {
+        continue;
+      }
+      const key = String(name).trim().toLowerCase();
+      if (!byName.has(key)) {
+        byName.set(key, { tool: { name, type: call.type || "function", source: "", description: "", parameters: "" }, declared: false });
+      }
     }
-    if (tools.some((tool) => tool.name === selectedToolName)) {
-      return;
-    }
-    setSelectedToolName(tools[0].name || "");
-  }, [selectedToolName, tools]);
-
-  const selectedTool = tools.find((tool) => tool.name === selectedToolName) || tools[0] || null;
-  const selectedToolCalls = selectedTool ? toolCalls.filter((call) => isSameToolName(call.function?.name, selectedTool.name)) : [];
-  const schemaTool = tools.find((tool) => tool.name === schemaToolName) || null;
+    return [...byName.values()];
+  }, [tools, toolCalls, t]);
 
   return (
     <>
@@ -604,82 +643,57 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
           <div>
             <h2>{t("traceDetail.requestTools")}</h2>
           </div>
+          {rows.length ? (
+            <InlineTag>{t(rows.length === 1 ? "traceDetail.toolsCountOne" : "traceDetail.toolsCount", { count: rows.length })}</InlineTag>
+          ) : null}
         </div>
-        {tools.length ? (
-          <div className="tool-layout">
-            <div className="tool-list-column">
-              {tools.map((tool, index) => {
-                const count = countToolMatches(toolCalls, tool.name);
-                const isSelected = selectedTool?.name === tool.name;
-                return (
-                  <button
-                    key={`${tool.name || "tool"}-${index}`}
-                    className={isSelected ? "tool-list-item tool-list-item-active" : "tool-list-item"}
-                    onClick={() => {
-                      setSelectedToolName(tool.name);
-                      setSchemaToolName(tool.name);
-                    }}
-                  >
-                    <div className="tool-list-item-head">
-                      <strong>{tool.name || t("traceDetail.toolFallback", { index: index + 1 })}</strong>
-                      <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? t(count > 1 ? "traceDetail.toolCallCount" : "traceDetail.toolCallCountOne", { count }) : t("traceDetail.notInvoked")}</InlineTag>
-                    </div>
-                    <div className="tool-list-item-meta">
-                      <span>{tool.source || tool.type || t("traceDetail.toolLabel")}</span>
-                      <span>{tool.description || t("traceDetail.toolClickHint")}</span>
-                    </div>
+        {rows.length ? (
+          <div className="tool-rows">
+            {rows.map(({ tool, declared }) => {
+              const calls = callsOf(tool.name);
+              const name = tool.name || t("traceDetail.toolFallback", { index: 1 });
+              // A tool without a declaration has no definition to show, so its
+              // row opens the calls instead of an empty modal.
+              const openDefinition = () => (declared ? setDefinitionTool(tool) : setCallsTool(tool));
+              return (
+                <article className="tool-row" key={`${name}-${declared ? "declared" : "called"}`}>
+                  <button type="button" className="tool-row-main" onClick={openDefinition}>
+                    <span className="tool-row-head">
+                      <strong>{name}</strong>
+                      <span className="trace-tag-group">
+                        <InlineTag tone="accent">{tool.source || tool.type || t("traceDetail.toolLabel")}</InlineTag>
+                        {declared ? null : <InlineTag>{t("traceDetail.undeclaredTool")}</InlineTag>}
+                        <InlineTag tone={calls.length ? "green" : "default"}>
+                          {calls.length ? t(calls.length > 1 ? "traceDetail.toolCallCount" : "traceDetail.toolCallCountOne", { count: calls.length }) : t("traceDetail.notInvoked")}
+                        </InlineTag>
+                      </span>
+                    </span>
+                    <span className="tool-description">{declared ? tool.description || t("traceDetail.noDescription") : t("traceDetail.undeclaredToolHint")}</span>
                   </button>
-                );
-              })}
-            </div>
-            <div className="tool-detail-column">
-              {selectedTool ? (
-                <>
-                  <div className="tool-detail-header">
-                    <div>
-                      <p className="eyebrow">{t("traceDetail.toolOverview")}</p>
-                      <h3>{selectedTool.name}</h3>
+                  {calls.length ? (
+                    <div className="tool-row-actions">
+                      <Button variant="ghost" size="sm" onClick={() => setCallsTool(tool)}>
+                        {t("traceDetail.viewCalls", { count: calls.length })}
+                      </Button>
                     </div>
-                    <div className="trace-tag-group">
-                      <InlineTag tone="accent">{selectedTool.source || selectedTool.type || t("traceDetail.toolLabel")}</InlineTag>
-                      <InlineTag tone={selectedToolCalls.length ? "green" : "default"}>
-                        {selectedToolCalls.length ? t(selectedToolCalls.length > 1 ? "traceDetail.matchedCalls" : "traceDetail.matchedCallsOne", { count: selectedToolCalls.length }) : t("traceDetail.unused")}
-                      </InlineTag>
-                    </div>
-                  </div>
-                  <p className="tool-description">{selectedTool.description || t("traceDetail.noDescription")}</p>
-                  <div className="tool-detail-actions">
-                    <Button variant="ghost" onClick={() => setSchemaToolName(selectedTool.name)}>
-                      {t("traceDetail.viewDefinition")}
-                    </Button>
-                  </div>
-                  {selectedToolCalls.length ? (
-                    <section className="breakdown-card">
-                      <div className="breakdown-title">{t("traceDetail.callArguments")}</div>
-                      {selectedToolCalls.map((call, index) => (
-                        <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
-                      ))}
-                    </section>
-                  ) : (
-                    <EmptyState title={t("traceDetail.toolNotInvoked")} detail={t("traceDetail.toolNotInvokedDetail")} compact />
-                  )}
-                </>
-              ) : null}
-            </div>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <EmptyState title={t("traceDetail.noDeclaredTools")} detail={t("traceDetail.noDeclaredToolsDetail")} />
         )}
       </Card>
-      {schemaTool ? (
-        <Dialog open onOpenChange={(next) => (next ? undefined : setSchemaToolName(""))}>
+      {definitionTool ? (
+        <Dialog open onOpenChange={(next) => (next ? undefined : setDefinitionTool(null))}>
           {/* Radix generates the aria-labelledby pair from DialogTitle, so the
               hand-written aria-label and its interpolation key are gone. */}
           <DialogContent className="tool-modal" aria-describedby={undefined}>
             <DialogHeader className="tool-modal-head">
               <div>
                 <p className="eyebrow">{t("traceDetail.toolDefinition")}</p>
-                <DialogTitle>{schemaTool.name}</DialogTitle>
+                <DialogTitle>{definitionTool.name}</DialogTitle>
               </div>
               <DialogClose asChild>
                 <Button variant="default" size="icon" aria-label={t("traceDetail.closeToolDefinition")}>
@@ -688,11 +702,53 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag, t }) 
               </DialogClose>
             </DialogHeader>
             <div className="trace-tag-group">
-              <InlineTag tone="accent">{schemaTool.source || schemaTool.type || t("traceDetail.toolLabel")}</InlineTag>
-              <InlineTag>{buildToolSchemaSummary(schemaTool.parameters)}</InlineTag>
+              <InlineTag tone="accent">{definitionTool.source || definitionTool.type || t("traceDetail.toolLabel")}</InlineTag>
+              <InlineTag>{buildToolSchemaSummary(definitionTool.parameters)}</InlineTag>
             </div>
-            {schemaTool.description ? <p className="tool-description">{schemaTool.description}</p> : null}
-            <CodeBlock value={schemaTool.parameters || "{}"} />
+            {definitionTool.description ? <p className="tool-description">{definitionTool.description}</p> : null}
+            <CodeBlock value={formatJSONValue(definitionTool.parameters)} />
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {callsTool ? (
+        <Dialog open onOpenChange={(next) => (next ? undefined : setCallsTool(null))}>
+          <DialogContent className="tool-modal tool-modal-wide" aria-describedby={undefined}>
+            <DialogHeader className="tool-modal-head">
+              <div>
+                <p className="eyebrow">{t("traceDetail.toolCallsDialog")}</p>
+                <DialogTitle>{callsTool.name}</DialogTitle>
+              </div>
+              <DialogClose asChild>
+                <Button variant="default" size="icon" aria-label={t("traceDetail.closeToolCalls")}>
+                  <span className="tool-modal-close">x</span>
+                </Button>
+              </DialogClose>
+            </DialogHeader>
+            <div className="trace-tag-group">
+              <InlineTag tone="accent">{callsTool.source || callsTool.type || t("traceDetail.toolLabel")}</InlineTag>
+              <InlineTag tone="green">{t(callsOf(callsTool.name).length > 1 ? "traceDetail.toolCallCount" : "traceDetail.toolCallCountOne", { count: callsOf(callsTool.name).length })}</InlineTag>
+            </div>
+            <div className="tool-call-list">
+              {callsOf(callsTool.name).map((call, index) => {
+                const output = call.id ? toolOutputs.get(call.id) : null;
+                return (
+                  <article className="tool-call-box" key={`${call.id || call.function?.name}-${index}`}>
+                    <div className="tool-call-head">
+                      <div className="tool-call-title">{call.function?.name || t("traceDetail.toolLabel")}</div>
+                      {call.id ? <span className="tool-call-id mono">{t("traceDetail.callID", { id: call.id })}</span> : null}
+                    </div>
+                    <div className="tool-call-section">
+                      <div className="breakdown-title">{t("traceDetail.callInput")}</div>
+                      <CodeBlock value={formatJSONValue(call.function?.arguments)} />
+                    </div>
+                    <div className="tool-call-section">
+                      <div className="breakdown-title">{t("traceDetail.callOutput")}</div>
+                      {output?.content ? <CodeBlock value={output.content} /> : <p className="tool-call-missing">{t("traceDetail.noCallOutput")}</p>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </DialogContent>
         </Dialog>
       ) : null}
@@ -720,7 +776,8 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
     return <EmptyState title={t("traceDetail.loadingProtocol")} detail={t("traceDetail.loadingProtocolDetail")} />;
   }
   const summary = observation.data?.summary;
-  const tree = observation.data?.tree || [];
+  const requestTree = observation.data?.request_tree || [];
+  const responseTree = observation.data?.response_tree || [];
   if (!observation.data) {
     return (
       <Card as="section" className="protocol-panel">
@@ -761,17 +818,67 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefr
           <CodeBlock value={JSON.stringify(summary.warnings, null, 2)} />
         </CollapsibleCard>
       ) : null}
-      {tree.length ? (
-        <div className="semantic-tree">
-          {tree.map((node) => (
-            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
-          ))}
+      {/*
+        Both halves of the parsed exchange. This panel used to render the
+        response tree alone, which is why reading it looked like the parser had
+        only seen the last turn: the request - every message of the conversation
+        plus the declared tools - was parsed and stored, but never drawn.
+      */}
+      {requestTree.length || responseTree.length ? (
+        <div className="protocol-sections">
+          <ProtocolNodeSection
+            title={t("traceDetail.parsedRequest")}
+            hint={t("traceDetail.parsedRequestHint")}
+            nodes={requestTree}
+            CodeBlock={CodeBlock}
+            InlineTag={InlineTag}
+            t={t}
+          />
+          <ProtocolNodeSection
+            title={t("traceDetail.parsedResponse")}
+            hint={t("traceDetail.parsedResponseHint")}
+            nodes={responseTree}
+            CodeBlock={CodeBlock}
+            InlineTag={InlineTag}
+            t={t}
+          />
         </div>
       ) : (
         <EmptyState title={t("traceDetail.noSemanticNodes")} detail={t("traceDetail.noSemanticNodesDetail")} compact />
       )}
     </Card>
   );
+}
+
+function ProtocolNodeSection({ title, hint, nodes = [], CodeBlock, InlineTag, t }) {
+  return (
+    <section className="protocol-section">
+      <div className="protocol-section-head">
+        <div>
+          <h3>{title}</h3>
+          {hint ? <p className="protocol-section-hint">{hint}</p> : null}
+        </div>
+        <InlineTag>{t("traceDetail.nodeCount", { count: countSemanticNodes(nodes) })}</InlineTag>
+      </div>
+      {nodes.length ? (
+        <div className="semantic-tree">
+          {nodes.map((node) => (
+            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} t={t} />
+          ))}
+        </div>
+      ) : (
+        <EmptyState title={t("traceDetail.emptyProtocolSection")} detail={t("traceDetail.emptyProtocolSectionDetail")} compact />
+      )}
+    </section>
+  );
+}
+
+function countSemanticNodes(nodes = []) {
+  let total = 0;
+  for (const node of nodes) {
+    total += 1 + countSemanticNodes(node.children || []);
+  }
+  return total;
 }
 
 function SemanticNodeView({ node, CodeBlock, InlineTag, t }) {
@@ -1099,9 +1206,20 @@ function RawProtocolPanel({ raw, focusTarget = "", t }) {
   );
 }
 
-function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
+/*
+ * EventStreamPanel is the recorder's own view of the exchange: one row per
+ * recorded event - the request, the response, and whatever the pipeline
+ * recorded around them (routing decisions, errors).
+ *
+ * It used to be the second card of 原始数据 and to expand every chat message and
+ * every tool call into a nested tree. That tree was the conversation tab again
+ * in a different typeface, and on a long agent trajectory it was the bulk of
+ * the response. What remains is the part the conversation cannot show: when
+ * each side of the exchange happened, over which URL, with which status, and
+ * how many bytes each side carried.
+ */
+function EventStreamPanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
   const panelRef = useRef(null);
-  const focusPath = focusTarget === "timeline_error" ? findFirstTimelineErrorPath(events) : [];
 
   useEffect(() => {
     if ((focusTarget !== "timeline" && focusTarget !== "timeline_error") || !panelRef.current) {
@@ -1115,17 +1233,18 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
   }
 
   return (
-    <Card as="section" ref={panelRef} className={focusTarget === "timeline" ? "timeline-panel timeline-panel-focused" : "timeline-panel"}>
+    <Card as="section" ref={panelRef} className={focusTarget === "timeline" || focusTarget === "timeline_error" ? "timeline-panel timeline-panel-focused" : "timeline-panel"}>
       <div className="panel-head">
         <div>
-          <h2>{t("traceDetail.unifiedEventStream")}</h2>
+          <h2>{t("traceDetail.recordedEvents")}</h2>
         </div>
+        <InlineTag>{t("traceDetail.eventCount", { count: events.length })}</InlineTag>
       </div>
       <div className="timeline-list">
         {events.map((event, index) => (
           <article key={`${event.type}-${index}`} className="timeline-item">
             <div className="timeline-rail">
-              <span className={event.type?.startsWith("llm.") ? "timeline-dot timeline-dot-live" : "timeline-dot"} />
+              <span className={event.type === "error" ? "timeline-dot timeline-dot-danger" : event.type?.startsWith("llm.") ? "timeline-dot timeline-dot-live" : "timeline-dot"} />
             </div>
             <div className="timeline-card">
               <div className="timeline-head">
@@ -1133,11 +1252,29 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag, t }) {
                   <strong>{event.type || t("traceDetail.eventFallback")}</strong>
                   <span>{formatDateTime(event.time)}</span>
                 </div>
-                <span className="timeline-badge">{event.is_stream ? t("routing.stream") : t("traceDetail.recordTag")}</span>
+                <div className="trace-tag-group">
+                  {event.status_code ? <InlineTag tone={Number(event.status_code) >= 400 ? "danger" : "green"}>{event.status_code}</InlineTag> : null}
+                  {event.method ? <InlineTag>{event.method}</InlineTag> : null}
+                  <span className="timeline-badge">{event.is_stream ? t("routing.stream") : t("traceDetail.recordTag")}</span>
+                </div>
               </div>
-              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} focusPath={focusPath} InlineTag={InlineTag} t={t} /> : null}
-              {!event.timeline_items?.length && event.message ? <div className="timeline-message">{event.message}</div> : null}
-              {event.attributes ? <CodeBlock value={JSON.stringify(event.attributes, null, 2)} /> : null}
+              {event.url ? <div className="timeline-event-url mono">{event.url}</div> : null}
+              {event.header_bytes || event.body_bytes ? (
+                <div className="detail-meta-strip">
+                  {event.header_bytes ? <DetailMetaPill label={t("traceDetail.headerBytes")} value={formatTokenCount(event.header_bytes)} /> : null}
+                  {event.body_bytes ? <DetailMetaPill label={t("traceDetail.bodyBytes")} value={formatTokenCount(event.body_bytes)} /> : null}
+                </div>
+              ) : null}
+              {/* When the backend expanded this event into a tree, `message`
+                  holds that whole rendering, which is the duplication this
+                  panel no longer shows. A message of its own - an error - has
+                  no tree and is the one worth printing. */}
+              {event.message && !event.timeline_items?.length ? <div className="timeline-message">{event.message}</div> : null}
+              {event.attributes ? (
+                <CollapsibleCard title={t("traceDetail.eventAttributes")} subtitle={t("traceDetail.eventAttributesHint")} defaultOpen={false}>
+                  <CodeBlock value={JSON.stringify(event.attributes, null, 2)} />
+                </CollapsibleCard>
+              ) : null}
             </div>
           </article>
         ))}
@@ -1287,74 +1424,6 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates =
         </CollapsibleCard>
       ) : null}
     </section>
-  );
-}
-
-function TimelineTree({ items, focusPath = [], InlineTag, t }) {
-  return (
-    <div className="timeline-tree">
-      {items.map((item, index) => (
-        <TimelineNode key={buildTimelineNodeKey(item, index)} nodeKey={buildTimelineNodeKey(item, index)} item={item} depth={0} focusPath={focusPath} InlineTag={InlineTag} t={t} />
-      ))}
-    </div>
-  );
-}
-
-function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [], InlineTag, t }) {
-  const nodeRef = useRef(null);
-  const hasChildren = Boolean(item.children?.length);
-  const hasDetails = Boolean(item.body && item.body !== item.summary);
-  const collapsible = hasChildren || hasDetails;
-  const focused = focusPath.includes(nodeKey);
-  const focusedBranch = focusPath.length > 0 && focused;
-  const className = `timeline-node timeline-node-${item.kind || "item"}${focused ? " timeline-node-focused" : ""}`;
-
-  useEffect(() => {
-    if (!focused || !nodeRef.current) {
-      return;
-    }
-    nodeRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [focused]);
-
-  if (!collapsible) {
-    return (
-      <div ref={nodeRef} className={className}>
-        <div className="timeline-node-leaf">
-          <TimelineNodeHeading item={item} t={t} />
-          {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
-          {item.status === "error" ? <InlineTag tone="danger">{t("traceDetail.errorLabel")}</InlineTag> : null}
-        </div>
-        {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
-      </div>
-    );
-  }
-
-  return (
-    <details ref={nodeRef} className={className} open={(depth === 0 && hasChildren) || focusedBranch}>
-      <summary className="timeline-node-summary">
-        <TimelineNodeHeading item={item} t={t} />
-        {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
-        {item.status === "error" ? <InlineTag tone="danger">{t("traceDetail.errorLabel")}</InlineTag> : null}
-      </summary>
-      {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
-      {hasDetails ? <pre className="timeline-node-body">{item.body}</pre> : null}
-      {hasChildren ? (
-        <div className="timeline-children">
-          {item.children.map((child, index) => (
-            <TimelineNode key={buildTimelineNodeKey(child, index)} nodeKey={buildTimelineNodeKey(child, index)} item={child} depth={depth + 1} focusPath={focusPath} InlineTag={InlineTag} t={t} />
-          ))}
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
-function TimelineNodeHeading({ item, t }) {
-  return (
-    <div className="timeline-node-heading">
-      <span className="timeline-node-kind">{formatTimelineKind(item.kind, t)}</span>
-      <strong className="timeline-node-title">{formatTimelineTitle(item, t)}</strong>
-    </div>
   );
 }
 
@@ -1524,7 +1593,7 @@ function ToolCallView({ call, match = null, CodeBlock, InlineTag, t }) {
           <a className="message-jump-link" href={`#${toolOutputAnchor(callID)}`}>{t("traceDetail.output")}</a>
         </div>
       ) : null}
-      <CodeBlock value={call.function?.arguments || "{}"} />
+      <CodeBlock value={formatJSONValue(call.function?.arguments)} />
     </div>
   );
 }
@@ -1572,59 +1641,6 @@ function formatBodyForDisplay(value = "", t) {
   } catch {
     return trimmed;
   }
-}
-
-function formatTimelineKind(kind = "", t) {
-  switch (kind) {
-    case "message":
-      return t("traceDetail.kindMessage");
-    case "tool_call":
-      return t("traceDetail.kindToolCall");
-    case "tool_response":
-      return t("traceDetail.kindToolResponse");
-    case "thinking":
-      return t("traceDetail.kindThinking");
-    case "output":
-      return t("traceDetail.kindOutput");
-    default:
-      return kind || t("traceDetail.kindItem");
-  }
-}
-
-function formatTimelineTitle(item = {}, t) {
-  if (item.kind === "message") {
-    return item.label || item.role || t("traceDetail.messageTitle");
-  }
-  return item.name || item.label || formatTimelineKind(item.kind, t);
-}
-
-function buildTimelineNodeKey(item = {}, index = 0) {
-  return `${item.kind || "item"}-${item.id || item.name || item.label || index}`;
-}
-
-function findFirstTimelineErrorPath(events = []) {
-  for (const event of events) {
-    const path = findTimelineItemErrorPath(event.timeline_items || []);
-    if (path.length) {
-      return path;
-    }
-  }
-  return [];
-}
-
-function findTimelineItemErrorPath(items = []) {
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    const nodeKey = buildTimelineNodeKey(item, index);
-    if (item.status === "error") {
-      return [nodeKey];
-    }
-    const childPath = findTimelineItemErrorPath(item.children || []);
-    if (childPath.length) {
-      return [nodeKey, ...childPath];
-    }
-  }
-  return [];
 }
 
 function hasConversation(detail) {

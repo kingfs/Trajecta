@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Changed
+- The trace detail page reads a recording through six tabs instead of five, and the 追踪检查器 card that wrapped the tab row is gone: the strip is now the same page-level one every other page renders, and the `Responses audit` link that shared its header moved into the page's own action row. `normalizeTraceTab` accepts `tools`, so `?tab=tools` is a shareable address like the rest.
+- Declared tools left the last card of 请求信息 for their own 工具调用 tab: one row per tool with its name, origin, call count (or 未调用) and description, the row itself opening the tool definition, and a 查看 N 次调用 button - only when the tool was actually called - opening a second, wider dialog with every call's input and the output matched to it by `tool_call_id`. A tool a request called but never declared gets a row too, because the call is a fact about the request even when the declaration was not recorded.
+- The unified event stream left the 原始数据 tab, where it had been a second copy of the conversation: every recorded message and tool call was re-expanded into a tree beside the raw bytes it came from. What survives moved into 请求信息 and shows the event itself - type, time, status, URL, header and body sizes, and the routing attributes - and never expands `timeline_items`. 原始数据 is now only the request and response bytes.
+- The 协议 tab renders both halves of the parsed exchange. The observation API returned one `tree`, which was the response tree, so a conversation of any length looked as though the parser had only seen the final turn; it now returns `request_tree` and `response_tree`, and the tab draws them as two labelled sections with a node count each, the request side holding the whole parsed history including the tool declarations.
+- The 会话 tab opens on the newest input instead of the top. A parsed conversation is long by nature and the reader arrives to read the turn that just happened, so the page scrolls to the last `user` / `human` step (or the instruction node) and expands it; a `node=` anchor, an active search, and the failed-only filter all win over that default, and the deferred repeats stop as soon as the reader scrolls or clicks. A rail now sits beside the panel as a grid column of its own - one tick per input turn at its measured position in the transcript, an arrow at each end for the first and last step, sticky while the page scrolls, hidden on a phone-sized viewport where it would leave the text too narrow.
+- Tool definition and tool-call dialogs are 960px and 1180px wide, declared in `styles/components.css` next to `.nav-modal` rather than in `styles.css`: the latter loads first, so the width written there lost the cascade to `.nav-modal`'s own and the dialog rendered 560px wide however wide its rule said.
+- The CSS the timeline tree was drawn with is gone from `styles.css` and `styles/pages.css` along with the tree: nothing renders `.timeline-node*`, `.timeline-children`, `.timeline-tree`, `.trace-reading-panel` or the tool list/detail columns any more.
+
+### Fixed
+- The trace header's 缓存比例 badge shows the percentage again. `formatCacheRate` returns a formatted string (`99.60%`), and the badge was handing it to the token formatter, whose `Number("99.6%")` is `NaN` and whose `NaN` renders as `0` - the tooltip printed the raw value and the badge printed zero, which is the disagreement the `format="text"` mode exists to prevent.
+- The tool definition dialog no longer crashes the page when a schema arrives as a decoded object rather than as JSON text. The recorder keeps the client's text and the parsed observation hands back the object, and both reached a `<pre>` as a React child; a `formatJSONValue` helper normalises either shape and pretty-prints it, and `buildToolSchemaSummary` reads the same two shapes instead of parsing an object into a thrown exception.
+
 ## [3.3.1] - 2026-10-16
 
 ### Added

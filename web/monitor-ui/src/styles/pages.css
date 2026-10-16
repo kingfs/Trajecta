@@ -206,23 +206,6 @@
   background: var(--accent-solid);
 }
 
-.timeline-node {
-  border-color: var(--border-subtle);
-  background: var(--surface-2);
-  box-shadow: none;
-}
-
-.timeline-node:hover {
-  border-color: var(--border);
-}
-
-.tool-modal {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--surface-1);
-  box-shadow: var(--shadow-lg);
-}
-
 /* The light theme overrode the active primary button with a near-black fill
    before there was a shared accent; the accent is the primary button now. */
 :root[data-theme="light"] .ghost-button.active,
@@ -324,6 +307,96 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* --------------------------------------------------------------------------
+   The conversation rail: a minimap of the input turns beside the panel, with an
+   arrow at each end. It is a grid column rather than a fixed overlay, so it
+   reserves the width it needs and cannot cover the text it navigates; sticky
+   keeps it on screen while the page scrolls past a long transcript. One tick per
+   turn sits at that turn's real position, so the shape of the rail is the shape
+   of the conversation.
+   -------------------------------------------------------------------------- */
+.conversation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.conversation-layout-railed {
+  grid-template-columns: minmax(0, 1fr) 30px;
+}
+
+.conversation-rail {
+  position: sticky;
+  top: calc(var(--sticky-chrome-h, 0px) + var(--space-4));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  height: min(60vh, 460px);
+  padding: var(--space-1) 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
+}
+
+.conversation-rail-arrow {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.conversation-rail-arrow:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.conversation-rail-track {
+  position: relative;
+  flex: 1 1 auto;
+  width: 14px;
+  min-height: 0;
+}
+
+.conversation-rail-tick {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.conversation-rail-tick:hover,
+.conversation-rail-tick:focus-visible {
+  background: var(--accent-solid);
+  transform: scaleX(1.5);
+}
+
+/* A rail beside a phone-sized transcript would leave the text too narrow. */
+@media (max-width: 720px) {
+  .conversation-layout-railed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .conversation-rail {
+    display: none;
+  }
 }
 
 .conversation-step {

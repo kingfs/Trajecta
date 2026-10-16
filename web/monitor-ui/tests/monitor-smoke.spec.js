@@ -211,6 +211,23 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-parsed/performance") {
       return route.fulfill({ json: { performance: { duration_ms: 1200, ttft_ms: 120, tokens_per_sec: 18.5 } } });
     }
+    // A trace that declared two tools and called one of them: the 工具调用 tab is
+    // one row per tool, and the called one opens its input/output transcript.
+    if (path === "/api/traces/trace-tools") {
+      return route.fulfill({ json: toolsTracePayload() });
+    }
+    if (path === "/api/traces/trace-tools/raw") {
+      return route.fulfill({ json: { data: { request_protocol: "{}", response_protocol: "{}" } } });
+    }
+    if (path === "/api/traces/trace-tools/observation") {
+      return route.fulfill({ json: { id: "trace-tools", summary: { status: "parsed", parser: "openai", provider: "openai" }, nodes: [], request_tree: [], response_tree: [] } });
+    }
+    if (path === "/api/traces/trace-tools/findings") {
+      return route.fulfill({ json: { items: [], total: 0 } });
+    }
+    if (path === "/api/traces/trace-tools/performance") {
+      return route.fulfill({ json: { performance: { duration_ms: 800, ttft_ms: 90, tokens_per_sec: 20 } } });
+    }
     if (path === "/api/traces") {
       return route.fulfill({ json: traceListPayload() });
     }
@@ -463,12 +480,16 @@ test("the conversation tab collapses a long recorded message until asked", async
   await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
 });
 
-// One trace, five readings, one visible at a time. The tabs replaced a grid of
-// five cards that made the reader walk past four summaries to reach the one
-// they came for, and 已选路由目标 left the conversation for the request's tab.
-test("a trace is read through five tabs, one panel at a time", async ({ page }) => {
+// One trace, six readings, one visible at a time. The tabs replaced a grid of
+// cards that made the reader walk past every summary to reach the one they came
+// for, and 已选路由目标 left the conversation for the request's tab.
+test("a trace is read through six tabs, one panel at a time", async ({ page }) => {
   await page.goto("/traces/trace-parsed");
-  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Audit/, /^Request info$/, /^Raw data$/]);
+  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Tool calls$/, /^Audit/, /^Request info$/, /^Raw data$/]);
+  // The strip is the page-level row every other page renders, not a card of its
+  // own: it has no titled frame around it.
+  expect(await page.getByRole("tablist").evaluate((element) => element.closest('[data-slot="card"]') === null)).toBe(true);
+  await expect(page.getByRole("heading", { name: "Trace inspector" })).toHaveCount(0);
   // The routing card is not on the conversation tab any more.
   await expect(page.getByRole("heading", { name: "Selected route target" })).toHaveCount(0);
 
@@ -476,12 +497,15 @@ test("a trace is read through five tabs, one panel at a time", async ({ page }) 
   await expect(page).toHaveURL(/tab=request$/);
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Request metrics" })).toBeVisible();
+  // The recorded event stream moved here from the raw tab; this fixture has no
+  // events, and the panel says so rather than rendering nothing.
+  await expect(page.getByText("No recorded events")).toBeVisible();
 
   await page.getByRole("tab", { name: "Raw data" }).click();
   await expect(page).toHaveURL(/tab=raw$/);
-  // The raw tab holds the bytes and the event timeline; this fixture has no
-  // events, and the panel says so rather than rendering nothing.
-  await expect(page.getByText("No timeline events")).toBeVisible();
+  // The raw tab holds the bytes and nothing else now.
+  await expect(page.getByRole("heading", { name: "Request / Response" })).toBeVisible();
+  await expect(page.getByText("Recorded events")).toHaveCount(0);
 });
 
 // The conversation is built from the Observation IR, so a tool call and the
@@ -513,6 +537,107 @@ test("the conversation renders the parsed steps instead of the flat messages", a
   await page.getByPlaceholder("Search messages, arguments and output").fill("");
   await page.getByRole("checkbox", { name: "Failed only" }).check();
   await expect(page.locator("[data-conversation-step]")).toHaveCount(1);
+});
+
+// The conversation opens on its newest turn - the reader came to read what was
+// just asked and answered - and the rail down the right edge navigates the rest.
+test("the conversation rail navigates the turns and lands on the newest input", async ({ page }) => {
+  const viewport = page.viewportSize();
+  await page.goto("/traces/trace-parsed");
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
+
+  // The last user turn is on screen without the reader scrolling for it.
+  await expect(page.locator("#node_in")).toBeInViewport();
+
+  const rail = page.locator(".conversation-rail");
+  if (viewport.width <= 720) {
+    // A rail pinned over a phone transcript would hide the text it navigates.
+    await expect(rail).toBeHidden();
+    return;
+  }
+  await expect(rail).toBeVisible();
+  // One tick per input turn: the system instruction and the one user message.
+  await expect(rail.locator(".conversation-rail-tick")).toHaveCount(2);
+  await expect(rail.getByRole("button", { name: "Jump to the first message" })).toBeVisible();
+  await expect(rail.getByRole("button", { name: "Jump to the bottom" })).toBeVisible();
+
+  await rail.locator(".conversation-rail-tick").first().click();
+  await expect(page.locator("#node_instr")).toBeInViewport();
+  await rail.getByRole("button", { name: "Jump to the bottom" }).click();
+  await expect(page.locator("#node_call_failed")).toBeInViewport();
+
+  // The rail sits in the gutter the panel reserves for it, so it never covers
+  // the text it navigates.
+  const railBox = await rail.boundingBox();
+  const stepRight = await page.locator("[data-conversation-step]").evaluateAll((nodes) => Math.max(...nodes.map((node) => node.getBoundingClientRect().right)));
+  expect(Math.round(stepRight)).toBeLessThanOrEqual(Math.round(railBox.x));
+});
+
+// The protocol tab draws both halves of the parsed exchange. It used to render
+// the response tree alone, which is what made a whole conversation look like the
+// parser had only seen the last turn.
+test("the protocol tab shows the parsed request and response", async ({ page }) => {
+  await page.goto("/traces/trace-parsed?tab=protocol");
+  await expect(page.getByRole("heading", { name: "Parsed request" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Parsed response" })).toBeVisible();
+  // The request side carries the conversation and the tool declaration.
+  const request = page.locator(".protocol-section").first();
+  await expect(request).toContainText("$.input[0]");
+  await expect(request).toContainText("$.tools[0]");
+  // The response side is its own section, not mixed into the request.
+  const response = page.locator(".protocol-section").nth(1);
+  await expect(response).toContainText("$.output[1]");
+  await expect(response).not.toContainText("$.input[0]");
+});
+
+// The declared tools are their own tab now: one row per tool, the row opens the
+// definition, and a called tool opens a second, wider dialog with the input and
+// the output of every call. A tool that was called without a recorded
+// declaration still gets a row, because the tab is named for the calls.
+test("the tool calls tab lists one row per tool and opens the calls dialog", async ({ page }) => {
+  const viewport = page.viewportSize();
+  await page.goto("/traces/trace-tools?tab=tools");
+  const rows = page.locator(".tool-row");
+  await expect(rows).toHaveCount(3);
+
+  const called = rows.filter({ hasText: "exec_command" });
+  await expect(called).toContainText("Run a shell command.");
+  await expect(called).toContainText("1 call");
+  await expect(rows.filter({ hasText: "read_file" })).toContainText("not invoked");
+  const undeclared = rows.filter({ hasText: "write_file" });
+  await expect(undeclared).toContainText("undeclared");
+
+  // One full-width row per tool, stacked: the old layout put the list in a left
+  // column and left the right one mostly empty.
+  const card = page.locator('[data-slot="card"]').first();
+  const cardBox = await card.boundingBox();
+  const rowBoxes = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect()).map((box) => ({ width: box.width, top: box.top, bottom: box.bottom })));
+  expect(rowBoxes[0].width).toBeGreaterThan(cardBox.width - 60);
+  expect(rowBoxes[1].top).toBeGreaterThanOrEqual(rowBoxes[0].bottom - 1);
+
+  // The row itself opens the definition.
+  await called.locator(".tool-row-main").click();
+  const definition = page.getByRole("dialog");
+  await expect(definition).toContainText("Tool definition");
+  await expect(definition).toContainText('"cmd"');
+  await page.keyboard.press("Escape");
+  await expect(definition).toHaveCount(0);
+
+  // A tool that was called gets a second button; the dialog holds the input and
+  // the output. It is wider than the read column, which the 560px default was
+  // not: a JSON schema at that width is a narrow column of wrapping text.
+  await called.getByRole("button", { name: /View 1 calls/ }).click();
+  const calls = page.getByRole("dialog");
+  await expect(calls).toContainText('"cmd": "ls -la"');
+  await expect(calls).toContainText("total 12");
+  const box = await calls.boundingBox();
+  expect(box.width).toBeGreaterThan(Math.min(900, viewport.width - 40));
+  await page.keyboard.press("Escape");
+
+  // With no declaration to show, the row opens the calls it does have rather
+  // than an empty definition.
+  await undeclared.locator(".tool-row-main").click();
+  await expect(page.getByRole("dialog")).toContainText("wrote 3 bytes");
 });
 
 // A finding names a node with an evidence path, which is precise and unreadable.
@@ -1211,39 +1336,42 @@ function tracePayload() {
 // returns - depth 0 for a step, depth 1 for a part of one.
 function parsedObservationPayload() {
   const node = (overrides) => ({ parent_id: "", provider_type: "openai", role: "", depth: 0, raw: null, children: [], ...overrides });
+  const instruction = node({ id: "node_instr", normalized_type: "instruction", role: "system", path: "$.instructions", index: 0, text_preview: "You are a careful agent." });
+  const input = node({ id: "node_in", normalized_type: "message", role: "user", path: "$.input[0]", index: 0, text_preview: "list the files" });
+  const inputPart = node({ id: "node_in_part", parent_id: "node_in", depth: 1, normalized_type: "text", path: "$.input[0].content[0]", index: 0, text_preview: "list the files" });
+  const call = node({
+    id: "node_call",
+    normalized_type: "tool_call",
+    role: "assistant",
+    path: "$.input[1]",
+    index: 1,
+    text_preview: "exec_command",
+    raw: { name: "exec_command", call_id: "call_1", arguments: '{"cmd":"ls -la"}' },
+  });
+  const result = node({ id: "node_result", normalized_type: "tool_result", role: "tool", path: "$.input[2]", index: 2, text_preview: "total 12\ndrwxr-xr-x  4 agent staff", raw: { call_id: "call_1", exit_code: 0 } });
+  const reasoning = node({ id: "node_reasoning", normalized_type: "reasoning", path: "$.output[0]", index: 0, text_preview: "They asked for a listing." });
+  const out = node({ id: "node_out", normalized_type: "message", role: "assistant", path: "$.output[1]", index: 1, text_preview: longAssistantMessage() });
+  const callFailed = node({
+    id: "node_call_failed",
+    normalized_type: "tool_call",
+    role: "assistant",
+    path: "$.input[3]",
+    index: 3,
+    text_preview: "read_file",
+    raw: { name: "read_file", call_id: "call_2", arguments: '{"path":"/etc/shadow"}' },
+  });
+  const resultFailed = node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: "permission denied", raw: { call_id: "call_2", status: "failed" } });
+  // A declaration is not part of the dialogue and has no step.
+  const toolDecl = node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command" });
   return {
     id: "trace-parsed",
-    summary: { total: 7, failed: 1 },
-    nodes: [
-      node({ id: "node_instr", normalized_type: "instruction", role: "system", path: "$.instructions", index: 0, text_preview: "You are a careful agent." }),
-      node({ id: "node_in", normalized_type: "message", role: "user", path: "$.input[0]", index: 0, text_preview: "list the files" }),
-      node({ id: "node_in_part", parent_id: "node_in", depth: 1, normalized_type: "text", path: "$.input[0].content[0]", index: 0, text_preview: "list the files" }),
-      node({
-        id: "node_call",
-        normalized_type: "tool_call",
-        role: "assistant",
-        path: "$.input[1]",
-        index: 1,
-        text_preview: "exec_command",
-        raw: { name: "exec_command", call_id: "call_1", arguments: '{"cmd":"ls -la"}' },
-      }),
-      node({ id: "node_result", normalized_type: "tool_result", role: "tool", path: "$.input[2]", index: 2, text_preview: "total 12\ndrwxr-xr-x  4 agent staff", raw: { call_id: "call_1", exit_code: 0 } }),
-      node({ id: "node_reasoning", normalized_type: "reasoning", path: "$.output[0]", index: 0, text_preview: "They asked for a listing." }),
-      node({ id: "node_out", normalized_type: "message", role: "assistant", path: "$.output[1]", index: 1, text_preview: longAssistantMessage() }),
-      node({
-        id: "node_call_failed",
-        normalized_type: "tool_call",
-        role: "assistant",
-        path: "$.input[3]",
-        index: 3,
-        text_preview: "read_file",
-        raw: { name: "read_file", call_id: "call_2", arguments: '{"path":"/etc/shadow"}' },
-      }),
-      node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: "permission denied", raw: { call_id: "call_2", status: "failed" } }),
-      // A declaration is not part of the dialogue and has no step.
-      node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command" }),
-    ],
-    tree: [],
+    summary: { status: "parsed", parser: "openai", parser_version: "1", provider: "openai", operation: "responses", model: "gpt-5", warnings: [] },
+    nodes: [instruction, input, inputPart, call, result, reasoning, out, callFailed, resultFailed, toolDecl],
+    // The protocol tab draws the request and the response as two trees, so a
+    // conversation longer than one turn is visible as a whole rather than as
+    // the assistant's last message alone.
+    request_tree: [instruction, { ...input, children: [inputPart] }, call, result, callFailed, resultFailed, toolDecl],
+    response_tree: [reasoning, out],
   };
 }
 
@@ -1284,6 +1412,31 @@ function parsedTracePayload() {
     // not from the messages the recorder extracted.
     messages: [],
     ai_reasoning: "",
+  };
+}
+
+// Two declared tools, one of them called once, plus a call to a tool the request
+// never declared. The tool result carries the `tool_call_id` that the 工具调用 tab
+// matches the call against, which is how the calls dialog shows an input and the
+// output that answered it.
+function toolsTracePayload() {
+  const payload = tracePayload();
+  return {
+    ...payload,
+    header: { ...payload.header, meta: { ...payload.header.meta, request_id: "trace-tools", endpoint: "/v1/chat/completions" } },
+    messages: [
+      { role: "tool", content: "total 12", message_type: "tool_result", tool_call_id: "call_1" },
+      { role: "tool", content: "wrote 3 bytes", message_type: "tool_result", tool_call_id: "call_2" },
+    ],
+    ai_reasoning: "",
+    tool_calls: [
+      { id: "call_1", type: "function", function: { name: "exec_command", arguments: '{"cmd":"ls -la"}' } },
+      { id: "call_2", type: "function", function: { name: "write_file", arguments: '{"path":"notes.txt"}' } },
+    ],
+    tools: [
+      { type: "function", function: { name: "exec_command", description: "Run a shell command.", parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] } } },
+      { type: "function", function: { name: "read_file", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } } } } },
+    ],
   };
 }
 

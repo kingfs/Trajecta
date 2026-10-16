@@ -69,6 +69,30 @@ export function collectTraceToolCalls(detail) {
   return calls;
 }
 
+/*
+ * The output a call produced, keyed by the call id it answers.
+ *
+ * A tool call and its result are two messages in a chat trace, and the result
+ * names the call with `tool_call_id`. The conversation tab merges the two into
+ * one card because it walks the Observation IR; the 工具调用 tab reads the
+ * recorder's flat messages, so it needs this lookup to show the pair in its own
+ * dialog without walking the IR twice.
+ */
+export function collectToolOutputs(detail) {
+  const outputs = new Map();
+  for (const message of detail?.messages || []) {
+    const type = String(message.message_type || "");
+    if (type !== "tool_result" && type !== "function_call_output" && message.role !== "tool") {
+      continue;
+    }
+    const id = message.tool_call_id || message.toolCallId || "";
+    if (id && !outputs.has(id)) {
+      outputs.set(id, message);
+    }
+  }
+  return outputs;
+}
+
 function normalizeToolName(value = "") {
   return String(value || "").trim().toLowerCase();
 }
@@ -82,22 +106,46 @@ export function findDeclaredToolForCall(call, declaredTools = []) {
   return declaredTools.find((tool) => isSameToolName(getDeclaredToolName(tool), name)) || null;
 }
 
-export function countToolMatches(toolCalls = [], toolName = "") {
-  return toolCalls.filter((call) => isSameToolName(call.function?.name, toolName)).length;
+/*
+ * JSON arrives in two shapes: the recorder keeps the text the client sent, and
+ * the parsed observation hands back the decoded object. A `<pre>` renders a
+ * string, so a surface has to normalise both before it prints - handing it an
+ * object is a React child error, not a formatting nit - and pretty-printing it
+ * is what makes a schema or an argument list readable.
+ */
+export function formatJSONValue(value, fallback = "{}") {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export function buildToolSchemaSummary(parameters = "") {
   if (!parameters) {
     return "No schema";
   }
-  try {
-    const payload = JSON.parse(parameters);
-    const properties = payload?.properties ? Object.keys(payload.properties) : [];
-    if (properties.length) {
-      return `${properties.length} field${properties.length > 1 ? "s" : ""}: ${properties.slice(0, 3).join(", ")}${properties.length > 3 ? "..." : ""}`;
+  let payload = parameters;
+  if (typeof parameters === "string") {
+    try {
+      payload = JSON.parse(parameters);
+    } catch {
+      return "Schema available";
     }
-    return payload?.type ? `Schema type ${payload.type}` : "JSON schema";
-  } catch {
-    return "Schema available";
   }
+  const properties = payload?.properties ? Object.keys(payload.properties) : [];
+  if (properties.length) {
+    return `${properties.length} field${properties.length > 1 ? "s" : ""}: ${properties.slice(0, 3).join(", ")}${properties.length > 3 ? "..." : ""}`;
+  }
+  return payload?.type ? `Schema type ${payload.type}` : "JSON schema";
 }

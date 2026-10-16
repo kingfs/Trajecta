@@ -108,6 +108,45 @@ test("real monitor server renders a parsed tool call as one conversation step", 
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+// The protocol tab draws the parsed request as well as the parsed response. The
+// API used to return one `tree`, which was the response tree, so this recording -
+// four request messages and one response - read as though the parser had seen
+// only the last turn.
+test("real monitor server shows the parsed request and response", async ({ page }) => {
+  const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
+  await page.goto(`/traces/${fixture.tools_trace_id}?tab=protocol`);
+
+  await expect(page.getByRole("heading", { name: "Parsed request" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Parsed response" })).toBeVisible();
+  const request = page.locator(".protocol-section").first();
+  // The conversation, not just the tool call that ended it.
+  await expect(request).toContainText("list the files");
+  await expect(request).toContainText("exec_command");
+  const response = page.locator(".protocol-section").nth(1);
+  await expect(response).toContainText("I could not list the files.");
+});
+
+// The 工具调用 tab with a real cassette. This recording calls a tool without
+// declaring one, which is the case the tab used to answer with "no declared
+// tools": the call is still a tool this request involved, so it gets a row, and
+// its input and the output that answered it are read out of the recorded
+// messages rather than out of a declaration that is not there.
+test("real monitor server lists a called tool that was never declared", async ({ page }) => {
+  const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
+  await page.goto(`/traces/${fixture.tools_trace_id}?tab=tools`);
+
+  const row = page.locator(".tool-row");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("exec_command");
+  await expect(row).toContainText("undeclared");
+  await expect(row).toContainText("1 call");
+
+  await row.getByRole("button", { name: /View 1 calls/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("ls -la");
+  await expect(dialog).toContainText("permission denied");
+});
+
 // The console has no refresh timers: a page becomes fresh because the server
 // pushed a topic at it. This drives the real Go server rather than a mock - the
 // socket the browser opens is the one the binary serves, and the write that

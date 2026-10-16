@@ -290,7 +290,13 @@ type observationDetailResponse struct {
 	ID      string                 `json:"id"`
 	Summary observationSummaryView `json:"summary"`
 	Nodes   []observationNodeView  `json:"nodes"`
-	Tree    []observationNodeView  `json:"tree"`
+	// The protocol tab reads the parsed exchange the way the parser shaped it:
+	// the request nodes (every message of the conversation plus the declared
+	// tools) and the response nodes as two trees. It used to carry only the
+	// response tree under `tree`, which made a whole conversation look like it
+	// had parsed nothing but the last turn.
+	RequestTree  []observationNodeView `json:"request_tree"`
+	ResponseTree []observationNodeView `json:"response_tree"`
 }
 
 type findingListResponse struct {
@@ -1948,10 +1954,11 @@ func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.St
 
 	nodes := observe.FlattenObservationNodes(observation)
 	payload := observationDetailResponse{
-		ID:      entry.ID,
-		Summary: summary,
-		Nodes:   observationNodeViewsFromFlat(nodes),
-		Tree:    observationNodeViewsFromTree(observation.Response.Nodes, 0),
+		ID:           entry.ID,
+		Summary:      summary,
+		Nodes:        observationNodeViewsFromFlat(nodes),
+		RequestTree:  observationNodeViewsFromTree(observation.Request.Nodes, 0),
+		ResponseTree: observationNodeViewsFromTree(observation.Response.Nodes, 0),
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

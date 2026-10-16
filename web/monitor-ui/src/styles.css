@@ -654,6 +654,43 @@
   border-left: 2px solid var(--line);
 }
 
+/* The protocol tab draws the parsed exchange as two labelled halves - request
+   and response - so it is obvious that the conversation on the request side is
+   the whole parsed history, not just the turn that produced this cassette. */
+.protocol-sections {
+  display: grid;
+  gap: 22px;
+}
+
+.protocol-section {
+  display: grid;
+  gap: 12px;
+}
+
+.protocol-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.protocol-section-head h3 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+}
+
+.protocol-section-hint {
+  margin: 4px 0 0;
+  max-width: 90ch;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .session-tab-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -732,7 +769,6 @@
 
 .ghost-button,
 .icon-button,
-.tool-list-item,
 .trace-row,
 .session-row,
 .upstream-failure-card,
@@ -1466,9 +1502,7 @@ a:focus-visible {
 :root[data-theme="light"] .finding-card,
 :root[data-theme="light"] .trace-reading-card,
 :root[data-theme="light"] .tool-call-box,
-:root[data-theme="light"] .tool-list-item,
 :root[data-theme="light"] .timeline-card,
-:root[data-theme="light"] .timeline-node,
 :root[data-theme="light"] .failure-context-card,
 :root[data-theme="light"] .failure-node,
 :root[data-theme="light"] .provider-form-check,
@@ -1507,7 +1541,6 @@ a:focus-visible {
 
 :root[data-theme="light"] .trace-row:hover,
 :root[data-theme="light"] .session-row:hover,
-:root[data-theme="light"] .tool-list-item:hover,
 :root[data-theme="light"] .channel-model-row:hover,
 :root[data-theme="light"] .provider-model-card:hover,
 :root[data-theme="light"] .model-market-card:hover,
@@ -2024,10 +2057,6 @@ a:focus-visible {
   margin-bottom: 18px;
 }
 
-.trace-reading-panel {
-  margin-bottom: 18px;
-}
-
 .trace-reading-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2368,85 +2397,97 @@ a:focus-visible {
   background: var(--surface-2);
 }
 
-.tool-layout {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.6fr);
-  gap: 18px;
-}
-
-.tool-list-column,
-.tool-detail-column
-{
+/* One row per declared tool. The row carries the whole reading of that tool -
+   name, origin, call count and description - so a request that declares ten
+   tools is ten rows instead of a list with a mostly-empty detail column beside
+   it. The row itself opens the definition; the calls open their own dialog. */
+.tool-rows {
   display: grid;
   gap: 12px;
 }
 
-.tool-list-item {
-  width: 100%;
+.tool-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 14px;
   background: var(--surface-2);
+}
+
+.tool-row:hover {
+  border-color: var(--line-strong);
+}
+
+.tool-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.tool-list-item:hover {
-  background: var(--surface-3);
-  border-color: var(--line-strong);
-}
-
-.tool-list-item-active {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-  background: var(--accent-soft);
-}
-
-.tool-list-item-head,
-.tool-call-head,
-.tool-detail-header
-{
+.tool-row-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.tool-list-item-meta,
-.tool-call-meta,
-.tool-message-summary,
-.tool-message-placeholder
-{
+.tool-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tool-call-section {
+  margin-top: 12px;
+}
+
+.tool-call-list {
+  display: grid;
+  gap: 14px;
+}
+
+.tool-call-id,
+.tool-description,
+.tool-call-missing {
   color: var(--muted);
   font-family: var(--font-sans);
   font-size: 0.82rem;
   line-height: 1.5;
 }
 
-.tool-list-item-meta {
-  display: grid;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.tool-detail-header h3 {
+.tool-description {
   margin: 0;
-  font-size: 1.5rem;
-  line-height: 1.05;
 }
 
-.tool-detail-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
+.tool-call-missing {
+  margin: 6px 0 0;
 }
 
 .tool-call-meta,
 .tool-message-summary,
 .tool-message-placeholder {
   margin-top: 10px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 .message-call-id,
@@ -2465,17 +2506,9 @@ a:focus-visible {
   text-decoration: underline;
 }
 
-.tool-modal {
-  width: min(880px, calc(100vw - 32px));
-  max-height: min(82vh, 920px);
-  overflow: auto;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--surface-1), var(--surface-1));
-  box-shadow: var(--shadow-lg);
-  padding: 22px;
-}
-
+/* The tool dialog's box lives in styles/components.css, next to .nav-modal: this
+   file loads first, so a width declared here lost the cascade and the modal
+   rendered at the 560px default. */
 .tool-modal-head {
   display: flex;
   justify-content: space-between;
@@ -2708,6 +2741,13 @@ a:focus-visible {
   line-height: 1.55;
 }
 
+.timeline-event-url {
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
 .session-timeline-meta {
   display: flex;
   align-items: center;
@@ -2805,144 +2845,6 @@ a:focus-visible {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.timeline-tree {
-  display: grid;
-  gap: 12px;
-}
-
-.timeline-node,
-.timeline-node summary {
-  border-radius: var(--radius-lg);
-}
-
-.timeline-node {
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
-  box-shadow: inset 0 1px 0 var(--border-subtle);
-}
-
-.timeline-node-focused {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 3px var(--accent-soft), inset 0 1px 0 var(--border-subtle);
-}
-
-.timeline-node-summary {
-  list-style: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 14px;
-  cursor: pointer;
-}
-
-.timeline-node-summary::-webkit-details-marker {
-  display: none;
-}
-
-.timeline-node-leaf {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 14px;
-}
-
-.timeline-node-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.timeline-node-kind {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.18rem 0.48rem;
-  border-radius: 999px;
-  background: var(--border-subtle);
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-family: var(--font-sans);
-  font-size: 0.63rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  white-space: nowrap;
-}
-
-.timeline-node-title {
-  font-size: 0.94rem;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.timeline-node-id {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--muted);
-  padding: 0.24rem 0.48rem;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  border: 1px solid var(--line);
-}
-
-.timeline-node-preview {
-  padding: 0 14px 14px;
-  color: var(--text);
-  font-size: 0.9rem;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.timeline-node-body {
-  margin: 0 14px 14px;
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
-  color: var(--text-primary);
-  overflow: auto;
-  font-size: 0.82rem;
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.timeline-children {
-  display: grid;
-  gap: 10px;
-  padding: 0 14px 14px 22px;
-  margin: 0 0 14px 14px;
-  border-left: 2px solid var(--accent-border);
-}
-
-.timeline-node-tool_call .timeline-node-kind {
-  color: var(--accent);
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-}
-
-.timeline-node-tool_response .timeline-node-kind {
-  color: var(--gold);
-  border-color: var(--warning-border);
-  background: var(--warning-soft);
-}
-
-.timeline-node-thinking .timeline-node-kind {
-  color: var(--green);
-  border-color: var(--success-border);
-  background: var(--success-soft);
-}
-
-.timeline-node-output .timeline-node-kind {
-  color: var(--accent);
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
 }
 
 .raw-grid {

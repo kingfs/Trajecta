@@ -274,6 +274,7 @@ export function normalizeTraceTab(value = "") {
   switch (value) {
     case "conversation":
     case "protocol":
+    case "tools":
     case "audit":
     case "request":
     case "raw":

@@ -5248,8 +5248,11 @@ func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 	if payload.Summary.Status != string(observe.ParseStatusParsed) || payload.Summary.Parser != "openai" {
 		t.Fatalf("summary = %+v", payload.Summary)
 	}
-	if len(payload.Tree) == 0 {
-		t.Fatalf("tree is empty: %+v", payload)
+	// The detail carries the request and the response as separate trees, so the
+	// protocol tab can show the whole parsed exchange rather than the response
+	// alone.
+	if len(payload.RequestTree) == 0 || len(payload.ResponseTree) == 0 {
+		t.Fatalf("request=%+v response=%+v", payload.RequestTree, payload.ResponseTree)
 	}
 	var foundText bool
 	for _, node := range payload.Nodes {
@@ -5364,8 +5367,8 @@ func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 	if payload.Summary.Parser != "openai" || payload.Summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", payload.Summary)
 	}
-	if len(payload.Nodes) == 0 || len(payload.Tree) == 0 {
-		t.Fatalf("nodes=%+v tree=%+v", payload.Nodes, payload.Tree)
+	if len(payload.Nodes) == 0 || len(payload.RequestTree) == 0 || len(payload.ResponseTree) == 0 {
+		t.Fatalf("nodes=%+v request=%+v response=%+v", payload.Nodes, payload.RequestTree, payload.ResponseTree)
 	}
 	var foundText bool
 	for _, node := range payload.Nodes {

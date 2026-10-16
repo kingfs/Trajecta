@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Card } from "../ui/card";
@@ -40,6 +41,21 @@ import {
 const CALL_KINDS = new Set(["tool_call", "server_tool_call", "code"]);
 const RESULT_KINDS = new Set(["tool_result", "server_tool_result", "code_result"]);
 const PLAIN_KINDS = new Set(["instruction", "message", "text", "refusal", "safety", "error", "citation"]);
+
+/*
+ * The steps the navigation rail marks, and the one the conversation lands on by
+ * default: a turn the caller opened. A tool call or its result is part of a
+ * turn, not a new one, so it gets no tick.
+ */
+const INPUT_ROLES = new Set(["user", "human"]);
+
+function isInputStep(step) {
+  return INPUT_ROLES.has(String(step.role || "").toLowerCase()) || step.kind === "instruction";
+}
+
+function stepKey(step) {
+  return step.id || `${step.path}-${step.index}`;
+}
 
 function kindTone(kind) {
   if (RESULT_KINDS.has(kind)) {
@@ -191,7 +207,7 @@ function ConversationCall({ call, open, onToggle, renderMarkdown, t }) {
   );
 }
 
-function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, t }) {
+function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, registerRef, t }) {
   const failed = step.failed || step.results.some(resultFailed);
   const kind = step.kind;
   const isCall = CALL_KINDS.has(kind);
@@ -207,6 +223,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
     <article
       className="conversation-step"
       id={step.id}
+      ref={registerRef}
       data-conversation-step=""
       data-kind={kind}
       data-failed={failed ? "true" : "false"}
@@ -351,10 +368,22 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
   const [failuresOnly, setFailuresOnly] = useState(false);
   const [openAll, setOpenAll] = useState(null);
   const [overrides, setOverrides] = useState({});
+  const [landedInput, setLandedInput] = useState("");
+  const [railTicks, setRailTicks] = useState([]);
   const scrolled = useRef("");
+  const listRef = useRef(null);
+  const stepRefs = useRef(new Map());
+  const landed = useRef(false);
   const target = useMemo(() => findConversationTarget(steps, anchor), [steps, anchor]);
+  const inputSteps = useMemo(
+    () => steps.map((step, index) => ({ step, ordinal: index + 1 })).filter(({ step }) => isInputStep(step)),
+    [steps],
+  );
   // A reader who scrolls while the anchor is still settling keeps their place:
   // the repeats above only belong to the reader who has not moved.
+  // A reader who scrolls - or who clicks anything, including the rail - while a
+  // landing is still settling keeps their place: the deferred repeats below only
+  // belong to the reader who has not moved.
   const settled = useRef(() => false);
   useEffect(() => {
     let moved = false;
@@ -364,10 +393,12 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
     settled.current = () => moved;
     window.addEventListener("wheel", mark, { passive: true });
     window.addEventListener("touchmove", mark, { passive: true });
+    window.addEventListener("pointerdown", mark, { passive: true });
     window.addEventListener("keydown", mark);
     return () => {
       window.removeEventListener("wheel", mark);
       window.removeEventListener("touchmove", mark);
+      window.removeEventListener("pointerdown", mark);
       window.removeEventListener("keydown", mark);
     };
   }, []);
@@ -415,6 +446,77 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
     };
   }, [target, anchor]);
 
+  // The conversation is long by nature and the reader usually arrives to read the
+  // newest turn. Landing on the last input step puts that turn - and the output
+  // that answered it - on screen; a finding's anchor still wins, and a reader who
+  // is already filtering keeps the view they asked for.
+  useEffect(() => {
+    if (landed.current || !steps.length) {
+      return undefined;
+    }
+    landed.current = true;
+    if (target || query.trim() || failuresOnly) {
+      return undefined;
+    }
+    const lastInput = [...inputSteps].reverse()[0];
+    const key = lastInput ? stepKey(lastInput.step) : "";
+    const element = key ? stepRefs.current.get(key) : null;
+    if (!element) {
+      return undefined;
+    }
+    setLandedInput(key);
+    // The same deferred repeats as an anchor landing: a lazy Markdown chunk
+    // makes the content above grow after the first scroll.
+    const scrolls = [0, 250, 700].map((delay) =>
+      window.setTimeout(() => {
+        if (!settled.current()) {
+          element.scrollIntoView({ block: "start", behavior: delay === 0 ? "auto" : "smooth" });
+        }
+      }, delay),
+    );
+    return () => {
+      scrolls.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [steps, inputSteps, target, query, failuresOnly]);
+
+  // One tick per input turn at its real position in the transcript, so the rail
+  // is a minimap of the conversation rather than an evenly-spaced list of
+  // numbers. The list is observed because expanding a step moves every tick
+  // below it.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) {
+      return undefined;
+    }
+    const measure = () => {
+      const listTop = list.getBoundingClientRect().top;
+      const height = list.offsetHeight || 1;
+      const next = [];
+      for (const { step, ordinal } of inputSteps) {
+        const element = stepRefs.current.get(stepKey(step));
+        if (!element) {
+          continue;
+        }
+        const offset = element.getBoundingClientRect().top - listTop;
+        next.push({
+          key: stepKey(step),
+          ordinal,
+          percent: Math.min(100, Math.max(0, (offset / height) * 100)),
+          preview: previewText(conversationText(step)),
+        });
+      }
+      setRailTicks(next);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(list);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [inputSteps, query, failuresOnly]);
+
   if (!steps.length) {
     return fallback;
   }
@@ -430,69 +532,119 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
     return true;
   });
 
+  const registerStepRef = (key) => (element) => {
+    if (element) {
+      stepRefs.current.set(key, element);
+    } else {
+      stepRefs.current.delete(key);
+    }
+  };
+  const jumpTo = (key) => {
+    stepRefs.current.get(key)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const jumpTop = () => {
+    stepRefs.current.get(stepKey(steps[0]))?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const jumpBottom = () => {
+    stepRefs.current.get(stepKey(steps[steps.length - 1]))?.scrollIntoView({ block: "end", behavior: "smooth" });
+  };
+  const railVisible = steps.length > 1;
+
   return (
-    <Card as="section" className="conversation-panel">
-      <div className="conversation-toolbar">
-        <Input
-          type="search"
-          className="conversation-search"
-          value={query}
-          placeholder={t("conversation.search")}
-          aria-label={t("conversation.search")}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <label className="wrap-toggle">
-          <input type="checkbox" checked={failuresOnly} onChange={(event) => setFailuresOnly(event.target.checked)} />
-          {t("conversation.failuresOnly")}
-        </label>
-        <label className="wrap-toggle">
-          <input type="checkbox" checked={renderMarkdown} onChange={(event) => onRenderMarkdownChange(event.target.checked)} />
-          {t("traceDetail.renderMarkdown")}
-        </label>
-        <Button variant="ghost" size="sm" onClick={() => { setOverrides({}); setOpenAll(openAll === true ? false : true); }}>
-          {openAll === true ? t("conversation.collapseAll") : t("conversation.expandAll")}
-        </Button>
-        <span className="conversation-count mono">
-          {t("conversation.count", { shown: visible.length, total: steps.length })}
-        </span>
-      </div>
-
-      <div className="conversation-summary">
-        <InlineTag>{t("conversation.statSteps", { count: stats.steps })}</InlineTag>
-        {stats.toolCalls ? <InlineTag tone="gold">{t("conversation.statCalls", { count: stats.toolCalls })}</InlineTag> : null}
-        {stats.toolResults ? <InlineTag tone="green">{t("conversation.statResults", { count: stats.toolResults })}</InlineTag> : null}
-        {stats.reasoning ? <InlineTag tone="accent">{t("conversation.statReasoning", { count: stats.reasoning })}</InlineTag> : null}
-        {stats.failed ? <InlineTag tone="danger">{t("conversation.statFailed", { count: stats.failed })}</InlineTag> : null}
-      </div>
-
-      {visible.length ? (
-        // The ordinal each card shows is the step's place in the whole
-        // conversation, not in the filtered view: a search must not renumber the
-        // trace a reader is looking at.
-        <div className="conversation-list">
-          {visible.map((step) => (
-            <ConversationStep
-              key={step.id || `${step.path}-${step.index}`}
-              step={step}
-              ordinal={steps.indexOf(step) + 1}
-              // The mark lasts as long as the URL names this step, because the
-              // URL is what a shared finding link carries; the ring it draws is
-              // an animation, so the page does not look like something is
-              // selected after the reader has moved on.
-              focused={step.id === target}
-              // A step the URL points at opens: a clamped block would hide the
-              // sentence the finding was about.
-              open={isOpen(step.id, false) || step.id === target}
-              onToggleOpen={toggleOpen}
-              onSelectAnchor={onSelectAnchor}
-              renderMarkdown={renderMarkdown}
-              t={t}
-            />
-          ))}
+    // The rail is a grid column of its own rather than a floating element over
+    // the panel: it reserves the width it needs, so it can never cover the text
+    // it navigates, and `position: sticky` keeps it on screen while the page
+    // scrolls past a long transcript.
+    <div className={railVisible ? "conversation-layout conversation-layout-railed" : "conversation-layout"}>
+      <Card as="section" className="conversation-panel">
+        <div className="conversation-toolbar">
+          <Input
+            type="search"
+            className="conversation-search"
+            value={query}
+            placeholder={t("conversation.search")}
+            aria-label={t("conversation.search")}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <label className="wrap-toggle">
+            <input type="checkbox" checked={failuresOnly} onChange={(event) => setFailuresOnly(event.target.checked)} />
+            {t("conversation.failuresOnly")}
+          </label>
+          <label className="wrap-toggle">
+            <input type="checkbox" checked={renderMarkdown} onChange={(event) => onRenderMarkdownChange(event.target.checked)} />
+            {t("traceDetail.renderMarkdown")}
+          </label>
+          <Button variant="ghost" size="sm" onClick={() => { setOverrides({}); setOpenAll(openAll === true ? false : true); }}>
+            {openAll === true ? t("conversation.collapseAll") : t("conversation.expandAll")}
+          </Button>
+          <span className="conversation-count mono">
+            {t("conversation.count", { shown: visible.length, total: steps.length })}
+          </span>
         </div>
-      ) : (
-        <EmptyState title={t("conversation.noMatch")} detail={t("conversation.noMatchDetail")} compact />
-      )}
-    </Card>
+
+        <div className="conversation-summary">
+          <InlineTag>{t("conversation.statSteps", { count: stats.steps })}</InlineTag>
+          {stats.toolCalls ? <InlineTag tone="gold">{t("conversation.statCalls", { count: stats.toolCalls })}</InlineTag> : null}
+          {stats.toolResults ? <InlineTag tone="green">{t("conversation.statResults", { count: stats.toolResults })}</InlineTag> : null}
+          {stats.reasoning ? <InlineTag tone="accent">{t("conversation.statReasoning", { count: stats.reasoning })}</InlineTag> : null}
+          {stats.failed ? <InlineTag tone="danger">{t("conversation.statFailed", { count: stats.failed })}</InlineTag> : null}
+        </div>
+
+        {visible.length ? (
+          // The ordinal each card shows is the step's place in the whole
+          // conversation, not in the filtered view: a search must not renumber the
+          // trace a reader is looking at.
+          <div className="conversation-list" ref={listRef}>
+            {visible.map((step) => (
+              <ConversationStep
+                key={stepKey(step)}
+                step={step}
+                ordinal={steps.indexOf(step) + 1}
+                // The mark lasts as long as the URL names this step, because the
+                // URL is what a shared finding link carries; the ring it draws is
+                // an animation, so the page does not look like something is
+                // selected after the reader has moved on.
+                focused={step.id === target}
+                // A step the URL points at opens: a clamped block would hide the
+                // sentence the finding was about. The step the page landed on by
+                // default opens too, because the newest input is what the reader
+                // came to read.
+                open={isOpen(step.id, false) || step.id === target || stepKey(step) === landedInput}
+                onToggleOpen={toggleOpen}
+                onSelectAnchor={onSelectAnchor}
+                renderMarkdown={renderMarkdown}
+                registerRef={registerStepRef(stepKey(step))}
+                t={t}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title={t("conversation.noMatch")} detail={t("conversation.noMatchDetail")} compact />
+        )}
+      </Card>
+      {railVisible ? (
+        <nav className="conversation-rail" aria-label={t("conversation.railLabel")}>
+          <button type="button" className="conversation-rail-arrow" onClick={jumpTop} title={t("conversation.jumpTop")} aria-label={t("conversation.jumpTop")}>
+            <ChevronUp size={14} aria-hidden="true" />
+          </button>
+          <div className="conversation-rail-track">
+            {railTicks.map((tick) => (
+              <button
+                key={tick.key}
+                type="button"
+                className="conversation-rail-tick"
+                style={{ top: `${tick.percent}%` }}
+                title={`#${tick.ordinal} · ${tick.preview}`}
+                aria-label={t("conversation.railTickLabel", { index: tick.ordinal, preview: tick.preview })}
+                onClick={() => jumpTo(tick.key)}
+              />
+            ))}
+          </div>
+          <button type="button" className="conversation-rail-arrow" onClick={jumpBottom} title={t("conversation.jumpBottom")} aria-label={t("conversation.jumpBottom")}>
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+        </nav>
+      ) : null}
+    </div>
   );
 }

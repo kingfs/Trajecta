@@ -851,6 +851,26 @@ input[type="radio"] {
   width: min(720px, 100%);
 }
 
+/* The tool definition and tool-call dialogs. The whole box lives here, next to
+   .nav-modal, because a width declared in styles.css loses to .nav-modal's own -
+   that file loads first - which is what made the dialog render 560px wide
+   however wide its rule said. A schema or a transcript of several calls is
+   unreadable at the default anyway. */
+.tool-modal {
+  width: min(960px, calc(100vw - 32px));
+  max-height: min(82vh, 920px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+}
+
+.tool-modal-wide {
+  width: min(1180px, calc(100vw - 32px));
+}
+
 .nav-modal-head {
   display: flex;
   align-items: flex-start;
