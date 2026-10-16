@@ -132,7 +132,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 读取面：
 
-- `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。
+- `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；`window` 不传时不按时间过滤——这个接口的两个读入口都按 `trace_id` 取某一次录制的替换，读的是录制事实而不是读取时刻，默认 `today` 会把当天之前的 trace 全部藏掉；显式传入才生效。返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。
 - `GET /api/secret-masks/{id}`：单条。
 - MCP 工具 `list_credential_masks`：同参数，返回同样的字段。
 - Monitor UI 两个入口都读这个接口：事件页的事件详情在 `category: credential_masked` 时就地列出该规则的替换对（并保留 `details_json` 作为原始证据），trace 详情的「审计」标签页在发现项之上先列出这条请求里所有被替换的凭据；从事件详情点进 trace 会直接落在「审计」标签页，因为答案在那里。两个入口都把真值与假值分行完整打印，并给出偏移、长度、置信度与 `storage_mode`。

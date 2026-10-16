@@ -77,6 +77,13 @@ func credentialMaskAuditViewOf(item store.CredentialMaskAudit) credentialMaskAud
 //
 // Filters: trace_id, rule, window (the same vocabulary the event feed uses),
 // page and page_size.
+//
+// An absent window is not a filter. Every reader of this endpoint asks for one
+// trace's replacements - the audit tab and the notification that links to it -
+// and neither sends a window, because a replacement is a property of the
+// recording rather than of the moment it is read. Defaulting to the event feed's
+// "today" would hide every trace recorded before the current day, which is the
+// whole history the tab exists to show. An explicit window still narrows.
 func credentialMaskAuditListAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
@@ -88,7 +95,10 @@ func credentialMaskAuditListAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		q := r.URL.Query()
-		_, since := parseSystemEventWindow(q.Get("window"))
+		var since time.Time
+		if window := strings.TrimSpace(q.Get("window")); window != "" {
+			_, since = parseSystemEventWindow(window)
+		}
 		filter := store.CredentialMaskAuditFilter{
 			TraceID:  strings.TrimSpace(q.Get("trace_id")),
 			Rule:     strings.TrimSpace(q.Get("rule")),

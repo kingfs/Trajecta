@@ -18,6 +18,9 @@ import (
 // event_index is asserted too: the audit list for one trace is ordered by it in
 // the UI, and the table's own ORDER BY cannot order the replacements of a single
 // exchange because they share a detection time and carry random uuids.
+//
+// The rows are dated in the past on purpose, because the default read is not
+// time-bounded and an explicit window still is. Both halves are asserted.
 func TestCredentialMaskAuditAPIHandler(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {
@@ -30,7 +33,13 @@ func TestCredentialMaskAuditAPIHandler(t *testing.T) {
 		original = "sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJT3BlbkFJKKKKLLLLMMMMNNNNOOOOPPPP"
 		standIn  = "sk-proj-XXXXYYYYZZZZAAAABBBBCCCCDDDDEEEEFFFFT3BlbkFJGGGGHHHHIIIIJJJJKKKKLLLL"
 	)
-	detectedAt := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+	// Three days back, and the age is the point: the console reads this endpoint
+	// per trace and sends no window, so the pair of a recording made before today
+	// has to come back. A row written "now" would pass under a default "today"
+	// bound too, and this test existed in that shape while the endpoint silently
+	// dropped every older trace - the CI run on the following day is what caught
+	// it.
+	detectedAt := time.Now().UTC().Add(-72 * time.Hour)
 	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
 		{
 			TraceID:    traceID,
@@ -130,6 +139,23 @@ func TestCredentialMaskAuditAPIHandler(t *testing.T) {
 	}
 	if filtered.Total != 1 || len(filtered.Items) != 1 || filtered.Items[0].Rule != "google.api_key" {
 		t.Fatalf("filtered rows = %+v, want the single google.api_key row", filtered.Items)
+	}
+
+	// A window the caller does send still narrows the page: "today" excludes the
+	// three-day-old row, which is what proves the unbounded default above is a
+	// decision rather than a filter that stopped being applied.
+	req = httptest.NewRequest(http.MethodGet, "/api/secret-masks?trace_id="+traceID+"&window=today", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("windowed status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var windowed credentialMaskAuditListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &windowed); err != nil {
+		t.Fatalf("decode windowed response: %v", err)
+	}
+	if windowed.Total != 0 || len(windowed.Items) != 0 {
+		t.Fatalf("window=today rows = %+v, want none for a trace older than the window", windowed.Items)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/secret-masks/"+first.ID, nil)

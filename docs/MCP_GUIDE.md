@@ -122,7 +122,7 @@ audit 表与查询语义（`internal/responses/audit.QueryService`）见 [本地
 | --- | --- |
 | `list_traces`、`list_sessions` | `page` 默认 1；`page_size` 默认 50，上限 200。 |
 | `query_sticky_routing`、`list_system_events`、`summarize_failure_clusters` | 接受 `page` / `page_size`（`page_size` 默认 50，上限 200）。 |
-| `list_credential_masks` | `page` 默认 1；`page_size` 默认 50，上限 200；`window` 与事件中心同一套取值。 |
+| `list_credential_masks` | `page` 默认 1；`page_size` 默认 50，上限 200；`window` 与事件中心同一套取值，不传则不按时间过滤（按 `trace_id` 读历史录制时不会被当天边界截断）。 |
 | `summarize_failure_clusters` | `limit` 默认 10；除 reason、status、model、provider、endpoint、upstream 与 route target 外，也按 channel 和 credential 分组。 |
 | `summarize_system_events` | `status` 默认 `unread`，并返回最新 5 条事件。 |
 | `query_unread_system_events` | `limit` 默认 20、上限 200；`min_severity` 默认 `warning`。 |
