@@ -41,7 +41,7 @@ func applyStartupProviderProbeToTarget(ctx context.Context, target *config.Upstr
 	}
 	probeTarget := *target
 	probeTarget.Upstream = *upstreamCfg
-	report, err := providerprobe.Probe(ctx, providerProbeTargetFromConfig(probeTarget), client)
+	report, err := providerprobe.Probe(ctx, providerprobe.TargetFromConfig(probeTarget), client)
 	if err != nil {
 		slog.Warn("Startup provider probe failed; continuing with explicit configuration",
 			"provider_id", strings.TrimSpace(probeTarget.ID),

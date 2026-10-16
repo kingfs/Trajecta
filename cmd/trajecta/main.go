@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+
+	"github.com/kingfs/Trajecta/internal/cli"
 )
 
 // Build metadata is injected with -ldflags by the Taskfile and the Dockerfile.
@@ -18,15 +20,5 @@ func main() {
 
 func run() int {
 	root := newRootCommand()
-	root.SetOut(os.Stdout)
-	root.SetErr(os.Stderr)
-	if err := root.Execute(); err != nil {
-		command := ""
-		if activeRuntime != nil {
-			command = activeRuntime.command
-		}
-		activeRuntime.writeError(os.Stdout, command, err)
-		return exitCodeFor(err)
-	}
-	return exitOK
+	return cli.Execute(os.Args[1:], root, activeOpsRuntime)
 }

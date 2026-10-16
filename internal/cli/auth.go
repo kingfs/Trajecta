@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
@@ -47,14 +48,14 @@ type authTokenOptions struct {
 	stdout     io.Writer
 }
 
-func newAuthCommand(runtime *cliRuntime) *cobra.Command {
+func newAuthCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "auth",
 		Short:         "Manage users, tokens, and auth database migrations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	migrateCmd := &cobra.Command{
@@ -63,7 +64,7 @@ func newAuthCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "up", "Apply auth database migrations"))
@@ -76,7 +77,7 @@ func newAuthCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short string) *cobra.Command {
+func newAuthMigrateDirectionCommand(runtime *Runtime, direction string, short string) *cobra.Command {
 	var steps int
 	var all bool
 	var dryRun bool
@@ -85,14 +86,14 @@ func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAuthMigrateWithOptions(authMigrateOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					direction:  direction,
 					steps:      steps,
 					all:        all,
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -106,19 +107,19 @@ func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short
 	return cmd
 }
 
-func newAuthMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
+func newAuthMigrateStatusCommand(runtime *Runtime) *cobra.Command {
 	var checkDB bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show auth database migration status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAuthMigrateWithOptions(authMigrateOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					direction:  "status",
 					checkDB:    checkDB,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -128,7 +129,7 @@ func newAuthMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
+func newAuthInitUserCommand(runtime *Runtime) *cobra.Command {
 	var username string
 	var password string
 	var dryRun bool
@@ -137,13 +138,13 @@ func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Create the initial auth user",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAuthInitUserWithOptions(authUserOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					username:   username,
 					password:   password,
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -155,7 +156,7 @@ func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
+func newAuthResetPasswordCommand(runtime *Runtime) *cobra.Command {
 	var username string
 	var password string
 	var dryRun bool
@@ -164,13 +165,13 @@ func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Reset an auth user's password",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAuthResetPasswordWithOptions(authUserOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					username:   username,
 					password:   password,
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -182,7 +183,7 @@ func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
+func newAuthCreateTokenCommand(runtime *Runtime) *cobra.Command {
 	var username string
 	var name string
 	var scope string
@@ -193,15 +194,15 @@ func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Create an API token for an auth user",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAuthCreateTokenWithOptions(authTokenOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					username:   username,
 					name:       name,
 					scope:      scope,
 					ttl:        ttl,
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -229,7 +230,7 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 		}
 	}
 	if opts.dryRun {
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate."+opts.direction, result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate."+opts.direction, result, func(w io.Writer) error {
 			fmt.Fprintf(w, "dry-run auth.migrate.%s: no changes will be applied\n", opts.direction)
 			writeAuthMigrationReportText(w, result)
 			return nil
@@ -241,7 +242,7 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 	}
 	switch opts.direction {
 	case "status":
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate.status", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate.status", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "auth database migration status\n")
 			writeAuthMigrationReportText(w, result)
 			return nil
@@ -297,7 +298,7 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 	authMigrationCommandRole := "manage sqlite auth-owned migrations"
 	const namespaceNote = "postgres auth tables are owned by the application schema_migrations namespace; an independent auth namespace has not been split yet"
 	note := "sqlite auth migrations use the configured auth database path and embedded sqlite migration files"
-	if normalizeAuthStoreDriver(cfg.DatabaseDriver()) == "postgres" {
+	if appdb.NormalizeDriver(cfg.DatabaseDriver()) == "postgres" {
 		source = "postgres-checked-in-sql"
 		sourcePath = "ent/postgres-migrations"
 		productionReady = true
@@ -504,7 +505,7 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 	}
 	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", opts.username)
 	if opts.format == "json" {
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.init-user", map[string]any{
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.init-user", map[string]any{
 			"mutated":  true,
 			"username": opts.username,
 		}, nil); err != nil {
@@ -538,7 +539,7 @@ func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 	}
 	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", opts.username)
 	if opts.format == "json" {
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.reset-password", map[string]any{
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.reset-password", map[string]any{
 			"mutated":  true,
 			"username": opts.username,
 		}, nil); err != nil {
@@ -571,7 +572,7 @@ func runAuthCreateTokenWithOptions(opts authTokenOptions) int {
 		return 1
 	}
 	if opts.format == "json" {
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.create-token", map[string]any{
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.create-token", map[string]any{
 			"mutated":  true,
 			"username": opts.username,
 			"name":     opts.name,
@@ -597,7 +598,7 @@ func stdoutOrDefault(w io.Writer) io.Writer {
 
 func writeDryRunResult(stdout io.Writer, format string, command string, result map[string]any) int {
 	if format == "json" {
-		if err := writeCLIResult(stdoutOrDefault(stdout), format, command, result, nil); err != nil {
+		if err := WriteResult(stdoutOrDefault(stdout), format, command, result, nil); err != nil {
 			slog.Error("Write dry-run result failed", "error", err)
 			return 1
 		}
@@ -613,7 +614,7 @@ func openAuthStoreForCommand(configPath string) (*config.Config, *auth.Store, in
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return nil, nil, 1
 	}
-	st, err := openAuthStoreWithAutoSchema(cfg)
+	st, err := appdb.OpenAuthStore(cfg)
 	if err != nil {
 		slog.Error("Open auth store failed", "error", err)
 		return nil, nil, 1

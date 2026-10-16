@@ -24,7 +24,7 @@
 
 ## 前置条件
 
-- 目标 Postgres 可连接，并已应用应用库 schema：`server db migrate up -c config.yaml`（`trajecta upgrade db` 只写数据，不建表）。
+- 目标 Postgres 可连接，并已应用应用库 schema：`trajecta db migrate up -c config.yaml`（`trajecta upgrade db` 只写数据，不建表）。
 - 一个可用的 `config.yaml` 或等价环境变量；`.env` 会被自动读取。
 - 二进制：`task build:go` 会同时产出服务端 `server` 与 CLI `trajecta`，也可以单独构建：
 

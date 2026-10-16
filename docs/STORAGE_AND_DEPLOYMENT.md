@@ -114,7 +114,7 @@ docker compose up -d
 - `TRAJECTA_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，本地默认值由 compose 注入。
 - Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；宿主端口由 `TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`、`TRAJECTA_POSTGRES_PORT` 控制。
 - 首个 provider 可选：设置 `TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL` 与 `TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY` 可导入一个 OpenAI 兼容 provider；两者留空也合法，登录后在 Monitor Web 配置 provider、凭据与模型。legacy `TRAJECTA_UPSTREAM_*` 仍支持单 upstream 迁移，新部署应使用 Web 管理的 provider 数据库。
-- 配置文件路径由 `TRAJECTA_CONFIG` 决定（CLI 的 viper 实例使用 `TRAJECTA` 前缀并开启 `AutomaticEnv`，`cmd/server/root.go`）；镜像 `Dockerfile` 与 compose 都把它设为 `/app/config/config.yaml`，未设置且未传 `-c` 时回退到 `config.yaml`。
+- 配置文件路径由 `TRAJECTA_CONFIG` 决定（CLI 的 viper 实例使用 `TRAJECTA` 前缀并开启 `AutomaticEnv`，`internal/cli/root.go`）；镜像 `Dockerfile` 与 compose 都把它设为 `/app/config/config.yaml`，未设置且未传 `-c` 时回退到 `config.yaml`。
 - 输出目录：`TRAJECTA_OUTPUT_DIR` 同时覆盖 `debug.output_dir` 与 `trace.output_dir`，`TRAJECTA_TRACE_OUTPUT_DIR` 只覆盖 `trace.output_dir` 且在两者都设置时后者生效（`internal/config/config.go`）；镜像把两者都设为 `/app/data/traces`，compose 同样注入。解析优先级是 `trace.output_dir` → `debug.output_dir`（`Config.TraceOutputDir()`），**录制器、store、默认 SQLite 路径与启动日志共用这一个解析结果**；两者都为空不报错，但 `Load` 会打一条 warning，此时 cassette 与默认 SQLite 文件写在进程工作目录下。
 - 响应写超时默认关闭：`http.Server.WriteTimeout` 覆盖整个响应写入而不是两次写入之间的间隔，而代理转发的 completion、本地 Responses 的 SSE、以及 Monitor 的 `GET /api/events/stream` 都可能是长连接，固定值会把它们在中途截断（客户端只看到连接关闭，没有可解析的协议错误）。因此 `server.write_timeout` 默认 `0`（不设写截止时间）；请求的上界改由调用方决定——转发到上游的请求携带入站请求的 context，SDK 取消即取消上游调用，再叠加 transport 的拨号/TLS 超时。同一段 transport 也没有等待上游响应头的上界（`ResponseHeaderTimeout`），因为代理无法区分"上游卡住"和"上游很慢"：非流式的推理调用可能在首字节前合法地花掉几分钟，而拨号、TLS 握手与空闲连接三个超时都看不见这段等待。代价是：上游接受连接后不再作答时，客户端的请求、它的并发槽位与连接会一直被占着，直到调用方自己放弃。愿意用快速失败换资源占用的部署可以设 `server.upstream_response_header_timeout`（或 `TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT`），流式调用只需覆盖到首字节的时间而不是到最后一个 token 的时间。需要硬上限的部署（例如公网暴露、防慢读客户端）可设 `server.write_timeout`（如 `30m`）或 `TRAJECTA_SERVER_WRITE_TIMEOUT`；`server.read_timeout` 默认 `5m`，可用 `TRAJECTA_SERVER_READ_TIMEOUT` 覆盖（`cmd/server/serve.go`）。
 - 排障开关默认关闭，只在排查问题时临时打开：`debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 `false`）在 Monitor mux 上挂载 `net/http/pprof`（关闭时 `/debug/` 前缀返回 404，不会落到 SPA）；`debug.slow_query_threshold`（`TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD`，默认 `0`，即不记录）让 store 记录超过该阈值的语句供 System 页读取。两者都是排查手段，不是常态配置；页面细节见 [Monitor 指南](./MONITOR_GUIDE.md)。
@@ -180,22 +180,22 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 | 类别 | 内容 | 说明 |
 | --- | --- | --- |
 | 可由 cassette 重算 | `logs` 索引、`trace_observations`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等（节点树不落库，详情视图按需从 cassette 重解析） |
-| 由写入路径增量维护 | `session_summaries` | 随写入按 session 重建，但重建先记进进程内队列（上限 256 条）。进程内由谁消费取决于是否启动了后台 flusher：`serve` 调 `Store.StartDerivedRefresh()`，此后由后台 goroutine 唯一消费——写入会直接唤醒它，所以通常毫秒级落库，2 秒的 ticker 只作为漏唤醒与失败重试的兜底；此时读取端不再自己 flush，页面渲染不会为整会话重建买单，代价是读取端最多看到亚秒级的滞后（表现为某次请求暂时未计入会话合计，不会是错误或自相矛盾的行）。没有启动 flusher 的调用方（测试、无服务器的 CLI 命令）保持同步语义：读取端自己先 flush，因此读与它之前的写立即一致。`Store.Close()` 会先停 flusher 再 settle 队列（其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移用 `server db summary rebuild sessions` 修复 |
+| 由写入路径增量维护 | `session_summaries` | 随写入按 session 重建，但重建先记进进程内队列（上限 256 条）。进程内由谁消费取决于是否启动了后台 flusher：`serve` 调 `Store.StartDerivedRefresh()`，此后由后台 goroutine 唯一消费——写入会直接唤醒它，所以通常毫秒级落库，2 秒的 ticker 只作为漏唤醒与失败重试的兜底；此时读取端不再自己 flush，页面渲染不会为整会话重建买单，代价是读取端最多看到亚秒级的滞后（表现为某次请求暂时未计入会话合计，不会是错误或自相矛盾的行）。没有启动 flusher 的调用方（测试、无服务器的 CLI 命令）保持同步语义：读取端自己先 flush，因此读与它之前的写立即一致。`Store.Close()` 会先停 flusher 再 settle 队列（其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移用 `trajecta db summary rebuild sessions` 修复 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 
 重算命令（均为当前可用子命令；`analyze reparse` / `scan` / `repair-usage` / `reanalyze` / `batch` 在 cobra 里是 `Hidden`，`--help` 只列出 `refresh` 与 `session`）：
 
 ```bash
-server analyze reparse --trace-id <id>
-server analyze scan --trace-id <id>
-server analyze reanalyze --trace-id <id>   # 或 --session-id <id>
-server analyze repair-usage --trace-id <id> [--rewrite-cassette]
-server analyze backfill-exchanges [--dry-run]
-server analyze session --session-id <id>
-server analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
-server analyze refresh --all
-server db summary rebuild sessions [--session-id <id>]
+trajecta analyze reparse --trace-id <id>
+trajecta analyze scan --trace-id <id>
+trajecta analyze reanalyze --trace-id <id>   # 或 --session-id <id>
+trajecta analyze repair-usage --trace-id <id> [--rewrite-cassette]
+trajecta analyze backfill-exchanges [--dry-run]
+trajecta analyze session --session-id <id>
+trajecta analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
+trajecta analyze refresh --all
+trajecta db summary rebuild sessions [--session-id <id>]
 ```
 
 `db summary rebuild` 当前只有 `sessions` 一个子命令（从 `logs` 重建 `session_summaries`，支持 `--session-id` 与 `--dry-run`）；`overview` 子命令已移除，`overview_metric_*` 两张表也不再被读写（Postgres 历史迁移仍会建表，除非运维手工 `DROP`）。

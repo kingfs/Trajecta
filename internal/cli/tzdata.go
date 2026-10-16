@@ -1,4 +1,4 @@
-package main
+package cli
 
 // The container runtime is a bare alpine image that has no /usr/share/zoneinfo
 // unless the tzdata package is installed, and Go reports a missing zone as a

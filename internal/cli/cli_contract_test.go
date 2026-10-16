@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"encoding/json"
@@ -62,15 +62,15 @@ func captureRunOutput(t *testing.T, args []string) (int, string, string) {
 
 func TestRunUnknownCommandExitsWithUsageCode(t *testing.T) {
 	code, _, stderr := captureRunOutput(t, []string{"nosuchcommand"})
-	if code != exitCodeUsage {
-		t.Fatalf("run(unknown command) = %d, want %d (stderr=%q)", code, exitCodeUsage, stderr)
+	if code != ExitCodeUsage {
+		t.Fatalf("run(unknown command) = %d, want %d (stderr=%q)", code, ExitCodeUsage, stderr)
 	}
 }
 
 func TestRunUnknownCommandHonorsJSONFormat(t *testing.T) {
 	code, _, stderr := captureRunOutput(t, []string{"--format", "json", "nosuchcommand"})
-	if code != exitCodeUsage {
-		t.Fatalf("run(--format json unknown command) = %d, want %d (stderr=%q)", code, exitCodeUsage, stderr)
+	if code != ExitCodeUsage {
+		t.Fatalf("run(--format json unknown command) = %d, want %d (stderr=%q)", code, ExitCodeUsage, stderr)
 	}
 	envelope := decodeCLIEnvelope(t, stderr)
 	if envelope.OK {
@@ -119,8 +119,8 @@ trace:
 	}
 
 	code, _, stderr := captureRunOutput(t, []string{"-c", configPath, "db", "migrate", "down"})
-	if code != exitCodeUsage {
-		t.Fatalf("run(db migrate down) = %d, want %d (stderr=%q)", code, exitCodeUsage, stderr)
+	if code != ExitCodeUsage {
+		t.Fatalf("run(db migrate down) = %d, want %d (stderr=%q)", code, ExitCodeUsage, stderr)
 	}
 	if count := strings.Count(stderr, appDBMigrateDownUnsupportedMessage); count != 1 {
 		t.Fatalf("stderr mentions the unsupported message %d times, want 1:\n%s", count, stderr)
@@ -147,8 +147,8 @@ trace:
 	}
 
 	code, _, stderr := captureRunOutput(t, []string{"-c", configPath, "--format", "json", "db", "migrate", "down"})
-	if code != exitCodeUsage {
-		t.Fatalf("run(db migrate down --format json) = %d, want %d (stderr=%q)", code, exitCodeUsage, stderr)
+	if code != ExitCodeUsage {
+		t.Fatalf("run(db migrate down --format json) = %d, want %d (stderr=%q)", code, ExitCodeUsage, stderr)
 	}
 	// db migrate down never loads the database, so stderr must be the envelope
 	// alone: the bare text line used to be printed before it.
@@ -205,8 +205,8 @@ func TestResultWarningsAreHoistedIntoTheEnvelope(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := len(resultWarnings(tc.result)); got != tc.want {
-				t.Fatalf("resultWarnings() = %d warnings, want %d", got, tc.want)
+			if got := len(ResultWarnings(tc.result)); got != tc.want {
+				t.Fatalf("ResultWarnings() = %d warnings, want %d", got, tc.want)
 			}
 		})
 	}

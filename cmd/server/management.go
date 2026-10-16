@@ -2,11 +2,8 @@ package main
 
 import (
 	"crypto/sha256"
-	"errors"
-
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/auth"
@@ -60,7 +57,7 @@ func newManagementMuxWithFunctionExecutorManager(
 			// endpoint for older clients.
 			Stateless: true,
 		})
-		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "trajecta-mcp", verifier))
+		mux.Handle(config.EffectiveMCPPath(cfg), auth.Middleware(mcpHandler, "trajecta-mcp", verifier))
 	}
 	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()
 	if functionExecutorManager != nil {
@@ -102,33 +99,7 @@ func effectiveMCPPath(cfg *config.Config) string {
 	if !cfg.MCP.Enabled {
 		return ""
 	}
-	return normalizeMCPPathMust(cfg.MCP.Path)
-}
-
-func normalizeMCPPathMust(path string) string {
-	normalized, err := normalizeMCPPath(path)
-	if err != nil {
-		panic(err)
-	}
-	return normalized
-}
-
-func normalizeMCPPath(path string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "/mcp", nil
-	}
-	if path == "/" {
-		return "", errors.New("mcp.path must not be /")
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	path = strings.TrimRight(path, "/")
-	if path == "" {
-		return "", errors.New("mcp.path must not be empty")
-	}
-	return path, nil
+	return config.EffectiveMCPPath(cfg)
 }
 
 func logResolvedTargets(rtr *router.Router) {

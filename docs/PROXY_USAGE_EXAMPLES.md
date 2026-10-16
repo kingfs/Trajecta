@@ -20,8 +20,8 @@ CONFIG=config/examples/local-sqlite.yaml task run
 首次使用需要先有用户，再签发 token（`auth create-token` 只会为已存在的启用用户签发）：
 
 ```bash
-go run ./cmd/server -c config/examples/local-sqlite.yaml auth init-user --username admin --password 'change-me'
-go run ./cmd/server -c config/examples/local-sqlite.yaml auth create-token --username admin --name local-dev
+go run ./cmd/trajecta -c config/examples/local-sqlite.yaml auth init-user --username admin --password 'change-me'
+go run ./cmd/trajecta -c config/examples/local-sqlite.yaml auth create-token --username admin --name local-dev
 ```
 
 后续示例统一使用这两个 shell 变量；如果 `server.port` 不是 `8080`，请同步修改它们以及 SDK 的 `base_url`：

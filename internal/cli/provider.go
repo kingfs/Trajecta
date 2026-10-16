@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
@@ -25,14 +26,14 @@ type providerProbeOptions struct {
 	command    string
 }
 
-func newProviderCommand(runtime *cliRuntime) *cobra.Command {
+func newProviderCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "provider",
 		Short:         "Inspect configured upstream providers",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newProviderProbeCommand(runtime))
@@ -41,7 +42,7 @@ func newProviderCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newProviderProbeCommand(runtime *cliRuntime) *cobra.Command {
+func newProviderProbeCommand(runtime *Runtime) *cobra.Command {
 	var id string
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -49,10 +50,10 @@ func newProviderProbeCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Probe configured upstream provider API surfaces",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runProviderProbeWithOptions(providerProbeOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 					id:         id,
 					timeout:    timeout,
@@ -66,7 +67,7 @@ func newProviderProbeCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newProviderProbeApplyCommand(runtime *cliRuntime) *cobra.Command {
+func newProviderProbeApplyCommand(runtime *Runtime) *cobra.Command {
 	var id string
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -74,10 +75,10 @@ func newProviderProbeApplyCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Apply provider probe suggestions to managed channels",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runProviderProbeApplyWithOptions(providerProbeOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 					id:         id,
 					timeout:    timeout,
@@ -91,7 +92,7 @@ func newProviderProbeApplyCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newProviderProbeReportCommand(runtime *cliRuntime) *cobra.Command {
+func newProviderProbeReportCommand(runtime *Runtime) *cobra.Command {
 	var id string
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -99,10 +100,10 @@ func newProviderProbeReportCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Generate a read-only batch provider probe report for configured upstreams",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runProviderProbeWithOptions(providerProbeOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 					id:         id,
 					timeout:    timeout,
@@ -143,7 +144,7 @@ func runProviderProbeWithOptions(opts providerProbeOptions) int {
 	if command == "" {
 		command = "provider.probe"
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
 		writeProviderProbeText(w, result)
 		return nil
 	}); err != nil {
@@ -165,7 +166,7 @@ func providerProbeTargets(cfg config.Config, id string) ([]providerprobe.ProbeTa
 		if id != "" && targetID != id {
 			continue
 		}
-		probeTarget := providerProbeTargetFromConfig(target)
+		probeTarget := providerprobe.TargetFromConfig(target)
 		probeTarget.TargetSource = "upstream"
 		if strings.TrimSpace(probeTarget.BaseURL) == "" {
 			continue
@@ -181,47 +182,13 @@ func providerProbeTargets(cfg config.Config, id string) ([]providerprobe.ProbeTa
 	return targets, nil
 }
 
-func providerProbeTargetFromConfig(target config.UpstreamTargetConfig) providerprobe.ProbeTarget {
-	upstream := target.Upstream
-	apiKey := strings.TrimSpace(upstream.ApiKey)
-	headers := cloneProviderProbeHeaders(upstream.Headers)
-	for _, credential := range target.EffectiveCredentials() {
-		if credential.Enabled != nil && !*credential.Enabled {
-			continue
-		}
-		if apiKey == "" {
-			apiKey = strings.TrimSpace(credential.ApiKey)
-		}
-		for key, value := range credential.Headers {
-			headers[key] = value
-		}
-		break
-	}
-	return providerprobe.ProbeTarget{
-		ProviderID:              strings.TrimSpace(target.ID),
-		BaseURL:                 strings.TrimSpace(upstream.BaseURL),
-		APIKey:                  apiKey,
-		Headers:                 headers,
-		SpecifiedAPIType:        upstream.APIType,
-		SpecifiedProtocolFamily: upstream.ProtocolFamily,
-	}
-}
-
-func cloneProviderProbeHeaders(in map[string]string) map[string]string {
-	out := map[string]string{}
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
 func runProviderProbeApplyWithOptions(opts providerProbeOptions) int {
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	st, err := openApplicationDatabase(cfg)
+	st, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Open application store failed", "error", err)
 		return 1
@@ -248,7 +215,7 @@ func runProviderProbeApplyWithOptions(opts providerProbeOptions) int {
 	if command == "" {
 		command = "provider.probe_apply"
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
 		writeProviderProbeApplyText(w, result)
 		return nil
 	}); err != nil {

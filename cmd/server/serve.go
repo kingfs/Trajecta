@@ -3,18 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/kingfs/Trajecta/internal/auth"
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/proxy"
@@ -27,19 +26,14 @@ import (
 	"github.com/spf13/pflag"
 )
 
-var (
-	authMigrateDatabaseUp = auth.MigrateDatabaseUp
-	authOpenDatabase      = auth.OpenDatabase
-)
-
-func newServeCommand(runtime *cliRuntime) *cobra.Command {
+func newServeCommand(runtime *cli.Runtime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Start the proxy, recorder, monitor, and MCP management endpoints",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
-				return runServeWithConfig(runtime.configPath())
+			return cli.RunCode(func() int {
+				return runServeWithConfig(runtime.ConfigPath())
 			})
 		},
 	}
@@ -57,7 +51,7 @@ func parseConfigPath(name string, args []string) (string, int) {
 	fs := pflag.NewFlagSet(name, pflag.ContinueOnError)
 	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
+	if err := fs.Parse(cli.NormalizeLegacyFlagArgs(args)); err != nil {
 		return "", 2
 	}
 	return *configPath, 0
@@ -73,7 +67,7 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Startup provider probe failed", "error", err)
 		return 1
 	}
-	if err := validateServeConfig(cfg); err != nil {
+	if err := config.ValidateServe(cfg); err != nil {
 		slog.Error("Invalid serve config", "error", err)
 		return 1
 	}
@@ -85,7 +79,7 @@ func runServeWithConfig(configPath string) int {
 		// the outside - otherwise presents as a process that started cleanly,
 		// printed nothing, and sat at 0% CPU while the database burned a core.
 		slog.Info("Applying application database migrations...", "driver", cfg.DatabaseDriver())
-		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
+		if err := appdb.MigrateUp(cfg, 0); err != nil {
 			slog.Error("Failed to migrate application database", "error", err)
 			return 1
 		}
@@ -93,7 +87,7 @@ func runServeWithConfig(configPath string) int {
 
 	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.25+")
 
-	authStore, err := openAuthStore(cfg)
+	authStore, err := appdb.OpenAuthStore(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize auth store", "error", err)
 		return 1
@@ -386,68 +380,6 @@ func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store,
 			}
 		}
 	}()
-}
-
-func openAuthStore(cfg *config.Config) (*auth.Store, error) {
-	return openAuthStoreWithAutoSchema(cfg)
-}
-
-func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
-	switch driver {
-	case "sqlite":
-		if cfg.DatabaseAutoMigrate() {
-			if err := authMigrateDatabaseUp(driver, cfg.DatabaseDSN(), 0); err != nil {
-				return nil, fmt.Errorf("migrate database: %w", err)
-			}
-		}
-	case "postgres":
-		// Postgres auth tables are owned by the application migration set, which
-		// serve applies before opening the auth store.
-	default:
-		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
-	}
-
-	st, err := authOpenDatabase(
-		driver,
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return st, nil
-}
-
-func normalizeAuthStoreDriver(driver string) string {
-	driver = strings.ToLower(strings.TrimSpace(driver))
-	switch driver {
-	case "":
-		// See store.normalizeDatabaseDriver: an unset driver means Postgres.
-		return "postgres"
-	case "postgresql":
-		return "postgres"
-	default:
-		return driver
-	}
-}
-
-func validateServeConfig(cfg *config.Config) error {
-	switch driver := cfg.DatabaseDriver(); driver {
-	case "sqlite", "postgres", "postgresql":
-	default:
-		return fmt.Errorf("database.driver %q is not supported yet; use sqlite or postgres", driver)
-	}
-	if cfg.MCP.Enabled && cfg.Monitor.Port == "" {
-		return errors.New("monitor.port is required when mcp.enabled=true")
-	}
-	if cfg.MCP.Enabled {
-		if _, err := normalizeMCPPath(cfg.MCP.Path); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // validateServeRouterConfig reports router-level configuration problems that

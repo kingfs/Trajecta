@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ type versionInfo struct {
 	Branch  string `json:"branch"`
 }
 
-func newVersionCommand(runtime *cliRuntime) *cobra.Command {
+func newVersionCommand(runtime *cli.Runtime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print build version information",
@@ -35,7 +36,7 @@ func newVersionCommand(runtime *cliRuntime) *cobra.Command {
 				Date:    Date,
 				Branch:  Branch,
 			}
-			return writeCLIResult(cmd.OutOrStdout(), runtime.outputFormat(), "version", info, func(w io.Writer) error {
+			return cli.WriteResult(cmd.OutOrStdout(), runtime.OutputFormat(), "version", info, func(w io.Writer) error {
 				_, err := fmt.Fprintf(w, "%s version=%s commit=%s date=%s branch=%s\n", cliName, Version, Commit, Date, Branch)
 				return err
 			})
