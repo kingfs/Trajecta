@@ -92,8 +92,7 @@ func newManagementMuxWithFunctionExecutorManager(
 				Date:    Date,
 				Branch:  Branch,
 			},
-			UpdateCheckEnabled:  cfg.UpdateCheckEnabled(),
-			UpdateCheckEndpoint: cfg.UpdateCheckEndpoint(),
+			UpdateCheckEnabled: cfg.UpdateCheckEnabled(),
 			Telemetry: monitor.TelemetryOptions{
 				Enabled:         telemetry.Enabled,
 				Provider:        telemetry.Provider,

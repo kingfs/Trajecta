@@ -121,13 +121,12 @@ debug:
   output_dir: "./data/traces"
   mask_key: true
 
-# The About page's "check for a newer release" button reads this URL when it is
-# pressed. Nothing polls and the process never calls out by itself. The default
-# is the GitHub Releases API for the upstream repository; point `endpoint` at a
-# mirror or a fork when api.github.com is unreachable.
+# The About page's "check for a newer release" button reads the project's fixed
+# GitHub release feed when it is pressed. Nothing polls and the process never
+# calls out by itself. The repository is a project fact, not a deployment
+# setting, so there is no endpoint to configure.
 update_check:
   enabled: true
-  endpoint: ""
 
 # The anonymous install ping the Monitor UI sends. OFF: with no endpoint set the
 # browser contacts nothing. When it is on, the page reports the version, the

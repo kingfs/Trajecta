@@ -153,7 +153,7 @@ func buildAbout(options AboutOptions) aboutResponse {
 		DocsURL:            ProductDocs,
 		License:            ProductLicenseName,
 		LicenseURL:         ProductLicenseURL,
-		UpdateCheckEnabled: options.UpdateCheckEnabled && strings.TrimSpace(options.UpdateCheckEndpoint) != "",
+		UpdateCheckEnabled: options.UpdateCheckEnabled,
 		Telemetry:          options.Telemetry,
 	}
 }

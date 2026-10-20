@@ -3319,6 +3319,31 @@ test("the About page reports the build and asks before it checks for a release",
   await expect(page.getByText("a newer release")).toBeVisible();
 });
 
+test("the About page says when the project has no release yet", async ({ page }) => {
+  await page.route("**/api/version/latest", (route) =>
+    route.fulfill({
+      json: {
+        ...releaseCheckPayload(),
+        status: "no_release",
+        latest_version: "",
+        latest_name: "",
+        release_url: "",
+        notes: "",
+        error: "this project has not published a GitHub release yet",
+      },
+    }),
+  );
+
+  await page.goto("/about");
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect(page.getByText("No GitHub release yet")).toBeVisible();
+  await expect(page.getByText("This project has not published a GitHub release")).toBeVisible();
+  await expect(page.locator(".about-update-result").getByRole("link", { name: "Releases" })).toHaveAttribute(
+    "href",
+    "https://github.com/kingfs/Trajecta/releases",
+  );
+});
+
 // The default payload has telemetry off, which is the shipped default and the
 // state most deployments are in. The card has to say so rather than disappear.
 test("the About page reports the install ping as off by default", async ({ page }) => {

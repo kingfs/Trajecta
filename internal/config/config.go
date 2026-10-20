@@ -47,17 +47,14 @@ type Config struct {
 	// UpdateCheck configures the About page's "check for a newer release"
 	// button. The lookup only ever runs when an operator presses that button;
 	// nothing here polls, and the process makes no outbound request on its own.
+	// The repository and its release feed are project facts, not deployment
+	// configuration, so there is deliberately no endpoint setting.
 	UpdateCheck struct {
 		// Enabled defaults to true. The zero value is false, so Load seeds it
 		// before decoding; an explicit `enabled: false` still wins. The switch
 		// exists for air-gapped deployments rather than for privacy, because
 		// the request is user-initiated either way.
 		Enabled bool `yaml:"enabled"`
-		// Endpoint is the URL whose JSON body describes the newest release. It
-		// defaults to the GitHub Releases API for this repository
-		// (DefaultUpdateCheckEndpoint); point it at a mirror or a fork to keep
-		// the check inside a network that cannot reach api.github.com.
-		Endpoint string `yaml:"endpoint"`
 	} `yaml:"update_check"`
 
 	// Telemetry is the anonymous install ping the Monitor UI sends. It is off
@@ -748,7 +745,6 @@ func applyEnvOverrides(cfg *Config) {
 	envBool(&cfg.Debug.PprofEnabled, "TRAJECTA_DEBUG_PPROF_ENABLED")
 	envDuration(&cfg.Debug.SlowQueryThreshold, "TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD")
 	envBool(&cfg.UpdateCheck.Enabled, "TRAJECTA_UPDATE_CHECK_ENABLED")
-	envString(&cfg.UpdateCheck.Endpoint, "TRAJECTA_UPDATE_CHECK_ENDPOINT")
 	envBool(&cfg.Telemetry.Enabled, "TRAJECTA_TELEMETRY_ENABLED")
 	envString(&cfg.Telemetry.Provider, "TRAJECTA_TELEMETRY_PROVIDER")
 	envString(&cfg.Telemetry.Endpoint, "TRAJECTA_TELEMETRY_ENDPOINT")
@@ -1401,12 +1397,6 @@ func (c Config) TraceSyncInterval() time.Duration {
 // day rather than the container's, which is UTC.
 const DefaultMonitorTimezone = "Asia/Shanghai"
 
-// DefaultUpdateCheckEndpoint is the GitHub Releases API URL the About page's
-// release check reads. `latest` excludes drafts and pre-releases, which is what
-// "is there a newer release" means to a user; a repository with no release yet
-// answers 404 and the page says so instead of failing.
-const DefaultUpdateCheckEndpoint = "https://api.github.com/repos/kingfs/Trajecta/releases/latest"
-
 // DefaultTelemetryInterval is the shortest gap between two install pings from
 // one browser. It is deliberately long: the number being counted is
 // installations, and a page reload is not a second installation.
@@ -1441,16 +1431,6 @@ type TelemetrySettings struct {
 // release. It defaults to true.
 func (c Config) UpdateCheckEnabled() bool {
 	return c.UpdateCheck.Enabled
-}
-
-// UpdateCheckEndpoint returns the release-check URL, falling back to the
-// GitHub Releases API for this repository.
-func (c Config) UpdateCheckEndpoint() string {
-	endpoint := strings.TrimSpace(c.UpdateCheck.Endpoint)
-	if endpoint == "" {
-		return DefaultUpdateCheckEndpoint
-	}
-	return endpoint
 }
 
 // TelemetrySettings resolves the telemetry section.

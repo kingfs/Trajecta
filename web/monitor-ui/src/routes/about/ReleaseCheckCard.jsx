@@ -94,6 +94,7 @@ function ReleaseResult({ result, about }) {
   const { t } = useI18n();
   const newer = result.status === "update_available";
   const unknown = result.status === "unknown";
+  const noRelease = result.status === "no_release";
   const unavailable = result.status === "unavailable" || result.status === "disabled";
 
   return (
@@ -108,6 +109,19 @@ function ReleaseResult({ result, about }) {
         <p className="about-update-headline about-update-headline-ok">{t("about.update.upToDate")}</p>
       ) : null}
       {unknown ? <p className="about-update-headline">{t("about.update.unknown")}</p> : null}
+      {noRelease ? (
+        <EmptyState
+          title={t("about.update.noRelease")}
+          detail={t("about.update.noReleaseDetail")}
+          action={
+            about?.releases_url ? (
+              <a href={about.releases_url} target="_blank" rel="noreferrer">
+                {t("about.releases")}
+              </a>
+            ) : null
+          }
+        />
+      ) : null}
       {unavailable ? (
         <EmptyState
           tone="warning"
@@ -163,6 +177,7 @@ function ReleaseStatusBadge({ status }) {
     update_available: "info",
     up_to_date: "success",
     unknown: "warning",
+    no_release: "muted",
     unavailable: "warning",
     disabled: "muted",
   };
