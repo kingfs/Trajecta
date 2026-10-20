@@ -1152,8 +1152,9 @@ test("the system page exposes the outbound proxy policy", async ({ page }) => {
 
   await expect(page.getByText("Network proxy settings saved.")).toBeVisible();
   await expect(page.getByPlaceholder("http://127.0.0.1:7890").first()).toHaveValue("http://127.0.0.1:7890");
-  // An empty https_proxy follows http_proxy, and the form says which value that is.
-  await expect(page.getByText("Leave empty to use http://127.0.0.1:7890.")).toBeVisible();
+  // An empty https_proxy follows http_proxy, and the placeholder carries that
+  // value without adding a second line under the field.
+  await expect(page.getByLabel("HTTPS proxy", { exact: true })).toHaveAttribute("placeholder", "http://127.0.0.1:7890");
 });
 
 test("access page renders protocol entrypoint examples", async ({ page }) => {

@@ -1107,8 +1107,6 @@ export default {
   "system.proxyEnabled": "启用出站代理",
   "system.proxyHTTP": "HTTP 代理",
   "system.proxyHTTPS": "HTTPS 代理",
-  "system.proxyHTTPSHint": "留空时与 HTTP 代理相同。支持 http://、https:// 与 socks5://。",
-  "system.proxyHTTPSUses": "留空时使用 {proxy}。",
   "system.proxyNoProxy": "NO_PROXY 例外",
   "system.proxyNoProxyHint": "逗号分隔，支持主机名、.example.com、IP、CIDR 和 host:port；* 表示全部直连。",
   "system.proxyScope": "作用于 LLM 上游请求、模型发现与探测、本地 Responses 调用、web 搜索和 GitHub 版本检查。环回地址始终直连；关闭后所有出站请求直连，不读取进程环境变量。",

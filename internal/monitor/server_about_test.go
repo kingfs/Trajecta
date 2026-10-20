@@ -213,6 +213,58 @@ func TestCheckLatestReleaseReportsAFailedLookupWithoutCachingIt(t *testing.T) {
 	}
 }
 
+func TestCheckLatestReleaseExplainsARateLimitedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	reset := time.Unix(1760000000, 0).UTC()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1760000000")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded for 18.143.38.22.","documentation_url":"https://docs.github.com/rest"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
+	if got.Status != releaseStatusUnavailable {
+		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnavailable)
+	}
+	if !strings.Contains(got.Error, "rate limited (HTTP 403)") {
+		t.Fatalf("error = %q, want it to name the rate limit", got.Error)
+	}
+	if !strings.Contains(got.Error, reset.Format(time.RFC3339)) {
+		t.Fatalf("error = %q, want it to say when the quota resets", got.Error)
+	}
+	// The API's body is noise for the reader and can be long; the actionable
+	// message replaces it rather than truncating it.
+	if strings.Contains(got.Error, "18.143.38.22") || strings.Contains(got.Error, "documentation_url") {
+		t.Fatalf("error = %q, want the response body omitted", got.Error)
+	}
+}
+
+func TestCheckLatestReleaseExplainsAMissingRelease(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
+	if got.Status != releaseStatusUnavailable {
+		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnavailable)
+	}
+	if !strings.Contains(got.Error, "no published release") {
+		t.Fatalf("error = %q, want it to explain the 404", got.Error)
+	}
+	if strings.Contains(got.Error, "documentation_url") {
+		t.Fatalf("error = %q, want the response body omitted", got.Error)
+	}
+}
+
 func TestCheckLatestReleaseHonoursTheSwitch(t *testing.T) {
 	t.Parallel()
 

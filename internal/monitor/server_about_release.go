@@ -3,9 +3,11 @@ package monitor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -170,6 +172,12 @@ func (c *releaseChecker) request(ctx context.Context) (releaseLookup, error) {
 		// Drain a little of the body so the connection can be reused, and keep
 		// the server's message short enough to show in the page.
 		detail, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		if message := releaseRateLimitMessage(response, string(detail)); message != "" {
+			return releaseLookup{}, errors.New(message)
+		}
+		if response.StatusCode == http.StatusNotFound {
+			return releaseLookup{}, errors.New("release endpoint answered HTTP 404: no published release was found; check update_check.endpoint")
+		}
 		message := strings.TrimSpace(string(detail))
 		if message == "" {
 			return releaseLookup{}, fmt.Errorf("release endpoint answered HTTP %d", response.StatusCode)
@@ -263,6 +271,33 @@ func fillRelease(response *releaseCheckResponse, release releaseLookup) {
 		response.PublishedAt = &published
 	}
 	response.Notes = truncateRunes(strings.TrimSpace(release.Body), releaseNotesLimit)
+}
+
+// releaseRateLimitMessage turns a quota rejection into something an operator
+// can act on. GitHub answers an unauthenticated API call from a shared egress
+// address with HTTP 403 and a JSON body that starts with the quota story; the
+// page should say why the check failed instead of pasting a truncated API
+// response, because the request itself was correct.
+func releaseRateLimitMessage(response *http.Response, body string) string {
+	if response.StatusCode != http.StatusForbidden && response.StatusCode != http.StatusTooManyRequests {
+		return ""
+	}
+	lowered := strings.ToLower(body)
+	remaining := strings.TrimSpace(response.Header.Get("X-RateLimit-Remaining"))
+	retryAfter := strings.TrimSpace(response.Header.Get("Retry-After"))
+	rateLimited := remaining == "0" || retryAfter != "" || strings.Contains(lowered, "rate limit")
+	if !rateLimited {
+		return ""
+	}
+	message := fmt.Sprintf("release endpoint rate limited (HTTP %d)", response.StatusCode)
+	if reset := strings.TrimSpace(response.Header.Get("X-RateLimit-Reset")); reset != "" {
+		if epoch, err := strconv.ParseInt(reset, 10, 64); err == nil && epoch > 0 {
+			message += fmt.Sprintf("; the quota resets at %s", time.Unix(epoch, 0).UTC().Format(time.RFC3339))
+		}
+	} else if retryAfter != "" {
+		message += fmt.Sprintf("; retry after %s", retryAfter)
+	}
+	return message + "; retry later or point update_check.endpoint at a mirror"
 }
 
 func truncateRunes(value string, limit int) string {

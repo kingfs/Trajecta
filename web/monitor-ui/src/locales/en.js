@@ -1108,8 +1108,6 @@ export default {
   "system.proxyEnabled": "Enable outbound proxy",
   "system.proxyHTTP": "HTTP proxy",
   "system.proxyHTTPS": "HTTPS proxy",
-  "system.proxyHTTPSHint": "Leave empty to use the HTTP proxy. http://, https:// and socks5:// are supported.",
-  "system.proxyHTTPSUses": "Leave empty to use {proxy}.",
   "system.proxyNoProxy": "NO_PROXY exceptions",
   "system.proxyNoProxyHint": "Comma-separated host names, .example.com, IP addresses, CIDR blocks and host:port entries; * bypasses the proxy for everything.",
   "system.proxyScope": "Applies to LLM upstream calls, model discovery and probes, local Responses calls, web search and the GitHub release check. Loopback is always direct; turning the switch off makes every outbound request direct and does not read the process environment.",

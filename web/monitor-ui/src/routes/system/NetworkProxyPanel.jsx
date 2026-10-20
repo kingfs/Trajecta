@@ -51,7 +51,6 @@ export function NetworkProxyPanel() {
   }, []);
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const effectiveHTTPSProxy = form.https_proxy.trim() || form.http_proxy.trim();
   // The stored copy wins: the server canonicalizes a bare host:port into a
   // full proxy URL, and the page shows what the transport will actually use.
   const save = useWriteMutation({
@@ -114,13 +113,6 @@ export function NetworkProxyPanel() {
               spellCheck={false}
               autoComplete="off"
             />
-            <span className="system-note">
-              {form.https_proxy.trim()
-                ? t("system.proxyHTTPSHint")
-                : effectiveHTTPSProxy
-                  ? t("system.proxyHTTPSUses", { proxy: effectiveHTTPSProxy })
-                  : t("system.proxyHTTPSHint")}
-            </span>
           </label>
 
           <label className="provider-form-wide">

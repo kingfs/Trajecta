@@ -257,6 +257,8 @@ update_check:
 
 比较只按 `vX.Y.Z` 的三段数字，忽略预发布后缀。响应里的 `cached` 说明这次结果是否来自缓存：成功结果缓存 10 分钟，**失败从不缓存**，因此上游恢复后下一次点击立刻能拿到结果。请求带 8 秒超时、`Accept: application/vnd.github+json`、`User-Agent: Trajecta/<version>`，响应体读取上限 1 MiB。这个端点不验证任何东西、不下载任何东西、也不写入任何文件。
 
+`unavailable` 的错误会尽量给出可操作的原因：带速率限制标记的 403/429 报告 `release endpoint rate limited` 与配额重置时间（`X-RateLimit-Reset`），404 报告 `no published release`，两者都不回显整段 GitHub JSON；其它非 2xx 才带截断后的服务端消息。经过共享出口代理访问 `api.github.com` 时，未认证配额按出口 IP 计算（每小时 60 次），因此同一代理后的多个部署会共用额度；需要稳定检查时把 `update_check.endpoint` 指向镜像，或稍后重试。
+
 ##### 匿名装机上报
 
 这一项默认关闭：`telemetry.enabled` 为 false 时不发任何请求，页面上的说明卡会写明这一点。它存在的目的只有一个——让项目作者知道大概有多少个部署在用、分别是什么版本——因此它只上报**安装**，不上报任何流量。
