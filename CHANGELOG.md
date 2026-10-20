@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- A 网络代理 tab on the System page (admin-only, `GET`/`PATCH /api/settings/network-proxy`) owns the server's outbound proxy policy, stored in `app_settings.network.proxy` and off by default. It follows the Linux variables operators already know: `http_proxy` for HTTP targets, `https_proxy` for HTTPS targets with an empty value falling back to `http_proxy`, and `no_proxy` as a comma-separated bypass list of host names, domain suffixes (`.example.com`), IP addresses, CIDR blocks (`10.0.0.0/8`), `host:port` entries and `*`; loopback is always direct. A proxy may be a bare `host:port` or carry `http://`, `https://` or `socks5://` and `user:pass@`, and is canonicalized when saved. The policy is read per request, so saving applies immediately without a restart, and it covers the proxy pass-through transport, the local Responses runtime's internal Chat Completions calls, the tokenize counter, model discovery and provider probes (including the startup probe), web search and the GitHub release check. Turning the switch off makes every outbound request direct and deliberately does not read the process environment, so an internal upstream cannot leave through a proxy inherited from the shell.
+
 ## [3.3.2] - 2026-10-20
 
 ### Added

@@ -688,6 +688,9 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
+	// The proxy URL may carry credentials and changing it moves every outbound
+	// request, so this is admin-only like the rest of the system surface.
+	mux.HandleFunc("/api/settings/network-proxy", monitorAdminRequired(networkProxySettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasListCreateAPIHandler(st)

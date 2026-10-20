@@ -252,6 +252,20 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/system/runtime") {
       return route.fulfill({ json: systemRuntimePayload() });
     }
+    if (path === "/api/settings/network-proxy") {
+      if (method === "PATCH") {
+        const body = route.request().postDataJSON();
+        const httpProxy = body.http_proxy && !body.http_proxy.includes("://") ? `http://${body.http_proxy}` : body.http_proxy;
+        return route.fulfill({
+          json: {
+            ...body,
+            http_proxy: httpProxy,
+            effective_https_proxy: body.https_proxy || httpProxy,
+          },
+        });
+      }
+      return route.fulfill({ json: { enabled: false, http_proxy: "", https_proxy: "", no_proxy: "" } });
+    }
     if (path === "/api/findings") {
       return route.fulfill({ json: parsedFindingsPayload() });
     }
@@ -1120,6 +1134,26 @@ test("server-side tool bindings live on the system page", async ({ page }) => {
   await expect(page.getByText("lookup_order")).toBeVisible();
   await expect(page.getByText("output configured")).toBeVisible();
   await expect(page.getByText("do-not-leak")).toHaveCount(0);
+});
+
+test("the system page exposes the outbound proxy policy", async ({ page }) => {
+  await page.goto("/system?tab=network");
+  await expect(page.getByRole("tab", { name: "Network proxy", selected: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Outbound network proxy" })).toBeVisible();
+
+  const toggle = page.getByRole("switch", { name: "Enable outbound proxy" });
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+
+  // A bare host:port is accepted; the server canonicalizes it on save.
+  await page.getByPlaceholder("http://127.0.0.1:7890").first().fill("127.0.0.1:7890");
+  await page.getByPlaceholder(/10\.0\.0\.0\/8/).fill("localhost, 10.0.0.0/8");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect(page.getByText("Network proxy settings saved.")).toBeVisible();
+  await expect(page.getByPlaceholder("http://127.0.0.1:7890").first()).toHaveValue("http://127.0.0.1:7890");
+  // An empty https_proxy follows http_proxy, and the form says which value that is.
+  await expect(page.getByText("Leave empty to use http://127.0.0.1:7890.")).toBeVisible();
 });
 
 test("access page renders protocol entrypoint examples", async ({ page }) => {
@@ -2871,7 +2905,7 @@ test("every route and every tab renders without reaching the error boundary", as
     ["/models", []],
     ["/routing", ["decisions", "settings", "aliases", "inspect"]],
     ["/connect", ["clients", "tokens"]],
-    ["/system", ["runtime", "server", "database", "slow", "tools"]],
+    ["/system", ["runtime", "server", "network", "database", "slow", "tools"]],
     ["/about", []],
   ];
   for (const [path, tabs] of PAGES) {

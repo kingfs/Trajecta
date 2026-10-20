@@ -15,6 +15,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/proxy"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
@@ -61,10 +62,6 @@ func runServeWithConfig(configPath string) int {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "path", configPath, "error", err)
-		return 1
-	}
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, nil); err != nil {
-		slog.Error("Startup provider probe failed", "error", err)
 		return 1
 	}
 	if err := config.ValidateServe(cfg); err != nil {
@@ -122,6 +119,31 @@ func runServeWithConfig(configPath string) int {
 		traceStore.FlushDerivedRefresh()
 		traceStore.Close()
 	}()
+	// The outbound proxy is an application setting, so it can only be read once
+	// the store exists. Install the default transport here, before the first
+	// outbound call: every client without an explicit transport follows it, and
+	// http.DefaultTransport's proxy function reads the policy per request, so a
+	// settings update takes effect without a restart.
+	if err := netproxy.Load(context.Background(), traceStore); err != nil {
+		slog.Warn("Failed to load network proxy settings; outbound requests stay direct", "error", err)
+	}
+	netproxy.InstallDefaultTransport()
+	if settings := netproxy.Current(); settings.Enabled {
+		slog.Info("Outbound network proxy enabled",
+			"http_proxy", netproxy.RedactedProxyURL(settings.HTTPProxy),
+			"https_proxy", netproxy.RedactedProxyURL(settings.EffectiveHTTPSProxy()),
+			"no_proxy", settings.NoProxy,
+		)
+	}
+
+	// The probe fills in optional protocol fields from the provider itself. It
+	// runs after the proxy policy is published so the probe reaches a provider
+	// behind the same proxy as the request path.
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, nil); err != nil {
+		slog.Error("Startup provider probe failed", "error", err)
+		return 1
+	}
+
 	syncCtx, cancelSync := context.WithCancel(context.Background())
 	var background sync.WaitGroup
 	defer func() {

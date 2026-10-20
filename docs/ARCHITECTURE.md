@@ -37,6 +37,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/routeplan`：入口 endpoint、执行模式与 `responses_strategy` 的路由决策计划。
 - `internal/appdbmigrate`：应用 Postgres checked-in migration 的加载与应用。
 - `internal/monitor`：Monitor API 与内嵌 React UI（`go:embed ui/dist/*`）。
+- `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
 - `internal/observeworker`：从 cassette 解析 Observation IR 并落库的后台 worker。

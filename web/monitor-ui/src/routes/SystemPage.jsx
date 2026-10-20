@@ -2,6 +2,7 @@ import React from "react";
 import { TabbedPage } from "../components/TabbedPage";
 import { HostPanel } from "./system/HostPanel";
 import { ServerPanel } from "./system/ServerPanel";
+import { NetworkProxyPanel } from "./system/NetworkProxyPanel";
 import { DatabasePanel } from "./system/DatabasePanel";
 import { SlowQueryPanel } from "./system/SlowQueryPanel";
 import { ToolsPanel } from "./system/ToolsPanel";
@@ -9,9 +10,9 @@ import { useI18n } from "../lib/i18n";
 
 // The system page is admin-only and reads three independent snapshots - host and
 // process runtime, PostgreSQL statistics, slow statements - plus the server-side
-// tool bindings. Each is its own request and its own tab, so a slow statement
-// collector that was never armed cannot hold up the database view, and the
-// database view cannot hold up the process view.
+// tool bindings and the outbound proxy policy. Each is its own request and its
+// own tab, so a slow statement collector that was never armed cannot hold up the
+// database view, and the database view cannot hold up the process view.
 //
 // 运行时 was one tab holding both halves of the runtime picture. That is why it
 // was twice the length of every other tab and why the page read as though it said
@@ -28,6 +29,7 @@ export function SystemPage() {
       tabs={[
         { id: "runtime", label: t("system.tabHost"), element: <HostPanel /> },
         { id: "server", label: t("system.tabServer"), element: <ServerPanel /> },
+        { id: "network", label: t("system.tabNetworkProxy"), element: <NetworkProxyPanel /> },
         { id: "database", label: t("system.tabDatabase"), element: <DatabasePanel /> },
         { id: "slow", label: t("system.tabSlowQueries"), element: <SlowQueryPanel /> },
         { id: "tools", label: t("system.tabTools"), element: <ToolsPanel /> },

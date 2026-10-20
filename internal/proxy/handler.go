@@ -26,6 +26,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/chaos"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/limit"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/internal/redaction"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
@@ -481,7 +482,10 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 
 	rp := &httputil.ReverseProxy{
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
+			// The proxy decision is read per request from the policy the
+			// Monitor's System page publishes, so enabling or editing the
+			// proxy needs no restart.
+			Proxy: netproxy.ProxyFunc,
 			DialContext: (&net.Dialer{
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
