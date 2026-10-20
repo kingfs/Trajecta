@@ -69,6 +69,11 @@ func newManagementMuxWithFunctionExecutorManager(
 	// The slow-query ring is off unless debug.slow_query_threshold is positive;
 	// arming it here keeps the switch in one place next to the pprof switch.
 	store.SetSlowQueryThreshold(cfg.DebugSlowQueryThreshold())
+	// The build identity is injected at link time into this package (see the
+	// Taskfile's LDFLAGS), so it is handed to the Monitor from here rather than
+	// read there. The install ping is reported to the page verbatim: the browser
+	// is what sends it, and the page has to be able to say whether it will.
+	telemetry := cfg.TelemetrySettings()
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
 		Router:                           rtr,
 		ChannelService:                   channel.NewService(traceStore).WithReadOnly(configHasExplicitCredentials(cfg)),
@@ -82,6 +87,24 @@ func newManagementMuxWithFunctionExecutorManager(
 		ResponsesFunctionExecutorManager: functionExecutorManager,
 		Location:                         cfg.MonitorLocation(),
 		DebugPprofEnabled:                cfg.DebugPprofEnabled(),
+		About: monitor.AboutOptions{
+			Build: monitor.BuildInfo{
+				Name:    "Trajecta",
+				Version: Version,
+				Commit:  Commit,
+				Date:    Date,
+				Branch:  Branch,
+			},
+			UpdateCheckEnabled:  cfg.UpdateCheckEnabled(),
+			UpdateCheckEndpoint: cfg.UpdateCheckEndpoint(),
+			Telemetry: monitor.TelemetryOptions{
+				Enabled:         telemetry.Enabled,
+				Provider:        telemetry.Provider,
+				Endpoint:        telemetry.Endpoint,
+				PathPrefix:      telemetry.PathPrefix,
+				IntervalSeconds: int(telemetry.Interval / time.Second),
+			},
+		},
 	})
 	return mux
 }

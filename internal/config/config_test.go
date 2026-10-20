@@ -1939,3 +1939,142 @@ func TestSecretMaskingDefaultsOn(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateCheckDefaultsOn pins the About page contract: the "check for a newer
+// release" button exists unless the configuration turns it away.
+//
+// The field's zero value is false, so a configuration that simply omitted the
+// key would have removed the button while the page still drew it. Load seeds
+// the field before decoding, which keeps an explicit `enabled: false` and the
+// environment override authoritative.
+func TestUpdateCheckDefaultsOn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		env  string
+		want bool
+	}{
+		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-update-check\n", want: true},
+		{name: "empty section", body: "update_check: {}\n", want: true},
+		{name: "explicitly true", body: "update_check:\n  enabled: true\n", want: true},
+		{name: "explicitly false", body: "update_check:\n  enabled: false\n", want: false},
+		{name: "env false overrides the default", body: "update_check: {}\n", env: "false", want: false},
+		{name: "env true overrides the file", body: "update_check:\n  enabled: false\n", env: "true", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TRAJECTA_UPDATE_CHECK_ENABLED", tc.env)
+			cfg, err := Load(writeTempConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.UpdateCheckEnabled() != tc.want {
+				t.Fatalf("UpdateCheckEnabled() = %v, want %v", cfg.UpdateCheckEnabled(), tc.want)
+			}
+		})
+	}
+}
+
+func TestUpdateCheckEndpointFallsBackToTheUpstreamRepository(t *testing.T) {
+	t.Setenv("TRAJECTA_UPDATE_CHECK_ENDPOINT", "")
+
+	cfg, err := Load(writeTempConfig(t, "update_check:\n  endpoint: \"  \"\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.UpdateCheckEndpoint(); got != DefaultUpdateCheckEndpoint {
+		t.Fatalf("UpdateCheckEndpoint() = %q, want %q", got, DefaultUpdateCheckEndpoint)
+	}
+
+	cfg, err = Load(writeTempConfig(t, "update_check:\n  endpoint: \"https://mirror.example/release.json\"\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.UpdateCheckEndpoint(); got != "https://mirror.example/release.json" {
+		t.Fatalf("UpdateCheckEndpoint() = %q, want the configured mirror", got)
+	}
+}
+
+// TestTelemetryDefaultsOff is the load-bearing one: a local-first proxy records
+// whatever its users point at it, so the anonymous install ping may not start
+// reporting because a configuration file simply did not mention it.
+func TestTelemetryDefaultsOff(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "key omitted", body: "trace:\n  output_dir: /tmp/trajecta-telemetry\n"},
+		{name: "empty section", body: "telemetry: {}\n"},
+		{name: "enabled with no endpoint", body: "telemetry:\n  enabled: true\n"},
+		{name: "enabled with a blank endpoint", body: "telemetry:\n  enabled: true\n  endpoint: \"   \"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TRAJECTA_TELEMETRY_ENABLED", "")
+			t.Setenv("TRAJECTA_TELEMETRY_ENDPOINT", "")
+			cfg, err := Load(writeTempConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			settings := cfg.TelemetrySettings()
+			if settings.Enabled {
+				t.Fatalf("TelemetrySettings().Enabled = true for %q; want off", tc.name)
+			}
+			if settings.Provider != TelemetryProviderCustom {
+				t.Fatalf("TelemetrySettings().Provider = %q, want %q", settings.Provider, TelemetryProviderCustom)
+			}
+			if settings.Interval != DefaultTelemetryInterval {
+				t.Fatalf("TelemetrySettings().Interval = %v, want %v", settings.Interval, DefaultTelemetryInterval)
+			}
+			if settings.PathPrefix != DefaultTelemetryPathPrefix {
+				t.Fatalf("TelemetrySettings().PathPrefix = %q, want %q", settings.PathPrefix, DefaultTelemetryPathPrefix)
+			}
+		})
+	}
+}
+
+func TestTelemetryEnabledWithAnEndpoint(t *testing.T) {
+	t.Setenv("TRAJECTA_TELEMETRY_ENABLED", "")
+	t.Setenv("TRAJECTA_TELEMETRY_ENDPOINT", "")
+
+	cfg, err := Load(writeTempConfig(t, `
+telemetry:
+  enabled: true
+  provider: "PIXEL"
+  endpoint: "https://counter.example/count"
+  path_prefix: "/my/installs"
+  interval: 6h
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	settings := cfg.TelemetrySettings()
+	if !settings.Enabled {
+		t.Fatal("TelemetrySettings().Enabled = false, want true")
+	}
+	if settings.Provider != TelemetryProviderPixel {
+		t.Fatalf("TelemetrySettings().Provider = %q, want %q", settings.Provider, TelemetryProviderPixel)
+	}
+	if settings.Interval != 6*time.Hour {
+		t.Fatalf("TelemetrySettings().Interval = %v, want 6h", settings.Interval)
+	}
+	if settings.PathPrefix != "/my/installs" {
+		t.Fatalf("TelemetrySettings().PathPrefix = %q, want /my/installs", settings.PathPrefix)
+	}
+}
+
+func TestLoadRejectsAnUnknownTelemetryProvider(t *testing.T) {
+	t.Setenv("TRAJECTA_TELEMETRY_ENABLED", "")
+	t.Setenv("TRAJECTA_TELEMETRY_PROVIDER", "")
+
+	_, err := Load(writeTempConfig(t, `
+telemetry:
+  enabled: true
+  provider: "plausible"
+  endpoint: "https://counter.example/count"
+`))
+	if err == nil {
+		t.Fatal("Load() error = nil, want a rejection")
+	}
+	if !strings.Contains(err.Error(), "telemetry.provider") {
+		t.Fatalf("Load() error = %v, want it to name telemetry.provider", err)
+	}
+}

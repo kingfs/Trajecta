@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { Card } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
@@ -21,6 +21,13 @@ import { SystemPage } from "./routes/SystemPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { TrafficPage } from "./routes/TrafficPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
+import { reportInstall } from "./lib/telemetry";
+
+// The About page is the only route that is not on the way to anything else, and
+// it is the only one that renders release notes. Loading it on demand keeps the
+// entry chunk under the size the build warns about, which is the same trade
+// components/common/Charts.jsx and Display.jsx already make.
+const AboutPage = React.lazy(() => import("./routes/AboutPage").then((module) => ({ default: module.AboutPage })));
 
 function App() {
   const { t } = useI18n();
@@ -87,6 +94,18 @@ function App() {
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
   };
 
+  // The anonymous install ping, when the deployment has asked for it. It runs
+  // here rather than on the About page so that opening the console is enough to
+  // be counted - that page is where the ping is *inspected*, not where it is
+  // sent. It is fire-and-forget: reportInstall swallows every failure, and the
+  // switch it reads is off by default. See lib/telemetry.js.
+  useEffect(() => {
+    if (auth.loading || (auth.required && !auth.authorized)) {
+      return;
+    }
+    reportInstall().catch(() => {});
+  }, [auth.loading, auth.required, auth.authorized]);
+
   if (auth.loading) {
     return <div className="auth-screen"><div className="auth-panel"><p className="eyebrow">{t("auth.eyebrow")}</p><h1>{t("auth.checking")}</h1></div></div>;
   }
@@ -132,6 +151,7 @@ function App() {
           <Route path="/connect" element={<AccessPage />} />
 
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/about" element={<Suspense fallback={<RouteLoading />}><AboutPage /></Suspense>} />
           <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
 
           {/* Pre-redesign addresses. Everything below redirects, preserving the
@@ -148,6 +168,17 @@ function App() {
         </MonitorErrorBoundary>
       </AppShell>
     </RealtimeProvider>
+  );
+}
+
+// The fallback for the one lazily loaded route. It reuses the page shell so a
+// slow chunk is a moment of "loading", not a layout jump.
+function RouteLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="shell shell-list">
+      <p className="system-note">{t("system.loading")}</p>
+    </div>
   );
 }
 

@@ -121,6 +121,40 @@ debug:
   output_dir: "./data/traces"
   mask_key: true
 
+# The About page's "check for a newer release" button reads this URL when it is
+# pressed. Nothing polls and the process never calls out by itself. The default
+# is the GitHub Releases API for the upstream repository; point `endpoint` at a
+# mirror or a fork when api.github.com is unreachable.
+update_check:
+  enabled: true
+  endpoint: ""
+
+# The anonymous install ping the Monitor UI sends. OFF: with no endpoint set the
+# browser contacts nothing. When it is on, the page reports the version, the
+# commit, the platform and this deployment's random install id (generated once,
+# kept in the application database under app_settings key "telemetry.install_id",
+# and shared by everyone who opens this Monitor, so the count is installations
+# rather than browsers), at most once per browser per `interval` - never what was
+# proxied, which models were used or who signed in.
+#
+#   provider: "custom"  POST the JSON payload (your own collector)
+#   provider: "ga4"     POST a Google Analytics 4 Measurement Protocol body;
+#                       put measurement_id and api_secret in the endpoint's
+#                       query string. Note that google-analytics.com is
+#                       unreachable from mainland China and is blocked by most
+#                       ad blockers, so the count only ever covers a subset.
+#   provider: "pixel"   GET an image at "<path_prefix>/<version>"; a hosted
+#                       GoatCounter-style counter reports the per-version split
+#                       straight from that path.
+#
+# See docs/MONITOR_GUIDE.md for the exact payload and the collector contract.
+telemetry:
+  enabled: false
+  provider: "custom"
+  endpoint: ""
+  path_prefix: "/trajecta/install"
+  interval: 24h
+
 # Credentials found in a request body are replaced with reversible,
 # format-preserving stand-ins before the request reaches the provider, and
 # restored in the response. On unless this is set to false; see

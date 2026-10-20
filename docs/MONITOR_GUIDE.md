@@ -49,7 +49,9 @@ Monitor 同时使用两类数据：
 
 ## 页面
 
-左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。下面按导航顺序说明路由与用途。
+左侧主导航分三组共 10 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统、关于）。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。导航栏底部、账号按钮上方是一行**构建与仓库**：左边显示当前运行的版本号并链到关于页，右边是 GitHub 图标链到项目仓库，两者都来自 `GET /api/about`。版本号在窄屏与折叠状态的侧边栏里隐藏（只剩两个图标），因为那一列放不下它。
+
+下面按导航顺序说明路由与用途。
 
 侧边栏可以折叠成只有图标的窄栏，折叠状态保存在浏览器 localStorage（`trajecta.monitor.sidebar.collapsed`）。折叠后品牌区块整体让位给展开按钮，因此折叠始终可逆；宽度不足 1000px 时布局固定为窄栏，与折叠状态无关，此时展开按钮不显示。窄栏里每个导航项只剩图标：文字标签被移出布局但仍留在无障碍树中（因此链接的可访问名称不变），并作为 `title` 在悬停时显示——此前标签留在文档流里被 `overflow: hidden` 从中间截断，既像渲染故障，又让图标没有可读的名字。
 
@@ -221,6 +223,68 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 false）为 true 时挂载到 Monitor 的 `/debug/pprof/`；为 false 时该前缀返回 404，不会落到前端 SPA。
 
+#### 关于 `/about`
+
+关于页回答「这是哪个构建、它有没有更新、这个部署会不会外发数据」。它与 `/system` 并列在**系统**分组里，但不属于系统页：系统页报告的是机器，关于页报告的是构建本身，因此它没有管理员门槛——后端对未认证请求返回 401（与其它 Monitor 接口一致），任何已登录角色都可以打开，未启用认证时显示给 `local` 伪用户。
+
+页面读两个接口：
+
+- `GET /api/about`：只读构建信息与配置摘要，**不发起任何外部请求**。字段包括 `name`、`version`（完整版本串，例如 `v3.3.1-2-g4e766d6`）、`base_version`（去掉 git-describe 后缀的标签，例如 `v3.3.1`）、`commits_since_tag`、`commit`、`build_date`、`branch`、`go_version`、`goos`、`goarch`、`repository`、`issues_url`、`releases_url`、`docs_url`、`license`、`license_url`、`update_check_enabled`、`telemetry`，以及数据库可用时的 `install_id`。这些值在编译期由 ldflags 注入（见 `cmd/server/version.go` 与 Taskfile 的 `git describe --tags --always --dirty`），不是运行期探测出来的。页头右上角的 GitHub 按钮、页面里的仓库 / 发布记录 / 问题反馈 / 文档四个链接、以及侧边栏底部的版本号都取自同一个响应，改一处不会各说各话。
+- `GET /api/version/latest`：只在读者按下「检查新版本」时请求，没有任何后台轮询，进程启动也不外联。它访问配置里的发布检查端点并比较版本。
+
+发布检查配置：
+
+```yaml
+update_check:
+  enabled: true
+  endpoint: "https://api.github.com/repos/kingfs/Trajecta/releases/latest"
+```
+
+`endpoint` 留空或 `enabled: false` 时，`/api/about` 的 `update_check_enabled` 为 false，页面**不画**那个按钮——不画一个按下去只会说「无法检查」的按钮。环境变量为 `TRAJECTA_UPDATE_CHECK_ENABLED` / `TRAJECTA_UPDATE_CHECK_ENDPOINT`。
+
+`/api/version/latest` **总是返回 HTTP 200**，结果放在响应体的 `status` 里，取值与含义：
+
+- `update_available`：远端有更新的版本，响应带 `latest_version`、`latest_name`、`published_at`、`release_url` 与截断到 6000 字符的 `notes`。
+- `up_to_date`：远端版本不高于当前构建。比较把 `latest <= current` 都算作最新——带 `commits_since_tag > 0` 的构建比最新发布**领先**，不是落后，页面在这种情况下会说明领先多少个提交。
+- `unknown`：某一侧的版本串解析不了（开发构建、非 semver 标签），因此无法比较。
+- `unavailable`：请求失败、超时、返回不是 2xx、`tag_name` 为空、或拿到的是 draft。
+- `disabled`：开关关闭或没有端点。
+
+比较只按 `vX.Y.Z` 的三段数字，忽略预发布后缀。响应里的 `cached` 说明这次结果是否来自缓存：成功结果缓存 10 分钟，**失败从不缓存**，因此上游恢复后下一次点击立刻能拿到结果。请求带 8 秒超时、`Accept: application/vnd.github+json`、`User-Agent: Trajecta/<version>`，响应体读取上限 1 MiB。这个端点不验证任何东西、不下载任何东西、也不写入任何文件。
+
+##### 匿名装机上报
+
+这一项默认关闭：`telemetry.enabled` 为 false 时不发任何请求，页面上的说明卡会写明这一点。它存在的目的只有一个——让项目作者知道大概有多少个部署在用、分别是什么版本——因此它只上报**安装**，不上报任何流量。
+
+```yaml
+telemetry:
+  enabled: false
+  provider: "custom"
+  endpoint: ""
+  path_prefix: "/trajecta/install"
+  interval: 24h
+```
+
+两个条件必须同时满足才会发出请求：`enabled: true` **且** `endpoint` 非空。环境变量为 `TRAJECTA_TELEMETRY_ENABLED` / `TRAJECTA_TELEMETRY_PROVIDER` / `TRAJECTA_TELEMETRY_ENDPOINT` / `TRAJECTA_TELEMETRY_PATH_PREFIX` / `TRAJECTA_TELEMETRY_INTERVAL`。它**不需要自建服务端**：下面三种传输方式都可以接现成的服务。
+
+上报内容是且只是：本部署的匿名安装 ID、`version`、`commit`、`os`、`arch`、时间戳。不含 URL、模型名、trace ID、令牌、用户名、请求体、来源 IP 之外的任何请求内容，也不含浏览器指纹。
+
+三种 `provider`：
+
+- `custom`（默认）：向 `endpoint` 发一个 `POST`，body 是 JSON：
+  ```json
+  {"event":"install_ping","install_id":"<32 位十六进制>","version":"v3.3.1-2-g4e766d6","commit":"4e766d6","os":"linux","arch":"amd64","ts":1760000000000}
+  ```
+  收集端按 `COUNT(DISTINCT install_id)` 统计装机量，按 `version` 分组统计版本分布。
+- `ga4`：Google Analytics 4 的 Measurement Protocol。`endpoint` 形如 `https://www.google-analytics.com/mp/collect?measurement_id=G-XXXXXXX&api_secret=YYYY`，body 里把安装 ID 放在 `client_id`，事件名为 `install_ping`，参数带 `version` / `commit` / `platform`。GA4 按 `client_id` 去重，所以一个部署的多个使用者仍然只算一个人。**注意**：需要自己注册 GA4 媒体资源；`google-analytics.com` 在中国大陆不可达，且会被广告拦截器屏蔽，因此这条路拿到的数字是有偏的子集。
+- `pixel`：向 `endpoint` 请求一个 1×1 图片，版本号写在 `path_prefix` 后面（例如 `https://<counter>/count?p=/trajecta/install/v3.3.1-2-g4e766d6`），适配 GoatCounter 这类按路径计数的计数器。它能直接给出「每个版本多少次」的分布，但**无法去重**：同一个部署每天开一次页面就会被计一次，所以它统计的是每日浏览器访问量，不是装机量。
+
+安装 ID 由**服务端**生成：首次需要时取 16 字节随机数转 32 位十六进制，存进应用数据库的 `app_settings`（键 `telemetry.install_id`），随 `/api/about` 返回，同一部署的所有使用者共用同一个 ID——这是「装机量」而不是「浏览器数」的原因，也是收集端应该按它去重的原因。数据库不可用时 `install_id` 字段省略，页面上的说明卡会写明服务端没能生成 ID，**这一次就不上报**：没有 ID 还照发，只会把「装机量」悄悄换成「浏览器数」，而后者正是这个功能要回答的问题之外的东西。这种情况不写节流记录，因此下一次打开页面会立刻重试，数据库恢复后不会白等一个周期。ID 与任何账号、IP、机器指纹无关，删除该 `app_settings` 行即换一个新 ID。
+
+发送是**静默且不阻塞**的：优先用 `navigator.sendBeacon` 发一个字符串 body（`text/plain;charset=UTF-8`，属于 CORS 安全列表，因此不触发预检），失败则退回 `fetch(..., {keepalive: true, mode: "no-cors", credentials: "omit", referrerPolicy: "no-referrer"})`，`pixel` 走 `new Image()`。任何失败都被吞掉，不影响页面。同一浏览器最多每 `interval` 上报一次（默认 24 小时），记录写在 localStorage 的 `trajecta.monitor.install-ping`；版本号变化会立刻再报一次，这是「升级后能看出新版本」的原因。节流记录在发送**之前**写入，所以即便发送失败也不会重试刷屏。
+
+关于页的这张卡会显示当前是开还是关、安装 ID、传输方式、端点与「本浏览器上次上报」。要看真实数据请到收集端查询；Monitor 不存储、不缓存、也不展示任何上报记录。
+
 ## 兼容路由与详情路由
 
 - `/` 重定向到 `/overview`。
@@ -297,6 +361,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 - Monitor 不能修改由 YAML 显式 `credentials` 管理的模型服务商、模型和别名，这类写操作返回 409。
 - 写接口不接受 `output`、`command`、`args`、`env` 等敏感可执行字段，Monitor overlay 不能创建新的可执行 command；字段语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 - `external_command` 只有轻量进程约束（工作目录、绝对 command、允许目录、拒绝 root），不等同于容器或 namespace 沙箱。
+- Monitor 不轮询上游、也不做后台外联：版本检查只在读者按下按钮时发生，装机上报默认关闭且启用后也只在浏览器里发出（见「关于 `/about`」）。Monitor 没有管理员界面之外的版本管理能力，也不下载或安装更新。
 
 ## 相关文档
 

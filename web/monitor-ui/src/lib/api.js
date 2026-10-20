@@ -8,6 +8,10 @@ export const apiPaths = {
   authPassword: "/api/auth/password",
   authTokens: "/api/auth/tokens",
   overview: "/api/overview",
+  // The build identity and the About page's two switches. Readable by every
+  // signed-in role, unlike the /api/system/* reads below.
+  about: "/api/about",
+  versionLatest: "/api/version/latest",
   systemRuntime: "/api/system/runtime",
   systemHost: "/api/system/host",
   systemDatabase: "/api/system/db",

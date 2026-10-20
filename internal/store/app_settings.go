@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,4 +75,42 @@ func (s *Store) DeleteAppSetting(ctx context.Context, key string) (bool, error) 
 		return false, fmt.Errorf("delete app setting %q: %w", key, err)
 	}
 	return affected > 0, nil
+}
+
+// InstallIDKey names the app_settings row that holds this deployment's
+// anonymous install id.
+const InstallIDKey = "telemetry.install_id"
+
+// LoadOrCreateInstallID returns a stable, random identifier for this
+// deployment, creating one the first time it is asked for.
+//
+// It exists because the thing worth counting is an installation, not a browser:
+// one Monitor is routinely opened by several people, and a per-browser id would
+// report five installs for one deployment. The id is generated here rather than
+// in the page so that every browser behind this database reports the same one,
+// which lets a collector count distinct ids.
+//
+// It is not a secret and it identifies nobody: it is sixteen random bytes, it is
+// never derived from the machine, the database or the operator, and deleting the
+// row simply makes the next call generate a new one.
+func (s *Store) LoadOrCreateInstallID(ctx context.Context) (string, error) {
+	var existing string
+	found, err := s.LoadAppSettingJSON(ctx, InstallIDKey, &existing)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		if trimmed := strings.TrimSpace(existing); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate install id: %w", err)
+	}
+	created := hex.EncodeToString(buf)
+	if err := s.SaveAppSettingJSON(ctx, InstallIDKey, created); err != nil {
+		return "", err
+	}
+	return created, nil
 }

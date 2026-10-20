@@ -395,6 +395,42 @@ type RouteOptions struct {
 	// prefix answers 404 instead of falling through to the SPA index, so the
 	// switch has an observable off state.
 	DebugPprofEnabled bool
+	// About is the About page's slice of configuration: the build identity
+	// injected at link time into package main, plus the two switches the page
+	// renders. A zero value is a valid, quiet answer - a version-less dev build
+	// with the release check and the install ping off.
+	About AboutOptions
+}
+
+// AboutOptions is what the About page and the release check read.
+type AboutOptions struct {
+	Build BuildInfo
+	// UpdateCheckEnabled turns the release lookup off for a deployment that
+	// cannot reach the endpoint. The check only ever runs when a person presses
+	// the button, so this default is about air gaps, not about privacy.
+	UpdateCheckEnabled bool
+	// UpdateCheckEndpoint is the release JSON URL; an empty value disables the
+	// lookup as well, so a caller that fills in only `enabled` cannot end up
+	// requesting nothing.
+	UpdateCheckEndpoint string
+	// Telemetry is reported to the page verbatim. See TelemetryOptions.
+	Telemetry TelemetryOptions
+}
+
+// TelemetryOptions is the install ping, as the browser is told about it.
+//
+// It is a struct rather than a set of booleans because the page has to build a
+// request, and the shape it builds depends on the provider: a JSON POST, a
+// Measurement Protocol body, or an image whose path carries the version.
+type TelemetryOptions struct {
+	Enabled    bool   `json:"enabled"`
+	Provider   string `json:"provider"`
+	Endpoint   string `json:"endpoint"`
+	PathPrefix string `json:"path_prefix"`
+	// IntervalSeconds is the shortest gap between two pings from one browser. It
+	// is seconds rather than a duration string so the page reads no layout of
+	// Go's Duration JSON.
+	IntervalSeconds int `json:"interval_seconds"`
 }
 
 // displayLocation anchors every day-based window ("today") and every calendar
@@ -629,6 +665,12 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), monitorVerifier))
 	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), monitorVerifier))
 	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), monitorVerifier))
+	// The About page is the one page every signed-in role may open: it reports
+	// which build is running and where the project lives, and nothing about the
+	// deployment. The release lookup behind it is user-initiated and cached; see
+	// server_about_release.go.
+	mux.HandleFunc("/api/about", monitorAuthRequired(aboutAPIHandler(opt.About, &installIdentity{store: st}), monitorVerifier))
+	mux.HandleFunc("/api/version/latest", monitorAuthRequired(versionCheckAPIHandler(opt.About, newReleaseChecker(opt.About.UpdateCheckEndpoint, opt.About.Build)), monitorVerifier))
 	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), monitorVerifier))

@@ -10,7 +10,9 @@
  * comes from: 监控 answers "what is happening", 配置 answers "what is it pointed
  * at", 系统 answers "is the machine healthy". Pages that used to be separate
  * destinations now live behind the tab strip of one of these entries, which is
- * why the list is nine items instead of twelve.
+ * why the list is ten items instead of twelve. The tenth is 关于: it is drawn in
+ * the 系统 group because that is where a reader looks for "which build is this",
+ * but unlike 系统 itself it carries nothing an admin has to guard.
  */
 export const NAV_GROUPS = [
   {
@@ -36,7 +38,13 @@ export const NAV_GROUPS = [
   {
     id: "system",
     labelKey: "nav.group.system",
-    items: [{ to: "/system", labelKey: "nav.system", icon: "settings", adminOnly: true }],
+    items: [
+      { to: "/system", labelKey: "nav.system", icon: "settings", adminOnly: true },
+      // The About page sits beside the system page but is not part of it: it
+      // reports the build rather than the machine, so it draws no admin-only
+      // data and every signed-in role may open it.
+      { to: "/about", labelKey: "nav.about", icon: "info" },
+    ],
   },
 ];
 

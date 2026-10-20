@@ -44,6 +44,52 @@ type Config struct {
 		Timezone string `yaml:"timezone"`
 	} `yaml:"monitor"`
 
+	// UpdateCheck configures the About page's "check for a newer release"
+	// button. The lookup only ever runs when an operator presses that button;
+	// nothing here polls, and the process makes no outbound request on its own.
+	UpdateCheck struct {
+		// Enabled defaults to true. The zero value is false, so Load seeds it
+		// before decoding; an explicit `enabled: false` still wins. The switch
+		// exists for air-gapped deployments rather than for privacy, because
+		// the request is user-initiated either way.
+		Enabled bool `yaml:"enabled"`
+		// Endpoint is the URL whose JSON body describes the newest release. It
+		// defaults to the GitHub Releases API for this repository
+		// (DefaultUpdateCheckEndpoint); point it at a mirror or a fork to keep
+		// the check inside a network that cannot reach api.github.com.
+		Endpoint string `yaml:"endpoint"`
+	} `yaml:"update_check"`
+
+	// Telemetry is the anonymous install ping the Monitor UI sends. It is off
+	// unless it is switched on here: with no endpoint configured the browser
+	// never contacts anything, which is the default a local-first proxy has to
+	// keep. When it is on, the page reports the version, the commit, the
+	// platform and a random install id that is generated in and never leaves
+	// the browser. It never reports what was proxied, which models were used,
+	// which URLs were recorded or who is signed in - see docs/MONITOR_GUIDE.md.
+	Telemetry struct {
+		Enabled bool `yaml:"enabled"`
+		// Provider selects the request shape and defaults to "custom":
+		//   custom - POST the Ping payload as JSON (navigator.sendBeacon)
+		//   ga4    - POST a Google Analytics 4 Measurement Protocol body, for
+		//            an endpoint that already carries measurement_id and
+		//            api_secret in its query string
+		//   pixel  - GET an image whose path carries the version, which is what
+		//            a GoatCounter-style counter needs
+		Provider string `yaml:"provider"`
+		// Endpoint is where the ping is sent. Empty keeps the feature off even
+		// when enabled is true, so a half-filled section cannot phone home.
+		Endpoint string `yaml:"endpoint"`
+		// PathPrefix is the path the pixel provider reports under. The version
+		// is appended to it, so one counter reports a per-version breakdown:
+		// "/trajecta/install" becomes "/trajecta/install/v3.3.1".
+		PathPrefix string `yaml:"path_prefix"`
+		// Interval is the shortest gap between two pings from one browser. It
+		// defaults to 24h, which is what keeps a reload from being counted as
+		// another installation.
+		Interval time.Duration `yaml:"interval"`
+	} `yaml:"telemetry"`
+
 	MCP struct {
 		Enabled bool   `yaml:"enabled"`
 		Path    string `yaml:"path"`
@@ -398,6 +444,11 @@ func Load(path string) (*Config, error) {
 	// means the documented default.
 	cfg := Config{}
 	cfg.Debug.MaskKey = true
+	// The release check is on by default for the same reason: the zero value is
+	// false, so a configuration that omitted the key would take the button away
+	// while the About page still drew it. Seeding before the decode keeps an
+	// explicit `update_check.enabled: false` authoritative.
+	cfg.UpdateCheck.Enabled = true
 	// Credential masking is on by default for the same reason: the zero value of the field is
 	// false, so a configuration that simply omitted the key would run with the protection off
 	// while the documents said it was on. An explicit `enabled: false` (or
@@ -416,6 +467,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := validateRouterEnums(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTelemetry(&cfg); err != nil {
 		return nil, err
 	}
 	if err := validateChaosRules(&cfg); err != nil {
@@ -693,6 +747,13 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Monitor.Timezone, "TRAJECTA_MONITOR_TIMEZONE")
 	envBool(&cfg.Debug.PprofEnabled, "TRAJECTA_DEBUG_PPROF_ENABLED")
 	envDuration(&cfg.Debug.SlowQueryThreshold, "TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD")
+	envBool(&cfg.UpdateCheck.Enabled, "TRAJECTA_UPDATE_CHECK_ENABLED")
+	envString(&cfg.UpdateCheck.Endpoint, "TRAJECTA_UPDATE_CHECK_ENDPOINT")
+	envBool(&cfg.Telemetry.Enabled, "TRAJECTA_TELEMETRY_ENABLED")
+	envString(&cfg.Telemetry.Provider, "TRAJECTA_TELEMETRY_PROVIDER")
+	envString(&cfg.Telemetry.Endpoint, "TRAJECTA_TELEMETRY_ENDPOINT")
+	envString(&cfg.Telemetry.PathPrefix, "TRAJECTA_TELEMETRY_PATH_PREFIX")
+	envDuration(&cfg.Telemetry.Interval, "TRAJECTA_TELEMETRY_INTERVAL")
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
 	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROVIDER_PRESET", func(u *UpstreamConfig, v string) { u.ProviderPreset = v })
@@ -1339,6 +1400,117 @@ func (c Config) TraceSyncInterval() time.Duration {
 // stores UTC, but "today" on the Monitor has to match the operator's calendar
 // day rather than the container's, which is UTC.
 const DefaultMonitorTimezone = "Asia/Shanghai"
+
+// DefaultUpdateCheckEndpoint is the GitHub Releases API URL the About page's
+// release check reads. `latest` excludes drafts and pre-releases, which is what
+// "is there a newer release" means to a user; a repository with no release yet
+// answers 404 and the page says so instead of failing.
+const DefaultUpdateCheckEndpoint = "https://api.github.com/repos/kingfs/Trajecta/releases/latest"
+
+// DefaultTelemetryInterval is the shortest gap between two install pings from
+// one browser. It is deliberately long: the number being counted is
+// installations, and a page reload is not a second installation.
+const DefaultTelemetryInterval = 24 * time.Hour
+
+// DefaultTelemetryPathPrefix is the pixel provider's path prefix. The version
+// is appended to it, so one counter answers both questions - how many
+// installations, and which version each of them runs.
+const DefaultTelemetryPathPrefix = "/trajecta/install"
+
+// TelemetryProvider values. A custom endpoint takes the Ping payload as JSON,
+// ga4 takes a Measurement Protocol body, and pixel is a GET image whose path
+// carries the version.
+const (
+	TelemetryProviderCustom = "custom"
+	TelemetryProviderGA4    = "ga4"
+	TelemetryProviderPixel  = "pixel"
+)
+
+// TelemetrySettings is the resolved telemetry section: the raw config with the
+// defaults filled in, and Enabled collapsed to false unless the section can
+// actually report somewhere.
+type TelemetrySettings struct {
+	Enabled    bool          `json:"enabled" yaml:"enabled"`
+	Provider   string        `json:"provider" yaml:"provider"`
+	Endpoint   string        `json:"endpoint" yaml:"endpoint"`
+	PathPrefix string        `json:"path_prefix" yaml:"path_prefix"`
+	Interval   time.Duration `json:"-" yaml:"interval"`
+}
+
+// UpdateCheckEnabled reports whether the About page may look up the newest
+// release. It defaults to true.
+func (c Config) UpdateCheckEnabled() bool {
+	return c.UpdateCheck.Enabled
+}
+
+// UpdateCheckEndpoint returns the release-check URL, falling back to the
+// GitHub Releases API for this repository.
+func (c Config) UpdateCheckEndpoint() string {
+	endpoint := strings.TrimSpace(c.UpdateCheck.Endpoint)
+	if endpoint == "" {
+		return DefaultUpdateCheckEndpoint
+	}
+	return endpoint
+}
+
+// TelemetrySettings resolves the telemetry section.
+//
+// `enabled: true` with no endpoint stays off. A missing endpoint is the state a
+// half-filled configuration is in, and treating it as "on" would have the
+// Monitor UI build a request to nowhere on every page load; the About page
+// reports the same false, so the switch an operator sees is the switch that is
+// in effect.
+func (c Config) TelemetrySettings() TelemetrySettings {
+	settings := TelemetrySettings{
+		Enabled:    c.Telemetry.Enabled,
+		Provider:   strings.ToLower(strings.TrimSpace(c.Telemetry.Provider)),
+		Endpoint:   strings.TrimSpace(c.Telemetry.Endpoint),
+		PathPrefix: strings.TrimSpace(c.Telemetry.PathPrefix),
+		Interval:   c.Telemetry.Interval,
+	}
+	if settings.Provider == "" {
+		settings.Provider = TelemetryProviderCustom
+	}
+	if settings.PathPrefix == "" {
+		settings.PathPrefix = DefaultTelemetryPathPrefix
+	}
+	if settings.Interval <= 0 {
+		settings.Interval = DefaultTelemetryInterval
+	}
+	if settings.Endpoint == "" {
+		settings.Enabled = false
+	}
+	return settings
+}
+
+// validTelemetryProviders lists the request shapes the Monitor UI implements.
+// An unrecognised provider would fall through to the custom one and post a JSON
+// body at an endpoint that expected a pixel, which is a silent no-op at the
+// collector rather than a visible mistake, so Load rejects it.
+var validTelemetryProviders = map[string]struct{}{
+	TelemetryProviderCustom: {},
+	TelemetryProviderGA4:    {},
+	TelemetryProviderPixel:  {},
+}
+
+// validateTelemetry rejects a telemetry section that cannot do what it says.
+func validateTelemetry(cfg *Config) error {
+	if !cfg.Telemetry.Enabled {
+		return nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(cfg.Telemetry.Provider))
+	if provider != "" {
+		if _, ok := validTelemetryProviders[provider]; !ok {
+			return fmt.Errorf("telemetry.provider %q is not supported; use one of custom, ga4, pixel", cfg.Telemetry.Provider)
+		}
+	}
+	// Deliberately not an error: `enabled: true` with no endpoint is off, and
+	// Validate() below reports it so a startup log line can say why.
+	if strings.TrimSpace(cfg.Telemetry.Endpoint) == "" {
+		slog.Warn("telemetry.enabled is true but telemetry.endpoint is empty; the anonymous install ping stays off until an endpoint is set")
+	}
+	return nil
+}
 
 // MonitorLocation resolves the configured Monitor timezone. An unset or
 // unparseable zone falls back to the default rather than to UTC, because a

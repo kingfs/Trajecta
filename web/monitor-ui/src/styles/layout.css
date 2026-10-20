@@ -619,3 +619,91 @@ html {
   background: var(--surface-3);
   color: var(--text-secondary);
 }
+
+/* The foot of the rail: which build is running, and where the project lives.
+   It sits above the realtime indicator, inside the account block, so the rail's
+   three-row grid is unchanged and the version is one click from every page. */
+.nav-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-1);
+}
+
+.nav-version {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-version:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.nav-version svg {
+  flex: none;
+}
+
+.nav-version-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-github {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-github:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Collapsed rail: the version text has nowhere to go, the two glyphs stay. */
+.app-shell-collapsed .nav-footer {
+  justify-content: center;
+  gap: 2px;
+  padding-inline: 0;
+}
+
+.app-shell-collapsed .nav-version {
+  padding: 3px;
+}
+
+.app-shell-collapsed .nav-version-label {
+  display: none;
+}
+
+/* The narrow rail is the collapsed rail: the same 72px column, so the footer
+   gives up the same things. This has to come after the base rules above rather
+   than inside the earlier media block, which it would lose the cascade to. */
+@media (max-width: 1000px) {
+  .nav-footer {
+    justify-content: center;
+    gap: 2px;
+    padding-inline: 0;
+  }
+
+  .nav-version {
+    padding: 3px;
+  }
+
+  .nav-version-label {
+    display: none;
+  }
+}

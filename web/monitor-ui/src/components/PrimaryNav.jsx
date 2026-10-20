@@ -9,6 +9,7 @@ import { Separator } from "./ui/separator";
 import {
   Activity,
   Bell,
+  Info,
   LoaderCircle,
   Monitor,
   Moon,
@@ -30,6 +31,7 @@ import {
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useJSON } from "../hooks/useJSON";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
+import { GitHubMark } from "./common/GitHubMark";
 import { isLegacyActive, navGroups } from "../lib/nav";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { RealtimeStatus } from "../lib/realtime";
@@ -60,6 +62,13 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   // question the sidebar has to answer rather than one a spinner or a timer
   // used to. See lib/realtime.js for what the three states mean.
   const realtime = useRealtimeStatus();
+  // The version and the repository link, at the foot of the rail. It reads the
+  // same /api/about the About page does, through the console's query cache, so
+  // the rail, the page and the install ping share one request. The version lives
+  // here rather than in the brand block because the rail is the one piece of
+  // chrome every page renders, which is where the other tools of this kind put
+  // it, and because it makes the About page one click from anywhere.
+  const { data: about } = useJSON(apiPaths.about);
   return (
     <nav className="primary-nav" aria-label={t("nav.primary")}>
       <div className="nav-brand">
@@ -112,6 +121,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           works when the two share a root. */}
       <Popover open={accountOpen} onOpenChange={setAccountOpen}>
         <div className="nav-account">
+          <NavFooter about={about} />
           {/* A status, not a control: the glyph is the state, the tooltip is the
               sentence, and `aria-live` announces a reconnect to a reader who is
               not looking at it. Rail space is the scarce thing here, so the
@@ -147,6 +157,47 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
 
       {passwordOpen ? <PasswordDialog returnFocusTo={accountButtonRef} onClose={() => setPasswordOpen(false)} /> : null}
     </nav>
+  );
+}
+
+/**
+ * The foot of the rail: which build this is, and where the project lives.
+ *
+ * This is the shape open-source consoles converge on, and it earns its place
+ * twice over. The version answers "what am I running" without a detour through a
+ * menu, and it is the entry point to 关于. The GitHub mark answers "where do I
+ * report this", which is the question an operator has at the moment they notice
+ * something wrong - and it is a plain link rather than a button, so it opens the
+ * repository in a new tab and never navigates the console away from a
+ * half-finished investigation.
+ */
+function NavFooter({ about }) {
+  const { t } = useI18n();
+  const version = String(about?.version || "").trim();
+  return (
+    <div className="nav-footer">
+      <NavLink
+        to="/about"
+        className="nav-version"
+        title={version ? `${t("about.title")} · ${version}` : t("about.title")}
+        aria-label={t("about.openAbout")}
+      >
+        <Info size={14} aria-hidden="true" />
+        <span className="nav-version-label">{version || t("about.versionUnknown")}</span>
+      </NavLink>
+      {about?.repository ? (
+        <a
+          className="nav-github"
+          href={about.repository}
+          target="_blank"
+          rel="noreferrer"
+          title={t("about.openRepository")}
+          aria-label={t("about.openRepository")}
+        >
+          <GitHubMark size={15} />
+        </a>
+      ) : null}
+    </div>
   );
 }
 
@@ -399,6 +450,7 @@ const NAV_ICONS = {
   lock: Lock,
   logout: LogOut,
   settings: Settings,
+  info: Info,
 };
 
 function NavIcon({ name }) {

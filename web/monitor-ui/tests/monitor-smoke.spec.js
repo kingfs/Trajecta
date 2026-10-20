@@ -8,7 +8,12 @@ import { expect, test } from "@playwright/test";
 const MASK_ORIGINAL = `sk-proj-${"a".repeat(60)}T3BlbkFJ${"b".repeat(56)}`;
 const MASK_STAND_IN = `sk-proj-${"s".repeat(60)}T3BlbkFJ${"c".repeat(56)}`;
 
+// The release check is the one read on the About page that only happens when a
+// person presses the button, so what was requested is itself the assertion.
+let releaseCheckReads = [];
+
 test.beforeEach(async ({ page }) => {
+  releaseCheckReads = [];
   // The Monitor UI defaults to Chinese when no language is persisted, while
   // this smoke suite asserts English labels. Pin the language for every test.
   await page.addInitScript(() => {
@@ -233,6 +238,13 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/sessions") {
       return route.fulfill({ json: sessionListPayload() });
+    }
+    if (path === "/api/about") {
+      return route.fulfill({ json: aboutPayload() });
+    }
+    if (path === "/api/version/latest") {
+      releaseCheckReads.push(url.toString());
+      return route.fulfill({ json: releaseCheckPayload() });
     }
     if (path === "/api/system/host") {
       return route.fulfill({ json: systemHostPayload() });
@@ -1820,6 +1832,55 @@ function systemRuntimePayload() {
   };
 }
 
+function aboutPayload() {
+  return {
+    generated_at: new Date().toISOString(),
+    name: "Trajecta",
+    version: "v3.3.1-2-g4e766d6",
+    base_version: "v3.3.1",
+    commits_since_tag: 2,
+    commit: "4e766d6",
+    build_date: "2026-10-16T00:00:00Z",
+    branch: "main",
+    go_version: "go1.26.5",
+    goos: "linux",
+    goarch: "amd64",
+    repository: "https://github.com/kingfs/Trajecta",
+    issues_url: "https://github.com/kingfs/Trajecta/issues",
+    releases_url: "https://github.com/kingfs/Trajecta/releases",
+    docs_url: "https://github.com/kingfs/Trajecta/tree/main/docs",
+    license: "MIT",
+    license_url: "https://github.com/kingfs/Trajecta/blob/main/LICENSE",
+    update_check_enabled: true,
+    // Off, which is what the server reports for a deployment that did not
+    // configure an endpoint. The one test that turns it on overrides this.
+    telemetry: {
+      enabled: false,
+      provider: "custom",
+      endpoint: "https://collector.example/install",
+      path_prefix: "/trajecta/install",
+      interval_seconds: 86400,
+    },
+    install_id: "0123456789abcdef0123456789abcdef",
+  };
+}
+
+function releaseCheckPayload() {
+  return {
+    checked_at: new Date().toISOString(),
+    status: "update_available",
+    current_version: "v3.3.1-2-g4e766d6",
+    base_version: "v3.3.1",
+    commits_since_tag: 2,
+    latest_version: "v9.9.9",
+    latest_name: "Trajecta 9.9.9",
+    published_at: "2026-10-01T00:00:00Z",
+    release_url: "https://github.com/kingfs/Trajecta/releases/tag/v9.9.9",
+    notes: "### Added\n- a newer release",
+    cached: false,
+  };
+}
+
 function responsesFunctionExecutorsPayload() {
   return {
     enabled: true,
@@ -2576,7 +2637,7 @@ async function darkSurfaces(page, selectors) {
 // the panels, cards, tables, filters, buttons and tags are all near-white.
 test("no light-mode surface resolves dark on any route", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
-  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/providers", "/routing", "/connect", "/system"];
+  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/providers", "/routing", "/connect", "/system", "/about"];
   // Elements with no intentional dark state. `.ghost-button.active`, `.badge-live`
   // and the accent fills are deliberately inverted or coloured and are excluded.
   const SURFACES = [
@@ -2811,6 +2872,7 @@ test("every route and every tab renders without reaching the error boundary", as
     ["/routing", ["decisions", "settings", "aliases", "inspect"]],
     ["/connect", ["clients", "tokens"]],
     ["/system", ["runtime", "server", "database", "slow", "tools"]],
+    ["/about", []],
   ];
   for (const [path, tabs] of PAGES) {
     for (const tab of [null, ...tabs]) {
@@ -3168,4 +3230,180 @@ test("a request row shows the protocol, the target and the exceptions only", asy
   // protocol, the target and the stream.
   const streaming = page.locator(".trace-row").nth(2);
   await expect(streaming.locator(".trace-tag-group .inline-tag")).toHaveText(["resp", "openai-primary", "stream"]);
+});
+
+// The rail carries the running version and a link to the repository, which is
+// what most consoles of this kind put at the foot of their navigation. The href
+// is the assertion that matters: it comes from /api/about, so a hard-coded or
+// drifted URL would show up here rather than as a dead link in production.
+test("the rail carries the version and the repository link", async ({ page, isMobile }) => {
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  await expect(page.getByRole("link", { name: "Open the About page" })).toHaveAttribute("href", "/about");
+
+  const repository = page.getByRole("link", { name: "Open the repository on GitHub" });
+  await expect(repository).toHaveAttribute("href", "https://github.com/kingfs/Trajecta");
+  await expect(repository).toHaveAttribute("target", "_blank");
+
+  // The version text is the first thing the narrow rail gives up, so it is only
+  // asserted where there is a column to draw it in.
+  if (!isMobile) {
+    await expect(page.getByRole("link", { name: "Open the About page" })).toContainText("v3.3.1-2-g4e766d6");
+  }
+});
+
+test("the About page reports the build and asks before it checks for a release", async ({ page }) => {
+  await page.goto("/about");
+  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
+  // Scoped to the content column: the rail footer also carries the version, and
+  // on a narrow viewport that copy is hidden, so an unscoped `.first()` would
+  // pick the invisible one.
+  const content = page.locator("#main-content");
+  await expect(content.getByText("v3.3.1-2-g4e766d6").first()).toBeVisible();
+  await expect(content.getByText("4e766d6").first()).toBeVisible();
+  await expect(content.getByText("2 commits past the tag").first()).toBeVisible();
+
+  // Every project link the API published, which is the half of the page a
+  // reader arrives for when something is wrong.
+  await expect(page.getByRole("link", { name: /GitHub repository/ })).toHaveAttribute("href", "https://github.com/kingfs/Trajecta");
+  await expect(page.getByRole("link", { name: /Issues/ })).toHaveAttribute("href", "https://github.com/kingfs/Trajecta/issues");
+  await expect(page.getByRole("link", { name: /Documentation/ })).toHaveAttribute("href", "https://github.com/kingfs/Trajecta/tree/main/docs");
+
+  // The check is user-initiated: opening the page must not have asked.
+  expect(releaseCheckReads, "the page asks for a release on its own").toEqual([]);
+  await expect(page.getByText("Press “Check for updates” to read the newest release from GitHub.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect(page.getByText("Version v9.9.9 is available")).toBeVisible();
+  expect(releaseCheckReads.length).toBe(1);
+  await expect(page.getByRole("link", { name: "Read the release notes" })).toHaveAttribute(
+    "href",
+    "https://github.com/kingfs/Trajecta/releases/tag/v9.9.9",
+  );
+  await expect(page.getByText("a newer release")).toBeVisible();
+});
+
+// The default payload has telemetry off, which is the shipped default and the
+// state most deployments are in. The card has to say so rather than disappear.
+test("the About page reports the install ping as off by default", async ({ page }) => {
+  await page.goto("/about");
+  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
+  await expect(page.getByText("The anonymous install ping is off by default.")).toBeVisible();
+  await expect(page.getByText("Install id")).toHaveCount(0);
+});
+
+test("the install ping reports the deployment once and carries no request data", async ({ page }) => {
+  const pings = [];
+  // Registered after the shared catch-all, which makes it win: Playwright checks
+  // routes in the reverse order they were added.
+  await page.route("**/api/about", (route) =>
+    route.fulfill({
+      json: {
+        ...aboutPayload(),
+        telemetry: {
+          enabled: true,
+          provider: "custom",
+          endpoint: "https://collector.example/install",
+          path_prefix: "/trajecta/install",
+          interval_seconds: 86400,
+        },
+      },
+    }),
+  );
+  await page.route("https://collector.example/**", (route) => {
+    pings.push({ url: route.request().url(), body: route.request().postData() || "" });
+    return route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect.poll(() => pings.length, { message: "the install ping never arrived" }).toBe(1);
+
+  expect(pings[0].url).toBe("https://collector.example/install");
+  const body = JSON.parse(pings[0].body);
+  // The deployment's id, not this browser's: five operators on one Monitor are
+  // one installation, which is the number the feature exists to report.
+  expect(body.install_id).toBe("0123456789abcdef0123456789abcdef");
+  expect(body.version).toBe("v3.3.1-2-g4e766d6");
+  expect(body.commit).toBe("4e766d6");
+  expect(Object.keys(body).sort()).toEqual(["arch", "commit", "event", "install_id", "os", "ts", "version"]);
+
+  // A second page load inside the interval reports nothing at all.
+  await page.goto("/about");
+  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(pings.length, "a page load was counted as a second installation").toBe(1);
+});
+
+
+// The identity block and the project links are the two things a reader comes to
+// this page for, and both are easy to render invisibly - a gradient that does
+// not resolve, a pill with no border, a link list collapsed to nothing.
+test("the About page draws its identity block and every project link", async ({ page }) => {
+  await page.goto("/about");
+  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
+
+  const mark = page.locator(".about-mark");
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveText("T");
+  // Filled rather than an outline: "none" here means the brand gradient failed
+  // to resolve and the letter is sitting on the bare card.
+  expect(await mark.evaluate((node) => getComputedStyle(node).backgroundImage)).not.toBe("none");
+
+  // Repository, releases, issues, documentation.
+  await expect(page.locator(".about-link")).toHaveCount(4);
+  await expect(page.locator(".about-link").first()).toHaveCSS("border-radius", "999px");
+
+  // The version is in the page body twice - the badge and the fact row - and
+  // both come from the same field, so a mismatch would mean two sources. (The
+  // rail footer is a third, which is why this is scoped to the content column.)
+  await expect(page.locator("#main-content").getByText("v3.3.1-2-g4e766d6")).toHaveCount(2);
+});
+
+// The page is a grid of values, and several of them - the install id, the
+// collector URL, the commit hash - have no space to break at. Widening the
+// document is how that goes wrong, and it only shows up at a narrow width.
+test("the About page does not widen the document", async ({ page, isMobile }) => {
+  await page.goto("/about");
+  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, `the document overflows by ${overflow}px at ${isMobile ? "mobile" : "desktop"} width`).toBeLessThanOrEqual(1);
+});
+
+// The footer is a new row inside the rail's account block. The rail is a fixed
+// width and clips its contents, so a footer wider than the rail reads as a
+// rendering fault rather than as a control.
+test("the rail footer stays inside the rail", async ({ page }) => {
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  const footer = page.locator(".nav-footer");
+  await expect(footer).toBeVisible();
+  const railBox = await page.locator(".app-sidebar").boundingBox();
+  const footerBox = await footer.boundingBox();
+  expect(footerBox.x).toBeGreaterThanOrEqual(railBox.x - 1);
+  expect(footerBox.x + footerBox.width).toBeLessThanOrEqual(railBox.x + railBox.width + 1);
+});
+
+// The narrow viewport gets the collapsed rail by media query, and the toggle that
+// gets there on a desktop is hidden. Both are the same 72px column, so the same
+// two glyphs have to survive in it.
+test("the collapsed rail keeps both footer glyphs", async ({ page, isMobile }) => {
+  test.skip(isMobile, "the narrow viewport is already the collapsed rail");
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  const footer = page.locator(".nav-footer");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(page.getByRole("link", { name: "Open the About page" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the repository on GitHub" })).toBeVisible();
+
+  const rail = await page.locator(".app-sidebar").boundingBox();
+  const box = await footer.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(rail.x - 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(rail.x + rail.width + 1);
 });
