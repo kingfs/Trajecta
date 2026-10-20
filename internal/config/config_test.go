@@ -1974,26 +1974,6 @@ func TestUpdateCheckDefaultsOn(t *testing.T) {
 	}
 }
 
-func TestUpdateCheckEndpointFallsBackToTheUpstreamRepository(t *testing.T) {
-	t.Setenv("TRAJECTA_UPDATE_CHECK_ENDPOINT", "")
-
-	cfg, err := Load(writeTempConfig(t, "update_check:\n  endpoint: \"  \"\n"))
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if got := cfg.UpdateCheckEndpoint(); got != DefaultUpdateCheckEndpoint {
-		t.Fatalf("UpdateCheckEndpoint() = %q, want %q", got, DefaultUpdateCheckEndpoint)
-	}
-
-	cfg, err = Load(writeTempConfig(t, "update_check:\n  endpoint: \"https://mirror.example/release.json\"\n"))
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if got := cfg.UpdateCheckEndpoint(); got != "https://mirror.example/release.json" {
-		t.Fatalf("UpdateCheckEndpoint() = %q, want the configured mirror", got)
-	}
-}
-
 // TestTelemetryDefaultsOff is the load-bearing one: a local-first proxy records
 // whatever its users point at it, so the anonymous install ping may not start
 // reporting because a configuration file simply did not mention it.

@@ -1384,8 +1384,10 @@ export default {
   "about.update.upToDate": "This is the newest version",
   "about.update.unknown": "Versions are not comparable",
   "about.update.unavailable": "The update check could not run",
+  "about.update.noRelease": "No GitHub release yet",
+  "about.update.noReleaseDetail": "This project has not published a GitHub release, so there is nothing to compare with the running build.",
   "about.update.disabled": "Release checks are off",
-  "about.update.disabledDetail": "update_check.enabled is false, or no update_check.endpoint is set.",
+  "about.update.disabledDetail": "update_check.enabled is false in the server configuration.",
   "about.update.monitorFailed": "The Monitor did not answer",
   "about.update.retry": "Retry",
 };

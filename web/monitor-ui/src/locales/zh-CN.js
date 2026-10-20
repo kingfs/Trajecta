@@ -1383,8 +1383,10 @@ export default {
   "about.update.upToDate": "已是最新版本",
   "about.update.unknown": "无法比较版本",
   "about.update.unavailable": "无法检查更新",
+  "about.update.noRelease": "项目尚未发布 GitHub Release",
+  "about.update.noReleaseDetail": "当前没有可比较的发布版本；项目发布第一个 Release 后，这里会显示最新版本。",
   "about.update.disabled": "发布检查已关闭",
-  "about.update.disabledDetail": "配置中 update_check.enabled 为 false，或没有设置 update_check.endpoint。",
+  "about.update.disabledDetail": "配置中 update_check.enabled 为 false。",
   "about.update.monitorFailed": "Monitor 没有返回结果",
   "about.update.retry": "重试",
 };

@@ -3326,6 +3326,34 @@ test("the About page reports the build and opens the release check only on reque
   expect(releaseCheckReads.length).toBe(1);
 });
 
+// The release card used to have its own no-release state; the dialog keeps that
+// answer without putting the result back on the page.
+test("the About page says when the project has no release yet", async ({ page }) => {
+  await page.route("**/api/version/latest", (route) =>
+    route.fulfill({
+      json: {
+        ...releaseCheckPayload(),
+        status: "no_release",
+        latest_version: "",
+        latest_name: "",
+        release_url: "",
+        notes: "",
+        error: "this project has not published a GitHub release yet",
+      },
+    }),
+  );
+
+  await page.goto("/about");
+  await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("No GitHub release yet")).toBeVisible();
+  await expect(page.getByText("This project has not published a GitHub release")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("link", { name: "Releases" })).toHaveAttribute(
+    "href",
+    "https://github.com/kingfs/Trajecta/releases",
+  );
+});
+
 
 // The identity block and the project links are the two things a reader comes to
 // this page for, and both are easy to render invisibly - a gradient that does

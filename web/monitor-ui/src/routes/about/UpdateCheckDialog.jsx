@@ -17,14 +17,14 @@ import { SystemFact } from "../system/format";
  * version and the newest release, and nothing else.
  *
  * It is still a click rather than a read-on-mount. A Monitor is often deployed
- * where nothing may call out, and a page that silently requests api.github.com
- * every time it is opened spends the deployment's rate limit and its operator's
- * trust. Pressing the button is the consent.
+ * where nothing may call out, and a page that silently requests the GitHub
+ * release feed every time it is opened spends the deployment's network budget
+ * and its operator's trust. Pressing the button is the consent.
  *
  * Every outcome is one shape. The endpoint answers 200 with a status even when
- * the lookup failed, so "up to date", "newer", "not comparable", "turned off"
- * and "unreachable" all render here; a thrown error means the Monitor itself
- * did not answer, which is a different sentence.
+ * the lookup failed, so "up to date", "newer", "no release yet", "not
+ * comparable", "turned off" and "unreachable" all render here; a thrown error
+ * means the Monitor itself did not answer, which is a different sentence.
  */
 export function UpdateCheckDialog({ about, onClose }) {
   const { t } = useI18n();
@@ -69,7 +69,7 @@ export function UpdateCheckDialog({ about, onClose }) {
             <EmptyState tone="danger" title={t("about.update.monitorFailed")} detail={state.error} />
           ) : null}
 
-          {state.status === "done" && result ? <UpdateStatus result={result} /> : null}
+          {state.status === "done" && result ? <UpdateStatus result={result} about={about} /> : null}
 
           {state.status === "loading" || (state.status === "done" && result) ? (
             <div className="system-kv about-update-facts">
@@ -79,7 +79,7 @@ export function UpdateCheckDialog({ about, onClose }) {
               />
               <SystemFact
                 label={t("about.update.latest")}
-                value={result ? result.latest_version : t("about.update.checking")}
+                value={result ? result.latest_version || "—" : t("about.update.checking")}
               />
             </div>
           ) : null}
@@ -100,7 +100,7 @@ export function UpdateCheckDialog({ about, onClose }) {
   );
 }
 
-function UpdateStatus({ result }) {
+function UpdateStatus({ result, about }) {
   const { t } = useI18n();
 
   if (result.status === "update_available") {
@@ -114,6 +114,22 @@ function UpdateStatus({ result }) {
 
   if (result.status === "up_to_date") {
     return <p className="about-update-headline about-update-headline-ok">{t("about.update.upToDate")}</p>;
+  }
+
+  if (result.status === "no_release") {
+    return (
+      <EmptyState
+        title={t("about.update.noRelease")}
+        detail={t("about.update.noReleaseDetail")}
+        action={
+          about?.releases_url ? (
+            <a href={about.releases_url} target="_blank" rel="noreferrer">
+              {t("about.releases")}
+            </a>
+          ) : null
+        }
+      />
+    );
   }
 
   if (result.status === "unknown") {

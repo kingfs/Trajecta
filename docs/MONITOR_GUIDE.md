@@ -235,7 +235,7 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 页面读两个接口：
 
 - `GET /api/about`：只读构建信息与配置摘要，**不发起任何外部请求**。字段包括 `name`、`version`（完整版本串，例如 `v3.3.1-2-g4e766d6`）、`base_version`（去掉 git-describe 后缀的标签，例如 `v3.3.1`）、`commits_since_tag`、`commit`、`build_date`、`branch`、`go_version`、`goos`、`goarch`、`repository`、`issues_url`、`releases_url`、`docs_url`、`license`、`license_url`、`update_check_enabled`、`telemetry`，以及数据库可用时的 `install_id`。这些值在编译期由 ldflags 注入（见 `cmd/server/version.go` 与 Taskfile 的 `git describe --tags --always --dirty`），不是运行期探测出来的。页头右上角的 GitHub 按钮、页面里的仓库 / 发布记录 / 问题反馈 / 文档四个链接、以及侧边栏底部的版本号都取自同一个响应，改一处不会各说各话。
-- `GET /api/version/latest`：只在读者按下「检查新版本」时请求，没有任何后台轮询，进程启动也不外联。它访问配置里的发布检查端点并比较版本。
+- `GET /api/version/latest`：只在读者按下「检查新版本」时请求，没有任何后台轮询，进程启动也不外联。它读取项目固定的 releases Atom feed `https://github.com/kingfs/Trajecta/releases.atom` 并比较版本。
 
 页面本身只渲染 `name` 与标语、四项构建事实（`version`、`commit`、`build_date`、`base_version`）以及项目链接；`branch`、`go_version`、`goos`/`goarch` 和许可证不在这一页重复，运行时的 Go 版本与平台由系统页报告。按下「检查新版本」打开一个弹窗，弹窗里只给当前版本与最新版本（以及一行状态），不再在页面上另起一个节重复构建信息。
 
@@ -244,22 +244,24 @@ pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 fal
 ```yaml
 update_check:
   enabled: true
-  endpoint: "https://api.github.com/repos/kingfs/Trajecta/releases/latest"
 ```
 
-`endpoint` 留空或 `enabled: false` 时，`/api/about` 的 `update_check_enabled` 为 false，页面**不画**那个按钮——不画一个按下去只会说「无法检查」的按钮。环境变量为 `TRAJECTA_UPDATE_CHECK_ENABLED` / `TRAJECTA_UPDATE_CHECK_ENDPOINT`。
+仓库地址与 release feed 是项目事实，不是部署配置，因此没有 `endpoint`，也没有对应的环境变量。旧配置里的 `update_check.endpoint` 不再读取，启动时会作为未知键警告并忽略。`enabled: false` 时 `/api/about` 的 `update_check_enabled` 为 false，页面**不画**那个按钮——不画一个按下去只会说「无法检查」的按钮。开关的环境变量是 `TRAJECTA_UPDATE_CHECK_ENABLED`。
+
+选择 Atom feed 而不是 `api.github.com` 的 REST 接口，是因为未认证的 GitHub API 配额按出口 IP 计算（每小时 60 次），同一个代理后的多个部署会互相消耗；feed 是公开的发布列表，不带这个配额。请求带 8 秒超时、`Accept: application/atom+xml`、`User-Agent: Trajecta/<version>`，响应体读取上限 1 MiB。
 
 `/api/version/latest` **总是返回 HTTP 200**，结果放在响应体的 `status` 里，取值与含义：
 
-- `update_available`：远端有更新的版本，响应带 `latest_version`、`latest_name`、`published_at`、`release_url` 与截断到 6000 字符的 `notes`。
+- `update_available`：远端有更新的版本，响应带 `latest_version`、`latest_name`、`published_at`、`release_url` 与截断到 6000 字符的 `notes`（feed 里的 HTML 会转成纯文本）。
 - `up_to_date`：远端版本不高于当前构建。比较把 `latest <= current` 都算作最新——带 `commits_since_tag > 0` 的构建比最新发布**领先**，不是落后。
 - `unknown`：某一侧的版本串解析不了（开发构建、非 semver 标签），因此无法比较。
-- `unavailable`：请求失败、超时、返回不是 2xx、`tag_name` 为空、或拿到的是 draft。
-- `disabled`：开关关闭或没有端点。
+- `no_release`：feed 正常返回，但里面没有任何 release。页面显示「项目尚未发布 GitHub Release」，这不是请求失败。
+- `unavailable`：网络失败、超时、非 2xx、feed 无法解析，或最新条目没有版本标签。
+- `disabled`：开关关闭。
 
-比较只按 `vX.Y.Z` 的三段数字，忽略预发布后缀。响应里的 `cached` 说明这次结果是否来自缓存：成功结果缓存 10 分钟，**失败从不缓存**，因此上游恢复后下一次点击立刻能拿到结果。请求带 8 秒超时、`Accept: application/vnd.github+json`、`User-Agent: Trajecta/<version>`，响应体读取上限 1 MiB。这个端点不验证任何东西、不下载任何东西、也不写入任何文件。
+比较只按 `vX.Y.Z` 的三段数字，忽略预发布后缀。响应里的 `cached` 说明这次结果是否来自缓存：成功结果缓存 10 分钟，**失败从不缓存**，因此上游恢复后下一次点击立刻能拿到结果。这个端点不验证任何东西、不下载任何东西、也不写入任何文件。
 
-`unavailable` 的错误会尽量给出可操作的原因：带速率限制标记的 403/429 报告 `release endpoint rate limited` 与配额重置时间（`X-RateLimit-Reset`），404 报告 `no published release`，两者都不回显整段 GitHub JSON；其它非 2xx 才带截断后的服务端消息。经过共享出口代理访问 `api.github.com` 时，未认证配额按出口 IP 计算（每小时 60 次），因此同一代理后的多个部署会共用额度；需要稳定检查时把 `update_check.endpoint` 指向镜像，或稍后重试。
+`unavailable` 的错误会尽量给出可操作的原因：无法连接 GitHub 时说明「could not reach GitHub」；带速率限制标记的 403/429 报告 `GitHub is limiting release checks from this network` 与重置时间（`X-RateLimit-Reset`）；feed 返回 404 时说明找不到项目的 release feed；其余 5xx 说明 GitHub 暂时不可用。GitHub 的 HTML/XML 错误正文不会回显到页面。
 
 ##### 匿名装机上报
 

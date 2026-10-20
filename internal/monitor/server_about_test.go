@@ -76,7 +76,7 @@ func TestCompareVersionParts(t *testing.T) {
 	}
 }
 
-// releaseTestServer answers with one release body and counts the requests it
+// releaseTestServer answers with one release feed and counts the requests it
 // served, so a test can tell a cached answer from a second lookup.
 func releaseTestServer(t *testing.T, status int, body string) (*httptest.Server, *int32) {
 	t.Helper()
@@ -86,7 +86,7 @@ func releaseTestServer(t *testing.T, status int, body string) (*httptest.Server,
 		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, ProductName+"/") {
 			t.Errorf("User-Agent = %q, want a %s/ prefix", got, ProductName)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/atom+xml")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -94,20 +94,32 @@ func releaseTestServer(t *testing.T, status int, body string) (*httptest.Server,
 	return server, &hits
 }
 
+// atomFeed builds the subset of the GitHub releases feed the checker reads.
+// Keeping the entries as strings lets a test make an empty feed just as easily
+// as one with a release.
+func atomFeed(entries ...string) string {
+	return `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">` +
+		strings.Join(entries, "") + `</feed>`
+}
+
+func atomEntry(tag, title, updated, contentHTML string) string {
+	return `<entry><updated>` + updated + `</updated>` +
+		`<link rel="alternate" type="text/html" href="https://example.test/releases/tag/` + tag + `"/>` +
+		`<title>` + title + `</title><content type="html">` + contentHTML + `</content></entry>`
+}
+
 func TestCheckLatestReleaseReportsAnAvailableUpdate(t *testing.T) {
 	t.Parallel()
 
-	server, hits := releaseTestServer(t, http.StatusOK, `{
-		"tag_name": "v3.4.0",
-		"name": "Trajecta 3.4.0",
-		"html_url": "https://example.test/releases/v3.4.0",
-		"body": "### Added\n- something",
-		"published_at": "2026-10-01T00:00:00Z"
-	}`)
+	server, hits := releaseTestServer(t, http.StatusOK, atomFeed(atomEntry(
+		"v3.4.0",
+		"Trajecta 3.4.0",
+		"2026-10-01T00:00:00Z",
+		"&lt;h3&gt;Added&lt;/h3&gt;&lt;p&gt;something like vector&lt;int&gt;&lt;/p&gt;",
+	)))
 	options := AboutOptions{
-		Build:               BuildInfo{Name: ProductName, Version: "v3.3.1-2-g4e766d6", Commit: "4e766d6"},
-		UpdateCheckEnabled:  true,
-		UpdateCheckEndpoint: server.URL,
+		Build:              BuildInfo{Name: ProductName, Version: "v3.3.1-2-g4e766d6", Commit: "4e766d6"},
+		UpdateCheckEnabled: true,
 	}
 	checker := newReleaseChecker(server.URL, options.Build)
 
@@ -118,22 +130,27 @@ func TestCheckLatestReleaseReportsAnAvailableUpdate(t *testing.T) {
 	if got.LatestVersion != "v3.4.0" || got.CurrentVersion != "v3.3.1-2-g4e766d6" {
 		t.Fatalf("latest/current = %q/%q", got.LatestVersion, got.CurrentVersion)
 	}
+	if got.LatestName != "Trajecta 3.4.0" {
+		t.Fatalf("latest_name = %q, want the feed title", got.LatestName)
+	}
 	if got.BaseVersion != "v3.3.1" || got.CommitsSinceTag != 2 {
 		t.Fatalf("base/commits = %q/%d, want v3.3.1/2", got.BaseVersion, got.CommitsSinceTag)
 	}
 	if got.PublishedAt == nil || !got.PublishedAt.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("published_at = %v, want 2026-10-01T00:00:00Z", got.PublishedAt)
 	}
-	if !strings.Contains(got.Notes, "### Added") {
-		t.Fatalf("notes = %q, want the release body", got.Notes)
+	if !strings.Contains(got.Notes, "Added") || !strings.Contains(got.Notes, "something like vector<int>") {
+		t.Fatalf("notes = %q, want the release body as text", got.Notes)
+	}
+	if strings.Contains(got.Notes, "<h3>") {
+		t.Fatalf("notes = %q, want the HTML tags stripped", got.Notes)
 	}
 	if got.Cached {
 		t.Fatal("cached = true on the first lookup")
 	}
 
-	// The second lookup is served from the cache: GitHub answers an
-	// unauthenticated caller from a shared per-IP quota, so a page that several
-	// operators open may only spend one request.
+	// The second lookup is served from the cache so several operators opening
+	// the page do not each ask GitHub.
 	again := checkLatestRelease(context.Background(), options, checker)
 	if !again.Cached {
 		t.Fatal("cached = false on the second lookup")
@@ -156,8 +173,8 @@ func TestCheckLatestReleaseReportsTheRunningBuildAsNewest(t *testing.T) {
 		{name: "commits past the tag", version: "v3.3.1-2-g4e766d6"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server, _ := releaseTestServer(t, http.StatusOK, `{"tag_name": "v3.3.1"}`)
-			options := AboutOptions{Build: BuildInfo{Version: tc.version}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+			server, _ := releaseTestServer(t, http.StatusOK, atomFeed(atomEntry("v3.3.1", "v3.3.1", "2026-09-01T00:00:00Z", "")))
+			options := AboutOptions{Build: BuildInfo{Version: tc.version}, UpdateCheckEnabled: true}
 			got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
 			if got.Status != releaseStatusUpToDate {
 				t.Fatalf("status = %q, want %q (error=%q)", got.Status, releaseStatusUpToDate, got.Error)
@@ -174,8 +191,8 @@ func TestCheckLatestReleaseReportsTheRunningBuildAsNewest(t *testing.T) {
 func TestCheckLatestReleaseStaysUnknownForADevBuild(t *testing.T) {
 	t.Parallel()
 
-	server, _ := releaseTestServer(t, http.StatusOK, `{"tag_name": "v9.9.9"}`)
-	options := AboutOptions{Build: BuildInfo{Version: "dev"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	server, _ := releaseTestServer(t, http.StatusOK, atomFeed(atomEntry("v9.9.9", "v9.9.9", "2026-09-01T00:00:00Z", "")))
+	options := AboutOptions{Build: BuildInfo{Version: "dev"}, UpdateCheckEnabled: true}
 	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
 	if got.Status != releaseStatusUnknown {
 		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnknown)
@@ -197,15 +214,15 @@ func TestCheckLatestReleaseReportsAFailedLookupWithoutCachingIt(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true}
 	checker := newReleaseChecker(server.URL, options.Build)
 	for i := 0; i < 2; i++ {
 		got := checkLatestRelease(context.Background(), options, checker)
 		if got.Status != releaseStatusUnavailable {
 			t.Fatalf("attempt %d: status = %q, want %q", i, got.Status, releaseStatusUnavailable)
 		}
-		if !strings.Contains(got.Error, "403") {
-			t.Fatalf("attempt %d: error = %q, want it to carry the status code", i, got.Error)
+		if !strings.Contains(got.Error, "403") || !strings.Contains(got.Error, "limiting") {
+			t.Fatalf("attempt %d: error = %q, want a readable rate-limit message with the status code", i, got.Error)
 		}
 	}
 	if got := atomic.LoadInt32(&hits); got != 2 {
@@ -225,42 +242,56 @@ func TestCheckLatestReleaseExplainsARateLimitedEndpoint(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true}
 	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
 	if got.Status != releaseStatusUnavailable {
 		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnavailable)
 	}
-	if !strings.Contains(got.Error, "rate limited (HTTP 403)") {
-		t.Fatalf("error = %q, want it to name the rate limit", got.Error)
+	if !strings.Contains(got.Error, "limiting release checks from this network (HTTP 403)") {
+		t.Fatalf("error = %q, want it to explain the rate limit", got.Error)
 	}
 	if !strings.Contains(got.Error, reset.Format(time.RFC3339)) {
-		t.Fatalf("error = %q, want it to say when the quota resets", got.Error)
+		t.Fatalf("error = %q, want it to say when the limit resets", got.Error)
 	}
-	// The API's body is noise for the reader and can be long; the actionable
+	// The response body is noise for the reader and can be long; the actionable
 	// message replaces it rather than truncating it.
 	if strings.Contains(got.Error, "18.143.38.22") || strings.Contains(got.Error, "documentation_url") {
 		t.Fatalf("error = %q, want the response body omitted", got.Error)
 	}
 }
 
-func TestCheckLatestReleaseExplainsAMissingRelease(t *testing.T) {
+func TestCheckLatestReleaseReportsAnEmptyFeedAsNoRelease(t *testing.T) {
+	t.Parallel()
+
+	server, _ := releaseTestServer(t, http.StatusOK, atomFeed())
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true}
+	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
+	if got.Status != releaseStatusNoRelease {
+		t.Fatalf("status = %q, want %q", got.Status, releaseStatusNoRelease)
+	}
+	if !strings.Contains(got.Error, "has not published a GitHub release") {
+		t.Fatalf("error = %q, want it to explain that the feed is empty", got.Error)
+	}
+}
+
+func TestCheckLatestReleaseExplainsAMissingFeed(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`))
+		_, _ = w.Write([]byte(`<html>not found</html>`))
 	}))
 	t.Cleanup(server.Close)
 
-	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true, UpdateCheckEndpoint: server.URL}
+	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true}
 	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
 	if got.Status != releaseStatusUnavailable {
 		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnavailable)
 	}
-	if !strings.Contains(got.Error, "no published release") {
-		t.Fatalf("error = %q, want it to explain the 404", got.Error)
+	if !strings.Contains(got.Error, "could not find the project's release feed") {
+		t.Fatalf("error = %q, want it to explain the missing feed", got.Error)
 	}
-	if strings.Contains(got.Error, "documentation_url") {
+	if strings.Contains(got.Error, "<html>") {
 		t.Fatalf("error = %q, want the response body omitted", got.Error)
 	}
 }
@@ -268,11 +299,10 @@ func TestCheckLatestReleaseExplainsAMissingRelease(t *testing.T) {
 func TestCheckLatestReleaseHonoursTheSwitch(t *testing.T) {
 	t.Parallel()
 
-	server, hits := releaseTestServer(t, http.StatusOK, `{"tag_name": "v9.9.9"}`)
+	server, hits := releaseTestServer(t, http.StatusOK, atomFeed(atomEntry("v9.9.9", "v9.9.9", "2026-09-01T00:00:00Z", "")))
 	options := AboutOptions{
-		Build:               BuildInfo{Version: "v3.3.1"},
-		UpdateCheckEnabled:  false,
-		UpdateCheckEndpoint: server.URL,
+		Build:              BuildInfo{Version: "v3.3.1"},
+		UpdateCheckEnabled: false,
 	}
 	got := checkLatestRelease(context.Background(), options, newReleaseChecker(server.URL, options.Build))
 	if got.Status != releaseStatusDisabled {
@@ -283,13 +313,16 @@ func TestCheckLatestReleaseHonoursTheSwitch(t *testing.T) {
 	}
 }
 
-func TestCheckLatestReleaseWithoutAnEndpoint(t *testing.T) {
+func TestCheckLatestReleaseWithoutAChecker(t *testing.T) {
 	t.Parallel()
 
 	options := AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true}
-	got := checkLatestRelease(context.Background(), options, newReleaseChecker("", options.Build))
+	got := checkLatestRelease(context.Background(), options, nil)
 	if got.Status != releaseStatusUnavailable {
 		t.Fatalf("status = %q, want %q", got.Status, releaseStatusUnavailable)
+	}
+	if !strings.Contains(got.Error, "not available") {
+		t.Fatalf("error = %q, want it to explain the missing checker", got.Error)
 	}
 }
 
@@ -328,10 +361,9 @@ func TestAboutAPIIsReadableByAnySignedInRole(t *testing.T) {
 		MonitorAuthVerifier: manager,
 		MonitorJWT:          manager,
 		About: AboutOptions{
-			Build:               BuildInfo{Name: ProductName, Version: "v3.3.1-2-g4e766d6", Commit: "4e766d6", Date: "2026-10-16T00:00:00Z", Branch: "main"},
-			UpdateCheckEnabled:  true,
-			UpdateCheckEndpoint: "https://api.github.com/repos/kingfs/Trajecta/releases/latest",
-			Telemetry:           TelemetryOptions{Enabled: true, Provider: "custom", Endpoint: "https://collector.test/ping", PathPrefix: "/trajecta/install", IntervalSeconds: 86400},
+			Build:              BuildInfo{Name: ProductName, Version: "v3.3.1-2-g4e766d6", Commit: "4e766d6", Date: "2026-10-16T00:00:00Z", Branch: "main"},
+			UpdateCheckEnabled: true,
+			Telemetry:          TelemetryOptions{Enabled: true, Provider: "custom", Endpoint: "https://collector.test/ping", PathPrefix: "/trajecta/install", IntervalSeconds: 86400},
 		},
 	})
 
@@ -375,16 +407,16 @@ func TestAboutAPIIsReadableByAnySignedInRole(t *testing.T) {
 	}
 }
 
-// The button is hidden when there is nothing for it to call, so the page cannot
-// offer a control that always answers "unavailable".
-func TestAboutReportsUpdateCheckDisabledWithoutAnEndpoint(t *testing.T) {
+// The switch is the only thing that decides whether the page draws the button;
+// the release feed URL is a project constant.
+func TestAboutReportsTheUpdateCheckSwitch(t *testing.T) {
 	t.Parallel()
 
 	payload := buildAbout(AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: true})
-	if payload.UpdateCheckEnabled {
-		t.Fatal("update_check_enabled = true without an endpoint")
+	if !payload.UpdateCheckEnabled {
+		t.Fatal("update_check_enabled = false while the switch is on")
 	}
-	payload = buildAbout(AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: false, UpdateCheckEndpoint: "https://example.test"})
+	payload = buildAbout(AboutOptions{Build: BuildInfo{Version: "v3.3.1"}, UpdateCheckEnabled: false})
 	if payload.UpdateCheckEnabled {
 		t.Fatal("update_check_enabled = true while the switch is off")
 	}

@@ -406,13 +406,10 @@ type RouteOptions struct {
 type AboutOptions struct {
 	Build BuildInfo
 	// UpdateCheckEnabled turns the release lookup off for a deployment that
-	// cannot reach the endpoint. The check only ever runs when a person presses
-	// the button, so this default is about air gaps, not about privacy.
+	// cannot reach GitHub. The check only ever runs when a person presses the
+	// button, so this default is about air gaps, not about privacy. The
+	// release feed URL itself is a project constant.
 	UpdateCheckEnabled bool
-	// UpdateCheckEndpoint is the release JSON URL; an empty value disables the
-	// lookup as well, so a caller that fills in only `enabled` cannot end up
-	// requesting nothing.
-	UpdateCheckEndpoint string
 	// Telemetry is reported to the page verbatim. See TelemetryOptions.
 	Telemetry TelemetryOptions
 }
@@ -670,7 +667,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// deployment. The release lookup behind it is user-initiated and cached; see
 	// server_about_release.go.
 	mux.HandleFunc("/api/about", monitorAuthRequired(aboutAPIHandler(opt.About, &installIdentity{store: st}), monitorVerifier))
-	mux.HandleFunc("/api/version/latest", monitorAuthRequired(versionCheckAPIHandler(opt.About, newReleaseChecker(opt.About.UpdateCheckEndpoint, opt.About.Build)), monitorVerifier))
+	mux.HandleFunc("/api/version/latest", monitorAuthRequired(versionCheckAPIHandler(opt.About, newReleaseChecker(releaseFeedURL, opt.About.Build)), monitorVerifier))
 	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), monitorVerifier))
