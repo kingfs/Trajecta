@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.3.2] - 2026-10-20
+
 ### Added
 - An 关于 (`/about`) page, reachable from every page through a new footer row in the rail that shows the running version and links to the repository. It reports the build (version, base tag, commits past the tag, commit, branch, build date, Go version, platform, license) and links out to the repository, the releases, the issues and the documentation; all of it comes from one `GET /api/about`, so the rail, the header button and the page cannot disagree about which build is running. The route is readable by any signed-in role - it reports the build, not the machine - and it is loaded as its own chunk, because it is the only route that is not on the way to anything else. (`GET /api/about` also returns the `install_id` described below, and omits it when the database cannot supply one.)
 - A 检查新版本 button on that page, backed by `GET /api/version/latest`. Nothing is requested until it is pressed: there is no polling on the page and no outbound request at startup. `update_check.enabled` (default true) and `update_check.endpoint` (default the project's GitHub `releases/latest`) configure it, `TRAJECTA_UPDATE_CHECK_ENABLED` and `TRAJECTA_UPDATE_CHECK_ENDPOINT` override them, and the button is not drawn at all when there is no endpoint, so it can never be a control that answers "unavailable" every time. The endpoint always answers HTTP 200 with a `status` of `update_available`, `up_to_date`, `unknown`, `unavailable` or `disabled`, mirroring `/api/system/db`; a successful lookup is cached for ten minutes and a failed one is never cached, so a collector that was briefly down does not keep answering from a stale failure. A build with commits past its tag is ahead of the newest release rather than behind it, so `latest <= current` reports `up_to_date` and says how far ahead the build is.
@@ -785,7 +787,8 @@ READMEs were rewritten as project landing pages.
 [3.0.0]: https://github.com/kingfs/Trajecta/compare/v2.2.0...v3.0.0
 [3.0.1]: https://github.com/kingfs/Trajecta/compare/v3.0.0...v3.0.1
 [3.1.0]: https://github.com/kingfs/Trajecta/compare/v3.0.1...v3.1.0
-[Unreleased]: https://github.com/kingfs/Trajecta/compare/v3.3.1...HEAD
+[Unreleased]: https://github.com/kingfs/Trajecta/compare/v3.3.2...HEAD
+[3.3.2]: https://github.com/kingfs/Trajecta/compare/v3.3.1...v3.3.2
 [3.3.1]: https://github.com/kingfs/Trajecta/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/kingfs/Trajecta/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/kingfs/Trajecta/compare/v3.1.0...v3.2.0
