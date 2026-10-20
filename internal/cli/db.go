@@ -1,13 +1,13 @@
-package main
+package cli
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -43,14 +43,14 @@ type dbSummaryRebuildOptions struct {
 
 const appDBMigrateDownUnsupportedMessage = "db migrate down is unsupported for the production Postgres migration contract; restore from backup or use a reviewed manual migration plan"
 
-func newDBCommand(runtime *cliRuntime) *cobra.Command {
+func newDBCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "db",
 		Short:         "Manage application database migrations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	migrateCmd := &cobra.Command{
@@ -59,7 +59,7 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
@@ -72,14 +72,14 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSummaryCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSummaryCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "summary",
 		Short:         "Maintain derived summary tables",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	rebuildCmd := &cobra.Command{
@@ -88,7 +88,7 @@ func newDBSummaryCommand(runtime *cliRuntime) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	rebuildCmd.AddCommand(newDBSummaryRebuildSessionsCommand(runtime))
@@ -96,7 +96,7 @@ func newDBSummaryCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSummaryRebuildSessionsCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSummaryRebuildSessionsCommand(runtime *Runtime) *cobra.Command {
 	var dryRun bool
 	var sessionID string
 	cmd := &cobra.Command{
@@ -104,12 +104,12 @@ func newDBSummaryRebuildSessionsCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Rebuild session_summaries from logs",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runDBSummaryRebuildSessionsWithOptions(dbSummaryRebuildOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					sessionID:  sessionID,
 					dryRun:     dryRun,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -120,7 +120,7 @@ func newDBSummaryRebuildSessionsCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, short string) *cobra.Command {
+func newAppDBMigrateDirectionCommand(runtime *Runtime, direction string, short string) *cobra.Command {
 	var steps int
 	var all bool
 	var dryRun bool
@@ -130,12 +130,12 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := appDBMigrateOptions{
-				configPath: runtime.configPath(),
+				configPath: runtime.ConfigPath(),
 				direction:  direction,
 				steps:      steps,
 				all:        all,
 				dryRun:     dryRun,
-				format:     runtime.outputFormat(),
+				format:     runtime.OutputFormat(),
 				stdout:     cmd.OutOrStdout(),
 			}
 			code := runAppDBMigrateWithOptions(opts)
@@ -143,15 +143,15 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 				return nil
 			}
 			if direction == "down" && !dryRun {
-				return cliExitError{
-					code:     exitCodeUsage,
-					category: errorCategoryUsage,
+				return ExitError{
+					code:     ExitCodeUsage,
+					category: ErrorCategoryUsage,
 					errCode:  "UNSUPPORTED_DB_MIGRATE_DOWN",
 					message:  appDBMigrateDownUnsupportedMessage,
 					field:    "direction",
 				}
 			}
-			return cliExitErrorFromCode(code)
+			return ExitErrorFromCode(code)
 		},
 	}
 	cmd.Flags().IntVar(&steps, "step", 0, "Apply only N migration steps")
@@ -162,7 +162,7 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 	return cmd
 }
 
-func newAppDBMigrateOptimizeIndexesCommand(runtime *cliRuntime) *cobra.Command {
+func newAppDBMigrateOptimizeIndexesCommand(runtime *Runtime) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "optimize-indexes",
@@ -170,36 +170,36 @@ func newAppDBMigrateOptimizeIndexesCommand(runtime *cliRuntime) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := appDBMigrateOptions{
-				configPath: runtime.configPath(),
+				configPath: runtime.ConfigPath(),
 				direction:  "optimize-indexes",
 				dryRun:     dryRun,
-				format:     runtime.outputFormat(),
+				format:     runtime.OutputFormat(),
 				stdout:     cmd.OutOrStdout(),
 			}
 			code := runAppDBMigrateWithOptions(opts)
 			if code == 0 {
 				return nil
 			}
-			return cliExitErrorFromCode(code)
+			return ExitErrorFromCode(code)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview index optimizations without changing the database")
 	return cmd
 }
 
-func newAppDBMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
+func newAppDBMigrateStatusCommand(runtime *Runtime) *cobra.Command {
 	var checkDB bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show application database migration status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runAppDBMigrateWithOptions(appDBMigrateOptions{
-					configPath: runtime.configPath(),
+					configPath: runtime.ConfigPath(),
 					direction:  "status",
 					checkDB:    checkDB,
-					format:     runtime.outputFormat(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -209,14 +209,14 @@ func newAppDBMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSecretCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSecretCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "secret",
 		Short:         "Inspect and back up local channel secret encryption keys",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newDBSecretStatusCommand(runtime))
@@ -225,16 +225,16 @@ func newDBSecretCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSecretStatusCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSecretStatusCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show local channel secret encryption key status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runDBSecretStatusWithOptions(dbSecretOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -243,17 +243,17 @@ func newDBSecretStatusCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSecretExportCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSecretExportCommand(runtime *Runtime) *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "Export the local channel secret encryption key for backup",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runDBSecretExportWithOptions(dbSecretOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 					outPath:    outPath,
 				})
@@ -264,17 +264,17 @@ func newDBSecretExportCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func newDBSecretRotateCommand(runtime *cliRuntime) *cobra.Command {
+func newDBSecretRotateCommand(runtime *Runtime) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "rotate",
 		Short: "Rotate the local channel secret encryption key and re-encrypt channel secrets",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runDBSecretRotateWithOptions(dbSecretOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 					yes:        yes,
 				})
@@ -308,7 +308,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 	}
 	switch opts.direction {
 	case "status":
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.status", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.status", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "application database migration status\n")
 			writeAppDBMigrationReportText(w, result)
 			return nil
@@ -318,12 +318,12 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		}
 		return 0
 	case "up":
-		if err := migrateApplicationDatabaseUp(cfg, opts.steps); err != nil {
+		if err := appdb.MigrateUp(cfg, opts.steps); err != nil {
 			slog.Error("Application database migration failed", "error", err)
 			return 1
 		}
 		result["mutated"] = true
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.up", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.up", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "application database schema migration applied\n")
 			writeAppDBMigrationReportText(w, result)
 			return nil
@@ -333,7 +333,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		}
 		return 0
 	case "optimize-indexes":
-		optimization, err := optimizeApplicationDatabaseIndexes(cfg)
+		optimization, err := appdb.OptimizeIndexes(cfg)
 		if err != nil {
 			slog.Error("Application database index optimization failed", "error", err)
 			return 1
@@ -341,7 +341,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		result["mutated"] = optimization.Applied
 		result["index_optimization_applied"] = optimization.Applied
 		result["index_optimization_statement_count"] = len(optimization.Statements)
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.optimize-indexes", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.optimize-indexes", result, func(w io.Writer) error {
 			if optimization.Applied {
 				fmt.Fprintf(w, "application database index optimizations applied\n")
 			} else {
@@ -356,7 +356,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		return 0
 	case "down":
 		// The caller (RunE) turns a non-zero code plus direction=down into a
-		// cliExitError carrying this message; printing here duplicated the line
+		// ExitError carrying this message; printing here duplicated the line
 		// in text mode and prepended bare text to the JSON envelope.
 		return 2
 	default:
@@ -369,13 +369,13 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 	source := "sqlite-startup-schema-fallback"
 	sourcePath := "internal/store raw DDL startup initialization"
 	versioned := false
-	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	driver := appdb.NormalizeDriver(cfg.DatabaseDriver())
 	productionReady := false
 	storageRole := appdbmigrate.SQLiteStorageRole
 	storageContract := appdbmigrate.SQLiteStorageContract
 	migrationAuthority := "internal/store raw DDL startup initialization"
 	schemaStrategy := appdbmigrate.SQLiteSchemaStrategy
-	if appDBMigrationMode(driver) == "versioned-sql" {
+	if appdb.MigrationMode(driver) == "versioned-sql" {
 		source = "postgres-checked-in-sql"
 		sourcePath = "ent/postgres-migrations"
 		versioned = true
@@ -394,7 +394,7 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 		"steps":                     steps,
 		"all":                       all,
 		"database_namespace":        "application",
-		"migration_mode":            appDBMigrationMode(cfg.DatabaseDriver()),
+		"migration_mode":            appdb.MigrationMode(cfg.DatabaseDriver()),
 		"migration_source":          source,
 		"migration_source_path":     sourcePath,
 		"migration_authority":       migrationAuthority,
@@ -538,65 +538,6 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "auth_migration_scope: %s (%s)\n", result["auth_migration_scope"], result["auth_migration_command"])
 }
 
-func migrateApplicationDatabaseUp(cfg *config.Config, steps int) error {
-	if appDBMigrationMode(cfg.DatabaseDriver()) == "versioned-sql" {
-		return appdbmigrate.MigrateUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), steps)
-	}
-	st, err := initializeApplicationDatabase(cfg)
-	if err != nil {
-		return err
-	}
-	return st.Close()
-}
-
-func optimizeApplicationDatabaseIndexes(cfg *config.Config) (appdbmigrate.IndexOptimizationResult, error) {
-	if appDBMigrationMode(cfg.DatabaseDriver()) != "versioned-sql" {
-		return appdbmigrate.IndexOptimizationResult{
-			Driver:  normalizeAuthStoreDriver(cfg.DatabaseDriver()),
-			Applied: false,
-		}, nil
-	}
-	return appdbmigrate.OptimizeIndexes(context.Background(), cfg.DatabaseDriver(), cfg.DatabaseDSN())
-}
-
-func appDBMigrationMode(driver string) string {
-	switch normalizeAuthStoreDriver(driver) {
-	case "postgres":
-		return "versioned-sql"
-	default:
-		return "schema-init"
-	}
-}
-
-func openApplicationDatabase(cfg *config.Config) (*store.Store, error) {
-	if cfg.DatabaseAutoMigrate() {
-		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
-			return nil, err
-		}
-	}
-	return store.NewWithDatabaseOptions(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-		store.DatabaseOptions{
-			AutoMigrate:           false,
-			UseSessionSummaryRead: cfg.DatabaseUseSessionSummaryRead(),
-		},
-	)
-}
-
-func initializeApplicationDatabase(cfg *config.Config) (*store.Store, error) {
-	return store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
-}
-
 func runDBSummaryRebuildSessionsWithOptions(opts dbSummaryRebuildOptions) int {
 	st, closeStore, code := openTraceStoreForCommand(opts.configPath)
 	if code != 0 {
@@ -646,7 +587,7 @@ func runDBSummaryRebuildSessionsWithOptions(opts dbSummaryRebuildOptions) int {
 		result["rebuilt_all"] = true
 	}
 	result["mutated"] = true
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.summary.rebuild.sessions", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.summary.rebuild.sessions", result, func(w io.Writer) error {
 		fmt.Fprintf(w, "session summaries rebuilt\n")
 		writeDBSummaryRebuildSessionsText(w, result)
 		return nil
@@ -674,7 +615,7 @@ func runDBSecretStatusWithOptions(opts dbSecretOptions) int {
 	}
 	defer closeStore()
 	status := st.SecretStatus()
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.status", status, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.status", status, func(w io.Writer) error {
 		fmt.Fprintf(w, "mode: %s\n", status.Mode)
 		fmt.Fprintf(w, "key_path: %s\n", status.KeyPath)
 		fmt.Fprintf(w, "exists: %t\n", status.Exists)
@@ -740,7 +681,7 @@ func runDBSecretExportWithOptions(opts dbSecretOptions) int {
 			"key_path":    status.KeyPath,
 			"fingerprint": status.Fingerprint,
 		}
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.export", result, func(w io.Writer) error {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.export", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "exported local secret key to %s\n", opts.outPath)
 			fmt.Fprintf(w, "fingerprint: %s\n", status.Fingerprint)
 			return nil
@@ -757,7 +698,7 @@ func runDBSecretExportWithOptions(opts dbSecretOptions) int {
 			"fingerprint": status.Fingerprint,
 			"key":         strings.TrimSpace(string(key)),
 		}
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.export", result, nil); err != nil {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.export", result, nil); err != nil {
 			slog.Error("Write db secret export result failed", "error", err)
 			return 1
 		}
@@ -785,7 +726,7 @@ func runDBSecretRotateWithOptions(opts dbSecretOptions) int {
 		slog.Error("Rotate local secret key failed", "error", err)
 		return 1
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.rotate", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.rotate", result, func(w io.Writer) error {
 		fmt.Fprintf(w, "rotated local secret key\n")
 		fmt.Fprintf(w, "key_path: %s\n", result.KeyPath)
 		fmt.Fprintf(w, "backup_path: %s\n", result.BackupPath)
@@ -808,7 +749,7 @@ func openTraceStoreForCommand(configPath string) (*store.Store, func(), int) {
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return nil, func() {}, 1
 	}
-	st, err := openApplicationDatabase(cfg)
+	st, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Open trace store failed", "error", err)
 		return nil, func() {}, 1

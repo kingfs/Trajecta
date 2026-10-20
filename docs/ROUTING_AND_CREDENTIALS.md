@@ -13,7 +13,7 @@
   此后数据库拥有路由配置，即使所有渠道都被禁用或删除。
 - `GET /api/settings/channels` 返回 `{"initialized": <bool>}`；`DELETE /api/settings/channels` 在 `ConfigurationTransaction` 内清除该标记。
   仅当数据库仍然没有任何渠道时，下一次启动才会重新执行 YAML bootstrap。
-- 带显式 `credentials` 列表的 YAML 渠道保持 YAML 管理：`cmd/server` 检测到显式 credentials 时以 `WithReadOnly(true)` 构造 channel service，所有 Monitor 渠道/模型/别名写路径返回 `409` 与 `upstreams are managed by YAML credentials; edit YAML and restart instead`。
+- 带显式 `credentials` 列表的 YAML 渠道保持 YAML 管理：`cmd/server/serve.go` 检测到显式 credentials 时以 `WithReadOnly(true)` 构造 channel service，所有 Monitor 渠道/模型/别名写路径返回 `409` 与 `upstreams are managed by YAML credentials; edit YAML and restart instead`。
   `BootstrapFromConfig` 也会跳过含显式 credentials 的配置，不把其导入数据库。
 - 环境变量只用于启动与本地部署覆盖，不是长期的渠道/模型管理面。
 
@@ -133,12 +133,12 @@ Provider 与探测：
 
 ## 凭据与隐式 default credential
 
-- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、`api_key` 覆盖与 route target 身份。`credentials[].headers` 目前只被 CLI `server provider probe` 读取，router/proxy 不合并它。
+- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、`api_key` 覆盖与 route target 身份。`credentials[].headers` 目前只被 CLI `trajecta provider probe` 读取，router/proxy 不合并它。
 - 配置了显式 `credentials` 时，每个 credential 展开成一个独立 route target（`<channel_id>:<credential_id>`）；credential 的 `api_key` 覆盖 target 的 resolved key，`credential_id` 缺省由 `name` 生成 slug，再缺省为 `credential-N`。
 - 没有显式 `credentials` 且 `upstream.api_key` 非空时，该 inline key 被视为隐式 credential：`credential_id = default`、`route_target_id = <channel_id>:default`。
 - 没有显式 credentials 也没有 inline key 时，渠道仍会产生一个 route target，其 credential id 为 `default`。
 - `api_key` 应引用环境变量（例如 `$env:OPENAI_PRIMARY_API_KEY`），`id` 要稳定，因为它进入 route target identity 并可能出现在 cassette metadata 中。
-- `credentials[].enabled: false` 表示该 credential 不参与路由：router 在展开 route target 时跳过它（与 CLI `server provider probe` 选探测凭据时的规则一致）。若某个渠道声明的 credentials 全部被禁用，该渠道不产生任何 route target，`New()` 会以 `no enabled upstream targets configured` 失败，而**不会**回退到渠道级 `upstream.api_key`——否则被关掉的 key 会继续发流量。跳过的 credential 不会改变其余 credential 的索引，因此由索引生成的 `credential-N` 与 route target ID 保持稳定。
+- `credentials[].enabled: false` 表示该 credential 不参与路由：router 在展开 route target 时跳过它（与 CLI `trajecta provider probe` 选探测凭据时的规则一致）。若某个渠道声明的 credentials 全部被禁用，该渠道不产生任何 route target，`New()` 会以 `no enabled upstream targets configured` 失败，而**不会**回退到渠道级 `upstream.api_key`——否则被关掉的 key 会继续发流量。跳过的 credential 不会改变其余 credential 的索引，因此由索引生成的 `credential-N` 与 route target ID 保持稳定。
 - `credentials[].concurrency_limit` 目前只是配置字段，没有运行时消费者；实际并发限制由下方 limit scope 统一处理。
 
 ## Limit 与 scope
@@ -166,7 +166,7 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 - 渠道 API 返回值中的 `headers` 会对敏感 header 名（如 `Authorization`、`api-key`、`token` 类）掩码为 `***`；写路径接受 `{ "keep": true }` 表示保留原值，避免 UI 回传掩码覆盖真实密钥。
 - 渠道 API 始终不返回明文 API key，只返回 `api_key_hint` 与 `secret_storage_mode`；`base_url` 按配置原样返回，路由事件里的候选 base URL 才会做 URL 脱敏。
 - 本地 secret：API key 与敏感 header 以 `tlsec:v1:` envelope 保存，主密钥文件是 `{{output_dir}}/trace_index.secret`（权限 `0600`，本地 AES-GCM）；历史明文保持可读，下次写入时转为加密 envelope。
-- 运维入口：`server db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）；Monitor 侧对应 `/api/secrets/local-key` 的状态、导出与轮换。
+- 运维入口：`trajecta db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）；Monitor 侧对应 `/api/secrets/local-key` 的状态、导出与轮换。
 - 没有加密能力时 `secret_storage_mode` 为 `plaintext-local`，UI 据此提示本地风险。
 
 ## Monitor 与 MCP 的管理入口
@@ -181,7 +181,7 @@ MCP 侧提供查询工具与受控重分析动作工具，但没有渠道/模型
 - `query_failures`、`summarize_failure_clusters`：失败 trace 与失败聚类。
 - `reanalyze_trace`、`reanalyze_session`：对单条 trace / 单个 session 运行或入队受控重分析（动作工具，不是只读查询）。
 
-CLI 侧的管理入口包括 `server provider probe` / `probe-report` / `probe-apply`、`models codex-config`、`db secret status/export/rotate`。
+CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe-apply`、`models codex-config`、`db secret status/export/rotate`。
 
 ## Replay 兼容性
 

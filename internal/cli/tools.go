@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -80,30 +80,30 @@ type toolsStatusMCPServer struct {
 	Enabled               bool     `json:"enabled"`
 }
 
-func newToolsCommand(runtime *cliRuntime) *cobra.Command {
+func newToolsCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "tools",
 		Short:         "Inspect hosted tool readiness",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newToolsStatusCommand(runtime))
 	return cmd
 }
 
-func newToolsStatusCommand(runtime *cliRuntime) *cobra.Command {
+func newToolsStatusCommand(runtime *Runtime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Print offline hosted tool readiness for integration tests",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runToolsStatusWithOptions(toolsStatusOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -118,7 +118,7 @@ func runToolsStatusWithOptions(opts toolsStatusOptions) int {
 		return 1
 	}
 	result := buildToolsStatusResult(opts.configPath, cfg)
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "tools.status", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "tools.status", result, func(w io.Writer) error {
 		writeToolsStatusText(w, result)
 		return nil
 	}); err != nil {

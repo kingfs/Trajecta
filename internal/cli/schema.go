@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -26,8 +26,8 @@ type cliSchemaContracts struct {
 }
 
 type cliErrorEnvelope struct {
-	OK    bool     `json:"ok"`
-	Error cliError `json:"error"`
+	OK    bool        `json:"ok"`
+	Error ErrorDetail `json:"error"`
 }
 
 type cliCommandSchema struct {
@@ -49,7 +49,7 @@ type cliFlagSchema struct {
 	Values    []string `json:"values,omitempty"`
 }
 
-func newSchemaCommand(runtime *cliRuntime, root *cobra.Command) *cobra.Command {
+func newSchemaCommand(runtime *Runtime, root *cobra.Command) *cobra.Command {
 	return &cobra.Command{
 		Use:   "schema [command...]",
 		Short: "Print machine-readable CLI schema for agents and automation",
@@ -63,8 +63,8 @@ func newSchemaCommand(runtime *cliRuntime, root *cobra.Command) *cobra.Command {
 					return err
 				}
 			}
-			schema := buildCLISchema(root, target)
-			return writeCLIResult(cmd.OutOrStdout(), runtime.outputFormat(), "schema", schema, func(w io.Writer) error {
+			schema := buildCLISchema(runtime, root, target)
+			return WriteResult(cmd.OutOrStdout(), runtime.OutputFormat(), "schema", schema, func(w io.Writer) error {
 				for _, item := range schema.Commands {
 					if _, err := fmt.Fprintf(w, "%s\t%s\n", item.Path, item.Short); err != nil {
 						return err
@@ -86,9 +86,9 @@ func findCommandByPath(root *cobra.Command, path string) (*cobra.Command, error)
 	}
 	target, _, err := root.Find(parts)
 	if err != nil || target == nil {
-		return nil, cliExitError{
-			code:     exitCodeUsage,
-			category: errorCategoryUsage,
+		return nil, ExitError{
+			code:     ExitCodeUsage,
+			category: ErrorCategoryUsage,
 			errCode:  "UNKNOWN_COMMAND",
 			message:  fmt.Sprintf("unknown command %q", path),
 			field:    "command",
@@ -97,26 +97,26 @@ func findCommandByPath(root *cobra.Command, path string) (*cobra.Command, error)
 	return target, nil
 }
 
-func buildCLISchema(root *cobra.Command, target *cobra.Command) cliSchema {
+func buildCLISchema(runtime *Runtime, root *cobra.Command, target *cobra.Command) cliSchema {
 	return cliSchema{
-		Name:        cliName,
-		Version:     Version,
+		Name:        runtime.Name(),
+		Version:     runtime.Version(),
 		Description: root.Short,
 		Contracts: cliSchemaContracts{
 			Formats: []string{"text", "json"},
 			ExitCodes: map[string]int{
 				"success":             0,
-				"api_error":           exitCodeAPI,
-				"usage_or_validation": exitCodeUsage,
-				"internal_error":      exitCodeInternal,
+				"api_error":           ExitCodeAPI,
+				"usage_or_validation": ExitCodeUsage,
+				"internal_error":      ExitCodeInternal,
 			},
 			Stdout: "primary command result only",
 			Stderr: "logs, diagnostics, and structured error envelopes on failure",
 			ErrorEnvelope: cliErrorEnvelope{
 				OK: false,
-				Error: cliError{
+				Error: ErrorDetail{
 					Code:        "USAGE_ERROR",
-					Category:    errorCategoryUsage,
+					Category:    ErrorCategoryUsage,
 					Message:     "example error message",
 					Field:       "flag_or_argument",
 					Retryable:   false,

@@ -210,7 +210,8 @@ func TestChat(t *testing.T) {
 
 | 目录 | 职责 |
 | --- | --- |
-| `cmd/server` | CLI 入口与全部子命令（serve、db、auth、provider、models、audit、analyze、doctor…） |
+| `cmd/server` | 运行时二进制入口：`serve`（以及 `version`、`completion`） |
+| `cmd/trajecta`、`internal/cli` | 运维 CLI 与两个二进制共享的命令契约：upgrade、layout、db、auth、provider、models、audit、analyze、doctor… |
 | `internal/proxy` | 反向代理、协议入口归一化、流式响应拦截 |
 | `internal/recorder` | cassette 录制与落盘 |
 | `pkg/recordfile` | 录制格式解析与写入（V3 写入，V2 / 旧 magic 兼容读取） |

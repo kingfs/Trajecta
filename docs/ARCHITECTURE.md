@@ -23,7 +23,10 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 
 顶层目录与包职责：
 
-- `cmd/server`：CLI 入口与 `serve` 装配。`main.go` 只通过 `run` 退出，命令接线在 `root.go`；命令文件包括 `serve.go`、`migrate.go`、`db.go`、`config.go`、`doctor.go`、`provider.go`、`models.go`、`tools.go`、`audit.go`、`auth.go`、`analyze.go`、`version.go`、`schema.go`、`completion.go`。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配，`provider_startup_probe.go` 提供 provider probe 辅助。
+- `cmd/server`：服务端二进制入口与 `serve` 装配。`main.go` 只通过 `run` 退出，`root.go` 只接线 `serve`、`version`、`completion` 与 `--config`/`--format`——除 `serve` 外不再承载运维子命令。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配，`provider_startup_probe.go` 提供启动期 provider probe 辅助。
+- `cmd/trajecta`：运维 CLI 入口。除既有的 `upgrade`、`layout`、`version` 外，还通过 `internal/cli` 暴露全部不需要代理进程的运维命令组：`analyze`、`audit`、`auth`、`config`、`db`、`doctor`、`migrate`、`models`、`provider`、`schema`、`tools`。`root.go` 用 viper 绑定 `--config`/`--format` 后交给 `internal/cli.Register`。
+- `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`doctor.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
+- `internal/appdb`：按配置打开 application database 的共用入口——驱动规范化、迁移模式判定、`MigrateUp`/`OptimizeIndexes`、`Open`/`Initialize` 与 auth store 打开；serve 启动与 trajecta 的 `db`/`auth`/`audit`/`analyze` 都走这里。
 - `internal/proxy`：反向代理与 `/v1/responses` 入口，负责鉴权、转发、响应截获与协议感知透传调整。
 - `internal/recorder`：cassette 写入与 metadata finalization。
 - `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。

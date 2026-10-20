@@ -210,7 +210,8 @@ The complete preset list (25 registry keys, 20 distinct providers after alias de
 
 | Directory | Responsibility |
 | --- | --- |
-| `cmd/server` | CLI entry point and all subcommands (serve, db, auth, provider, models, audit, analyze, doctor…) |
+| `cmd/server` | Runtime binary entry point: `serve` (plus `version` and `completion`) |
+| `cmd/trajecta`, `internal/cli` | Operations CLI and the command contract both binaries share: upgrade, layout, db, auth, provider, models, audit, analyze, doctor… |
 | `internal/proxy` | Reverse proxy, protocol entry normalization, streaming interception |
 | `internal/recorder` | Cassette recording and persistence |
 | `pkg/recordfile` | Record format parsing and writing (writes V3, reads V2 and the legacy magic) |

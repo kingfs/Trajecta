@@ -14,7 +14,7 @@ Monitor 是 Trajecta 的本地 Web 工作台，由 `internal/monitor` 提供 API
 
 ```bash
 export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=disable'
-go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
+go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。

@@ -129,7 +129,7 @@ tasks:
   test:e2e:
     desc: Run local end-to-end tests without external network dependencies
     cmds:
-      - go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest
+      - go test ./internal/proxy ./internal/monitor ./cmd/server ./cmd/trajecta ./unittest
 
   atif:validate:
     desc: Validate ATIF-v1.8 JSONL with pinned Harbor models (install scripts/atif-requirements.txt first)
@@ -210,12 +210,12 @@ tasks:
   migrate:
     desc: Rewrite legacy V2 cassettes to V3 and rebuild SQLite index
     cmds:
-      - go run ./cmd/server migrate -c {{.CONFIG}}
+      - go run ./cmd/trajecta migrate -c {{.CONFIG}}
 
   migrate:db:up:
     desc: Apply application database migrations
     cmds:
-      - go run ./cmd/server db migrate up -c {{.CONFIG}}
+      - go run ./cmd/trajecta db migrate up -c {{.CONFIG}}
 
   migrate:legacy:
     desc: Inspect a pre-rename deployment; pass ARGS="--apply" to write changes
@@ -225,12 +225,12 @@ tasks:
   auth:init-user:
     desc: Initialize an auth user, pass USER and PASSWORD
     cmds:
-      - go run ./cmd/server auth init-user -c {{.CONFIG}} --username "{{.USER}}" --password "{{.PASSWORD}}"
+      - go run ./cmd/trajecta auth init-user -c {{.CONFIG}} --username "{{.USER}}" --password "{{.PASSWORD}}"
 
   auth:create-token:
     desc: Create an API token for a user, pass USER and NAME
     cmds:
-      - go run ./cmd/server auth create-token -c {{.CONFIG}} --username "{{.USER}}" --name "{{.NAME}}"
+      - go run ./cmd/trajecta auth create-token -c {{.CONFIG}} --username "{{.USER}}" --name "{{.NAME}}"
 
   run:
     desc: Start proxy and monitor with local config

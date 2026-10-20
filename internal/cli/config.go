@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	appconfig "github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/redaction"
@@ -223,30 +224,30 @@ type configInspectUpstreamsSourceSummary struct {
 	Credentials string `json:"credentials"`
 }
 
-func newConfigCommand(runtime *cliRuntime) *cobra.Command {
+func newConfigCommand(runtime *Runtime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "config",
 		Short:         "Inspect effective configuration",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return requireSubcommand(cmd)
+			return RequireSubcommand(cmd)
 		},
 	}
 	cmd.AddCommand(newConfigInspectCommand(runtime))
 	return cmd
 }
 
-func newConfigInspectCommand(runtime *cliRuntime) *cobra.Command {
+func newConfigInspectCommand(runtime *Runtime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "inspect",
 		Short: "Print a redacted effective configuration summary",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runConfigInspectWithOptions(configInspectOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
+					configPath: runtime.ConfigPath(),
+					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
@@ -261,7 +262,7 @@ func runConfigInspectWithOptions(opts configInspectOptions) int {
 		return 1
 	}
 	result := buildConfigInspectResult(opts.configPath, cfg)
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "config.inspect", result, func(w io.Writer) error {
+	if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "config.inspect", result, func(w io.Writer) error {
 		writeConfigInspectText(w, result)
 		return nil
 	}); err != nil {
@@ -296,9 +297,9 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			DSN:                     redactConfigInspectDSN(cfg.DatabaseDSN()),
 			AutoMigrate:             cfg.DatabaseAutoMigrate(),
 			UseSessionSummaryRead:   cfg.DatabaseUseSessionSummaryRead(),
-			MigrationMode:           appDBMigrationMode(cfg.DatabaseDriver()),
+			MigrationMode:           appdb.MigrationMode(cfg.DatabaseDriver()),
 			ProductionStorageDriver: appdbmigrate.ProductionStorageDriver,
-			ProductionReady:         normalizeAuthStoreDriver(cfg.DatabaseDriver()) == appdbmigrate.ProductionStorageDriver,
+			ProductionReady:         appdb.NormalizeDriver(cfg.DatabaseDriver()) == appdbmigrate.ProductionStorageDriver,
 			StorageRole:             configInspectDatabaseStorageRole(cfg.DatabaseDriver()),
 			StorageContract:         configInspectDatabaseStorageContract(cfg.DatabaseDriver()),
 		},
@@ -632,7 +633,7 @@ func configInspectMCPPath(cfg *appconfig.Config) string {
 	if cfg == nil || !cfg.MCP.Enabled {
 		return ""
 	}
-	normalized, err := normalizeMCPPath(cfg.MCP.Path)
+	normalized, err := appconfig.NormalizeMCPPath(cfg.MCP.Path)
 	if err != nil {
 		return strings.TrimSpace(cfg.MCP.Path)
 	}
@@ -736,14 +737,14 @@ func shouldRedactKey(key string) bool {
 }
 
 func configInspectDatabaseStorageRole(driver string) string {
-	if normalizeAuthStoreDriver(driver) == appdbmigrate.ProductionStorageDriver {
+	if appdb.NormalizeDriver(driver) == appdbmigrate.ProductionStorageDriver {
 		return "production"
 	}
 	return appdbmigrate.SQLiteStorageRole
 }
 
 func configInspectDatabaseStorageContract(driver string) string {
-	if normalizeAuthStoreDriver(driver) == appdbmigrate.ProductionStorageDriver {
+	if appdb.NormalizeDriver(driver) == appdbmigrate.ProductionStorageDriver {
 		return appdbmigrate.PostgresStorageContract
 	}
 	return appdbmigrate.SQLiteStorageContract

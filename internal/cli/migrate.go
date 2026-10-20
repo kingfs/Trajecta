@@ -1,10 +1,11 @@
-package main
+package cli
 
 import (
 	"io"
 	"log/slog"
 	"os"
 
+	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/migrate"
 	"github.com/spf13/cobra"
@@ -20,7 +21,7 @@ type migrateOptions struct {
 	stdout       io.Writer
 }
 
-func newMigrateCommand(runtime *cliRuntime) *cobra.Command {
+func newMigrateCommand(runtime *Runtime) *cobra.Command {
 	var rewriteV2 bool
 	var rebuildIndex bool
 	var dryRun bool
@@ -29,13 +30,13 @@ func newMigrateCommand(runtime *cliRuntime) *cobra.Command {
 		Short: "Rewrite legacy cassettes and rebuild the trace metadata index",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(func() int {
+			return RunCode(func() int {
 				return runMigrateWithOptions(migrateOptions{
-					configPath:   runtime.configPath(),
+					configPath:   runtime.ConfigPath(),
 					rewriteV2:    rewriteV2,
 					rebuildIndex: rebuildIndex,
 					dryRun:       dryRun,
-					format:       runtime.outputFormat(),
+					format:       runtime.OutputFormat(),
 					stdout:       cmd.OutOrStdout(),
 				})
 			})
@@ -53,7 +54,7 @@ func runMigrate(args []string) int {
 	rewriteV2 := fs.Bool("rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
 	rebuildIndex := fs.Bool("rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
+	if err := fs.Parse(NormalizeLegacyFlagArgs(args)); err != nil {
 		return 2
 	}
 	return runMigrateWithOptions(migrateOptions{
@@ -82,7 +83,7 @@ func runMigrateWithOptions(opts migrateOptions) int {
 			"database_dsn":    config.RedactDSN(cfg.DatabaseDSN()),
 		})
 	}
-	traceStore, err := openApplicationDatabase(cfg)
+	traceStore, err := appdb.Open(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -108,7 +109,7 @@ func runMigrateWithOptions(opts migrateOptions) int {
 		"indexed_rows", result.RebuiltIndexRows,
 	)
 	if opts.format == "json" {
-		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "migrate", map[string]any{
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "migrate", map[string]any{
 			"mutated":            opts.rewriteV2 || opts.rebuildIndex,
 			"output_dir":         cfg.TraceOutputDir(),
 			"scanned_files":      result.ScannedFiles,
