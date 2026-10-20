@@ -121,13 +121,10 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           works when the two share a root. */}
       <Popover open={accountOpen} onOpenChange={setAccountOpen}>
         <div className="nav-account">
-          <NavFooter about={about} />
-          {/* A status, not a control: the glyph is the state, the tooltip is the
-              sentence, and `aria-live` announces a reconnect to a reader who is
-              not looking at it. Rail space is the scarce thing here, so the
-              indicator is one icon wide at every width and the word lives in
-              the tooltip rather than beside it. */}
-          <RealtimeIndicator status={realtime} />
+          {/* One row, not two: the build, the socket state and the repository
+              link are three glyphs of the same kind and each is one line tall,
+              so stacking them spent a whole extra row of the rail on an icon. */}
+          <NavFooter about={about} status={realtime} />
           <PopoverTrigger asChild>
             <button
               ref={accountButtonRef}
@@ -161,7 +158,8 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
 }
 
 /**
- * The foot of the rail: which build this is, and where the project lives.
+ * The foot of the rail: which build this is, whether the socket is pushing, and
+ * where the project lives - one row, three glyphs.
  *
  * This is the shape open-source consoles converge on, and it earns its place
  * twice over. The version answers "what am I running" without a detour through a
@@ -170,8 +168,13 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
  * something wrong - and it is a plain link rather than a button, so it opens the
  * repository in a new tab and never navigates the console away from a
  * half-finished investigation.
+ *
+ * The socket state belongs here rather than on a row of its own above the
+ * account button: all three are quiet, permanently visible facts about the
+ * console, and each is one glyph wide, so a second row bought nothing but spent
+ * height the rail could give the destinations.
  */
-function NavFooter({ about }) {
+function NavFooter({ about, status }) {
   const { t } = useI18n();
   const version = String(about?.version || "").trim();
   return (
@@ -185,18 +188,21 @@ function NavFooter({ about }) {
         <Info size={14} aria-hidden="true" />
         <span className="nav-version-label">{version || t("about.versionUnknown")}</span>
       </NavLink>
-      {about?.repository ? (
-        <a
-          className="nav-github"
-          href={about.repository}
-          target="_blank"
-          rel="noreferrer"
-          title={t("about.openRepository")}
-          aria-label={t("about.openRepository")}
-        >
-          <GitHubMark size={15} />
-        </a>
-      ) : null}
+      <div className="nav-footer-meta">
+        <RealtimeIndicator status={status} />
+        {about?.repository ? (
+          <a
+            className="nav-github"
+            href={about.repository}
+            target="_blank"
+            rel="noreferrer"
+            title={t("about.openRepository")}
+            aria-label={t("about.openRepository")}
+          >
+            <GitHubMark size={15} />
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -233,6 +239,10 @@ const REALTIME_GLYPHS = {
   [RealtimeStatus.RETRYING]: { Icon: WifiOff, key: "realtime.retrying" },
 };
 
+// A status, not a control: the glyph is the state, the tooltip is the sentence,
+// and `aria-live` announces a reconnect to a reader who is not looking at it.
+// Rail space is the scarce thing here, so the indicator is one icon wide at
+// every width and the word lives in the tooltip rather than beside it.
 function RealtimeIndicator({ status }) {
   const { t } = useI18n();
   const { Icon, key } = REALTIME_GLYPHS[status] || REALTIME_GLYPHS[RealtimeStatus.CONNECTING];

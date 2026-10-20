@@ -247,18 +247,22 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-/* The socket's state. It sits above the account button rather than in the scroll
-   area, because it describes the whole console rather than a page.
+/* The socket's state, one glyph in the footer row beside the version and the
+   repository link. It used to own a row above the account button; three
+   one-glyph facts stack into two rows that read as a gap, so they share the
+   footer instead and the rail gets the height back.
    One glyph wide in every layout: the rail has no room for a sentence, and the
    tooltip is where the sentence lives. The colour carries the state at a
    glance - live, working on it, or away - and the glyph differs too, so the
    three states are not one icon in three hues for a reader who cannot tell
    them apart. */
 .realtime-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--space-2) var(--space-1);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-sm);
   cursor: default;
 }
 
@@ -620,15 +624,25 @@ html {
   color: var(--text-secondary);
 }
 
-/* The foot of the rail: which build is running, and where the project lives.
-   It sits above the realtime indicator, inside the account block, so the rail's
-   three-row grid is unchanged and the version is one click from every page. */
+/* The foot of the rail: which build is running, whether the socket is pushing,
+   and where the project lives - one row, inside the account block, so the
+   rail's three-row grid is unchanged and the version is one click from every
+   page. */
 .nav-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-1);
   padding: 0 var(--space-2) var(--space-1);
+}
+
+/* The two glyphs that answer "is it live" and "where do I report this" sit
+   together on the right; the version takes the room that is left. */
+.nav-footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
 }
 
 .nav-version {
@@ -674,15 +688,26 @@ html {
   color: var(--text-primary);
 }
 
-/* Collapsed rail: the version text has nowhere to go, the two glyphs stay. */
+/* Collapsed rail: the version text has nowhere to go, the three glyphs stay.
+   The 72px column leaves 56px of content, so each glyph gives up its padding
+   and gets an equal slice of the row rather than letting the last one clip. */
 .app-shell-collapsed .nav-footer {
   justify-content: center;
-  gap: 2px;
+  gap: 0;
   padding-inline: 0;
 }
 
-.app-shell-collapsed .nav-version {
-  padding: 3px;
+.app-shell-collapsed .nav-footer-meta {
+  gap: 0;
+}
+
+.app-shell-collapsed .nav-version,
+.app-shell-collapsed .realtime-indicator,
+.app-shell-collapsed .nav-github {
+  justify-content: center;
+  width: 18px;
+  height: 26px;
+  padding: 0;
 }
 
 .app-shell-collapsed .nav-version-label {
@@ -695,12 +720,21 @@ html {
 @media (max-width: 1000px) {
   .nav-footer {
     justify-content: center;
-    gap: 2px;
+    gap: 0;
     padding-inline: 0;
   }
 
-  .nav-version {
-    padding: 3px;
+  .nav-footer-meta {
+    gap: 0;
+  }
+
+  .nav-version,
+  .realtime-indicator,
+  .nav-github {
+    justify-content: center;
+    width: 18px;
+    height: 26px;
+    padding: 0;
   }
 
   .nav-version-label {

@@ -3406,10 +3406,34 @@ test("the rail footer stays inside the rail", async ({ page }) => {
   expect(footerBox.x + footerBox.width).toBeLessThanOrEqual(railBox.x + railBox.width + 1);
 });
 
+// The foot of the rail is one row: the build, the socket state and the
+// repository link. Stacked, the socket's single glyph cost a whole extra row and
+// the block read as a gap rather than a footer, so all three share a line.
+test("the rail footer keeps the build, the socket state and the repository on one row", async ({ page }) => {
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  const footer = page.locator(".nav-footer");
+  await expect(footer.locator(".realtime-indicator")).toHaveCount(1);
+  const height = await footer.evaluate((element) => element.getBoundingClientRect().height);
+  expect(height, "the footer is one line tall, not a column of rows").toBeLessThanOrEqual(30);
+
+  const rows = await Promise.all(
+    [".nav-version", ".realtime-indicator", ".nav-github"].map(async (selector) => {
+      const box = await footer.locator(selector).boundingBox();
+      return box.y + box.height / 2;
+    }),
+  );
+  // Same line: every glyph's vertical centre is within a pixel of the others'.
+  for (const centre of rows.slice(1)) {
+    expect(Math.abs(centre - rows[0]), "all three glyphs share a baseline").toBeLessThanOrEqual(1);
+  }
+});
+
 // The narrow viewport gets the collapsed rail by media query, and the toggle that
 // gets there on a desktop is hidden. Both are the same 72px column, so the same
-// two glyphs have to survive in it.
-test("the collapsed rail keeps both footer glyphs", async ({ page, isMobile }) => {
+// three glyphs have to survive in it, side by side and unpadded.
+test("the collapsed rail keeps the three footer glyphs on one row", async ({ page, isMobile }) => {
   test.skip(isMobile, "the narrow viewport is already the collapsed rail");
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
@@ -3418,9 +3442,18 @@ test("the collapsed rail keeps both footer glyphs", async ({ page, isMobile }) =
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(page.getByRole("link", { name: "Open the About page" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open the repository on GitHub" })).toBeVisible();
+  await expect(page.locator(".realtime-indicator")).toBeVisible();
 
   const rail = await page.locator(".app-sidebar").boundingBox();
   const box = await footer.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(rail.x - 1);
   expect(box.x + box.width).toBeLessThanOrEqual(rail.x + rail.width + 1);
+
+  // Three 18px glyphs inside the 56px of content the 72px column leaves: each one
+  // has to stay inside the rail rather than being clipped by its overflow.
+  for (const selector of [".nav-version", ".realtime-indicator", ".nav-github"]) {
+    const glyph = await page.locator(selector).boundingBox();
+    expect(glyph.x, `${selector} starts inside the rail`).toBeGreaterThanOrEqual(rail.x - 1);
+    expect(glyph.x + glyph.width, `${selector} ends inside the rail`).toBeLessThanOrEqual(rail.x + rail.width + 1);
+  }
 });
