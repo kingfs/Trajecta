@@ -3669,41 +3669,10 @@ a:focus-visible {
 }
 
 /* System page (admin diagnostics). The page reuses the trace table shell and
-   only overrides its column template per table. */
-.system-kv {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px 18px;
-  margin: 12px 0 18px;
-}
-
-.system-fact {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-chip);
-  background: var(--panel-soft);
-  min-width: 0;
-}
-
-.system-fact > span {
-  color: var(--muted);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.system-fact > strong {
-  font-size: 0.95rem;
-  overflow-wrap: anywhere;
-}
-
-.system-fact-warn {
-  border-color: var(--gold);
-}
-
+   only overrides its column template per table. The definition grid itself -
+   `.system-kv` and `.system-fact` - lives in styles/components.css, which loads
+   after this sheet; keeping a second copy here reintroduced the card frame and
+   zero horizontal padding the compact grid was meant to replace. */
 .system-tags {
   display: flex;
   flex-wrap: wrap;

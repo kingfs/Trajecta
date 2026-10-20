@@ -21,10 +21,9 @@ import { SystemPage } from "./routes/SystemPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { TrafficPage } from "./routes/TrafficPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
-import { reportInstall } from "./lib/telemetry";
 
 // The About page is the only route that is not on the way to anything else, and
-// it is the only one that renders release notes. Loading it on demand keeps the
+// it is the only one that opens the release check. Loading it on demand keeps the
 // entry chunk under the size the build warns about, which is the same trade
 // components/common/Charts.jsx and Display.jsx already make.
 const AboutPage = React.lazy(() => import("./routes/AboutPage").then((module) => ({ default: module.AboutPage })));
@@ -93,18 +92,6 @@ function App() {
     window.localStorage.removeItem(MONITOR_TOKEN_KEY);
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
   };
-
-  // The anonymous install ping, when the deployment has asked for it. It runs
-  // here rather than on the About page so that opening the console is enough to
-  // be counted - that page is where the ping is *inspected*, not where it is
-  // sent. It is fire-and-forget: reportInstall swallows every failure, and the
-  // switch it reads is off by default. See lib/telemetry.js.
-  useEffect(() => {
-    if (auth.loading || (auth.required && !auth.authorized)) {
-      return;
-    }
-    reportInstall().catch(() => {});
-  }, [auth.loading, auth.required, auth.authorized]);
 
   if (auth.loading) {
     return <div className="auth-screen"><div className="auth-panel"><p className="eyebrow">{t("auth.eyebrow")}</p><h1>{t("auth.checking")}</h1></div></div>;

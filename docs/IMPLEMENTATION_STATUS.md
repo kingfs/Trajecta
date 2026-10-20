@@ -119,7 +119,7 @@ Monitor 是 Go embed 的 React/Vite 前端。左侧导航分 监控（Overview�
 
 Session 详情页提供默认（带上限）与完整流式两种导出（UI 标签 `导出轨迹 (ATIF)` / `完整导出 (NDJSON 流)`），从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`（流式为 `session-<id>.atif.ndjson`）：格式固定为 ATIF-v1.8，默认只重建最早的 500 条 trace 并在响应 `extra` 里给出 `trace_count` / `included_traces` / `truncated` / `trace_cap`，`?full=1` 取消上限，`?stream=1` 走 NDJSON 流式输出；不调用模型、不修改 cassette。接口契约见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
-About 页由 `GET /api/about`（构建信息、仓库链接、发布检查开关与装机上报配置，不外联）与 `GET /api/version/latest`（仅在点击时查询发布端点，恒返回 200 并在 `status` 里给出 `update_available`/`up_to_date`/`unknown`/`unavailable`/`disabled`，成功结果缓存 10 分钟、失败不缓存）支撑；匿名装机上报默认关闭，需同时配置 `telemetry.enabled` 与 `telemetry.endpoint`，支持 `custom`、`ga4`、`pixel` 三种传输且不需要自建服务端，上报内容只有服务端生成并存在 `app_settings.telemetry.install_id` 的匿名安装 ID 与版本、提交、平台。详见 [Monitor 指南](./MONITOR_GUIDE.md)。
+About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关，不外联）与 `GET /api/version/latest`（仅在点击「检查新版本」后查询发布端点，恒返回 200 并在 `status` 里给出 `update_available`/`up_to_date`/`unknown`/`unavailable`/`disabled`，成功结果缓存 10 分钟、失败不缓存）支撑。页面只列版本、提交、构建时间与标签四项构建事实，发布检查结果在弹窗里给出当前版本与最新版本；`telemetry` 配置与 `/api/about` 的 `telemetry`/`install_id` 字段仍然保留，但 Web UI 不再展示「使用统计」，也不再发送匿名装机上报。详见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
 出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页一节。
 

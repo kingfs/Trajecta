@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 - The version check no longer pastes a truncated GitHub error body when `api.github.com` rejects the request for quota or a missing release. A rate-limited 403/429 now reports the reset time from `X-RateLimit-Reset` and says the endpoint is rate limited, a 404 says no published release was found, and the one-line hint under the HTTPS proxy field is gone - its placeholder already shows the HTTP proxy the empty value follows, and the extra line made the two columns uneven.
+- The 关于 page states the build once. The hero carries the name, the tagline and the 检查新版本 button; four facts (version, git short hash, build date and tag) replace the old badge row and eight-fact card, and branch, Go version, platform and license are left to the 系统 page. The release check is now a modal that shows only the running version and the newest release, so the 版本更新 card and its duplicated build facts are gone.
+- The compact definition grid shared by 关于 and 系统 no longer inherits the legacy card frame and zero horizontal padding from `styles.css`: labels and values sit on one line inside the section card instead of being pressed against a border.
+
+### Removed
+- The 关于 page's 使用统计 card and the browser-side anonymous install ping. The page no longer displays the telemetry settings and the console no longer sends the install id, version, commit or platform to `telemetry.endpoint`; the server-side `telemetry` configuration and the `/api/about` fields remain for existing integrations but have no sender.
 
 ## [3.3.2] - 2026-10-20
 

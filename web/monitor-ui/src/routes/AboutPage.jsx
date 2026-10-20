@@ -1,7 +1,7 @@
-import React from "react";
-import { ExternalLink, FileText, LifeBuoy, Tag } from "lucide-react";
+import React, { useState } from "react";
+import { ExternalLink, FileText, LifeBuoy, RefreshCw, Tag } from "lucide-react";
 import { GitHubMark } from "../components/common/GitHubMark";
-import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { EmptyState } from "../components/common/EmptyState";
 import { PageHeader } from "../components/common/PageHeader";
@@ -9,8 +9,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { formatDateTime } from "../lib/monitor";
-import { ReleaseCheckCard } from "./about/ReleaseCheckCard";
-import { UsageStatsCard } from "./about/UsageStatsCard";
+import { UpdateCheckDialog } from "./about/UpdateCheckDialog";
 import { SystemFact } from "./system/format";
 
 /*
@@ -23,6 +22,13 @@ import { SystemFact } from "./system/format";
  * every signed-in role may open. Merging them would have forced the build facts
  * behind the admin gate, or the process internals out of it.
  *
+ * The page keeps one copy of the build identity. The hero states the name and
+ * the tagline; the four facts below it are version, commit, build date and tag,
+ * which is everything the release check compares and everything a bug report
+ * asks for. Branch, Go version, platform and license are not repeated here:
+ * 系统 already reports the runtime, and a second copy on this page made the two
+ * screens look like they disagreed about the product.
+ *
  * The version itself is not read from the frontend bundle: it is injected into
  * the Go binary at link time and read back from /api/about, so the number the
  * page prints is the number the server is running even when a stale asset
@@ -31,9 +37,9 @@ import { SystemFact } from "./system/format";
 export function AboutPage() {
   const { t } = useI18n();
   const { loading, data, error } = useJSON(apiPaths.about);
+  const [checkOpen, setCheckOpen] = useState(false);
 
   const version = data?.version || "";
-  const commits = Number(data?.commits_since_tag || 0);
 
   return (
     <div className="shell shell-list">
@@ -61,24 +67,22 @@ export function AboutPage() {
               <div className="about-hero-copy">
                 <h2>{data.name || "Trajecta"}</h2>
                 <p className="about-tagline">{t("about.tagline")}</p>
-                <div className="about-badges">
-                  <Badge tone="brand" className="mono">{version || t("about.versionUnknown")}</Badge>
-                  {data.commit ? <Badge tone="muted" className="mono">{data.commit}</Badge> : null}
-                  {data.branch ? <Badge tone="muted">{data.branch}</Badge> : null}
-                  {commits > 0 ? <Badge tone="info">{t("about.commitsSinceTag", { count: commits })}</Badge> : null}
-                </div>
               </div>
+              {data.update_check_enabled ? (
+                <div className="about-hero-actions">
+                  <Button variant="primary" type="button" onClick={() => setCheckOpen(true)}>
+                    <RefreshCw size={14} aria-hidden="true" />
+                    {t("about.update.check")}
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
             <div className="system-kv about-facts">
               <SystemFact label={t("about.version")} value={version || t("about.versionUnknown")} />
-              <SystemFact label={t("about.baseVersion")} value={data.base_version} />
               <SystemFact label={t("about.commit")} value={data.commit} />
               <SystemFact label={t("about.buildDate")} value={data.build_date ? formatDateTime(data.build_date) : ""} />
-              <SystemFact label={t("about.branch")} value={data.branch} />
-              <SystemFact label={t("about.goVersion")} value={data.go_version} />
-              <SystemFact label={t("about.platform")} value={`${data.goos || ""}/${data.goarch || ""}`} />
-              <SystemFact label={t("about.license")} value={data.license} />
+              <SystemFact label={t("about.baseVersion")} value={data.base_version} />
             </div>
 
             {/* Every link the project publishes, in one row. They are the reason
@@ -93,8 +97,7 @@ export function AboutPage() {
             </div>
           </Card>
 
-          <ReleaseCheckCard about={data} />
-          <UsageStatsCard about={data} />
+          {checkOpen ? <UpdateCheckDialog about={data} onClose={() => setCheckOpen(false)} /> : null}
         </>
       ) : null}
     </div>

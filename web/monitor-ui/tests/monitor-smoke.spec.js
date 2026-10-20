@@ -1105,8 +1105,8 @@ test("the memory and disk rings sit side by side and do not double-count the cac
   await expect(memory.locator(".recharts-pie-sector")).toHaveCount(3);
   await expect(memory.locator(".usage-donut-center strong")).toContainText("25.0");
   await expect(memory.locator(".usage-donut-center span")).toHaveText("4.00 GiB / 16.0 GiB");
-  // textContent, not innerText: the label is uppercased by the stylesheet and
-  // innerText applies that transform, which makes the keys depend on CSS.
+  // textContent, not innerText: innerText applies the stylesheet's text
+  // transforms, which makes the keys depend on CSS.
   const memoryFacts = await page.locator(".system-gauge--memory .system-fact").evaluateAll(
     (rows) => rows.map((row) => [...row.children].map((cell) => cell.textContent.trim())),
   );
@@ -1887,8 +1887,9 @@ function aboutPayload() {
     license: "MIT",
     license_url: "https://github.com/kingfs/Trajecta/blob/main/LICENSE",
     update_check_enabled: true,
-    // Off, which is what the server reports for a deployment that did not
-    // configure an endpoint. The one test that turns it on overrides this.
+    // The server still returns the telemetry summary and the install id. The
+    // About page no longer renders them and the console no longer sends a ping,
+    // so these fields are here to mirror the real response, not to be asserted.
     telemetry: {
       enabled: false,
       provider: "custom",
@@ -3288,7 +3289,7 @@ test("the rail carries the version and the repository link", async ({ page, isMo
   }
 });
 
-test("the About page reports the build and asks before it checks for a release", async ({ page }) => {
+test("the About page reports the build and opens the release check only on request", async ({ page }) => {
   await page.goto("/about");
   await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
   // Scoped to the content column: the rail footer also carries the version, and
@@ -3297,7 +3298,14 @@ test("the About page reports the build and asks before it checks for a release",
   const content = page.locator("#main-content");
   await expect(content.getByText("v3.3.1-2-g4e766d6").first()).toBeVisible();
   await expect(content.getByText("4e766d6").first()).toBeVisible();
-  await expect(content.getByText("2 commits past the tag").first()).toBeVisible();
+  await expect(content.getByText("v3.3.1", { exact: true }).first()).toBeVisible();
+
+  // The page states the build once. Branch, runtime and license belong to 系统,
+  // and the old badges repeated the version the fact row already prints.
+  await expect(content.getByText("Branch")).toHaveCount(0);
+  await expect(content.getByText("Go version")).toHaveCount(0);
+  await expect(content.getByText("License")).toHaveCount(0);
+  await expect(page.locator(".about-badges")).toHaveCount(0);
 
   // Every project link the API published, which is the half of the page a
   // reader arrives for when something is wrong.
@@ -3305,70 +3313,17 @@ test("the About page reports the build and asks before it checks for a release",
   await expect(page.getByRole("link", { name: /Issues/ })).toHaveAttribute("href", "https://github.com/kingfs/Trajecta/issues");
   await expect(page.getByRole("link", { name: /Documentation/ })).toHaveAttribute("href", "https://github.com/kingfs/Trajecta/tree/main/docs");
 
-  // The check is user-initiated: opening the page must not have asked.
+  // The check is user-initiated: opening the page must not have asked, and the
+  // result section no longer sits on the page repeating the running version.
   expect(releaseCheckReads, "the page asks for a release on its own").toEqual([]);
-  await expect(page.getByText("Press “Check for updates” to read the newest release from GitHub.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Version updates" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Check for updates" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText("Version v9.9.9 is available")).toBeVisible();
+  await expect(page.getByText("Running")).toBeVisible();
+  await expect(page.getByText("Latest")).toBeVisible();
   expect(releaseCheckReads.length).toBe(1);
-  await expect(page.getByRole("link", { name: "Read the release notes" })).toHaveAttribute(
-    "href",
-    "https://github.com/kingfs/Trajecta/releases/tag/v9.9.9",
-  );
-  await expect(page.getByText("a newer release")).toBeVisible();
-});
-
-// The default payload has telemetry off, which is the shipped default and the
-// state most deployments are in. The card has to say so rather than disappear.
-test("the About page reports the install ping as off by default", async ({ page }) => {
-  await page.goto("/about");
-  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
-  await expect(page.getByText("The anonymous install ping is off by default.")).toBeVisible();
-  await expect(page.getByText("Install id")).toHaveCount(0);
-});
-
-test("the install ping reports the deployment once and carries no request data", async ({ page }) => {
-  const pings = [];
-  // Registered after the shared catch-all, which makes it win: Playwright checks
-  // routes in the reverse order they were added.
-  await page.route("**/api/about", (route) =>
-    route.fulfill({
-      json: {
-        ...aboutPayload(),
-        telemetry: {
-          enabled: true,
-          provider: "custom",
-          endpoint: "https://collector.example/install",
-          path_prefix: "/trajecta/install",
-          interval_seconds: 86400,
-        },
-      },
-    }),
-  );
-  await page.route("https://collector.example/**", (route) => {
-    pings.push({ url: route.request().url(), body: route.request().postData() || "" });
-    return route.fulfill({ status: 204, body: "" });
-  });
-
-  await page.goto("/overview");
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect.poll(() => pings.length, { message: "the install ping never arrived" }).toBe(1);
-
-  expect(pings[0].url).toBe("https://collector.example/install");
-  const body = JSON.parse(pings[0].body);
-  // The deployment's id, not this browser's: five operators on one Monitor are
-  // one installation, which is the number the feature exists to report.
-  expect(body.install_id).toBe("0123456789abcdef0123456789abcdef");
-  expect(body.version).toBe("v3.3.1-2-g4e766d6");
-  expect(body.commit).toBe("4e766d6");
-  expect(Object.keys(body).sort()).toEqual(["arch", "commit", "event", "install_id", "os", "ts", "version"]);
-
-  // A second page load inside the interval reports nothing at all.
-  await page.goto("/about");
-  await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();
-  await page.waitForTimeout(300);
-  expect(pings.length, "a page load was counted as a second installation").toBe(1);
 });
 
 
@@ -3390,15 +3345,14 @@ test("the About page draws its identity block and every project link", async ({ 
   await expect(page.locator(".about-link")).toHaveCount(4);
   await expect(page.locator(".about-link").first()).toHaveCSS("border-radius", "999px");
 
-  // The version is in the page body twice - the badge and the fact row - and
-  // both come from the same field, so a mismatch would mean two sources. (The
-  // rail footer is a third, which is why this is scoped to the content column.)
-  await expect(page.locator("#main-content").getByText("v3.3.1-2-g4e766d6")).toHaveCount(2);
+  // One copy in the content column: the fact row. (The rail footer is a second,
+  // which is why this is scoped to #main-content.)
+  await expect(page.locator("#main-content").getByText("v3.3.1-2-g4e766d6")).toHaveCount(1);
 });
 
-// The page is a grid of values, and several of them - the install id, the
-// collector URL, the commit hash - have no space to break at. Widening the
-// document is how that goes wrong, and it only shows up at a narrow width.
+// The page is a grid of values, and several of them - the build date, the commit
+// hash - have no space to break at. Widening the document is how that goes
+// wrong, and it only shows up at a narrow width.
 test("the About page does not widen the document", async ({ page, isMobile }) => {
   await page.goto("/about");
   await expect(page.getByRole("heading", { name: "About", exact: true })).toBeVisible();

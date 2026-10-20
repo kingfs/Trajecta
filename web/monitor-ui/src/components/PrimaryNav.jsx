@@ -64,7 +64,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   const realtime = useRealtimeStatus();
   // The version and the repository link, at the foot of the rail. It reads the
   // same /api/about the About page does, through the console's query cache, so
-  // the rail, the page and the install ping share one request. The version lives
+  // the rail and the page share one request. The version lives
   // here rather than in the brand block because the rail is the one piece of
   // chrome every page renders, which is where the other tools of this kind put
   // it, and because it makes the About page one click from anywhere.
