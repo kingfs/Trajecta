@@ -417,10 +417,10 @@ var ruleTable = [ruleIDCount]Rule{
 	//
 	// The word "tel" is deliberately not a keyword - it is a substring of
 	// "hotel" and "intel", and one travel record would anchor every number
-	// beside it. The quoted JSON key '"tel"' is a keyword instead: a quote
-	// cannot precede the "tel" in those words, so it only matches a field
-	// named tel.
-	RuleCNMobile: {Name: "pii.cn_mobile", Kind: KindMobile, Grade: GradeA, Strength: StrengthGeneric, MinLen: 11, MaxLen: 11, CandidateCheck: candidateCNMobilePrefix, WordBounded: true, ContextWindow: 24, Keywords: []string{"手机", "手机号", "手机号码", "电话", "联系电话", "联系方式", "致电", "拨打", "phone", "mobile", "cellphone", `"tel"`}},
+	// beside it. The quoted JSON key ('"tel"', and its escaped form in a
+	// string-embedded JSON object) is a keyword instead: a quote cannot
+	// precede the "tel" in those words, so it only matches a field named tel.
+	RuleCNMobile: {Name: "pii.cn_mobile", Kind: KindMobile, Grade: GradeA, Strength: StrengthGeneric, MinLen: 11, MaxLen: 11, CandidateCheck: candidateCNMobilePrefix, WordBounded: true, ContextWindow: 24, Keywords: []string{"手机", "手机号", "手机号码", "电话", "联系电话", "联系方式", "致电", "拨打", "phone", "mobile", "cellphone", `"tel"`, `\"tel\"`}},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

@@ -70,6 +70,7 @@ func TestCNMobileDetection(t *testing.T) {
 		{"full-width punctuation", "手机：13800138000。", 1, true},
 		{"bare number is reported but not rewritten", "13800138000", 1, false},
 		{"quoted tel field", `{"tel":"13800138000"}`, 1, true},
+		{"escaped tel field inside a string", `{\"tel\":\"13800138000\"}`, 1, true},
 		{"hotel does not anchor a number", `{"hotel":"13800138000"}`, 1, false},
 		{"unallocated head", "手机号 14000138000", 0, false},
 		{"ten digits", "1380013800", 0, false},
