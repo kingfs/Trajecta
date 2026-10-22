@@ -1,6 +1,10 @@
 package monitor
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +127,81 @@ func TestAttachTraceAuditLeavesCleanTracesNil(t *testing.T) {
 		if item.Audit != nil {
 			t.Fatalf("clean trace %s got audit %+v", item.ID, item.Audit)
 		}
+	}
+}
+
+// The detail page's audit tab covers both halves of the audit - the credential
+// replacements and the findings - so its badge must come from the same total as
+// the list tag. A findings-only count dropped the number for a trace whose key
+// was rewritten but which had no finding.
+func TestTraceDetailAuditMatchesListTally(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	writeTraceFixture(t, outputDir, "detail.http", buildRecordFixtureWithStatusHeadersAndMutator(
+		t, "/v1/chat/completions", false, "200 OK", nil,
+		`{"model":"m","messages":[{"role":"user","content":"key sk-proj-abcdefghijklmnopqrstuvwxyz"}]}`,
+		`{"choices":[]}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.TraceID = "trace-detail"
+			header.Meta.RequestID = "req-detail"
+		},
+	))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	items := traceListItemsFromEntries(mustListRecent(t, st, 10))
+	traceID := traceIDForFile(t, items, "detail.http")
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{TraceID: traceID, EventIndex: 0, Rule: "openai.project_key", Kind: "api_key", Original: "sk-proj-abcdefghijklmnopqrstuvwxyz", StandIn: "sk-proj-abcdefghijklmnopqrstuvwxzz", DetectedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+	if err := st.SaveFindings(traceID, []observe.Finding{
+		{ID: "finding-detail", TraceID: traceID, Category: "pii_leak", Severity: observe.SeverityHigh, Confidence: 0.95, Title: "Personal data"},
+	}); err != nil {
+		t.Fatalf("SaveFindings() error = %v", err)
+	}
+	if err := attachTraceAudit(st, items); err != nil {
+		t.Fatalf("attachTraceAudit() error = %v", err)
+	}
+	if items[0].Audit == nil {
+		t.Fatalf("list item has no audit tally")
+	}
+
+	entry, err := st.GetByID(traceID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	absPath, err := filepath.Abs(entry.LogPath)
+	if err != nil {
+		t.Fatalf("Abs() error = %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID, nil)
+	handleTraceDetail(recorder, request, st, absPath, entry, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("handleTraceDetail status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Audit *traceAuditView `json:"audit"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if payload.Audit == nil {
+		t.Fatalf("detail response has no audit tally: %s", recorder.Body.String())
+	}
+	if payload.Audit.Total != items[0].Audit.Total {
+		t.Fatalf("detail audit total = %d, list = %d", payload.Audit.Total, items[0].Audit.Total)
+	}
+	if payload.Audit.Total != 2 || payload.Audit.Masked != 1 || payload.Audit.Findings != 1 {
+		t.Fatalf("detail audit = %+v, want total=2 masked=1 findings=1", payload.Audit)
 	}
 }
 

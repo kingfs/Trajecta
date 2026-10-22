@@ -245,6 +245,11 @@ type detailResponse struct {
 	UpstreamCalls          []traceListItem          `json:"upstream_calls,omitempty"`
 	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
 	Performance            performanceView          `json:"performance"`
+	// Audit is the same tally the list tag shows. The audit tab contains both
+	// the credential-mask replacements and the findings, so its count must not
+	// be the findings count alone: a trace with a rewritten key and no finding
+	// would otherwise lose the number between the list and the detail page.
+	Audit *traceAuditView `json:"audit,omitempty"`
 }
 
 type traceResponsesAuditRef struct {
@@ -2137,10 +2142,14 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 	for _, child := range childrenByTrace[entry.ID] {
 		resp.UpstreamCalls = append(resp.UpstreamCalls, traceListItemFromEntry(child))
 	}
-	if err := attachTraceAudit(st, resp.UpstreamCalls); err != nil {
+	// Include the parent in the same grouped tally as its upstream calls, so the
+	// detail page's audit tab and the list tag read the same numbers.
+	selfAudit := []traceListItem{{ID: entry.ID}}
+	if err := attachTraceAudit(st, resp.UpstreamCalls, selfAudit); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
 		return
 	}
+	resp.Audit = selfAudit[0].Audit
 	attachTracePreviews(resp.UpstreamCalls)
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)

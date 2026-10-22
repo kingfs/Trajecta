@@ -107,6 +107,11 @@ export function TraceDetailPage() {
   const responsesAuditLink = buildResponsesAuditLink(detail.data);
   const upstreamCalls = Array.isArray(detail.data?.upstream_calls) ? detail.data.upstream_calls : [];
   const findingsCount = Array.isArray(findings.data?.items) ? findings.data.items.length : Number(findings.data?.total || 0);
+  // The audit tab holds the credential replacements and the findings, so its
+  // badge is the same total as the list row's audit tag. Falling back to the
+  // findings count keeps the badge working against a server that predates the
+  // detail `audit` field.
+  const auditCount = Number(detail.data?.audit?.total || 0) || findingsCount;
 
   // 会话, 协议, 工具调用, 审计, 请求信息, 原始数据. The first tab used to be
   // "Routing & Conversation", which is exactly the problem it had: half of it
@@ -117,7 +122,7 @@ export function TraceDetailPage() {
     { id: "conversation", label: t("traceDetail.tabConversation") },
     { id: "protocol", label: t("audit.protocol") },
     { id: "tools", label: t("traceDetail.tabTools"), count: toolCount || undefined },
-    { id: "audit", label: t("nav.audit"), count: findingsCount || undefined },
+    { id: "audit", label: t("nav.audit"), count: auditCount || undefined },
     { id: "request", label: t("traceDetail.tabRequest") },
     { id: "raw", label: t("traceDetail.tabRaw") },
   ];

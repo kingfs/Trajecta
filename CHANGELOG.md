@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - The 关于 page's 使用统计 card and the browser-side anonymous install ping. The page no longer displays the telemetry settings and the console no longer sends the install id, version, commit or platform to `telemetry.endpoint`; the server-side `telemetry` configuration and the `/api/about` fields remain for existing integrations but have no sender.
 
 ### Fixed
+- The trace detail's audit tab badge counts what the tab actually holds. It was built from the findings response alone, so a trace whose key or identity number was rewritten but which had no finding showed `审计 1` in the list and no number on the detail tab. The detail response now carries the same `audit` tally as the list row - credential-mask replacements plus findings - and the badge uses it, falling back to the findings count against a server that predates the field.
 - The trace row's semantic tags keep their tone in the light theme. The light theme's chip normalisation (`.inline-tag` under `:root[data-theme="light"]`) and the trace row's descendant colour rule both outranked a bare tone class, so the new red audit tag - and the existing gold, green and accent tags - rendered as muted text on a white pill. The tone classes are re-asserted at the same theme specificity and the row's colour rule now excludes `.inline-tag`, so the audit tag is red in both themes.
 
 ## [3.3.2] - 2026-10-20
