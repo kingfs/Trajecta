@@ -23,7 +23,8 @@
 | `task test:atif` | `go test ./internal/trajectory ./internal/monitor` + `python3 -m unittest discover -s scripts/atif_tests` |
 | `task test:codex-fixtures` | `env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1` |
 | `task bench` | `go test -bench=. -benchmem ./...` |
-| `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay` |
+| `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask` |
+| `task bench:secretmask` | `go test -count=1 -run '^$' -bench=. -benchmem ./pkg/secretmask` |
 | `task deps:verify` | `go mod verify` + `go list -mod=readonly ./...` |
 | `task deps:tidy` | `go mod tidy` |
 | `task build:go` | `go build -trimpath -ldflags=... -o server ./cmd/server` 以及 `-o trajecta ./cmd/trajecta` |
@@ -69,7 +70,7 @@ task run
 - `task test:race`：全套单元测试加 Go race detector；代理、路由、录制、存储或 streaming 改动必须补跑。
 - `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`cmd/trajecta`、`unittest`，不依赖外部网络。
 - `task test:cover`：写 `coverage.out`。
-- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`）。
+- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`、`pkg/secretmask`）。`task bench:secretmask` 只跑检测、遮蔽与还原，覆盖 4 KiB–512 KiB 请求、凭据密度、流式分片与一次完整往返，用来量化代理开启 `secret_masking` 后每个请求增加的耗时。
 - `task lint:vet`：单独跑 `go vet ./...`，与 golangci-lint 互补。
 - `task test:codex-fixtures`：离线 Codex Responses fixture runner；fixture 清单、覆盖范围与 runner 契约见 [Codex Responses fixtures](../tests/fixtures/codex/README.md)。
 

@@ -177,10 +177,26 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 ## 度量
 
-以下数字来自 `go test ./pkg/secretmask -bench . -count=3` 在 24 线程机器上的稳定值，看数量级即可：
+以下数字来自 `go test ./pkg/secretmask -run '^$' -bench . -benchmem -count=3` 在 24 线程机器上的稳定值，看数量级即可；`task bench:secretmask` 跑同一套（`-count=1`，更快但抖动略大）。基准载荷是 transcript 形状：散文、代码、40 位 commit hash、MD5、UUID 与稀疏凭据混合，比纯英文更接近真实 agent 请求。
 
-- 词法扫描约 73 KB 载荷：约 1.4–1.5 ms，约 51–53 MB/s（加入身份证规则前约 1.32 ms / 57 MB/s；生成表从 31201 行涨到 33425 行，手机号规则未改变它）。
+### 请求与响应路径
+
+| 场景 | 载荷 | 耗时 | 吞吐 |
+| --- | --- | --- | --- |
+| 词法扫描（请求体） | 4 KiB | 56 µs | 74 MB/s |
+| 词法扫描 | 64 KiB | 0.89 ms | 74 MB/s |
+| 词法扫描 | 512 KiB | 7.2 ms | 73 MB/s |
+| 遮蔽（热 vault） | 64 KiB | 0.93 ms | 71 MB/s |
+| 遮蔽（热 vault） | 512 KiB | 7.4 ms | 71 MB/s |
+| 还原（无命中 / 有命中） | 64 KiB | 0.47 ms | 139–142 MB/s |
+| 还原（无命中 / 有命中） | 512 KiB | 3.8 ms | 138–141 MB/s |
+| 流式还原（512 B–64 KiB 分片） | 256 KiB | 1.83–1.91 ms | 137–143 MB/s |
+| 一次往返（Mask + Restore 各 64 KiB） | 128 KiB | 1.4 ms | 94 MB/s |
+
+- 64 KiB 请求扫描约 0.9 ms，完整请求 + 响应往返约 1.4 ms；512 KiB 请求约 7 ms。4 KiB–512 KiB 的吞吐基本不变，说明扫描没有超线性的退化。
+- 载荷内容对吞吐影响很大：散文占主导的 `BenchmarkMaskWarm` 109 KB 约 222 MB/s，而 hash/UUID 密集的 transcript 形状约 70–75 MB/s。引用吞吐数字时要说明载荷；上表用更保守的 transcript 形状。
+- 凭据密度：64 KiB 无凭据约 0.89 ms，稀疏（约每 20 KB 一条）约 0.89 ms，中等（约每 2.5 KB 一条）约 0.91 ms，每条消息都带凭据的密集载荷约 1.02 ms。校验与上下文打分只对候选执行，所以正常密度几乎不改变成本；最坏情况仍是下一条的手机号。
 - 身份证命中本身：每 64 KB 一条时约 231 MB/s；每 64 KB 约 3500 条时约 151 MB/s（`BenchmarkScanDenseChineseIDs`），因为 `SkipContext` 跳过了上下文扫描。手机号因为不能跳过上下文：每 64 KB 一条（带 `phone=`）时约 211 MB/s，每 64 KB 约 3500 条时约 21 MB/s（`BenchmarkScanDenseMobileNumbers`，24 字节窗口），这是该规则的已知最坏情况。
-- 遮蔽 109 KB 载荷：热态约 200 MB/s，冷态约 189 MB/s（冷态包含渲染假值）。
-- 还原：约 295 MB/s（无命中载荷），流式约 302 MB/s。跨 delta 重组只增加一次判定，代价已包含在内。「整条假值优先于链」的判定要在链开着时逐字节做，这是相对不做该判定时约 13% 的代价（346 → 295 MB/s），换来的是不漏还原、不拼接。
+- 遮蔽 109 KB 散文载荷：热态约 222 MB/s，冷态约 210 MB/s（冷态包含渲染假值）。
+- 还原：散文载荷约 340 MB/s，流式约 348 MB/s；上表的 transcript 载荷约 139 MB/s。跨 delta 重组只增加一次判定，代价已包含在内；「整条假值优先于链」的判定在链开着时逐字节执行，这部分开销也在测量值里，换来的是不漏还原、不拼接。
 - 精度：对 `git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）扫描得到 78 处命中、25 个文件。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报：`ek_` 开头的 Go 标识符、`go.sum` 里形似 `LTAI` 的串、`17179869184` 常量、HTML 快照里的一个 11 位数字；Low 一律不会改写。身份证规则 13 处（全 High）；手机号规则 29 处，其中 12 处 Medium 全部落在 `mobile_test.go` 与 `secretmask_test.go` 的样例里，其余 17 处为 Low。干净检出上为 76 处 / 24 个文件。

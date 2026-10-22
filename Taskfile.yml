@@ -175,9 +175,14 @@ tasks:
       - go test -bench=. -benchmem ./...
 
   bench:core:
-    desc: Run benchmarks for core proxy, record/replay, router, store, and LLM packages
+    desc: Run benchmarks for core proxy, record/replay, router, store, secretmask, and LLM packages
     cmds:
-      - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay
+      - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask
+
+  bench:secretmask:
+    desc: Run credential/PII detection, masking and restore benchmarks
+    cmds:
+      - go test -count=1 -run '^$' -bench=. -benchmem ./pkg/secretmask
 
   deps:verify:
     desc: Verify module dependencies without editing go.mod or go.sum
