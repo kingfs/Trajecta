@@ -16,6 +16,7 @@ func TestValidatorsKnown(t *testing.T) {
 		validatorGitHubPAT:    true,
 		validatorJWE:          true,
 		validatorBech32:       true,
+		validatorChineseID:    true,
 	}
 	for id := RuleUnknown + 1; id < ruleIDCount; id++ {
 		r := ruleTable[id]
@@ -242,7 +243,7 @@ func TestStrengthCoverage(t *testing.T) {
 	// docs/SECRET_MASKING.md together, which is the point: silently changing how
 	// conclusive a shape is, is how a rule starts masking something it should
 	// only have reported.
-	const wantStrong, wantAnchored, wantGeneric = 35, 24, 16
+	const wantStrong, wantAnchored, wantGeneric = 35, 24, 17
 	if counts[StrengthStrong] != wantStrong || counts[StrengthAnchored] != wantAnchored || counts[StrengthGeneric] != wantGeneric {
 		t.Errorf("strength distribution: strong=%d anchored=%d generic=%d, want %d/%d/%d",
 			counts[StrengthStrong], counts[StrengthAnchored], counts[StrengthGeneric],

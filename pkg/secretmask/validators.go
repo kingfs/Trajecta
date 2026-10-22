@@ -21,6 +21,7 @@ const (
 	validatorGitHubPAT    = "github_pat"
 	validatorJWE          = "jwe"
 	validatorBech32       = "bech32"
+	validatorChineseID    = "chinese_id"
 )
 
 // runValidator dispatches to the named offline check. An unrecognised name
@@ -40,6 +41,8 @@ func runValidator(name string, tok []byte) bool {
 		return validateJWE(tok)
 	case validatorBech32:
 		return validateBech32(tok)
+	case validatorChineseID:
+		return validateChineseID(tok)
 	default:
 		return false
 	}
@@ -364,4 +367,101 @@ func decodedBase64URLLen(seg []byte) int {
 		n--
 	}
 	return n * 6 / 8
+}
+
+// chineseIDWeights and chineseIDCheckChars spell out ISO 7064 MOD 11-2, the
+// scheme GB 11643 uses for the last character of a resident identity number.
+var chineseIDWeights = [17]int{7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2}
+
+const chineseIDCheckChars = "10X98765432"
+
+// chineseIDProvinceList is the province-level prefix set of GB/T 2260, in code
+// order. 71, 81 and 82 are Taiwan, Hong Kong and Macao.
+var chineseIDProvinceList = []string{
+	"11", "12", "13", "14", "15",
+	"21", "22", "23",
+	"31", "32", "33", "34", "35", "36", "37",
+	"41", "42", "43", "44", "45", "46",
+	"50", "51", "52", "53", "54",
+	"61", "62", "63", "64", "65",
+	"71", "81", "82",
+}
+
+// chineseIDProvinceSet is chineseIDProvinceList indexed by the two-digit code,
+// built once so the validator is an array lookup. TestChineseIDProvinceTable
+// keeps the two in step.
+var chineseIDProvinceSet = func() (set [100]bool) {
+	for _, p := range chineseIDProvinceList {
+		set[int(p[0]-'0')*10+int(p[1]-'0')] = true
+	}
+	return set
+}()
+
+// validateChineseID checks the three independent properties a real identity
+// number has: the region code names a province, the birthdate is a calendar
+// date, and the last character is the ISO 7064 MOD 11-2 check character of the
+// first seventeen. The check character alone filters ten of eleven random digit
+// runs; the calendar cuts the rest by two orders of magnitude, and the province
+// prefix removes most of what is left.
+//
+// The birth-year bounds are fixed rather than read from the clock: a validator
+// that answered differently as time passed would make an old cassette
+// re-analyze to different findings. The lower bound admits the 19th-century
+// births still present in archived records; the upper bound is the last year a
+// four-digit birth year can plausibly carry.
+func validateChineseID(tok []byte) bool {
+	if len(tok) != 18 {
+		return false
+	}
+	for i := 0; i < 17; i++ {
+		if tok[i] < '0' || tok[i] > '9' {
+			return false
+		}
+	}
+	c := tok[17]
+	if c == 'x' {
+		c = 'X'
+	}
+	if (c < '0' || c > '9') && c != 'X' {
+		return false
+	}
+	if !chineseIDProvinceSet[int(tok[0]-'0')*10+int(tok[1]-'0')] {
+		return false
+	}
+	year := int(tok[6]-'0')*1000 + int(tok[7]-'0')*100 + int(tok[8]-'0')*10 + int(tok[9]-'0')
+	month := int(tok[10]-'0')*10 + int(tok[11]-'0')
+	day := int(tok[12]-'0')*10 + int(tok[13]-'0')
+	if year < 1800 || year > 2099 || !validCalendarDate(year, month, day) {
+		return false
+	}
+	return chineseIDCheckChar(tok[:17]) == c
+}
+
+// chineseIDCheckChar returns the ISO 7064 MOD 11-2 check character for the
+// seventeen leading digits.
+func chineseIDCheckChar(digits []byte) byte {
+	sum := 0
+	for i := 0; i < 17; i++ {
+		sum += int(digits[i]-'0') * chineseIDWeights[i]
+	}
+	return chineseIDCheckChars[sum%11]
+}
+
+// validCalendarDate reports whether the day exists in the month, including the
+// leap-year rule.
+func validCalendarDate(year, month, day int) bool {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return day >= 1 && day <= 31
+	case 4, 6, 9, 11:
+		return day >= 1 && day <= 30
+	case 2:
+		leap := year%4 == 0 && (year%100 != 0 || year%400 == 0)
+		if leap {
+			return day >= 1 && day <= 29
+		}
+		return day >= 1 && day <= 28
+	default:
+		return false
+	}
 }

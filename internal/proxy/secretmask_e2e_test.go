@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/kingfs/Trajecta/pkg/replay"
+	"github.com/kingfs/Trajecta/pkg/secretmask"
 )
 
 const (
@@ -709,5 +710,142 @@ func TestMaskedCassetteStillReplays(t *testing.T) {
 	}
 	if err := replay(masked); err == nil {
 		t.Fatal("replaying the stand-in matched the cassette, so the cassette did not record the original body")
+	}
+}
+
+// TestHandlerMasksChineseIDOnTheWire covers the personal-data path end to end.
+// The provider must receive a well-formed stand-in, the echo must come back as
+// the original number, the cassette must keep the original for replay and
+// inspection, and the audit table must keep the pair. The stand-in is located
+// by scanning the bytes the provider actually received, not by re-deriving it,
+// so the assertion also covers the renderer.
+func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
+	const id = "11010519491231002X"
+	requestBody := `{"model":"gpt-5","messages":[{"role":"user","content":"我的身份证号是 ` + id + `，请帮我核对。"}]}`
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		seen := "(missing)"
+		if findings := secretmask.Scan(body); len(findings) > 0 {
+			seen = string(findings[0].Bytes(body))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"echo": seen})
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+	}
+
+	if strings.Contains(upstreamBody, id) {
+		t.Errorf("the upstream received the real identity number: %s", upstreamBody)
+	}
+	if len(upstreamBody) != len(requestBody) {
+		t.Errorf("body length changed: got %d, want %d; content-length would desynchronise",
+			len(upstreamBody), len(requestBody))
+	}
+	var standIn string
+	if findings := secretmask.Scan([]byte(upstreamBody)); len(findings) > 0 {
+		standIn = string(findings[0].Bytes([]byte(upstreamBody)))
+	}
+	if len(standIn) != len(id) {
+		t.Fatalf("the upstream body carries no identity-number-shaped stand-in: %s", upstreamBody)
+	}
+
+	var echoed struct {
+		Echo string `json:"echo"`
+	}
+	if err := json.Unmarshal(respBody, &echoed); err != nil {
+		t.Fatalf("decode response %q: %v", respBody, err)
+	}
+	if echoed.Echo != id {
+		t.Errorf("client received %q, want the original number restored", echoed.Echo)
+	}
+
+	path := findRecordedHTTP(t, outputDir)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cassette %q: %v", path, err)
+	}
+	parsed, err := waitForRecordedPrelude(path, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	_, recordedBody, _, _ := recordfile.ExtractSections(raw, parsed)
+	if !strings.Contains(string(recordedBody), id) {
+		t.Errorf("the cassette did not record the original body: %s", recordedBody)
+	}
+	var maskedEvents int
+	for _, event := range parsed.Events {
+		if event.Type != "secret.masked" {
+			continue
+		}
+		maskedEvents++
+		if rule, _ := event.Attributes["rule"].(string); rule != "pii.chinese_id" {
+			t.Errorf("secret.masked rule = %q, want pii.chinese_id", rule)
+		}
+		if strings.Contains(recordfileEventText(event), id) || strings.Contains(recordfileEventText(event), standIn) {
+			t.Errorf("secret.masked event carries a value: %s", recordfileEventText(event))
+		}
+	}
+	if maskedEvents != 1 {
+		t.Errorf("recorded %d secret.masked events, want 1", maskedEvents)
+	}
+
+	// The pair is written to the audit table by the recorder's finalize, which
+	// can finish a moment after the client has its response.
+	deadline := time.Now().Add(2 * time.Second)
+	var audits store.CredentialMaskAuditPage
+	for {
+		audits, err = st.ListCredentialMaskAudits(store.CredentialMaskAuditFilter{PageSize: 10})
+		if err != nil {
+			t.Fatalf("ListCredentialMaskAudits() error = %v", err)
+		}
+		if len(audits.Items) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(audits.Items) != 1 {
+		t.Fatalf("audit rows = %d, want 1: %+v", len(audits.Items), audits)
+	}
+	row := audits.Items[0]
+	if row.Rule != "pii.chinese_id" || row.Kind != "national_id" || row.Vendor != "" {
+		t.Errorf("audit rule/kind/vendor = %q/%q/%q", row.Rule, row.Kind, row.Vendor)
+	}
+	if row.Original != id || row.StandIn != standIn {
+		t.Errorf("audit pair = (%q, %q), want (%q, %q)", row.Original, row.StandIn, id, standIn)
+	}
+	if row.TraceID == "" || row.End-row.Start != len(id) {
+		t.Errorf("audit row lost its trace or offsets: %+v", row)
 	}
 }

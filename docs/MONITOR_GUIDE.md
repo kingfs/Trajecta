@@ -119,7 +119,7 @@ Trajecta 自身的事件收件箱：
 
 支持按状态、级别、来源过滤和搜索 fingerprint / trace / model / 消息，支持单条标记已读、解决、忽略，以及「全部标为已读」。重复事件按 fingerprint 合并。导航上的未读角标由 `GET /api/events/summary` 与 SSE `GET /api/events/stream` 驱动。
 
-`credential_masked`（`source: secretmask`）是代理把请求里的凭据换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)），事件详情面板会就地列出该规则的替换对（原始值与替换值各一行、完整打印，并带偏移、长度、置信度与落盘形态），因此不必离开事件页去确认；详情里的「追踪」链接指向该 trace 的「审计」标签页而不是默认的协议页，因为替换对属于审计面。其他事件保持默认落点。
+`credential_masked`（`source: secretmask`）是代理把请求里的凭据或身份证号换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)），事件详情面板会就地列出该规则的替换对（原始值与替换值各一行、完整打印，并带偏移、长度、置信度与落盘形态），因此不必离开事件页去确认；详情里的「追踪」链接指向该 trace 的「审计」标签页而不是默认的协议页，因为替换对属于审计面。其他事件保持默认落点。
 
 #### 质量 `/audit`
 

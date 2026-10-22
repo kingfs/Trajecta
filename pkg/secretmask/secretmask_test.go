@@ -17,6 +17,7 @@ var positiveSamples = []struct {
 	text string
 }{
 	{RulePEMPrivateKey, "-----BEGIN RSA PRIVATE KEY-----"},
+	{RuleChineseID, "11010519491231002X"},
 	{RuleJWT, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"},
 	{RuleWebhookSecret, "whsec_" + rep("A", 43) + "="},
 

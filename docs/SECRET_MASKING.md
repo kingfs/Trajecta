@@ -1,10 +1,12 @@
-# 敏感凭据遮蔽（Secret Masking）
+# 敏感凭据与个人数据遮蔽（Secret Masking）
 
 本文描述 `pkg/secretmask` 的当前能力，以及代理在请求与响应路径上如何使用它。
 
 ## 它解决什么问题
 
 用户（或本地 agent）在对话里粘贴真实 API key 时，这个值会随请求离开本机、进入上游厂商与模型上下文。开启本能力后，请求体在离开本机前会被扫描，命中的凭据被替换为**保形假值**；上游与模型只看到假值，本机则保留真值。模型如果在回复或工具调用里回显了假值，响应在写给客户端前会被换回真值。
+
+同一个机制也覆盖个人数据，目前是**中国居民身份证号**（`pii.chinese_id`）：它走同一套识别、打分、遮蔽与还原路径，只是假值不是逐字节替换，而是重新渲染成一个校验位成立的号码（见「假值形态」）。
 
 它保护的是「值本身不被泄露给上游」。它不承诺的事情见最后的「已知边界」。
 
@@ -19,7 +21,7 @@ secret_masking:
 
 或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED=false`。
 
-之所以默认开启：扫描本身几乎不花时间（见「度量」），而漏掉一个真实 key 的代价是它永久进入上游与模型上下文。开启它改变的是模型实际看到的内容，属于语义变更，因此运维需要能一眼看出它在工作——每个被改写的值都会落一条 `secret.masked` 事件，响应里每次还原落一条 `secret.restored`。
+之所以默认开启：扫描本身几乎不花时间（见「度量」），而漏掉一个真实 key 的代价是它永久进入上游与模型上下文。开启它改变的是模型实际看到的内容，属于语义变更，因此运维需要能一眼看出它在工作——每个被改写的值（凭据与身份证号都算）都会落一条 `secret.masked` 事件，响应里每次还原落一条 `secret.restored`。
 
 默认值由 `internal/config.Load` 在解码 YAML **之前**给字段播种实现（与 `debug.mask_key` 同一手法）。这样省略该键即取默认值，而显式 `enabled: false` 与环境变量仍然优先——环境变量在解码**之后**应用，因此始终覆盖文件。
 
@@ -34,6 +36,8 @@ secret_masking:
 **三、确定性。** 假值是 `(seed, 规则名, 真值)` 的纯函数：同一个 key 在每一轮对话里渲染成同一个假值。这既保证多轮对话不自相矛盾，也保证上游的 prompt cache 前缀不发生抖动。
 
 渲染在 `pkg/secretmask/vault.go`：以 HMAC-SHA256 生成密钥流，逐字节替换为同类字符。
+
+身份证号是唯一的例外。逐字节替换会打坏它的内部结构——省份前缀、出生日期与校验位——下游任何按 GB 11643 校验的工具都会拒绝假值。`renderChineseID` 因此用同一份密钥流重新渲染一个号码：省份从 GB/T 2260 的省级前缀里取，出生日期固定落在 1950–2009、1–12 月、1–28 日（永远是合法日历日），顺序码取随机数字，最后一位按 ISO 7064 MOD 11-2 重算。等长、确定性、可还原三条性质不变。**出生日期刻意不保留**：它是最直接指向个人的部分，而下游不需要这个日期为真；代价是「把身份证号与另一处出生日期交叉核对」的流程会对不上（见「已知边界」）。
 
 ## Vault
 
@@ -50,19 +54,24 @@ secret_masking:
 
 **L1 词法 DFA。** `pkg/secretmask/rules.rl` 是模式的唯一事实源，由 Ragel 编译成 Go 状态机（`rules_ragel.go`，已提交）。扫描器用 `|* ... *|`，因此**最长匹配优先，等长时先声明者优先**，规则顺序具有语义。运行时不做回溯。
 
-长度上下界不在状态机里表达，而在 `scan.go` 的 `collector.emit` 里用原生代码判断。把固定重复 `{n}` 交给状态机展开到宽字符类上，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间也同步变长，而「`+` 加原生长度检查」没有这个问题。当前 `rules_ragel.go` 是 31201 行 / 349944 字节。
+长度上下界不在状态机里表达，而在 `scan.go` 的 `collector.emit` 里用原生代码判断。把固定重复 `{n}` 交给状态机展开到宽字符类上，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间也同步变长，而「`+` 加原生长度检查」没有这个问题。当前 `rules_ragel.go` 是 33425 行 / 371351 字节。
 
-**L2 结构校验。** `validators.go` 实现五个离线校验，规则通过 `Validator` 字段引用：
+**粗筛与细判。** 带前缀的凭据（`sk-proj-`、`AIza`、`ghp_` …）由状态机直接给出规则 ID，因为锚点本身就是词法。数字类个人数据没有这样的锚点：身份证号是 18 位，手机号 11 位，银行卡 12–19 位，它们共同的词法只是「一段数字」。为每一类各写一条 `[0-9]{n}` 会让状态机按长度重复展开；先粗扫再细扫则等于把同一份请求扫两遍。`rules.rl` 因此只有一条粗规则 `digit_run = [0-9]+ [Xx]?;`，命中后交给 `scan.go` 的 `emitDigits`：按 `digitClasses` 的顺序逐类试长度与校验器，第一类通过即采用，两侧边界由 `bounded` 统一检查。加一类数字（手机号、银行卡）只改 `digitClasses` 与该规则的元数据，**不新增 DFA 状态、也不需要重新生成**，一次扫描同时服务所有数字类。
+
+**L2 结构校验。** `validators.go` 实现六个离线校验，规则通过 `Validator` 字段引用：
 
 - `jwt`：三段 base64url 全部解码成功，头部是命名了算法的 JSON 对象，载荷是 JSON 对象，且签名解码长度与该算法一致。
 - `anthropic_key`：结尾必须是已发布 Anthropic key 家族共有的 `AA`。
 - `github_pat`：`github_pat_` 之后 30 字节正文的 CRC32 与末 6 字节 base62 校验位吻合。
 - `jwe`：第一段 base64url 解出的 JSON 头里有 `enc` 成员。
 - `bech32`：BIP-173 校验和成立（age 私钥），且大小写不混用。
+- `chinese_id`：18 位，前 6 位是 GB/T 2260 的省级前缀，第 7–14 位是合法历法生日（含闰年，年份 1800–2099），最后一位是前 17 位的 ISO 7064 MOD 11-2 校验位。
 
 带校验器的规则只上报通过校验的匹配，且通过校验本身就足以认定。
 
 **L3 上下文。** 在匹配位置前后各 96 字节窗口内搜索凭据词汇（`context.go` 的全局词表，加上规则自己的 `Keywords`）。
+
+规则可以用 `SkipContext` 跳过这一层：校验器通过就已经落在可改写档，窗口扫描不会改变结论，而它是命中密集时最贵的一步。身份证规则就是这么做的——64 KB 里命中约 3800 次时，跳过窗口扫描把耗时从约 23.5 ms 降到约 0.45 ms。`WordBounded` 是另一条原生判据：匹配两侧只要紧邻 ASCII 字母或数字就丢弃，避免从 19 位订单号或时间戳里切出一个 18 位来当身份证号。
 
 **L4 置信度门限。** 打分权重见 `finding.go`：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；上下文命中加 40 分；校验器通过则分数不低于 70 分；总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。**只有 Medium 及以上允许被自动改写**，Low 仍然上报，让审计能看到「看见了但故意没动」。
 
@@ -70,12 +79,15 @@ secret_masking:
 
 ## 覆盖范围
 
-规则集共 75 条：Strong 35、Anchored 24、Generic 16。范围是两组：
+规则集共 76 条：Strong 35、Anchored 24、Generic 17。范围是三组：
 
 1. 结构形状（JWT、JWE、PEM 头、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；
-2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`。
+2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`；
+3. 个人数据：中国居民身份证号（`pii.chinese_id`）。它按 Generic 计分——18 位数字本身不证明什么——但校验器通过即认定，因此实际只会改写省份、生日与校验位三者同时成立的号码。
 
 **刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64，都是哈希、对象 ID 与密钥共用的形状；而校验器通过会把分数直接抬到可改写档，所以「base64 解码后正好 64 字节」这类判据一旦写成规则，就会把转录里每一个 64 字节块（哈希、证书、随机 nonce）都改写掉。弱形态要成为可改写的，必须先有「必须命中上下文」这一档语义，而现在的打法是上下文**加分**而非**必需**。
+
+**15 位旧号不覆盖。** 1999 年之前的 15 位旧身份证没有校验位，只有 6 位地区 + 6 位生日（YYMMDD）+ 3 位顺序码，仅凭形状无法与普通数字区分；要做就必须把上下文改成「必需」，与当前「上下文加分」的打法冲突。
 
 **DSN 与 Cookie 需要子跨度遮蔽。** 这两者只有一部分是秘密（`postgres://user:pass@host` 里的 pass、`Cookie: a=b` 里的值），而 vault 的替换粒度是整个命中跨度：整段改写会把主机名、用户名与键名一起随机化，等于改变连接目标、破坏结构。它们要等有了子跨度机制再做。
 
@@ -89,6 +101,8 @@ secret_masking:
 - 本地 Responses 路径：`internal/proxy/responses_server.go`。`buildResponsesServerChatRequest` 收到遮蔽后的体，`PrepareLogFileWithOptionsAndBody` 的第三个参数仍是原始体。
 
 响应侧是还原，且还原器必须装在 `UsageSniffer` **之内**而不是之外：`UsageSniffer.Read` 会把读到的 `p[:n]` 直接写入 cassette，如果还原发生在 sniffer 外层，cassette 里留下的就是假值。
+
+还原不只在写给客户端之前发生。本地 Responses runtime 执行客户端工具时，工具调用参数是从**还原后**的响应里读出来的：`internal/proxy/responses_server.go` 的 `recordResponsesServerChatResponse` 把 `Restorer` 装在 sniffer 之内，`internal/responses/runtime/runtime.go` 再用还原后的文本构造 `FunctionToolCall` 参数。因此客户端工具与本地 runtime 拿到的都是真值；只有**上游托管的工具**（provider-executed / hosted tools）直接看到假值，因为它们在厂商侧执行，本机没有机会还原。
 
 还原是**单遍、单调**的扫描：它只放出自己已经判定过的字节，判定不了的部分留在缓冲区里等下次读取，因此不会重复处理同一个字节。需要等待的情况有两种。
 
@@ -115,7 +129,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 两者都**不携带凭据字节**。prelude 会被复制进 trace 索引、发给 Monitor 并被导出，把真值写进去等于把它再散播一份；`internal/proxy/secretmask_e2e_test.go` 与 `secretmask_audit_test.go` 都把这条不变量钉住了。
 
-**2. `credential_mask_audits` 表**——真值与假值唯一的落库位置。每个被替换的值一行：
+**2. `credential_mask_audits` 表**——真值与假值唯一的落库位置。每个被替换的值一行（凭据与个人数据都写这里；表名是历史名称，不随覆盖范围改名）：
 
 | 列 | 含义 |
 | --- | --- |
@@ -128,7 +142,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，seed 每进程随机，cassette 只记原始请求体，所以后台重建索引或回填**拿不到假值**。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
 
-**3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。
+**3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。身份证替换走同一条通知与 `secretmask:rule:<rule>` 指纹，只是 `rule` 为 `pii.chinese_id`、`kind` 为 `national_id`；两个读入口都按 `kind` 原样显示，不区分凭据与个人数据。
 
 读取面：
 
@@ -141,9 +155,10 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 ## 已知边界
 
-- **审计表本身就是一份凭据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。它应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把它读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
+- **审计表本身就是一份凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。它应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把它读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
 - **PEM 私钥正文不覆盖。** 规则只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，不含密钥材料；真正的 base64 正文没有任何规则覆盖。改写头行既不能保护私钥，又会破坏文件语法，因此该规则**只上报、不改写**。
-- **需要真值的操作会失败。** HMAC 签名、AWS SigV4、JWT 签名等必须在真值上运算的操作，拿着假值无法完成。
+- **只有上游托管的工具看不到真值。** 客户端工具与本地 runtime 执行工具时拿到的是还原后的真值（见「在代理中的接入点」），HMAC 签名、AWS SigV4、签发 JWT 这类必须在真值上运算的操作在那里可以完成；provider-executed / hosted tools 在厂商侧执行，只看到假值，同样的操作会失败。
+- **身份证的生日不保留。** 假值的出生日期是重新渲染的合法日期，不是真值里的那一天。任何把身份证号与另一处出生日期交叉比对的下游（例如 KYC）都会对不上；需要这个一致性的流程应关闭遮蔽，或只依赖号码自身的校验位。
 - **逐 token 的极小分片不重组。** 链从假值的第一段开始跟，如果厂商把值切成小于 8 字节的片（逐 token 下发就可能这样），就永远等不到足够长的一段，链不会开。此时客户端拿到的是拼接后的**假值**而不是真值——功能上失败，但没有改写任何无关字节。（注意 `content` 与工具调用参数都走同一条路径，所以这一条对两者都成立。）
 - **`/tokenize` 计数请求不遮蔽。** 本地 Responses runtime 的 token 计数器会把待压缩的对话正文原样 POST 到上游的 `/tokenize` 端点（`internal/responses/runtime/tokenize_counter.go`，经 `runtime.go` 的 `EstimateResponsePromptTokens` 在自动压缩时调用），这条路径没有接入 vault。它需要显式配置才启用：`model_profiles` 里要有 `name`/`pattern`、`context_window_tokens`，以及声明了 `capabilities.tokenize` 的启用目标，或用 `tokenize_counter.enabled` 显式打开；跟踪的默认配置里没有 `model_profiles`，因此当前不生效。一旦启用，它发出的正文里含真实凭据。
 - **派生与编码形式绕过。** 引擎不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分（JWT 的三段、JWE 的头部、GitHub 与 age 的校验位）。被编码、截断、改大小写或重新格式化过的凭据识别不到。
@@ -153,7 +168,8 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 以下数字来自 `go test ./pkg/secretmask -bench . -count=3` 在 24 线程机器上的稳定值，看数量级即可：
 
-- 词法扫描约 73 KB 载荷：约 1.32 ms，约 57 MB/s。
+- 词法扫描约 73 KB 载荷：约 1.43 ms，约 52 MB/s（加入身份证规则前约 1.32 ms / 57 MB/s；生成表从 31201 行涨到 33425 行）。
+- 身份证命中本身：每 64 KB 一条时约 231 MB/s；每 64 KB 约 3500 条时约 153 MB/s（`BenchmarkScanDenseChineseIDs`），因为 `SkipContext` 跳过了上下文扫描。
 - 遮蔽 109 KB 载荷：热态约 200 MB/s，冷态约 189 MB/s（冷态包含渲染假值）。
 - 还原：约 295 MB/s（无命中载荷），流式约 302 MB/s。跨 delta 重组只增加一次判定，代价已包含在内。「整条假值优先于链」的判定要在链开着时逐字节做，这是相对不做该判定时约 13% 的代价（346 → 295 MB/s），换来的是不漏还原、不拼接。
-- 精度：对仓库自身 757 个文本文件（13.4 MB）扫描得到 27 处命中，分布在 12 个文件。其中 24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2，JWT/JWE/age/Langfuse 等各 1），1 处是既有的 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key——正是本功能要保护的场景。用规则包自身的 `Scan` 遍历仓库文本文件即可复现；在干净检出上应为 25 处 / 11 个文件。新增的 8 条规则在真实代码上没有产生任何误报。
+- 精度：对仓库自身 757 个文本文件（13.4 MB）扫描得到 27 处命中，分布在 12 个文件。其中 24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2，JWT/JWE/age/Langfuse 等各 1），1 处是既有的 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key——正是本功能要保护的场景。用规则包自身的 `Scan` 遍历仓库文本文件即可复现；在干净检出上应为 25 处 / 11 个文件。新增的 8 条规则在真实代码上没有产生任何误报；身份证规则加入前在仓库自身文本文件上命中 0 处，当前的命中都是本次新增的测试夹具与文档示例。

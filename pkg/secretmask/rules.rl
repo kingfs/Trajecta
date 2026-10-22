@@ -38,6 +38,14 @@ jwe = 'eyJ' b64u+ '.' b64u* '.' b64u* '.' b64u* '.' b64u*;
 # which would also match a spelling no Prefixes entry could protect.
 bearer = ('Bearer ' | 'bearer ') [0-9A-Za-z._~+/\-]+;
 
+# --- personal data -----------------------------------------------------
+# A maximal digit run, optionally closed by the X check character. This is the
+# coarse half of the two-stage design: the machine finds the run in one pass,
+# and scan.go decides which numeric class it is and whether it is real. Keeping
+# the pattern coarse means the DFA gains one loop, not one state chain per
+# numeric class, and adding a class needs no regeneration at all.
+digit_run = [0-9]+ [Xx]?;
+
 # --- OpenAI ------------------------------------------------------------
 # T3BlbkFJ ("OpenAI" in base64) is what separates these from the sk- pool.
 # Legacy segments allow no '-'/'_'; the project family does.
@@ -227,6 +235,8 @@ main := |*
 
     sk_under => { sink.emit(RuleSkUnderscoreGeneric, ts, te) };
     sk_dash  => { sink.emit(RuleSkDashGeneric, ts, te) };
+
+    digit_run => { sink.emitDigits(ts, te) };
 
     any;
 *|;

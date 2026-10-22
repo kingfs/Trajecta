@@ -303,6 +303,11 @@ func (v *Vault) render(r *Rule, real []byte, attempt int) string {
 	out := make([]byte, len(real))
 	copy(out, real)
 	ks := keystream(v.seed, r.Name, attempt, len(real))
+	if r.Kind == KindNationalID {
+		if fake := renderChineseID(len(real), ks); fake != nil {
+			return string(fake)
+		}
+	}
 	// The replacement alphabet is chosen per run of alphanumeric bytes rather
 	// than for the whole value: a vendor that puts a hex segment next to a
 	// free-form one (zhipu, the Langfuse UUIDs, a Databricks token) would
@@ -501,4 +506,50 @@ func insertLongestFirst(bucket []fakeEntry, e fakeEntry) []fakeEntry {
 	copy(bucket[i+1:], bucket[i:])
 	bucket[i] = e
 	return bucket
+}
+
+// renderChineseID builds a stand-in that is itself a well-formed identity
+// number: a real province code, a calendar birthdate and the ISO 7064 check
+// character recomputed over the substituted digits. Keeping the shape valid is
+// the same reason every other rule keeps its prefix - a downstream validator
+// has to accept the value the provider was given. A shape-only stand-in would
+// be rejected by every tool that checks an identity number.
+//
+// The birthdate is deliberately not preserved: it is the part of the value that
+// identifies a person most directly, and nothing downstream needs that
+// particular date to be true. The stand-in only has to be a number the
+// validator admits.
+//
+// The keystream is the same one the byte-wise renderer uses, so the stand-in is
+// still a pure function of (seed, rule, real value) and a retry with a
+// different attempt produces a different number.
+func renderChineseID(n int, ks []byte) []byte {
+	if n != 18 || len(ks) < 12 {
+		return nil
+	}
+	out := make([]byte, 18)
+	province := chineseIDProvinceList[int(ks[0])%len(chineseIDProvinceList)]
+	out[0], out[1] = province[0], province[1]
+	for i := 2; i <= 5; i++ {
+		out[i] = '0' + ks[i]%10
+	}
+	year := 1950 + int(ks[6])%60
+	month := 1 + int(ks[7])%12
+	day := 1 + int(ks[8])%28
+	putFixedDigits(out[6:10], year)
+	putFixedDigits(out[10:12], month)
+	putFixedDigits(out[12:14], day)
+	for i := 14; i <= 16; i++ {
+		out[i] = '0' + ks[9+i-14]%10
+	}
+	out[17] = chineseIDCheckChar(out[:17])
+	return out
+}
+
+// putFixedDigits writes v into dst as zero-padded decimal digits.
+func putFixedDigits(dst []byte, v int) {
+	for i := len(dst) - 1; i >= 0; i-- {
+		dst[i] = byte('0' + v%10)
+		v /= 10
+	}
 }

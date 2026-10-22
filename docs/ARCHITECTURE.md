@@ -54,7 +54,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/replay`：测试回放 transport。
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
-- `pkg/secretmask`：凭据形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。
+- `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
 - `web/monitor-ui`：Monitor 前端源码（React + Vite 8，Tailwind v4 + Radix primitives，TanStack Query 管服务端状态，Playwright 与 `node --test` 测试）。样式令牌由 `src/styles/tokens.css`（生成的 OKLCH 调色板）提供，`vite build` 的产物写入 `internal/monitor/ui/dist`。
 
@@ -67,7 +67,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 1. SDK、CLI 或应用把 LLM API 请求发到本地代理（如 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`）。
 2. proxy 归一化入口 endpoint，并按请求路径与上游配置识别协议族。
 3. routeplan/router 依据入口、模型、能力与 `responses_strategy` 选择 route target，并记录决策与候选。
-4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。**凭据遮蔽也在这一步、真正发包之前发生，且默认开启**：通过规则与置信度门限的凭据被替换为等长保形假值后才发给上游，cassette 记录的仍是原始请求体，响应在写回 client 之前把假值换回真值（流式响应按跨 delta 重组）；两个方向各写 `secret.masked` / `secret.restored` 事件且不携带凭据字节。细节与边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
+4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。**凭据与个人数据遮蔽也在这一步、真正发包之前发生，且默认开启**：通过规则与置信度门限的值（API key、身份证号等）被替换为等长保形假值后才发给上游，cassette 记录的仍是原始请求体，响应在写回 client 之前把假值换回真值（流式响应按跨 delta 重组）；两个方向各写 `secret.masked` / `secret.restored` 事件且不携带凭据字节。细节与边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
 5. 请求转发到上游，响应以流式或非流式返回 client。若某次 `/v1/responses` 请求被判定为原生直通，则该请求只会在「自己实现 Responses API」的目标里选择：只能靠本地 runtime 翻译的 Chat Completions 目标在这一请求上不可选（重试重新选择时同样不可选），否则原样转发会把 Responses 请求发给不实现该协议的上游。转发路径自己写响应体（不经 `httputil.ReverseProxy` 的拷贝），所以「流式响应逐次 flush」这条契约由它承担：流式（或长度未知）的响应每写一次就 flush 一次，否则小于服务端输出缓冲的写入会被攒着，client 在 handler 返回前收不到任何东西——连响应头都收不到，`stream: true` 就退化成「最后一个 token 之后一次性收到完整回答」，首字节时间等于总时长。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 与 `llm.*` timeline 事件。
@@ -125,7 +125,7 @@ application DB 是结构化查询源：
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）；
-- 凭据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成、每进程种子随机，cassette 只记原始请求体，所以后台重建索引拿不到假值、只会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
+- 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成、每进程种子随机，cassette 只记原始请求体，所以后台重建索引拿不到假值、只会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
 
 生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
 

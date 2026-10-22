@@ -24,6 +24,11 @@ const (
 	KindSessionKey
 	KindEphemeralKey
 	KindGenericKey
+	// KindNationalID is personal data rather than a credential: a value that
+	// identifies a person and that a provider has no reason to hold. The
+	// detection and rendering pipeline is the same, but an audit reads it
+	// differently, and Kind.PII is what separates the two.
+	KindNationalID
 )
 
 // kindNames renders a Kind for logs, audit records and test failures.
@@ -43,6 +48,7 @@ var kindNames = [...]string{
 	KindSessionKey:          "session_key",
 	KindEphemeralKey:        "ephemeral_key",
 	KindGenericKey:          "generic_key",
+	KindNationalID:          "national_id",
 }
 
 // String names the kind.
@@ -52,6 +58,12 @@ func (k Kind) String() string {
 	}
 	return "unknown"
 }
+
+// PII reports whether the kind is personal data rather than a credential. The
+// masking path treats the two the same: both leave the machine only as a
+// stand-in. The distinction is for the audit side, where a credential finding
+// and a personal-data finding are read differently.
+func (k Kind) PII() bool { return k == KindNationalID }
 
 // Grade records how strong the format evidence is, following the grading used
 // by the format reference: A means an official document states the shape, D
@@ -109,6 +121,18 @@ type Rule struct {
 	// bytes. A rule with a validator only reports matches that pass it, and a
 	// pass is by itself enough to treat the match as conclusive.
 	Validator string
+	// WordBounded rejects a match that touches an ASCII alphanumeric byte on
+	// either side, so a run inside a longer identifier is not a candidate. It
+	// matters for the shapes that are defined by a length rather than by a
+	// prefix: an eighteen-digit identity number inside a twenty-digit order
+	// number is not an identity number.
+	WordBounded bool
+	// SkipContext keeps the rule out of the L3 context scan. A passing
+	// validator already raises the score to the maskable band, so the window
+	// scan cannot change the decision; skipping it matters because the window
+	// search is the most expensive part of emit, and a body can carry thousands
+	// of matches.
+	SkipContext bool
 	// Keywords are vendor-specific strings whose presence near the match
 	// counts as context evidence. The global credential vocabulary in
 	// context.go applies to every rule as well.
@@ -238,6 +262,11 @@ const (
 	RuleSkDashGeneric
 	RuleSkUnderscoreGeneric
 
+	// Personal data. These are not credentials and are appended for the same
+	// reason as the cloud shapes above: the numbers already assigned never
+	// move.
+	RuleChineseID
+
 	ruleIDCount
 )
 
@@ -347,6 +376,14 @@ var ruleTable = [ruleIDCount]Rule{
 
 	RuleSkDashGeneric:       {Name: "generic.sk_dash", Kind: KindGenericKey, Grade: GradeD, Strength: StrengthGeneric, MinLen: 35, Keywords: []string{"deepseek", "dashscope", "moonshot", "kimi", "siliconflow"}, Prefixes: []string{"sk-"}},
 	RuleSkUnderscoreGeneric: {Name: "generic.sk_underscore", Kind: KindGenericKey, Grade: GradeD, Strength: StrengthGeneric, MinLen: 35, Keywords: []string{"novita", "elevenlabs"}, Prefixes: []string{"sk_"}},
+
+	// The resident identity number is 6-digit region code + 8-digit birthdate +
+	// 3-digit sequence + 1 ISO 7064 MOD 11-2 check character (GB 11643). The
+	// lexical shape alone is a bare digit run, which is why Strength is Generic:
+	// only the validator makes this conclusive, and a rule with a validator
+	// reports nothing that failed it. The coarse digit run and the fine rule are
+	// kept apart on purpose - see digitClasses in scan.go.
+	RuleChineseID: {Name: "pii.chinese_id", Kind: KindNationalID, Grade: GradeA, Strength: StrengthGeneric, MinLen: 18, MaxLen: 18, Validator: validatorChineseID, WordBounded: true, SkipContext: true},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

@@ -34,7 +34,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
-- Credential shape detection and masking: the Ragel-compiled DFA, the rule table, the offline validators, the context scorer and the format-preserving stand-in vault in `pkg/secretmask`; wired into `internal/proxy` on both the pass-through and the local Responses paths, gated by `secret_masking.enabled`
+- Credential and personal-data shape detection and masking: the Ragel-compiled DFA, the rule table, the offline validators, the context scorer and the format-preserving stand-in vault in `pkg/secretmask`; wired into `internal/proxy` on both the pass-through and the local Responses paths, gated by `secret_masking.enabled`. Numeric shapes with no lexical anchor (national IDs, phone numbers) do not get their own DFA pattern: `rules.rl` has one coarse `digit_run`, `scan.go`'s `digitClasses` picks the class after the match, and adding a class needs no regeneration
 
 ## Storage
 
@@ -68,7 +68,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
 - Keep recorded `.http` payloads human-inspectable.
 - Prefer additive evolution over destructive migration of existing cassettes.
 - The application database is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
-- `pkg/secretmask` renders the stand-ins for masked credentials and reverses them. A stand-in MUST stay
+- `pkg/secretmask` renders the stand-ins for masked credentials and personal data and reverses them. A national-ID stand-in is re-rendered as a well-formed number (real province code, calendar birthdate, recomputed check character) rather than byte-substituted; its birthdate is deliberately not the real one, so a downstream flow that cross-checks the ID against a separately entered birthdate will disagree. A stand-in MUST stay
   exactly as long as the value it replaces and MUST keep that value's prefix, punctuation and per-segment
   alphabet: the proxy copies the upstream `Content-Length` to the client verbatim and derives the outbound
   request length from the body slice it is handed, so a length-changing replacement desynchronises both
@@ -124,7 +124,7 @@ All files under `docs/` are written in Chinese and describe current code facts o
 - `docs/PROTOCOLS_AND_PROVIDERS.md`: 协议族、请求入口、provider preset 与能力声明
 - `docs/ROUTING_AND_CREDENTIALS.md`: 配置来源与所有权、路由选择、凭据与 limit scope
 - `docs/RESPONSES_RUNTIME.md`: 本地 Responses runtime、Codex 兼容面、hosted tools
-- `docs/SECRET_MASKING.md`: 凭据遮蔽的规则来源、置信度门限、保形假值与流式还原、接入点与已知边界
+- `docs/SECRET_MASKING.md`: 凭据与个人数据遮蔽的规则来源、置信度门限、保形假值与流式还原、接入点与已知边界
 - `docs/OBSERVATION_AND_AUDIT.md`: 语义解析管道、Observation IR、findings 与重分析
 - `docs/STORAGE_AND_DEPLOYMENT.md`: 存储分层、迁移命令、生产部署与派生数据重算
 - `docs/MONITOR_GUIDE.md`: Monitor 当前用户可见能力与操作流程

@@ -684,6 +684,7 @@ func (a *serverAPI) queryDangerousToolCalls(ctx context.Context, req *mcp.CallTo
 func (a *serverAPI) querySensitiveDataFindings(ctx context.Context, req *mcp.CallToolRequest, in *querySensitiveDataFindingsInput) (*mcp.CallToolResult, map[string]any, error) {
 	out, err := a.mergeTraceFindingCategories(ctx, in.TraceID, "", []string{
 		"credential_leak",
+		"pii_leak",
 		"sensitive_data",
 	})
 	return nil, out, err

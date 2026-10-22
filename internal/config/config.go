@@ -254,8 +254,11 @@ type LimitConfig struct {
 	ChannelKeyHeader string `yaml:"channel_key_header"`
 }
 
-// SecretMaskingConfig controls replacing credentials found in a request body
-// with format-preserving stand-ins before the request leaves the machine.
+// SecretMaskingConfig controls replacing credentials and personal data found in
+// a request body with format-preserving stand-ins before the request leaves the
+// machine. The personal-data rules are currently the Chinese resident identity
+// number; they share the same switch because there is no useful policy in
+// masking an API key but forwarding the identity number beside it.
 //
 // The stand-ins keep the real value's length, prefix and punctuation, so a
 // Content-Length stays valid and a tool that validates on shape still accepts

@@ -1175,11 +1175,14 @@ api_key="<APIKey>", algorithm="hmac-sha256", headers="host date request-line", s
 | JWK 私钥 | JSON 含 `kty` 且含 `d`（或 oct 含 `k`） | 高 |
 | Google 服务账号 JSON | `"type":"service_account"` 与 `"private_key"` 同对象 | 高 |
 | PowerShell `ConvertTo-SecureString` | `01000000d08c9ddf0115d1118c7a00c04fc297eb` 头部 | 高 |
+| 中国居民身份证号 | 18 位结构 + GB/T 2260 省级前缀 + 合法历法生日 + ISO 7064 MOD 11-2 校验位 | 高（三者同时成立） |
 | PyPI token | 固定前缀 `pypi-AgEIcHlwaS5vcmc` + macaroon 结构 | 高（前缀） |
 | Bedrock API key | `ABSK…` / `bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t`（后者 base64 解码即 `bedrock.amazonaws.com`） | 高（魔法串） |
 | OpenAI key | 串内含固定 base64 片段 `T3BlbkFJ`（`OpenAI` 的 base64） | 高（魔法串） |
 | Anthropic key | `sk-ant-api03-` + 93 字符 + 结尾 `AA` | 高 |
 | TOTP/恢复码 | 结构弱，一般不纳入 | — |
+
+身份证号（GB 11643，`pkg/secretmask` 的 `pii.chinese_id`）是 18 位：6 位行政区划 + 8 位出生日期（`YYYYMMDD`）+ 3 位顺序码 + 1 位校验位（`0-9` 或 `X`）。校验位是 ISO 7064 MOD 11-2：前 17 位按权重 `7 9 10 5 8 4 2 1 6 3 7 9 10 5 8 4 2` 加权求和，`sum mod 11` 查 `10X98765432`。只用校验位能排除约 10/11 的随机 18 位数字；再要求省份码属于 GB/T 2260 的省级前缀（11–15、21–23、31–37、41–46、50–54、61–65、71、81、82）、生日是真实日历日（含闰年），剩余误报约为万分之一量级。1999 年之前的 15 位旧号没有校验位，不在覆盖范围内。
 
 ### 8.2 GitHub PAT 的 CRC32 校验位（已核实，实现即可用）
 
@@ -1297,8 +1300,8 @@ Trajecta 当前的凭据识别发生在两处：
 | --- | --- |
 | `rules.rl` | Ragel 源，词法模式（字符类、前缀、结构形状）的唯一事实源 |
 | `rule.go` | 规则元数据表，每条规则一项：`Kind`、`Grade`、`Strength`、`MinLen`、`MaxLen`、`Validator`、`Keywords`、`Prefixes`、`PrefixSkip`、`Literals` |
-| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，31201 行 / 349944 字节（约 342 KiB）的状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
-| `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key`、`github_pat`、`jwe`、`bech32` 命名 |
+| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，33425 行 / 371351 字节（约 363 KiB）的状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
+| `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key`、`github_pat`、`jwe`、`bech32`、`chinese_id` 命名 |
 | `context.go` | 全局凭据词表与 96 字节上下文窗口 |
 | `finding.go` | `Finding`、`Confidence`、`Reason` 与打分权重 |
 | `vault.go` | 假值的渲染与反查 |
@@ -1316,26 +1319,28 @@ Trajecta 当前的凭据识别发生在两处：
 
 长度上下界**不写进状态机**，而是在 `scan.go` 的 `collector.emit` 里用原生代码判断。固定重复 `{n}` 交给状态机在宽字符类上展开，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间同步变长；同一形态改用「`+` 加原生长度检查」后回到 25238 行量级。原生长度检查是承重设计，不是风格偏好。
 
+数字类形状（身份证号、手机号、银行卡）走**粗筛 + 原生分类**，而不是每条一段 `[0-9]{n}`：状态机里只有一条 `digit_run = [0-9]+ [Xx]?;`，命中后由 `scan.go` 的 `emitDigits` 按 `digitClasses` 逐类比较长度、跑校验器，第一类通过即采用。这样新增一类数字只改 `digitClasses` 与该规则元数据，不增加状态、不需要重新生成，也不会产生第二遍扫描。
+
 ### 9.3 检测分层、置信度与覆盖边界
 
 `Detector.AppendFindings` 依次走四层，越往后越贵，只有前一层放行的候选才进入下一层：
 
 1. **L1 词法**：编译好的 DFA 单遍扫描，最长匹配，不回溯。
-2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`；`github_pat` 重算 30 位 body 的 CRC32-IEEE 并比对末 6 位 base62；`jwe` 要求五段式头部解码为含 `enc` 的 JSON 对象；`bech32` 验证 age 私钥的 BIP-173 校验和。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。
+2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`；`github_pat` 重算 30 位 body 的 CRC32-IEEE 并比对末 6 位 base62；`jwe` 要求五段式头部解码为含 `enc` 的 JSON 对象；`bech32` 验证 age 私钥的 BIP-173 校验和；`chinese_id` 验证 GB/T 2260 省级前缀、历法生日（含闰年，年份 1800–2099）与 ISO 7064 MOD 11-2 校验位。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。
 
 **「足以认定」是校验器的准入线，比「看起来像」高得多。** 通过校验器的 finding 会被自动改写，所以只缩小范围而不构成证明的判据不能写进这里：例如「base64 解码后正好 64 字节」会接受转录里每一个 64 字节块（Azure Storage Key、Cosmos Key、Service Bus Key 与普通哈希、nonce 共用该形状），因此它只是 §8.4 的弱形态，不是校验器。
-3. **L3 上下文**：在匹配位置前后各 96 字节窗口内搜索凭据词汇，来源是 `context.go` 的固定全局词表，加上该规则自己的 `Keywords`。
+3. **L3 上下文**：在匹配位置前后各 96 字节窗口内搜索凭据词汇，来源是 `context.go` 的固定全局词表，加上该规则自己的 `Keywords`。`SkipContext` 让已经由校验器认定的规则跳过这一层；`WordBounded` 在原生代码里拒绝两侧紧邻 ASCII 字母或数字的匹配。
 4. **L4 置信度门限**：按下面的权重打分并分档。
 
 打分权重（`finding.go`）：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；窗口内出现凭据词汇加 40 分；校验器通过则分数抬到不低于 70 分。总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。`Finding.Maskable()` 只放行 Medium 及以上自动改写；Low 仍然上报，让审计能看到看见了什么、以及故意没动什么。
 
-规则集共 75 条：Strong 35、Anchored 24、Generic 16。范围是结构形状（JWT、JWE、PEM 头、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`。
+规则集共 76 条：Strong 35、Anchored 24、Generic 17。范围是结构形状（JWT、JWE、PEM 头、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`，以及**个人数据**里的中国居民身份证号。身份证号按 Generic 计分（18 位数字本身不证明什么），校验器通过即认定；15 位旧号没有校验位，不覆盖。
 
 **刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64 是哈希、对象 ID 与密钥共用的形状，而通过校验器会把分数抬到可改写档，所以这类规则一旦加入就会改写转录里每一个同形块。它们要成为可改写的，需要先有「上下文必需」这一档语义——当前打法是上下文加分而非必需。**DSN 与 Cookie 也暂不覆盖**：只有一部分是秘密，而 vault 的替换粒度是整个命中跨度，整段改写会改变连接目标、破坏结构，需要子跨度机制。`internal/analyzer` 保留这些正则用于事后上报，那里可以有误报，自动改写不能。
 
-引擎不做的事同样属于当前事实：不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；任何需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）拿着假值都无法进行。
+引擎不做的事同样属于当前事实：不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）在只看到假值的地方无法进行；客户端工具与本地 Responses runtime 拿到的是还原后的真值，只有上游托管的工具直接看到假值（§9.4）。
 
-实测（`-count=3` 稳定值）：约 73 KB 载荷的词法扫描约 1.32 ms，约 57 MB/s。精度用仓库自身度量：757 个文本文件、13.4 MB，共 27 处命中、分布在 12 个文件——24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2 等），1 处是 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key（干净检出上为 25 处 / 11 个文件）。新增的 8 条规则没有引入任何误报。
+实测（`-count=3` 稳定值）：约 73 KB 载荷的词法扫描约 1.43 ms，约 52 MB/s（加入身份证规则前为 1.32 ms / 57 MB/s）。身份证规则每 64 KB 命中一条时约 231 MB/s、命中约 3500 条时约 153 MB/s（`SkipContext`）。精度用仓库自身度量：757 个文本文件、13.4 MB，共 27 处命中、分布在 12 个文件——24 处是刻意的测试夹具与文档示例（PEM 头 9、Bearer 6、GitHub 2 等），1 处是 Go 标识符误命中 `ek_` 前缀（Low，不遮蔽），2 处是开发者本地 gitignore 的 `config/config.dev.yaml` 里的真实 key（干净检出上为 25 处 / 11 个文件）。新增的 8 条规则没有引入任何误报。
 
 ### 9.4 遮蔽与还原
 
@@ -1346,6 +1351,8 @@ Trajecta 当前的凭据识别发生在两处：
 - **确定性**：假值是 `(seed, 规则名, 真值)` 的纯函数，同一个凭据永远渲染成同一个假值。多轮对话的一致性依赖它，上游 prompt cache 的前缀稳定性也依赖它。
 - **与真值等长**：代理把上游返回的 `Content-Length` 原样透传给客户端，而请求体长度由 net/http 从实际交给它的字节切片推导（`internal/proxy/handler.go`）。长度一变，请求与响应两侧都会静默错位。因此这条是承重约束。
 - **保留形状**：保留真值的前缀、全部非字母数字字符与分段字母表（整段小写 hex 仍取小写 hex），按形状校验的下游工具仍接受假值。
+
+身份证号是这三条的唯一例外：逐字节替换会破坏省份、生日与校验位，因此 `renderChineseID` 用同一份密钥流重新渲染一个合法号码（真实省份前缀、1950–2009 年的生日、重算的 ISO 7064 校验位）。等长与确定性不变，但**生日不保留真值**——它是号码里最直接指向个人的部分，代价是把身份证号与另一处生日交叉核对的流程会对不上。
 
 映射只存在于内存（`vault.go` 的 `Vault`）：默认用 `crypto/rand` 播种，每个进程不同；上限 4096 条，超出按最旧优先淘汰。从线路上读到的假值离开这个进程就无从还原。遮蔽是幂等的，vault 已认识的假值会被跳过。
 
@@ -1375,6 +1382,7 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 | --- | --- |
 | `internal/proxy` | 已对接。请求侧把命中值换成保形假值再发往上游，cassette 仍记录原始体；响应侧在 `UsageSniffer` 之内还原。见 §9.4 |
 | `internal/analyzer` 的 `credentialPatterns` | **未替换，仍在使用**。7 条正则分别是 OpenAI `sk-`、AWS `AKIA`、GitHub `gh[pousr]_`、私钥块头行、Bearer、DB 连接串、Cookie；表外的「凭据化 URL」检查走 `url.Parse` 的 userinfo，不是正则。其中 4 条（OpenAI `sk-`、AWS、GitHub、Bearer）已由 `pkg/secretmask` 覆盖并会改写，私钥块只覆盖头行且只上报不改写（§9.4），DB 连接串与 Cookie 连同一并的 URL 检查**刻意不覆盖**：它们只有一部分是秘密，而 vault 的替换粒度是整个命中跨度（§9.3）。两者并存的分工是 analyzer 负责审计侧 findings（可以有误报），secretmask 负责转发侧改写（不能有误报） |
+| `internal/analyzer` 的 `PIIDetector` | 已对接。它不重复维护一套 PII 模式，而是对 observation 的节点文本调用 `secretmask.Scan`，只保留 `Kind.PII()` 的规则，再把命中值从 evidence 里替换成 `[redacted]`；entry 与 model 两种 exchange scope 都运行。因此审计能覆盖「遮蔽关闭时写入的 trace」与「重分析」，而不只是遮蔽当次的替换记录 |
 | `internal/redaction/url.go` | **未改动**。它按 URL 查询参数名与 userinfo 脱敏，依赖字段名而非值，与按字节 span 识别凭据是两件不同的事 |
 | `pkg/observe` | 未新增节点类型。命中与还原目前只写 cassette prelude 事件 `secret.masked` / `secret.restored` |
 | CLI（`cmd/trajecta`） | 未提供 `secrets scan` 子命令。`Detector` 与 `Vault` 是导出 API，可离线调用 |
@@ -1389,7 +1397,8 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
   - MD5/SHA 校验和；
   - base64 编码的图片片段；
   - 单词里恰好含前缀（如 `sk-` 开头的英文短语、`ghp` 作为变量名片段）；
-  - 明显占位符（`YOUR_API_KEY`、`<token>`、`changeme`、全 `A` 串）。
+  - 明显占位符（`YOUR_API_KEY`、`<token>`、`changeme`、全 `A` 串）；
+  - 身份证号：校验位错误的 18 位数字、13 月/2 月 30 日/非闰年 2 月 29 日、非法省份码、1800 年前与 2099 年后的生日、夹在 19 位时间戳或更长的字母数字串里的 18 位片段。
 - **模糊测试**：`go test -fuzz=FuzzScan`，断言（a）不 panic、（b）扫描时间与输入长度近似线性（用 `testing.AllocsPerRun` 或运行时长粗测）、（c）对任意输入 `Scan(x)` 的结果 span 必须落在 `[0,len(x)]` 内。
 - **回归基线**：用附录 A–D 的规则集做"覆盖率测试"——统计有多少条上游规则能被当前引擎表达；新增规则时该数字应单调不减。
 
@@ -1399,13 +1408,13 @@ PEM 规则只上报、不改写：它只匹配 `-----BEGIN ... PRIVATE KEY-----`
 
 | 输入规模 | 现状 |
 | --- | --- |
-| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，75 条规则下约 58 MB/s |
+| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，76 条规则下约 52 MB/s |
 | 10 MB 以上 | **没有**关键词预筛或分段跳过：`Detector` 会扫描整个缓冲区。这是有意为之的取舍——先保证语义正确，规模优化留到出现真实需求时再做 |
 | 规则数 | 规则越多，DFA 状态数与生成代码越大，而扫描循环仍是按输入字节推进，与规则数无关。这也是长度上下界放在原生代码里判断的原因（§9.2 的状态数对比） |
 
 ### 9.8 规则维护流程
 
-1. 从厂商官方文档确认形状 → 改 `pkg/secretmask/rules.rl` 的模式，并在 `pkg/secretmask/rule.go` 补齐该规则的元数据（`Name`、`Vendor`、`Kind`、`Grade`、`Strength`、`MinLen`/`MaxLen`、`Keywords`，需要时还有 `Validator`、`Prefixes`、`PrefixSkip`、`Literals`）；
+1. 从厂商官方文档确认形状 → 改 `pkg/secretmask/rules.rl` 的模式，并在 `pkg/secretmask/rule.go` 补齐该规则的元数据（`Name`、`Vendor`、`Kind`、`Grade`、`Strength`、`MinLen`/`MaxLen`、`Keywords`，需要时还有 `Validator`、`Prefixes`、`PrefixSkip`、`Literals`、`WordBounded`、`SkipContext`）。数字类形状不需要新写 `rules.rl` 模式，只要把规则 ID 加进 `scan.go` 的 `digitClasses`；
 2. 在 `pkg/secretmask/secretmask_test.go` 的 `positiveSamples` 加一条"显然伪造但格式合法"的样例——`TestRuleMetadataComplete` 要求每条规则都有样例，缺一条就会失败；
 3. 跑 `task generate:secretmask` 重新生成 `rules_ragel.go`，并把 `rules.rl`、`rule.go` 与生成文件一起提交；
 4. 跑 `go test ./pkg/secretmask/`，其中 `TestFakeKeepsShapeAndLength` 会验证新规则的假值仍然等长、保留前缀与标点；

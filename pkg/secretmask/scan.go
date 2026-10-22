@@ -23,21 +23,82 @@ func (c *collector) emit(id RuleID, start, end int) {
 	if n < r.MinLen || (r.MaxLen > 0 && n > r.MaxLen) {
 		return
 	}
-	tok := c.src[start:end]
+	if r.WordBounded && !bounded(c.src, start, end) {
+		return
+	}
 	validatorPassed := false
 	if r.Validator != "" {
-		if !runValidator(r.Validator, tok) {
+		if !runValidator(r.Validator, c.src[start:end]) {
 			return
 		}
 		validatorPassed = true
 	}
-	score, why := scoreFinding(r, hasContext(c.src, start, end, r.Keywords), validatorPassed)
+	c.append(id, r, start, end, validatorPassed)
+}
+
+// emitDigits is the fine half of the coarse digit_run pattern in rules.rl. The
+// machine only finds a maximal digit run; which numeric class the run belongs
+// to, and whether it is a real value of that class, is decided here by length,
+// validator and boundary. Adding another numeric class to digitClasses
+// therefore costs no DFA states and no second pass over the request.
+func (c *collector) emitDigits(start, end int) {
+	if !bounded(c.src, start, end) {
+		return
+	}
+	n := end - start
+	for _, id := range digitClasses {
+		r := &ruleTable[id]
+		if n < r.MinLen || (r.MaxLen > 0 && n > r.MaxLen) {
+			continue
+		}
+		validatorPassed := false
+		if r.Validator != "" {
+			if !runValidator(r.Validator, c.src[start:end]) {
+				continue
+			}
+			validatorPassed = true
+		}
+		c.append(id, r, start, end, validatorPassed)
+		return
+	}
+}
+
+// append records one accepted candidate. The context scan is the expensive part
+// of this path: a 96-byte window on either side searched for the global
+// vocabulary plus the rule's own keywords. A rule whose validator already
+// proves the value skips it, because the score is at the maskable band either
+// way and the reason set only loses an entry that could not change the
+// decision.
+func (c *collector) append(id RuleID, r *Rule, start, end int, validatorPassed bool) {
+	ctx := false
+	if !r.SkipContext {
+		ctx = hasContext(c.src, start, end, r.Keywords)
+	}
+	score, why := scoreFinding(r, ctx, validatorPassed)
 	c.findings = append(c.findings, Finding{
 		Span:       Span{Start: start, End: end, ID: id},
 		Score:      score,
 		Confidence: ConfidenceFor(score),
 		Reasons:    why,
 	})
+}
+
+// digitClasses are the fine rules the coarse digit_run pattern feeds, in
+// decision order: the first rule whose length bounds admit the run and whose
+// validator accepts it wins. A stricter class must come before a looser one
+// that can share its length, because only one finding may cover a span.
+var digitClasses = []RuleID{RuleChineseID}
+
+// bounded reports whether neither side of [start,end) is an ASCII alphanumeric
+// byte, so a run inside a longer identifier is not a candidate.
+func bounded(src []byte, start, end int) bool {
+	if start > 0 && isAlnumByte(src[start-1]) {
+		return false
+	}
+	if end < len(src) && isAlnumByte(src[end]) {
+		return false
+	}
+	return true
 }
 
 // Detector scans buffers with the compiled credential DFA.

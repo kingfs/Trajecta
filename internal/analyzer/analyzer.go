@@ -43,6 +43,7 @@ func DefaultDetectors() []Detector {
 	return []Detector{
 		DangerousShellDetector{},
 		CredentialDetector{},
+		PIIDetector{},
 		ProviderSafetyDetector{},
 		ToolErrorDetector{},
 	}
@@ -113,7 +114,10 @@ func detectorAllowedForScope(detector Detector, scope exchangeScope) bool {
 		return true
 	}
 	switch detector.Name() {
-	case CredentialDetector{}.Name():
+	// A credential or a personal number in the request the client sent is the
+	// signal an entry exchange exists to carry. The other detectors read the
+	// model's response, which an entry exchange does not have.
+	case CredentialDetector{}.Name(), PIIDetector{}.Name():
 		return true
 	default:
 		return false

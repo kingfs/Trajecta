@@ -154,10 +154,11 @@ telemetry:
   path_prefix: "/trajecta/install"
   interval: 24h
 
-# Credentials found in a request body are replaced with reversible,
-# format-preserving stand-ins before the request reaches the provider, and
-# restored in the response. On unless this is set to false; see
-# docs/SECRET_MASKING.md for what the engine covers and what it does not.
+# Credentials and personal data (currently the Chinese resident identity
+# number) found in a request body are replaced with reversible, format-preserving
+# stand-ins before the request reaches the provider, and restored in the
+# response. On unless this is set to false; see docs/SECRET_MASKING.md for what
+# the engine covers and what it does not.
 secret_masking:
   enabled: true
 
