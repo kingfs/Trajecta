@@ -276,6 +276,51 @@ func (s *Store) ListCredentialMaskAudits(filter CredentialMaskAuditFilter) (Cred
 	}, nil
 }
 
+// MaskAuditRuleCount is one (rule, kind) tally of a trace's masking events.
+type MaskAuditRuleCount struct {
+	Rule  string
+	Kind  string
+	Count int
+}
+
+// CountCredentialMaskAuditsByTraceIDs groups the masking events of the given
+// traces by rule and kind.
+//
+// Like CountFindingsByTraceIDs this exists for the trace list: the tag needs one
+// number per trace, and listing the rows would decrypt every original value to
+// count it.
+func (s *Store) CountCredentialMaskAuditsByTraceIDs(traceIDs []string) (map[string][]MaskAuditRuleCount, error) {
+	out := make(map[string][]MaskAuditRuleCount, len(traceIDs))
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(traceIDs), storeSQLParamChunk) {
+		rows, err := s.db.Query(`
+			SELECT trace_id, rule, kind, COUNT(*)
+			FROM credential_mask_audits
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+			GROUP BY trace_id, rule, kind
+		`, stringArgs(chunk)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var (
+				traceID string
+				count   MaskAuditRuleCount
+			)
+			if err := rows.Scan(&traceID, &count.Rule, &count.Kind, &count.Count); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[traceID] = append(out[traceID], count)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // GetCredentialMaskAudit returns one row by id.
 func (s *Store) GetCredentialMaskAudit(id string) (CredentialMaskAudit, error) {
 	id = strings.TrimSpace(id)

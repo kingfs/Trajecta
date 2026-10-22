@@ -1794,6 +1794,11 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 		for _, entry := range detail.Traces {
 			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
 		}
+		if err := attachTraceAudit(st, resp.Traces); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+			return
+		}
+		attachTracePreviews(resp.Traces)
 		resp.Target.Performance = buildUpstreamPerformance(resp.Target)
 		writeJSON(w, http.StatusOK, resp)
 	}

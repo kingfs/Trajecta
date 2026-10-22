@@ -145,6 +145,34 @@ type traceListItem struct {
 	UpstreamCallCount int                 `json:"upstream_call_count,omitempty"`
 	UpstreamCalls     []traceListItem     `json:"upstream_calls,omitempty"`
 	Observation       observationListView `json:"observation"`
+	// The user's opening message, trimmed to tracePreviewRunes. It is derived
+	// from the cassette by the list handlers rather than stored, so traces
+	// recorded before this field existed get it too.
+	RequestPreview string `json:"request_preview,omitempty"`
+	// Audit counts the persisted audit events of this trace: credential-mask
+	// replacements and analysis findings. It is nil when the trace has none, so
+	// a row without audit events carries no tag at all.
+	Audit *traceAuditView `json:"audit,omitempty"`
+	// logPath is the cassette the row was indexed from, kept out of JSON so the
+	// list enrichment helpers can read a preview without a second query.
+	logPath string
+}
+
+// traceAuditView is the per-trace audit tally the list renders as one tag.
+//
+// Total counts recorded audit events, not distinct values: one masking row is
+// one event, and one finding row is one event. Masked and Findings say which
+// table the number came from, because the two are read differently - a mask row
+// proves a value was rewritten before it left the machine, while a finding is a
+// detector's reading of the recorded content.
+type traceAuditView struct {
+	Total      int `json:"total"`
+	Sensitive  int `json:"sensitive"`
+	PII        int `json:"pii"`
+	Credential int `json:"credential"`
+	Other      int `json:"other"`
+	Masked     int `json:"masked"`
+	Findings   int `json:"findings"`
 }
 
 type observationListView struct {
@@ -1693,6 +1721,11 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			item.UpstreamCallCount = len(childrenByTrace[entry.ID])
 			resp.Items = append(resp.Items, item)
 		}
+		if err := attachTraceAudit(st, resp.Items); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+			return
+		}
+		attachTracePreviews(resp.Items)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -1798,6 +1831,11 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
 		resp.Performance = buildAggregatePerformance(resp.Traces)
+		if err := attachTraceAudit(st, resp.Traces); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+			return
+		}
+		attachTracePreviews(resp.Traces)
 		if runs, err := st.ListAnalysisRuns(sessionID, "", "", 10); err == nil {
 			resp.Analysis = analysisRunViews(runs)
 		}
@@ -1857,7 +1895,14 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "overview error: " + err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, overviewResponseFromStore(windowLabel, dashboard))
+		resp := overviewResponseFromStore(windowLabel, dashboard)
+		if err := attachTraceAudit(st, resp.Attention.RecentFailures, resp.Attention.SlowTraces); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+			return
+		}
+		attachTracePreviews(resp.Attention.RecentFailures)
+		attachTracePreviews(resp.Attention.SlowTraces)
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -2092,6 +2137,11 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 	for _, child := range childrenByTrace[entry.ID] {
 		resp.UpstreamCalls = append(resp.UpstreamCalls, traceListItemFromEntry(child))
 	}
+	if err := attachTraceAudit(st, resp.UpstreamCalls); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+		return
+	}
+	attachTracePreviews(resp.UpstreamCalls)
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2477,6 +2527,7 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		ParentExchangeID: entry.Header.Meta.ParentExchangeID,
 		SequenceIndex:    entry.Header.Meta.SequenceIndex,
 		Observation:      observationListViewFromStore(entry.Observation),
+		logPath:          entry.LogPath,
 	}
 }
 

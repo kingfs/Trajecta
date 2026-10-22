@@ -95,6 +95,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
             <UpstreamTag item={item} />
             {!groupedChild && upstreamCallCount > 1 ? <InlineTag tone="gold">{upstreamCallCount} child</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+            <AuditTag audit={item.audit} />
             {item.observation?.status && String(item.observation.status).toLowerCase() !== "parsed" ? (
               <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
             ) : null}
@@ -104,6 +105,9 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
           <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
           {item.session_id ? <span className="trace-subline mono">{t("sessions.title")} {item.session_id}</span> : null}
         </div>
+        {item.request_preview ? (
+          <p className="trace-preview" title={item.request_preview}>{item.request_preview}</p>
+        ) : null}
       </div>
       <div className="trace-metric-stack">
         <strong className={failed ? "status-err" : "status-ok"}>{item.status_code}</strong>
@@ -118,6 +122,30 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
       <TokenMetrics item={item} />
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
     </article>
+  );
+}
+
+function AuditTag({ audit }) {
+  const { t } = useI18n();
+  const total = Number(audit?.total || 0);
+  if (!total) {
+    return null;
+  }
+  // Red only when the events include personal data or a credential. A trace
+  // whose only findings are refusals or tool errors still gets the count, but
+  // in the warning tone, so red stays a signal worth stopping on.
+  const sensitive = Number(audit.sensitive || 0);
+  const parts = [
+    Number(audit.pii || 0) ? t("requests.auditPII", { count: audit.pii }) : "",
+    Number(audit.credential || 0) ? t("requests.auditCredential", { count: audit.credential }) : "",
+    Number(audit.other || 0) ? t("requests.auditOther", { count: audit.other }) : "",
+    Number(audit.masked || 0) ? t("requests.auditMasked", { count: audit.masked }) : "",
+    Number(audit.findings || 0) ? t("requests.auditFindings", { count: audit.findings }) : "",
+  ].filter(Boolean);
+  return (
+    <span title={parts.join(" · ")}>
+      <InlineTag tone={sensitive ? "danger" : "gold"}>{t("requests.auditTag", { count: total })}</InlineTag>
+    </span>
   );
 }
 

@@ -72,6 +72,8 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 请求与会话两个标签页。
 
 **请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。
+- 每行在 endpoint / 上游 / stream 标签之后还有一枚审计标签：数值是该 trace 已落库的审计事件总数（`credential_mask_audits` 的替换事件加 `trace_findings` 的发现项）。含身份证、手机号或敏感 Key 时标签为红色，只有拒答、工具错误等其它发现项时为黄色，没有任何审计事件时整枚标签不显示；悬停给出身份证/手机号、敏感 Key、其它发现、脱敏事件与发现项的分项。计数来自 `GET /api/traces` 的 `audit` 字段，每个来源对整个列表页各做一次分组查询，不逐条读 cassette。
+- 时间与会话那行下面显示该 trace 的第一条 user 消息（前 80 个字符，超出以 `…` 截断；system 提示不参与），由服务端从 cassette 的请求段读出后随列表的 `request_preview` 返回。请求体超过 4 MiB、读不到用户消息或 cassette 不可读时，该行不显示预览。
 - 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
 - `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
 

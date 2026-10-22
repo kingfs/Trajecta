@@ -490,6 +490,52 @@ func scanFindingRow(rows *sql.Rows) (observe.Finding, error) {
 	return finding, nil
 }
 
+// FindingCategoryCount is one (category, severity) tally of a trace's findings.
+//
+// The trace list needs "how many audit events of which kind" for up to a page of
+// traces at once. Reading the findings themselves would drag every evidence
+// excerpt across for a number that is rendered as a tag, so the count is its own
+// query and the detail views keep reading the rows.
+type FindingCategoryCount struct {
+	Category string
+	Severity string
+	Count    int
+}
+
+// CountFindingsByTraceIDs groups the findings of the given traces by category and
+// severity.
+func (s *Store) CountFindingsByTraceIDs(traceIDs []string) (map[string][]FindingCategoryCount, error) {
+	out := make(map[string][]FindingCategoryCount, len(traceIDs))
+	for _, chunk := range chunkStrings(dedupeNonEmptyStrings(traceIDs), storeSQLParamChunk) {
+		rows, err := s.db.Query(`
+			SELECT trace_id, category, severity, COUNT(*)
+			FROM trace_findings
+			WHERE trace_id IN (`+placeholders(len(chunk))+`)
+			GROUP BY trace_id, category, severity
+		`, stringArgs(chunk)...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var (
+				traceID string
+				count   FindingCategoryCount
+			)
+			if err := rows.Scan(&traceID, &count.Category, &count.Severity, &count.Count); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[traceID] = append(out[traceID], count)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Finding, error) {
 	if limit <= 0 {
 		limit = 50

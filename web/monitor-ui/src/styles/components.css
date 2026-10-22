@@ -337,6 +337,36 @@ button:disabled {
   color: var(--accent);
 }
 
+/* `styles.css` normalises every chip in the light theme with
+   `:root[data-theme="light"] .inline-tag`, which outranks a bare tone class and
+   painted all of them as plain text. Re-assert the tones at the same theme
+   specificity (this sheet is imported after it) so a red audit tag stays red
+   in light mode. */
+:root[data-theme="light"] .inline-tag-green {
+  background: var(--success-soft);
+  border-color: transparent;
+  color: var(--success);
+}
+
+:root[data-theme="light"] .inline-tag-danger {
+  background: var(--danger-soft);
+  border-color: transparent;
+  color: var(--danger);
+}
+
+:root[data-theme="light"] .inline-tag-gold {
+  background: var(--warning-soft);
+  border-color: transparent;
+  color: var(--warning);
+}
+
+:root[data-theme="light"] .inline-tag-accent,
+:root[data-theme="light"] .inline-tag-blue {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
 .detail-meta-pill,
 .metric,
 .mini-token,
@@ -550,6 +580,21 @@ input[type="radio"] {
 .trace-model-name {
   color: var(--text-secondary);
   font-size: var(--text-sm);
+}
+
+/* The user's opening text, one clamped line under the time/session line. It is
+   the one part of a trace row that says what the request was about, so it gets
+   the tertiary colour rather than competing with the model name. */
+.trace-preview {
+  margin: 3px 0 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }
 
 .mono {

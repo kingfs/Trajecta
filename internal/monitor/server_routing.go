@@ -379,6 +379,11 @@ func routingExchangeListAPIHandler(st *store.Store) http.HandlerFunc {
 		for _, entry := range result.Items {
 			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
 		}
+		if err := attachTraceAudit(st, resp.Items); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+			return
+		}
+		attachTracePreviews(resp.Items)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }

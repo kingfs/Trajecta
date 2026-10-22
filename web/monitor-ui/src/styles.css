@@ -1981,7 +1981,10 @@ a:focus-visible {
   flex-wrap: wrap;
 }
 
-.trace-row span,
+/* A tag carries its own colour from its tone class. This descendant rule is
+   more specific than a bare `.inline-tag-*`, so without the :not() it painted
+   every chip inside a row - including the red audit tag - as muted text. */
+.trace-row span:not(.inline-tag),
 .message-kind,
 .tool-description,
 .collapse-head span,
