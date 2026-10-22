@@ -14,9 +14,12 @@
 // Numeric shapes that share the same lexical form - a run of digits - are
 // matched by one coarse pattern and classified natively after the match, so a
 // new numeric class needs no new DFA states. The Chinese resident identity
-// number is the first such class (KindNationalID): its stand-in is re-rendered
-// as a well-formed number with a fresh birthdate rather than byte-substituted,
-// because a shape-only replacement would fail every downstream validator.
+// number (KindNationalID) and the mainland mobile number (KindMobile) are such
+// classes, and neither stand-in is byte-substituted: an identity number is
+// re-rendered with a real province code, a fresh birthdate and a recomputed
+// check character, and a mobile number keeps its allocated three-digit head
+// while the eight subscriber digits are re-rendered from the keystream. A
+// shape-only replacement would fail every downstream validator.
 //
 // The package is stdlib-only and never writes anything: a caller decides what
 // to do with a Finding, and Restorer reverses stand-ins as bytes flow through

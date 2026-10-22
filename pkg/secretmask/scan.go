@@ -26,6 +26,9 @@ func (c *collector) emit(id RuleID, start, end int) {
 	if r.WordBounded && !bounded(c.src, start, end) {
 		return
 	}
+	if r.CandidateCheck != "" && !runCandidateCheck(r.CandidateCheck, c.src[start:end]) {
+		return
+	}
 	validatorPassed := false
 	if r.Validator != "" {
 		if !runValidator(r.Validator, c.src[start:end]) {
@@ -51,6 +54,9 @@ func (c *collector) emitDigits(start, end int) {
 		if n < r.MinLen || (r.MaxLen > 0 && n > r.MaxLen) {
 			continue
 		}
+		if r.CandidateCheck != "" && !runCandidateCheck(r.CandidateCheck, c.src[start:end]) {
+			continue
+		}
 		validatorPassed := false
 		if r.Validator != "" {
 			if !runValidator(r.Validator, c.src[start:end]) {
@@ -72,7 +78,7 @@ func (c *collector) emitDigits(start, end int) {
 func (c *collector) append(id RuleID, r *Rule, start, end int, validatorPassed bool) {
 	ctx := false
 	if !r.SkipContext {
-		ctx = hasContext(c.src, start, end, r.Keywords)
+		ctx = hasContext(c.src, start, end, r.Keywords, r.ContextWindow)
 	}
 	score, why := scoreFinding(r, ctx, validatorPassed)
 	c.findings = append(c.findings, Finding{
@@ -85,9 +91,13 @@ func (c *collector) append(id RuleID, r *Rule, start, end int, validatorPassed b
 
 // digitClasses are the fine rules the coarse digit_run pattern feeds, in
 // decision order: the first rule whose length bounds admit the run and whose
-// validator accepts it wins. A stricter class must come before a looser one
-// that can share its length, because only one finding may cover a span.
-var digitClasses = []RuleID{RuleChineseID}
+// checks accept it wins. A stricter class must come before a looser one that can
+// share its length, because only one finding may cover a span.
+//
+// The identity number and the mobile number have disjoint lengths, so the order
+// cannot change a decision; the eighteen-digit validator runs first because it
+// is the conclusive one.
+var digitClasses = []RuleID{RuleChineseID, RuleCNMobile}
 
 // bounded reports whether neither side of [start,end) is an ASCII alphanumeric
 // byte, so a run inside a longer identifier is not a candidate.

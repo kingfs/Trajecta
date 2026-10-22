@@ -29,6 +29,10 @@ const (
 	// detection and rendering pipeline is the same, but an audit reads it
 	// differently, and Kind.PII is what separates the two.
 	KindNationalID
+	// KindMobile is a mainland Chinese mobile number. It is personal data like
+	// the national ID, but it has no check digit, so a match is rewritten only
+	// when the surrounding text names a phone; see RuleCNMobile.
+	KindMobile
 )
 
 // kindNames renders a Kind for logs, audit records and test failures.
@@ -49,6 +53,7 @@ var kindNames = [...]string{
 	KindEphemeralKey:        "ephemeral_key",
 	KindGenericKey:          "generic_key",
 	KindNationalID:          "national_id",
+	KindMobile:              "mobile",
 }
 
 // String names the kind.
@@ -63,7 +68,7 @@ func (k Kind) String() string {
 // masking path treats the two the same: both leave the machine only as a
 // stand-in. The distinction is for the audit side, where a credential finding
 // and a personal-data finding are read differently.
-func (k Kind) PII() bool { return k == KindNationalID }
+func (k Kind) PII() bool { return k == KindNationalID || k == KindMobile }
 
 // Grade records how strong the format evidence is, following the grading used
 // by the format reference: A means an official document states the shape, D
@@ -121,12 +126,26 @@ type Rule struct {
 	// bytes. A rule with a validator only reports matches that pass it, and a
 	// pass is by itself enough to treat the match as conclusive.
 	Validator string
+	// CandidateCheck names a cheap structural filter applied to a match without
+	// granting it the confidence of a proof. A rule uses it when its format is
+	// checkable but not decisive: every mainland mobile number begins with an
+	// allocated 1[3-9]x head, yet millions of unrelated eleven-digit values do
+	// too, so a pass narrows the candidates while the score still depends on
+	// the surrounding text. Unlike Validator, a pass never raises the score.
+	CandidateCheck string
 	// WordBounded rejects a match that touches an ASCII alphanumeric byte on
 	// either side, so a run inside a longer identifier is not a candidate. It
 	// matters for the shapes that are defined by a length rather than by a
 	// prefix: an eighteen-digit identity number inside a twenty-digit order
 	// number is not an identity number.
 	WordBounded bool
+	// ContextWindow narrows the L3 window to this many bytes on each side of
+	// the match. Zero means the shared 96-byte default. A rule whose evidence
+	// is always adjacent - a phone label sits next to its number, never ninety
+	// bytes away - narrows it so an unrelated mention of a phone elsewhere in
+	// the payload cannot anchor an order number, and every byte removed also
+	// cuts the most expensive step of a hit.
+	ContextWindow int
 	// SkipContext keeps the rule out of the L3 context scan. A passing
 	// validator already raises the score to the maskable band, so the window
 	// scan cannot change the decision; skipping it matters because the window
@@ -266,6 +285,7 @@ const (
 	// reason as the cloud shapes above: the numbers already assigned never
 	// move.
 	RuleChineseID
+	RuleCNMobile
 
 	ruleIDCount
 )
@@ -384,6 +404,23 @@ var ruleTable = [ruleIDCount]Rule{
 	// reports nothing that failed it. The coarse digit run and the fine rule are
 	// kept apart on purpose - see digitClasses in scan.go.
 	RuleChineseID: {Name: "pii.chinese_id", Kind: KindNationalID, Grade: GradeA, Strength: StrengthGeneric, MinLen: 18, MaxLen: 18, Validator: validatorChineseID, WordBounded: true, SkipContext: true},
+
+	// The mainland mobile number is a 1, an allocated 1[3-9]x three-digit head
+	// and eight subscriber digits. There is no check character: the head only
+	// narrows the candidate space, so it is a CandidateCheck rather than a
+	// Validator. What makes the value rewriteable is the surrounding text
+	// naming a phone ("手机号", "phone", "mobile"), which lifts the generic
+	// shape to the medium band; a bare eleven-digit run is reported but left
+	// alone, because an order number, an epoch and a phone are the same bytes.
+	// The head is kept in the stand-in, so the fake still looks like a mobile
+	// number to a shape check.
+	//
+	// The word "tel" is deliberately not a keyword - it is a substring of
+	// "hotel" and "intel", and one travel record would anchor every number
+	// beside it. The quoted JSON key '"tel"' is a keyword instead: a quote
+	// cannot precede the "tel" in those words, so it only matches a field
+	// named tel.
+	RuleCNMobile: {Name: "pii.cn_mobile", Kind: KindMobile, Grade: GradeA, Strength: StrengthGeneric, MinLen: 11, MaxLen: 11, CandidateCheck: candidateCNMobilePrefix, WordBounded: true, ContextWindow: 24, Keywords: []string{"手机", "手机号", "手机号码", "电话", "联系电话", "联系方式", "致电", "拨打", "phone", "mobile", "cellphone", `"tel"`}},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

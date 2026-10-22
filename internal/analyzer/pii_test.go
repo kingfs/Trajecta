@@ -149,3 +149,52 @@ func TestPIIDetectorReadsToolArguments(t *testing.T) {
 		t.Errorf("evidence excerpt repeats the identity number: %q", findings[0].EvidenceExcerpt)
 	}
 }
+
+// TestPIIDetectorFindsAnAnchoredMobileNumber covers the other way a value
+// reaches the maskable band: eleven digits have no check character, so the
+// evidence is the phone vocabulary around them.
+func TestPIIDetectorFindsAnAnchoredMobileNumber(t *testing.T) {
+	const number = "13800138000"
+	node := observe.SemanticNode{
+		ID:             "node-mobile",
+		NormalizedType: observe.NodeText,
+		Path:           "$.messages[0].content",
+		Text:           "客户联系电话 " + number + "，请回拨。",
+	}
+	obs := observe.TraceObservation{
+		TraceID:      "trace-pii-mobile",
+		ExchangeKind: "entry",
+		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
+
+	findings := piiFindings(t, obs)
+	if len(findings) != 1 {
+		t.Fatalf("pii findings = %d, want 1: %+v", len(findings), findings)
+	}
+	if evidence := findings[0].EvidenceExcerpt; strings.Contains(evidence, number) || !strings.Contains(evidence, "[redacted]") {
+		t.Errorf("evidence excerpt must redact the number: %q", evidence)
+	}
+	if !strings.Contains(findings[0].EvidenceExcerpt, "联系电话") {
+		t.Errorf("evidence excerpt lost the surrounding context: %q", findings[0].EvidenceExcerpt)
+	}
+}
+
+// TestPIIDetectorIgnoresABareMobileNumber is the counterpart: without phone
+// vocabulary the masker leaves the number alone, so the audit must not accuse
+// an order number of being personal data.
+func TestPIIDetectorIgnoresABareMobileNumber(t *testing.T) {
+	node := observe.SemanticNode{
+		ID:             "node-bare-mobile",
+		NormalizedType: observe.NodeText,
+		Path:           "$.messages[0].content",
+		Text:           "订单号 13800138000",
+	}
+	obs := observe.TraceObservation{
+		TraceID:      "trace-pii-bare-mobile",
+		ExchangeKind: "entry",
+		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
+	if findings := piiFindings(t, obs); len(findings) != 0 {
+		t.Fatalf("bare mobile number produced %d findings, want 0: %+v", len(findings), findings)
+	}
+}

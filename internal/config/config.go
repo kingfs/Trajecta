@@ -257,13 +257,15 @@ type LimitConfig struct {
 // SecretMaskingConfig controls replacing credentials and personal data found in
 // a request body with format-preserving stand-ins before the request leaves the
 // machine. The personal-data rules are currently the Chinese resident identity
-// number; they share the same switch because there is no useful policy in
-// masking an API key but forwarding the identity number beside it.
+// number and the mainland mobile number; they share the same switch because
+// there is no useful policy in masking an API key but forwarding the identity
+// number beside it.
 //
-// The stand-ins keep the real value's length, prefix and punctuation, so a
-// Content-Length stays valid and a tool that validates on shape still accepts
-// the value, and they are reversible only through the mapping held in this
-// process's memory. The cassette still records the original bytes, so replay
+// The stand-ins keep the real value's length and, where the shape allows, its
+// prefix and punctuation, so a Content-Length stays valid and a tool that
+// validates on shape still accepts the value. An identity number and a mobile
+// number are re-rendered instead of byte-substituted, and they are reversible
+// only through the mapping held in this process's memory. The cassette still records the original bytes, so replay
 // and a human reading a trace see the real values.
 //
 // It is on by default, and Load seeds the field before decoding the YAML so an

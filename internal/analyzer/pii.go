@@ -17,11 +17,14 @@ const piiExcerptRadius = 60
 // PIIDetector reports personal data found in a trace.
 //
 // It reuses the masking engine instead of carrying a second set of patterns:
-// secretmask.Scan is one pass over the node text, and a rule with a validator
-// reports only values the offline check proved. That is the property this
-// detector needs - an audit may not accuse an eighteen-digit order number of
-// being an identity number, and a checksum, a calendar and a province prefix
-// are exactly the evidence that separates the two.
+// secretmask.Scan is one pass over the node text, and only values the masking
+// policy would rewrite are reported (Finding.Maskable). For an identity number
+// that means its validator proved the region, calendar and check character; for
+// a mobile number it means the surrounding text named a phone, because eleven
+// digits have no check character to prove. A bare eleven-digit run that the
+// masker deliberately leaves alone is therefore not reported as a leak either:
+// the audit and the rewrite agree on what counts as a phone, so an order number
+// cannot be accused of being personal data.
 //
 // The masking path already records every replacement in
 // credential_mask_audits. This detector answers a different question: it works
@@ -44,13 +47,19 @@ func (d PIIDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]
 			}
 			for _, match := range secretmask.Scan([]byte(text)) {
 				rule, ok := match.Rule()
-				if !ok || !rule.Kind.PII() || seen[match.ID] {
+				if !ok || !rule.Kind.PII() || !match.Maskable() || seen[match.ID] {
 					continue
 				}
 				seen[match.ID] = true
+				evidence := "A value matching " + rule.Name + " is strong enough to mask but appears in this trace."
+				switch {
+				case match.Reasons&secretmask.ReasonValidator != 0:
+					evidence = "A value matching " + rule.Name + " passed its offline validator and appears in this trace."
+				case match.Reasons&secretmask.ReasonContext != 0:
+					evidence = "A value matching " + rule.Name + " appears next to matching vocabulary in this trace."
+				}
 				findings = append(findings, finding(obs.TraceID, "pii_leak", observe.SeverityHigh, 0.95,
-					"Personal data: "+rule.Kind.String(),
-					"A value matching "+rule.Name+" passed its offline validator and appears in this trace.",
+					"Personal data: "+rule.Kind.String(), evidence,
 					node, excerptRedacted(text, match.Start, match.End), d.Name(), d.Version()))
 			}
 		}

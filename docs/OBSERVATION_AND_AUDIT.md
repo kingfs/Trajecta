@@ -276,7 +276,7 @@ type Detector interface {
 
 - dangerous_shell：扫描 `obs.Tools.Calls[].ArgsText`/`ArgsJSON`，以及类型为 `tool_call`/`server_tool_call`/`code` 的节点文本；用正则 `destructiveRMPattern` 识别 `rm -rf /`、`rm -rf ~`，并用关键字识别 `sudo rm`、`mkfs`、`diskutil erase`、`dd if=`、`chmod -R 777`、`chown -R`、`nc -e`、`bash -i`、`curl|wget ... | sh/bash`、`.ssh/id_rsa`、`.aws/credentials`、`security find-generic-password`、`env | curl`。
 - credential：对所有节点扫描 `credentialPatterns`：OpenAI key `sk-...`、AWS `AKIA...`、GitHub `gh[pousr]_...`、`-----BEGIN ... PRIVATE KEY-----`、Bearer token、`postgres|mysql|mongodb://` 连接串、Cookie header，以及带用户名密码的 URL。检测是 observe-only，不修改请求或响应。
-- pii：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Scan`，只保留 `Kind.PII()` 的规则（当前是中国居民身份证号 `pii.chinese_id`）。因为复用遮蔽引擎，只有通过离线校验器的值才会被上报；evidence 用 `excerptRedacted` 把命中值换成 `[redacted]`，findings 表不会成为第二份明文。每个节点的每个 PII 类别只报一条。
+- pii：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Scan`，只保留 `Kind.PII()` 且 `Finding.Maskable()` 的命中（当前是中国居民身份证号 `pii.chinese_id` 与手机号 `pii.cn_mobile`）。因为复用遮蔽引擎，只有可改写档的值才会被上报：身份证靠离线校验器，手机号靠上下文词表，裸 11 位数字只报 Low、不入账，因此审计与改写口径一致。evidence 用 `excerptRedacted` 把命中值换成 `[redacted]`，findings 表不会成为第二份明文。每个节点的每个 PII 类别只报一条。
 - provider_safety：把 `safety` 节点映射为 `provider_safety_block`、`refusal` 节点映射为 `model_refusal`，并叠加 `ObservationSafety.Blocked`/`Refused` 汇总位。
 - tool_error：`obs.Tools.Results[].IsError` 为真，或 `tool_result`/`server_tool_result`/`error` 节点的 status/text 含错误信号时报告 `tool_result_error`。
 
@@ -297,7 +297,7 @@ CLI 入口（`internal/cli/analyze.go`）：`analyze reparse`、`analyze scan`�
 ## 非目标与未实现
 
 - 不做 provider 协议互转；唯一例外是 `/v1/responses` 本地运行时的内部编排。
-- PII 检测目前只覆盖中国居民身份证号：手机号、邮箱、内网 URL/IP 与 15 位旧身份证号不在检测范围内。15 位旧号没有校验位，仅凭形状无法与普通数字区分。
+- PII 检测目前只覆盖中国居民身份证号与手机号：邮箱、内网 URL/IP 与 15 位旧身份证号不在检测范围内。15 位旧号没有校验位，仅凭形状无法与普通数字区分；手机号则必须有上下文才会进入可改写档。
 - 没有性能检测器；TTFT、tokens/s、cache hit、错误率等指标不产生 finding。
 - 没有 LLM 语义总结层，`session_summary` 之外的模型化分析未实现。
 - 敏感信息只有 observe 模式，`redact_at_rest` 与 `inline_redact` 未实现。

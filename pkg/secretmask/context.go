@@ -37,24 +37,32 @@ var globalKeywords = []string{
 
 // hasContext reports whether credential vocabulary appears in the window
 // around [start,end). Rule-specific keywords are checked in addition to the
-// global list.
-func hasContext(src []byte, start, end int, extra []string) bool {
-	lo := start - contextWindow
+// global list. window is the number of bytes searched on each side; zero means
+// contextWindow.
+func hasContext(src []byte, start, end int, extra []string, window int) bool {
+	if window <= 0 {
+		window = contextWindow
+	}
+	lo := start - window
 	if lo < 0 {
 		lo = 0
 	}
-	hi := end + contextWindow
+	hi := end + window
 	if hi > len(src) {
 		hi = len(src)
 	}
-	window := src[lo:hi]
-	for _, kw := range globalKeywords {
-		if containsFold(window, kw) {
+	win := src[lo:hi]
+	// Rule-specific vocabulary first. It is the more selective evidence and the
+	// likely hit for a domain rule ("手机号", "phone", "anthropic"), so the
+	// window search usually stops inside a handful of keywords instead of
+	// walking the global list first.
+	for _, kw := range extra {
+		if containsFold(win, kw) {
 			return true
 		}
 	}
-	for _, kw := range extra {
-		if containsFold(window, kw) {
+	for _, kw := range globalKeywords {
+		if containsFold(win, kw) {
 			return true
 		}
 	}

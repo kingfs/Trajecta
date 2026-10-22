@@ -308,6 +308,11 @@ func (v *Vault) render(r *Rule, real []byte, attempt int) string {
 			return string(fake)
 		}
 	}
+	if r.Kind == KindMobile {
+		if fake := renderCNMobile(real, ks); fake != nil {
+			return string(fake)
+		}
+	}
 	// The replacement alphabet is chosen per run of alphanumeric bytes rather
 	// than for the whole value: a vendor that puts a hex segment next to a
 	// free-form one (zhipu, the Langfuse UUIDs, a Databricks token) would
@@ -552,4 +557,31 @@ func putFixedDigits(dst []byte, v int) {
 		dst[i] = byte('0' + v%10)
 		v /= 10
 	}
+}
+
+// renderCNMobile builds a stand-in that is itself a well-formed mainland mobile
+// number: the real 1[3-9]x head when it is an allocated one (otherwise another
+// allocated head) and eight subscriber digits from the keystream. Keeping the
+// head is the point - carrier allocation is public, so a tool that checks the
+// head still accepts the value the provider was given, and there is no check
+// digit to recompute.
+//
+// The subscriber digits are not preserved: they are the part that identifies a
+// person. The result is still a pure function of (seed, rule, real value), so
+// the same number renders the same stand-in across retries and sessions.
+func renderCNMobile(real, ks []byte) []byte {
+	if len(real) != 11 || len(ks) < 11 {
+		return nil
+	}
+	out := make([]byte, 11)
+	putFixedDigits(out[:3], cnMobileHead(real, ks))
+	for i := 3; i < 11; i++ {
+		out[i] = '0' + ks[i]%10
+	}
+	// A keystream can reproduce the real value; hand back a different number
+	// rather than the one this stand-in exists to hide.
+	if string(out) == string(real) {
+		out[10] = '0' + (out[10]-'0'+1)%10
+	}
+	return out
 }

@@ -34,7 +34,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
-- Credential and personal-data shape detection and masking: the Ragel-compiled DFA, the rule table, the offline validators, the context scorer and the format-preserving stand-in vault in `pkg/secretmask`; wired into `internal/proxy` on both the pass-through and the local Responses paths, gated by `secret_masking.enabled`. Numeric shapes with no lexical anchor (national IDs, phone numbers) do not get their own DFA pattern: `rules.rl` has one coarse `digit_run`, `scan.go`'s `digitClasses` picks the class after the match, and adding a class needs no regeneration
+- Credential and personal-data shape detection and masking: the Ragel-compiled DFA, the rule table, the offline validators, the context scorer and the format-preserving stand-in vault in `pkg/secretmask`; wired into `internal/proxy` on both the pass-through and the local Responses paths, gated by `secret_masking.enabled`. Numeric shapes with no lexical anchor (national IDs, mobile numbers) do not get their own DFA pattern: `rules.rl` has one coarse `digit_run`, `scan.go`'s `digitClasses` picks the class after the match, and adding a class needs no regeneration. A mobile number has no check digit, so its rule uses a non-proving `CandidateCheck` (allocated `1[3-9]x` head) and needs surrounding phone vocabulary before it is rewritten; the bare eleven-digit run is reported only, and `ContextWindow` narrows its context window to 24 bytes so a distant mention of a phone cannot anchor an order number
 
 ## Storage
 
@@ -68,7 +68,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
 - Keep recorded `.http` payloads human-inspectable.
 - Prefer additive evolution over destructive migration of existing cassettes.
 - The application database is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
-- `pkg/secretmask` renders the stand-ins for masked credentials and personal data and reverses them. A national-ID stand-in is re-rendered as a well-formed number (real province code, calendar birthdate, recomputed check character) rather than byte-substituted; its birthdate is deliberately not the real one, so a downstream flow that cross-checks the ID against a separately entered birthdate will disagree. A stand-in MUST stay
+- `pkg/secretmask` renders the stand-ins for masked credentials and personal data and reverses them. A national-ID stand-in is re-rendered as a well-formed number (real province code, calendar birthdate, recomputed check character) rather than byte-substituted; its birthdate is deliberately not the real one, so a downstream flow that cross-checks the ID against a separately entered birthdate will disagree. A mobile-number stand-in keeps the real allocated three-digit head and re-renders the eight subscriber digits, so it is itself a well-formed number but a downstream flow that shows or checks the last four digits will disagree. A stand-in MUST stay
   exactly as long as the value it replaces and MUST keep that value's prefix, punctuation and per-segment
   alphabet: the proxy copies the upstream `Content-Length` to the client verbatim and derives the outbound
   request length from the body slice it is handed, so a length-changing replacement desynchronises both
@@ -82,7 +82,9 @@ The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格
   envelope between them, so a run that merely resembles a stand-in is held back while the chain is open and
   released byte for byte if the rest never arrives. Never rewrite a run before the whole stand-in is
   accounted for - that is what keeps a lookalike from corrupting the text it sits in. Adding or changing a rule means editing `rules.rl` and `rule.go`, including `Strength`,
-  `Prefixes`, `PrefixSkip`, `Literals` and any `Validator`, then running `task generate:secretmask`.
+  `Prefixes`, `PrefixSkip`, `Literals`, any `Validator` and any `CandidateCheck` (a non-proving filter such
+  as the allocated mobile-number head), then running `task generate:secretmask`; a numeric class added to
+  `scan.go`'s `digitClasses` needs neither a `rules.rl` change nor a regeneration.
 - `pkg/secretmask/rules_ragel.go` is generated from `pkg/secretmask/rules.rl` by Ragel and is committed. Never open, read, or edit it: it is a ~340 KB state-table blob whose contents are not reviewable by a human or an agent, and any hand edit is silently destroyed by the next generation. Change `rules.rl` (patterns) and `rule.go` (rule metadata) instead, then run `task generate:secretmask`. Regeneration needs `ragel-go`; the generic `ragel` binary emits C for this machine, so `ragel-go -G2` is not interchangeable with it. Commit `rules.rl`, `rule.go` and the regenerated `rules_ragel.go` in the same change, and never commit a hand-written substitute for the generated file.
 
 ## Common Workflows
