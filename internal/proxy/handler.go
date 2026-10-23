@@ -463,6 +463,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		}
 	}
 
+	// Build the vault before the recorder: opening the mapping store can fail
+	// (locked file, unwritable path), and the recorder starts background
+	// workers that would otherwise have to be torn down on that error path.
+	secretVault, err := newSecretVault(cfg, st)
+	if err != nil {
+		return nil, fmt.Errorf("initialize secret masking: %w", err)
+	}
 	// TraceOutputDir() resolves trace.output_dir with a debug.output_dir fallback, which is
 	// what the store, the default SQLite path and the startup log already use. Reading
 	// Debug.OutputDir directly here meant a configuration that set only trace.output_dir
@@ -470,7 +477,6 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	// somewhere other than the configured directory, and a read-only working directory failed
 	// every request, because a recording error returns 500.
 	rec := recorder.New(cfg.TraceOutputDir(), cfg.Debug.MaskKey, st)
-	secretVault := newSecretVault(cfg)
 	cm := chaos.New(cfg)
 	localLimiter := limit.New(limit.Config{
 		MaxConcurrent: cfg.Limits.MaxConcurrent,
@@ -2255,6 +2261,18 @@ func (h *Handler) FinalizeRecordings(ctx context.Context) error {
 		return nil
 	}
 	return h.recorder.Close(ctx)
+}
+
+// Close releases the handler's process-wide resources. Today that is the secret
+// mapping store, whose pending appends must be flushed before the process exits
+// or the next start renders a different fake for a value the model already saw.
+// Call it after the HTTP servers have stopped and recordings have been
+// finalised. It is safe to call on a handler whose masking is off.
+func (h *Handler) Close() error {
+	if h == nil || h.secretVault == nil {
+		return nil
+	}
+	return h.secretVault.Close()
 }
 
 // FinalizeStats reports how the finalize queue has been used.

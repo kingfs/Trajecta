@@ -1,6 +1,10 @@
 package proxy
 
 import (
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
@@ -15,14 +19,37 @@ import (
 // One vault serves every request so that a credential keeps the same stand-in
 // across a conversation; a model that saw one fake and is handed a different one
 // on the next turn would contradict itself, and a provider caching on the
-// request prefix would miss. The seed is random per process, so the mapping
-// exists only in memory and a stand-in read off the wire cannot be reversed
-// without this process.
-func newSecretVault(cfg *config.Config) *secretmask.Vault {
+// request prefix would miss.
+//
+// With mapping_store on (the default), the pairs are loaded from and written to
+// a local bbolt file under the output directory. That is what carries the
+// mapping across a restart: without it a fake the model still holds would be an
+// unknown value to the new process, masked again into a second fake. The seed
+// stays random per process - a persisted pair, not the seed, is the durable
+// record - so a fake read off the wire still cannot be reversed without the
+// local file.
+func newSecretVault(cfg *config.Config, st *store.Store) (*secretmask.Vault, error) {
 	if cfg == nil || !cfg.SecretMasking.Enabled {
-		return nil
+		return nil, nil
 	}
-	return secretmask.NewVault(nil)
+	mapping := cfg.SecretMasking.MappingStore
+	if !mapping.Enabled || st == nil {
+		return secretmask.NewVault(nil), nil
+	}
+	path := strings.TrimSpace(mapping.Path)
+	if path == "" {
+		path = filepath.Join(st.OutputDir(), store.SecretMappingFileName)
+	}
+	mappingStore, err := st.OpenSecretMappingStore(path)
+	if err != nil {
+		return nil, fmt.Errorf("open secret mapping store: %w", err)
+	}
+	vault, err := secretmask.NewVaultWithStore(nil, mappingStore, mapping.LoadLimit)
+	if err != nil {
+		return nil, fmt.Errorf("load secret mappings: %w", err)
+	}
+	slog.Info("Secret masking mapping store ready", "path", path, "loaded", vault.Len())
+	return vault, nil
 }
 
 // secretMaskEvents renders one record-file event per replaced value.

@@ -1356,7 +1356,7 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 
 身份证号与手机号是这三条的例外：逐字节替换会破坏它们的结构，下游按结构校验的工具会拒绝假值。身份证号由 `renderChineseID` 用同一份密钥流重新渲染一个合法号码（真实省份前缀、1950–2009 年的生日、重算的 ISO 7064 校验位）；手机号由 `renderCNMobile` 保留真值的三位号段、重排后 8 位。等长与确定性不变，但**身份证生日与手机号后 8 位都不保留真值**——它们是最直接指向个人的部分，代价是依赖这些字段交叉核对的流程会对不上（例如用末四位展示或校验手机号）。
 
-映射只存在于内存（`vault.go` 的 `Vault`）：默认用 `crypto/rand` 播种，每个进程不同；上限 4096 条，超出按最旧优先淘汰。从线路上读到的假值离开这个进程就无从还原。遮蔽是幂等的，vault 已认识的假值会被跳过。
+映射默认持久化（`vault.go` 的 `Vault` + `internal/store` 的 bbolt 文件 `{{output_dir}}/secret_mask_mappings.db`）：按真值去重保存 `real -> fake`，启动默认加载全部（`secret_masking.mapping_store.load_limit: 0`；正数只加载最新 N 条），内存已命中的值不再查文件，首次遇到的真值才查一次；新增映射异步批量落盘，用 `trace_index.secret` 加密。关闭 `secret_masking.mapping_store.enabled` 后退回纯内存：默认用 `crypto/rand` 播种，每个进程不同，上限 4096 条，超出按最旧优先淘汰。遮蔽是幂等的，vault 已认识的假值会被跳过；持久化让这个「已认识」跨重启成立。
 
 PEM 私钥分两条规则：`structural.pem_private_key` 只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行、只上报不改写（头行不含密钥材料）；`structural.pem_private_key_block` 覆盖 header 到同标签 footer 的整块，可以改写。footer 必须重复 header 的标签，反向引用 DFA 表达不了，因此块扩展写在 `pem.go` 里由头行命中触发（与 `digit_run` → `digitClasses` 同一打法），不新增 DFA 状态、不重新生成 `rules_ragel.go`。`policySkipMask` 只对头行那条规则 ID 返回 true——早先它按 `KindPrivateKey` 判断，把同属该 Kind 的 age 私钥一起豁免了，而 age 私钥是整条命中就是要保护的完整秘密，已修正为按规则 ID 豁免。块级假值保留头尾行、换行与缩进，只重排正文，正文仍是 base64 形状但不是可解析的私钥；vault 同时登记假值相邻的两种 JSON 转义深度，因此消息正文（转义一次）与工具调用参数（转义两次）都能还原。
 

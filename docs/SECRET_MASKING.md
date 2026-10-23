@@ -21,7 +21,20 @@ secret_masking:
 
 或环境变量 `TRAJECTA_SECRET_MASKING_ENABLED=false`。
 
-之所以默认开启：扫描本身几乎不花时间（见「度量」），而漏掉一个真实 key 的代价是它永久进入上游与模型上下文。开启它改变的是模型实际看到的内容，属于语义变更，因此运维需要能一眼看出它在工作——每个被改写的值（凭据、身份证号与手机号都算）都会落一条 `secret.masked` 事件，响应里每次还原落一条 `secret.restored`。
+**持久化映射同样默认开启**，由 `secret_masking.mapping_store` 控制：
+
+```yaml
+secret_masking:
+  enabled: true
+  mapping_store:
+    enabled: true
+    path: ""          # 默认 {{output_dir}}/secret_mask_mappings.db
+    load_limit: 0     # 0 = 加载全部；正数只加载最新 N 条
+```
+
+环境变量为 `TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED`、`TRAJECTA_SECRET_MASKING_MAPPING_STORE_PATH` 与 `TRAJECTA_SECRET_MASKING_MAPPING_STORE_LOAD_LIMIT`。关掉它回到纯进程内映射：重启后旧假值全部失效，模型上下文里带着的旧假值会被当成新值再遮蔽一次。
+
+之所以默认开启：扫描本身几乎不花时间（见「度量」），而漏掉一个真实 key 的代价是它永久进入上游与模型上下文。开启它改变的是模型实际看到的内容，属于语义变更，因此运维需要能一眼看出它在工作——每个被改写的值（凭据、身份证号与手机号都算）都会落一条 `secret.masked` 事件，响应里每次还原落一条 `secret.restored`；映射文件在启动时也会输出一行 `Secret masking mapping store ready`，带路径与已加载条数。
 
 默认值由 `internal/config.Load` 在解码 YAML **之前**给字段播种实现（与 `debug.mask_key` 同一手法）。这样省略该键即取默认值，而显式 `enabled: false` 与环境变量仍然优先——环境变量在解码**之后**应用，因此始终覆盖文件。
 
@@ -33,7 +46,7 @@ secret_masking:
 
 **二、保留前缀、标点与分段字母表。** 假值保留真值的前缀（`sk-proj-`、`AIza`、`gsk_` 等）、所有非字母数字字符、以及厂商水印（OpenAI 系四个规则的 `T3BlbkFJ`、Bedrock 短期的 host 串）。字母数字部分按「连续字母数字串」逐段替换：整段都是小写十六进制就仍从小写十六进制取字符，因此 Databricks、智谱、Langfuse、OpenRouter 这类带 hex 段的 key 不会退化成自由文本。这样，只按形状校验的工具仍然接受假值。
 
-**三、确定性。** 假值是 `(seed, 规则名, 真值)` 的纯函数：同一个 key 在每一轮对话里渲染成同一个假值。这既保证多轮对话不自相矛盾，也保证上游的 prompt cache 前缀不发生抖动。
+**三、确定性。** 假值的首次渲染是 `(seed, 规则名, 真值)` 的纯函数：同一个 key 在每一轮对话里渲染成同一个假值。这既保证多轮对话不自相矛盾，也保证上游的 prompt cache 前缀不发生抖动。开启持久化映射后，同一个真值优先复用已记录的假值，因此换种子（重启、重新加载）或映射被淘汰出内存都不会改变它；渲染函数仍决定一个从未记录过的值长什么样。
 
 渲染在 `pkg/secretmask/vault.go`：以 HMAC-SHA256 生成密钥流，逐字节替换为同类字符。
 
@@ -47,12 +60,33 @@ secret_masking:
 
 ## Vault
 
-`Vault` 是唯一能还原假值的反向索引，只存在于内存中：
+`Vault` 是进程内唯一能还原假值的反向索引。开启 `mapping_store` 时它由 bbolt 文件支撑，关闭时只存在于内存：
 
-- 种子默认来自 `crypto/rand`，每个进程不同。因此从线路上抓到的假值离开这个进程就无从还原，重启后旧假值全部失效。只有在测试或需要复现会话时才显式传种子。
-- 上限 4096 条，超出按插入顺序淘汰最旧的，避免长驻进程无界增长。
-- 遮蔽是幂等的：已经在 vault 里的假值会被跳过，二次遮蔽等价于一次。
-- 可并发使用。一个进程只有一份 vault，所有请求共用：多个请求同时遮蔽、多个响应同时还原互不干扰（流式还原在每次扫描时持有读锁）。
+- 种子默认来自 `crypto/rand`，每个进程不同。从线路上抓到的假值不能只靠种子还原；开启持久化映射时，本机映射文件是这个进程之外唯一的反向来源，因此它和 cassette、审计表按同一级别保护。
+- 启动时加载全部映射（`load_limit: 0`，默认）；正数只加载最新 N 条。内存里保留整个加载窗口，再加 `DefaultVaultCapacity`（4096）条余量，所以加载全部后的第一个新值不会立刻淘汰最旧的加载项。淘汰只影响内存，下一次遇到同一个真值会先查映射文件并复用已记录的假值，不会换一个假值。
+- 遮蔽是幂等的：已经在 vault 里的假值会被跳过，二次遮蔽等价于一次。这正是「上游上下文里的旧假值不会被二次替换」的机制。
+- 可并发使用。一个进程只有一份 vault，所有请求共用：多个请求同时遮蔽、多个响应同时还原互不干扰（流式还原在每次扫描时持有读锁）。新值的「查映射文件 + 渲染」由一把独立的创建锁串行化，已命中的值不经过它。
+- 新值写入内存后才交给映射文件；写文件是异步批量提交，不占请求路径（见「持久化映射」）。
+
+## 持久化映射
+
+映射文件 `{{output_dir}}/secret_mask_mappings.db` 是一个嵌入式 [bbolt](https://github.com/etcd-io/bbolt) 文件，权限 `0600`。选它而不是 application DB 的原因：映射与渲染它的那个本机进程绑定，属于 cassette 同一侧的本地产物；bbolt 提供有序键、单次批量 fsync 与崩溃安全提交，不需要数据库迁移，也不要求生产环境的 Postgres 可写。
+
+文件里三个 bucket：
+
+| bucket | 键 | 值 |
+| --- | --- | --- |
+| `meta` | `version` / `next_seq` | 格式版本与下一个插入序号 |
+| `mappings` | 8 字节大端插入序号 | 加密后的 JSON `{real, fake}` |
+| `by_real` | `HMAC(本地密钥, 真值)` | 插入序号，用来去重与按真值查找 |
+
+- **真值只存一条。** 去重键是真值本身（HMAC），不是 `(规则, 真值)`：同一个敏感值不管在哪个会话、哪一天、被哪条规则命中，永远只有一条转换关系。重复写入直接跳过，先记录的假值获胜。
+- **加密。** `real` / `fake` 用本地密钥（`trace_index.secret`，`store.SecretStorageMode()`）封成 `tlsec:v1:` 信封；`by_real` 用 HMAC 而不是裸 SHA-256，因为 11 位手机号的裸摘要可以被离线穷举。没有本地密钥时退化为明文（与 `credential_mask_audits` 的 `plaintext-local` 一致）。
+- **只存必要信息。** 值里只有 `real` 与 `fake`：规则和检测时间属于审计行，转换和还原都不需要它们。
+- **异步写入。** `Vault` 在内存里插入新映射后，把 `(real, fake)` 投进一个有界队列；后台 goroutine 每 25 ms 或每 128 条提交一个 bbolt 事务。队列满（1024）时该次 append 同步落盘，绝不丢映射。`Handler.Close()` → `Vault.Close()` 会先排空队列再关文件；`serve` 在退出时调用它。
+- **启动加载。** 默认加载全部（`load_limit: 0`）；正数只加载最新 N 条（按插入序号倒序取），用启动内存换识别窗口。内存里没有的真值在首次遇到时先按 `by_real` 查文件：这就是「映射已淘汰/不在窗口内，但真值再次出现时仍得到原假值」的保证。查文件只发生在首次遇到某个真值，已命中的值走内存。
+- **假值识别。** 加载进内存的假值同时进入 `byFake`，`Mask` 遇到完全相同的假值时跳过。于是一个假值跨重启、跨上下文压缩都保持不变，不会被再遮蔽成第二个假值。
+- **文件只增不减。** bbolt 不把释放的页归还给文件系统；按真值去重意味着增长上限是「见过的不同敏感值数」，不是请求数。需要缩小文件时停进程后重建；直接删文件会丢映射，旧假值不再被识别。运行中直接 `cp` 也可能拿到不一致的页，备份应在进程停止时做或用文件系统快照。
 
 ## 识别与打分
 
@@ -116,6 +150,8 @@ secret_masking:
 - 透传路径：`internal/proxy/handler.go`。`upstreamBodyBytes`（别名改写后）交给 cassette，`sendBodyBytes`（遮蔽后）交给上游。交给路由器、指纹与失败 cassette 的 `bodyBytes` **不被改动**。
 - 本地 Responses 路径：`internal/proxy/responses_server.go`。`buildResponsesServerChatRequest` 收到遮蔽后的体，`PrepareLogFileWithOptionsAndBody` 的第三个参数仍是原始体。
 
+请求体如果带着上一进程记录的假值（模型上下文、压缩后的历史、客户端存下来的转写），`Mask` 会在 `byFake` 里认出它并原样保留。这正是持久化映射解决的二次替换：没有它，新进程会把这个假值当成新的身份证号/手机号/凭据再渲染一次，上游看到第二个假值，而本机再也对不上第一个。
+
 响应侧是还原，且还原器必须装在 `UsageSniffer` **之内**而不是之外：`UsageSniffer.Read` 会把读到的 `p[:n]` 直接写入 cassette，如果还原发生在 sniffer 外层，cassette 里留下的就是假值。
 
 还原不只在写给客户端之前发生。本地 Responses runtime 执行客户端工具时，工具调用参数是从**还原后**的响应里读出来的：`internal/proxy/responses_server.go` 的 `recordResponsesServerChatResponse` 把 `Restorer` 装在 sniffer 之内，`internal/responses/runtime/runtime.go` 再用还原后的文本构造 `FunctionToolCall` 参数。因此客户端工具与本地 runtime 拿到的都是真值；只有**上游托管的工具**（provider-executed / hosted tools）直接看到假值，因为它们在厂商侧执行，本机没有机会还原。
@@ -145,7 +181,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 两者都**不携带凭据字节**。prelude 会被复制进 trace 索引、发给 Monitor 并被导出，把真值写进去等于把它再散播一份；`internal/proxy/secretmask_e2e_test.go` 与 `secretmask_audit_test.go` 都把这条不变量钉住了。
 
-**2. `credential_mask_audits` 表**——真值与假值唯一的落库位置。每个被替换的值一行（凭据与个人数据都写这里；表名是历史名称，不随覆盖范围改名）：
+**2. `credential_mask_audits` 表**——按 trace 保存真值与假值的唯一位置。每个被替换的值一行（凭据与个人数据都写这里；表名是历史名称，不随覆盖范围改名）：
 
 | 列 | 含义 |
 | --- | --- |
@@ -156,7 +192,9 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 | `storage_mode` | 该行写入时的落盘形态，与 `GET /api/secrets/local-key` 报告的一致；`encrypted-local` 表示列里是 `tlsec:v1:` 本地密钥信封 |
 | `detected_at` | 改写时刻 |
 
-只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，seed 每进程随机，cassette 只记原始请求体，所以后台重建索引或回填**拿不到假值**。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
+只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，cassette 只记原始请求体，回填与重建索引的路径没有接入映射文件，所以它们**不写**这张表。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
+
+开启 `mapping_store` 时还有第四份持久化副本：`{{output_dir}}/secret_mask_mappings.db` 按**真值**去重保存同一对值。它不是审计记录——没有 trace、偏移与命中次数，只用于启动加载、假值识别和真值复用；审计读取面不读它，删掉它不影响已有 trace，只影响后续重启能否复用旧假值。
 
 **3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。身份证与手机号替换走同一条通知与 `secretmask:rule:<rule>` 指纹，只是 `rule`/`kind` 不同（`pii.chinese_id`/`national_id`、`pii.cn_mobile`/`mobile`）；两个读入口都按 `kind` 原样显示，不区分凭据与个人数据。
 
@@ -171,9 +209,15 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 ## 已知边界
 
-- **审计表本身就是一份凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。它应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把它读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
+- **审计表与映射文件都是凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。`secret_mask_mappings.db` 同样保存真值与假值，只是按真值去重、只存 `real`/`fake`，不含 trace、偏移与检测时间。两者都应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把审计表读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
 - **PEM 私钥块只在完整时改写。** 找不到同标签的 `-----END ...-----`（截断粘贴）、footer 与 header 标签不一致、或正文里出现 base64/空白/JSON 转义之外的字节时，块不成立，只剩头行上报、一个字节都不改。因此「只贴了一部分私钥」「header 与 END 被拼错」仍然会漏；老式 `Proc-Type: 4,ENCRYPTED` 头（正文前有 `:`/`,` 行）也不在块内，只上报头行。PuTTY `.ppk`、`---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----`（4 个横线）与 base64 套壳（kubeconfig `client-key-data`、K8s Secret）需要各自的规则，当前不覆盖。公钥与证书按设计不匹配。
 - **私钥假值不可用。** 块级假值的正文仍是 base64 形状，但解码后不是有效私钥（`ssh-keygen` 会报错）。依赖「模型先用假值解析/校验 key」的流程会失败；本地工具拿到的是还原后的真值（除 provider 托管工具）。
+- **升级前的旧假值不在文件里。** 首次启用持久化（或从没有映射文件的版本升级）时，之前进程渲染的假值没有记录；它们第一次回到请求里仍会被再遮蔽一次，之后该对关系才会被记录。要避免这一次，只能在升级时清空上游上下文或重新开始会话。
+- **异步写入有一个很短的持久化窗口。** 新映射先写内存、最多 25 ms 后落盘；进程被强杀时最后一批可能丢失，重启后对应假值会被再遮蔽一次。正常关闭（`Handler.Close`）会排空队列。
+- **只有正数 `load_limit` 才有识别窗口。** 默认加载全部，任何记录过的假值都能被 `byFake` 认识。设置正数后，一条比窗口更旧、且已从内存淘汰的假值如果再次出现，会被当成新值再遮蔽一次；真值本身不受影响，它第一次再次出现时会按 `by_real` 查文件并复用原假值。窗口越大覆盖越久，代价是启动内存。
+- **映射文件是本机、单实例文件。** bbolt 有排他文件锁：同一个 `output_dir` 不能被两个 Trajecta 进程同时打开映射文件，第二个进程会在启动时报错，而不是静默降级。它也不跨机器共享——在另一台机器上，同一个真值会渲染出不同的假值。共享 `output_dir`（NFS 等）不适合放 bbolt 文件；把 `mapping_store.path` 指到本地磁盘，或关掉它。
+- **映射文件打不开时启动失败。** 路径不可写、文件损坏或被另一个进程锁住时，`newSecretVault` 返回错误，handler 创建失败，进程退出。这里刻意不静默退回纯内存：静默退回会让重启后的假值重新变成第二个假值，正是本能力要修的问题；要么修好文件，要么显式设置 `mapping_store.enabled: false` 接受重启失效。
+- **本地密钥轮换后旧映射不可读。** 映射值用 `trace_index.secret` 封存，`by_real` 也用同一把密钥做 HMAC；轮换密钥后，旧行无法解密、新查找也按新 HMAC 落空。代理会跳过不可读行并重新渲染、写入新行，旧行成为孤儿；需要干净重建时删除 `secret_mask_mappings.db`。这与 `credential_mask_audits` 在密钥轮换后读不出 `original` 的边界一致。
 - **只有上游托管的工具看不到真值。** 客户端工具与本地 runtime 执行工具时拿到的是还原后的真值（见「在代理中的接入点」），HMAC 签名、AWS SigV4、签发 JWT 这类必须在真值上运算的操作在那里可以完成；provider-executed / hosted tools 在厂商侧执行，只看到假值，同样的操作会失败。
 - **身份证的生日不保留。** 假值的出生日期是重新渲染的合法日期，不是真值里的那一天。任何把身份证号与另一处出生日期交叉比对的下游（例如 KYC）都会对不上；需要这个一致性的流程应关闭遮蔽，或只依赖号码自身的校验位。
 - **手机号的后 8 位不保留。** 假值只保留号段，后 8 位是重新渲染的。依赖末四位做展示、核对或「请输入完整号码」类校验的下游会对不上；号段本身是公开的运营商分配，不构成个人信息。
@@ -207,5 +251,6 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 - 遮蔽 109 KB 散文载荷：热态约 222 MB/s，冷态约 210 MB/s（冷态包含渲染假值）。
 - PEM 私钥块：块扩展只在头行命中时跑一次 `bytes.Index` 级的扫描，不改变每字节成本；首次渲染一把 594 B 的 ed25519 约 27 µs、3 KB 的 RSA 约 0.2 ms（密钥流每 32 字节一次 HMAC-SHA256），同一把 key 再出现时约 1–2 µs。还原 70 KB 散文仍约 282 MB/s；vault 里有一把 3 KB 块时也约 290 MB/s。
 - 长假值在还原侧的开链门槛是 16 字节而不是 8：私钥块的 `-----BEGIN ` 与所有 PEM 头共享 11 字节，8 字节门槛会让响应里每个证书头都开一条永远凑不齐的链，在 PEM 密集的极端载荷上把还原吞吐从约 280 MB/s 拖到约 50 MB/s，并让流式输出暂扣 512 字节。同一份极端载荷在 16 字节门槛下不再开链。
+- 映射文件不改变请求热路径：已加载或已命中的值只查内存 map，只有首次遇到某个真值时才查一次 bbolt；新值渲染后的写入在后台批量提交。启动加载是一次性成本，默认加载全部，规模由不同敏感值的数量决定；正数 `load_limit` 可限制启动内存。
 - 还原：散文载荷约 340 MB/s，流式约 348 MB/s；上表的 transcript 载荷约 139 MB/s。跨 delta 重组只增加一次判定，代价已包含在内；「整条假值优先于链」的判定在链开着时逐字节执行，这部分开销也在测量值里，换来的是不漏还原、不拼接。
 - 精度：对 `git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）扫描得到 83 处命中、25 个文件。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报：`ek_` 开头的 Go 标识符、`go.sum` 里形似 `LTAI` 的串、`17179869184` 常量、HTML 快照里的一个 11 位数字；Low 一律不会改写。身份证规则 15 处（全 High）；手机号规则 29 处，其中 12 处 Medium 全部落在 `mobile_test.go` 与 `secretmask_test.go` 的样例里，其余 17 处为 Low。PEM 私钥块规则本身在当前工作树没有命中；新增的 SSH 测试夹具带来 2 处 PEM 头命中。

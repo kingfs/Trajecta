@@ -222,6 +222,14 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
 	}
+	// Registered after the trace store's cleanup, so it runs first: the mapping
+	// append queue must be flushed while its file is still open, and the trace
+	// store close that follows is unrelated to it.
+	defer func() {
+		if err := handler.Close(); err != nil {
+			slog.Warn("Secret mapping store did not close cleanly", "error", err)
+		}
+	}()
 
 	// The periodic walk is a reconciliation backstop, not the normal path: a
 	// cassette is indexed when it is written, and Sync only has to catch files

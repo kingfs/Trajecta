@@ -273,9 +273,39 @@ type LimitConfig struct {
 // remains authoritative. Turning it off is a one-line change for an operator who
 // would rather see the real values reach the provider, or who is validating the
 // stand-ins over a longer period before trusting them.
+// The stand-in is persisted as a real-to-fake pair when mapping_store is on, so
+// a fake that the model still holds after a restart stays the same fake and a
+// value the model echoes back is not masked a second time.
 type SecretMaskingConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled      bool                         `yaml:"enabled"`
+	MappingStore SecretMaskMappingStoreConfig `yaml:"mapping_store"`
 }
+
+// SecretMaskMappingStoreConfig controls the durable mapping beside the vault.
+//
+// The mapping is a local bbolt file, not an application-database table: it pairs
+// a real value with a fake that only the proxy process can render, so it belongs
+// beside the cassettes in the output directory, and it must be writable even
+// when the application database is a remote Postgres. Disable it to keep every
+// fake process-local, which is the pre-persistence behaviour: a restart renders
+// new fakes and a fake from an earlier session is masked again.
+type SecretMaskMappingStoreConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Path is the bbolt file. Empty means
+	// {{output_dir}}/secret_mask_mappings.db.
+	Path string `yaml:"path"`
+	// LoadLimit bounds the pairs loaded into memory at startup; a positive value
+	// keeps the newest ones and zero (the default) loads every pair. A value
+	// whose pair is older than a positive window is looked up in the file before
+	// it is rendered, so it still keeps its recorded fake.
+	LoadLimit int `yaml:"load_limit"`
+}
+
+// DefaultSecretMappingLoadLimit mirrors secretmask.DefaultMappingLoadLimit. The
+// configuration package does not import the rule engine, so the number is
+// repeated here; TestSecretMaskingMappingDefaults pins the two together. Zero
+// means load every recorded pair.
+const DefaultSecretMappingLoadLimit = 0
 
 type ResponsesServerConfig struct {
 	DefaultModel                string                          `yaml:"default_model"`
@@ -457,6 +487,12 @@ func Load(path string) (*Config, error) {
 	// TRAJECTA_SECRET_MASKING_ENABLED=false) still wins, because the seed happens before the
 	// YAML is decoded and the environment override happens after.
 	cfg.SecretMasking.Enabled = true
+	// The durable mapping is part of the default protection: it is what keeps a
+	// fake stable across a restart, so leaving it off by default would put the
+	// protection back in the state where the model's context and a fresh process
+	// disagree about the stand-in for the same value.
+	cfg.SecretMasking.MappingStore.Enabled = true
+	cfg.SecretMasking.MappingStore.LoadLimit = DefaultSecretMappingLoadLimit
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -775,6 +811,9 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
 	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
+	envBool(&cfg.SecretMasking.MappingStore.Enabled, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED")
+	envString(&cfg.SecretMasking.MappingStore.Path, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_PATH")
+	envInt(&cfg.SecretMasking.MappingStore.LoadLimit, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_LOAD_LIMIT")
 	envString(&cfg.ResponsesServer.DefaultModel, "TRAJECTA_RESPONSES_DEFAULT_MODEL")
 	envBool(&cfg.ResponsesServer.ForceStore, "TRAJECTA_RESPONSES_FORCE_STORE")
 	envInt64(&cfg.ResponsesServer.MaxRequestBodyBytes, "TRAJECTA_RESPONSES_MAX_REQUEST_BODY_BYTES")

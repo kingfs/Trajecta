@@ -54,7 +54,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/replay`：测试回放 transport。
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
-- `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号与手机号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类；PEM 私钥块由 `pem.go` 从 DFA 命中的头行原生扩展到配对 footer（标签必须一致，反向引用无法用 DFA 表达），不新增 DFA 状态。
+- `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号与手机号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类；PEM 私钥块由 `pem.go` 从 DFA 命中的头行原生扩展到配对 footer（标签必须一致，反向引用无法用 DFA 表达），不新增 DFA 状态。vault 的 `real -> fake` 映射由 `internal/store` 的 bbolt 文件持久化（默认开启），启动默认加载全部、首次遇到未知真值时回查，因此假值跨重启与上下文压缩保持稳定；正数 `load_limit` 可限制启动内存并形成识别窗口。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
 - `web/monitor-ui`：Monitor 前端源码（React + Vite 8，Tailwind v4 + Radix primitives，TanStack Query 管服务端状态，Playwright 与 `node --test` 测试）。样式令牌由 `src/styles/tokens.css`（生成的 OKLCH 调色板）提供，`vite build` 的产物写入 `internal/monitor/ui/dist`。
 
@@ -125,7 +125,8 @@ application DB 是结构化查询源：
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）；
-- 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成、每进程种子随机，cassette 只记原始请求体，所以后台重建索引拿不到假值、只会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
+- 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成，cassette 只记录原始请求体，回填路径不读映射文件，所以后台重建索引仍然会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
+- 凭据遮蔽映射（`{{output_dir}}/secret_mask_mappings.db`）：bbolt 文件，按真值去重只保存 `real -> fake`，启动时默认加载全部（`secret_masking.mapping_store.load_limit: 0`；正数只加载最新 N 条），新映射异步批量写入。它是 Vault 的恢复索引而不是审计表：没有 trace、偏移与命中次数，删掉只影响后续重启能否复用旧假值。同一 `output_dir` 只能被一个进程打开（bbolt 排他锁），并且用 `trace_index.secret` 加密、用同一把密钥做去重索引的 HMAC。
 
 生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。
 

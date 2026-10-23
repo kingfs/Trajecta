@@ -322,6 +322,11 @@ type secretBox struct {
 	mode        string
 	keyPath     string
 	fingerprint string
+	// indexKey is the raw local key, kept so the secret-mapping store can key
+	// its dedupe index with HMAC rather than an unkeyed hash. An unkeyed hash of
+	// a mobile number is brute-forceable in seconds, and the index key is part of
+	// the on-disk file.
+	indexKey []byte
 }
 
 type SecretStatus struct {
@@ -1395,6 +1400,7 @@ func secretBoxFromKey(key []byte, keyPath string) (*secretBox, error) {
 		mode:        "encrypted-local",
 		keyPath:     keyPath,
 		fingerprint: hex.EncodeToString(sum[:8]),
+		indexKey:    append([]byte(nil), key...),
 	}, nil
 }
 

@@ -159,8 +159,18 @@ telemetry:
 # reversible, format-preserving stand-ins before the request reaches the
 # provider, and restored in the response. On unless this is set to false; see docs/SECRET_MASKING.md for what
 # the engine covers and what it does not.
+#
+# mapping_store keeps the real-to-stand-in pairs in a local bbolt file so a
+# restart, a new session or a compacted context keeps the same stand-in instead
+# of masking an already-masked value again. load_limit 0 (the default) loads
+# every pair; a positive value keeps only the newest ones and still looks an
+# older value up from the file before rendering a new stand-in.
 secret_masking:
   enabled: true
+  mapping_store:
+    enabled: true
+    # path: ""        # default {{output_dir}}/secret_mask_mappings.db
+    load_limit: 0
 
 chaos:
   enabled: false

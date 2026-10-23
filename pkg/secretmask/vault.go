@@ -6,13 +6,16 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"log/slog"
 	"strings"
 	"sync"
 )
 
-// DefaultVaultCapacity bounds how many distinct real values one Vault
-// remembers; the oldest is evicted first. A proxy sees few distinct
-// credentials, so the cap only exists to keep a long-running process bounded.
+// DefaultVaultCapacity is the minimum number of distinct real values one Vault
+// remembers, and the headroom added above a loaded mapping window so a
+// load-all start does not evict a loaded pair on the first new value. The
+// oldest is evicted first; an evicted pair is looked up in the durable store
+// and reused if the same value appears again.
 const DefaultVaultCapacity = 4096
 
 // keystreamDomain separates this use of the seed from any other.
@@ -63,13 +66,28 @@ type Vault struct {
 	firstFit [256]bool
 	fakeLen  int
 	order    []string
+
+	// store is the durable side of the mapping, nil when the vault is purely
+	// in-memory. It is consulted only when a real value is not already in
+	// memory.
+	store MappingStore
+	// createMu serializes the slow path of fakeFor - the store lookup and the
+	// render - so two requests that carry the same new value cannot race to
+	// create and persist two mappings. Masking an already-known value never
+	// takes it.
+	createMu sync.Mutex
+	// closeOnce makes Close idempotent; closeErr is the result of the one close.
+	closeOnce sync.Once
+	closeErr  error
 }
 
-// NewVault returns a Vault. A nil or empty seed is replaced with 32 bytes from
-// crypto/rand, which is the recommended mode for a live process: the mapping
-// exists only in memory, so a fake observed on the wire cannot be reversed
-// without this process, and restarting the proxy invalidates every fake. Pass
-// an explicit seed only for tests and for reproducing a session.
+// NewVault returns an in-memory Vault. A nil or empty seed is replaced with 32
+// bytes from crypto/rand, which is the recommended mode for a live process: the
+// mapping exists only in memory, so a fake observed on the wire cannot be
+// reversed without this process, and restarting the proxy invalidates every
+// fake. Pass an explicit seed only for tests and for reproducing a session.
+//
+// Use NewVaultWithStore when the mapping should survive a restart.
 func NewVault(seed []byte) *Vault {
 	if len(seed) == 0 {
 		seed = make([]byte, 32)
@@ -85,6 +103,84 @@ func NewVault(seed []byte) *Vault {
 		byFake:   make(map[string]string),
 		index:    make(map[byte][]fakeEntry),
 	}
+}
+
+// NewVaultWithStore returns a Vault that loads its mappings from store and
+// records every new one through it. A limit of zero or less loads every pair; a
+// positive limit loads the newest limit.
+//
+// Persisting the pair is what makes a stand-in stable across a restart. Without
+// it a fake rendered before the restart is just an unknown value to the new
+// process: the detector sees a well-formed identity number or mobile number and
+// renders a second fake over it, so the upstream conversation, which still holds
+// the first fake, and the local side, which needs the real value, disagree. A
+// loaded fake is in byFake, so Mask leaves it alone, and a loaded real is in
+// byReal, so it renders to the recorded fake rather than a new one.
+//
+// The vault owns store and closes it from Close.
+func NewVaultWithStore(seed []byte, store MappingStore, limit int) (*Vault, error) {
+	v := NewVault(seed)
+	if store == nil {
+		return v, nil
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	mappings, err := store.LoadMappings(limit)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	v.store = store
+	// Keep the whole loaded window resident, plus the normal capacity as
+	// headroom for new values. Without the headroom the first new value after a
+	// load-all start would evict the oldest loaded pair, which is exactly the
+	// pair the load-all default exists to keep recognisable.
+	if need := len(mappings) + DefaultVaultCapacity; need > v.capacity {
+		v.capacity = need
+	}
+	// LoadMappings returns newest first, and eviction is oldest first, so insert
+	// in reverse: the slice then reads newest first while order reads oldest
+	// first.
+	for i := len(mappings) - 1; i >= 0; i-- {
+		v.loadMapping(mappings[i])
+	}
+	return v, nil
+}
+
+// Close flushes any pending mapping appends and closes the mapping store. It is
+// idempotent, and a vault without a store has nothing to close. Requests must
+// have stopped before Close: a mask that starts after the store closes cannot
+// persist its pair, though the in-memory mapping still works for this process.
+func (v *Vault) Close() error {
+	if v == nil {
+		return nil
+	}
+	v.closeOnce.Do(func() {
+		if v.store != nil {
+			v.closeErr = v.store.Close()
+		}
+	})
+	return v.closeErr
+}
+
+// loadMapping inserts one persisted pair. A pair that is malformed - an empty
+// side, unequal lengths, or a fake already owned by a different real value - is
+// skipped rather than installed, because installing it would either break the
+// length invariant or make Restore return the wrong real value.
+func (v *Vault) loadMapping(m Mapping) {
+	if m.Real == "" || m.Fake == "" || m.Real == m.Fake || len(m.Real) != len(m.Fake) {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, ok := v.byReal[m.Real]; ok {
+		return
+	}
+	if owner, taken := v.byFake[m.Fake]; taken && owner != m.Real {
+		return
+	}
+	v.insertLocked(m.Real, m.Fake)
 }
 
 // Len reports how many real values the vault currently maps.
@@ -261,18 +357,76 @@ func (v *Vault) isFake(tok []byte) bool {
 	return ok
 }
 
-// fakeFor returns the fake for real, rendering and recording it on first use.
+// fakeFor returns the fake for real, reusing a recorded mapping when one exists
+// and rendering and recording a new one otherwise.
 func (v *Vault) fakeFor(r *Rule, real []byte) string {
 	key := string(real)
 
+	v.mu.RLock()
+	f, ok := v.byReal[key]
+	v.mu.RUnlock()
+	if ok {
+		return f
+	}
+
+	// The store lookup and the render both run outside v.mu, so creation is
+	// serialized separately: two requests carrying the same new value must not
+	// each render and persist a pair. The fast path above never takes this lock.
+	v.createMu.Lock()
+	defer v.createMu.Unlock()
+
+	v.mu.RLock()
+	f, ok = v.byReal[key]
+	v.mu.RUnlock()
+	if ok {
+		return f
+	}
+	if f, ok := v.recordedFake(key); ok {
+		return f
+	}
+
+	f = v.renderAndInsert(r, key, real)
+	v.record(key, f)
+	return f
+}
+
+// recordedFake reuses a mapping the durable store already holds. It is what
+// keeps a fake stable when its pair has fallen out of the loaded window, or when
+// this process restarted after recording it: the value is rendered again only
+// when no pair exists.
+func (v *Vault) recordedFake(real string) (string, bool) {
+	if v.store == nil {
+		return "", false
+	}
+	m, found, err := v.store.LookupMapping(real)
+	if err != nil || !found {
+		return "", false
+	}
+	if m.Real != real || m.Fake == "" || m.Real == m.Fake || len(m.Real) != len(m.Fake) {
+		return "", false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if f, ok := v.byReal[real]; ok {
+		return f, true
+	}
+	if owner, taken := v.byFake[m.Fake]; taken && owner != real {
+		return "", false
+	}
+	v.insertLocked(real, m.Fake)
+	return m.Fake, true
+}
+
+// renderAndInsert renders a fresh fake and installs it under v.mu. The render
+// loop is a safety net, not a search: the first attempt differs from real with
+// overwhelming probability, and a collision needs an existing fake to be the
+// same bytes.
+func (v *Vault) renderAndInsert(r *Rule, key string, real []byte) string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if f, ok := v.byReal[key]; ok {
 		return f
 	}
-	// The loop is a safety net, not a search: the first attempt differs from
-	// real with overwhelming probability, and a collision needs an existing
-	// fake to be the same bytes.
 	for attempt := 0; attempt < 64; attempt++ {
 		f := v.render(r, real, attempt)
 		if f == key {
@@ -286,6 +440,18 @@ func (v *Vault) fakeFor(r *Rule, real []byte) string {
 	}
 	// Unreachable outside of a deliberately hostile vault state.
 	return key
+}
+
+// record hands a new pair to the durable store. It is deliberately not called
+// for a pair read back from the store, and it never runs while v.mu is held: the
+// store may fall back to a synchronous write when its queue is full.
+func (v *Vault) record(real, fake string) {
+	if v.store == nil || real == fake {
+		return
+	}
+	if err := v.store.AppendMapping(Mapping{Real: real, Fake: fake}); err != nil {
+		slog.Warn("Failed to persist secret mask mapping", "error", err)
+	}
 }
 
 // render builds a same-length fake.

@@ -5,6 +5,8 @@ __debug*
 logs/
 /trajecta
 data/
+# 敏感值遮蔽映射是本地运行时数据（含真值），绝不入库
+secret_mask_mappings.db
 node_modules/
 /server
 docker-data/
