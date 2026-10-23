@@ -107,6 +107,8 @@ var positiveSamples = []struct {
 
 	{RuleSkDashGeneric, "sk-" + rep("a1", 16)},
 	{RuleSkUnderscoreGeneric, "sk_" + rep("A1", 16)},
+
+	{RulePEMPrivateKeyBlock, "-----BEGIN OPENSSH PRIVATE KEY-----\n" + rep("A", 70) + "\n" + rep("B", 70) + "\n-----END OPENSSH PRIVATE KEY-----"},
 }
 
 // noiseSamples are benign strings that must never produce a span. Trajecta

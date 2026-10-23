@@ -152,6 +152,13 @@ type Rule struct {
 	// search is the most expensive part of emit, and a body can carry thousands
 	// of matches.
 	SkipContext bool
+	// ArmoredBlock marks a rule whose match spans a whole RFC 7468 armor block.
+	// The header and footer lines are format constants - the BEGIN and END
+	// labels have to agree for the block to be well formed - so rendering copies
+	// them verbatim and rewrites only the body between them, instead of
+	// substituting every alphanumeric run in the value. It also tells render to
+	// leave the body's line breaks and indentation exactly where they are.
+	ArmoredBlock bool
 	// Keywords are vendor-specific strings whose presence near the match
 	// counts as context evidence. The global credential vocabulary in
 	// context.go applies to every rule as well.
@@ -287,6 +294,13 @@ const (
 	RuleChineseID
 	RuleCNMobile
 
+	// The armored half of the PEM pair. structural.pem_private_key matches the
+	// header line alone, which carries no key material and is never rewritten;
+	// this rule covers the whole block that pemBlockAt recognises once that
+	// header anchored the scan. Appended for the same reason as the rules
+	// above: the ids already assigned never move.
+	RulePEMPrivateKeyBlock
+
 	ruleIDCount
 )
 
@@ -421,6 +435,20 @@ var ruleTable = [ruleIDCount]Rule{
 	// string-embedded JSON object) is a keyword instead: a quote cannot
 	// precede the "tel" in those words, so it only matches a field named tel.
 	RuleCNMobile: {Name: "pii.cn_mobile", Kind: KindMobile, Grade: GradeA, Strength: StrengthGeneric, MinLen: 11, MaxLen: 11, CandidateCheck: candidateCNMobilePrefix, WordBounded: true, ContextWindow: 24, Keywords: []string{"手机", "手机号", "手机号码", "电话", "联系电话", "联系方式", "致电", "拨打", "phone", "mobile", "cellphone", `"tel"`, `\"tel\"`}},
+
+	// The armored half of the PEM pair, and the one that carries key material.
+	// structural.pem_private_key matches the header line alone; rewriting that
+	// line would break the file without protecting anything, which is why
+	// policySkipMask leaves it alone. pemBlockAt (pem.go) extends that header
+	// match to the matching footer, and the label has to repeat exactly - a
+	// back-reference a DFA cannot express, and the reason this half is native
+	// rather than another pattern in rules.rl.
+	//
+	// The score is Strong because a complete armor pair with a matching
+	// "PRIVATE KEY" label is conclusive: the body is base64 of key material and
+	// ordinary prose does not produce one. SkipContext keeps the 96-byte window
+	// off a match that can be kilobytes long; the header is the evidence.
+	RulePEMPrivateKeyBlock: {Name: "structural.pem_private_key_block", Kind: KindPrivateKey, Grade: GradeA, Strength: StrengthStrong, MinLen: 64, Prefixes: []string{"-----BEGIN "}, SkipContext: true, ArmoredBlock: true},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

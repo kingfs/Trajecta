@@ -32,6 +32,19 @@ const (
 	chainMinEntry = 8
 	chainMinRun   = 8
 	chainMaxGap   = 512
+
+	// chainLongFake and chainMinEntryLong are the other half of that policy: a
+	// long fake needs a longer first run before a chain may open. The armored
+	// private-key block shares its "-----BEGIN " prefix with every other PEM
+	// block, so the eight-byte threshold let any certificate header in a
+	// response open a chain that could never complete: the stream stalled for
+	// the whole chainMaxGap and a PEM-dense body fell into the byte-by-byte
+	// continuation walk. Sixteen bytes is past that shared prefix - a different
+	// label diverges at its first letter, byte eleven - and still well inside
+	// the block's own header, so a provider that cuts the real stand-in into
+	// deltas opens the chain on its first run.
+	chainLongFake     = 256
+	chainMinEntryLong = 16
 )
 
 // run is one contiguous piece of a stand-in sitting in the buffer.
@@ -202,8 +215,7 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 				full      *fakeEntry
 				fullLen   int
 				undecided *fakeEntry
-				prefix    *fakeEntry
-				prefixLen int
+				prefixes  []chainCandidate
 			)
 			// Each bucket is ordered longest first, so the first complete match
 			// is also the longest one.
@@ -216,8 +228,8 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 					// wait for the rest or record the run that did match.
 					m := commonPrefix(buf[i:], cand.raw[:avail])
 					if m < avail {
-						if m > prefixLen {
-							prefix, prefixLen = cand, m
+						if chainStart(m, cand.entry, buf[i+m]) {
+							prefixes = append(prefixes, chainCandidate{entry: cand, first: m})
 						}
 						continue
 					}
@@ -227,8 +239,8 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 					continue
 				}
 				if m := commonPrefix(buf[i:i+n], cand.raw); m < n {
-					if m > prefixLen {
-						prefix, prefixLen = cand, m
+					if chainStart(m, cand.entry, buf[i+m]) {
+						prefixes = append(prefixes, chainCandidate{entry: cand, first: m})
 					}
 					continue
 				}
@@ -245,17 +257,28 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 			case undecided != nil:
 				st.cursor = i
 				return i, replaced
-			case prefix != nil && prefixLen >= chainMinEntry:
+			case len(prefixes) > 0:
 				// Hold the run back instead of rewriting it now: only a complete
 				// stand-in is rewritten, so a run that merely resembles one
 				// cannot corrupt the text it sits in.
+				chosen, decision := chooseChain(buf, i, prefixes)
+				if decision == chainWait {
+					// The variants share every byte the stream has delivered so
+					// far and the next run will decide between them; waiting is
+					// what turns that into a decision rather than a guess.
+					st.cursor = i
+					return i, replaced
+				}
+				if decision == chainNone {
+					break
+				}
 				st.frag = &fragment{
-					fake:  prefix.raw,
-					real:  []byte(v.byFake[prefix.text]),
+					fake:  chosen.entry.raw,
+					real:  []byte(v.byFake[chosen.entry.text]),
 					start: i,
 				}
-				st.frag.add(i, 0, prefixLen)
-				i += prefixLen
+				st.frag.add(i, 0, chosen.first)
+				i += chosen.first
 				continue
 			}
 		}
@@ -267,6 +290,154 @@ func (v *Vault) restoreScan(buf []byte, st *streamState) (int, int) {
 	}
 	return len(buf), replaced
 }
+
+// chainStart reports whether a run of m bytes may open a chain. Usually it has
+// to reach the candidate's entry threshold, but a delta can end the run before
+// that: the closing quote of the JSON string is where the envelope begins, and
+// the variant lookahead can then confirm the block across that envelope. A
+// short run that ends anywhere else is prose, not a delta boundary, so it is
+// not allowed to stall the stream - that is what the certificate case taught.
+func chainStart(m, entry int, next byte) bool {
+	if m <= 0 {
+		return false
+	}
+	if m >= entry {
+		return true
+	}
+	// Only a long stand-in gets the delta-boundary exception: a short secret
+	// cut into tiny runs must stay untouched, which is what its entry threshold
+	// is for.
+	return entry >= chainMinEntryLong && next == '"'
+}
+
+// chainCandidate is one escape-depth variant a run could begin, along with how
+// many bytes of it the first run covers.
+type chainCandidate struct {
+	entry *fakeEntry
+	first int
+}
+
+// chooseChain picks the variant whose continuation the buffered bytes actually
+// carry. A stand-in made of newlines exists at several JSON escape depths, and
+// the run that opens a chain ends at the first envelope between deltas, before
+// any of them differs: the depth that matches the bytes after that envelope is
+// the one the stream is carrying, so the lookahead is what makes the choice
+// instead of bucket order. When the buffer cannot separate the variants yet it
+// asks for more input rather than guessing, and it declines the run only when
+// every variant exhausted the gap, which means the run was never a stand-in.
+func chooseChain(buf []byte, at int, cands []chainCandidate) (chainCandidate, chainDecision) {
+	bestReach := -1
+	var best chainCandidate
+	survivors := 0
+	for _, cand := range cands {
+		reach, status := chainReach(cand.entry.raw, buf, at, cand.first)
+		if status == chainReachAbandoned {
+			continue
+		}
+		survivors++
+		if status == chainReachComplete {
+			return cand, chainPick
+		}
+		if reach > bestReach {
+			bestReach = reach
+			best = cand
+		}
+	}
+	switch survivors {
+	case 0:
+		return chainCandidate{}, chainNone
+	case 1:
+		return best, chainPick
+	default:
+		return chainCandidate{}, chainWait
+	}
+}
+
+// chainDecision is what chooseChain concluded about a run that could open a
+// chain.
+type chainDecision int
+
+const (
+	chainPick chainDecision = iota // one variant is the only one that can match
+	chainWait                      // the buffer cannot separate the variants yet
+	chainNone                      // every variant exhausted the gap; not a chain
+)
+
+// chainReach walks the same continuation rules as feedFragment without touching
+// the buffer and reports how much of fake the bytes at buf[at:] can account for.
+// It stops when the stand-in is complete, when the gap limit is exceeded, or
+// when the buffer ends inside something it cannot judge yet.
+func chainReach(fake, buf []byte, at, matched int) (int, chainReachStatus) {
+	pos := at + matched
+	gap := 0
+	for matched < len(fake) {
+		need := chainMinRun
+		if len(fake)-matched < need {
+			need = len(fake) - matched
+		}
+		if len(buf)-pos < need {
+			return matched, chainReachWaiting
+		}
+		if !bytesEqual(buf[pos:pos+need], fake[matched:matched+need]) {
+			if gap == 0 {
+				if n := shortDeltaTail(fake, buf, pos, matched, need); n > 0 {
+					matched += n
+					pos += n
+					gap = 0
+					continue
+				}
+			}
+			gap++
+			pos++
+			if gap > chainMaxGap {
+				return matched, chainReachAbandoned
+			}
+			continue
+		}
+		limit := len(fake) - matched
+		if avail := len(buf) - pos; limit > avail {
+			limit = avail
+		}
+		run := need
+		for run < limit && buf[pos+run] == fake[matched+run] {
+			run++
+		}
+		matched += run
+		pos += run
+		gap = 0
+	}
+	return matched, chainReachComplete
+}
+
+// shortDeltaTail returns the length of a run that stops short of chainMinRun
+// only because the JSON string ends there. A delta can cut a run anywhere, and
+// the bytes between one delta's content and the next are the envelope, so the
+// closing quote is what tells a real delta boundary from prose that happens to
+// share a few bytes. Refusing such a tail would drop the chain out of alignment
+// for every later run; taking it is safe because completion still requires
+// every remaining byte.
+//
+// The caller must only try it at gap zero, the direct continuation of the run
+// that just ended. A quote appears all over an SSE envelope, and accepting one
+// after a gap lets a coincidental few bytes inside the envelope advance the
+// logical offset, which leaves the matching byte in front of the run
+// unrewritten.
+func shortDeltaTail(fake, buf []byte, at, matched, need int) int {
+	n := commonPrefix(buf[at:], fake[matched:])
+	if n > 0 && n < need && buf[at+n] == '"' {
+		return n
+	}
+	return 0
+}
+
+// chainReachStatus is how far chainReach got with one variant.
+type chainReachStatus int
+
+const (
+	chainReachWaiting   chainReachStatus = iota // the buffer ended inside a possible match
+	chainReachComplete                          // the whole stand-in is present
+	chainReachAbandoned                         // the gap limit was exceeded
+)
 
 // completeAt returns the longest whole stand-in that begins at buf[off], or nil,
 // along with its length. Buckets are ordered longest first, so the first match
@@ -353,6 +524,18 @@ func (v *Vault) feedFragment(buf []byte, i int, st *streamState) (int, fragmentO
 		return i, fragmentWaiting
 	}
 	if !bytesEqual(buf[i:i+need], f.fake[f.matched:f.matched+need]) {
+		if f.gap == 0 {
+			if n := shortDeltaTail(f.fake, buf, i, f.matched, need); n > 0 {
+				f.add(i, f.matched, n)
+				f.gap = 0
+				if f.matched == len(f.fake) {
+					f.rewrite(buf)
+					st.frag = nil
+					return i + n, fragmentDone
+				}
+				return i + n, fragmentOpen
+			}
+		}
 		f.gap++
 		if f.gap > chainMaxGap {
 			st.frag = nil

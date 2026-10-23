@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -846,6 +847,178 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 		t.Errorf("audit pair = (%q, %q), want (%q, %q)", row.Original, row.StandIn, id, standIn)
 	}
 	if row.TraceID == "" || row.End-row.Start != len(id) {
+		t.Errorf("audit row lost its trace or offsets: %+v", row)
+	}
+}
+
+// proxyTestSSHBlock builds a realistic OpenSSH private key: the binary blob
+// starts with the format's magic, and the armor is wrapped at 64 characters.
+func proxyTestSSHBlock() string {
+	raw := make([]byte, 387)
+	copy(raw, []byte("openssh-key-v1\x00"))
+	for i := len(raw) - 1; i >= 0; i-- {
+		raw[i] ^= byte(i * 31)
+	}
+	body := base64.StdEncoding.EncodeToString(raw)
+	var b strings.Builder
+	b.WriteString("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+	for len(body) > 64 {
+		b.WriteString(body[:64] + "\n")
+		body = body[64:]
+	}
+	b.WriteString(body + "\n-----END OPENSSH PRIVATE KEY-----")
+	return b.String()
+}
+
+// TestHandlerMasksSSHPrivateKeyOnTheWire is the scenario the rule exists for:
+// the agent reads a private key and asks the model to deploy or reorganise it.
+// The provider has to receive a stand-in, the echo has to come back as the real
+// key so a local tool can use it, the cassette has to keep the original for
+// replay, and the audit table has to keep the pair.
+func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
+	block := proxyTestSSHBlock()
+	escapedKey := strings.ReplaceAll(block, "\n", `\n`)
+	requestBody := `{"model":"gpt-5","messages":[{"role":"user","content":"` + escapedKey + `"}]}`
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			// The handler probes the provider at startup; only the chat request
+			// carries a body worth inspecting.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		// Decode the request the way a provider does before the model sees it,
+		// then echo the content back. The response encoder escapes the newlines
+		// again, which is the form the restorer has to reverse.
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || len(req.Messages) == 0 {
+			t.Errorf("upstream request is not the expected JSON: %v body=%q", err, body)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"echo": req.Messages[0].Content})
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+	}
+
+	if strings.Contains(upstreamBody, escapedKey) {
+		t.Errorf("the upstream received the real private key: %s", upstreamBody)
+	}
+	if len(upstreamBody) != len(requestBody) {
+		t.Errorf("body length changed: got %d, want %d; content-length would desynchronise",
+			len(upstreamBody), len(requestBody))
+	}
+	findings := secretmask.Scan([]byte(upstreamBody))
+	if len(findings) != 1 || findings[0].ID != secretmask.RulePEMPrivateKeyBlock {
+		t.Fatalf("the upstream body carries no private-key block stand-in: %+v", findings)
+	}
+	standIn := string(findings[0].Bytes([]byte(upstreamBody)))
+	if len(standIn) != len(escapedKey) {
+		t.Fatalf("stand-in length %d, want %d", len(standIn), len(escapedKey))
+	}
+	if !strings.HasPrefix(standIn, `-----BEGIN OPENSSH PRIVATE KEY-----\n`) ||
+		!strings.HasSuffix(standIn, `\n-----END OPENSSH PRIVATE KEY-----`) {
+		t.Fatalf("stand-in lost the armor: %q", standIn)
+	}
+
+	var echoed struct {
+		Echo string `json:"echo"`
+	}
+	if err := json.Unmarshal(respBody, &echoed); err != nil {
+		t.Fatalf("decode response %q: %v", respBody, err)
+	}
+	if echoed.Echo != block {
+		t.Errorf("client received %q, want the original private key restored", echoed.Echo)
+	}
+
+	path := findRecordedHTTP(t, outputDir)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cassette %q: %v", path, err)
+	}
+	parsed, err := waitForRecordedPrelude(path, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	_, recordedBody, _, _ := recordfile.ExtractSections(raw, parsed)
+	if !strings.Contains(string(recordedBody), escapedKey) {
+		t.Errorf("the cassette did not record the original body: %s", recordedBody)
+	}
+	var maskedEvents int
+	for _, event := range parsed.Events {
+		if event.Type != "secret.masked" {
+			continue
+		}
+		maskedEvents++
+		if rule, _ := event.Attributes["rule"].(string); rule != "structural.pem_private_key_block" {
+			t.Errorf("secret.masked rule = %q, want structural.pem_private_key_block", rule)
+		}
+	}
+	if maskedEvents != 1 {
+		t.Errorf("recorded %d secret.masked events, want 1", maskedEvents)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var audits store.CredentialMaskAuditPage
+	for {
+		audits, err = st.ListCredentialMaskAudits(store.CredentialMaskAuditFilter{PageSize: 10})
+		if err != nil {
+			t.Fatalf("ListCredentialMaskAudits() error = %v", err)
+		}
+		if len(audits.Items) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(audits.Items) != 1 {
+		t.Fatalf("audit rows = %d, want 1: %+v", len(audits.Items), audits)
+	}
+	row := audits.Items[0]
+	if row.Rule != "structural.pem_private_key_block" || row.Kind != "private_key" {
+		t.Errorf("audit rule/kind = %q/%q", row.Rule, row.Kind)
+	}
+	if row.Original != escapedKey || row.StandIn != standIn {
+		t.Errorf("audit pair does not match the wire values")
+	}
+	if row.TraceID == "" || row.End-row.Start != len(escapedKey) {
 		t.Errorf("audit row lost its trace or offsets: %+v", row)
 	}
 }

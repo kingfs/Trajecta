@@ -4,6 +4,15 @@ package secretmask
 type collector struct {
 	src      []byte
 	findings []Finding
+	// suppressUntil is the end of the last armored block that was emitted. The
+	// DFA resumes scanning right after the header, so it walks the base64 body
+	// as ordinary text and can find a second, unrelated shape inside it (a
+	// four-letter vendor anchor that happens to occur in base64). Spans must not
+	// overlap: Mask rewrites spans in order on one buffer, so a finding inside a
+	// block would overwrite bytes the block stand-in already replaced. Dropping
+	// anything that starts before the block ends is the whole fix, and it costs
+	// one comparison per match.
+	suppressUntil int
 }
 
 // emit is called from generated code for every completed lexical match.
@@ -15,8 +24,19 @@ type collector struct {
 // checked natively. Validators and context scoring follow for the survivors,
 // which are rare enough that the cost does not show up in a profile.
 func (c *collector) emit(id RuleID, start, end int) {
-	if id == RuleUnknown || id >= ruleIDCount {
+	if id == RuleUnknown || id >= ruleIDCount || start < c.suppressUntil {
 		return
+	}
+	// The PEM header is the anchor for the whole block: the machine can decide
+	// the header line, but only native code can check that the footer repeats
+	// the header's label. When a complete block is found the block rule replaces
+	// the header finding rather than joining it, because the two spans would
+	// overlap; a block too short to be a block, or one with no matching footer,
+	// leaves the header finding exactly as it was (reported, never rewritten).
+	if id == RulePEMPrivateKey {
+		if blockEnd, ok := pemBlockAt(c.src, start, end); ok && blockEnd-start >= ruleTable[RulePEMPrivateKeyBlock].MinLen {
+			id, end = RulePEMPrivateKeyBlock, blockEnd
+		}
 	}
 	r := &ruleTable[id]
 	n := end - start
@@ -37,6 +57,9 @@ func (c *collector) emit(id RuleID, start, end int) {
 		validatorPassed = true
 	}
 	c.append(id, r, start, end, validatorPassed)
+	if id == RulePEMPrivateKeyBlock {
+		c.suppressUntil = end
+	}
 }
 
 // emitDigits is the fine half of the coarse digit_run pattern in rules.rl. The
@@ -45,7 +68,7 @@ func (c *collector) emit(id RuleID, start, end int) {
 // validator and boundary. Adding another numeric class to digitClasses
 // therefore costs no DFA states and no second pass over the request.
 func (c *collector) emitDigits(start, end int) {
-	if !bounded(c.src, start, end) {
+	if start < c.suppressUntil || !bounded(c.src, start, end) {
 		return
 	}
 	n := end - start

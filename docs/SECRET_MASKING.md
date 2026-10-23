@@ -87,11 +87,17 @@ secret_masking:
 
 ## 覆盖范围
 
-规则集共 77 条：Strong 35、Anchored 24、Generic 18。范围是三组：
+规则集共 78 条：Strong 36、Anchored 24、Generic 18。范围是三组：
 
-1. 结构形状（JWT、JWE、PEM 头、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；
+1. 结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；
 2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`；
 3. 个人数据：中国居民身份证号（`pii.chinese_id`）与手机号（`pii.cn_mobile`）。两者都按 Generic 计分——18 位或 11 位数字本身不证明什么。身份证的校验器通过即认定，因此实际只会改写省份、生日与校验位三者同时成立的号码；手机号没有校验位，号段只是候选检查，只有命中 `手机号`/`phone` 这类上下文才进入 Medium 并被改写，裸 11 位数字只上报（Low）。
+
+**PEM 私钥块按整块改写，不是只改头行。** `structural.pem_private_key` 仍然只匹配头行、只上报（`policySkipMask` 只豁免这一条规则 ID），因为头行不含密钥材料；真正承载密钥的是 `structural.pem_private_key_block`。footer 必须重复 header 的标签（`OPENSSH` 对 `OPENSSH`），这是一次反向引用，正则/DFA 表达不了，所以扩展写在 `pem.go` 里、由头行命中触发，沿用 `digit_run` → `digitClasses` 的「粗锚点 + 原生细判」打法：不新增 DFA 状态，也不重新生成 `rules_ragel.go`。
+
+块级假值保留头行、尾行与每一个换行/缩进，只重排正文的字母数字串。于是长度、行宽、`BEGIN`/`END` 标签、YAML 缩进与 JSON 的 `\n` 转义全部原样保留，正文仍是 base64 形状，但解码后是垃圾——私钥假值**故意不是一个可解析的 key**，与身份证/手机号「结构成立」的假值不同。覆盖 `OPENSSH`、PKCS#1（`RSA`/`DSA`/`EC`）、PKCS#8（`PRIVATE KEY`）、`ENCRYPTED PRIVATE KEY`，以及 CRLF、JSON 转义、YAML 块缩进、同一请求多把 key。公钥（`ssh-ed25519 AAAA…`、`authorized_keys`、`known_hosts`）与证书不是秘密，**刻意不匹配**。
+
+还原侧多一层考虑：私钥块全是换行，而 JSON 把换行写成 `\n`。vault 同时登记假值在「深一层 / 浅一层」两种转义深度下的形态（`wireVariants`），因此普通消息正文（转义一次）与工具调用参数（本身是 JSON 字符串，转义两次）都能整条还原成对应深度的真值，客户端拿到的仍是合法 JSON。
 
 **刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64，都是哈希、对象 ID 与密钥共用的形状；而校验器通过会把分数直接抬到可改写档，所以「base64 解码后正好 64 字节」这类判据一旦写成规则，就会把转录里每一个 64 字节块（哈希、证书、随机 nonce）都改写掉。弱形态要成为可改写的，必须先有「必须命中上下文」这一档语义，而现在的打法是上下文**加分**而非**必需**。
 
@@ -166,11 +172,12 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 ## 已知边界
 
 - **审计表本身就是一份凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。它应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把它读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
-- **PEM 私钥正文不覆盖。** 规则只匹配 `-----BEGIN ... PRIVATE KEY-----` 头行，不含密钥材料；真正的 base64 正文没有任何规则覆盖。改写头行既不能保护私钥，又会破坏文件语法，因此该规则**只上报、不改写**。
+- **PEM 私钥块只在完整时改写。** 找不到同标签的 `-----END ...-----`（截断粘贴）、footer 与 header 标签不一致、或正文里出现 base64/空白/JSON 转义之外的字节时，块不成立，只剩头行上报、一个字节都不改。因此「只贴了一部分私钥」「header 与 END 被拼错」仍然会漏；老式 `Proc-Type: 4,ENCRYPTED` 头（正文前有 `:`/`,` 行）也不在块内，只上报头行。PuTTY `.ppk`、`---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----`（4 个横线）与 base64 套壳（kubeconfig `client-key-data`、K8s Secret）需要各自的规则，当前不覆盖。公钥与证书按设计不匹配。
+- **私钥假值不可用。** 块级假值的正文仍是 base64 形状，但解码后不是有效私钥（`ssh-keygen` 会报错）。依赖「模型先用假值解析/校验 key」的流程会失败；本地工具拿到的是还原后的真值（除 provider 托管工具）。
 - **只有上游托管的工具看不到真值。** 客户端工具与本地 runtime 执行工具时拿到的是还原后的真值（见「在代理中的接入点」），HMAC 签名、AWS SigV4、签发 JWT 这类必须在真值上运算的操作在那里可以完成；provider-executed / hosted tools 在厂商侧执行，只看到假值，同样的操作会失败。
 - **身份证的生日不保留。** 假值的出生日期是重新渲染的合法日期，不是真值里的那一天。任何把身份证号与另一处出生日期交叉比对的下游（例如 KYC）都会对不上；需要这个一致性的流程应关闭遮蔽，或只依赖号码自身的校验位。
 - **手机号的后 8 位不保留。** 假值只保留号段，后 8 位是重新渲染的。依赖末四位做展示、核对或「请输入完整号码」类校验的下游会对不上；号段本身是公开的运营商分配，不构成个人信息。
-- **逐 token 的极小分片不重组。** 链从假值的第一段开始跟，如果厂商把值切成小于 8 字节的片（逐 token 下发就可能这样），就永远等不到足够长的一段，链不会开。此时客户端拿到的是拼接后的**假值**而不是真值——功能上失败，但没有改写任何无关字节。（注意 `content` 与工具调用参数都走同一条路径，所以这一条对两者都成立。）手机号假值只有 11 字节，8 字节的开链门槛意味着首段被切到 7 字节以下（例如 6+5）就不会重组；身份证 18 字节的余量稍大，但同受这条限制。
+- **逐 token 的极小分片不重组。** 链从假值的第一段开始跟；普通假值的开链门槛是 8 字节，长假值（如私钥块）是 16 字节。对 SSE 的 JSON 字符串分片，长假值在首段止于该字符串的结束引号时会破例收下短于门槛的首段（`restore.go` 的 `chainStart`），因此 17 字节甚至 5 字节的首段都能开链；真正不重组的是既短于门槛、又不在 JSON 字符串边界的切法，例如逐字节的纯文本流，或首段后紧跟非引号字节。此时客户端拿到的是拼接后的**假值**而不是真值——功能上失败，但没有改写任何无关字节。（注意 `content` 与工具调用参数都走同一条路径，所以这一条对两者都成立。）手机号假值只有 11 字节，8 字节的开链门槛意味着首段被切到 7 字节以下（例如 6+5）就不会重组；身份证 18 字节的余量稍大，但同受这条限制。
 - **`/tokenize` 计数请求不遮蔽。** 本地 Responses runtime 的 token 计数器会把待压缩的对话正文原样 POST 到上游的 `/tokenize` 端点（`internal/responses/runtime/tokenize_counter.go`，经 `runtime.go` 的 `EstimateResponsePromptTokens` 在自动压缩时调用），这条路径没有接入 vault。它需要显式配置才启用：`model_profiles` 里要有 `name`/`pattern`、`context_window_tokens`，以及声明了 `capabilities.tokenize` 的启用目标，或用 `tokenize_counter.enabled` 显式打开；跟踪的默认配置里没有 `model_profiles`，因此当前不生效。一旦启用，它发出的正文里含真实凭据。
 - **派生与编码形式绕过。** 引擎不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分（JWT 的三段、JWE 的头部、GitHub 与 age 的校验位）。被编码、截断、改大小写或重新格式化过的凭据识别不到。
 - **不阻止「借刀杀人」。** 它保护值不泄露给上游，但不阻止模型通过工具调用让下游系统去使用该凭据。
@@ -198,5 +205,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 - 凭据密度：64 KiB 无凭据约 0.89 ms，稀疏（约每 20 KB 一条）约 0.89 ms，中等（约每 2.5 KB 一条）约 0.91 ms，每条消息都带凭据的密集载荷约 1.02 ms。校验与上下文打分只对候选执行，所以正常密度几乎不改变成本；最坏情况仍是下一条的手机号。
 - 身份证命中本身：每 64 KB 一条时约 231 MB/s；每 64 KB 约 3500 条时约 151 MB/s（`BenchmarkScanDenseChineseIDs`），因为 `SkipContext` 跳过了上下文扫描。手机号因为不能跳过上下文：每 64 KB 一条（带 `phone=`）时约 211 MB/s，每 64 KB 约 3500 条时约 21 MB/s（`BenchmarkScanDenseMobileNumbers`，24 字节窗口），这是该规则的已知最坏情况。
 - 遮蔽 109 KB 散文载荷：热态约 222 MB/s，冷态约 210 MB/s（冷态包含渲染假值）。
+- PEM 私钥块：块扩展只在头行命中时跑一次 `bytes.Index` 级的扫描，不改变每字节成本；首次渲染一把 594 B 的 ed25519 约 27 µs、3 KB 的 RSA 约 0.2 ms（密钥流每 32 字节一次 HMAC-SHA256），同一把 key 再出现时约 1–2 µs。还原 70 KB 散文仍约 282 MB/s；vault 里有一把 3 KB 块时也约 290 MB/s。
+- 长假值在还原侧的开链门槛是 16 字节而不是 8：私钥块的 `-----BEGIN ` 与所有 PEM 头共享 11 字节，8 字节门槛会让响应里每个证书头都开一条永远凑不齐的链，在 PEM 密集的极端载荷上把还原吞吐从约 280 MB/s 拖到约 50 MB/s，并让流式输出暂扣 512 字节。同一份极端载荷在 16 字节门槛下不再开链。
 - 还原：散文载荷约 340 MB/s，流式约 348 MB/s；上表的 transcript 载荷约 139 MB/s。跨 delta 重组只增加一次判定，代价已包含在内；「整条假值优先于链」的判定在链开着时逐字节执行，这部分开销也在测量值里，换来的是不漏还原、不拼接。
-- 精度：对 `git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）扫描得到 78 处命中、25 个文件。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报：`ek_` 开头的 Go 标识符、`go.sum` 里形似 `LTAI` 的串、`17179869184` 常量、HTML 快照里的一个 11 位数字；Low 一律不会改写。身份证规则 13 处（全 High）；手机号规则 29 处，其中 12 处 Medium 全部落在 `mobile_test.go` 与 `secretmask_test.go` 的样例里，其余 17 处为 Low。干净检出上为 76 处 / 24 个文件。
+- 精度：对 `git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）扫描得到 83 处命中、25 个文件。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报：`ek_` 开头的 Go 标识符、`go.sum` 里形似 `LTAI` 的串、`17179869184` 常量、HTML 快照里的一个 11 位数字；Low 一律不会改写。身份证规则 15 处（全 High）；手机号规则 29 处，其中 12 处 Medium 全部落在 `mobile_test.go` 与 `secretmask_test.go` 的样例里，其余 17 处为 Low。PEM 私钥块规则本身在当前工作树没有命中；新增的 SSH 测试夹具带来 2 处 PEM 头命中。

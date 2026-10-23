@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"strings"
 	"sync"
 )
 
@@ -22,6 +23,11 @@ const keystreamDomain = "secretmask/v1"
 type fakeEntry struct {
 	text string
 	raw  []byte
+	// entry is how many leading bytes a run must cover before this fake may
+	// open a chain. It is chainMinEntry for ordinary values and
+	// chainMinEntryLong for a long fake such as an armored private-key block;
+	// see chainLongFake.
+	entry int
 }
 
 // Vault renders the stand-in values that replace real credentials, and maps
@@ -313,6 +319,19 @@ func (v *Vault) render(r *Rule, real []byte, attempt int) string {
 			return string(fake)
 		}
 	}
+	// An armored private-key block keeps its header and footer verbatim and is
+	// rewritten only between them. The two labels have to agree for the armor to
+	// stay well formed, the body's line breaks have to keep their positions, and
+	// a YAML block scalar indents every line: copying everything outside the
+	// body and substituting inside it gives all three for free. The fallback
+	// below still runs when the value is not a complete block, which is how the
+	// shortest-match prefix test can render a synthetic header on its own.
+	if r.ArmoredBlock {
+		if from, to, ok := armoredBodySpan(real); ok {
+			substituteRuns(out, real, ks, from, to)
+			return string(out)
+		}
+	}
 	// The replacement alphabet is chosen per run of alphanumeric bytes rather
 	// than for the whole value: a vendor that puts a hex segment next to a
 	// free-form one (zhipu, the Langfuse UUIDs, a Databricks token) would
@@ -340,6 +359,76 @@ func (v *Vault) render(r *Rule, real []byte, attempt int) string {
 
 func isAlnumByte(c byte) bool {
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// armoredBodySpan returns the half-open body range of an RFC 7468 private-key
+// block, or ok=false when real is not one. The body starts right after the
+// header's closing dashes and ends where the footer's opening dashes begin, so
+// both delimiter lines - and with them both labels - stay outside the range and
+// are copied verbatim by the caller.
+//
+// The first " PRIVATE KEY-----" in a block is the header's: base64 contains no
+// dash, so the only occurrences of that marker are the header and the footer,
+// and LastIndex finds the footer.
+func armoredBodySpan(real []byte) (int, int, bool) {
+	i := bytes.Index(real, []byte(pemKeyMarker))
+	if i < 0 {
+		return 0, 0, false
+	}
+	start := i + len(pemKeyMarker)
+	end := bytes.LastIndex(real, []byte(pemEndMarker))
+	if end < start {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+// jsonEscapeLen is how many bytes a JSON escape at the start of b occupies: two
+// for the simple escapes, six for \uXXXX. A backslash with nothing valid behind
+// it counts as one so the loop always advances.
+func jsonEscapeLen(b []byte) int {
+	if len(b) < 2 {
+		return 1
+	}
+	if b[1] != 'u' {
+		return 2
+	}
+	if len(b) < 6 {
+		return len(b)
+	}
+	return 6
+}
+
+// substituteRuns rewrites every alphanumeric run in real[from:to] in place in
+// out. It is the armored-block half of the generic loop in render: no literal
+// protection and no header, because the caller has already narrowed the range to
+// the body and the block's constants live outside it. The keystream index stays
+// absolute, so a byte's substitute still depends on its position in the value.
+func substituteRuns(out, real, ks []byte, from, to int) {
+	for i := from; i < to; {
+		if real[i] == '\\' {
+			// A block inside a JSON string carries its line breaks as the two
+			// bytes '\' 'n'. Substituting the 'n' would turn a valid escape into
+			// an arbitrary letter and corrupt the request, so the escape
+			// sequence is copied whole; a real armor body never contains a
+			// backslash, so this only ever fires on the escaped form.
+			i += jsonEscapeLen(real[i:to])
+			continue
+		}
+		if !isAlnumByte(real[i]) {
+			i++
+			continue
+		}
+		j := i
+		for j < to && isAlnumByte(real[j]) {
+			j++
+		}
+		hexMode := allLowerHex(real[i:j])
+		for k := i; k < j; k++ {
+			out[k] = substitute(real[k], ks[k], hexMode)
+		}
+		i = j
+	}
 }
 
 // protectedHead is how many leading bytes of a match stay verbatim. The longest
@@ -453,29 +542,34 @@ func (v *Vault) insertLocked(real, fake string) {
 		v.evictLocked()
 	}
 	v.byReal[real] = fake
-	v.byFake[fake] = real
-	b := fake[0]
-	v.index[b] = insertLongestFirst(v.index[b], fakeEntry{text: fake, raw: []byte(fake)})
-	v.firstFit[b] = true
-	if len(fake) > v.fakeLen {
-		v.fakeLen = len(fake)
+	for _, variant := range wireVariants(real, fake) {
+		v.addWireLocked(variant.real, variant.fake)
 	}
 	v.order = append(v.order, real)
 }
 
-func (v *Vault) evictLocked() {
-	if len(v.order) == 0 {
+// addWireLocked indexes one byte form of a stand-in. A value with no bytes JSON
+// escapes has exactly one form, so the ordinary rules add one entry; an armored
+// block adds up to three, one for each nesting depth it can appear at.
+func (v *Vault) addWireLocked(real, fake string) {
+	if _, ok := v.byFake[fake]; ok {
 		return
 	}
-	oldest := v.order[0]
-	v.order = v.order[1:]
-	fake, ok := v.byReal[oldest]
-	if !ok {
-		return
+	v.byFake[fake] = real
+	b := fake[0]
+	v.index[b] = insertLongestFirst(v.index[b], fakeEntry{text: fake, raw: []byte(fake), entry: chainEntry(len(fake))})
+	v.firstFit[b] = true
+	if len(fake) > v.fakeLen {
+		v.fakeLen = len(fake)
 	}
-	delete(v.byReal, oldest)
-	delete(v.byFake, fake)
+}
 
+// removeWireLocked drops one byte form of a stand-in from the restore index.
+func (v *Vault) removeWireLocked(fake string) {
+	if _, ok := v.byFake[fake]; !ok {
+		return
+	}
+	delete(v.byFake, fake)
 	b := fake[0]
 	bucket := v.index[b]
 	for i := range bucket {
@@ -490,6 +584,22 @@ func (v *Vault) evictLocked() {
 	} else {
 		v.index[b] = bucket
 	}
+}
+
+func (v *Vault) evictLocked() {
+	if len(v.order) == 0 {
+		return
+	}
+	oldest := v.order[0]
+	v.order = v.order[1:]
+	fake, ok := v.byReal[oldest]
+	if !ok {
+		return
+	}
+	delete(v.byReal, oldest)
+	for _, variant := range wireVariants(oldest, fake) {
+		v.removeWireLocked(variant.fake)
+	}
 	if len(fake) == v.fakeLen {
 		v.fakeLen = 0
 		for _, f := range v.byFake {
@@ -498,6 +608,111 @@ func (v *Vault) evictLocked() {
 			}
 		}
 	}
+}
+
+// wireVariant is one byte form of a stand-in and the real bytes it restores to.
+type wireVariant struct {
+	real string
+	fake string
+}
+
+// wireVariants returns the byte forms a stand-in can take on the wire, paired
+// with the matching form of the real value.
+//
+// A credential with no byte JSON escapes has one form and this returns one
+// entry, so every rule but the armored block is unaffected. A private-key block
+// is different: it is full of newlines, and JSON carries a newline as the two
+// bytes '\' 'n'. The form the request used depends on how many JSON strings
+// enclosed the key, and the echo comes back at the depth of the field that
+// carries it - plain text at one level, a tool call's arguments at two - so the
+// depth immediately above and below the stored form are indexed as well. Each
+// variant maps to the real bytes at the same depth, which is what keeps the
+// client's JSON valid after a restore.
+func wireVariants(real, fake string) []wireVariant {
+	out := []wireVariant{{real: real, fake: fake}}
+	if up := jsonEscapeValue(fake); up != fake {
+		out = append(out, wireVariant{real: jsonEscapeValue(real), fake: up})
+	}
+	if down := jsonUnescapeValue(fake); down != fake {
+		out = append(out, wireVariant{real: jsonUnescapeValue(real), fake: down})
+	}
+	return out
+}
+
+// jsonEscapeValue escapes a value the way encoding/json writes a string.
+func jsonEscapeValue(s string) string {
+	if !strings.ContainsAny(s, "\\\"\n\r\t") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+// jsonUnescapeValue reverses jsonEscapeValue for the escapes it can emit. An
+// unknown escape is copied through unchanged rather than dropped, so a real
+// block whose body happens to contain a backslash is never mangled.
+func jsonUnescapeValue(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case 'n':
+			b.WriteByte('\n')
+			i++
+		case 'r':
+			b.WriteByte('\r')
+			i++
+		case 't':
+			b.WriteByte('\t')
+			i++
+		case '"':
+			b.WriteByte('"')
+			i++
+		case '\\':
+			b.WriteByte('\\')
+			i++
+		case '/':
+			b.WriteByte('/')
+			i++
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+// chainEntry is the prefix a run must cover before a chain may open for a fake
+// of length n. A long value is almost certainly an armored block, whose literal
+// prefix is shared with every other PEM block; see chainLongFake.
+func chainEntry(n int) int {
+	if n > chainLongFake {
+		return chainMinEntryLong
+	}
+	return chainMinEntry
 }
 
 // insertLongestFirst keeps a bucket ordered by descending length so Restore can
