@@ -1,6 +1,7 @@
 package secretmask
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"sync"
@@ -357,5 +358,53 @@ func TestVaultLoadsEveryMappingByDefault(t *testing.T) {
 		if got := v.fakeFor(&ruleTable[RuleOpenAIProject], []byte(reals[i])); got != fakes[i] {
 			t.Fatalf("loaded pair %d changed: got %q, want %q", i, got, fakes[i])
 		}
+	}
+}
+
+// TestVaultKeepsPEMBlockAcrossRestart covers the integration with the armored
+// PEM block: the stored pair is a whole private-key block, and a second process
+// must both leave the fake alone and restore it to the real block. The fake is
+// mostly newlines, so this also exercises the JSON escape variants that
+// insertLocked adds for a loaded pair.
+func TestVaultKeepsPEMBlockAcrossRestart(t *testing.T) {
+	block := armor("OPENSSH PRIVATE KEY", testSSHKey(), "\n")
+	src := []byte("deploy this key to web-1:\n" + block + "\nthanks")
+
+	store := &memoryMappingStore{}
+	first, err := NewVaultWithStore([]byte("pem-first-seed"), store, 0)
+	if err != nil {
+		t.Fatalf("first NewVaultWithStore() error = %v", err)
+	}
+	masked, events := first.Mask(src)
+	if len(events) != 1 || events[0].Rule != RulePEMPrivateKeyBlock {
+		t.Fatalf("first Mask() events = %+v, want one PEM block", events)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close() error = %v", err)
+	}
+	persisted := store.snapshot()
+	if len(persisted) != 1 {
+		t.Fatalf("persisted %d mappings, want 1", len(persisted))
+	}
+
+	// A fresh store and a different seed force the second vault to rely on the
+	// persisted pair; without it the block would render to a second stand-in.
+	secondStore := &memoryMappingStore{mappings: persisted}
+	second, err := NewVaultWithStore([]byte("pem-second-seed"), secondStore, 0)
+	if err != nil {
+		t.Fatalf("second NewVaultWithStore() error = %v", err)
+	}
+	defer second.Close()
+
+	again, more := second.Mask(masked)
+	if len(more) != 0 || !bytes.Equal(again, masked) {
+		t.Fatalf("second Mask() re-masked the persisted fake: %d event(s)", len(more))
+	}
+	if restored := second.Restore(masked); !bytes.Equal(restored, src) {
+		t.Fatal("second Restore() did not return the real PEM block")
+	}
+	remasked, events := second.Mask(src)
+	if len(events) != 1 || !bytes.Equal(remasked, masked) {
+		t.Fatal("the real PEM block did not reuse its recorded fake")
 	}
 }
