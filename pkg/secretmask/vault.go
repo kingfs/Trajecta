@@ -11,11 +11,12 @@ import (
 	"sync"
 )
 
-// DefaultVaultCapacity is the minimum number of distinct real values one Vault
-// remembers, and the headroom added above a loaded mapping window so a
-// load-all start does not evict a loaded pair on the first new value. The
-// oldest is evicted first; an evicted pair is looked up in the durable store
-// and reused if the same value appears again.
+// DefaultVaultCapacity is the headroom added above a positive mapping load
+// window. Load-all (the default) disables eviction instead, because the point of
+// loading every pair is that every recorded fake stays recognizable; memory then
+// grows with the number of distinct sensitive values, not with request volume.
+// With a positive limit the oldest is evicted first, and an evicted pair is
+// looked up in the durable store and reused if its real value appears again.
 const DefaultVaultCapacity = 4096
 
 // keystreamDomain separates this use of the seed from any other.
@@ -106,8 +107,9 @@ func NewVault(seed []byte) *Vault {
 }
 
 // NewVaultWithStore returns a Vault that loads its mappings from store and
-// records every new one through it. A limit of zero or less loads every pair; a
-// positive limit loads the newest limit.
+// records every new one through it. A limit of zero or less loads every pair and
+// keeps it resident; a positive limit loads the newest limit and leaves
+// DefaultVaultCapacity of headroom before evicting the oldest.
 //
 // Persisting the pair is what makes a stand-in stable across a restart. Without
 // it a fake rendered before the restart is just an unknown value to the new
@@ -132,11 +134,13 @@ func NewVaultWithStore(seed []byte, store MappingStore, limit int) (*Vault, erro
 		return nil, err
 	}
 	v.store = store
-	// Keep the whole loaded window resident, plus the normal capacity as
-	// headroom for new values. Without the headroom the first new value after a
-	// load-all start would evict the oldest loaded pair, which is exactly the
-	// pair the load-all default exists to keep recognisable.
-	if need := len(mappings) + DefaultVaultCapacity; need > v.capacity {
+	if limit == 0 {
+		// Load-all is also no-evict: evicting a loaded pair after
+		// DefaultVaultCapacity new values would silently reopen the window the
+		// default exists to close. Memory grows with the distinct values the
+		// mapping file already grows with.
+		v.capacity = 0
+	} else if need := len(mappings) + DefaultVaultCapacity; need > v.capacity {
 		v.capacity = need
 	}
 	// LoadMappings returns newest first, and eviction is oldest first, so insert

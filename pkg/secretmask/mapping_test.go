@@ -323,8 +323,8 @@ func TestVaultCloseIdempotent(t *testing.T) {
 }
 
 // TestVaultLoadsEveryMappingByDefault pins the zero-limit default: every
-// recorded pair is loaded, and the normal capacity is kept as headroom so the
-// first new value does not evict the oldest loaded pair.
+// recorded pair is loaded and kept resident, so a new value does not evict the
+// oldest loaded pair.
 func TestVaultLoadsEveryMappingByDefault(t *testing.T) {
 	store := &memoryMappingStore{}
 	const count = 8
@@ -348,8 +348,7 @@ func TestVaultLoadsEveryMappingByDefault(t *testing.T) {
 		t.Fatalf("loaded %d mappings, want %d", v.Len(), count)
 	}
 
-	// A new value must not evict a loaded pair; DefaultVaultCapacity is the
-	// headroom on top of the loaded window.
+	// Load-all disables eviction, so a new value must not evict a loaded pair.
 	v.fakeFor(&ruleTable[RuleOpenAIProject], []byte(testPersistKey))
 	if v.Len() != count+1 {
 		t.Fatalf("after a new value the vault holds %d mappings, want %d", v.Len(), count+1)

@@ -4,9 +4,11 @@ package secretmask
 // startup. bbolt iterates the file in insertion order and the pair is small, so
 // the cost is bounded by the number of distinct sensitive values the
 // installation has ever seen, not by request volume; holding them all removes
-// the window in which an old stand-in could be mistaken for a new value. Set a
-// positive limit to trade that window for a smaller startup footprint on an
-// installation with an unusually large number of distinct values.
+// the window in which an old stand-in could be mistaken for a new value, and a
+// load-all vault does not evict, so memory grows with the number of distinct
+// values the file already holds. Set a positive limit to trade that guarantee
+// for a smaller, bounded footprint on an installation with an unusually large
+// number of distinct values.
 const DefaultMappingLoadLimit = 0
 
 // Mapping is one persisted real-to-stand-in pair.

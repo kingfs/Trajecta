@@ -295,9 +295,10 @@ type SecretMaskMappingStoreConfig struct {
 	// {{output_dir}}/secret_mask_mappings.db.
 	Path string `yaml:"path"`
 	// LoadLimit bounds the pairs loaded into memory at startup; a positive value
-	// keeps the newest ones and zero (the default) loads every pair. A value
-	// whose pair is older than a positive window is looked up in the file before
-	// it is rendered, so it still keeps its recorded fake.
+	// keeps the newest ones (with DefaultVaultCapacity of headroom) and zero
+	// (the default) loads and keeps every pair. A value whose pair is older than
+	// a positive window is looked up in the file before it is rendered, so it
+	// still keeps its recorded fake.
 	LoadLimit int `yaml:"load_limit"`
 }
 

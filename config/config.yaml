@@ -163,8 +163,9 @@ telemetry:
 # mapping_store keeps the real-to-stand-in pairs in a local bbolt file so a
 # restart, a new session or a compacted context keeps the same stand-in instead
 # of masking an already-masked value again. load_limit 0 (the default) loads
-# every pair; a positive value keeps only the newest ones and still looks an
-# older value up from the file before rendering a new stand-in.
+# and keeps every pair, so no recorded stand-in is evicted; a positive value
+# keeps only the newest ones with some headroom and still looks an older value
+# up from the file before rendering a new stand-in.
 secret_masking:
   enabled: true
   mapping_store:
