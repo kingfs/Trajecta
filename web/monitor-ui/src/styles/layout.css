@@ -43,6 +43,87 @@
   width: 100%;
 }
 
+/* --------------------------------------------------------- loading mask */
+
+/* The console keeps the previous answer on screen while the next window or
+ * filter is being read, so a slow read used to be invisible: the page simply
+ * sat there, looking settled. The mask is a scrim over the content column (not
+ * the rail) with one spinner and one word. It sits above the sticky page header
+ * so that header cannot be mistaken for a page that is ready.
+ *
+ * `pointer-events: none` on purpose. The mask answers "is it still loading?",
+ * and a background refetch fired by a realtime push must not swallow a click on
+ * the row the reader is already reading.
+ */
+.page-loading-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--sidebar-width);
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: color-mix(in oklab, var(--bg-canvas) 62%, transparent);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+}
+
+.app-shell-collapsed .page-loading-mask {
+  left: var(--sidebar-width-collapsed);
+}
+
+.page-loading-mask-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The pill repeats the surface language of the dialogs and the empty states,
+ * so a loading page still looks like one of this console's pages. */
+.page-loading-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.page-loading-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in oklab, var(--text-tertiary) 30%, transparent);
+  border-top-color: var(--accent-solid);
+  border-radius: 50%;
+  animation: page-loading-spin 700ms linear infinite;
+}
+
+@keyframes page-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A spinner is a loop, and a fast one is exactly what reduced motion asks not
+ * to be shown. Slowing it keeps the "still working" signal without the rapid
+ * rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .page-loading-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
 /* Full-bleed on purpose. The 1680px cap used to centre the shell with an auto
  * margin that grew with the window - fifty pixels a side on a 1780px screen -
  * so the content sat in a narrower column than the space it was given. A
@@ -68,6 +149,12 @@
   .app-shell,
   .app-shell-collapsed {
     grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
+  }
+
+  /* Below this breakpoint the rail is always the collapsed width, whatever the
+   * stored collapsed flag says, so the mask has to start there too. */
+  .page-loading-mask {
+    left: var(--sidebar-width-collapsed);
   }
 
   .shell {

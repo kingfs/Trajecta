@@ -979,6 +979,67 @@ func TestSystemEventStatusAPIHandlers(t *testing.T) {
 	}
 }
 
+// The events page can now show status=all, which is the way back to the rows a
+// reader already marked. "Mark all read" must keep meaning "clear the unread
+// ones": running it under the all view used to match every status and turn a
+// resolved row back into a read one, losing the resolution the reader recorded.
+func TestSystemEventReadAllTreatsAllAsUnread(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	unread, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:all-read-unread",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(unread) error = %v", err)
+	}
+	resolved, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:all-read-resolved",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Status:      store.SystemEventStatusResolved,
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(resolved) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/read-all?status=all&window=all", nil)
+	rr := httptest.NewRecorder()
+	systemEventReadAllAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read-all status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload map[string]int
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(read-all) error = %v", err)
+	}
+	if payload["updated"] != 1 {
+		t.Fatalf("read-all updated = %d, want 1", payload["updated"])
+	}
+
+	readUnread, err := st.GetSystemEvent(unread.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(unread) error = %v", err)
+	}
+	if readUnread.Status != store.SystemEventStatusRead {
+		t.Fatalf("unread event status = %q, want read", readUnread.Status)
+	}
+	afterResolved, err := st.GetSystemEvent(resolved.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(resolved) error = %v", err)
+	}
+	if afterResolved.Status != store.SystemEventStatusResolved {
+		t.Fatalf("resolved event status = %q, want resolved", afterResolved.Status)
+	}
+}
+
 func TestSystemEventStreamAPIHandlerPushesUpdates(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

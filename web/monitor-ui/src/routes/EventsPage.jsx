@@ -18,6 +18,12 @@ import { useWriteMutation } from "../lib/mutations";
 import { buildTraceLink, formatDateTime, formatFailureReason, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_EVENT_WINDOW = "all";
+// The inbox opens on unread, which is the one status that is also a real filter
+// token rather than "no filter". `all` is therefore a selected value of its own
+// and must stay in the URL: deleting the parameter for it made the browser fall
+// back to the unread default, so the reader could never reach the events they
+// had already marked.
+const DEFAULT_EVENT_STATUS = "unread";
 const STATUS_OPTIONS = ["unread", "read", "resolved", "ignored", "all"];
 const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
 const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp", "secretmask"];
@@ -36,7 +42,14 @@ export function EventsPage() {
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(searchParams);
-    const shouldDelete = key === "window" ? value === DEFAULT_EVENT_WINDOW : value === "all";
+    // A value equal to the parameter's default is written as an absent
+    // parameter; everything else, including status=all, has to survive in the
+    // URL because it is a different filter from the default.
+    const shouldDelete = key === "window"
+      ? value === DEFAULT_EVENT_WINDOW
+      : key === "status"
+        ? value === DEFAULT_EVENT_STATUS
+        : value === "all";
     setOrDeleteParam(next, key, shouldDelete ? "" : value);
     if (key !== "page") {
       next.delete("page");
@@ -110,7 +123,7 @@ export function EventsPage() {
           <span className="badge">{t("events.matching", { count: data?.total ?? 0 })}</span>
         </div>
         <div className="filter-bar event-filter-bar">
-          <select className="filter-input" value={currentFilter(searchParams, "status", "unread")} onChange={(event) => setFilter("status", event.target.value)} aria-label={t("events.status")}>
+          <select className="filter-input" value={currentFilter(searchParams, "status", DEFAULT_EVENT_STATUS)} onChange={(event) => setFilter("status", event.target.value)} aria-label={t("events.status")}>
             {STATUS_OPTIONS.map((option) => <option key={option} value={option}>{formatEventOption(option, t, language)}</option>)}
           </select>
           <select className="filter-input" value={currentFilter(searchParams, "severity", "all")} onChange={(event) => setFilter("severity", event.target.value)} aria-label={t("events.severity")}>
@@ -223,7 +236,7 @@ function formatEventOption(option, t, language) {
 function eventQueryParams(searchParams) {
   const params = new URLSearchParams();
   params.set("window", currentFilter(searchParams, "window", DEFAULT_EVENT_WINDOW));
-  params.set("status", currentFilter(searchParams, "status", "unread"));
+  params.set("status", currentFilter(searchParams, "status", DEFAULT_EVENT_STATUS));
   for (const key of ["severity", "source", "category", "q", "page"]) {
     const value = searchParams.get(key);
     if (value && value !== "all") {

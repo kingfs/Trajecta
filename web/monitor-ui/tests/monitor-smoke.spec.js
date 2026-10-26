@@ -485,6 +485,68 @@ test("events page opens the all-window unread inbox", async ({ page }) => {
   await expect(page.getByText("analysis job failed").first()).toBeVisible();
 });
 
+// `all` used to be written as an absent `status` parameter, which the page then
+// read back as its unread default: the option looked selectable and always
+// snapped back to Unread. `all` is a filter of its own now, and it is the only
+// way to find the events that were already marked read, resolved or ignored.
+test("the event status filter reaches previously marked events", async ({ page }) => {
+  const reads = [];
+  await page.route("**/api/events?*", async (route) => {
+    const url = new URL(route.request().url());
+    const status = url.searchParams.get("status");
+    reads.push(status);
+    const payload = eventListPayload();
+    if (status === "all" || status === "resolved") {
+      payload.items = [{
+        ...payload.items[0],
+        id: "event-resolved-1",
+        title: "resolved event",
+        status: "resolved",
+      }];
+    }
+    return route.fulfill({ json: payload });
+  });
+
+  await page.goto("/events");
+  const statusSelect = page.getByLabel("Status");
+  await expect(statusSelect).toHaveValue("unread");
+
+  await statusSelect.selectOption("all");
+  await expect(page).toHaveURL(/status=all/);
+  await expect(statusSelect).toHaveValue("all");
+  await expect(page.getByRole("heading", { name: "resolved event" })).toBeVisible();
+  expect(reads.at(-1)).toBe("all");
+
+  await statusSelect.selectOption("resolved");
+  await expect(page).toHaveURL(/status=resolved/);
+  await expect(statusSelect).toHaveValue("resolved");
+  await expect(page.getByRole("heading", { name: "resolved event" })).toBeVisible();
+
+  // Unread is the default again, which keeps the URL clean.
+  await statusSelect.selectOption("unread");
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(statusSelect).toHaveValue("unread");
+});
+
+// A big window can take seconds. While the next response is in flight the page
+// keeps the previous one, so without the mask a settled-looking list and a list
+// that is still loading were the same picture.
+test("a slow read shows the loading mask until its response lands", async ({ page }) => {
+  await page.route("**/api/events?*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return route.fulfill({ json: eventListPayload() });
+  });
+
+  await page.goto("/events");
+  const mask = page.locator(".page-loading-mask-visible");
+  await expect(mask).toBeVisible();
+  await expect(mask.getByText("Loading")).toBeVisible();
+  await expect(mask.getByRole("status")).toBeVisible();
+
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+  await expect(page.locator(".page-loading-mask-visible")).toHaveCount(0);
+});
+
 test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.goto("/traces/trace-routed?tab=request");
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();

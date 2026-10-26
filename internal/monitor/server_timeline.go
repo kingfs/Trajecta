@@ -171,7 +171,11 @@ func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		_, since := parseSystemEventWindow(r.URL.Query().Get("window"))
 		filter := systemEventFilterFromRequest(r, since)
-		if strings.TrimSpace(filter.Status) == "" {
+		// "Mark all read" is a transition out of unread. An absent status, or the
+		// list endpoints' `all`, must not turn a resolved row back into a read one:
+		// the action would silently discard the resolution the reader recorded.
+		switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+		case "", "all":
 			filter.Status = store.SystemEventStatusUnread
 		}
 		count, err := st.MarkAllSystemEventsRead(filter)

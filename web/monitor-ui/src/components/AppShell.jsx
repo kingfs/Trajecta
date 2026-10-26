@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { PrimaryNav } from "./PrimaryNav";
+import { PageLoadingMask } from "./common/LoadingOverlay";
 import { useI18n } from "../lib/i18n";
 
 const SIDEBAR_COLLAPSED_KEY = "trajecta.monitor.sidebar.collapsed";
@@ -98,6 +99,7 @@ export function AppShell({ children, user, onLogout }) {
       </aside>
       <main className="app-main" id="main-content" ref={mainRef} tabIndex={-1}>
         {children}
+        <PageLoadingMask />
       </main>
     </div>
   );
