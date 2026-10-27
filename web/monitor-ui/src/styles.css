@@ -699,11 +699,20 @@
   display: flex;
   align-items: center;
   min-width: 0;
+  padding-right: 4px;
+  border-radius: var(--radius-sm);
 }
 
+.resource-tree-row:hover {
+  background: var(--surface-2);
+}
+
+/* The chevron, the icon and the name are the click target; the count and the
+   locate action are siblings so the action can sit beside the name instead of
+   at the far edge of the row. */
 .resource-tree-row-button {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
   width: auto;
@@ -718,8 +727,9 @@
   cursor: pointer;
 }
 
-.resource-tree-row-button:hover {
-  background: var(--surface-2);
+.resource-tree-row-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
 }
 
 .resource-tree-spacer {
@@ -764,8 +774,8 @@
   opacity: 0;
 }
 
-.resource-tree-row-button:hover .resource-tree-open,
-.resource-tree-row-button:focus-visible .resource-tree-open {
+.resource-tree-row:hover .resource-tree-open,
+.resource-tree-row:focus-within .resource-tree-open {
   opacity: 1;
 }
 
@@ -778,10 +788,11 @@
 }
 
 /*
- * The locate action appears on the row it belongs to. It is always in the DOM so
- * the count badge does not shift when the pointer arrives, and it is revealed by
- * the row's hover or focus rather than shown for every leaf at once - a tree of
- * two hundred leaves would otherwise be two hundred icons.
+ * The locate action sits immediately after the resource name, where the reader
+ * asked for it. It is always in the DOM so the name does not shift when the
+ * pointer arrives, and it is revealed by the row's hover or focus rather than
+ * shown for every leaf at once - a tree of two hundred leaves would otherwise be
+ * two hundred icons.
  */
 .resource-tree-locate {
   flex: none;
@@ -790,7 +801,7 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  margin-left: 2px;
+  margin-left: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;

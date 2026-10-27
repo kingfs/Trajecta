@@ -163,7 +163,11 @@ function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric, onLo
   const locateLabel = item
     ? t("resources.locateHint", { value: item.value.length > 120 ? `${item.value.slice(0, 120)}…` : item.value })
     : "";
-  const row = (
+  // The clickable part is the chevron, the icon and the name. The locate
+  // action sits immediately after the name - the reader asked for it there -
+  // and the count stays at the right edge of the row, so the two never compete
+  // for the same far-away corner.
+  const rowMain = (
     <>
       {hasChildren ? (
         open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />
@@ -172,21 +176,19 @@ function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric, onLo
       )}
       {nodeIcon(node, open)}
       <span className={`resource-tree-name ${node.kind === "category" ? "" : "mono"}`.trim()}>{label}</span>
-      {item && !hasChildren && href ? <span className="resource-tree-open">{t("resources.openLatestTrace")}</span> : null}
-      <span className="resource-tree-count" title={t("resources.treeCountHint", { metric })}>{node.count}</span>
     </>
   );
 
   const rowButton = hasChildren ? (
     <button type="button" className="resource-tree-row-button" aria-expanded={open} onClick={() => onToggle(node)} title={title}>
-      {row}
+      {rowMain}
     </button>
   ) : href ? (
     <Link className="resource-tree-row-button" to={href} title={title}>
-      {row}
+      {rowMain}
     </Link>
   ) : (
-    <span className="resource-tree-row-button" title={title}>{row}</span>
+    <span className="resource-tree-row-button" title={title}>{rowMain}</span>
   );
 
   return (
@@ -206,6 +208,9 @@ function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric, onLo
             <Crosshair size={13} aria-hidden="true" />
           </button>
         ) : null}
+        <span className="resource-tree-row-spacer" aria-hidden="true" />
+        {item && !hasChildren && href ? <span className="resource-tree-open">{t("resources.openLatestTrace")}</span> : null}
+        <span className="resource-tree-count" title={t("resources.treeCountHint", { metric })}>{node.count}</span>
       </div>
       {open ? (
         <ul className="resource-tree-list">
