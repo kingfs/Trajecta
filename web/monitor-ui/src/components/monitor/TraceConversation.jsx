@@ -631,7 +631,9 @@ export function TraceConversation({ observation, anchor = "", highlight = "", re
                 // URL is what a shared finding link carries; the ring it draws is
                 // an animation, so the page does not look like something is
                 // selected after the reader has moved on.
-                focused={step.id === target}
+                // With a matched value the exact bytes carry the location; the
+                // whole-card ring would read as if the entire message matched.
+                focused={step.id === target && !highlight}
                 // A step the URL points at opens: a clamped block would hide the
                 // sentence the finding was about. The step the page landed on by
                 // default opens too, because the newest input is what the reader

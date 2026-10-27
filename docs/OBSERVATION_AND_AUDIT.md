@@ -258,7 +258,9 @@ type Finding struct {
 - `provider_safety`：`provider_safety_block`（medium）、`model_refusal`（low）。
 - `tool_error`：`tool_result_error`（medium）。
 
-Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。检测按 exchange scope 过滤：entry observation 只跑 `credential` 与 `pii`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
+Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。
+
+`GET /api/traces/{id}/findings/{findingID}/locate` 回答「这条 findings 实际命中的是哪几个字节」：它重新解析 cassette，用 `analyzer.LocateFinding` 对 finding 所在节点重跑对应类别的判定，返回匹配文本、文本视图与字节区间，以及该节点的顶级祖先 `anchor`。findings 表仍只存 `[redacted]` 摘要、不新增匹配列；匹配值只在这类已鉴权的单次读取中返回。可判定跨度的类别是 `pii_leak`（标题里的 `national_id`/`mobile` 决定取哪一类命中）、`credential_leak`（凭据模式或带用户信息的 URL）、以及 dangerous_shell 的四个类别；`tool_result_error`、`provider_safety_block`、`model_refusal` 是整节点判断，没有单一跨度，接口只返回 `anchor`，前端仅定位步骤。检测按 exchange scope 过滤：entry observation 只跑 `credential` 与 `pii`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
 
 ## 检测器
 

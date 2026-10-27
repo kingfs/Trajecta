@@ -13,6 +13,7 @@ import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
 import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
 import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
+import { locateFindingInConversation } from "../lib/findingLocate";
 import { locateResourceConversation } from "../lib/resourceLocate";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -62,6 +63,10 @@ export function TraceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
+  // A finding's matched value must not travel in the URL: it may be a personal
+  // number or a credential. The locate action keeps it in component state for
+  // the step it opened, while a resource's path or URL uses the shareable `hl`.
+  const [findingHighlight, setFindingHighlight] = useState("");
 
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
@@ -101,6 +106,7 @@ export function TraceDetailPage() {
   // The value a locate action asked the conversation to mark; `hl` is set only
   // by that action, never by a finding link.
   const resourceHighlight = searchParams.get("hl") || "";
+  const conversationHighlight = findingHighlight || resourceHighlight;
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   // The request list and the session list are two tabs of /traces now, so a
@@ -171,6 +177,9 @@ export function TraceDetailPage() {
   };
 
   const setTraceTab = (nextTab) => {
+    if (nextTab !== "conversation") {
+      setFindingHighlight("");
+    }
     applyTraceFocus(nextTab, focusTarget);
   };
 
@@ -182,6 +191,7 @@ export function TraceDetailPage() {
     // A finding link names its own location; a resource highlight left over
     // from an earlier locate must not mark an unrelated sentence.
     next.delete("hl");
+    setFindingHighlight("");
     setSearchParams(next, { replace: true });
   };
 
@@ -197,6 +207,7 @@ export function TraceDetailPage() {
         toast.error(t("resources.locateMissing"));
         return;
       }
+      setFindingHighlight("");
       applyTraceFocus("conversation", "", located.anchor, located.highlight);
     } catch (error) {
       toast.error(t("resources.locateFailed"), {
@@ -205,9 +216,23 @@ export function TraceDetailPage() {
     }
   };
 
-  // From a finding: switch to the conversation and land on the node it named.
-  const openConversationAnchor = (value) => {
-    applyTraceFocus("conversation", "", value);
+  // The audit tab's locate action. The stored finding carries a redacted
+  // excerpt, so the value is recomputed by the server for this read and kept in
+  // component state; the URL carries only the step anchor.
+  const locateFinding = async (finding) => {
+    try {
+      const located = await locateFindingInConversation(traceID, finding.id);
+      if (!located.anchor) {
+        toast.error(t("audit.locateMissing"));
+        return;
+      }
+      setFindingHighlight(located.value || "");
+      applyTraceFocus("conversation", "", located.anchor, "");
+    } catch (error) {
+      toast.error(t("audit.locateFailed"), {
+        description: String(error?.message || error),
+      });
+    }
   };
 
   const downloadTrace = async () => {
@@ -399,7 +424,7 @@ export function TraceDetailPage() {
               <TraceConversation
                 observation={observation.data}
                 anchor={anchor}
-                highlight={resourceHighlight}
+                highlight={conversationHighlight}
                 renderMarkdown={renderMarkdown}
                 onRenderMarkdownChange={setRenderMarkdown}
                 onSelectAnchor={setTraceAnchor}
@@ -438,7 +463,7 @@ export function TraceDetailPage() {
               <AuditPanel
                 findings={findings}
                 observation={observation.data}
-                onOpenAnchor={openConversationAnchor}
+                onLocateFinding={locateFinding}
                 InlineTag={InlineTag}
                 CodeBlock={CodeBlock}
                 t={t}
@@ -1091,7 +1116,8 @@ function TraceMessagesFallback({ detail, raw, renderMarkdown, onRenderMarkdownCh
  * above it, because "these bytes left the machine" is a fact about the request
  * while a finding is a detector's reading of it.
  */
-function AuditPanel({ findings, observation, onOpenAnchor, InlineTag, CodeBlock, t }) {
+function AuditPanel({ findings, observation, onLocateFinding, InlineTag, CodeBlock, t }) {
+  const [locatingID, setLocatingID] = useState("");
   if (findings.error) {
     return <EmptyState title={t("audit.loadFindingsError")} detail={findings.error} tone="danger" />;
   }
@@ -1101,6 +1127,17 @@ function AuditPanel({ findings, observation, onOpenAnchor, InlineTag, CodeBlock,
   const items = Array.isArray(findings.data?.items) ? findings.data.items : Array.isArray(findings.data) ? findings.data : [];
   const nodes = Array.isArray(observation?.nodes) ? observation.nodes : [];
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const locate = async (finding) => {
+    if (locatingID || !onLocateFinding) {
+      return;
+    }
+    setLocatingID(finding.id);
+    try {
+      await onLocateFinding(finding);
+    } finally {
+      setLocatingID("");
+    }
+  };
   return (
     <Card as="section" className="audit-panel">
       <div className="panel-head">
@@ -1129,8 +1166,15 @@ function AuditPanel({ findings, observation, onOpenAnchor, InlineTag, CodeBlock,
                 </div>
                 <div className="finding-card-where">
                   {anchor ? (
-                    <Button variant="ghost" size="sm" onClick={() => onOpenAnchor(anchor)} title={finding.evidence_path || finding.node_id}>
-                      {t("conversation.openStep")}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={locatingID === finding.id}
+                      aria-busy={locatingID === finding.id ? "true" : "false"}
+                      onClick={() => locate(finding)}
+                      title={`${t("audit.locateHint")} · ${finding.evidence_path || finding.node_id || ""}`}
+                    >
+                      {t("audit.locate")}
                       <span className="finding-card-where-label mono">{place || finding.node_id}</span>
                     </Button>
                   ) : (

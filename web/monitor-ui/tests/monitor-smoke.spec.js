@@ -234,6 +234,23 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-parsed/performance") {
       return route.fulfill({ json: { performance: { duration_ms: 1200, ttft_ms: 120, tokens_per_sec: 18.5 } } });
     }
+    // The audit finding's locate read names the node and the value that proved
+    // it; the value is what the conversation highlights, the node is the step.
+    if (path === "/api/traces/trace-parsed/findings/finding-1/locate") {
+      return route.fulfill({
+        json: {
+          id: "trace-parsed",
+          finding_id: "finding-1",
+          anchor: "node_result_failed",
+          value: "permission denied",
+          node_id: "node_result_failed",
+          node_path: "$.input[4]",
+          view: "text",
+          start: 0,
+          end: 17,
+        },
+      });
+    }
     // A trace that declared two tools and called one of them: the 工具调用 tab is
     // one row per tool, and the called one opens its input/output transcript.
     if (path === "/api/traces/trace-tools") {
@@ -995,22 +1012,28 @@ test("the tool calls tab filters a long catalog", async ({ page }) => {
 });
 
 // A finding names a node with an evidence path, which is precise and unreadable.
-// The audit row says where it is in the same words the conversation uses, and
-// opens it there.
-test("an audit finding opens the conversation at the step it names", async ({ page }) => {
+// The audit row says where it is in the same words the conversation uses, opens
+// it there, and marks the value that proved the finding instead of outlining the
+// whole message.
+test("an audit finding opens the conversation and marks the matched bytes", async ({ page }) => {
   await page.goto("/traces/trace-parsed?tab=audit");
   // The audit tab's other card lists the credentials this request replaced, and
   // a replacement row shares the finding card's styling. The finding this test
   // drives is the one in the findings list.
   const finding = page.locator(".finding-list .finding-card");
   await expect(finding).toContainText("Attempt to read a credential file");
-  const open = finding.getByRole("button", { name: /Open the conversation at this step/ });
+  const open = finding.getByRole("button", { name: /Locate/ });
   await expect(open).toContainText("$.input[4] · tool result · tool");
 
   await open.click();
   await expect(page).toHaveURL(/node=node_result_failed/);
   await expect(page).not.toHaveURL(/tab=audit/);
-  const target = page.locator('[data-conversation-step][data-focused="true"]');
+  const hit = page.locator("mark.content-hit");
+  await expect(hit).toHaveText("permission denied");
+  // The exact bytes carry the location; the whole-card ring would say the whole
+  // message matched.
+  await expect(page.locator('[data-conversation-step][data-focused="true"]')).toHaveCount(0);
+  const target = page.locator("[data-conversation-step]").filter({ has: hit });
   await expect(target).toContainText("permission denied");
   // It is scrolled to, not merely rendered: the step has to be inside the
   // viewport and below the sticky topbar, or the link did nothing a reader
