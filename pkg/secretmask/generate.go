@@ -10,3 +10,11 @@ package secretmask
 //
 //go:generate ragel-go -G2 -o rules_ragel.go rules.rl
 //go:generate gofmt -w rules_ragel.go
+//
+// The access indicators (URLs and local paths) are a second machine. They are
+// ReportOnly and must not share the credential scanner: a Ragel scanner consumes
+// what it matched, so a URL rule there would swallow a credential embedded in
+// the URL and the masker would never see it.
+//
+//go:generate ragel-go -G2 -o indicator_ragel.go indicator.rl
+//go:generate gofmt -w indicator_ragel.go

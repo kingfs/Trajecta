@@ -44,6 +44,7 @@ func DefaultDetectors() []Detector {
 		DangerousShellDetector{},
 		CredentialDetector{},
 		PIIDetector{},
+		AccessDetector{},
 		ProviderSafetyDetector{},
 		ToolErrorDetector{},
 	}
@@ -115,9 +116,11 @@ func detectorAllowedForScope(detector Detector, scope exchangeScope) bool {
 	}
 	switch detector.Name() {
 	// A credential or a personal number in the request the client sent is the
-	// signal an entry exchange exists to carry. The other detectors read the
+	// signal an entry exchange exists to carry. The access detector reads the
+	// client request too: a tool call the client already made, and the paths it
+	// named, are what the audit is looking for. The other detectors read the
 	// model's response, which an entry exchange does not have.
-	case CredentialDetector{}.Name(), PIIDetector{}.Name():
+	case CredentialDetector{}.Name(), PIIDetector{}.Name(), AccessDetector{}.Name():
 		return true
 	default:
 		return false
@@ -360,6 +363,20 @@ func allNodes(obs observe.TraceObservation) []observe.SemanticNode {
 	}
 	walk(roots)
 	return out
+}
+
+// nodeTexts returns the text a detector scans for one node: the normalized
+// text, a tool call's arguments, and the two raw payloads. The views overlap on
+// purpose - the raw JSON carries the same bytes the normalized text does - so a
+// detector that reports one event per value must deduplicate the values it
+// extracts instead of assuming each occurrence is distinct.
+func nodeTexts(node observe.SemanticNode) []string {
+	return []string{
+		node.Text,
+		metadataString(node.Metadata, "arguments"),
+		rawText(node.Raw),
+		rawText(node.JSON),
+	}
 }
 
 func findNodeByID(obs observe.TraceObservation, id string) observe.SemanticNode {

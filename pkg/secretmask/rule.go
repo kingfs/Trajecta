@@ -33,6 +33,15 @@ const (
 	// the national ID, but it has no check digit, so a match is rewritten only
 	// when the surrounding text names a phone; see RuleCNMobile.
 	KindMobile
+	// KindLocalPath and KindURL are not credentials and not personal data.
+	// They are access indicators: a local filesystem path or a URL that the
+	// model saw in its input or produced in its output. Their rules are
+	// ReportOnly - reported to an auditor, never rewritten - and they are
+	// scanned by the separate machine in indicator.rl. They are appended here
+	// for the same reason as every other late addition: the numeric values
+	// already assigned never move.
+	KindLocalPath
+	KindURL
 )
 
 // kindNames renders a Kind for logs, audit records and test failures.
@@ -54,6 +63,8 @@ var kindNames = [...]string{
 	KindGenericKey:          "generic_key",
 	KindNationalID:          "national_id",
 	KindMobile:              "mobile",
+	KindLocalPath:           "local_path",
+	KindURL:                 "url",
 }
 
 // String names the kind.
@@ -152,6 +163,24 @@ type Rule struct {
 	// search is the most expensive part of emit, and a body can carry thousands
 	// of matches.
 	SkipContext bool
+	// ReportOnly marks a match that is reported to an auditor and never
+	// rewritten or restored. It is a property of the value's role, not of how
+	// conclusive the match is: a path or a URL must reach the audit unchanged
+	// because the audit is about what the agent read and where it went, and a
+	// stand-in would hide exactly the fact being audited. Such a rule is
+	// matched by the indicator machine in indicator.rl, not by the credential
+	// machine, and Finding.Maskable always returns false for it.
+	ReportOnly bool
+	// TrimRight lists the bytes stripped from the end of a ReportOnly match
+	// before the length, boundary and candidate checks run. Sentence
+	// punctuation and markdown closers are part of the URL/path character set
+	// (a ')' is legal in a URL path), so the machine cannot exclude them; the
+	// trailing '.' of "see https://example.com/x." belongs to the sentence.
+	// A closing bracket is stripped only when it is unbalanced inside the
+	// match, so a URL that legitimately contains parentheses keeps them.
+	// Empty for every credential rule: removing a byte from a credential would
+	// change its length and break the stand-in contract.
+	TrimRight string
 	// ArmoredBlock marks a rule whose match spans a whole RFC 7468 armor block.
 	// The header and footer lines are format constants - the BEGIN and END
 	// labels have to agree for the block to be well formed - so rendering copies
@@ -301,6 +330,12 @@ const (
 	// above: the ids already assigned never move.
 	RulePEMPrivateKeyBlock
 
+	// Access indicators. These are not credentials at all; see KindLocalPath
+	// and KindURL. They are reported by the separate indicator machine and are
+	// never rewritten. Appended for the same reason as every rule above.
+	RuleURL
+	RuleLocalPath
+
 	ruleIDCount
 )
 
@@ -449,6 +484,21 @@ var ruleTable = [ruleIDCount]Rule{
 	// ordinary prose does not produce one. SkipContext keeps the 96-byte window
 	// off a match that can be kilobytes long; the header is the evidence.
 	RulePEMPrivateKeyBlock: {Name: "structural.pem_private_key_block", Kind: KindPrivateKey, Grade: GradeA, Strength: StrengthStrong, MinLen: 64, Prefixes: []string{"-----BEGIN "}, SkipContext: true, ArmoredBlock: true},
+
+	// Access indicators, reported to the audit and never rewritten. Strength is
+	// Generic because the shape proves nothing about sensitivity - a URL is not
+	// more or less secret than another URL - and ReportOnly is what keeps the
+	// rule out of the rewriting path. Grade is deliberately left zero: it
+	// grades how well a credential format is documented, which does not apply.
+	//
+	// The candidate checks carry the real decision. The machine finds the
+	// longest run of URL/path bytes; candidateURLShape rejects an authority with
+	// no host, and candidateLocalPathShape separates a local path from an API
+	// route (/v1/chat/completions), a MIME type (application/vnd.api+json) and a
+	// bare domain (example.com/path). TrimRight removes the sentence or markdown
+	// punctuation that is legally part of a URL.
+	RuleURL:       {Name: "access.url", Kind: KindURL, Strength: StrengthGeneric, MinLen: 10, ReportOnly: true, WordBounded: true, SkipContext: true, CandidateCheck: candidateURLShape, TrimRight: accessTrimRight},
+	RuleLocalPath: {Name: "access.local_path", Kind: KindLocalPath, Strength: StrengthGeneric, MinLen: 3, ReportOnly: true, WordBounded: true, SkipContext: true, CandidateCheck: candidateLocalPathShape, TrimRight: accessTrimRight},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

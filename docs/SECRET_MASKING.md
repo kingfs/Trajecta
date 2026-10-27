@@ -92,9 +92,11 @@ secret_masking:
 
 引擎分四层，越往后越贵，只有前一层放行的候选才进入下一层。
 
-**L1 词法 DFA。** `pkg/secretmask/rules.rl` 是模式的唯一事实源，由 Ragel 编译成 Go 状态机（`rules_ragel.go`，已提交）。扫描器用 `|* ... *|`，因此**最长匹配优先，等长时先声明者优先**，规则顺序具有语义。运行时不做回溯。
+**L1 词法 DFA。** `pkg/secretmask/rules.rl` 是**凭据与个人数据**模式的唯一事实源，由 Ragel 编译成 Go 状态机（`rules_ragel.go`，已提交）。扫描器用 `|* ... *|`，因此**最长匹配优先，等长时先声明者优先**，规则顺序具有语义。运行时不做回溯。
 
 长度上下界不在状态机里表达，而在 `scan.go` 的 `collector.emit` 里用原生代码判断。把固定重复 `{n}` 交给状态机展开到宽字符类上，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间也同步变长，而「`+` 加原生长度检查」没有这个问题。当前 `rules_ragel.go` 是 33425 行 / 371351 字节。
+
+访问指示符另有一套 **report-only** 状态机 `indicator.rl`（`indicator_ragel.go`，已提交）：`access.url` 与 `access.local_path` 只上报模型输入/输出里的 URL 与本地路径，`ReportOnly` 使 `Finding.Maskable` 恒为 false，`Vault.Mask` 也从不使用这套机器。不把这两条并进 `rules.rl` 是刻意的：Ragel 扫描器会消费它匹配到的字节，URL 规则若与凭据规则同机，`https://…?X-Amz-Credential=AKIA…` 会把里面的凭据整段吞掉，遮蔽就再也看不到它；两套机器意味着同一份字节扫两遍，各自独立。`rules.rl` 与 `rules_ragel.go` 未改。
 
 **粗筛与细判。** 带前缀的凭据（`sk-proj-`、`AIza`、`ghp_` …）由状态机直接给出规则 ID，因为锚点本身就是词法。数字类个人数据没有这样的锚点：身份证号是 18 位，手机号 11 位，银行卡 12–19 位，它们共同的词法只是「一段数字」。为每一类各写一条 `[0-9]{n}` 会让状态机按长度重复展开；先粗扫再细扫则等于把同一份请求扫两遍。`rules.rl` 因此只有一条粗规则 `digit_run = [0-9]+ [Xx]?;`，命中后交给 `scan.go` 的 `emitDigits`：按 `digitClasses` 的顺序逐类试长度与校验器，第一类通过即采用，两侧边界由 `bounded` 统一检查。加一类数字（手机号、银行卡）只改 `digitClasses` 与该规则的元数据，**不新增 DFA 状态、也不需要重新生成**，一次扫描同时服务所有数字类。手机号就是按这条路径加入的：`rules.rl` 未改、生成表仍是 33425 行，改动集中在规则元数据、候选检查与渲染器。
 
@@ -121,11 +123,13 @@ secret_masking:
 
 ## 覆盖范围
 
-规则集共 78 条：Strong 36、Anchored 24、Generic 18。范围是三组：
+凭据与个人数据规则集共 78 条：Strong 36、Anchored 24、Generic 18。范围是三组：
 
 1. 结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；
 2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`；
 3. 个人数据：中国居民身份证号（`pii.chinese_id`）与手机号（`pii.cn_mobile`）。两者都按 Generic 计分——18 位或 11 位数字本身不证明什么。身份证的校验器通过即认定，因此实际只会改写省份、生日与校验位三者同时成立的号码；手机号没有校验位，号段只是候选检查，只有命中 `手机号`/`phone` 这类上下文才进入 Medium 并被改写，裸 11 位数字只上报（Low）。
+
+**另有两条只上报的访问指示符规则。** `access.url` 与 `access.local_path`（`indicator.rl`）不计入上面的 78 条与 Strength 分布，也永远不会被改写。URL 覆盖 `http`/`https`/`ws`/`wss`；本地路径覆盖 POSIX 绝对路径、已知根目录、`~/`、`./`、`../`、Windows 盘符、UNC 与带扩展名的相对路径。机器只负责最长的 URL/路径字节串，`indicator.go` 的候选检查才决定它是不是一次本地读取：`/v1/chat/completions` 这类路由前缀、`application/vnd.api+json` 这类 MIME、`net/http` 这类 import 路径、`example.com/path` 这类域名相对引用与 `#/definitions/Foo` 这类 JSON pointer 都被排除；句末或 markdown 的收尾标点（`).`、`**`）由 `TrimRight` 从值里去掉，但成对括号属于 URL 本身（`…/wiki/Foo_(bar)`），只有落单的收尾括号才被去掉。段内不包含空白：URL 到第一个空白/引号/反斜杠为止，含空格的路径（`C:\Program Files\…`、`/home/a/my file.txt`）只上报到第一个空格，这是路径与正文之间唯一可靠的分界。工具调用参数是 JSON 文本，其中的 Windows 路径反斜杠成对出现（`C:\\Users\\…`）；机器同时接受单、双反斜杠两种形式，`access` 检测器在记录前把成对反斜杠还原成单个，UNC 的两段网络根保持不变。它们的唯一消费方是 `internal/analyzer` 的 `access` 检测器：按值去重后每个 trace 每个值一条 `info` finding，`category` 为 `url_access` 或 `local_path_access`，用来审计 agent 执行中读过哪些目录、访问过哪些 URL。
 
 **PEM 私钥块按整块改写，不是只改头行。** `structural.pem_private_key` 仍然只匹配头行、只上报（`policySkipMask` 只豁免这一条规则 ID），因为头行不含密钥材料；真正承载密钥的是 `structural.pem_private_key_block`。footer 必须重复 header 的标签（`OPENSSH` 对 `OPENSSH`），这是一次反向引用，正则/DFA 表达不了，所以扩展写在 `pem.go` 里、由头行命中触发，沿用 `digit_run` → `digitClasses` 的「粗锚点 + 原生细判」打法：不新增 DFA 状态，也不重新生成 `rules_ragel.go`。
 

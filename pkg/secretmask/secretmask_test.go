@@ -109,6 +109,12 @@ var positiveSamples = []struct {
 	{RuleSkUnderscoreGeneric, "sk_" + rep("A1", 16)},
 
 	{RulePEMPrivateKeyBlock, "-----BEGIN OPENSSH PRIVATE KEY-----\n" + rep("A", 70) + "\n" + rep("B", 70) + "\n-----END OPENSSH PRIVATE KEY-----"},
+
+	// Access indicators. They are ReportOnly and matched by the second machine
+	// in indicator.rl; the samples double as the documented shapes, and
+	// TestPositiveSamplesDetectAsIndicators checks the machine against them.
+	{RuleURL, "https://example.com/repos/example/project"},
+	{RuleLocalPath, "/home/alice/project/main.go"},
 }
 
 // noiseSamples are benign strings that must never produce a span. Trajecta
@@ -139,6 +145,11 @@ var noiseSamples = []string{
 
 func TestPositiveSamples(t *testing.T) {
 	for _, tc := range positiveSamples {
+		if ruleTable[tc.rule].ReportOnly {
+			// Access indicators are matched by the second machine, not by
+			// Scan; TestPositiveSamplesDetectAsIndicators covers them.
+			continue
+		}
 		t.Run(strings.TrimPrefix(ruleTable[tc.rule].Name, "unknown"), func(t *testing.T) {
 			spans := Scan([]byte(tc.text))
 			for _, sp := range spans {

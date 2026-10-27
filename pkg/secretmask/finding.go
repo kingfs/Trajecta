@@ -112,7 +112,17 @@ type Finding struct {
 // Maskable reports whether the finding is strong enough to be rewritten
 // automatically. Low-confidence findings are still reported so that an audit
 // can show what was seen but deliberately left alone.
-func (f Finding) Maskable() bool { return f.Confidence >= ConfidenceMedium }
+//
+// A ReportOnly rule is never maskable regardless of its score: a local path or
+// a URL is audited as the exact bytes the agent used, and a stand-in would erase
+// the fact under audit. The check is here as well as in the indicator scanner so
+// that a caller which mixes the two finding sets still cannot rewrite one.
+func (f Finding) Maskable() bool {
+	if rule, ok := f.Rule(); ok && rule.ReportOnly {
+		return false
+	}
+	return f.Confidence >= ConfidenceMedium
+}
 
 // scoreFinding turns the evidence for one match into a score and a reason set.
 // validatorPassed reports whether the rule's validator accepted the bytes.

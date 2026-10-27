@@ -39,9 +39,8 @@ func (PIIDetector) Version() string { return "0.1.0" }
 func (d PIIDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
 	for _, node := range allNodes(obs) {
-		texts := []string{node.Text, metadataString(node.Metadata, "arguments"), rawText(node.Raw), rawText(node.JSON)}
 		seen := map[secretmask.RuleID]bool{}
-		for _, text := range texts {
+		for _, text := range nodeTexts(node) {
 			if text == "" {
 				continue
 			}

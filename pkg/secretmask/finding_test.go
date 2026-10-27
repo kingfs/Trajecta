@@ -227,10 +227,15 @@ func TestConfidenceBands(t *testing.T) {
 }
 
 // TestStrengthCoverage makes the tiering explicit so a new rule cannot be added
-// without deciding how conclusive it is.
+// without deciding how conclusive it is. ReportOnly rules are exempt: they are
+// access indicators, not credential shapes, and they are never scored for a
+// rewrite.
 func TestStrengthCoverage(t *testing.T) {
 	counts := map[Strength]int{}
 	for id := RuleUnknown + 1; id < ruleIDCount; id++ {
+		if ruleTable[id].ReportOnly {
+			continue
+		}
 		switch ruleTable[id].Strength {
 		case StrengthGeneric, StrengthAnchored, StrengthStrong:
 			counts[ruleTable[id].Strength]++

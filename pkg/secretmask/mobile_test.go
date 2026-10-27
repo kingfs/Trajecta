@@ -14,6 +14,8 @@ func TestCandidateChecksKnown(t *testing.T) {
 	known := map[string]bool{
 		"":                      true,
 		candidateCNMobilePrefix: true,
+		candidateURLShape:       true,
+		candidateLocalPathShape: true,
 	}
 	for id := RuleUnknown + 1; id < ruleIDCount; id++ {
 		r := ruleTable[id]

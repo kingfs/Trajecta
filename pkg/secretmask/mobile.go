@@ -42,6 +42,10 @@ func runCandidateCheck(name string, tok []byte) bool {
 		return true
 	case candidateCNMobilePrefix:
 		return validCNMobilePrefix(tok)
+	case candidateURLShape:
+		return validURLShape(tok)
+	case candidateLocalPathShape:
+		return validLocalPathShape(tok)
 	default:
 		return false
 	}
