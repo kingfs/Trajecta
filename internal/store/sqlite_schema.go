@@ -555,6 +555,30 @@ var sqliteSchemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS toolcallaudit_call_id ON tool_call_audits(call_id);`,
 	`CREATE INDEX IF NOT EXISTS toolcallaudit_tool_name_status_created_at ON tool_call_audits(tool_name, status, created_at);`,
 	`CREATE INDEX IF NOT EXISTS toolcallaudit_status_created_at ON tool_call_audits(status, created_at);`,
+	// The resource index. resources is the global catalogue (one row per
+	// distinct path/URL) and trace_resources is the per-trace relation, so a
+	// path read by many traces occupies one catalogue row plus one small link
+	// per trace, not one row per occurrence. No file content is stored.
+	`CREATE TABLE IF NOT EXISTS resources (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind TEXT NOT NULL DEFAULT '',
+			value TEXT NOT NULL DEFAULT '',
+			value_hash TEXT NOT NULL DEFAULT '',
+			last_trace_id TEXT NOT NULL DEFAULT '',
+			first_seen_at datetime NOT NULL,
+			last_seen_at datetime NOT NULL
+		);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS resource_kind_value_hash ON resources(kind, value_hash);`,
+	`CREATE INDEX IF NOT EXISTS resource_last_seen_at_id ON resources(last_seen_at DESC, id DESC);`,
+	`CREATE TABLE IF NOT EXISTS trace_resources (
+			trace_id TEXT NOT NULL,
+			resource_id INTEGER NOT NULL,
+			access_count INTEGER NOT NULL DEFAULT 0,
+			first_position INTEGER NOT NULL DEFAULT 0,
+			created_at datetime NOT NULL,
+			PRIMARY KEY (trace_id, resource_id)
+		);`,
+	`CREATE INDEX IF NOT EXISTS traceresource_resource_id_trace_id ON trace_resources(resource_id, trace_id);`,
 }
 
 // applySQLiteSchemaUpgrades brings an existing SQLite database up to the

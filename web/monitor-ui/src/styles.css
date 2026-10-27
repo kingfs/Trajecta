@@ -630,6 +630,14 @@
   font-size: 0.78rem;
 }
 
+/* A path or URL is long and has no spaces to wrap on; the card must not grow
+   past the column because of it. */
+.finding-card-head strong.resource-value {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* The protocol tab draws the parsed exchange as two labelled halves - request
    and response - so it is obvious that the conversation on the request side is
    the whole parsed history, not just the turn that produced this cassette. */

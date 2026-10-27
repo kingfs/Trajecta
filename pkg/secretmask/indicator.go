@@ -240,7 +240,18 @@ func validLocalPathShape(tok []byte) bool {
 		return true
 	}
 	if isASCIIAlpha(tok[0]) && len(tok) >= 3 && tok[1] == ':' && (tok[2] == '\\' || tok[2] == '/') {
-		return len(tok) > 3
+		segments := splitPathSegments(tok[3:], true)
+		if len(segments) == 0 {
+			return false
+		}
+		// A drive followed by "n123" / "r123" / "t123" is a JSON escape plus a
+		// line number (z:\n244), not a Windows directory; a real segment that
+		// happens to look like that is not worth the false positives.
+		if first := segments[0]; len(first) > 1 &&
+			(first[0] == 'n' || first[0] == 'r' || first[0] == 't') && allDigits(first[1:]) {
+			return false
+		}
+		return true
 	}
 	if len(tok) >= 2 && (tok[0] == '\\' || tok[0] == '/') && (tok[1] == '\\' || tok[1] == '/') {
 		return len(splitPathSegments(tok[2:], true)) >= 2

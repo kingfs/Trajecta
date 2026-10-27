@@ -51,7 +51,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 当前应用库中的主要表：
 
-- trace 与观测：`logs`、`trace_observations`、`trace_findings`、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
+- trace 与观测：`logs`、`trace_observations`、`trace_findings`、`resources` / `trace_resources`（路径与 URL 的资源索引）、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
 - 凭据遮蔽：`credential_mask_audits`（每个被替换的值一行，含真值、假值与落盘形态；见 [凭据遮蔽](./SECRET_MASKING.md)）。
 - Responses 与审计：`responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`。
 - 渠道与模型：`channel_configs`、`channel_models`、`channel_probe_runs`、`model_catalog`、`model_aliases`、`upstream_targets`、`upstream_models`。
@@ -123,7 +123,7 @@ About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关
 
 出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页一节。
 
-主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
+主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 
 使用说明见 [./MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 
@@ -160,6 +160,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 语义解析与派生分析层已实现：
 
 - `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化紧凑摘要（parser、status、usage、warnings 等）并可在 trace detail 展示；节点树不落库，Protocol/详情视图打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 重解析；parser 失败写入 system events。
+- 资源索引：`internal/resources` 在解析 worker 每次成功解析后提取本地路径与 URL，按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；`GET /api/traces/{id}/resources` 与质量页的 `GET /api/resources` 读取，历史 trace 可通过详情页「解析资源」或 `POST /api/resources/backfill` 排队重解析。
 - deterministic audit detectors：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error，以及复用 `pkg/secretmask` 的个人数据检测（`pii`，只报可改写档的身份证号与手机号，evidence 里的命中值替换为 `[redacted]`）；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。
 - 重分析 job 类型：`trace_reparse`、`trace_rescan`、`trace_repair_usage`、`trace_reanalyze`、`session_reanalyze`、`batch_reanalyze`，状态持久化在 `analysis_jobs`。
 - parser/analyzer/router/upstream 事件写入 system events。

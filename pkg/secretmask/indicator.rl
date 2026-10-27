@@ -26,8 +26,10 @@ urlchar  = [0-9A-Za-z._~%!$&'()*+,;=:@/?#\-];
 # A host name or an address literal in brackets. Brackets and colons are
 # handled by the host alternative below, not by this class.
 hostchar = [0-9A-Za-z._~\-];
-# A path segment: urlchar without '?' '#' '/', which are structural here.
-pathchar = [0-9A-Za-z._~%!$&'()*+,;=@\-];
+# A path segment: urlchar without the query/fragment/path separators and
+# without the punctuation that separates one path from the next in prose
+# (quotes, commas, semicolons, glob stars).
+pathchar = [0-9A-Za-z._~%!$&()+=@\-];
 # One or more path bytes: the segment itself, not a single character.
 pathseg  = pathchar+;
 # Userinfo cannot cross a '/', '?' or '#': e.g. the '@' in a path segment

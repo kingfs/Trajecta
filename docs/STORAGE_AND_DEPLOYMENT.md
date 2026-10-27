@@ -9,6 +9,7 @@ Raw cassette (.http, LLM_PROXY_V3)
   -> trace index (logs)
   -> trace_observations（仅紧凑摘要）
   -> trace_findings
+  -> resources / trace_resources（每次解析后的资源目录与 trace 关系）
   -> analysis_runs
 ```
 
@@ -41,7 +42,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 
 生产存储是 Postgres（compose 使用 `postgres:17-alpine`）。`database.driver` 接受 `postgres` / `postgresql`，并且必须提供显式 `database.dsn`：对非 SQLite driver，DSN 为空时 `DatabaseDSN()` 返回空串，迁移会直接报 `postgres application database dsn is required`。
 
-- 版本化迁移 SQL 签入在 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 通过 `golang-migrate` 应用，版本与 dirty 状态记录在 `schema_migrations`。该目录覆盖 trace index、routing/channel/model、Responses 状态、audit/correlation、observation/finding、analysis、system events 与凭据遮蔽审计（`credential_mask_audits`）等表。
+- 版本化迁移 SQL 签入在 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 通过 `golang-migrate` 应用，版本与 dirty 状态记录在 `schema_migrations`。该目录覆盖 trace index、routing/channel/model、Responses 状态、audit/correlation、observation/finding、analysis、system events、凭据遮蔽审计（`credential_mask_audits`）与资源目录（`resources` / `trace_resources`）等表。
 - Postgres 生成新迁移使用 ent 生成器（需要临时开发库，禁止生产 DSN）：
 
   ```bash

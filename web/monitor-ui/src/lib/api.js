@@ -25,6 +25,9 @@ export const apiPaths = {
   eventIgnore: (eventID) => `/api/events/${encodeURIComponent(eventID)}/ignore`,
   traces: "/api/traces",
   findings: "/api/findings",
+  // The deduplicated path/URL catalogue behind the 资源 page.
+  resources: "/api/resources",
+  resourcesBackfill: "/api/resources/backfill",
   // The credential-masking audit table. It is the only read that returns the
   // masked value next to the stand-in that replaced it; the event feed
   // deliberately carries neither.
@@ -38,9 +41,11 @@ export const apiPaths = {
   traceRaw: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/raw`,
   traceObservation: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/observation`,
   traceFindings: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/findings`,
+  traceResources: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/resources`,
   tracePerformance: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/performance`,
   traceDownload: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/download`,
   traceRepairUsage: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/repair-usage`,
+  traceReparse: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reparse`,
   traceReanalyze: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reanalyze`,
   sessions: "/api/sessions",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,

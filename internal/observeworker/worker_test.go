@@ -548,3 +548,79 @@ func reparseForTest(t *testing.T, st *store.Store, traceID string) observe.Trace
 	}
 	return obs
 }
+
+// TestWorkerIndexesTraceResources pins the automatic half of the resource
+// index: a normally recorded and parsed trace already has its paths and URLs in
+// the database, with no analyze scan in the path.
+func TestWorkerIndexesTraceResources(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	const requestID = "req-worker-resources"
+	reqHead := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
+	reqBody := `{"model":"gpt-5.1","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"file_path\":\"/data/src/github.com/lyramakesmusic/neuron-explorer/README.md\"}"}}]},{"role":"user","content":"also fetch https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"}]}`
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"choices":[{"message":{"content":"done"}}]}`
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     requestID,
+			Time:          time.Date(2026, 5, 13, 11, 0, 0, 0, time.UTC),
+			Model:         "gpt-5.1",
+			Provider:      "openai_compatible",
+			Operation:     "chat.completions",
+			Endpoint:      "/v1/chat/completions",
+			URL:           "/v1/chat/completions",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    10,
+			TTFTMs:        2,
+			ClientIP:      "127.0.0.1",
+			ContentLength: int64(len(reqBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(reqHead)),
+			ReqBodyLen:   int64(len(reqBody)),
+			ResHeaderLen: int64(len(resHead)),
+			ResBodyLen:   int64(len(resBody)),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "worker-resources.http")
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID(requestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if err := st.EnqueueParseJob(entry.ID); err != nil {
+		t.Fatalf("EnqueueParseJob() error = %v", err)
+	}
+	New(st, Options{BatchSize: 5}).RunOnce(context.Background())
+
+	items, err := st.ListTraceResources(entry.ID)
+	if err != nil {
+		t.Fatalf("ListTraceResources() error = %v", err)
+	}
+	values := map[string]bool{}
+	for _, item := range items {
+		values[item.Value] = true
+	}
+	if !values["/data/src/github.com/lyramakesmusic/neuron-explorer/README.md"] {
+		t.Fatalf("tool-call path was not indexed: %+v", items)
+	}
+	if !values["https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"] {
+		t.Fatalf("message URL was not indexed: %+v", items)
+	}
+}

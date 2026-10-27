@@ -136,6 +136,11 @@ func TestIndicatorsDetectURLsAndPaths(t *testing.T) {
 			want: []string{`C:\\Users\\alice\\project\\main.go`},
 		},
 		{
+			name: "quoted list is split into paths",
+			text: `'explorer/a.npz','explorer/b.npz`,
+			want: []string{"explorer/a.npz", "explorer/b.npz"},
+		},
+		{
 			name: "json escaped unc path",
 			text: `{"path":"\\\\fileserver\\share\\dir\\report.txt"}`,
 			want: []string{`\\\\fileserver\\share\\dir\\report.txt`},

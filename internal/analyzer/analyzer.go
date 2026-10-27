@@ -44,7 +44,6 @@ func DefaultDetectors() []Detector {
 		DangerousShellDetector{},
 		CredentialDetector{},
 		PIIDetector{},
-		AccessDetector{},
 		ProviderSafetyDetector{},
 		ToolErrorDetector{},
 	}
@@ -116,11 +115,10 @@ func detectorAllowedForScope(detector Detector, scope exchangeScope) bool {
 	}
 	switch detector.Name() {
 	// A credential or a personal number in the request the client sent is the
-	// signal an entry exchange exists to carry. The access detector reads the
-	// client request too: a tool call the client already made, and the paths it
-	// named, are what the audit is looking for. The other detectors read the
-	// model's response, which an entry exchange does not have.
-	case CredentialDetector{}.Name(), PIIDetector{}.Name(), AccessDetector{}.Name():
+	// signal an entry exchange exists to carry. The other detectors read the
+	// model's response, which an entry exchange does not have. (The resource
+	// index is not a detector: it runs in the parse worker for both kinds.)
+	case CredentialDetector{}.Name(), PIIDetector{}.Name():
 		return true
 	default:
 		return false
@@ -349,34 +347,14 @@ func stableFindingID(f observe.Finding) string {
 }
 
 func allNodes(obs observe.TraceObservation) []observe.SemanticNode {
-	var roots []observe.SemanticNode
-	roots = append(roots, obs.Request.Nodes...)
-	roots = append(roots, obs.Response.Nodes...)
-	roots = append(roots, obs.Stream.AccumulatedToolCalls...)
-	var out []observe.SemanticNode
-	var walk func([]observe.SemanticNode)
-	walk = func(nodes []observe.SemanticNode) {
-		for _, node := range nodes {
-			out = append(out, node)
-			walk(node.Children)
-		}
-	}
-	walk(roots)
-	return out
+	return observe.TraceNodes(obs)
 }
 
-// nodeTexts returns the text a detector scans for one node: the normalized
-// text, a tool call's arguments, and the two raw payloads. The views overlap on
-// purpose - the raw JSON carries the same bytes the normalized text does - so a
-// detector that reports one event per value must deduplicate the values it
-// extracts instead of assuming each occurrence is distinct.
+// nodeTexts returns the text a detector scans for one node. It is the IR's
+// shared view list so a detector and a derived index cannot disagree about
+// which bytes a node carries.
 func nodeTexts(node observe.SemanticNode) []string {
-	return []string{
-		node.Text,
-		metadataString(node.Metadata, "arguments"),
-		rawText(node.Raw),
-		rawText(node.JSON),
-	}
+	return observe.NodeTexts(node)
 }
 
 func findNodeByID(obs observe.TraceObservation, id string) observe.SemanticNode {

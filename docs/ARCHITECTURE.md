@@ -40,6 +40,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
+- `internal/resources`：从 Observation IR 提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引。
 - `internal/observeworker`：从 cassette 解析 Observation IR 并落库的后台 worker。
 - `internal/reanalysis`：trace/session/batch 重分析任务（service 与 worker）。
 - `internal/sessionanalysis`：session 级聚合分析。
@@ -72,7 +73,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 与 `llm.*` timeline 事件。
 8. application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。代理请求路径只把完成的录制投入有界后台 finalize 队列（`internal/recorder/finalize_queue.go`：2 个 worker、深度 256），worker 负责补 prelude、写 `logs`（含 routing 列）并入队 parse_job；队列满时回退到请求内联完成，进程正常关闭时排空队列。
-9. observeworker 与 reanalysis 从 raw cassette 解析 Observation IR、findings 和分析任务结果。
+9. observeworker 与 reanalysis 从 raw cassette 解析 Observation IR、findings、资源索引和分析任务结果。
 10. Monitor 与 MCP 从 application DB 查询列表/聚合，从 cassette 读取详情。
 11. Monitor 的会话轨迹导出用 `internal/trajectory` 从该会话的客户端可见 cassette 重建 ATIF-v1.8 JSONL（不调用模型、不修改 cassette）。
 12. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
@@ -118,12 +119,12 @@ raw `.http` cassette 是事实源：
 
 - replay 事实源；
 - raw protocol 详情源；
-- Observation IR / findings / usage repair 的重建来源。
+- Observation IR / findings / 资源索引 / usage repair 的重建来源。
 
 application DB 是结构化查询源：
 
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；
-- auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、eval；
+- auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、资源索引（`resources` / `trace_resources`）、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）；
 - 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成，cassette 只记录原始请求体，回填路径不读映射文件，所以后台重建索引仍然会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。
 - 凭据遮蔽映射（`{{output_dir}}/secret_mask_mappings.db`）：bbolt 文件，按真值去重只保存 `real -> fake`，启动时默认加载全部且不淘汰（`secret_masking.mapping_store.load_limit: 0`；正数只加载最新 N 条，超过余量后淘汰最旧），新映射异步批量写入。它是 Vault 的恢复索引而不是审计表：没有 trace、偏移与命中次数，删掉只影响后续重启能否复用旧假值。同一 `output_dir` 只能被一个进程打开（bbolt 排他锁），并且用 `trace_index.secret` 加密、用同一把密钥做去重索引的 HMAC。

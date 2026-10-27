@@ -7,6 +7,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { TabStrip, Tabs, TabsContent } from "../components/common/Tabs";
 import { TraceConversation } from "../components/monitor/TraceConversation";
+import { TraceResources } from "../components/monitor/TraceResources";
 import { ProtocolTree } from "../components/monitor/ProtocolTree";
 import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
 import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
@@ -71,6 +72,7 @@ export function TraceDetailPage() {
   const raw = useJSON(traceExists ? apiPaths.traceRaw(traceID) : null, [traceID, tab === "raw" ? "raw" : "summary"]);
   const observation = useJSON(traceExists ? apiPaths.traceObservation(traceID) : null, [traceID, tab === "protocol" ? "protocol" : "idle", derivedRefreshTick]);
   const findings = useJSON(traceExists ? apiPaths.traceFindings(traceID) : null, [traceID, tab === "audit" ? "audit" : "idle", derivedRefreshTick]);
+  const resources = useJSON(traceExists ? apiPaths.traceResources(traceID) : null, [traceID, tab === "resources" ? "resources" : "idle", derivedRefreshTick]);
   const performance = useJSON(traceExists ? apiPaths.tracePerformance(traceID) : null, [traceID, tab === "performance" ? "performance" : "idle"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
@@ -112,6 +114,10 @@ export function TraceDetailPage() {
   // findings count keeps the badge working against a server that predates the
   // detail `audit` field.
   const auditCount = Number(detail.data?.audit?.total || 0) || findingsCount;
+  // The list endpoint is the live count: it refreshes after a reparse, while
+  // the detail payload is only re-read on navigation. It falls back to the
+  // detail field for a server that predates the list.
+  const resourceCount = Number(resources.data?.total ?? detail.data?.resources ?? 0);
 
   // 会话, 协议, 工具调用, 审计, 请求信息, 原始数据. The first tab used to be
   // "Routing & Conversation", which is exactly the problem it had: half of it
@@ -123,6 +129,7 @@ export function TraceDetailPage() {
     { id: "protocol", label: t("audit.protocol") },
     { id: "tools", label: t("traceDetail.tabTools"), count: toolCount || undefined },
     { id: "audit", label: t("nav.audit"), count: auditCount || undefined },
+    { id: "resources", label: t("resources.tab"), count: resourceCount || undefined },
     { id: "request", label: t("traceDetail.tabRequest") },
     { id: "raw", label: t("traceDetail.tabRaw") },
   ];
@@ -394,6 +401,19 @@ export function TraceDetailPage() {
                 onOpenAnchor={openConversationAnchor}
                 InlineTag={InlineTag}
                 CodeBlock={CodeBlock}
+                t={t}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="resources">
+            <div className="detail-grid">
+              <TraceResources
+                data={resources.data}
+                loading={resources.loading}
+                error={resources.error}
+                refreshing={jobBusy === "reparse"}
+                onRefresh={() => runTraceActionWith("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}
                 t={t}
               />
             </div>
@@ -1684,6 +1704,8 @@ function labelTraceAction(action, t) {
       return t("traceDetail.statsRepair");
     case "reanalyze":
       return t("traceDetail.analysisRefresh");
+    case "reparse":
+      return t("resources.reparse");
     default:
       return t("nav.analysis");
   }

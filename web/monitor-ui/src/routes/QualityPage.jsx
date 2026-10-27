@@ -6,6 +6,7 @@ import { FindingsPanel } from "./quality/FindingsPanel";
 import { LineagePanel } from "./quality/LineagePanel";
 import { AnalysisPanel } from "./quality/AnalysisPanel";
 import { DataHealthPanel } from "./quality/DataHealthPanel";
+import { ResourcesPanel } from "./quality/ResourcesPanel";
 import { normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { useI18n } from "../lib/i18n";
 
@@ -34,6 +35,7 @@ export function QualityPage() {
       tabs={[
         { id: "findings", label: t("quality.tabFindings"), element: <FindingsPanel /> },
         { id: "lineage", label: t("quality.tabLineage"), element: <LineagePanel /> },
+        { id: "resources", label: t("resources.tab"), element: <ResourcesPanel /> },
         { id: "analysis", label: t("quality.tabAnalysis"), element: <AnalysisPanel /> },
         {
           id: "health",

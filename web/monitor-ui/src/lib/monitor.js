@@ -276,6 +276,7 @@ export function normalizeTraceTab(value = "") {
     case "protocol":
     case "tools":
     case "audit":
+    case "resources":
     case "request":
     case "raw":
       return value;

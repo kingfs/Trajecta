@@ -250,6 +250,8 @@ type detailResponse struct {
 	// be the findings count alone: a trace with a rewritten key and no finding
 	// would otherwise lose the number between the list and the detail page.
 	Audit *traceAuditView `json:"audit,omitempty"`
+	// Resources is the number of distinct paths and URLs indexed for this trace.
+	Resources int `json:"resources"`
 }
 
 type traceResponsesAuditRef struct {
@@ -730,6 +732,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	}), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/resources", monitorAuthRequired(resourcesAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/resources/backfill", monitorAuthRequired(resourceBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), monitorVerifier))
@@ -1941,6 +1945,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceObservation(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "resources" && r.Method == http.MethodGet:
+			handleTraceResources(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "performance" && r.Method == http.MethodGet:
 			handleTracePerformance(w, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
@@ -2150,6 +2156,12 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 		return
 	}
 	resp.Audit = selfAudit[0].Audit
+	if resourceCount, err := st.CountTraceResources(entry.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace resources: " + err.Error()})
+		return
+	} else {
+		resp.Resources = resourceCount
+	}
 	attachTracePreviews(resp.UpstreamCalls)
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)

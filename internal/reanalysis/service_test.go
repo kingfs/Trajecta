@@ -56,6 +56,15 @@ func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 	if len(findings) != 1 {
 		t.Fatalf("findings = %+v, want one credential finding", findings)
 	}
+	// A reparse also refreshes the resource index: it is the path that fills the
+	// index for a trace recorded before the index existed.
+	indexed, err := st.ListTraceResources(traceID)
+	if err != nil {
+		t.Fatalf("ListTraceResources() error = %v", err)
+	}
+	if len(indexed) != 2 {
+		t.Fatalf("indexed resources = %+v, want the path and the URL", indexed)
+	}
 }
 
 // TestServiceRescanTraceParsesCassetteWithoutStoringObservation pins the
@@ -276,7 +285,7 @@ func TestServiceReanalyzeSessionSavesAnalysisRun(t *testing.T) {
 func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello /tmp/reanalysis.log and https://api.example.com/x with sk-test_abcdefghijklmnopqrstuvwxyz"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
 	header := recordfile.RecordHeader{

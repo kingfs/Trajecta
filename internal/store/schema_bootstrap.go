@@ -30,6 +30,9 @@ func (s *Store) initSchema() error {
 		if err := s.ensureModelAliasesSchema(); err != nil {
 			return err
 		}
+		if err := s.ensureResourcesSchema(); err != nil {
+			return err
+		}
 		if err := s.ensureLogExchangeColumns(); err != nil {
 			return err
 		}

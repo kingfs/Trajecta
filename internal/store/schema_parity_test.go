@@ -219,6 +219,8 @@ func TestSQLiteAndPostgresSchemasAgree(t *testing.T) {
 		"app_settings",
 		"model_aliases",
 		"session_summaries",
+		"resources",
+		"trace_resources",
 	}
 
 	postgresReach := postgresSchemaReach(t, storePackageSource(t))

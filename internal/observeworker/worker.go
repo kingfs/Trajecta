@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -100,10 +101,35 @@ func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
 		return err
 	}
+	// The resource index is part of parsing, not a detector: it answers which
+	// paths and URLs the exchange carried, and it is what the trace detail and
+	// the resources page read. Saving it here is what makes it automatic - an
+	// audit that only ran behind `analyze scan` would be empty for every
+	// normally recorded trace.
+	if err := w.store.SaveTraceResources(job.TraceID, StoreResourceAccesses(obs)); err != nil {
+		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
+		return err
+	}
 	if err := w.store.MarkParseJobDone(job.ID); err != nil {
 		return err
 	}
 	return nil
+}
+
+// StoreResourceAccesses adapts the extracted values to the write shape without
+// making the store depend on the extractor.
+func StoreResourceAccesses(obs observe.TraceObservation) []store.ResourceAccess {
+	extracted := resources.Extract(obs)
+	accesses := make([]store.ResourceAccess, 0, len(extracted))
+	for _, item := range extracted {
+		accesses = append(accesses, store.ResourceAccess{
+			Kind:     item.Kind,
+			Value:    item.Value,
+			Count:    item.Count,
+			Position: item.Position,
+		})
+	}
+	return accesses
 }
 
 func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Registry, traceID string) (observe.TraceObservation, error) {

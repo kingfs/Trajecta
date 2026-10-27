@@ -250,16 +250,15 @@ type Finding struct {
 
 `Severity` 取 `info`、`low`、`medium`、`high`、`critical`。`Runner.Analyze` 按 severity 降序、ID 升序稳定排序，并补全 `TraceID`、`Detector`、`DetectorVersion`、`CreatedAt`、`ID`。
 
-当前六个检测器实际产生的 category：
+当前五个检测器实际产生的 category：
 
 - `dangerous_shell`：`filesystem_destructive_operation`（critical）、`dangerous_command`（high）、`unsafe_code_execution`（high）、`credential_leak`（high，凭据文件访问）。
 - `credential`：`credential_leak`（high）。
 - `pii`：`pii_leak`（high）。
-- `access`：`url_access`（info）、`local_path_access`（info）。
 - `provider_safety`：`provider_safety_block`（medium）、`model_refusal`（low）。
 - `tool_error`：`tool_result_error`（medium）。
 
-Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。`access` 例外：它的 ID 只哈希 trace、category 与值本身，因为同一节点里的两个不同 URL 必须各占一行，而同一个值在请求与响应中重复出现只保留一行；锚点只是首次出现的节点。检测按 exchange scope 过滤：entry observation 只跑 `credential`、`pii` 与 `access`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
+Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。检测按 exchange scope 过滤：entry observation 只跑 `credential` 与 `pii`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
 
 ## 检测器
 
@@ -273,14 +272,23 @@ type Detector interface {
 }
 ```
 
-`DefaultDetectors()` 返回 `DangerousShellDetector`、`CredentialDetector`、`PIIDetector`、`AccessDetector`、`ProviderSafetyDetector`、`ToolErrorDetector`。
+`DefaultDetectors()` 返回 `DangerousShellDetector`、`CredentialDetector`、`PIIDetector`、`ProviderSafetyDetector`、`ToolErrorDetector`。
 
 - dangerous_shell：扫描 `obs.Tools.Calls[].ArgsText`/`ArgsJSON`，以及类型为 `tool_call`/`server_tool_call`/`code` 的节点文本；用正则 `destructiveRMPattern` 识别 `rm -rf /`、`rm -rf ~`，并用关键字识别 `sudo rm`、`mkfs`、`diskutil erase`、`dd if=`、`chmod -R 777`、`chown -R`、`nc -e`、`bash -i`、`curl|wget ... | sh/bash`、`.ssh/id_rsa`、`.aws/credentials`、`security find-generic-password`、`env | curl`。
 - credential：对所有节点扫描 `credentialPatterns`：OpenAI key `sk-...`、AWS `AKIA...`、GitHub `gh[pousr]_...`、`-----BEGIN ... PRIVATE KEY-----`、Bearer token、`postgres|mysql|mongodb://` 连接串、Cookie header，以及带用户名密码的 URL。检测是 observe-only，不修改请求或响应。
 - pii：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Scan`，只保留 `Kind.PII()` 且 `Finding.Maskable()` 的命中（当前是中国居民身份证号 `pii.chinese_id` 与手机号 `pii.cn_mobile`）。因为复用遮蔽引擎，只有可改写档的值才会被上报：身份证靠离线校验器，手机号靠上下文词表，裸 11 位数字只报 Low、不入账，因此审计与改写口径一致。evidence 用 `excerptRedacted` 把命中值换成 `[redacted]`，findings 表不会成为第二份明文。每个节点的每个 PII 类别只报一条。
-- access：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Indicators`——第二套 report-only Ragel 状态机（见 [凭据遮蔽](./SECRET_MASKING.md)）。URL（`http`/`https`/`ws`/`wss`）报 `url_access`，本地路径报 `local_path_access`，都是 `info`；值本身**不脱敏**，因为「读过哪个目录、访问过哪个地址」正是要审计的对象。检测按**值**去重：同一个路径或 URL 在一次交换的请求与响应里出现多次只留一条 finding，锚定在首次出现的节点；出现的**模型步骤数**写进 `description` 与 `Metadata["steps"]`（同一节点的多份文本视图只算一次，单条消息内重复写同一值也不重复计数）。候选检查排除了不是本地读取的斜杠文本：API 路由（`/v1/chat/completions`）、MIME 类型（`application/vnd.api+json`）、import 路径（`net/http`）、裸域名（`example.com/path`）都不上报。它只写审计，不改写、不阻断；值为路径或 URL 时 `description` 截断到 2048 字节（按 UTF-8 边界），`evidence_excerpt` 仍由存储层截断到 500 字节。
 - provider_safety：把 `safety` 节点映射为 `provider_safety_block`、`refusal` 节点映射为 `model_refusal`，并叠加 `ObservationSafety.Blocked`/`Refused` 汇总位。
 - tool_error：`obs.Tools.Results[].IsError` 为真，或 `tool_result`/`server_tool_result`/`error` 节点的 status/text 含错误信号时报告 `tool_result_error`。
+
+## 资源索引
+
+路径与 URL 不是 finding：它们没有严重度，也不该在「发现项」里和拒答、工具错误混在一起。`internal/resources` 从 Observation IR 提取它们，`internal/observeworker` 在每次解析成功后调用，`internal/reanalysis` 在重解析/重扫时同样刷新；这是解析的派生索引，不是检测器，也不改写请求或响应。
+
+- **只记录访问对象。** 每个值是一条路径或一个 URL，不保存文件内容，不写入 `secret_mask_mappings.db`（资源不需要替换，也没有真/假值对），值按提取规则保存（它就是要审计的对象；只做 Windows 转义还原与句末标点裁剪）。
+- **按值去重，两层表。** `resources` 是全局目录：`(kind, value_hash)` 唯一，`kind` 为 `url` 或 `local_path`，保留完整值、`last_trace_id` 与首末出现时间；`trace_resources` 是单条 trace 的关系：`(trace_id, resource_id)` 主键，带该 trace 内的出现步骤数与首次出现顺序。同一路径被多个请求、跨 session、跨很长时间访问，只占一条目录行加每条 trace 一行关系，不随流量增长；访问请求数与出现步数在读取时从关系聚合，重解析用「先删后插」替换该 trace 的关系，不做增量计数。
+- **读取面。** trace 详情的 `GET /api/traces/{id}/resources`（「资源」标签页，`resources` 字段给出计数）按首次出现顺序列出本次交换的路径与 URL；`GET /api/resources?kind=&q=&window=&page=&page_size=`（质量 → 资源）按最近出现排序，返回 `trace_count` 与 `access_count`，`last_trace_id` 可跳到最近一次建立索引的请求。
+- **历史流量。** 新解析的 trace 自动入库；已有 trace 在详情页点「解析资源」触发一次 reparse，或在质量 → 资源页用「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`）。
+- **解析口径。** 复用 `pkg/secretmask.Indicators` 的 report-only DFA（见[凭据遮蔽](./SECRET_MASKING.md)），所以 URL/路径的形状、排除项（API 路由、MIME、import 路径、域名、JSON pointer）、成对括号与 JSON 转义反斜杠的处理与遮蔽侧一致；单个节点只计一次，节点的多份文本视图不会重复计数。
 
 ## 重解析与重分析入口
 

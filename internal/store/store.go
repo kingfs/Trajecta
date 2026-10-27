@@ -1791,6 +1791,16 @@ func (s *Store) execTx(tx *sql.Tx, query string, args ...any) (sql.Result, error
 	return tx.Exec(s.db.rebind(query), args...)
 }
 
+// queryRowTx is execTx's read counterpart: a *sql.Tx from Begin does not carry
+// the "?" to "$n" rebinding, so a statement with placeholders run directly on
+// the transaction fails to parse on Postgres.
+func (s *Store) queryRowTx(tx *sql.Tx, query string, args ...any) *sql.Row {
+	if s == nil || s.db == nil {
+		return tx.QueryRow(query, args...)
+	}
+	return tx.QueryRow(s.db.rebind(query), args...)
+}
+
 func (s *Store) hasColumn(table string, column string) (bool, error) {
 	typ, err := s.columnType(table, column)
 	if err != nil {

@@ -317,6 +317,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr29
 
 				}
+			case 43:
+				{
+					goto _ctr29
+
+				}
 			case 46:
 				{
 					goto _ctr30
@@ -325,11 +330,6 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 			case 47:
 				{
 					goto _ctr31
-
-				}
-			case 59:
-				{
-					goto _ctr29
 
 				}
 			case 61:
@@ -369,20 +369,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 65 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr29
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr29
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _ctr32
+
+					}
+
+				} else if (data[p]) >= 65 {
 					goto _ctr32
 
 				}
 
 			} else {
-				goto _ctr32
+				goto _ctr29
 
 			}
 			goto _ctr28
@@ -417,14 +429,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -444,14 +456,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -484,14 +508,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -511,14 +535,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -551,7 +587,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st25
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st25
 
@@ -573,20 +609,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st25
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st25
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st25
 
 				}
@@ -619,14 +667,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st25
 
 				}
+			case 43:
+				{
+					goto _st25
+
+				}
 			case 47:
 				{
 					goto _st26
-
-				}
-			case 59:
-				{
-					goto _st25
 
 				}
 			case 61:
@@ -646,14 +694,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st25
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st25
 
 				}
@@ -686,7 +746,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st25
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st25
 
@@ -708,20 +768,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st25
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st25
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st25
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st25
 
 				}
@@ -762,6 +834,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 46:
 				{
 					goto _st2
@@ -770,11 +847,6 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 			case 47:
 				{
 					goto _st28
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -794,14 +866,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -834,14 +918,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st28
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -861,14 +945,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -901,7 +997,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st29
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st29
 
@@ -923,20 +1019,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st29
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st29
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st29
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st29
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st29
 
 				}
@@ -969,14 +1077,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st29
 
 				}
+			case 43:
+				{
+					goto _st29
+
+				}
 			case 47:
 				{
 					goto _st28
-
-				}
-			case 59:
-				{
-					goto _st29
 
 				}
 			case 61:
@@ -996,14 +1104,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st29
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st29
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st29
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st29
 
 				}
@@ -1050,14 +1170,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st31
 
 				}
+			case 43:
+				{
+					goto _st31
+
+				}
 			case 47:
 				{
 					goto _st3
-
-				}
-			case 59:
-				{
-					goto _st31
 
 				}
 			case 61:
@@ -1082,14 +1202,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st31
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st31
 
 				}
@@ -1122,14 +1254,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st31
 
 				}
+			case 43:
+				{
+					goto _st31
+
+				}
 			case 47:
 				{
 					goto _st32
-
-				}
-			case 59:
-				{
-					goto _st31
 
 				}
 			case 61:
@@ -1149,14 +1281,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st31
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st31
 
 				}
@@ -1189,7 +1333,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st31
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st31
 
@@ -1211,20 +1355,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st31
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st31
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st31
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st31
 
 				}
@@ -1257,14 +1413,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st4
 
 				}
+			case 43:
+				{
+					goto _st4
+
+				}
 			case 47:
 				{
 					goto _st7
-
-				}
-			case 59:
-				{
-					goto _st4
 
 				}
 			case 61:
@@ -1289,14 +1445,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st4
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st4
 
 				}
@@ -1329,14 +1497,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st4
 
 				}
+			case 43:
+				{
+					goto _st4
+
+				}
 			case 47:
 				{
 					goto _st5
-
-				}
-			case 59:
-				{
-					goto _st4
 
 				}
 			case 61:
@@ -1361,14 +1529,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st4
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st4
 
 				}
@@ -1401,14 +1581,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr9
 
 				}
+			case 43:
+				{
+					goto _ctr9
+
+				}
 			case 47:
 				{
 					goto _st6
-
-				}
-			case 59:
-				{
-					goto _ctr9
 
 				}
 			case 61:
@@ -1433,14 +1613,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr9
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _ctr9
 
 				}
@@ -1487,14 +1679,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr9
 
 				}
+			case 43:
+				{
+					goto _ctr9
+
+				}
 			case 47:
 				{
 					goto _st5
-
-				}
-			case 59:
-				{
-					goto _ctr9
 
 				}
 			case 61:
@@ -1519,14 +1711,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr9
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _ctr9
 
 				}
@@ -1559,7 +1763,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr9
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _ctr9
 
@@ -1581,20 +1785,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr9
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _ctr9
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _ctr9
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _ctr9
 
 				}
@@ -1658,7 +1874,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st4
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st4
 
@@ -1680,20 +1896,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st4
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st4
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st4
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st4
 
 				}
@@ -1740,6 +1968,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
@@ -1767,14 +2000,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 59 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -1838,14 +2083,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr13
 
 				}
+			case 43:
+				{
+					goto _ctr13
+
+				}
 			case 47:
 				{
 					goto _st11
-
-				}
-			case 59:
-				{
-					goto _ctr13
 
 				}
 			case 61:
@@ -1870,14 +2115,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr13
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _ctr13
 
 				}
@@ -1924,14 +2181,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr13
 
 				}
+			case 43:
+				{
+					goto _ctr13
+
+				}
 			case 47:
 				{
 					goto _st10
-
-				}
-			case 59:
-				{
-					goto _ctr13
 
 				}
 			case 61:
@@ -1956,14 +2213,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr13
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _ctr13
 
 				}
@@ -1996,7 +2265,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _ctr13
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _ctr13
 
@@ -2018,20 +2287,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _ctr13
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _ctr13
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _ctr13
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _ctr13
 
 				}
@@ -2123,6 +2404,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
@@ -2155,14 +2441,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 59 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -2195,14 +2493,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -2227,14 +2525,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -2267,14 +2577,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -2299,14 +2609,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -2335,6 +2657,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 		} else {
 			switch data[p] {
 			case 33:
+				{
+					goto _st0
+
+				}
+			case 43:
 				{
 					goto _st0
 
@@ -2371,14 +2698,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 59 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -2980,6 +3319,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
@@ -3007,14 +3351,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 59 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -3061,6 +3417,11 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st1
@@ -3093,14 +3454,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 59 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -3141,14 +3514,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st0
 
 				}
+			case 43:
+				{
+					goto _st0
+
+				}
 			case 47:
 				{
 					goto _st43
-
-				}
-			case 59:
-				{
-					goto _st0
 
 				}
 			case 61:
@@ -3168,14 +3541,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st0
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st0
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st0
 
 				}
@@ -3208,7 +3593,7 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st44
 
 				}
-			case 59:
+			case 43:
 				{
 					goto _st44
 
@@ -3230,20 +3615,32 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 48 {
-				if 36 <= (data[p]) && (data[p]) <= 46 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st44
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st44
 
 				}
 
-			} else if (data[p]) > 57 {
-				if (data[p]) > 90 {
+			} else if (data[p]) > 46 {
+				if (data[p]) < 64 {
+					if 48 <= (data[p]) && (data[p]) <= 57 {
+						goto _st44
+
+					}
+
+				} else if (data[p]) > 90 {
 					if 97 <= (data[p]) && (data[p]) <= 122 {
 						goto _st44
 
 					}
 
-				} else if (data[p]) >= 64 {
+				} else {
 					goto _st44
 
 				}
@@ -3276,14 +3673,14 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 					goto _st44
 
 				}
+			case 43:
+				{
+					goto _st44
+
+				}
 			case 47:
 				{
 					goto _st43
-
-				}
-			case 59:
-				{
-					goto _st44
 
 				}
 			case 61:
@@ -3303,14 +3700,26 @@ func scanIndicatorDFA(data []byte, sink *indicatorCollector) {
 				}
 
 			}
-			if (data[p]) < 64 {
-				if 36 <= (data[p]) && (data[p]) <= 57 {
+			if (data[p]) < 45 {
+				if (data[p]) > 38 {
+					if 40 <= (data[p]) && (data[p]) <= 41 {
+						goto _st44
+
+					}
+
+				} else if (data[p]) >= 36 {
 					goto _st44
 
 				}
 
-			} else if (data[p]) > 90 {
-				if 97 <= (data[p]) && (data[p]) <= 122 {
+			} else if (data[p]) > 57 {
+				if (data[p]) > 90 {
+					if 97 <= (data[p]) && (data[p]) <= 122 {
+						goto _st44
+
+					}
+
+				} else if (data[p]) >= 64 {
 					goto _st44
 
 				}
