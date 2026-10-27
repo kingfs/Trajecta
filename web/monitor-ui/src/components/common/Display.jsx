@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useI18n } from "../../lib/i18n";
-import { findHighlight } from "../../lib/highlight";
+import { findHighlight, findMatches } from "../../lib/highlight";
 import { formatRawNumber } from "../../lib/monitor";
 
 /**
@@ -60,7 +60,7 @@ export function CodeBlock({ value }) {
   return <pre className="code-block">{value}</pre>;
 }
 
-export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10, forceExpanded = false, highlight = "" }) {
+export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10, forceExpanded = false, highlight = "", find = "" }) {
   const [expanded, setExpanded] = useState(false);
   // `forceExpanded` is how a caller that jumped to this content - the trace
   // page's conversation, landing on a finding's anchor - shows it open without
@@ -77,13 +77,15 @@ export function MessageContent({ value, format, renderMarkdown, className = "", 
   if (renderMarkdown && format === "markdown") {
     return (
       <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
-        <MarkdownContent value={value} className={bodyClassName} highlight={highlight} />
+        <MarkdownContent value={value} className={bodyClassName} highlight={highlight} find={find} />
       </ExpandableContent>
     );
   }
   return (
     <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
-      <div className={`${bodyClassName} prose-block`.trim()}>{highlightText(value, highlight)}</div>
+      <div className={`${bodyClassName} prose-block`.trim()}>
+        {find ? findText(value, find) : highlightText(value, highlight)}
+      </div>
     </ExpandableContent>
   );
 }
@@ -97,6 +99,26 @@ export function MessageContent({ value, format, renderMarkdown, className = "", 
  * needle. A value that no longer occurs renders the text unchanged - the jump
  * still landed on the step, which is the part that matters.
  */
+/*
+ * The conversation finder marks every occurrence of the typed query. It is a
+ * separate renderer from the audited-value highlight above: browser find is a
+ * case-insensitive substring search and has no boundary rule, while a locator
+ * marks one exact value and refuses to mark a prefix of a longer path.
+ */
+function findText(value, query) {
+  const found = findMatches(value, query);
+  if (!found) {
+    return String(value || "");
+  }
+  return found.segments.map((segment, index) =>
+    segment.hit ? (
+      <mark className="content-find" key={`find-${index}`}>{segment.text}</mark>
+    ) : (
+      segment.text
+    ),
+  );
+}
+
 function highlightText(value, needle) {
   const text = String(value || "");
   const found = findHighlight(text, needle);
@@ -144,10 +166,10 @@ function shouldCollapseContent(value, collapsedLines) {
  */
 const MarkdownBlock = React.lazy(() => import("./MarkdownBlock"));
 
-function MarkdownContent({ value, className = "", highlight = "" }) {
+function MarkdownContent({ value, className = "", highlight = "", find = "" }) {
   return (
     <React.Suspense fallback={<div className={`${className} prose-block`.trim()}>{value}</div>}>
-      <MarkdownBlock value={value} className={className} highlight={highlight} />
+      <MarkdownBlock value={value} className={className} highlight={highlight} find={find} />
     </React.Suspense>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Card } from "../ui/card";
@@ -101,7 +101,7 @@ function previewText(text = "") {
   return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
 }
 
-function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, highlight = "", t }) {
+function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, highlight = "", find = "", t }) {
   const long = text.length > 900 || text.split(/\r\n|\r|\n/).length > 12;
   return (
     <div className="conversation-block" id={bodyID}>
@@ -113,6 +113,7 @@ function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, highl
         collapsedLines={12}
         forceExpanded={open}
         highlight={highlight}
+        find={find}
       />
       {long ? (
         <button type="button" className="conversation-more" onClick={onToggle}>
@@ -124,7 +125,7 @@ function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, highl
   );
 }
 
-function ConversationResult({ result, open, onToggle, renderMarkdown, highlight = "", t }) {
+function ConversationResult({ result, open, onToggle, renderMarkdown, highlight = "", find = "", t }) {
   const failed = resultFailed(result);
   const { text, structured } = toolOutputOf(result);
   const raw = result.raw && typeof result.raw === "object" ? result.raw : {};
@@ -152,6 +153,7 @@ function ConversationResult({ result, open, onToggle, renderMarkdown, highlight 
             open={open}
             onToggle={onToggle}
             highlight={highlight}
+            find={find}
             t={t}
           />
         )
@@ -165,7 +167,7 @@ function ConversationResult({ result, open, onToggle, renderMarkdown, highlight 
 // A tool call that arrived inside a message - every OpenAI chat trace records
 // one this way - drawn as the action it is: what ran, with what arguments, and
 // the result that came back.
-function ConversationCall({ call, open, onToggle, renderMarkdown, highlight = "", t }) {
+function ConversationCall({ call, open, onToggle, renderMarkdown, highlight = "", find = "", t }) {
   const failed = call.failed || (call.results || []).some(resultFailed);
   const args = toolArgumentsOf(call);
   const raw = call.raw && typeof call.raw === "object" ? call.raw : {};
@@ -190,6 +192,7 @@ function ConversationCall({ call, open, onToggle, renderMarkdown, highlight = ""
           open={open}
           onToggle={() => onToggle(call.id)}
           highlight={highlight}
+          find={find}
           t={t}
         />
       ) : (
@@ -199,18 +202,18 @@ function ConversationCall({ call, open, onToggle, renderMarkdown, highlight = ""
         part.text ? (
           <div className="conversation-part" key={part.id}>
             <span className="conversation-anchor" id={part.id} aria-hidden="true" />
-            <TextBlock text={part.text} format="text" renderMarkdown={renderMarkdown} open={open} onToggle={() => onToggle(part.id)} highlight={highlight} t={t} />
+            <TextBlock text={part.text} format="text" renderMarkdown={renderMarkdown} open={open} onToggle={() => onToggle(part.id)} highlight={highlight} find={find} t={t} />
           </div>
         ) : null,
       )}
       {(call.results || []).map((result) => (
-        <ConversationResult key={result.id} result={result} open={open} onToggle={() => onToggle(result.id)} renderMarkdown={renderMarkdown} highlight={highlight} t={t} />
+        <ConversationResult key={result.id} result={result} open={open} onToggle={() => onToggle(result.id)} renderMarkdown={renderMarkdown} highlight={highlight} find={find} t={t} />
       ))}
     </div>
   );
 }
 
-function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, highlight = "", registerRef, t }) {
+function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, highlight = "", find = "", registerRef, t }) {
   const failed = step.failed || step.results.some(resultFailed);
   const kind = step.kind;
   const isCall = CALL_KINDS.has(kind);
@@ -295,6 +298,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
                 open={open}
                 onToggle={() => onToggleOpen(step.id)}
                 highlight={highlight}
+                find={find}
                 t={t}
               />
             ) : (
@@ -309,6 +313,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             open={open}
             onToggle={() => onToggleOpen(step.id)}
             highlight={highlight}
+            find={find}
             t={t}
           />
         ) : step.calls.length ? null : (
@@ -325,6 +330,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             onToggle={onToggleOpen}
             renderMarkdown={renderMarkdown}
             highlight={highlight}
+            find={find}
             t={t}
           />
         ))}
@@ -344,6 +350,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
                 open={open}
                 onToggle={() => onToggleOpen(part.id)}
                 highlight={highlight}
+                find={find}
                 t={t}
               />
             ) : part.raw ? (
@@ -360,6 +367,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             onToggle={() => onToggleOpen(result.id)}
             renderMarkdown={renderMarkdown}
             highlight={highlight}
+            find={find}
             t={t}
           />
         ))}
@@ -378,8 +386,17 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
   const [overrides, setOverrides] = useState({});
   const [landedInput, setLandedInput] = useState("");
   const [railTicks, setRailTicks] = useState([]);
+  const [matchCount, setMatchCount] = useState(0);
+  const [activeMatch, setActiveMatch] = useState(0);
+  const [findTicks, setFindTicks] = useState([]);
   const scrolled = useRef("");
   const listRef = useRef(null);
+  const findInputRef = useRef(null);
+  const findMarksRef = useRef([]);
+  const activeMatchRef = useRef(0);
+  const appliedQueryRef = useRef("");
+  const collectFrameRef = useRef(0);
+  const collectRef = useRef(() => {});
   const stepRefs = useRef(new Map());
   const landed = useRef(false);
   const target = useMemo(() => findConversationTarget(steps, anchor), [steps, anchor]);
@@ -390,6 +407,22 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
     () => steps.map((step, index) => ({ step, ordinal: index + 1 })).filter(({ step }) => isInputStep(step)),
     [steps],
   );
+  // A find must not hide the conversation (that is a filter, not a browser
+  // find), but a match inside a clamped step is invisible until the step opens.
+  // The steps whose text contains the query are opened automatically.
+  const findOpenKeys = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const keys = new Set();
+    if (!needle) {
+      return keys;
+    }
+    for (const step of steps) {
+      if (stepHaystack(step).includes(needle)) {
+        keys.add(stepKey(step));
+      }
+    }
+    return keys;
+  }, [steps, query]);
   // A reader who scrolls while the anchor is still settling keeps their place:
   // the repeats above only belong to the reader who has not moved.
   // A reader who scrolls - or who clicks anything, including the rail - while a
@@ -528,16 +561,115 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
     };
   }, [inputSteps, query, failuresOnly]);
 
+  // The finder marks every rendered occurrence, so the count and the rail ticks
+  // are read from the DOM after React and the lazy Markdown chunk settle. The
+  // observer covers a Markdown chunk arriving after the first frame.
+  collectRef.current = () => {
+    const list = listRef.current;
+    if (!list) {
+      findMarksRef.current = [];
+      setMatchCount(0);
+      setFindTicks([]);
+      return;
+    }
+    const previousCount = findMarksRef.current.length;
+    const marks = Array.from(list.querySelectorAll("mark.content-find"));
+    findMarksRef.current = marks;
+    setMatchCount((current) => (current === marks.length ? current : marks.length));
+    const queryNow = query.trim();
+    const changed = appliedQueryRef.current !== queryNow;
+    appliedQueryRef.current = queryNow;
+    let index = activeMatchRef.current;
+    if (changed) {
+      index = 0;
+    }
+    if (!marks.length) {
+      index = 0;
+    } else if (index > marks.length - 1) {
+      index = marks.length - 1;
+    }
+    activeMatchRef.current = index;
+    setActiveMatch((current) => (current === index ? current : index));
+    marks.forEach((mark, position) => {
+      const active = position === index;
+      mark.classList.toggle("content-find-active", active);
+      if (active) {
+        mark.setAttribute("aria-current", "true");
+      } else {
+        mark.removeAttribute("aria-current");
+      }
+    });
+    const listTop = list.getBoundingClientRect().top;
+    const height = list.offsetHeight || 1;
+    const ticks = marks.slice(0, 200).map((mark, position) => {
+      const rect = mark.getBoundingClientRect();
+      const percent = Math.min(100, Math.max(0, ((rect.top - listTop) / height) * 100));
+      return { index: position, percent: Math.round(percent * 10) / 10 };
+    });
+    setFindTicks((current) => (sameFindTicks(current, ticks) ? current : ticks));
+    // Scroll when the query changes, and when the first marks arrive after a
+    // lazy Markdown chunk: the fallback text rendered before that chunk has no
+    // marks, so the first collect saw none.
+    if ((changed || previousCount === 0) && marks.length) {
+      marks[index].scrollIntoView({ block: "center", behavior: changed ? "auto" : "smooth" });
+    }
+  };
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => collectRef.current());
+    return () => window.cancelAnimationFrame(frame);
+  }, [query, renderMarkdown, failuresOnly, openAll, overrides, steps, findOpenKeys]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) {
+      return undefined;
+    }
+    const observer = new MutationObserver(() => {
+      if (collectFrameRef.current) {
+        return;
+      }
+      collectFrameRef.current = window.requestAnimationFrame(() => {
+        collectFrameRef.current = 0;
+        collectRef.current();
+      });
+    });
+    observer.observe(list, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      if (collectFrameRef.current) {
+        window.cancelAnimationFrame(collectFrameRef.current);
+      }
+    };
+  }, [steps, failuresOnly]);
+
+  // Cmd/Ctrl+F is the shortcut a reader already knows for "find on this page";
+  // when the 会话 tab is open it focuses the conversation finder instead. A
+  // modal owns the keyboard while it is open, so the browser keeps its own
+  // find there.
+  useEffect(() => {
+    const focusFind = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || String(event.key).toLowerCase() !== "f") {
+        return;
+      }
+      if (document.querySelector('[role="dialog"]')) {
+        return;
+      }
+      event.preventDefault();
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    };
+    window.addEventListener("keydown", focusFind);
+    return () => window.removeEventListener("keydown", focusFind);
+  }, []);
+
   if (!steps.length) {
     return fallback;
   }
 
-  const needle = query.trim().toLowerCase();
+  const findQuery = query.trim();
   const visible = steps.filter((step) => {
     if (failuresOnly && !(step.failed || step.results.some(resultFailed))) {
-      return false;
-    }
-    if (needle && !stepHaystack(step).includes(needle)) {
       return false;
     }
     return true;
@@ -559,7 +691,47 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
   const jumpBottom = () => {
     stepRefs.current.get(stepKey(steps[steps.length - 1]))?.scrollIntoView({ block: "end", behavior: "smooth" });
   };
-  const railVisible = steps.length > 1;
+  const jumpToMatch = (targetIndex) => {
+    const marks = findMarksRef.current;
+    if (!marks.length) {
+      return;
+    }
+    const index = ((targetIndex % marks.length) + marks.length) % marks.length;
+    activeMatchRef.current = index;
+    setActiveMatch(index);
+    marks.forEach((mark, position) => {
+      const active = position === index;
+      mark.classList.toggle("content-find-active", active);
+      if (active) {
+        mark.setAttribute("aria-current", "true");
+      } else {
+        mark.removeAttribute("aria-current");
+      }
+    });
+    marks[index].scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  const stepMatch = (delta) => {
+    jumpToMatch(activeMatchRef.current + delta);
+  };
+  const clearFind = () => {
+    setQuery("");
+    activeMatchRef.current = 0;
+    setActiveMatch(0);
+    setMatchCount(0);
+    findMarksRef.current = [];
+    setFindTicks([]);
+    findInputRef.current?.focus();
+  };
+  const onFindKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      stepMatch(event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      clearFind();
+    }
+  };
+  const railVisible = steps.length > 1 || findTicks.length > 0;
 
   return (
     // The rail is a grid column of its own rather than a floating element over
@@ -570,13 +742,52 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
       <Card as="section" className="conversation-panel">
         <div className="conversation-toolbar">
           <Input
+            ref={findInputRef}
             type="search"
             className="conversation-search"
             value={query}
             placeholder={t("conversation.search")}
             aria-label={t("conversation.search")}
+            title={t("conversation.findShortcut")}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={onFindKeyDown}
           />
+          {findQuery ? (
+            <div className="conversation-find-nav">
+              <span className="conversation-find-count mono" aria-live="polite">
+                {matchCount
+                  ? t("conversation.findCount", { index: activeMatch + 1, total: matchCount })
+                  : t("conversation.findNone")}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t("conversation.findPrevious")}
+                title={t("conversation.findPrevious")}
+                onClick={() => stepMatch(-1)}
+              >
+                <ChevronUp size={14} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t("conversation.findNext")}
+                title={t("conversation.findNext")}
+                onClick={() => stepMatch(1)}
+              >
+                <ChevronDown size={14} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t("conversation.findClear")}
+                title={t("conversation.findClear")}
+                onClick={clearFind}
+              >
+                <X size={14} aria-hidden="true" />
+              </Button>
+            </div>
+          ) : null}
           <label className="wrap-toggle">
             <input type="checkbox" checked={failuresOnly} onChange={(event) => setFailuresOnly(event.target.checked)} />
             {t("conversation.failuresOnly")}
@@ -636,7 +847,7 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
                 // selected after the reader has moved on.
                 // With a matched value the exact bytes carry the location; the
                 // whole-card ring would read as if the entire message matched.
-                focused={step.id === target && !highlight}
+                focused={step.id === target && !highlight && !findQuery}
                 // A step the URL points at opens: a clamped block would hide the
                 // sentence the finding was about. The step the page landed on by
                 // default opens too, because the newest input is what the reader
@@ -645,12 +856,14 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
                   isOpen(step.id, false) ||
                   step.id === target ||
                   stepKey(step) === landedInput ||
-                  openedAnchors.has(step.id)
+                  openedAnchors.has(step.id) ||
+                  findOpenKeys.has(stepKey(step))
                 }
                 onToggleOpen={toggleOpen}
                 onSelectAnchor={onSelectAnchor}
                 renderMarkdown={renderMarkdown}
                 highlight={highlight}
+                find={findQuery}
                 registerRef={registerStepRef(stepKey(step))}
                 t={t}
               />
@@ -677,6 +890,17 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
                 onClick={() => jumpTo(tick.key)}
               />
             ))}
+            {findTicks.map((tick) => (
+              <button
+                key={`find-${tick.index}`}
+                type="button"
+                className={`conversation-rail-hit${tick.index === activeMatch ? " conversation-rail-hit-active" : ""}`}
+                style={{ top: `${tick.percent}%` }}
+                title={t("conversation.findTick", { index: tick.index + 1 })}
+                aria-label={t("conversation.findTick", { index: tick.index + 1 })}
+                onClick={() => jumpToMatch(tick.index)}
+              />
+            ))}
           </div>
           <button type="button" className="conversation-rail-arrow" onClick={jumpBottom} title={t("conversation.jumpBottom")} aria-label={t("conversation.jumpBottom")}>
             <ChevronDown size={14} aria-hidden="true" />
@@ -685,4 +909,12 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
       ) : null}
     </div>
   );
+}
+
+
+function sameFindTicks(left = [], right = []) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((tick, index) => tick.index === right[index].index && tick.percent === right[index].percent);
 }

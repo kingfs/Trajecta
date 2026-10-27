@@ -83,3 +83,67 @@ export function findHighlight(text, value) {
   }
   return null;
 }
+
+
+// The conversation finder marks every occurrence of a typed query, not one
+// exact audited value. Browser find semantics are the right model: substring,
+// case-insensitive, all matches, original casing preserved in the mark. A
+// pathological query in a huge output is capped per block; the count in the
+// toolbar comes from the rendered marks, so a truncated block under-reports
+// rather than freezing the page.
+export const FIND_MATCH_LIMIT = 200;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * findMatches splits text into alternating plain and matched segments.
+ *
+ * @param {string} text
+ * @param {string} query
+ * @returns {{segments: {text: string, hit?: boolean}[], count: number, truncated: boolean} | null}
+ */
+export function findMatches(text, query) {
+  const source = String(text || "");
+  const needle = String(query || "").trim();
+  if (!source || !needle) {
+    return null;
+  }
+  let pattern;
+  try {
+    pattern = new RegExp(escapeRegExp(needle), "gi");
+  } catch {
+    return null;
+  }
+  const segments = [];
+  let last = 0;
+  let count = 0;
+  let truncated = false;
+  let match = pattern.exec(source);
+  while (match) {
+    if (!match[0]) {
+      pattern.lastIndex += 1;
+      match = pattern.exec(source);
+      continue;
+    }
+    if (count >= FIND_MATCH_LIMIT) {
+      truncated = true;
+      break;
+    }
+    if (match.index > last) {
+      segments.push({ text: source.slice(last, match.index) });
+    }
+    segments.push({ text: match[0], hit: true });
+    last = match.index + match[0].length;
+    count += 1;
+    match = pattern.exec(source);
+  }
+  if (!count) {
+    return null;
+  }
+  if (last < source.length) {
+    segments.push({ text: source.slice(last) });
+  }
+  return { segments, count, truncated };
+}

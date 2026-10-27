@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { findHighlight, highlightNeedles } from "../src/lib/highlight.js";
+import { FIND_MATCH_LIMIT, findHighlight, findMatches, highlightNeedles } from "../src/lib/highlight.js";
 
 /*
  * The resource locate action marks the bytes it jumped to. The index normalizes
@@ -44,5 +44,36 @@ describe("findHighlight", () => {
   it("refuses a value repeated so often it is a pattern", () => {
     const text = Array.from({ length: 20 }, () => "/tmp/x").join(" ");
     assert.equal(findHighlight(text, "/tmp/x"), null);
+  });
+});
+
+describe("findMatches", () => {
+  it("matches case-insensitively and keeps the original casing in the mark", () => {
+    const found = findMatches("Line one, line two", "LINE");
+    assert.deepEqual(found.segments, [
+      { text: "Line", hit: true },
+      { text: " one, " },
+      { text: "line", hit: true },
+      { text: " two" },
+    ]);
+    assert.equal(found.count, 2);
+  });
+
+  it("treats regular-expression punctuation as text", () => {
+    const found = findMatches("open a.b then [x] then a+b", "a.b");
+    assert.equal(found.count, 1);
+    assert.equal(found.segments.filter((segment) => segment.hit)[0].text, "a.b");
+  });
+
+  it("returns null when there is nothing to mark", () => {
+    assert.equal(findMatches("nothing here", "missing"), null);
+    assert.equal(findMatches("", "x"), null);
+    assert.equal(findMatches("text", "  "), null);
+  });
+
+  it("caps a pathological block rather than freezing the page", () => {
+    const found = findMatches("a".repeat(250), "a");
+    assert.equal(found.count, FIND_MATCH_LIMIT);
+    assert.equal(found.truncated, true);
   });
 });

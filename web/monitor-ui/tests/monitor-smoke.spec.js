@@ -779,10 +779,14 @@ test("the conversation renders the parsed steps instead of the flat messages", a
   await expect(page.locator("#node_call .conversation-index")).toHaveText("#3");
   await expect(page.locator("#node_call_failed .conversation-index")).toHaveText("#6");
 
-  // The toolbar narrows the list rather than the page.
-  await page.getByPlaceholder("Search messages, arguments and output").fill("permission");
-  await expect(page.locator("[data-conversation-step]")).toHaveCount(1);
-  await page.getByPlaceholder("Search messages, arguments and output").fill("");
+  // The toolbar finds rather than filters: every step stays on screen, the hit
+  // is marked and counted, and the only filter left is "Failed only".
+  const finder = page.getByPlaceholder("Find in conversation");
+  await finder.fill("permission");
+  await expect(page.locator("[data-conversation-step]")).toHaveCount(6);
+  await expect(page.locator("mark.content-find")).toHaveCount(1);
+  await expect(page.locator(".conversation-find-count")).toHaveText("1 / 1");
+  await finder.fill("");
   await page.getByRole("checkbox", { name: "Failed only" }).check();
   await expect(page.locator("[data-conversation-step]")).toHaveCount(1);
 });
@@ -1030,6 +1034,46 @@ test("the tool calls tab filters a long catalog", async ({ page }) => {
 
   await filter.fill("");
   await expect(rows).toHaveCount(6);
+});
+
+// The conversation finder behaves like the browser's find: it marks every
+// occurrence, shows the count, steps through them, and draws their positions on
+// the rail. It does not filter the conversation away.
+test("the conversation finder counts and steps through matches", async ({ page }) => {
+  await page.goto("/traces/trace-parsed");
+  const find = page.getByRole("searchbox", { name: "Find in conversation" });
+  await expect(find).toBeVisible();
+
+  await page.keyboard.press("Control+f");
+  await expect(find).toBeFocused();
+  await find.fill("line");
+
+  await expect(page.locator("mark.content-find")).toHaveCount(16);
+  await expect(page.locator(".conversation-find-count")).toHaveText("1 / 16");
+  await expect(page.locator("mark.content-find-active")).toHaveCount(1);
+  expect(await page.locator(".conversation-rail-hit").count()).toBeGreaterThan(0);
+  // The first hit is brought into view, not merely marked in the DOM.
+  await expect
+    .poll(async () => {
+      const box = await page.locator("mark.content-find-active").boundingBox();
+      return box ? box.y > 0 && box.y < page.viewportSize().height : false;
+    }, { message: "the first find hit settles inside the viewport" })
+    .toBe(true);
+
+  await find.press("Enter");
+  await expect(page.locator(".conversation-find-count")).toHaveText("2 / 16");
+  await expect(page.locator("mark.content-find-active")).toHaveCount(1);
+
+  await find.press("Shift+Enter");
+  await expect(page.locator(".conversation-find-count")).toHaveText("1 / 16");
+
+  await find.press("Escape");
+  await expect(page.locator("mark.content-find")).toHaveCount(0);
+  await expect(page.locator(".conversation-find-count")).toHaveCount(0);
+
+  await find.fill("not-in-this-conversation");
+  await expect(page.locator(".conversation-find-count")).toHaveText("No matches");
+  await expect(page.locator("mark.content-find")).toHaveCount(0);
 });
 
 // A finding names a node with an evidence path, which is precise and unreadable.

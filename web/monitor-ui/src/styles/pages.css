@@ -340,6 +340,37 @@
   max-width: 24rem;
 }
 
+.conversation-find-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.conversation-find-count {
+  min-width: 5.5ch;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* A find hit is a substring the reader typed, not the one audited value the
+   locator marks. It keeps the browser's familiar yellow-ish read, with the
+   current hit outlined so next/previous has a visible target. */
+.content-find {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warning-solid) 30%, transparent);
+  color: inherit;
+}
+
+.content-find-active {
+  background: color-mix(in srgb, var(--warning-solid) 58%, transparent);
+  outline: 2px solid var(--warning-solid);
+  outline-offset: 1px;
+}
+
 .conversation-count {
   margin-left: auto;
   color: var(--text-tertiary);
@@ -436,6 +467,33 @@
 .conversation-rail-tick:focus-visible {
   background: var(--accent-solid);
   transform: scaleX(1.5);
+}
+
+/* One dot per find hit, on top of the turn ticks. The strip is the native
+   scrollbar's stand-in: it answers "how many hits and where" and each dot is a
+   jump target. Many hits overlap at this scale; the count in the toolbar stays
+   exact. */
+.conversation-rail-hit {
+  position: absolute;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--warning-solid);
+  box-shadow: 0 0 0 2px var(--surface-1);
+  cursor: pointer;
+  z-index: 1;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.conversation-rail-hit:hover,
+.conversation-rail-hit:focus-visible,
+.conversation-rail-hit-active {
+  background: var(--accent-solid);
+  transform: scale(1.6);
 }
 
 /* The two toolbar jumps stand in for the rail's arrows, so exactly one of the

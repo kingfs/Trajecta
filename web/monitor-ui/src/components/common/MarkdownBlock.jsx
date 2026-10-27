@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { findHighlight } from "../../lib/highlight";
+import { findHighlight, findMatches } from "../../lib/highlight";
 
 /*
  * Markdown rendering, on react-markdown + remark-gfm.
@@ -53,6 +53,57 @@ function rehypeHighlight(options = {}) {
   };
 }
 
+/*
+ * The finder's Markdown pass. It uses the same text-node strategy as the
+ * audited-value highlight, but matches case-insensitively and marks every
+ * occurrence, which is what a browser find bar does.
+ */
+function rehypeFind(options = {}) {
+  const query = options.value || "";
+  return (tree) => {
+    const visit = (node) => {
+      if (!node || !Array.isArray(node.children)) {
+        return;
+      }
+      const next = [];
+      for (const child of node.children) {
+        if (child.type === "text") {
+          next.push(...findTextNodes(child, query));
+        } else {
+          visit(child);
+          next.push(child);
+        }
+      }
+      node.children = next;
+    };
+    visit(tree);
+  };
+}
+
+function findTextNodes(node, query) {
+  const found = findMatches(node.value, query);
+  if (!found) {
+    return [node];
+  }
+  const out = [];
+  for (const segment of found.segments) {
+    if (!segment.text) {
+      continue;
+    }
+    out.push(
+      segment.hit
+        ? {
+            type: "element",
+            tagName: "mark",
+            properties: { className: ["content-find"] },
+            children: [{ type: "text", value: segment.text }],
+          }
+        : { type: "text", value: segment.text },
+    );
+  }
+  return out;
+}
+
 function highlightTextNode(node, value) {
   const found = findHighlight(node.value, value);
   if (!found) {
@@ -80,8 +131,12 @@ const COMPONENTS = {
   a: ({ node, ...props }) => <a target="_blank" rel="noreferrer" {...props} />,
 };
 
-export default function MarkdownBlock({ value = "", className = "", highlight = "" }) {
-  const rehypePlugins = highlight ? [[rehypeHighlight, { value: highlight }]] : [];
+export default function MarkdownBlock({ value = "", className = "", highlight = "", find = "" }) {
+  const rehypePlugins = find
+    ? [[rehypeFind, { value: find }]]
+    : highlight
+      ? [[rehypeHighlight, { value: highlight }]]
+      : [];
   return (
     <div className={`${className} prose-block rendered-markdown`.trim()}>
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={COMPONENTS}>
