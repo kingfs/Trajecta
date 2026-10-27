@@ -101,7 +101,7 @@ function previewText(text = "") {
   return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
 }
 
-function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, t }) {
+function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, highlight = "", t }) {
   const long = text.length > 900 || text.split(/\r\n|\r|\n/).length > 12;
   return (
     <div className="conversation-block" id={bodyID}>
@@ -112,6 +112,7 @@ function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, t }) 
         className="conversation-text"
         collapsedLines={12}
         forceExpanded={open}
+        highlight={highlight}
       />
       {long ? (
         <button type="button" className="conversation-more" onClick={onToggle}>
@@ -123,7 +124,7 @@ function TextBlock({ bodyID, text, format, renderMarkdown, open, onToggle, t }) 
   );
 }
 
-function ConversationResult({ result, open, onToggle, renderMarkdown, t }) {
+function ConversationResult({ result, open, onToggle, renderMarkdown, highlight = "", t }) {
   const failed = resultFailed(result);
   const { text, structured } = toolOutputOf(result);
   const raw = result.raw && typeof result.raw === "object" ? result.raw : {};
@@ -150,6 +151,7 @@ function ConversationResult({ result, open, onToggle, renderMarkdown, t }) {
             renderMarkdown={false}
             open={open}
             onToggle={onToggle}
+            highlight={highlight}
             t={t}
           />
         )
@@ -163,7 +165,7 @@ function ConversationResult({ result, open, onToggle, renderMarkdown, t }) {
 // A tool call that arrived inside a message - every OpenAI chat trace records
 // one this way - drawn as the action it is: what ran, with what arguments, and
 // the result that came back.
-function ConversationCall({ call, open, onToggle, renderMarkdown, t }) {
+function ConversationCall({ call, open, onToggle, renderMarkdown, highlight = "", t }) {
   const failed = call.failed || (call.results || []).some(resultFailed);
   const args = toolArgumentsOf(call);
   const raw = call.raw && typeof call.raw === "object" ? call.raw : {};
@@ -187,6 +189,7 @@ function ConversationCall({ call, open, onToggle, renderMarkdown, t }) {
           renderMarkdown={false}
           open={open}
           onToggle={() => onToggle(call.id)}
+          highlight={highlight}
           t={t}
         />
       ) : (
@@ -196,18 +199,18 @@ function ConversationCall({ call, open, onToggle, renderMarkdown, t }) {
         part.text ? (
           <div className="conversation-part" key={part.id}>
             <span className="conversation-anchor" id={part.id} aria-hidden="true" />
-            <TextBlock text={part.text} format="text" renderMarkdown={renderMarkdown} open={open} onToggle={() => onToggle(part.id)} t={t} />
+            <TextBlock text={part.text} format="text" renderMarkdown={renderMarkdown} open={open} onToggle={() => onToggle(part.id)} highlight={highlight} t={t} />
           </div>
         ) : null,
       )}
       {(call.results || []).map((result) => (
-        <ConversationResult key={result.id} result={result} open={open} onToggle={() => onToggle(result.id)} renderMarkdown={renderMarkdown} t={t} />
+        <ConversationResult key={result.id} result={result} open={open} onToggle={() => onToggle(result.id)} renderMarkdown={renderMarkdown} highlight={highlight} t={t} />
       ))}
     </div>
   );
 }
 
-function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, registerRef, t }) {
+function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelectAnchor, renderMarkdown, highlight = "", registerRef, t }) {
   const failed = step.failed || step.results.some(resultFailed);
   const kind = step.kind;
   const isCall = CALL_KINDS.has(kind);
@@ -291,6 +294,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
                 renderMarkdown={false}
                 open={open}
                 onToggle={() => onToggleOpen(step.id)}
+                highlight={highlight}
                 t={t}
               />
             ) : (
@@ -304,6 +308,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             renderMarkdown={renderMarkdown}
             open={open}
             onToggle={() => onToggleOpen(step.id)}
+            highlight={highlight}
             t={t}
           />
         ) : step.calls.length ? null : (
@@ -319,6 +324,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             open={open}
             onToggle={onToggleOpen}
             renderMarkdown={renderMarkdown}
+            highlight={highlight}
             t={t}
           />
         ))}
@@ -337,6 +343,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
                 renderMarkdown={renderMarkdown}
                 open={open}
                 onToggle={() => onToggleOpen(part.id)}
+                highlight={highlight}
                 t={t}
               />
             ) : part.raw ? (
@@ -352,6 +359,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
             open={open}
             onToggle={() => onToggleOpen(result.id)}
             renderMarkdown={renderMarkdown}
+            highlight={highlight}
             t={t}
           />
         ))}
@@ -360,7 +368,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
   );
 }
 
-export function TraceConversation({ observation, anchor = "", renderMarkdown, onRenderMarkdownChange, onSelectAnchor, fallback = null }) {
+export function TraceConversation({ observation, anchor = "", highlight = "", renderMarkdown, onRenderMarkdownChange, onSelectAnchor, fallback = null }) {
   const { t } = useI18n();
   const steps = useMemo(() => buildConversationSteps(observation?.nodes || []), [observation]);
   const stats = useMemo(() => conversationStats(steps), [steps]);
@@ -632,6 +640,7 @@ export function TraceConversation({ observation, anchor = "", renderMarkdown, on
                 onToggleOpen={toggleOpen}
                 onSelectAnchor={onSelectAnchor}
                 renderMarkdown={renderMarkdown}
+                highlight={highlight}
                 registerRef={registerStepRef(stepKey(step))}
                 t={t}
               />

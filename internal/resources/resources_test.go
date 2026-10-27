@@ -197,3 +197,76 @@ func TestExtractKeepsRealPathsInProse(t *testing.T) {
 		t.Errorf("extracted %+v, want exactly the two paths", values)
 	}
 }
+
+// TestLocateFindsTheNodeBehindAValue pins the jump target the resource tree
+// uses: the value is searched through the same views Extract indexed, and the
+// result names the node and view it came from. A value the detector would not
+// index has no occurrence, so an old catalogue row cannot send the reader to an
+// arbitrary step.
+func TestLocateFindsTheNodeBehindAValue(t *testing.T) {
+	request := observe.SemanticNode{
+		ID:   "node-message",
+		Path: "$.messages[0]",
+		Text: "read (modules/identity-tenancy.md and registry_file=internal/infrastructure/config/config.go",
+	}
+	tool := observe.SemanticNode{
+		ID:       "node-call",
+		Path:     "$.messages[1].tool_calls[0]",
+		Metadata: map[string]any{"arguments": `{"file_path":"C:\\Users\\alice\\project\\main.go"}`},
+	}
+	obs := observe.TraceObservation{
+		Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{request, tool}},
+	}
+
+	cases := []struct {
+		kind  string
+		value string
+		node  string
+		view  string
+	}{
+		{kind: KindLocalPath, value: "modules/identity-tenancy.md", node: "node-message", view: "text"},
+		{kind: KindLocalPath, value: "internal/infrastructure/config/config.go", node: "node-message", view: "text"},
+		{kind: KindLocalPath, value: `C:\Users\alice\project\main.go`, node: "node-call", view: "arguments"},
+	}
+	for _, tc := range cases {
+		got := Locate(obs, tc.kind, tc.value)
+		if len(got) != 1 {
+			t.Fatalf("Locate(%q) = %+v, want one occurrence", tc.value, got)
+		}
+		if got[0].NodeID != tc.node || got[0].View != tc.view || got[0].End <= got[0].Start {
+			t.Errorf("Locate(%q) = %+v, want node %q view %q", tc.value, got[0], tc.node, tc.view)
+		}
+		if got[0].NodePath == "" {
+			t.Errorf("Locate(%q) has no node path: %+v", tc.value, got[0])
+		}
+	}
+
+	for _, value := range []string{"", "modules/identity-tenancy.md ", "../a", `\n\tid`} {
+		if got := Locate(obs, KindLocalPath, value); len(got) != 0 {
+			t.Errorf("Locate(%q) = %+v, want none", value, got)
+		}
+	}
+	if got := Locate(obs, "other", "modules/identity-tenancy.md"); len(got) != 0 {
+		t.Errorf("Locate with an unknown kind = %+v, want none", got)
+	}
+}
+
+// TestLocateReportsEachNodeOnce keeps the jump list short when the same value
+// appears in several views of one node (a message and its raw payload, or a tool
+// call and its arguments): the conversation only needs the first one.
+func TestLocateReportsEachNodeOnce(t *testing.T) {
+	node := observe.SemanticNode{
+		ID:       "node-both",
+		Path:     "$.messages[0]",
+		Text:     "open /home/alice/project/main.go",
+		Metadata: map[string]any{"arguments": `{"file_path":"/home/alice/project/main.go"}`},
+	}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	got := Locate(obs, KindLocalPath, "/home/alice/project/main.go")
+	if len(got) != 1 {
+		t.Fatalf("Locate = %+v, want one occurrence for the node", got)
+	}
+	if got[0].View != "text" {
+		t.Errorf("first view = %q, want text", got[0].View)
+	}
+}

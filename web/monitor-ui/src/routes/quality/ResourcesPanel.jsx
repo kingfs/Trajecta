@@ -2,7 +2,8 @@ import React from "react";
 import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { EmptyState } from "../../components/common/EmptyState";
 import { InlineTag } from "../../components/common/Badges";
 import { ResourceTree } from "../../components/monitor/ResourceTree";
@@ -11,6 +12,7 @@ import { apiPaths, apiURL, postJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { useRefresh } from "../../hooks/useRefresh";
 import { useWriteMutation } from "../../lib/mutations";
+import { locateResourceConversation } from "../../lib/resourceLocate";
 import { normalizeAnalyticsWindow, setOrDeleteParam } from "../../lib/monitor";
 
 /*
@@ -27,6 +29,7 @@ import { normalizeAnalyticsWindow, setOrDeleteParam } from "../../lib/monitor";
  */
 export function ResourcesPanel() {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const kind = searchParams.get("kind") || "";
   const query = searchParams.get("q") || "";
@@ -58,6 +61,28 @@ export function ResourcesPanel() {
     error: "resources.backfillError",
     onSuccess: () => refresh(),
   });
+
+  // A catalogue row lives across traces, so locating it means locating it in the
+  // trace that last carried it; the conversation URL is built from that read.
+  const locateResource = async (item) => {
+    const traceID = item?.last_trace_id || "";
+    if (!traceID) {
+      toast.error(t("resources.locateMissing"));
+      return;
+    }
+    try {
+      const located = await locateResourceConversation(traceID, item);
+      if (!located.anchor) {
+        toast.error(t("resources.locateMissing"));
+        return;
+      }
+      navigate(located.href);
+    } catch (error) {
+      toast.error(t("resources.locateFailed"), {
+        description: String(error?.message || error),
+      });
+    }
+  };
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(searchParams);
@@ -122,6 +147,7 @@ export function ResourcesPanel() {
           leafHref={(item) =>
             item.last_trace_id ? `/traces/${encodeURIComponent(item.last_trace_id)}?tab=resources` : ""
           }
+          onLocate={locateResource}
         />
       ) : resources.data ? (
         <EmptyState title={t("resources.none")} detail={t("resources.noneDetail")} />

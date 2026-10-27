@@ -49,6 +49,96 @@ type Access struct {
 	Position int
 }
 
+// Occurrence is one place a distinct value was found: the semantic node and the
+// text view inside it. Locate returns these so the Monitor can jump from a
+// resource row to the conversation step the value came from; the offsets are
+// byte offsets into the decoded view, not into the cassette.
+type Occurrence struct {
+	NodeID   string
+	NodePath string
+	View     string
+	Start    int
+	End      int
+}
+
+// The labels of the four text views a node is scanned through. They are part of
+// the locate response (not user-facing names): "text" is the parser's normalized
+// text, "arguments" a tool call's arguments, and "raw"/"json" the payloads after
+// one layer of decoding.
+const (
+	viewText      = "text"
+	viewArguments = "arguments"
+	viewRaw       = "raw"
+	viewJSON      = "json"
+)
+
+// textView is one decoded string of one node, labelled with the view it came
+// from so a locate result can say where the value was seen.
+type textView struct {
+	label string
+	text  string
+}
+
+// nodeTextViews returns the views of node in the order Extract scans them.
+//
+// Scan decoded text only. The raw JSON envelopes are escaped text, and treating
+// them as paths makes "\n" in a PEM block's base64 look like a UNC root.
+// Decoding a string that is itself JSON (a tool call's arguments, or an entry
+// parser's whole-request node) recovers the paths inside it at the same depth as
+// the text.
+func nodeTextViews(node observe.SemanticNode) []textView {
+	var views []textView
+	for _, text := range decodedTextViews(node.Text) {
+		views = append(views, textView{label: viewText, text: text})
+	}
+	for _, text := range decodedTextViews(observe.NodeArguments(node)) {
+		views = append(views, textView{label: viewArguments, text: text})
+	}
+	for _, text := range decodedJSONTexts(node.Raw) {
+		views = append(views, textView{label: viewRaw, text: text})
+	}
+	for _, text := range decodedJSONTexts(node.JSON) {
+		views = append(views, textView{label: viewJSON, text: text})
+	}
+	return views
+}
+
+// forEachAccess calls yield for every report-only indicator in text, with the
+// normalized value and the byte span it occupied. This is the single place the
+// extraction decision lives: Extract indexes what it yields and Locate searches
+// for the same value from the same views, so a row that was indexed can always
+// be located by the exact value the index stores.
+func forEachAccess(text string, yield func(kind, value string, start, end int)) {
+	if text == "" {
+		return
+	}
+	src := []byte(text)
+	// A credential's material can contain slashes that look exactly like an
+	// absolute path; a private-key body is base64, and any base64 run with two
+	// slash-separated segments would otherwise be indexed. Drop a candidate only
+	// when it is entirely inside a credential span: a URL that carries a key in
+	// its query still starts before it and is kept.
+	credentials := secretmask.Scan(src)
+	for _, match := range secretmask.Indicators(src) {
+		if insideCredential(match, credentials) {
+			continue
+		}
+		rule, ok := match.Rule()
+		if !ok || !rule.ReportOnly {
+			continue
+		}
+		kind, ok := kindFor(rule.Kind)
+		if !ok {
+			continue
+		}
+		value := normalizeValue(rule.Kind, string(match.Bytes(src)))
+		if value == "" || len(value) > maxValueBytes {
+			continue
+		}
+		yield(kind, value, match.Start, match.End)
+	}
+}
+
 // Extract returns the distinct local paths and URLs in obs, in first-appearance
 // order, with the number of nodes that carried each one.
 func Extract(obs observe.TraceObservation) []Access {
@@ -59,61 +149,69 @@ func Extract(obs observe.TraceObservation) []Access {
 		// A node's four text views overlap; a value in more than one of them is
 		// still one occurrence in this node.
 		nodeSeen := make(map[string]struct{}, 4)
-		// Scan decoded text only. The raw JSON envelopes are escaped text, and
-		// treating them as paths makes "\n" in a PEM block's base64 look like a
-		// UNC root. Decoding a string that is itself JSON (a tool call's
-		// arguments, or an entry parser's whole-request node) recovers the paths
-		// inside it at the same depth as the text.
-		views := decodedTextViews(node.Text)
-		views = append(views, decodedTextViews(observe.NodeArguments(node))...)
-		views = append(views, decodedJSONTexts(node.Raw)...)
-		views = append(views, decodedJSONTexts(node.JSON)...)
-		for _, text := range views {
-			if text == "" {
-				continue
-			}
-			src := []byte(text)
-			// A credential's material can contain slashes that look exactly like
-			// an absolute path; a private-key body is base64, and any base64 run
-			// with two slash-separated segments would otherwise be indexed. Drop
-			// a candidate only when it is entirely inside a credential span: a
-			// URL that carries a key in its query still starts before it and is
-			// kept.
-			credentials := secretmask.Scan(src)
-			for _, match := range secretmask.Indicators(src) {
-				if insideCredential(match, credentials) {
-					continue
-				}
-				rule, ok := match.Rule()
-				if !ok || !rule.ReportOnly {
-					continue
-				}
-				kind, ok := kindFor(rule.Kind)
-				if !ok {
-					continue
-				}
-				value := normalizeValue(rule.Kind, string(match.Bytes(src)))
-				if value == "" || len(value) > maxValueBytes {
-					continue
-				}
+		for _, view := range nodeTextViews(node) {
+			forEachAccess(view.text, func(kind, value string, _, _ int) {
 				key := kind + "\x00" + value
 				if _, ok := nodeSeen[key]; ok {
-					continue
+					return
 				}
 				nodeSeen[key] = struct{}{}
 				if access, ok := byKey[key]; ok {
 					access.Count++
-					continue
+					return
 				}
 				byKey[key] = &Access{Kind: kind, Value: value, Count: 1, Position: position}
 				position++
 				order = append(order, key)
-			}
+			})
 		}
 	}
 	out := make([]Access, 0, len(order))
 	for _, key := range order {
 		out = append(out, *byKey[key])
+	}
+	return out
+}
+
+// Locate returns the places obs carries kind/value. One occurrence per semantic
+// node is enough to jump to the conversation, and nodes are visited in the same
+// order Extract walks them, so the first result is the earliest place the value
+// appeared. A value the current detector would not extract (an old index row, or
+// a value the caller invented) has no occurrence.
+func Locate(obs observe.TraceObservation, kind, value string) []Occurrence {
+	if value == "" || (kind != KindURL && kind != KindLocalPath) {
+		return nil
+	}
+	var out []Occurrence
+	seenNodes := make(map[string]struct{}, 8)
+	for _, node := range observe.TraceNodes(obs) {
+		if node.ID != "" {
+			if _, ok := seenNodes[node.ID]; ok {
+				continue
+			}
+		}
+		found := false
+		for _, view := range nodeTextViews(node) {
+			forEachAccess(view.text, func(foundKind, foundValue string, start, end int) {
+				if found || foundKind != kind || foundValue != value {
+					return
+				}
+				found = true
+				out = append(out, Occurrence{
+					NodeID:   node.ID,
+					NodePath: node.Path,
+					View:     view.label,
+					Start:    start,
+					End:      end,
+				})
+			})
+			if found {
+				break
+			}
+		}
+		if found && node.ID != "" {
+			seenNodes[node.ID] = struct{}{}
+		}
 	}
 	return out
 }

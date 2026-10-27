@@ -42,6 +42,7 @@ export const apiPaths = {
   traceObservation: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/observation`,
   traceFindings: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/findings`,
   traceResources: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/resources`,
+  traceResourceLocate: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/resources/locate`,
   tracePerformance: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/performance`,
   traceDownload: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/download`,
   traceRepairUsage: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/repair-usage`,

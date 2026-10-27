@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
 // TestTraceResourcesAndCatalogueAPI pins both read surfaces: the per-trace list
@@ -87,5 +90,82 @@ func TestTraceResourcesAndCatalogueAPI(t *testing.T) {
 	}
 	if catalogue.Window != "all" {
 		t.Errorf("default window = %q, want all", catalogue.Window)
+	}
+
+}
+
+// TestTraceResourceLocateAPI pins the locate read the resource tree uses: the
+// value is found in the current parse of the cassette, and the answer names a
+// conversation step the reader can open. The index itself is not consulted, so
+// an old row is still locatable, and a value the cassette no longer carries
+// answers with no anchor instead of a guess.
+func TestTraceResourceLocateAPI(t *testing.T) {
+	outputDir := t.TempDir()
+	content := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil,
+		`{"messages":[{"role":"user","content":"read /home/alice/project/main.go and call https://api.example.com/x"}]}`,
+		`{"choices":[{"message":{"content":"done"}}]}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.Provider = llm.ProviderOpenAICompatible
+			header.Meta.Operation = llm.OperationChatCompletions
+			header.Meta.Endpoint = "/v1/chat/completions"
+		})
+	writeTraceFixture(t, outputDir, "locate.http", content)
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+	traces, err := st.ListRecent(10)
+	if err != nil || len(traces) == 0 {
+		t.Fatalf("ListRecent() = %v, %v", traces, err)
+	}
+	traceID := traces[0].ID
+
+	locate := func(kind, value string) (resourceLocateResponse, int) {
+		t.Helper()
+		target := "/api/traces/" + traceID + "/resources/locate?kind=" + url.QueryEscape(kind) + "&value=" + url.QueryEscape(value)
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rr := httptest.NewRecorder()
+		traceAPIHandler(st, nil).ServeHTTP(rr, req)
+		var payload resourceLocateResponse
+		if rr.Code == http.StatusOK {
+			if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode locate: %v", err)
+			}
+		}
+		return payload, rr.Code
+	}
+
+	located, code := locate("local_path", "/home/alice/project/main.go")
+	if code != http.StatusOK {
+		t.Fatalf("locate status = %d", code)
+	}
+	if located.Anchor == "" || len(located.Items) == 0 {
+		t.Fatalf("locate = %+v, want an anchor and at least one occurrence", located)
+	}
+	if located.Items[0].NodeID == "" || located.Items[0].NodePath == "" {
+		t.Errorf("occurrence = %+v, want the node and its path", located.Items[0])
+	}
+	if located.Items[0].Anchor != located.Anchor {
+		t.Errorf("response anchor = %q, want the first occurrence anchor %q", located.Anchor, located.Items[0].Anchor)
+	}
+	if located.Items[0].End <= located.Items[0].Start {
+		t.Errorf("occurrence span = %+v, want a non-empty span", located.Items[0])
+	}
+
+	urlLocated, code := locate("url", "https://api.example.com/x")
+	if code != http.StatusOK || urlLocated.Anchor == "" {
+		t.Fatalf("url locate = %+v, status = %d", urlLocated, code)
+	}
+
+	missing, code := locate("local_path", "/not/in/this/trace.go")
+	if code != http.StatusOK || missing.Anchor != "" || len(missing.Items) != 0 {
+		t.Fatalf("missing locate = %+v, status = %d", missing, code)
+	}
+
+	if _, code := locate("other", "x"); code != http.StatusBadRequest {
+		t.Errorf("bad kind status = %d, want 400", code)
 	}
 }

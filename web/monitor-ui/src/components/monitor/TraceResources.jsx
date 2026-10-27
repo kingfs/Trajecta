@@ -16,7 +16,7 @@ import { ResourceTree } from "./ResourceTree";
  * recorded before the index existed. It is an explicit button rather than a
  * write on page load: opening a trace should not change the database.
  */
-export function TraceResources({ data, loading, error, onRefresh, refreshing, t }) {
+export function TraceResources({ data, loading, error, onRefresh, refreshing, onLocate, t }) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const refreshAction = (
     <Button variant="primary" type="button" disabled={refreshing} onClick={onRefresh}>
@@ -41,7 +41,7 @@ export function TraceResources({ data, loading, error, onRefresh, refreshing, t 
       {loading && !data ? <EmptyState title={t("resources.loading")} detail={t("resources.loadingDetail")} /> : null}
 
       {items.length ? (
-        <ResourceTree items={items} countKey="access_count" t={t} />
+        <ResourceTree items={items} countKey="access_count" t={t} onLocate={onLocate} />
       ) : data && !error ? (
         <EmptyState
           title={t("resources.emptyTitle")}

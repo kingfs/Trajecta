@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useI18n } from "../../lib/i18n";
+import { findHighlight } from "../../lib/highlight";
 import { formatRawNumber } from "../../lib/monitor";
 
 /**
@@ -59,7 +60,7 @@ export function CodeBlock({ value }) {
   return <pre className="code-block">{value}</pre>;
 }
 
-export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10, forceExpanded = false }) {
+export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10, forceExpanded = false, highlight = "" }) {
   const [expanded, setExpanded] = useState(false);
   // `forceExpanded` is how a caller that jumped to this content - the trace
   // page's conversation, landing on a finding's anchor - shows it open without
@@ -76,15 +77,40 @@ export function MessageContent({ value, format, renderMarkdown, className = "", 
   if (renderMarkdown && format === "markdown") {
     return (
       <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
-        <MarkdownContent value={value} className={bodyClassName} />
+        <MarkdownContent value={value} className={bodyClassName} highlight={highlight} />
       </ExpandableContent>
     );
   }
   return (
     <ExpandableContent expanded={showAll} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
-      <div className={`${bodyClassName} prose-block`.trim()}>{value}</div>
+      <div className={`${bodyClassName} prose-block`.trim()}>{highlightText(value, highlight)}</div>
     </ExpandableContent>
   );
+}
+
+/*
+ * The resource tab's locate action marks the bytes the resource row stands for,
+ * so the reader can see the detection inside the message it came from.
+ *
+ * A path is stored with the Windows separators normalized but the conversation
+ * may show the JSON-escaped spelling, so the escaped form is tried as a second
+ * needle. A value that no longer occurs renders the text unchanged - the jump
+ * still landed on the step, which is the part that matters.
+ */
+function highlightText(value, needle) {
+  const text = String(value || "");
+  const found = findHighlight(text, needle);
+  if (!found) {
+    return text;
+  }
+  const out = [];
+  found.parts.forEach((piece, index) => {
+    if (index > 0) {
+      out.push(<mark className="content-hit" key={`content-hit-${index}`}>{found.needle}</mark>);
+    }
+    out.push(piece);
+  });
+  return out;
 }
 
 function ExpandableContent({ expanded, collapsible, onToggle, children }) {
@@ -118,10 +144,10 @@ function shouldCollapseContent(value, collapsedLines) {
  */
 const MarkdownBlock = React.lazy(() => import("./MarkdownBlock"));
 
-function MarkdownContent({ value, className = "" }) {
+function MarkdownContent({ value, className = "", highlight = "" }) {
   return (
     <React.Suspense fallback={<div className={`${className} prose-block`.trim()}>{value}</div>}>
-      <MarkdownBlock value={value} className={className} />
+      <MarkdownBlock value={value} className={className} highlight={highlight} />
     </React.Suspense>
   );
 }

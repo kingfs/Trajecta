@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { findHighlight } from "../../lib/highlight";
 
 /*
  * Markdown rendering, on react-markdown + remark-gfm.
@@ -24,15 +25,66 @@ import remarkGfm from "remark-gfm";
  */
 const REMARK_PLUGINS = [remarkGfm];
 
+/*
+ * The resource locate action marks its value inside rendered Markdown without
+ * touching the source: the tree is already parsed, so a text node is where the
+ * value can be split into text + <mark> + text and nothing else changes. Splitting
+ * the Markdown source first would break emphasis and code spans.
+ */
+function rehypeHighlight(options = {}) {
+  const value = options.value || "";
+  return (tree) => {
+    const visit = (node) => {
+      if (!node || !Array.isArray(node.children)) {
+        return;
+      }
+      const next = [];
+      for (const child of node.children) {
+        if (child.type === "text") {
+          next.push(...highlightTextNode(child, value));
+        } else {
+          visit(child);
+          next.push(child);
+        }
+      }
+      node.children = next;
+    };
+    visit(tree);
+  };
+}
+
+function highlightTextNode(node, value) {
+  const found = findHighlight(node.value, value);
+  if (!found) {
+    return [node];
+  }
+  const out = [];
+  found.parts.forEach((piece, index) => {
+    if (index > 0) {
+      out.push({
+        type: "element",
+        tagName: "mark",
+        properties: { className: ["content-hit"] },
+        children: [{ type: "text", value: found.needle }],
+      });
+    }
+    if (piece) {
+      out.push({ type: "text", value: piece });
+    }
+  });
+  return out;
+}
+
 const COMPONENTS = {
   pre: ({ node, className, ...props }) => <pre className={className ? `md-pre ${className}` : "md-pre"} {...props} />,
   a: ({ node, ...props }) => <a target="_blank" rel="noreferrer" {...props} />,
 };
 
-export default function MarkdownBlock({ value = "", className = "" }) {
+export default function MarkdownBlock({ value = "", className = "", highlight = "" }) {
+  const rehypePlugins = highlight ? [[rehypeHighlight, { value: highlight }]] : [];
   return (
     <div className={`${className} prose-block rendered-markdown`.trim()}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={COMPONENTS}>
         {String(value || "")}
       </ReactMarkdown>
     </div>

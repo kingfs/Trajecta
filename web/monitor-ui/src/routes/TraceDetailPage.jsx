@@ -13,6 +13,7 @@ import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
 import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
 import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
+import { locateResourceConversation } from "../lib/resourceLocate";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { Input } from "../components/ui/input";
@@ -97,6 +98,9 @@ export function TraceDetailPage() {
   const toolOutputsByCallID = collectToolOutputs(detail.data);
   const focusTarget = searchParams.get("focus") || "";
   const anchor = searchParams.get("node") || "";
+  // The value a locate action asked the conversation to mark; `hl` is set only
+  // by that action, never by a finding link.
+  const resourceHighlight = searchParams.get("hl") || "";
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   // The request list and the session list are two tabs of /traces now, so a
@@ -157,11 +161,12 @@ export function TraceDetailPage() {
       />
     );
 
-  const applyTraceFocus = (nextTab, nextFocus = "", nextAnchor = anchor) => {
+  const applyTraceFocus = (nextTab, nextFocus = "", nextAnchor = anchor, nextHighlight = "") => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "tab", nextTab === "conversation" ? "" : nextTab);
     setOrDeleteParam(next, "focus", nextFocus);
     setOrDeleteParam(next, "node", nextAnchor);
+    setOrDeleteParam(next, "hl", nextHighlight);
     setSearchParams(next, { replace: true });
   };
 
@@ -174,7 +179,30 @@ export function TraceDetailPage() {
   const setTraceAnchor = (value) => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "node", value);
+    // A finding link names its own location; a resource highlight left over
+    // from an earlier locate must not mark an unrelated sentence.
+    next.delete("hl");
     setSearchParams(next, { replace: true });
+  };
+
+  // The resource tab's locate action: the server finds the node the indexed
+  // value was detected in, and the conversation opens on that step with the
+  // value marked. The request lives here rather than in the tree component so
+  // both resource surfaces (the trace tab and the catalogue) share one outcome
+  // and one error message.
+  const locateResource = async (item) => {
+    try {
+      const located = await locateResourceConversation(traceID, item);
+      if (!located.anchor) {
+        toast.error(t("resources.locateMissing"));
+        return;
+      }
+      applyTraceFocus("conversation", "", located.anchor, located.highlight);
+    } catch (error) {
+      toast.error(t("resources.locateFailed"), {
+        description: String(error?.message || error),
+      });
+    }
   };
 
   // From a finding: switch to the conversation and land on the node it named.
@@ -371,6 +399,7 @@ export function TraceDetailPage() {
               <TraceConversation
                 observation={observation.data}
                 anchor={anchor}
+                highlight={resourceHighlight}
                 renderMarkdown={renderMarkdown}
                 onRenderMarkdownChange={setRenderMarkdown}
                 onSelectAnchor={setTraceAnchor}
@@ -425,6 +454,7 @@ export function TraceDetailPage() {
                 error={resources.error}
                 refreshing={jobBusy === "reparse"}
                 onRefresh={() => runTraceActionWith("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}
+                onLocate={locateResource}
                 t={t}
               />
             </div>

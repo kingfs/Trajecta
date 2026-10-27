@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
+  Crosshair,
   FileText,
   Folder,
   FolderOpen,
@@ -33,6 +34,12 @@ import {
  * The paths and URLs are separate trees because their roots mean different
  * things: a path tree starts at / or ~ or a drive, while a URL tree starts at the
  * authority category (domain, ip, host) and then the authority itself.
+ *
+ * A row that names a resource also carries its locate action: hovering (or
+ * focusing) the row reveals a crosshair that opens the trace conversation at the
+ * step where the value was detected. The action lives beside the row rather than
+ * inside it, because the leaf is already a link to the latest request and a
+ * button cannot be nested in a link.
  */
 
 const CATEGORY_LABELS = {
@@ -42,7 +49,7 @@ const CATEGORY_LABELS = {
   domain: "resources.categoryDomain",
 };
 
-export function ResourceTree({ items = [], countKey = "access_count", t, leafHref }) {
+export function ResourceTree({ items = [], countKey = "access_count", t, leafHref, onLocate }) {
   const forest = useMemo(() => buildResourceForest(items, { countKey }), [items, countKey]);
   const initial = useMemo(() => {
     const ids = new Set();
@@ -58,6 +65,10 @@ export function ResourceTree({ items = [], countKey = "access_count", t, leafHre
   // survive a reparse or a filter change, so an explicit choice is kept aside
   // instead of being folded into the same set.
   const [overrides, setOverrides] = useState(() => new Map());
+  // One locate request at a time: the server reparses the cassette to answer, so
+  // a second click while the first is in flight is a queued duplicate, not a new
+  // question.
+  const [locatingKey, setLocatingKey] = useState("");
 
   const isOpen = (node) => (overrides.has(node.id) ? overrides.get(node.id) : initial.has(node.id));
   const toggle = (node) => {
@@ -76,6 +87,18 @@ export function ResourceTree({ items = [], countKey = "access_count", t, leafHre
       next.set(id, open);
     }
     setOverrides(next);
+  };
+
+  const locate = async (item) => {
+    if (!onLocate || locatingKey) {
+      return;
+    }
+    setLocatingKey(`${item.kind}\u0000${item.value}`);
+    try {
+      await onLocate(item);
+    } finally {
+      setLocatingKey("");
+    }
   };
 
   const metric = countKey === "trace_count" ? t("resources.traces") : t("resources.nodeCount");
@@ -116,6 +139,8 @@ export function ResourceTree({ items = [], countKey = "access_count", t, leafHre
                 t={t}
                 leafHref={leafHref}
                 metric={metric}
+                onLocate={onLocate ? locate : null}
+                locatingKey={locatingKey}
               />
             ))}
           </ul>
@@ -125,13 +150,19 @@ export function ResourceTree({ items = [], countKey = "access_count", t, leafHre
   );
 }
 
-function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric }) {
+function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric, onLocate, locatingKey }) {
   const hasChildren = node.children.length > 0;
   const open = hasChildren && isOpen(node);
   const item = node.ownItems[0] ?? null;
   const href = item && leafHref ? leafHref(item) : "";
   const label = node.kind === "category" ? t(CATEGORY_LABELS[node.name] || "resources.categoryUrl") : node.name;
   const title = describeNode(node, t);
+  const canLocate = Boolean(item && onLocate);
+  const locateKey = item ? `${item.kind}\u0000${item.value}` : "";
+  const locating = canLocate && locatingKey === locateKey;
+  const locateLabel = item
+    ? t("resources.locateHint", { value: item.value.length > 120 ? `${item.value.slice(0, 120)}…` : item.value })
+    : "";
   const row = (
     <>
       {hasChildren ? (
@@ -146,20 +177,35 @@ function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric }) {
     </>
   );
 
+  const rowButton = hasChildren ? (
+    <button type="button" className="resource-tree-row-button" aria-expanded={open} onClick={() => onToggle(node)} title={title}>
+      {row}
+    </button>
+  ) : href ? (
+    <Link className="resource-tree-row-button" to={href} title={title}>
+      {row}
+    </Link>
+  ) : (
+    <span className="resource-tree-row-button" title={title}>{row}</span>
+  );
+
   return (
     <li className={`resource-tree-node resource-tree-${node.kind}`}>
       <div className="resource-tree-row">
-        {hasChildren ? (
-          <button type="button" className="resource-tree-row-button" aria-expanded={open} onClick={() => onToggle(node)} title={title}>
-            {row}
+        {rowButton}
+        {canLocate ? (
+          <button
+            type="button"
+            className={`resource-tree-locate${locating ? " resource-tree-locate-busy" : ""}`.trim()}
+            title={locateLabel}
+            aria-label={locateLabel}
+            aria-busy={locating ? "true" : "false"}
+            disabled={locating}
+            onClick={() => onLocate(item)}
+          >
+            <Crosshair size={13} aria-hidden="true" />
           </button>
-        ) : href ? (
-          <Link className="resource-tree-row-button" to={href} title={title}>
-            {row}
-          </Link>
-        ) : (
-          <span className="resource-tree-row-button" title={title}>{row}</span>
-        )}
+        ) : null}
       </div>
       {open ? (
         <ul className="resource-tree-list">
@@ -173,6 +219,8 @@ function ResourceNode({ node, depth, isOpen, onToggle, t, leafHref, metric }) {
               t={t}
               leafHref={leafHref}
               metric={metric}
+              onLocate={onLocate}
+              locatingKey={locatingKey}
             />
           ))}
         </ul>

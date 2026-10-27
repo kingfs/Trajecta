@@ -1947,6 +1947,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "resources" && r.Method == http.MethodGet:
 			handleTraceResources(w, r, st, entry)
+		case len(parts) == 3 && parts[1] == "resources" && parts[2] == "locate" && r.Method == http.MethodGet:
+			handleTraceResourceLocate(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "performance" && r.Method == http.MethodGet:
 			handleTracePerformance(w, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
