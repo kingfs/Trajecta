@@ -279,3 +279,71 @@ func TestIndicatorSpansDoNotOverlap(t *testing.T) {
 		}
 	}
 }
+
+// TestIndicatorsRejectEscapeDebris pins the false positives a real transcript
+// produced. Each value is either the raw text as it arrived (doubled backslashes
+// from JSON) or the value the index stored after normalizeValue collapsed the
+// pair, so both forms are covered.
+func TestIndicatorsRejectEscapeDebris(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		// JSON/Go escape sequences read as a UNC share after the index
+		// normalizes the doubled separator.
+		{name: "escaped newline newline", text: `\\n\\n`},
+		{name: "escaped tab tab", text: `\\n\\t\\t`},
+		{name: "escaped tab return", text: `\\n\\treturn`},
+		{name: "escaped tab id", text: `\\n\\tid`},
+		{name: "escaped tab case", text: `\\t\\tcase`},
+		{name: "stored newline newline", text: `\n\n`},
+		{name: "stored tab return", text: `\n\treturn`},
+		{name: "stored tab tab case", text: `\t\tcase`},
+		// Regex source, both escaped and stored.
+		{name: "escaped regex group", text: `\\d+)\\.(\\d+`},
+		{name: "stored regex group", text: `\d+)\.(\d+`},
+		{name: "escaped backreference", text: `\\1.\\2`},
+		{name: "stored backreference", text: `\1.\2`},
+		{name: "escaped regex dot group", text: `\\.(\\d+)`},
+		{name: "stored regex dot group", text: `\.(\d+)`},
+		// A printf format after a one-letter label looked like a drive path.
+		{name: "printf format after label", text: `q:\n%s`},
+		{name: "escaped printf format after label", text: `q:\\n%s`},
+		{name: "escaped line number after drive", text: `z:\n244`},
+		// Surface area with no evidence of an accessed file.
+		{name: "bare parent", text: `../`},
+		{name: "parent with one segment", text: `../a`},
+		{name: "dot with shell metacharacter", text: `./$`},
+		{name: "bare dot", text: `./`},
+		{name: "home dir only", text: `~/`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := indicatorValues(tc.text); len(got) != 0 {
+				t.Fatalf("%q produced indicators %q, want none", tc.text, got)
+			}
+		})
+	}
+}
+
+// TestIndicatorsStripProsePrefixes keeps the value that follows an assignment or
+// an opening parenthesis. The byte before a path is prose, not part of it: the
+// machine must not consume "registry_file=" or "(" in the first place, because a
+// candidate check can only drop a value, not rewrite it.
+func TestIndicatorsStripProsePrefixes(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{text: `(modules/identity-tenancy.md`, want: "modules/identity-tenancy.md"},
+		{text: `registry_file=internal/infrastructure/config/config.go`, want: "internal/infrastructure/config/config.go"},
+		{text: `-file=./internal/store/store.go`, want: "./internal/store/store.go"},
+		{text: `open(/home/alice/project/main.go)`, want: "/home/alice/project/main.go"},
+	}
+	for _, tc := range cases {
+		got := indicatorValues(tc.text)
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%q produced %q, want [%q]", tc.text, got, tc.want)
+		}
+	}
+}

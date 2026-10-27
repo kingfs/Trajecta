@@ -215,7 +215,17 @@ func validURLShape(tok []byte) bool {
 // model transcript carries. The machine has already matched one of the path
 // forms in indicator.rl; this decides whether that form is local:
 //
-//   - ~/..., ./..., ../ and a drive- or UNC-rooted path are local by prefix.
+//   - ~/..., ./... and ../... are local only when a real relative path follows
+//     the root: the tail needs a file extension or at least two segments, so
+//     ".", "./", "../", "../a" and "./$" are not file reads.
+//   - a drive-rooted path needs real segments after the drive. A segment that
+//     is a JSON escape ("n", "n244", "u4e2d") or carries a printf placeholder
+//     ("%s") is escape debris, not a directory: q:\n%s is a print statement.
+//   - a backslash-rooted path is a UNC path, and only in one consistent form:
+//     the decoded form has one leading pair and single separators, the escaped
+//     form has two leading pairs and doubled separators. A token mixing the
+//     two is the remains of escaped text (\\n\\tid, \\d+)\\.(\\d+), \\n\\n),
+//     never a real share.
 //   - /a/b is local unless its first segment is a transport route prefix: an
 //     absolute path with two segments is far more likely to be /v1/chat than
 //     /project/src, and /v1/chat is not a directory an agent read.
@@ -230,31 +240,23 @@ func validLocalPathShape(tok []byte) bool {
 	if len(tok) == 0 {
 		return false
 	}
-	if tok[0] == '~' {
-		return len(tok) > 1 && tok[1] == '/'
+	if tok[0] == '\\' {
+		return validBackslashRootedPath(tok)
 	}
-	if tok[0] == '.' && len(tok) >= 2 && tok[1] == '/' {
-		return true
+	if tok[0] == '~' {
+		return len(tok) > 1 && tok[1] == '/' && validRelativeTail(tok[2:])
 	}
 	if len(tok) >= 3 && tok[0] == '.' && tok[1] == '.' && tok[2] == '/' {
-		return true
+		return validRelativeTail(tok[3:])
+	}
+	if tok[0] == '.' && len(tok) >= 2 && tok[1] == '/' {
+		return validRelativeTail(tok[2:])
 	}
 	if isASCIIAlpha(tok[0]) && len(tok) >= 3 && tok[1] == ':' && (tok[2] == '\\' || tok[2] == '/') {
-		segments := splitPathSegments(tok[3:], true)
-		if len(segments) == 0 {
-			return false
-		}
-		// A drive followed by "n123" / "r123" / "t123" is a JSON escape plus a
-		// line number (z:\n244), not a Windows directory; a real segment that
-		// happens to look like that is not worth the false positives.
-		if first := segments[0]; len(first) > 1 &&
-			(first[0] == 'n' || first[0] == 'r' || first[0] == 't') && allDigits(first[1:]) {
-			return false
-		}
-		return true
+		return validDrivePath(tok)
 	}
-	if len(tok) >= 2 && (tok[0] == '\\' || tok[0] == '/') && (tok[1] == '\\' || tok[1] == '/') {
-		return len(splitPathSegments(tok[2:], true)) >= 2
+	if len(tok) >= 2 && tok[0] == '/' && tok[1] == '/' {
+		return validForwardRootedPath(tok)
 	}
 	if tok[0] == '/' {
 		segments := splitPathSegments(tok[1:], false)
@@ -267,7 +269,7 @@ func validLocalPathShape(tok []byte) bool {
 			}
 			return len(segments[0]) > 1 && segments[0][0] == '.'
 		default:
-			return !isRoutePrefix(segments[0])
+			return !isRoutePrefix(segments[0]) && plausibleSegments(segments)
 		}
 	}
 	segments := splitPathSegments(tok, false)
@@ -286,7 +288,171 @@ func validLocalPathShape(tok []byte) bool {
 	if len(first) > 1 && first[0] == '.' {
 		return true
 	}
-	return hasFileExtension(segments[len(segments)-1])
+	return hasFileExtension(segments[len(segments)-1]) && plausibleSegments(segments)
+}
+
+// validRelativeTail decides whether what follows "~/", "./" or "../" is a real
+// relative path. A bare root ("../") has no tail, and a single segment with no
+// file extension ("../a", "./$") is not evidence that anything was read; a
+// directory needs at least two segments, the way /project/src does.
+func validRelativeTail(rest []byte) bool {
+	segments := splitPathSegments(rest, false)
+	if len(segments) == 0 || !plausibleSegments(segments) {
+		return false
+	}
+	if hasFileExtension(segments[len(segments)-1]) {
+		return true
+	}
+	return len(segments) >= 2
+}
+
+// validDrivePath checks the segments after a Windows drive. The drive itself
+// proves little - a one-letter identifier followed by a colon and a backslash is
+// also a print statement or a JSON escape - so the segments must look like
+// names a filesystem could hold.
+func validDrivePath(tok []byte) bool {
+	segments := splitPathSegments(tok[3:], true)
+	if len(segments) == 0 || !plausibleSegments(segments) {
+		return false
+	}
+	// z:\n244 is an escape sequence plus a line number, not a directory. The
+	// check is on the first segment only: a later name may legitimately be "n".
+	return !isEscapeSegment(segments[0])
+}
+
+// validBackslashRootedPath accepts a UNC path in exactly one of the two forms a
+// transcript carries: the decoded form (\\server\share, one leading pair,
+// single separators) and the escaped form that appears inside JSON text
+// (\\\\server\\share, two leading pairs, doubled separators). The mixed form
+// (two leading pairs, doubled separators) is what escaped prose looks like
+// once the surrounding JSON was decoded - it is not a path.
+func validBackslashRootedPath(tok []byte) bool {
+	leading := 0
+	for leading < len(tok) && tok[leading] == '\\' {
+		leading++
+	}
+	rest := tok[leading:]
+	switch leading {
+	case 2:
+		if bytes.Contains(rest, []byte(`\\`)) {
+			return false
+		}
+		return validUNCSegments(splitPathSegments(rest, true))
+	case 4:
+		segments, ok := splitEscapedBackslashPath(rest)
+		if !ok {
+			return false
+		}
+		return validUNCSegments(segments)
+	default:
+		// 1 or 3 leading backslashes are the middle of an escape sequence, and
+		// a longer run is not a share root this machine should guess at.
+		return false
+	}
+}
+
+// validForwardRootedPath handles //server/share. The machine also matches it as
+// a doubled-root POSIX path, which is local either way; the same consistency
+// and segment checks apply.
+func validForwardRootedPath(tok []byte) bool {
+	rest := tok[2:]
+	if bytes.Contains(rest, []byte("//")) {
+		return false
+	}
+	segments := splitPathSegments(rest, false)
+	return validUNCSegments(segments)
+}
+
+// validUNCSegments requires a host and a share, and rejects a host that is an
+// escape sequence rather than a name: \\\n\\tid after normalization reads "\n\tid",
+// which is a tab-indented line of code, not a network share.
+func validUNCSegments(segments [][]byte) bool {
+	if len(segments) < 2 || !plausibleSegments(segments) {
+		return false
+	}
+	return !isEscapeSegment(segments[0])
+}
+
+// splitEscapedBackslashPath splits the escaped form of a UNC path on doubled
+// separators. It reports false when a separator is not doubled, which is the
+// other half of the mixed-form rejection.
+func splitEscapedBackslashPath(rest []byte) ([][]byte, bool) {
+	var segments [][]byte
+	for i := 0; ; {
+		start := i
+		for i < len(rest) && rest[i] != '\\' {
+			i++
+		}
+		if i > start {
+			segments = append(segments, rest[start:i])
+		}
+		if i >= len(rest) {
+			return segments, true
+		}
+		if i+1 >= len(rest) || rest[i+1] != '\\' {
+			return nil, false
+		}
+		i += 2
+	}
+}
+
+// isEscapeSegment reports whether a segment is a JSON or Go escape sequence
+// rather than a file or directory name: "n"/"t"/"r" plus a line number (\n244),
+// a \uXXXX rune (u4e2d), or a \xXX byte (x41). Names such as "node_modules" and
+// "tmp" are not escape segments.
+func isEscapeSegment(seg []byte) bool {
+	if len(seg) == 0 {
+		return false
+	}
+	switch seg[0] {
+	case 'n', 'r', 't', 'b', 'f', 'v', '0':
+		return len(seg) == 1 || allDigits(seg[1:])
+	case 'u':
+		return len(seg) == 5 && allHex(seg[1:])
+	case 'x':
+		return len(seg) == 3 && allHex(seg[1:])
+	}
+	return false
+}
+
+// plausibleSegments rejects a path whose segments contain punctuation a
+// filesystem name would not hold. The machine's path class is already narrow;
+// what it cannot express is a printf placeholder inside a segment (q:\n%s).
+func plausibleSegments(segments [][]byte) bool {
+	for _, seg := range segments {
+		if !plausibleSegment(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+// plausibleSegment is the per-segment check: a name needs something other than
+// punctuation, and a '%' must start a two-digit escape (%20) rather than a
+// printf verb (%s).
+func plausibleSegment(seg []byte) bool {
+	if len(seg) == 0 {
+		return false
+	}
+	if string(seg) == "." || string(seg) == ".." {
+		return true
+	}
+	hasName := false
+	for i := 0; i < len(seg); i++ {
+		switch c := seg[i]; {
+		case isAlnumByte(c):
+			hasName = true
+		case c == '.' || c == '_' || c == '-' || c == '~' || c == '+' || c == '@' || c == '$':
+		case c == '%':
+			if i+2 >= len(seg) || !isHexByte(seg[i+1]) || !isHexByte(seg[i+2]) {
+				return false
+			}
+			i += 2
+		default:
+			return false
+		}
+	}
+	return hasName
 }
 
 // localPathRoots are the single-segment absolute paths accepted without any
@@ -368,6 +534,15 @@ func hasFileExtension(segment []byte) bool {
 		}
 	}
 	return hasLetter
+}
+
+func allHex(b []byte) bool {
+	for _, c := range b {
+		if !isHexByte(c) {
+			return false
+		}
+	}
+	return len(b) > 0
 }
 
 func allDigits(b []byte) bool {

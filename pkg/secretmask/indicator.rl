@@ -28,8 +28,12 @@ urlchar  = [0-9A-Za-z._~%!$&'()*+,;=:@/?#\-];
 hostchar = [0-9A-Za-z._~\-];
 # A path segment: urlchar without the query/fragment/path separators and
 # without the punctuation that separates one path from the next in prose
-# (quotes, commas, semicolons, glob stars).
-pathchar = [0-9A-Za-z._~%!$&()+=@\-];
+# (quotes, commas, semicolons, glob stars, parentheses) and without the '='
+# of a "key=value" assignment. Those bytes are what put a leading
+# "(modules/x.md" or "registry_file=internal/x.go" in front of a real path;
+# the native check cannot strip a prefix once it is part of the match, so
+# the machine must not consume it in the first place.
+pathchar = [0-9A-Za-z._~%$+@\-];
 # One or more path bytes: the segment itself, not a single character.
 pathseg  = pathchar+;
 # Userinfo cannot cross a '/', '?' or '#': e.g. the '@' in a path segment

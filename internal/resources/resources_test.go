@@ -141,3 +141,59 @@ func TestExtractKeepsAURLThatCarriesACredential(t *testing.T) {
 		t.Fatalf("extracted %+v, want the URL that carries the key", got)
 	}
 }
+
+// TestExtractIgnoresEscapedCodeShapes pins the false positives a real transcript
+// produced after the index normalized doubled separators: escape sequences,
+// regex groups and printf formats were stored as if they were paths. The text is
+// scanned both as decoded prose and inside one layer of JSON escaping, which is
+// the shape an entry parser's raw payload has.
+func TestExtractIgnoresEscapedCodeShapes(t *testing.T) {
+	texts := []string{
+		`print("q:\n%s" % name)`,
+		`payload = "\\n\\tid"`,
+		`out = "\\n\\n"`,
+		`re := regexp.MustCompile(` + "`" + `\\d+)\\.(\\d+` + "`" + `)`,
+		`subst := "\\1.\\2"`,
+		`code = "if x {\\n\\t\\treturn\\n\\t}"`,
+		`cd ../a && ls ../`,
+	}
+	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"name":"shell","arguments":"{\"command\":\"printf 'q:\\\\n%s' && cd ../a\"}"}}]}]}`
+	for _, text := range texts {
+		node := observe.SemanticNode{ID: "escaped-code", Text: text}
+		obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+		if got := Extract(obs); len(got) != 0 {
+			t.Errorf("%q extracted %+v, want none", text, got)
+		}
+	}
+	node := observe.SemanticNode{ID: "escaped-code-raw", Raw: []byte(raw)}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	if got := Extract(obs); len(got) != 0 {
+		t.Errorf("raw payload extracted %+v, want none", got)
+	}
+}
+
+// TestExtractKeepsRealPathsInProse fixes the other half: removing the prose
+// around a path must not remove the path, and a real relative path that follows
+// an assignment is still indexed.
+func TestExtractKeepsRealPathsInProse(t *testing.T) {
+	node := observe.SemanticNode{
+		ID:   "prose",
+		Text: `registry_file=internal/infrastructure/config/config.go and (modules/identity-tenancy.md`,
+	}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	values := map[string]bool{}
+	for _, access := range Extract(obs) {
+		values[access.Value] = true
+	}
+	for _, want := range []string{
+		"internal/infrastructure/config/config.go",
+		"modules/identity-tenancy.md",
+	} {
+		if !values[want] {
+			t.Errorf("missing %q from %+v", want, values)
+		}
+	}
+	if len(values) != 2 {
+		t.Errorf("extracted %+v, want exactly the two paths", values)
+	}
+}

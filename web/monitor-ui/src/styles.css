@@ -630,12 +630,166 @@
   font-size: 0.78rem;
 }
 
-/* A path or URL is long and has no spaces to wrap on; the card must not grow
-   past the column because of it. */
-.finding-card-head strong.resource-value {
-  font-family: var(--font-mono);
+/*
+ * The resource index as directory trees. A flat card per path made the reader
+ * rebuild the shared prefix of every row; here a repository or a host is one row
+ * whose count is its whole subtree, and the leaves hang under a guide line the
+ * way the parsed-payload tree does. A name can still wrap anywhere - a path has
+ * no spaces to break on - so the row never widens the column.
+ */
+.resource-tree {
+  display: grid;
+  gap: 20px;
+}
+
+.resource-tree-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resource-tree-legend {
+  margin: 0;
+  max-width: 90ch;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.resource-tree-toolbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.resource-tree-section {
+  display: grid;
+  gap: 6px;
+}
+
+.resource-tree-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resource-tree-section-head h3 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+}
+
+.resource-tree-list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resource-tree-list .resource-tree-list {
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.resource-tree-row {
+  display: flex;
+  min-width: 0;
+}
+
+.resource-tree-row-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-tree-row-button:hover {
+  background: var(--surface-2);
+}
+
+.resource-tree-spacer {
+  flex: none;
+  width: 14px;
+}
+
+.resource-tree-name {
+  min-width: 0;
+  font-size: 0.86rem;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.resource-tree-category > .resource-tree-row > .resource-tree-row-button > .resource-tree-name {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.resource-tree-count {
+  flex: none;
+  margin-left: auto;
+  min-width: 3ch;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* The leaf is a link to the request that last carried it; the label only shows
+   on hover or focus so it does not repeat on every row. */
+.resource-tree-open {
+  flex: none;
+  color: var(--accent-deep);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.resource-tree-row-button:hover .resource-tree-open,
+.resource-tree-row-button:focus-visible .resource-tree-open {
+  opacity: 1;
+}
+
+.resource-tree-partial {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .resource-tree-toolbar {
+    flex-direction: column;
+  }
+
+  /* A phone has no room for eighteen pixels per level; a path eight
+     directories deep would start at the edge of the column. */
+  .resource-tree-list .resource-tree-list {
+    margin-left: 10px;
+    padding-left: 6px;
+  }
+
+  .resource-tree-open {
+    display: none;
+  }
 }
 
 /* The protocol tab draws the parsed exchange as two labelled halves - request
