@@ -50,9 +50,35 @@ export const REALTIME_TOPIC_PREFIXES = {
   system: ["/api/system"],
 };
 
+/**
+ * Collection roots whose direct children are single-record reads.
+ *
+ * A trace detail page reads `/api/traces/<id>` and its sub-resources. Those are
+ * a snapshot of one completed exchange: the cassette is the source of truth for
+ * replay and detail views and does not change while the reader is on the page.
+ * Subscribing them to `traffic` is what made a viewer refetch six endpoint reads
+ * - one of them a live reparse of the cassette - on every request the proxy
+ * recorded, so the page looked like it was loading forever. The same applies to
+ * the other detail pages, whose records are also only refreshed by an action
+ * they perform themselves.
+ *
+ * The collection root (`/api/traces`, `/api/sessions`, ...) stays live; only a
+ * URL below it is a snapshot. Keep this next to the topic table because it is
+ * the other half of the same URL rule.
+ */
+const REALTIME_SNAPSHOT_ROOTS = ["/api/traces", "/api/sessions", "/api/models", "/api/channels", "/api/upstreams"];
+
+function isSnapshotURL(url) {
+  const path = url.split("?")[0].replace(/\/+$/, "");
+  return REALTIME_SNAPSHOT_ROOTS.some((root) => path.startsWith(`${root}/`));
+}
+
 /** The topic a request URL belongs to, or "" for a read nothing pushes for. */
 export function realtimeTopicForURL(url) {
   if (typeof url !== "string" || !url.startsWith("/")) {
+    return "";
+  }
+  if (isSnapshotURL(url)) {
     return "";
   }
   let match = "";

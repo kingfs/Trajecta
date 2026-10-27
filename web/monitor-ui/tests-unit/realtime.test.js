@@ -19,21 +19,40 @@ import {
  * the registry are pinned here rather than left to the browser suite.
  */
 
-test("a request URL maps to the topic that covers it", () => {
+test("a collection URL maps to the topic that covers it", () => {
   assert.equal(realtimeTopicForURL("/api/traces?window=7d&page=2"), "traffic");
-  assert.equal(realtimeTopicForURL("/api/traces/abc/observation"), "traffic");
-  assert.equal(realtimeTopicForURL("/api/sessions/abc"), "traffic");
+  assert.equal(realtimeTopicForURL("/api/sessions?window=7d"), "traffic");
   assert.equal(realtimeTopicForURL("/api/overview?window=all"), "traffic");
   assert.equal(realtimeTopicForURL("/api/findings?window=all"), "traffic");
   assert.equal(realtimeTopicForURL("/api/analysis/jobs"), "traffic");
   assert.equal(realtimeTopicForURL("/api/routing/exchanges?limit=50"), "traffic");
-  assert.equal(realtimeTopicForURL("/api/upstreams/gpt-5"), "traffic");
-  assert.equal(realtimeTopicForURL("/api/models/gpt-5?window=today"), "traffic");
-  assert.equal(realtimeTopicForURL("/api/channels/openai-primary"), "traffic");
+  assert.equal(realtimeTopicForURL("/api/upstreams?window=7d"), "traffic");
+  assert.equal(realtimeTopicForURL("/api/models?window=today"), "traffic");
+  assert.equal(realtimeTopicForURL("/api/channels?window=7d"), "traffic");
   assert.equal(realtimeTopicForURL("/api/events/summary?window=all"), "events");
   assert.equal(realtimeTopicForURL("/api/events/abc"), "events");
   assert.equal(realtimeTopicForURL("/api/system/host"), "system");
   assert.equal(realtimeTopicForURL("/api/system/db"), "system");
+});
+
+test("a single-record URL is a snapshot and maps to no topic", () => {
+  // The detail page reads a finished recording; the cassette is already the
+  // source of truth. A traffic push for some other request must not make it
+  // reparse and redraw itself, which is what subscribed prefixes used to do.
+  for (const url of [
+    "/api/traces/abc",
+    "/api/traces/abc/",
+    "/api/traces/abc/observation",
+    "/api/traces/abc/raw?view=request",
+    "/api/sessions/abc",
+    "/api/sessions/abc/trajectory?max_traces=500",
+    "/api/models/gpt-5?window=today",
+    "/api/models/gpt-5/spec-lookup",
+    "/api/channels/openai-primary",
+    "/api/upstreams/gpt-5",
+  ]) {
+    assert.equal(realtimeTopicForURL(url), "", `${url} should map to no topic`);
+  }
 });
 
 test("a read nothing pushes for belongs to no topic", () => {

@@ -12,8 +12,14 @@ const MASK_STAND_IN = `sk-proj-${"s".repeat(60)}T3BlbkFJ${"c".repeat(56)}`;
 // person presses the button, so what was requested is itself the assertion.
 let releaseCheckReads = [];
 
+// The mocked socket, when a test needs the server side of a realtime push.
+let realtimeSocket = null;
+let realtimeSubscribed = false;
+
 test.beforeEach(async ({ page }) => {
   releaseCheckReads = [];
+  realtimeSocket = null;
+  realtimeSubscribed = false;
   // The Monitor UI defaults to Chinese when no language is persisted, while
   // this smoke suite asserts English labels. Pin the language for every test.
   await page.addInitScript(() => {
@@ -65,8 +71,20 @@ test.beforeEach(async ({ page }) => {
   // The console keeps one realtime socket open. The mock layer answers /api/**
   // but not the WebSocket upgrade, so without this every test would spend its
   // run in the reconnect backoff and log a failed connection per attempt. A
-  // handler that does nothing is a socket that stays open and silent.
-  await page.routeWebSocket(/\/api\/events\/ws/, () => {});
+  // handler that does nothing is a socket that stays open and silent. Keeping
+  // the route lets a test push the server half of a topic message.
+  await page.routeWebSocket(/\/api\/events\/ws/, (ws) => {
+    realtimeSocket = ws;
+    ws.onMessage((message) => {
+      try {
+        if (Array.isArray(JSON.parse(String(message)).topics)) {
+          realtimeSubscribed = true;
+        }
+      } catch {
+        // A malformed frame is not this test's concern.
+      }
+    });
+  });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -302,6 +320,13 @@ test.beforeEach(async ({ page }) => {
     return route.fulfill({ status: 404, json: { error: `unhandled ${method} ${path}` } });
   });
 });
+
+// The browser's first subscription frame is what proves the console socket is
+// ready for a server push; sending before it would race the page's own connect.
+async function pushRealtimeTopic(topic) {
+  await expect.poll(() => realtimeSubscribed).toBe(true);
+  realtimeSocket.send(JSON.stringify({ topic }));
+}
 
 test("models marketplace and detail render", async ({ page }) => {
   await page.goto("/models");
@@ -547,6 +572,103 @@ test("a slow read shows the loading mask until its response lands", async ({ pag
   await expect(page.locator(".page-loading-mask-visible")).toHaveCount(0);
 });
 
+// The mask still belongs to a filter change: the response for the new key is
+// not there yet, even though the page keeps the previous rows visible.
+test("a slow filter change still masks the previous result", async ({ page }) => {
+  await page.route("**/api/events?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("status") === "all") {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    return route.fulfill({ json: eventListPayload() });
+  });
+
+  await page.goto("/events");
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+
+  await page.getByLabel("Status").selectOption("all");
+  await expect(page.locator(".page-loading-mask-visible")).toBeVisible();
+  await expect(page.locator(".page-loading-mask-visible")).toHaveCount(0, { timeout: 5_000 });
+});
+
+// A realtime push refreshes a read that already has a response on screen. That
+// is a background update of prepared content, not a page whose answer is
+// missing, and it must not put the scrim back over it.
+test("a background refresh does not mask prepared content", async ({ page }) => {
+  let calls = 0;
+  let releaseRefetch;
+  const refetchGate = new Promise((resolve) => {
+    releaseRefetch = resolve;
+  });
+  await page.route("**/api/events?*", async (route) => {
+    calls += 1;
+    if (calls > 1) {
+      await refetchGate;
+    }
+    return route.fulfill({ json: eventListPayload() });
+  });
+
+  await page.goto("/events");
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+  const settled = calls;
+
+  await pushRealtimeTopic("events");
+  await expect.poll(() => calls).toBeGreaterThan(settled);
+  // The refetch is still in flight, and it is older than the 200 ms delay that
+  // would reveal the mask if this counted as a read with nothing to show.
+  await page.waitForTimeout(300);
+  await expect(page.locator(".page-loading-mask-visible")).toHaveCount(0);
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+  releaseRefetch();
+});
+
+// A trace is a finished recording; the detail page used to subscribe to the
+// broad `/api/traces` prefix, so every request the proxy recorded refetched the
+// detail and its five sub-resources (one of which reparses the cassette) and
+// flashed the loading mask over a page whose content was already there.
+test("a traffic push does not reload the trace on screen", async ({ page }) => {
+  const reads = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && path.startsWith("/api/traces/trace-routed")) {
+      reads.push(path);
+    }
+  });
+
+  await page.goto("/traces/trace-routed");
+  await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
+  // The detail plus raw, observation, findings, resources and performance.
+  await expect.poll(() => reads.length).toBeGreaterThanOrEqual(6);
+  const settled = reads.length;
+
+  await pushRealtimeTopic("traffic");
+  await page.waitForTimeout(500);
+  expect(reads.length).toBe(settled);
+  await expect(page.locator(".page-loading-mask-visible")).toHaveCount(0);
+});
+
+// A tab is a view of a response already loaded, not a different response. The
+// query keys used to carry the active tab, so every switch refetched that one
+// endpoint and showed the mask again over panels that were already on screen.
+test("switching trace tabs reuses the panel already loaded", async ({ page }) => {
+  const reads = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && path === "/api/traces/trace-parsed/observation") {
+      reads.push(path);
+    }
+  });
+
+  await page.goto("/traces/trace-parsed");
+  await expect(page.locator("[data-conversation-step]").first()).toBeVisible();
+  await expect.poll(() => reads.length).toBeGreaterThan(0);
+  const settled = reads.length;
+
+  await page.getByRole("tab", { name: "Protocol" }).click();
+  await expect(page.getByRole("tab", { name: "Protocol", selected: true })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(reads.length).toBe(settled);
+});
+
 test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.goto("/traces/trace-routed?tab=request");
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
@@ -571,9 +693,9 @@ test("the conversation tab collapses a long recorded message until asked", async
 // One trace, six readings, one visible at a time. The tabs replaced a grid of
 // cards that made the reader walk past every summary to reach the one they came
 // for, and 已选路由目标 left the conversation for the request's tab.
-test("a trace is read through six tabs, one panel at a time", async ({ page }) => {
+test("a trace is read through seven tabs, one panel at a time", async ({ page }) => {
   await page.goto("/traces/trace-parsed");
-  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Tool calls$/, /^Audit/, /^Request info$/, /^Raw data$/]);
+  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Tool calls$/, /^Audit/, /^Resources$/, /^Request info$/, /^Raw data$/]);
   // The strip is the page-level row every other page renders, not a card of its
   // own: it has no titled frame around it.
   expect(await page.getByRole("tablist").evaluate((element) => element.closest('[data-slot="card"]') === null)).toBe(true);

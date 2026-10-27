@@ -196,11 +196,13 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 - `events`：运行时事件收据变化（侧边栏未读角标与事件页）；
 - `system`：主机、进程与数据库采样到期，这是唯一真正周期性的读数，由服务端定时器产生，且只在有标签页停在系统页时采样，多个标签页共用一份。
 
+单条记录的详情读不注册主题：`/api/traces/<id>` 及其 `raw`、`observation`、`findings`、`resources`、`performance` 子资源，以及 `/api/sessions/<id>`、`/api/models/<id>`、`/api/channels/<id>`、`/api/upstreams/<id>`，都是已录制内容的快照。cassette 是详情的事实源，页面打开后不会因为别的请求被录制而变化；把它们挂在 `traffic` 前缀下会让每次录制都重新读取详情和五个子资源（其中 observation 还要现场重解析 cassette），读者看到的就是一个反复出现的「加载中」。这些页面只由它们自己的写操作（重解析、重分析、修复统计）显式失效并重取。列表和聚合读仍然按主题实时更新。
+
 侧边栏底部那一行里用一个图标显示这条连接的状态（连接中 / 已连接 / 断开重连中），与版本号和仓库图标同行，鼠标悬停给出文字说明；连接失败时浏览器控制台会打印一次端点与重试间隔。断线后前端按指数退避自动重连，最长 5 分钟一次，不需要手动刷新页面。
 
 发布主题的写路径包括：录制请求落库、观测与发现项写入、重分析更新 token 用量、分析任务与解析任务的状态迁移、运行时事件收据变化。也就是说，服务端后台自己跑的解析与重分析也会让页面自己刷新，不需要读者做任何操作。
 
-主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上带 `Authorization` 头，所以这条路径（以及 SSE 端点）允许把访问令牌放在 `?access_token=` 查询串里，其余接口仍然只认请求头。
+主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在；集合根路径（如 `/api/traces`）按前缀注册，根路径下的单条记录（如 `/api/traces/<id>`）按快照处理，不注册主题。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上带 `Authorization` 头，所以这条路径（以及 SSE 端点）允许把访问令牌放在 `?access_token=` 查询串里，其余接口仍然只认请求头。
 
 #### 系统 `/system`
 
@@ -326,7 +328,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 
 可复用的界面原语在 `src/components/ui/`：`dialog`、`tabs`、`switch`、`separator`、`skeleton`、`popover`、`radio-group`、`segmented-control`、`sonner` 已在页面上使用，类名合并走 `clsx` 加 `tailwind-merge`。`button` 也已有调用点：工具栏上的图标按钮全部是 `variant="default" size="icon"`，原语的变体按它替换掉的类命名并使用同一批 token，因此迁移过的按钮和旁边没迁移的按钮尺寸、配色一致。目录里另有 `badge`、`card`、`dropdown-menu`、`input`、`select`、`tooltip` 已经写好但还没有页面接入——它们是 shadcn/ui 式的拷贝进源码的原语，接入才算完成，未接入的按死代码看待。按钮与文本控件已经迁完：95 处 `.ghost-button` 是 `variant="ghost"`／`variant="primary"`（其中 26 处是 `<Link>`／`<a>`，用 `<Button asChild>` 包住，链接仍是链接），55 处受元素规则影响的 `<input>` 是 `input` 原语，三种筛选宽度（180/120/260px，原 `.filter-input`、`-small`、`-wide`）成为调用点的工具类。表单与设置面板里的 `<select>` 也已经换成 Radix 的 `select` 原语（触发器用与 `input` 相同的盒子，宽度留在调用点，因为 `.provider-form select` 原本把它撑满网格单元，而按钮不会继承那条规则；空字符串选项的翻译规则写在原语里）；页面区块也已经换成 `card` 原语：70 个 `<section className="panel">` 是 `<Card as="section">`（`as` 存在的理由正是它们原本是 `<section>`，换成卡片不该把文档大纲压平）。这次迁移用几何而不是眼睛验收——15 条路由上 87 个 panel 与 stat 卡的位置、尺寸、内边距、外边距、边框、圆角在迁移前后完全一致；也正是这次对比找出了唯一的真实差异。两个承重细节现在有测试钉住：区块之间的 16px 间距写在旧样式表里（`[data-slot="card"]`）而不是工具类，因为 `.page-body > .panel` 会为直接位于页面主体下的区块取消它，而工具类会盖过那条规则（第一版正是这样，让 11 条路由的内容下移了 16px）。仍留在旧实现上的是列表筛选用的 6 个原生 `<select>`，保留的理由是它们筛选列表、其中一个随外层表单提交、且手机上是系统选择器；`.stat-card` 也保留自己的类，它是 4px 间距的 flex 列，不是这个表面。服务端状态走 TanStack Query，客户端实例在 `src/lib/queryClient.ts`，其默认值刻意保持被替换掉的自写 `useJSON` 的行为（`retry: false`、`refetchOnWindowFocus: false`）。
 
-读查询全部经 `src/hooks/useJSON.ts` 走 TanStack Query。`AppShell` 里挂着一个 `PageLoadingMask`，由 `useIsFetching` 统计当前仍在进行中的读取：任一读取持续超过 200 ms 未返回时，内容区（不含左侧导航）盖上一层带转圈与「加载中」的蒙版，因此 30 天事件、冷会话轨迹、大型审计表以及实时推送触发的后台重取都有同一个「还没好」的信号。延迟 200 ms 是为了让快速的筛选切换不闪出蒙版，而读取一结束蒙版立即消失；它不拦截鼠标事件，不会挡住读者对已有内容的操作。首次加载仍保留各页原有的加载空状态。
+读查询全部经 `src/hooks/useJSON.ts` 走 TanStack Query。`AppShell` 里挂着一个 `PageLoadingMask`，由 `useIsFetching` 统计当前仍在进行中的读取，但只统计仍挂在屏幕上、且还没有任何内容可显示的读取（查询处于 `active` 且 `data === undefined`）：任一这样的读取持续超过 200 ms 未返回时，内容区（不含左侧导航）盖上一层带转圈与「加载中」的蒙版，因此首次加载、30 天窗口、冷会话轨迹、大型审计表以及切换筛选产生的新查询都有同一个「还没好」的信号。实时推送触发的后台重取已经有数据在屏幕上，只静默替换，不再把蒙版盖回读者正在看的内容；这正是单条 trace 详情页此前反复闪「加载中」的原因。延迟 200 ms 是为了让快速的筛选切换不闪出蒙版，而读取一结束蒙版立即消失；它不拦截鼠标事件，不会挡住读者对已有内容的操作。首次加载仍保留各页原有的加载空状态。
 
 写操作统一走 `src/lib/mutations.js` 的 `useWriteMutation`：它自己持有 pending 状态，成功后按需失效调用方声明的读查询，并把结果交给 `sonner` 的 toast 播出；页面不再各自维护 `busy`／`error`／`saved` 之类的状态。播报力度是有约定的——成功且行内已经能看到变化（事件操作、token 增删）保持静默，被截断的导出用 warning，失败一律 error 并带上服务端消息。toast 容器是一个 `aria-live` 区域，所以结果既看得见也读得到；登录表单是唯一例外，它的错误留在表单里，因为那条错误出现在 shell 之前。分段选择器（窗口、分布、trace 过滤）统一为 `src/components/ui/segmented-control.tsx`，底层是 Radix 的 radio group：单选语义、`aria-checked`、方向键移动并选中。Radix 的 radio group 只移动焦点不选中，原因是 React 19 从根元素派发事件而 Radix 在 `document` 上监听冒泡阶段的 keydown，它判断“方向键按下了吗”时按键还没被记下；原语补上了缺的那一半。日期与时间按当前语言格式化（`Intl.DateTimeFormat`／`Intl.NumberFormat`，`src/lib/monitor.js`），不再固定 `zh-CN`。Markdown 内容由 `react-markdown` 加 `remark-gfm` 渲染（`src/components/common/MarkdownBlock.jsx`，懒加载），它是 React 元素而不是 HTML 字符串，因此不再需要 `dangerouslySetInnerHTML` 和手写转义。系统事件流由 `@microsoft/fetch-event-source` 读取，替代手写的 SSE 解析。
 

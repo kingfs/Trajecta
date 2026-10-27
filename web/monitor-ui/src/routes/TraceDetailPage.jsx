@@ -62,18 +62,24 @@ export function TraceDetailPage() {
   const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
 
-  const [derivedRefreshTick, setDerivedRefreshTick] = useState(0);
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
   // The sub-resources all live under the same trace: when the main lookup fails
   // (an unknown id returns 404) there is nothing to load, so they stay parked
   // instead of firing four more doomed requests at the backend.
+  //
+  // None of them is keyed by the active tab. The URL is the request's identity,
+  // and a tab switch asks for a view of a response that is already in cache, not
+  // for a different response; keying on the tab only refetched the same endpoint
+  // and put the loading mask back over content the reader had already opened.
+  // A write on this page invalidates the whole `GET /api/traces/<id>` prefix
+  // instead (see runTraceAction), which is the one thing that can change them.
   const traceExists = Boolean(detail.data);
-  const raw = useJSON(traceExists ? apiPaths.traceRaw(traceID) : null, [traceID, tab === "raw" ? "raw" : "summary"]);
-  const observation = useJSON(traceExists ? apiPaths.traceObservation(traceID) : null, [traceID, tab === "protocol" ? "protocol" : "idle", derivedRefreshTick]);
-  const findings = useJSON(traceExists ? apiPaths.traceFindings(traceID) : null, [traceID, tab === "audit" ? "audit" : "idle", derivedRefreshTick]);
-  const resources = useJSON(traceExists ? apiPaths.traceResources(traceID) : null, [traceID, tab === "resources" ? "resources" : "idle", derivedRefreshTick]);
-  const performance = useJSON(traceExists ? apiPaths.tracePerformance(traceID) : null, [traceID, tab === "performance" ? "performance" : "idle"]);
+  const raw = useJSON(traceExists ? apiPaths.traceRaw(traceID) : null, [traceID]);
+  const observation = useJSON(traceExists ? apiPaths.traceObservation(traceID) : null, [traceID]);
+  const findings = useJSON(traceExists ? apiPaths.traceFindings(traceID) : null, [traceID]);
+  const resources = useJSON(traceExists ? apiPaths.traceResources(traceID) : null, [traceID]);
+  const performance = useJSON(traceExists ? apiPaths.tracePerformance(traceID) : null, [traceID]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
@@ -197,6 +203,12 @@ export function TraceDetailPage() {
   // tell "repair" from "reanalyze" while one of them is in flight.
   const runTraceAction = useWriteMutation({
     mutationFn: ({ path, payload }) => postJSON(path, payload),
+    // This page no longer subscribes to the traffic topic (a recorded trace is a
+    // snapshot), so the write is what refreshes the derived panels. A prefix
+    // key invalidates the detail and every `/api/traces/<id>/...` read; the
+    // cached response stays on screen while each refetches, so the action does
+    // not raise the loading mask.
+    invalidate: [["GET", apiPaths.trace(traceID)]],
     error: (err, variables) => `${labelTraceAction(variables.action, t)} failed: ${err?.message || t("common.actionFailed")}`,
     onSuccess: (response, variables) => {
       // The request succeeded either way; whether the job it queued failed is a
@@ -207,7 +219,6 @@ export function TraceDetailPage() {
       } else {
         toast.success(text);
       }
-      setDerivedRefreshTick((value) => value + 1);
     },
   });
   const jobBusy = runTraceAction.isPending ? runTraceAction.variables?.action || "" : "";
