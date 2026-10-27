@@ -129,7 +129,7 @@ Trajecta 自身的事件收件箱：
 
 **发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤；每条发现项给出可读的定位（`$.input[4] · #5`）并直接跳到对应 trace 会话中的那一步（`?node=`），另有入口进入该 trace 的审计页与协议页。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 
-**资源**（`GET /api/resources`）：跨请求、跨会话去重后的路径与 URL 目录。支持 `kind`（`url` / `local_path`）、`q`、`window`（默认全部，因为目录要回答「这个部署访问过什么」而不是今天访问过什么）与分页；每条给出访问请求数、出现步数、首次/最近出现时间，并链接到最近一次请求的「资源」标签页。右上角「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`），用于填充历史流量；索引本身由解析 worker 在解析后写入，只记录访问对象，不保存文件内容。
+**资源**（`GET /api/resources`）：跨请求、跨会话去重后的路径与 URL 目录。支持 `kind`（`url` / `local_path`）、`q`、`window`（默认全部，因为目录要回答「这个部署访问过什么」而不是今天访问过什么）与分页；每条给出访问请求数、出现步数、首次/最近出现时间，并链接到最近一次请求的「资源」标签页。右上角「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`），用于填充历史流量；cassette 已不存在的陈旧索引行会跳过；索引本身由解析 worker 在解析后写入，只记录访问对象，不保存文件内容。
 
 **请求链路**：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
 

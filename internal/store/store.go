@@ -1801,6 +1801,14 @@ func (s *Store) queryRowTx(tx *sql.Tx, query string, args ...any) *sql.Row {
 	return tx.QueryRow(s.db.rebind(query), args...)
 }
 
+// queryTx is queryRowTx's multi-row counterpart.
+func (s *Store) queryTx(tx *sql.Tx, query string, args ...any) (*sql.Rows, error) {
+	if s == nil || s.db == nil {
+		return tx.Query(query, args...)
+	}
+	return tx.Query(s.db.rebind(query), args...)
+}
+
 func (s *Store) hasColumn(table string, column string) (bool, error) {
 	typ, err := s.columnType(table, column)
 	if err != nil {

@@ -31,13 +31,25 @@ func TraceNodes(obs TraceObservation) []SemanticNode {
 // purpose - the raw JSON carries the same bytes the normalized text does - so a
 // caller that counts occurrences must deduplicate per node rather than assume
 // every returned view is a distinct occurrence.
+//
+// The raw payloads are JSON text, with escape sequences still in place. A
+// caller that scans for paths or URLs should use NodeArguments and decode the
+// raw payloads instead: "\\n" in a raw envelope is an escaped newline, not a
+// UNC path.
 func NodeTexts(node SemanticNode) []string {
 	return []string{
 		node.Text,
-		metadataText(node.Metadata, "arguments"),
+		NodeArguments(node),
 		string(node.Raw),
 		string(node.JSON),
 	}
+}
+
+// NodeArguments returns the arguments text of a tool call, or an empty string.
+// The value is the provider's JSON string, so a path inside it may still carry
+// one level of escapes; the caller decides whether to decode it.
+func NodeArguments(node SemanticNode) string {
+	return metadataText(node.Metadata, "arguments")
 }
 
 // metadataText renders one metadata value as the text a detector should scan.

@@ -19,9 +19,11 @@ package store
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -102,6 +104,15 @@ func (s *Store) SaveTraceResources(traceID string, accesses []ResourceAccess) er
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// The old relation is read before it is replaced so a value that the new
+	// parse no longer sees can drop its catalogue row when this trace was its
+	// last user. Without this, a parser or extractor change would leave values
+	// that no page can ever show.
+	oldIDs, err := s.resourceIDsTx(tx, traceID)
+	if err != nil {
+		return err
+	}
+
 	type link struct {
 		resourceID int64
 		access     ResourceAccess
@@ -148,12 +159,27 @@ func (s *Store) SaveTraceResources(traceID string, accesses []ResourceAccess) er
 	if _, err := s.execTx(tx, `DELETE FROM trace_resources WHERE trace_id = ?`, traceID); err != nil {
 		return fmt.Errorf("clear trace resources: %w", err)
 	}
+	newIDs := make(map[int64]struct{}, len(links))
 	for _, item := range links {
+		newIDs[item.resourceID] = struct{}{}
 		if _, err := s.execTx(tx, `
 			INSERT INTO trace_resources (trace_id, resource_id, access_count, first_position, created_at)
 			VALUES (?, ?, ?, ?, ?)
 		`, traceID, item.resourceID, item.access.Count, item.access.Position, now); err != nil {
 			return fmt.Errorf("insert trace resource: %w", err)
+		}
+	}
+	// Drop catalogue rows this trace was the last user of. A value another
+	// trace still links stays; the NOT EXISTS carries that decision.
+	for _, resourceID := range oldIDs {
+		if _, ok := newIDs[resourceID]; ok {
+			continue
+		}
+		if _, err := s.execTx(tx, `
+			DELETE FROM resources
+			WHERE id = ? AND NOT EXISTS (SELECT 1 FROM trace_resources WHERE resource_id = ?)
+		`, resourceID, resourceID); err != nil {
+			return fmt.Errorf("delete orphan resource: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -372,7 +398,7 @@ func (s *Store) EnqueueResourceBackfill(since time.Time, limit int) (int, error)
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`
-		SELECT l.trace_id
+		SELECT l.trace_id, l.path
 		FROM logs l
 		WHERE `+where+`
 			AND NOT EXISTS (SELECT 1 FROM trace_resources tr WHERE tr.trace_id = l.trace_id)
@@ -382,14 +408,15 @@ func (s *Store) EnqueueResourceBackfill(since time.Time, limit int) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	var traceIDs []string
+	type candidate struct{ traceID, path string }
+	var candidates []candidate
 	for rows.Next() {
-		var traceID string
-		if err := rows.Scan(&traceID); err != nil {
+		var item candidate
+		if err := rows.Scan(&item.traceID, &item.path); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		traceIDs = append(traceIDs, traceID)
+		candidates = append(candidates, item)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -397,11 +424,37 @@ func (s *Store) EnqueueResourceBackfill(since time.Time, limit int) (int, error)
 		return 0, err
 	}
 	queued := 0
-	for _, traceID := range traceIDs {
-		if err := s.EnqueueParseJob(traceID); err != nil {
+	for _, item := range candidates {
+		// A stale log row whose cassette is gone can only fail its parse job;
+		// queueing it would fill the analysis list with failures the operator
+		// cannot act on. The row itself is a separate index-hygiene issue.
+		if item.path != "" {
+			if _, err := os.Stat(item.path); err != nil {
+				continue
+			}
+		}
+		if err := s.EnqueueParseJob(item.traceID); err != nil {
 			return queued, err
 		}
 		queued++
 	}
 	return queued, nil
+}
+
+// resourceIDsTx loads the resource ids currently linked to one trace.
+func (s *Store) resourceIDsTx(tx *sql.Tx, traceID string) ([]int64, error) {
+	rows, err := s.queryTx(tx, `SELECT resource_id FROM trace_resources WHERE trace_id = ?`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

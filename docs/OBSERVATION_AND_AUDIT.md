@@ -287,7 +287,7 @@ type Detector interface {
 - **只记录访问对象。** 每个值是一条路径或一个 URL，不保存文件内容，不写入 `secret_mask_mappings.db`（资源不需要替换，也没有真/假值对），值按提取规则保存（它就是要审计的对象；只做 Windows 转义还原与句末标点裁剪）。
 - **按值去重，两层表。** `resources` 是全局目录：`(kind, value_hash)` 唯一，`kind` 为 `url` 或 `local_path`，保留完整值、`last_trace_id` 与首末出现时间；`trace_resources` 是单条 trace 的关系：`(trace_id, resource_id)` 主键，带该 trace 内的出现步骤数与首次出现顺序。同一路径被多个请求、跨 session、跨很长时间访问，只占一条目录行加每条 trace 一行关系，不随流量增长；访问请求数与出现步数在读取时从关系聚合，重解析用「先删后插」替换该 trace 的关系，不做增量计数。
 - **读取面。** trace 详情的 `GET /api/traces/{id}/resources`（「资源」标签页，`resources` 字段给出计数）按首次出现顺序列出本次交换的路径与 URL；`GET /api/resources?kind=&q=&window=&page=&page_size=`（质量 → 资源）按最近出现排序，返回 `trace_count` 与 `access_count`，`last_trace_id` 可跳到最近一次建立索引的请求。
-- **历史流量。** 新解析的 trace 自动入库；已有 trace 在详情页点「解析资源」触发一次 reparse，或在质量 → 资源页用「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`）。
+- **历史流量。** 新解析的 trace 自动入库；已有 trace 在详情页点「解析资源」触发一次 reparse，或在质量 → 资源页用「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`）；cassette 已不存在的陈旧索引行会被跳过，不会产生失败的 parse job。
 - **解析口径。** 复用 `pkg/secretmask.Indicators` 的 report-only DFA（见[凭据遮蔽](./SECRET_MASKING.md)），所以 URL/路径的形状、排除项（API 路由、MIME、import 路径、域名、JSON pointer）、成对括号与 JSON 转义反斜杠的处理与遮蔽侧一致；单个节点只计一次，节点的多份文本视图不会重复计数。
 
 ## 重解析与重分析入口

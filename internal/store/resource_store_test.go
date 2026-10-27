@@ -86,9 +86,16 @@ func TestResourceIndexDedupesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("after reparse resources = %+v, want just the URL", items)
 	}
 	// The path lost its last reference, so it is no longer part of the visible
-	// catalogue even though its identity row is kept.
+	// catalogue and its identity row is dropped with it.
 	if orphan, err := st.ListResources(ResourceFilter{Query: path}); err != nil || orphan.Total != 0 {
 		t.Fatalf("orphan catalogue lookup = %+v, %v; want none", orphan, err)
+	}
+	var orphanRows int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM resources WHERE value = ?`, path).Scan(&orphanRows); err != nil {
+		t.Fatalf("count orphan rows: %v", err)
+	}
+	if orphanRows != 0 {
+		t.Fatalf("catalogue still holds %d orphan row(s) for %q", orphanRows, path)
 	}
 
 	// A second trace sharing the URL joins the same catalogue row.
@@ -174,5 +181,32 @@ func TestResourceBackfillQueuesOnlyUnindexedTraces(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].TraceID != missing.ID {
 		t.Fatalf("queued jobs = %+v, want the unindexed trace", jobs)
+	}
+}
+
+func TestResourceBackfillSkipsMissingCassettes(t *testing.T) {
+	st := configTransactionTestStore(t)
+	trace := resourceTestTrace(t, st, "backfill-missing-file", time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC))
+	entry, err := st.GetByID(trace.ID)
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if err := os.Remove(entry.LogPath); err != nil {
+		t.Fatalf("remove cassette: %v", err)
+	}
+
+	queued, err := st.EnqueueResourceBackfill(time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("queued = %d, want 0 for a missing cassette", queued)
+	}
+	jobs, err := st.ListParseJobs("queued", 10)
+	if err != nil {
+		t.Fatalf("list parse jobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("queued jobs = %+v, want none", jobs)
 	}
 }

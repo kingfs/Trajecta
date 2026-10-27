@@ -59,11 +59,13 @@ func Extract(obs observe.TraceObservation) []Access {
 		// A node's four text views overlap; a value in more than one of them is
 		// still one occurrence in this node.
 		nodeSeen := make(map[string]struct{}, 4)
-		views := observe.NodeTexts(node)
-		// An entry parser keeps the client request as one raw JSON object, so a
-		// tool call's arguments are escaped one layer deeper than a tool-call
-		// node's. Decoding the raw JSON and scanning its strings recovers that
-		// layer; NodeTexts still covers the plain views.
+		// Scan decoded text only. The raw JSON envelopes are escaped text, and
+		// treating them as paths makes "\n" in a PEM block's base64 look like a
+		// UNC root. Decoding a string that is itself JSON (a tool call's
+		// arguments, or an entry parser's whole-request node) recovers the paths
+		// inside it at the same depth as the text.
+		views := decodedTextViews(node.Text)
+		views = append(views, decodedTextViews(observe.NodeArguments(node))...)
 		views = append(views, decodedJSONTexts(node.Raw)...)
 		views = append(views, decodedJSONTexts(node.JSON)...)
 		for _, text := range views {
@@ -71,7 +73,17 @@ func Extract(obs observe.TraceObservation) []Access {
 				continue
 			}
 			src := []byte(text)
+			// A credential's material can contain slashes that look exactly like
+			// an absolute path; a private-key body is base64, and any base64 run
+			// with two slash-separated segments would otherwise be indexed. Drop
+			// a candidate only when it is entirely inside a credential span: a
+			// URL that carries a key in its query still starts before it and is
+			// kept.
+			credentials := secretmask.Scan(src)
 			for _, match := range secretmask.Indicators(src) {
+				if insideCredential(match, credentials) {
+					continue
+				}
 				rule, ok := match.Rule()
 				if !ok || !rule.ReportOnly {
 					continue
@@ -106,6 +118,18 @@ func Extract(obs observe.TraceObservation) []Access {
 	return out
 }
 
+// insideCredential reports whether an indicator span is wholly contained in a
+// credential span. A URL that merely contains a key is not contained, because it
+// starts before the key.
+func insideCredential(match secretmask.Finding, credentials []secretmask.Finding) bool {
+	for _, credential := range credentials {
+		if credential.Start <= match.Start && match.End <= credential.End {
+			return true
+		}
+	}
+	return false
+}
+
 func kindFor(kind secretmask.Kind) (string, bool) {
 	switch kind {
 	case secretmask.KindURL:
@@ -133,6 +157,20 @@ func normalizeValue(kind secretmask.Kind, value string) string {
 		}
 	}
 	return strings.ToValidUTF8(value, "\uFFFD")
+}
+
+// decodedTextViews decodes one text that is JSON as a whole (a tool call's
+// arguments object, or a quoted message body) and falls back to the text
+// itself when it is not JSON. The decoded strings are the values that actually
+// reach a model, without the envelope's escapes.
+func decodedTextViews(text string) []string {
+	if text == "" {
+		return nil
+	}
+	if decoded := decodedJSONTexts([]byte(text)); len(decoded) > 0 {
+		return decoded
+	}
+	return []string{text}
 }
 
 // decodedJSONTexts returns every string value in one raw JSON payload. It is

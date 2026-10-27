@@ -112,3 +112,32 @@ func TestExtractReadsDoubleEscapedWindowsPath(t *testing.T) {
 		t.Fatalf("path = %+v, want the decoded Windows path", got[0])
 	}
 }
+
+// TestExtractSkipsPathsInsideCredentialMaterial covers the false positives a
+// real trace produced: a private-key body is base64, and a base64 run with two
+// slash-separated segments looks exactly like an absolute path. The whole block
+// is a credential span, so those candidates are dropped.
+func TestExtractSkipsPathsInsideCredentialMaterial(t *testing.T) {
+	text := "key:\n-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+		"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ/abc/def\n" +
+		"-----END OPENSSH PRIVATE KEY-----\n"
+	node := observe.SemanticNode{ID: "pem", Text: text}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	if got := Extract(obs); len(got) != 0 {
+		t.Fatalf("extracted %+v from a private-key body, want none", got)
+	}
+}
+
+// TestExtractKeepsAURLThatCarriesACredential pins the other side of the
+// containment rule: the URL is the access being audited and starts before the
+// key, so it must be kept even though a credential span sits inside it.
+func TestExtractKeepsAURLThatCarriesACredential(t *testing.T) {
+	key := "sk-" + "A" + "AAAAAAAAAAAAAAAAAAAT3BlbkFJ" + "BBBBBBBBBBBBBBBBBBBB"
+	url := "https://api.example.com/v1?key=" + key
+	node := observe.SemanticNode{ID: "url-with-key", Text: "fetched " + url}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	got := Extract(obs)
+	if len(got) != 1 || got[0].Kind != KindURL || got[0].Value != url {
+		t.Fatalf("extracted %+v, want the URL that carries the key", got)
+	}
+}
