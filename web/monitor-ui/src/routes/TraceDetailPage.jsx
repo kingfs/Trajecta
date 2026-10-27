@@ -14,6 +14,7 @@ import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
 import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
 import { locateFindingInConversation } from "../lib/findingLocate";
+import { locateMaskInConversation } from "../lib/maskLocate";
 import { locateResourceConversation } from "../lib/resourceLocate";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -67,6 +68,12 @@ export function TraceDetailPage() {
   // number or a credential. The locate action keeps it in component state for
   // the step it opened, while a resource's path or URL uses the shareable `hl`.
   const [findingHighlight, setFindingHighlight] = useState("");
+  // A replaced credential's original value is just as sensitive as a finding's
+  // match, so it is kept here rather than in `hl`.
+  const [maskHighlight, setMaskHighlight] = useState("");
+  // Steps to expand beyond the one the locator scrolls to: a value that occurs
+  // in several messages should be visible in all of them, not only the first.
+  const [highlightAnchors, setHighlightAnchors] = useState([]);
 
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
@@ -106,7 +113,7 @@ export function TraceDetailPage() {
   // The value a locate action asked the conversation to mark; `hl` is set only
   // by that action, never by a finding link.
   const resourceHighlight = searchParams.get("hl") || "";
-  const conversationHighlight = findingHighlight || resourceHighlight;
+  const conversationHighlight = maskHighlight || findingHighlight || resourceHighlight;
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   // The request list and the session list are two tabs of /traces now, so a
@@ -178,7 +185,9 @@ export function TraceDetailPage() {
 
   const setTraceTab = (nextTab) => {
     if (nextTab !== "conversation") {
+      setMaskHighlight("");
       setFindingHighlight("");
+      setHighlightAnchors([]);
     }
     applyTraceFocus(nextTab, focusTarget);
   };
@@ -191,7 +200,9 @@ export function TraceDetailPage() {
     // A finding link names its own location; a resource highlight left over
     // from an earlier locate must not mark an unrelated sentence.
     next.delete("hl");
+    setMaskHighlight("");
     setFindingHighlight("");
+    setHighlightAnchors([]);
     setSearchParams(next, { replace: true });
   };
 
@@ -207,7 +218,11 @@ export function TraceDetailPage() {
         toast.error(t("resources.locateMissing"));
         return;
       }
+      setMaskHighlight("");
       setFindingHighlight("");
+      setHighlightAnchors(
+        [...new Set((located.payload?.items || []).map((item) => item.anchor).filter(Boolean))],
+      );
       applyTraceFocus("conversation", "", located.anchor, located.highlight);
     } catch (error) {
       toast.error(t("resources.locateFailed"), {
@@ -226,10 +241,34 @@ export function TraceDetailPage() {
         toast.error(t("audit.locateMissing"));
         return;
       }
+      setMaskHighlight("");
       setFindingHighlight(located.value || "");
+      setHighlightAnchors(located.anchor ? [located.anchor] : []);
       applyTraceFocus("conversation", "", located.anchor, "");
     } catch (error) {
       toast.error(t("audit.locateFailed"), {
+        description: String(error?.message || error),
+      });
+    }
+  };
+
+  // The audit tab's credential-mask locate. The row already carries the
+  // original bytes; the read returns every conversation step that contains them
+  // so all occurrences can be marked and expanded, while the value stays out of
+  // the URL.
+  const locateMask = async (mask) => {
+    try {
+      const located = await locateMaskInConversation(traceID, mask.id);
+      if (!located.anchor) {
+        toast.error(t("masks.locateMissing"));
+        return;
+      }
+      setFindingHighlight("");
+      setMaskHighlight(String(mask.original || ""));
+      setHighlightAnchors(located.anchors);
+      applyTraceFocus("conversation", "", located.anchor, "");
+    } catch (error) {
+      toast.error(t("masks.locateFailed"), {
         description: String(error?.message || error),
       });
     }
@@ -425,6 +464,7 @@ export function TraceDetailPage() {
                 observation={observation.data}
                 anchor={anchor}
                 highlight={conversationHighlight}
+                highlightAnchors={highlightAnchors}
                 renderMarkdown={renderMarkdown}
                 onRenderMarkdownChange={setRenderMarkdown}
                 onSelectAnchor={setTraceAnchor}
@@ -459,7 +499,7 @@ export function TraceDetailPage() {
 
           <TabsContent value="audit">
             <div className="audit-tab">
-              <CredentialMaskSection traceID={traceID} t={t} InlineTag={InlineTag} />
+              <CredentialMaskSection traceID={traceID} t={t} InlineTag={InlineTag} onLocate={locateMask} />
               <AuditPanel
                 findings={findings}
                 observation={observation.data}

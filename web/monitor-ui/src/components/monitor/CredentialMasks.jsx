@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { Crosshair } from "lucide-react";
 import { Card } from "../ui/card";
 import { EmptyState } from "../common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
@@ -33,7 +34,7 @@ function ruleMeta(mask) {
  * see at a glance that the stand-in preserved it - the property the proxy
  * depends on, since it forwards the upstream Content-Length verbatim.
  */
-function CredentialMaskRow({ mask, t, InlineTag }) {
+function CredentialMaskRow({ mask, t, InlineTag, onLocate, locating = false }) {
   const original = String(mask?.original || "");
   const standIn = String(mask?.stand_in || "");
   const length = Number(mask?.value_length || original.length || standIn.length || 0);
@@ -53,7 +54,22 @@ function CredentialMaskRow({ mask, t, InlineTag }) {
       <div className="credential-mask-pair">
         <div className="credential-mask-value">
           <span className="credential-mask-label">{t("masks.original")}</span>
-          {original ? <code className="credential-mask-code">{original}</code> : <span className="credential-mask-missing">{t("masks.originalUnavailable")}</span>}
+          <div className="credential-mask-code-row">
+            {original ? <code className="credential-mask-code">{original}</code> : <span className="credential-mask-missing">{t("masks.originalUnavailable")}</span>}
+            {original && onLocate ? (
+              <button
+                type="button"
+                className="credential-mask-locate"
+                title={t("masks.locateHint")}
+                aria-label={t("masks.locateHint")}
+                aria-busy={locating ? "true" : "false"}
+                disabled={locating}
+                onClick={() => onLocate(mask)}
+              >
+                <Crosshair size={13} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="credential-mask-value">
           <span className="credential-mask-label">{t("masks.standIn")}</span>
@@ -72,7 +88,19 @@ function CredentialMaskRow({ mask, t, InlineTag }) {
  * the cards below so a caller that already owns a card (the events page) can
  * inline it.
  */
-export function CredentialMaskList({ masks, loading = false, error = "", t, InlineTag, emptyTitle = "", emptyDetail = "" }) {
+export function CredentialMaskList({ masks, loading = false, error = "", t, InlineTag, emptyTitle = "", emptyDetail = "", onLocate = null }) {
+  const [locatingID, setLocatingID] = useState("");
+  const locate = async (mask) => {
+    if (!onLocate || locatingID) {
+      return;
+    }
+    setLocatingID(mask.id);
+    try {
+      await onLocate(mask);
+    } finally {
+      setLocatingID("");
+    }
+  };
   if (error) {
     return <EmptyState title={t("masks.loadError")} detail={error} tone="danger" compact />;
   }
@@ -86,7 +114,14 @@ export function CredentialMaskList({ masks, loading = false, error = "", t, Inli
   return (
     <div className="credential-mask-list">
       {items.map((mask, index) => (
-        <CredentialMaskRow key={mask?.id || `${mask?.rule || "mask"}-${mask?.event_index ?? index}`} mask={mask} t={t} InlineTag={InlineTag} />
+        <CredentialMaskRow
+          key={mask?.id || `${mask?.rule || "mask"}-${mask?.event_index ?? index}`}
+          mask={mask}
+          t={t}
+          InlineTag={InlineTag}
+          onLocate={onLocate ? locate : null}
+          locating={locatingID === mask.id}
+        />
       ))}
     </div>
   );
@@ -97,7 +132,7 @@ export function CredentialMaskList({ masks, loading = false, error = "", t, Inli
  * trace. It sits above the findings because it is the request's own fact - the
  * bytes that left the machine - while a finding is a detector's opinion.
  */
-export function CredentialMaskSection({ traceID, t, InlineTag }) {
+export function CredentialMaskSection({ traceID, t, InlineTag, onLocate }) {
   const url = credentialMaskURLForTrace(traceID);
   const masks = useJSON(url, [traceID]);
   const count = credentialMaskItems(masks.data).length;
@@ -110,7 +145,7 @@ export function CredentialMaskSection({ traceID, t, InlineTag }) {
         </div>
         <InlineTag tone={count ? "gold" : "default"}>{t(count === 1 ? "masks.countOne" : "masks.count", { count })}</InlineTag>
       </div>
-      <CredentialMaskList masks={masks.data} loading={masks.loading} error={masks.error} t={t} InlineTag={InlineTag} />
+      <CredentialMaskList masks={masks.data} loading={masks.loading} error={masks.error} t={t} InlineTag={InlineTag} onLocate={onLocate} />
     </Card>
   );
 }

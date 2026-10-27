@@ -236,6 +236,27 @@ test.beforeEach(async ({ page }) => {
     }
     // The audit finding's locate read names the node and the value that proved
     // it; the value is what the conversation highlights, the node is the step.
+    // The credential audit row's locate read: every step that carries the
+    // original value, addressed by the step the conversation opens.
+    if (path === "/api/traces/trace-parsed/secret-masks/mask-1/locate") {
+      return route.fulfill({
+        json: {
+          id: "trace-parsed",
+          mask_id: "mask-1",
+          anchor: "node_result_failed",
+          items: [
+            {
+              node_id: "node_result_failed",
+              node_path: "$.input[4]",
+              anchor: "node_result_failed",
+              view: "text",
+              start: 0,
+              end: MASK_ORIGINAL.length,
+            },
+          ],
+        },
+      });
+    }
     if (path === "/api/traces/trace-parsed/findings/finding-1/locate") {
       return route.fulfill({
         json: {
@@ -1068,6 +1089,14 @@ test("the audit tab lists the credentials replaced in a request", async ({ page 
 
   // The findings card is still on the tab, below the replacements.
   await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
+
+  // The original value locates in the conversation, marks every occurrence and
+  // never travels in the URL.
+  await row.getByRole("button", { name: "Open the conversation and highlight the original value" }).click();
+  await expect(page).toHaveURL(/node=node_result_failed/);
+  expect(decodeURIComponent(page.url())).not.toContain(MASK_ORIGINAL);
+  await expect(page.locator("mark.content-hit").first()).toHaveText(MASK_ORIGINAL);
+  await expect(page.locator('[data-conversation-step][data-focused="true"]')).toHaveCount(0);
 });
 
 // The inbox half: the notification names a rule and a trace, and the detail
@@ -1758,7 +1787,9 @@ function parsedObservationPayload() {
     text_preview: "read_file",
     raw: { name: "read_file", call_id: "call_2", arguments: '{"path":"/etc/shadow"}' },
   });
-  const resultFailed = node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: "permission denied", raw: { call_id: "call_2", status: "failed" } });
+  // The credential audit row's original value also appears in this result, so
+  // the mask locate action has something to mark when the test opens it.
+  const resultFailed = node({ id: "node_result_failed", normalized_type: "tool_result", role: "tool", path: "$.input[4]", index: 4, text_preview: `permission denied ${MASK_ORIGINAL}`, raw: { call_id: "call_2", status: "failed" } });
   // A declaration is not part of the dialogue and has no step.
   const toolDecl = node({ id: "node_tool_decl", normalized_type: "tool_declaration", path: "$.tools[0]", index: 0, text_preview: "exec_command", raw: { type: "function", function: { name: "exec_command" } } });
   // Two ways a node arrives without a semantic name: an item type a newer

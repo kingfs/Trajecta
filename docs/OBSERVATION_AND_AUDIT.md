@@ -282,6 +282,10 @@ type Detector interface {
 - provider_safety：把 `safety` 节点映射为 `provider_safety_block`、`refusal` 节点映射为 `model_refusal`，并叠加 `ObservationSafety.Blocked`/`Refused` 汇总位。
 - tool_error：`obs.Tools.Results[].IsError` 为真，或 `tool_result`/`server_tool_result`/`error` 节点的 status/text 含错误信号时报告 `tool_result_error`。
 
+## 遮蔽审计的定位
+
+`credential_mask_audits` 保存每条替换的原始值、假值、规则与请求体内的偏移，但不知道它出现在哪个语义节点。`GET /api/traces/{id}/secret-masks/{maskID}/locate` 用审计行的解密原始值重新解析 cassette，在该值的所有解码文本视图里做字面检索，返回每一次出现的 `node_id`、`node_path`、视图、字节区间和该节点的顶级祖先 `anchor`。响应不重复原始值：调用方已经从 `GET /api/secret-masks` 拿到它，定位结果只需要位置；前端据此展开所有命中的步骤并高亮所有出现。原始值只在一次已鉴权读取中解密用于比较，不写回任何表，也不进入 URL。
+
 ## 资源索引
 
 路径与 URL 不是 finding：它们没有严重度，也不该在「发现项」里和拒答、工具错误混在一起。`internal/resources` 从 Observation IR 提取它们，`internal/observeworker` 在每次解析成功后调用，`internal/reanalysis` 在重解析/重扫时同样刷新；这是解析的派生索引，不是检测器，也不改写请求或响应。

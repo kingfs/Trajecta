@@ -173,6 +173,50 @@ func Extract(obs observe.TraceObservation) []Access {
 	return out
 }
 
+// maxLocateOccurrences bounds a literal search response. A value that occurs
+// more often than this is ambient text (a format string, a common word), not a
+// position an operator is looking for.
+const maxLocateOccurrences = 200
+
+// LocateValue returns every place obs carries value literally in one of the
+// decoded node text views. It backs the audit-side locate for a masked value:
+// the credential audit row knows the original bytes, and the conversation has to
+// highlight all of them, not only the first.
+//
+// Unlike Locate it does not run the detector; the caller already knows the exact
+// value and wants the positions. Empty values and values absent from the parse
+// yield nothing.
+func LocateValue(obs observe.TraceObservation, value string) []Occurrence {
+	if value == "" {
+		return nil
+	}
+	var out []Occurrence
+	for _, node := range observe.TraceNodes(obs) {
+		for _, view := range nodeTextViews(node) {
+			start := 0
+			for start <= len(view.text) {
+				index := strings.Index(view.text[start:], value)
+				if index < 0 {
+					break
+				}
+				index += start
+				out = append(out, Occurrence{
+					NodeID:   node.ID,
+					NodePath: node.Path,
+					View:     view.label,
+					Start:    index,
+					End:      index + len(value),
+				})
+				if len(out) >= maxLocateOccurrences {
+					return out
+				}
+				start = index + len(value)
+			}
+		}
+	}
+	return out
+}
+
 // Locate returns the places obs carries kind/value. One occurrence per semantic
 // node is enough to jump to the conversation, and nodes are visited in the same
 // order Extract walks them, so the first result is the earliest place the value

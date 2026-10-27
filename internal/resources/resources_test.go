@@ -270,3 +270,44 @@ func TestLocateReportsEachNodeOnce(t *testing.T) {
 		t.Errorf("first view = %q, want text", got[0].View)
 	}
 }
+
+// TestLocateValueReturnsEveryOccurrence pins the audit-side literal search:
+// the credential audit row names the exact original bytes, and the reader wants
+// every place they appear (a prompt and a tool call, or twice in one message),
+// not only the first hit.
+func TestLocateValueReturnsEveryOccurrence(t *testing.T) {
+	value := `sk-` + strings.Repeat("A", 20) + "T3BlbkFJ" + strings.Repeat("B", 20)
+	twice := observe.SemanticNode{
+		ID:   "node-twice",
+		Path: "$.messages[0]",
+		Text: "first " + value + " second " + value,
+	}
+	call := observe.SemanticNode{
+		ID:       "node-call",
+		Path:     "$.messages[1].tool_calls[0]",
+		Metadata: map[string]any{"arguments": `{"key":"` + value + `"}`},
+	}
+	other := observe.SemanticNode{ID: "node-other", Path: "$.messages[2]", Text: "nothing here"}
+	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{twice, call, other}}}
+
+	got := LocateValue(obs, value)
+	if len(got) != 3 {
+		t.Fatalf("LocateValue() = %d occurrences, want 3: %+v", len(got), got)
+	}
+	byNode := map[string][]Occurrence{}
+	for _, occurrence := range got {
+		byNode[occurrence.NodeID] = append(byNode[occurrence.NodeID], occurrence)
+		if occurrence.View == "" || occurrence.End-occurrence.Start != len(value) {
+			t.Errorf("occurrence = %+v, want a view and the value's span", occurrence)
+		}
+	}
+	if len(byNode["node-twice"]) != 2 || len(byNode["node-call"]) != 1 {
+		t.Errorf("occurrences by node = %+v, want two in the message and one in the call", byNode)
+	}
+	if byNode["node-twice"][0].Start >= byNode["node-twice"][1].Start {
+		t.Errorf("occurrences are not in text order: %+v", byNode["node-twice"])
+	}
+	if got := LocateValue(obs, ""); len(got) != 0 {
+		t.Errorf("LocateValue(\"\") = %+v, want none", got)
+	}
+}

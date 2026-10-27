@@ -1947,6 +1947,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:
 			handleTraceFindingLocate(w, r, st, entry, parts[2])
+		case len(parts) == 4 && parts[1] == "secret-masks" && parts[3] == "locate" && r.Method == http.MethodGet:
+			handleTraceMaskLocate(w, r, st, entry, parts[2])
 		case len(parts) == 2 && parts[1] == "resources" && r.Method == http.MethodGet:
 			handleTraceResources(w, r, st, entry)
 		case len(parts) == 3 && parts[1] == "resources" && parts[2] == "locate" && r.Method == http.MethodGet:

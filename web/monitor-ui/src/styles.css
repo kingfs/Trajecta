@@ -364,6 +364,44 @@
   font-size: var(--text-label);
 }
 
+.credential-mask-code-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.credential-mask-code-row .credential-mask-code {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.credential-mask-locate {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.credential-mask-locate:hover {
+  border-color: var(--accent-border);
+  background: var(--surface-2);
+  color: var(--accent-deep);
+}
+
+.credential-mask-locate:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 .credential-mask-code {
   display: block;
   padding: 8px 10px;

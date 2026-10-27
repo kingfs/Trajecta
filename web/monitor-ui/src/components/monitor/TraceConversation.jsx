@@ -368,7 +368,7 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
   );
 }
 
-export function TraceConversation({ observation, anchor = "", highlight = "", renderMarkdown, onRenderMarkdownChange, onSelectAnchor, fallback = null }) {
+export function TraceConversation({ observation, anchor = "", highlight = "", highlightAnchors = [], renderMarkdown, onRenderMarkdownChange, onSelectAnchor, fallback = null }) {
   const { t } = useI18n();
   const steps = useMemo(() => buildConversationSteps(observation?.nodes || []), [observation]);
   const stats = useMemo(() => conversationStats(steps), [steps]);
@@ -383,6 +383,9 @@ export function TraceConversation({ observation, anchor = "", highlight = "", re
   const stepRefs = useRef(new Map());
   const landed = useRef(false);
   const target = useMemo(() => findConversationTarget(steps, anchor), [steps, anchor]);
+  // Every step a locate read reported, not just the one the URL names: a
+  // credential replaced in several messages has to be visible in all of them.
+  const openedAnchors = useMemo(() => new Set(highlightAnchors || []), [highlightAnchors]);
   const inputSteps = useMemo(
     () => steps.map((step, index) => ({ step, ordinal: index + 1 })).filter(({ step }) => isInputStep(step)),
     [steps],
@@ -638,7 +641,12 @@ export function TraceConversation({ observation, anchor = "", highlight = "", re
                 // sentence the finding was about. The step the page landed on by
                 // default opens too, because the newest input is what the reader
                 // came to read.
-                open={isOpen(step.id, false) || step.id === target || stepKey(step) === landedInput}
+                open={
+                  isOpen(step.id, false) ||
+                  step.id === target ||
+                  stepKey(step) === landedInput ||
+                  openedAnchors.has(step.id)
+                }
                 onToggleOpen={toggleOpen}
                 onSelectAnchor={onSelectAnchor}
                 renderMarkdown={renderMarkdown}
