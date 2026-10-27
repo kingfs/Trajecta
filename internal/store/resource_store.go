@@ -1,5 +1,5 @@
-// Resource index: the distinct local filesystem paths and URLs a recorded
-// exchange carried.
+// Resource index: the distinct local filesystem paths and URLs the model's
+// tool calls in a recorded exchange named.
 //
 // The cassette remains the source of truth; this is a derived index over it. It
 // is deliberately two tables rather than one row per occurrence:
@@ -33,7 +33,7 @@ type ResourceAccess struct {
 	Kind string
 	// Value is the path or URL. It is never file content.
 	Value string
-	// Count is the number of semantic nodes that carried it.
+	// Count is the number of tool calls that named it.
 	Count int
 	// Position is the order of first appearance within the trace.
 	Position int

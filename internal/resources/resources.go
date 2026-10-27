@@ -1,17 +1,22 @@
-// Package resources extracts the local filesystem paths and URLs a recorded
-// exchange carried, so the monitor can answer "which directories did this
-// agent read and which addresses did it call".
+// Package resources extracts the local filesystem paths and URLs a model asked
+// a tool to operate on, so the monitor can answer "which files did this agent
+// read, and which addresses did it call".
+//
+// The scope is deliberately narrow: only the model's own tool calls are read
+// (see toolcalls.go). Tool results, message text, reasoning and code bodies are
+// not scanned, because a path-shaped string in those is usually not an access -
+// a regular expression literal, an import specifier, a documentation link or a
+// URL quoted in prose all look like one. Within a call, the argument key (a
+// `file_path` is a location, a `pattern` is a regex) and the shell operand
+// position decide which tokens can be accesses; the shape detector in
+// pkg/secretmask validates the survivors.
 //
 // The extraction is a pure function of the observation: it never rewrites the
 // request or the response, stores no file contents, and needs no vault. The
-// detector is the report-only Ragel machine in pkg/secretmask, so the shapes
-// are the same ones the masking engine knows without sharing its rewrite path.
-//
-// The result is deduplicated by value within one trace; the caller (the parse
+// result is deduplicated by value within one trace; the caller (the parse
 // worker) persists that as one row per distinct resource, not one per
 // occurrence. A path reused across sessions is deduplicated globally by the
-// resources table, which is what keeps the database bounded by the number of
-// distinct values rather than by traffic.
+// resources table.
 package resources
 
 import (
@@ -29,6 +34,13 @@ const (
 	// secretmask.RuleLocalPath recognizes.
 	KindLocalPath = "local_path"
 
+	// modeStrictPath is the internal mode of a candidate taken from a field
+	// whose key does not name a location. An unclassified argument may be a
+	// path, but only a strong shape is evidence: an absolute or home path, a
+	// drive, a UNC root, or a relative path with a file extension. A bare
+	// "../../lib/monitor" is an import specifier, not a file read.
+	modeStrictPath = "strict_local_path"
+
 	// maxValueBytes bounds a stored value. A path or URL longer than this is
 	// not indexed rather than truncated: a truncated value would collide with
 	// every other value sharing its prefix, and no real path or endpoint is
@@ -37,22 +49,21 @@ const (
 	maxValueBytes = 8192
 )
 
-// Access is one distinct path or URL seen in a trace.
+// Access is one distinct path or URL a model tool call named.
 type Access struct {
 	Kind  string
 	Value string
-	// Count is the number of semantic nodes that carried the value. A node is
-	// scanned through overlapping text views (text, arguments, raw JSON), so
-	// counting views would inflate it for every node.
+	// Count is the number of tool calls that named the value. A call can carry
+	// the same value in more than one argument, which is still one call.
 	Count int
 	// Position is the order of first appearance within the trace.
 	Position int
 }
 
-// Occurrence is one place a distinct value was found: the semantic node and the
-// text view inside it. Locate returns these so the Monitor can jump from a
-// resource row to the conversation step the value came from; the offsets are
-// byte offsets into the decoded view, not into the cassette.
+// Occurrence is one place a distinct value was found: the tool call's node and
+// the argument view inside it. Locate returns these so the Monitor can jump from
+// a resource row to the conversation step the value came from; the offsets are
+// byte offsets into the decoded argument text, not into the cassette.
 type Occurrence struct {
 	NodeID   string
 	NodePath string
@@ -61,10 +72,10 @@ type Occurrence struct {
 	End      int
 }
 
-// The labels of the four text views a node is scanned through. They are part of
-// the locate response (not user-facing names): "text" is the parser's normalized
-// text, "arguments" a tool call's arguments, and "raw"/"json" the payloads after
-// one layer of decoding.
+// The labels of the text views a node is scanned through by LocateValue. They
+// are part of the locate response (not user-facing names): "text" is the
+// parser's normalized text, "arguments" a tool call's arguments, and "raw"/"json"
+// the payloads after one layer of decoding.
 const (
 	viewText      = "text"
 	viewArguments = "arguments"
@@ -72,99 +83,44 @@ const (
 	viewJSON      = "json"
 )
 
-// textView is one decoded string of one node, labelled with the view it came
-// from so a locate result can say where the value was seen.
-type textView struct {
-	label string
-	text  string
+// candidate is one argument token that may name an access, before the shape
+// check. mode restricts the kind the field can mean: a URL argument cannot
+// become a filesystem path.
+type candidate struct {
+	mode  string
+	token string
+	start int
+	end   int
 }
 
-// nodeTextViews returns the views of node in the order Extract scans them.
-//
-// Scan decoded text only. The raw JSON envelopes are escaped text, and treating
-// them as paths makes "\n" in a PEM block's base64 look like a UNC root.
-// Decoding a string that is itself JSON (a tool call's arguments, or an entry
-// parser's whole-request node) recovers the paths inside it at the same depth as
-// the text.
-func nodeTextViews(node observe.SemanticNode) []textView {
-	var views []textView
-	for _, text := range decodedTextViews(node.Text) {
-		views = append(views, textView{label: viewText, text: text})
-	}
-	for _, text := range decodedTextViews(observe.NodeArguments(node)) {
-		views = append(views, textView{label: viewArguments, text: text})
-	}
-	for _, text := range decodedJSONTexts(node.Raw) {
-		views = append(views, textView{label: viewRaw, text: text})
-	}
-	for _, text := range decodedJSONTexts(node.JSON) {
-		views = append(views, textView{label: viewJSON, text: text})
-	}
-	return views
-}
-
-// forEachAccess calls yield for every report-only indicator in text, with the
-// normalized value and the byte span it occupied. This is the single place the
-// extraction decision lives: Extract indexes what it yields and Locate searches
-// for the same value from the same views, so a row that was indexed can always
-// be located by the exact value the index stores.
-func forEachAccess(text string, yield func(kind, value string, start, end int)) {
-	if text == "" {
-		return
-	}
-	src := []byte(text)
-	// A credential's material can contain slashes that look exactly like an
-	// absolute path; a private-key body is base64, and any base64 run with two
-	// slash-separated segments would otherwise be indexed. Drop a candidate only
-	// when it is entirely inside a credential span: a URL that carries a key in
-	// its query still starts before it and is kept.
-	credentials := secretmask.Scan(src)
-	for _, match := range secretmask.Indicators(src) {
-		if insideCredential(match, credentials) {
-			continue
-		}
-		rule, ok := match.Rule()
-		if !ok || !rule.ReportOnly {
-			continue
-		}
-		kind, ok := kindFor(rule.Kind)
-		if !ok {
-			continue
-		}
-		value := normalizeValue(rule.Kind, string(match.Bytes(src)))
-		if value == "" || len(value) > maxValueBytes {
-			continue
-		}
-		yield(kind, value, match.Start, match.End)
-	}
-}
-
-// Extract returns the distinct local paths and URLs in obs, in first-appearance
-// order, with the number of nodes that carried each one.
+// Extract returns the distinct local paths and URLs the model's tool calls named
+// in obs, in first-appearance order, with the number of calls that named each.
 func Extract(obs observe.TraceObservation) []Access {
 	byKey := make(map[string]*Access, 16)
 	order := make([]string, 0, 16)
 	position := 0
-	for _, node := range observe.TraceNodes(obs) {
-		// A node's four text views overlap; a value in more than one of them is
-		// still one occurrence in this node.
-		nodeSeen := make(map[string]struct{}, 4)
-		for _, view := range nodeTextViews(node) {
-			forEachAccess(view.text, func(kind, value string, _, _ int) {
-				key := kind + "\x00" + value
-				if _, ok := nodeSeen[key]; ok {
-					return
-				}
-				nodeSeen[key] = struct{}{}
-				if access, ok := byKey[key]; ok {
-					access.Count++
-					return
-				}
-				byKey[key] = &Access{Kind: kind, Value: value, Count: 1, Position: position}
-				position++
-				order = append(order, key)
-			})
-		}
+	for _, call := range modelToolCalls(obs) {
+		// One call can name the same value in two arguments; that is one
+		// occurrence of the value in this call, not two.
+		callSeen := make(map[string]struct{}, 4)
+		forEachCallCandidate(call, func(mode, token, view string, start, end int) {
+			kind, value, ok := resolveCandidate(candidate{mode: mode, token: token, start: start, end: end})
+			if !ok {
+				return
+			}
+			key := kind + "\x00" + value
+			if _, duplicated := callSeen[key]; duplicated {
+				return
+			}
+			callSeen[key] = struct{}{}
+			if access, exists := byKey[key]; exists {
+				access.Count++
+				return
+			}
+			byKey[key] = &Access{Kind: kind, Value: value, Count: 1, Position: position}
+			position++
+			order = append(order, key)
+		})
 	}
 	out := make([]Access, 0, len(order))
 	for _, key := range order {
@@ -183,9 +139,9 @@ const maxLocateOccurrences = 200
 // the credential audit row knows the original bytes, and the conversation has to
 // highlight all of them, not only the first.
 //
-// Unlike Locate it does not run the detector; the caller already knows the exact
-// value and wants the positions. Empty values and values absent from the parse
-// yield nothing.
+// Unlike Locate it does not run the access extractor; the caller already knows
+// the exact value and wants the positions, wherever the payload carries them.
+// Empty values and values absent from the parse yield nothing.
 func LocateValue(obs observe.TraceObservation, value string) []Occurrence {
 	if value == "" {
 		return nil
@@ -217,47 +173,170 @@ func LocateValue(obs observe.TraceObservation, value string) []Occurrence {
 	return out
 }
 
-// Locate returns the places obs carries kind/value. One occurrence per semantic
-// node is enough to jump to the conversation, and nodes are visited in the same
-// order Extract walks them, so the first result is the earliest place the value
-// appeared. A value the current detector would not extract (an old index row, or
-// a value the caller invented) has no occurrence.
+// Locate returns the places obs's model tool calls name kind/value. One
+// occurrence per call node is enough to jump to the conversation, and calls are
+// visited in the same order Extract walks them, so the first result is the
+// earliest place the value appeared. A value the current extractor would not
+// produce (an old index row, or a value the caller invented) has no occurrence.
 func Locate(obs observe.TraceObservation, kind, value string) []Occurrence {
 	if value == "" || (kind != KindURL && kind != KindLocalPath) {
 		return nil
 	}
 	var out []Occurrence
 	seenNodes := make(map[string]struct{}, 8)
-	for _, node := range observe.TraceNodes(obs) {
-		if node.ID != "" {
-			if _, ok := seenNodes[node.ID]; ok {
+	for _, call := range modelToolCalls(obs) {
+		if call.nodeID != "" {
+			if _, seen := seenNodes[call.nodeID]; seen {
 				continue
 			}
 		}
 		found := false
-		for _, view := range nodeTextViews(node) {
-			forEachAccess(view.text, func(foundKind, foundValue string, start, end int) {
-				if found || foundKind != kind || foundValue != value {
-					return
-				}
-				found = true
-				out = append(out, Occurrence{
-					NodeID:   node.ID,
-					NodePath: node.Path,
-					View:     view.label,
-					Start:    start,
-					End:      end,
-				})
-			})
+		forEachCallCandidate(call, func(mode, token, view string, start, end int) {
 			if found {
-				break
+				return
 			}
-		}
-		if found && node.ID != "" {
-			seenNodes[node.ID] = struct{}{}
+			foundKind, foundValue, ok := resolveCandidate(candidate{mode: mode, token: token, start: start, end: end})
+			if !ok || foundKind != kind || foundValue != value {
+				return
+			}
+			found = true
+			spanStart, spanEnd := candidateSpan(candidate{token: token, start: start, end: end})
+			out = append(out, Occurrence{
+				NodeID:   call.nodeID,
+				NodePath: call.nodePath,
+				View:     view,
+				Start:    spanStart,
+				End:      spanEnd,
+			})
+		})
+		if found && call.nodeID != "" {
+			seenNodes[call.nodeID] = struct{}{}
 		}
 	}
 	return out
+}
+
+// resolveCandidate turns one argument token into a resource kind and value, or
+// reports that it is not an access. The token must be exactly one path or URL:
+// the shape detector has to match the whole token, which is what keeps
+// "import ... from '../../lib/monitor'" and "print('/x')" from becoming file
+// reads even when they reach an argument.
+func resolveCandidate(c candidate) (kind, value string, ok bool) {
+	token := strings.TrimSpace(c.token)
+	if token == "" || len(token) > maxValueBytes {
+		return "", "", false
+	}
+	src := []byte(token)
+	matches := secretmask.Indicators(src)
+	if len(matches) != 1 {
+		return "", "", false
+	}
+	match := matches[0]
+	if match.Start != 0 || match.End != len(token) {
+		return "", "", false
+	}
+	rule, ok := match.Rule()
+	if !ok || !rule.ReportOnly {
+		return "", "", false
+	}
+	kind, ok = kindFor(rule.Kind)
+	if !ok {
+		return "", "", false
+	}
+	switch {
+	case c.mode == modeStrictPath:
+		// A URL is unambiguous; a local path from an unclassified field needs
+		// a strong shape.
+		if kind == KindLocalPath && !isStrongPathToken(token) {
+			return "", "", false
+		}
+	case c.mode != "" && c.mode != kind:
+		return "", "", false
+	}
+	if insideCredential(match, secretmask.Scan(src)) {
+		return "", "", false
+	}
+	value = normalizeValue(rule.Kind, token)
+	if value == "" || len(value) > maxValueBytes {
+		return "", "", false
+	}
+	return kind, value, true
+}
+
+// isStrongPathToken reports whether a relative path candidate has evidence of
+// naming a file rather than being a module specifier or a route fragment: an
+// absolute, home, drive or UNC root, or a last segment with a file extension.
+func isStrongPathToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(token, "/"), strings.HasPrefix(token, "~/"),
+		strings.HasPrefix(token, `\\`):
+		return true
+	case len(token) >= 3 && isASCIIAlpha(token[0]) && token[1] == ':' &&
+		(token[2] == '/' || token[2] == '\\'):
+		return true
+	}
+	slash := strings.LastIndexAny(token, `\/`)
+	base := token[slash+1:]
+	dot := strings.LastIndexByte(base, '.')
+	if dot <= 0 || dot == len(base)-1 {
+		return false
+	}
+	for _, r := range base[dot+1:] {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlpha(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// candidateSpan returns the byte range the candidate occupies inside the
+// argument view, with the surrounding whitespace the resolver trimmed.
+func candidateSpan(c candidate) (start, end int) {
+	left := strings.TrimLeft(c.token, " \t\r\n")
+	lead := len(c.token) - len(left)
+	token := strings.TrimRight(left, " \t\r\n")
+	return c.start + lead, c.start + lead + len(token)
+}
+
+// textView is one decoded string of one node, labelled with the view it came
+// from so a locate result can say where the value was seen.
+type textView struct {
+	label string
+	text  string
+}
+
+// nodeTextViews returns the views of node in the order LocateValue scans them.
+//
+// Scan decoded text only. The raw JSON envelopes are escaped text, and treating
+// them as paths makes "\n" in a PEM block's base64 look like a UNC root.
+// Decoding a string that is itself JSON (a tool call's arguments, or an entry
+// parser's whole-request node) recovers the strings inside it at the same depth
+// as the text.
+func nodeTextViews(node observe.SemanticNode) []textView {
+	var views []textView
+	for _, text := range decodedTextViews(node.Text) {
+		views = append(views, textView{label: viewText, text: text})
+	}
+	for _, text := range decodedTextViews(observe.NodeArguments(node)) {
+		views = append(views, textView{label: viewArguments, text: text})
+	}
+	for _, text := range decodedJSONTexts(node.Raw) {
+		views = append(views, textView{label: viewRaw, text: text})
+	}
+	for _, text := range decodedJSONTexts(node.JSON) {
+		views = append(views, textView{label: viewJSON, text: text})
+	}
+	return views
 }
 
 // insideCredential reports whether an indicator span is wholly contained in a
@@ -315,9 +394,7 @@ func decodedTextViews(text string) []string {
 	return []string{text}
 }
 
-// decodedJSONTexts returns every string value in one raw JSON payload. It is
-// used to see through the extra escaping an entry parser's whole-request node
-// carries; a malformed payload contributes nothing.
+// decodedJSONTexts returns every string value in one raw JSON payload.
 func decodedJSONTexts(raw []byte) []string {
 	if len(raw) == 0 {
 		return nil

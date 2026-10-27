@@ -562,9 +562,12 @@ func TestWorkerIndexesTraceResources(t *testing.T) {
 
 	const requestID = "req-worker-resources"
 	reqHead := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"file_path\":\"/data/src/github.com/lyramakesmusic/neuron-explorer/README.md\"}"}}]},{"role":"user","content":"also fetch https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"}]}`
+	// The request carries the client's history, including an assistant tool call
+	// from an earlier turn; the resource index reads the model's output, so only
+	// the calls in the response are expected below.
+	reqBody := `{"model":"gpt-5.1","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_0","type":"function","function":{"name":"read","arguments":"{\"file_path\":\"/old/history.txt\"}"}}]},{"role":"user","content":"read the readme"}]}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-	resBody := `{"choices":[{"message":{"content":"done"}}]}`
+	resBody := `{"choices":[{"message":{"content":"done","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"file_path\":\"/data/src/github.com/lyramakesmusic/neuron-explorer/README.md\"}"}},{"id":"call_2","type":"function","function":{"name":"web_fetch","arguments":"{\"url\":\"https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03\"}"}}]}}]}`
 	header := recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",
 		Meta: recordfile.MetaData{
@@ -621,6 +624,9 @@ func TestWorkerIndexesTraceResources(t *testing.T) {
 		t.Fatalf("tool-call path was not indexed: %+v", items)
 	}
 	if !values["https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"] {
-		t.Fatalf("message URL was not indexed: %+v", items)
+		t.Fatalf("tool-call URL was not indexed: %+v", items)
+	}
+	if values["/old/history.txt"] {
+		t.Fatalf("request history was indexed: %+v", items)
 	}
 }

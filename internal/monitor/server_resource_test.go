@@ -102,8 +102,8 @@ func TestTraceResourcesAndCatalogueAPI(t *testing.T) {
 func TestTraceResourceLocateAPI(t *testing.T) {
 	outputDir := t.TempDir()
 	content := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil,
-		`{"messages":[{"role":"user","content":"read /home/alice/project/main.go and call https://api.example.com/x"}]}`,
-		`{"choices":[{"message":{"content":"done"}}]}`,
+		`{"messages":[{"role":"user","content":"read the project"}]}`,
+		`{"choices":[{"message":{"content":"done","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"file_path\":\"/home/alice/project/main.go\"}"}},{"id":"call_2","type":"function","function":{"name":"web_fetch","arguments":"{\"url\":\"https://api.example.com/x\"}"}}]}}]}`,
 		func(header *recordfile.RecordHeader) {
 			header.Meta.Provider = llm.ProviderOpenAICompatible
 			header.Meta.Operation = llm.OperationChatCompletions

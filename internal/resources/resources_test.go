@@ -7,103 +7,285 @@ import (
 	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
-func TestExtractDedupesValuesAcrossNodesAndTextViews(t *testing.T) {
-	request := observe.SemanticNode{
-		ID:   "node-request",
-		Text: "edited /home/alice/project/main.go, then called https://api.example.com/repos/1?page=2 twice",
-		Raw:  []byte(`{"content":"edited /home/alice/project/main.go"}`),
+// callNode builds the IR shape every protocol parser produces for a model tool
+// call: a response-side node whose arguments are provider JSON text.
+func callNode(id, name, args string) observe.SemanticNode {
+	return observe.SemanticNode{
+		ID:             id,
+		ProviderType:   "function_call",
+		NormalizedType: observe.NodeToolCall,
+		Path:           "$.output[" + id + "]",
+		Text:           name,
+		Metadata: map[string]any{
+			"name":      name,
+			"arguments": args,
+		},
 	}
-	response := observe.SemanticNode{
-		ID:   "node-response",
-		Text: "reading /home/alice/project/main.go; docs https://docs.example.com/guide",
-	}
-	tool := observe.SemanticNode{
-		ID:       "node-tool",
-		Metadata: map[string]any{"arguments": `{"file_path":"C:\\Users\\alice\\project\\main.go","url":"https://api.example.com/repos/1?page=2"}`},
-	}
-	obs := observe.TraceObservation{
-		Request:  observe.ObservationRequest{Nodes: []observe.SemanticNode{request, tool}},
-		Response: observe.ObservationResponse{Nodes: []observe.SemanticNode{response}},
-	}
+}
 
+func observationOf(nodes ...observe.SemanticNode) observe.TraceObservation {
+	return observe.TraceObservation{
+		Response: observe.ObservationResponse{ToolCalls: nodes, Nodes: nodes},
+	}
+}
+
+func extractedValues(obs observe.TraceObservation) map[string]Access {
+	values := make(map[string]Access, 8)
+	for _, access := range Extract(obs) {
+		values[access.Value] = access
+	}
+	return values
+}
+
+// TestExtractReadsToolCallArguments pins the positive half: the locations a
+// model's file and network tools name are the resources of the trace.
+func TestExtractReadsToolCallArguments(t *testing.T) {
+	obs := observationOf(
+		callNode("read", "read_file", `{"file_path":"/home/alice/project/main.go"}`),
+		callNode("fetch", "web_fetch", `{"url":"https://api.example.com/repos/1?page=2","prompt":"summarize"}`),
+		callNode("list", "ls", `{"path":"/project/src"}`),
+	)
 	got := Extract(obs)
-	byValue := make(map[string]Access, len(got))
-	for _, access := range got {
-		if _, ok := byValue[access.Value]; ok {
-			t.Fatalf("value %q was extracted twice", access.Value)
+	if len(got) != 3 {
+		t.Fatalf("extracted %+v, want three resources", got)
+	}
+	if got[0].Kind != KindLocalPath || got[0].Value != "/home/alice/project/main.go" {
+		t.Errorf("first access = %+v", got[0])
+	}
+	if got[1].Kind != KindURL || got[1].Value != "https://api.example.com/repos/1?page=2" {
+		t.Errorf("second access = %+v", got[1])
+	}
+	if got[2].Value != "/project/src" {
+		t.Errorf("third access = %+v", got[2])
+	}
+	for index, access := range got {
+		if access.Position != index || access.Count != 1 {
+			t.Errorf("access %d = %+v, want position %d and count 1", index, access, index)
 		}
-		byValue[access.Value] = access
+	}
+}
+
+// TestExtractIgnoresTextAndToolResults is the scope contract, and the reason
+// the index stopped reporting regex literals (/gpt-5/i), import specifiers
+// ("../../lib/monitor") and documentation URLs: none of them is a tool call.
+func TestExtractIgnoresTextAndToolResults(t *testing.T) {
+	obs := observe.TraceObservation{
+		Request: observe.ObservationRequest{
+			Nodes: []observe.SemanticNode{{
+				ID:   "prompt",
+				Text: `read /home/alice/project/main.go and fetch https://docs.example.com/guide`,
+			}},
+		},
+		Response: observe.ObservationResponse{
+			Outputs: []observe.SemanticNode{{
+				ID:   "answer",
+				Text: "the import comes from ../../lib/monitor and the flag is /gpt-5/i",
+			}},
+			ToolResults: []observe.SemanticNode{{
+				ID:             "result",
+				NormalizedType: observe.NodeToolResult,
+				Text:           "cat /etc/passwd\nhttps://internal.example.com:8443/a/b?q=1#f",
+			}},
+			Nodes: []observe.SemanticNode{
+				{ID: "prompt", Text: "see /tmp/secret.txt"},
+				{ID: "result", NormalizedType: observe.NodeToolResult, Text: "see /tmp/secret.txt"},
+				{ID: "answer", Text: "see /tmp/secret.txt"},
+			},
+		},
+	}
+	if got := Extract(obs); len(got) != 0 {
+		t.Fatalf("extracted %+v from text and tool results, want none", got)
+	}
+}
+
+// TestExtractIgnoresContentAndPatternArguments covers the code shapes the old
+// full-text scan reported: an Edit tool's old_string carries an import
+// specifier, a grep tool's pattern is a regular expression, and neither is a
+// file access. The file_path beside them still is.
+func TestExtractIgnoresContentAndPatternArguments(t *testing.T) {
+	obs := observationOf(
+		callNode("edit", "edit", `{"file_path":"/repo/lib/utils.ts","old_string":"import { formatDateTime, normalizeAnalyticsWindow, setOrDeleteParam } from \"../../lib/monitor\";","new_string":"import { formatDateTime, normalizeAnalyticsWindow, setOrDeleteParam } from \"../../lib/monitor\";"}`),
+		callNode("grep", "grep", `{"pattern":"/gpt-5/i","path":"/repo/src"}`),
+		callNode("write", "write", `{"file_path":"/repo/src/regex.js","content":"const pattern = /gpt-5/i;"}`),
+	)
+	got := extractedValues(obs)
+	for _, want := range []string{"/repo/lib/utils.ts", "/repo/src", "/repo/src/regex.js"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
+	}
+	for _, unwanted := range []string{"../../lib/monitor", "/gpt-5/i"} {
+		if _, ok := got[unwanted]; ok {
+			t.Errorf("indexed %q from code content", unwanted)
+		}
+	}
+	if len(got) != 3 {
+		t.Errorf("extracted %+v, want exactly the three file operations", got)
+	}
+}
+
+// TestExtractReadsShellOperands pins the command half: a shell tool names files
+// and URLs by operand position, not by field name.
+func TestExtractReadsShellOperands(t *testing.T) {
+	obs := observationOf(callNode("bash", "Bash", `{"command":"cat /etc/hosts src/main.go && curl -s https://api.example.com/v1/x -o /tmp/out.json","description":"inspect"}`))
+	got := extractedValues(obs)
+	for _, want := range []string{"/etc/hosts", "src/main.go", "https://api.example.com/v1/x", "/tmp/out.json"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
 	}
 	if len(got) != 4 {
-		t.Fatalf("extracted %d resources, want 4: %+v", len(got), got)
-	}
-
-	path := byValue["/home/alice/project/main.go"]
-	if path.Kind != KindLocalPath || path.Count != 2 {
-		t.Errorf("path = %+v, want local_path seen in 2 nodes", path)
-	}
-	url := byValue["https://api.example.com/repos/1?page=2"]
-	if url.Kind != KindURL || url.Count != 2 {
-		t.Errorf("url = %+v, want a URL seen in 2 nodes", url)
-	}
-	if _, ok := byValue["https://docs.example.com/guide"]; !ok {
-		t.Errorf("response URL missing: %+v", byValue)
-	}
-	if _, ok := byValue[`C:\Users\alice\project\main.go`]; !ok {
-		t.Errorf("escaped Windows path was not normalized: %+v", byValue)
-	}
-	if got[0].Position != 0 || got[1].Position != 1 {
-		t.Errorf("positions are not first-appearance order: %+v", got)
+		t.Errorf("extracted %+v, want four operands", got)
 	}
 }
 
-func TestExtractIgnoresNonLocalSlashText(t *testing.T) {
+// TestExtractIgnoresShellContent keeps the regex/import/echo shapes out when
+// they reach a command: a pattern operand, interpreter inline code and a
+// message are not paths.
+func TestExtractIgnoresShellContent(t *testing.T) {
+	cases := []string{
+		"grep -E '/gpt-5/i' /repo/src/main.go",
+		"rg '/gpt-5/i' /repo/src",
+		"git grep '/gpt-5/i'",
+		"python3 -c 'print(\"/gpt-5/i\")'",
+		"node -e 'console.log(require(\"../../lib/monitor\"))'",
+		"echo /gpt-5/i",
+		"printf 'import x from \"../../lib/monitor\"'",
+		"sed -n 's#/a/b#x#' /repo/data.txt",
+		"jq '.a/b' /repo/data.json",
+		"git commit -m '/gpt-5/i'",
+	}
+	for _, command := range cases {
+		args := `{"command":` + quoteJSON(command) + `}`
+		got := extractedValues(observationOf(callNode("bash", "Bash", args)))
+		for value := range got {
+			if value == "/gpt-5/i" || value == "../../lib/monitor" || value == "/a/b" {
+				t.Errorf("%q indexed content %q", command, value)
+			}
+		}
+	}
+}
+
+// TestExtractKeepsShellRealPaths is the other half of the command rules: the
+// file beside a pattern, the script a shell runs, and a directory a command
+// changes to are still accesses.
+func TestExtractKeepsShellRealPaths(t *testing.T) {
+	cases := map[string][]string{
+		"grep -E '/gpt-5/i' /repo/src/main.go": {"/repo/src/main.go"},
+		"sed -n '1,10p' /repo/data.txt":        {"/repo/data.txt"},
+		"bash -c 'cat /etc/hosts'":             {"/etc/hosts"},
+		"cd ../../lib/monitor && ls .":         {"../../lib/monitor"},
+		"./scripts/build.sh --out /tmp/a.bin":  {"./scripts/build.sh", "/tmp/a.bin"},
+		"git clone https://github.com/x/y.git": {"https://github.com/x/y.git"},
+	}
+	for command, want := range cases {
+		got := extractedValues(observationOf(callNode("bash", "Bash", `{"command":`+quoteJSON(command)+`}`)))
+		for _, value := range want {
+			if _, ok := got[value]; !ok {
+				t.Errorf("%q extracted %+v, missing %q", command, got, value)
+			}
+		}
+	}
+}
+
+// TestExtractIgnoresShellPlumbing keeps redirect sinks out: /dev/null is in
+// nearly every command and is not a file anyone read.
+func TestExtractIgnoresShellPlumbing(t *testing.T) {
+	obs := observationOf(callNode("bash", "Bash", `{"command":"make build > /dev/null 2>&1"}`))
+	if got := Extract(obs); len(got) != 0 {
+		t.Fatalf("extracted %+v from a device sink, want none", got)
+	}
+}
+
+// TestExtractReadsPatchHeaders covers a free-form apply_patch input: the paths
+// are in the patch headers, and the patch body is not scanned.
+func TestExtractReadsPatchHeaders(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: src/main.go\n@@\n-import x from '../../lib/monitor'\n+import y\n*** Add File: src/new_file.ts\n*** End Patch"
 	node := observe.SemanticNode{
-		ID:   "node",
-		Text: "POST /v1/chat/completions application/vnd.api+json net/http example.com/path #/definitions/Foo",
+		ID:             "patch",
+		ProviderType:   "custom_tool_call",
+		NormalizedType: observe.NodeToolCall,
+		Path:           "$.output[0]",
+		Metadata: map[string]any{
+			"name":  "apply_patch",
+			"input": patch,
+		},
 	}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	got := extractedValues(observationOf(node))
+	if len(got) != 2 {
+		t.Fatalf("extracted %+v, want two patch paths", got)
+	}
+	for _, want := range []string{"src/main.go", "src/new_file.ts"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
+	}
+	if _, ok := got["../../lib/monitor"]; ok {
+		t.Errorf("indexed the patch body: %+v", got)
+	}
+}
+
+// TestExtractReadsLocalShellCommandVector covers the Responses API
+// local_shell_call shape: the command is a vector, not a JSON string.
+func TestExtractReadsLocalShellCommandVector(t *testing.T) {
+	node := observe.SemanticNode{
+		ID:             "shell",
+		ProviderType:   "local_shell_call",
+		NormalizedType: observe.NodeToolCall,
+		Path:           "$.output[0]",
+		Metadata:       map[string]any{"name": "local_shell"},
+		Raw:            []byte(`{"type":"local_shell_call","action":{"type":"exec","command":["bash","-lc","cat /etc/hosts && echo /gpt-5/i"]}}`),
+	}
+	got := extractedValues(observationOf(node))
+	if len(got) != 1 {
+		t.Fatalf("extracted %+v, want one path", got)
+	}
+	if _, ok := got["/etc/hosts"]; !ok {
+		t.Errorf("missing /etc/hosts from %+v", got)
+	}
+}
+
+// TestExtractReadsEntryRawOutput covers the entry parser: the client-visible
+// response of the local Responses runtime is kept whole, so the model's calls
+// are read out of the Responses API output array.
+func TestExtractReadsEntryRawOutput(t *testing.T) {
+	raw := `{"id":"resp_1","output":[{"type":"function_call","name":"read","arguments":"{\"file_path\":\"/data/src/project/README.md\"}"},{"type":"function_call_output","call_id":"c1","output":"see https://docs.example.com/guide"}]}`
+	node := observe.SemanticNode{
+		ID:             "entry-response",
+		ProviderType:   "client_response",
+		NormalizedType: observe.NodeUnknown,
+		Path:           "$",
+		Raw:            []byte(raw),
+	}
+	obs := observe.TraceObservation{
+		ExchangeKind: "entry",
+		Response:     observe.ObservationResponse{Nodes: []observe.SemanticNode{node}},
+	}
+	got := Extract(obs)
+	if len(got) != 1 || got[0].Value != "/data/src/project/README.md" {
+		t.Fatalf("extracted %+v, want the function_call path only", got)
+	}
+}
+
+// TestExtractIgnoresEntryRequestHistory keeps the entry request out of the
+// index: it carries the client's history, whose calls belong to the traces
+// that produced them.
+func TestExtractIgnoresEntryRequestHistory(t *testing.T) {
+	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"name":"read","arguments":"{\"file_path\":\"/old/history.txt\"}"}}]}]}`
+	node := observe.SemanticNode{ID: "entry-request", NormalizedType: observe.NodeUnknown, Raw: []byte(raw)}
+	obs := observe.TraceObservation{
+		ExchangeKind: "entry",
+		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
 	if got := Extract(obs); len(got) != 0 {
-		t.Fatalf("extracted %+v, want none", got)
+		t.Fatalf("extracted history %+v, want none", got)
 	}
 }
 
-func TestExtractSkipsPathologicallyLongValues(t *testing.T) {
-	long := "https://example.com/" + strings.Repeat("a", maxValueBytes)
-	node := observe.SemanticNode{ID: "node", Text: long}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
-	if got := Extract(obs); len(got) != 0 {
-		t.Fatalf("extracted an over-long value: %+v", got)
-	}
-}
-
-// TestExtractReadsTheEntryRawPayload covers the entry parser's shape: it keeps
-// the client request as one raw JSON node rather than decoding tool calls into
-// per-node arguments, so the paths and URLs in a tool call are only in Raw.
-func TestExtractReadsTheEntryRawPayload(t *testing.T) {
-	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"name":"read","arguments":"{\"file_path\":\"/data/src/github.com/lyramakesmusic/neuron-explorer/README.md\"}"}}]},{"role":"user","content":"see https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"}]}`
-	node := observe.SemanticNode{ID: "entry-raw", Raw: []byte(raw)}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
-	values := map[string]bool{}
-	for _, access := range Extract(obs) {
-		values[access.Value] = true
-	}
-	if !values["/data/src/github.com/lyramakesmusic/neuron-explorer/README.md"] {
-		t.Fatalf("tool-call path from the entry raw payload was not extracted: %+v", values)
-	}
-	if !values["https://gist.github.com/shkr/5e38fedf265feccd733061ecc6a6ad03"] {
-		t.Fatalf("URL from the entry raw payload was not extracted: %+v", values)
-	}
-}
-
-// TestExtractReadsDoubleEscapedWindowsPath covers the entry parser's extra
-// escaping layer: a Windows path inside a tool call's arguments is already JSON
-// text (two backslashes), and the entry node's re-marshalled raw JSON doubles
-// them again. Decoding the raw payload once must still yield one readable path.
-func TestExtractReadsDoubleEscapedWindowsPath(t *testing.T) {
-	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"file_path\":\"C:\\\\Users\\\\alice\\\\project\\\\main.go\"}"}}]}]}`
-	node := observe.SemanticNode{ID: "entry-raw-windows", Raw: []byte(raw)}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+// TestExtractReadsWindowsArguments covers the escaped form a tool call's
+// arguments carry.
+func TestExtractReadsWindowsArguments(t *testing.T) {
+	obs := observationOf(callNode("read", "read_file", `{"file_path":"C:\\\\Users\\\\alice\\\\project\\\\main.go"}`))
 	got := Extract(obs)
 	if len(got) != 1 {
 		t.Fatalf("extracted %+v, want one path", got)
@@ -113,168 +295,124 @@ func TestExtractReadsDoubleEscapedWindowsPath(t *testing.T) {
 	}
 }
 
-// TestExtractSkipsPathsInsideCredentialMaterial covers the false positives a
-// real trace produced: a private-key body is base64, and a base64 run with two
-// slash-separated segments looks exactly like an absolute path. The whole block
-// is a credential span, so those candidates are dropped.
-func TestExtractSkipsPathsInsideCredentialMaterial(t *testing.T) {
-	text := "key:\n-----BEGIN OPENSSH PRIVATE KEY-----\n" +
-		"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ/abc/def\n" +
-		"-----END OPENSSH PRIVATE KEY-----\n"
-	node := observe.SemanticNode{ID: "pem", Text: text}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+// TestExtractSkipsPathologicallyLongValues keeps one pathological argument out
+// of the index rather than truncating it into a colliding value.
+func TestExtractSkipsPathologicallyLongValues(t *testing.T) {
+	long := "https://example.com/" + strings.Repeat("a", maxValueBytes)
+	obs := observationOf(callNode("fetch", "web_fetch", `{"url":`+quoteJSON(long)+`}`))
 	if got := Extract(obs); len(got) != 0 {
-		t.Fatalf("extracted %+v from a private-key body, want none", got)
+		t.Fatalf("extracted an over-long value: %+v", got)
 	}
 }
 
-// TestExtractKeepsAURLThatCarriesACredential pins the other side of the
-// containment rule: the URL is the access being audited and starts before the
-// key, so it must be kept even though a credential span sits inside it.
+// TestExtractKeepsAURLThatCarriesACredential pins the containment rule: the
+// URL is the access being audited and starts before the key, so it is kept even
+// though a credential span sits inside it.
 func TestExtractKeepsAURLThatCarriesACredential(t *testing.T) {
 	key := "sk-" + "A" + "AAAAAAAAAAAAAAAAAAAT3BlbkFJ" + "BBBBBBBBBBBBBBBBBBBB"
 	url := "https://api.example.com/v1?key=" + key
-	node := observe.SemanticNode{ID: "url-with-key", Text: "fetched " + url}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+	obs := observationOf(callNode("fetch", "web_fetch", `{"url":`+quoteJSON(url)+`}`))
 	got := Extract(obs)
 	if len(got) != 1 || got[0].Kind != KindURL || got[0].Value != url {
 		t.Fatalf("extracted %+v, want the URL that carries the key", got)
 	}
 }
 
-// TestExtractIgnoresEscapedCodeShapes pins the false positives a real transcript
-// produced after the index normalized doubled separators: escape sequences,
-// regex groups and printf formats were stored as if they were paths. The text is
-// scanned both as decoded prose and inside one layer of JSON escaping, which is
-// the shape an entry parser's raw payload has.
-func TestExtractIgnoresEscapedCodeShapes(t *testing.T) {
-	texts := []string{
-		`print("q:\n%s" % name)`,
-		`payload = "\\n\\tid"`,
-		`out = "\\n\\n"`,
-		`re := regexp.MustCompile(` + "`" + `\\d+)\\.(\\d+` + "`" + `)`,
-		`subst := "\\1.\\2"`,
-		`code = "if x {\\n\\t\\treturn\\n\\t}"`,
-		`cd ../a && ls ../`,
-	}
-	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"name":"shell","arguments":"{\"command\":\"printf 'q:\\\\n%s' && cd ../a\"}"}}]}]}`
-	for _, text := range texts {
-		node := observe.SemanticNode{ID: "escaped-code", Text: text}
-		obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
-		if got := Extract(obs); len(got) != 0 {
-			t.Errorf("%q extracted %+v, want none", text, got)
-		}
-	}
-	node := observe.SemanticNode{ID: "escaped-code-raw", Raw: []byte(raw)}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
-	if got := Extract(obs); len(got) != 0 {
-		t.Errorf("raw payload extracted %+v, want none", got)
-	}
-}
-
-// TestExtractKeepsRealPathsInProse fixes the other half: removing the prose
-// around a path must not remove the path, and a real relative path that follows
-// an assignment is still indexed.
-func TestExtractKeepsRealPathsInProse(t *testing.T) {
+// TestExtractIgnoresServerToolCalls keeps provider-executed calls out: a
+// web_search action is not a client resource operation.
+func TestExtractIgnoresServerToolCalls(t *testing.T) {
 	node := observe.SemanticNode{
-		ID:   "prose",
-		Text: `registry_file=internal/infrastructure/config/config.go and (modules/identity-tenancy.md`,
+		ID:             "search",
+		ProviderType:   "web_search_call",
+		NormalizedType: observe.NodeServerToolCall,
+		Path:           "$.output[0]",
+		Metadata:       map[string]any{"name": "web_search"},
+		Raw:            []byte(`{"type":"web_search_call","action":{"type":"search","query":"https://internal.example.com:8443/a/b?q=1#f"}}`),
 	}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
-	values := map[string]bool{}
-	for _, access := range Extract(obs) {
-		values[access.Value] = true
-	}
-	for _, want := range []string{
-		"internal/infrastructure/config/config.go",
-		"modules/identity-tenancy.md",
-	} {
-		if !values[want] {
-			t.Errorf("missing %q from %+v", want, values)
-		}
-	}
-	if len(values) != 2 {
-		t.Errorf("extracted %+v, want exactly the two paths", values)
+	obs := observe.TraceObservation{Response: observe.ObservationResponse{ToolCalls: []observe.SemanticNode{node}, Nodes: []observe.SemanticNode{node}}}
+	if got := Extract(obs); len(got) != 0 {
+		t.Fatalf("extracted %+v from a server tool call, want none", got)
 	}
 }
 
-// TestLocateFindsTheNodeBehindAValue pins the jump target the resource tree
-// uses: the value is searched through the same views Extract indexed, and the
-// result names the node and view it came from. A value the detector would not
-// index has no occurrence, so an old catalogue row cannot send the reader to an
-// arbitrary step.
-func TestLocateFindsTheNodeBehindAValue(t *testing.T) {
-	request := observe.SemanticNode{
-		ID:   "node-message",
-		Path: "$.messages[0]",
-		Text: "read (modules/identity-tenancy.md and registry_file=internal/infrastructure/config/config.go",
+// TestExtractCountsCallsNotArguments pins count semantics: two calls that name
+// the same file are two accesses, two arguments in one call are one.
+func TestExtractCountsCallsNotArguments(t *testing.T) {
+	obs := observationOf(
+		callNode("one", "read_file", `{"file_path":"/repo/main.go","path":"/repo/main.go"}`),
+		callNode("two", "read_file", `{"file_path":"/repo/main.go"}`),
+	)
+	got := extractedValues(obs)
+	access, ok := got["/repo/main.go"]
+	if !ok {
+		t.Fatalf("missing /repo/main.go from %+v", got)
 	}
-	tool := observe.SemanticNode{
-		ID:       "node-call",
-		Path:     "$.messages[1].tool_calls[0]",
-		Metadata: map[string]any{"arguments": `{"file_path":"C:\\Users\\alice\\project\\main.go"}`},
+	if access.Count != 2 {
+		t.Errorf("count = %d, want 2 tool calls", access.Count)
 	}
-	obs := observe.TraceObservation{
-		Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{request, tool}},
-	}
+}
 
+// TestExtractIgnoresUnknownText keeps a field that is not a location and is not
+// a single token from being read as one: free-form prose is not an argument.
+func TestExtractIgnoresUnknownText(t *testing.T) {
+	obs := observationOf(callNode("tool", "mcp_tool", `{"note":"the file lives at /repo/main.go maybe","title":"src/main.go"}`))
+	got := extractedValues(obs)
+	if _, ok := got["/repo/main.go"]; ok {
+		t.Errorf("indexed a path from prose: %+v", got)
+	}
+}
+
+// TestLocateFindsTheCallNode pins the jump target the resource tree uses: the
+// value is searched through the same argument views Extract indexed, and the
+// result names the call's node and the span inside the decoded arguments.
+func TestLocateFindsTheCallNode(t *testing.T) {
+	obs := observationOf(
+		callNode("call-one", "read_file", `{"file_path":"/home/alice/project/main.go"}`),
+		callNode("call-two", "web_fetch", `{"url":"https://api.example.com/docs?page=2"}`),
+	)
 	cases := []struct {
 		kind  string
 		value string
 		node  string
-		view  string
 	}{
-		{kind: KindLocalPath, value: "modules/identity-tenancy.md", node: "node-message", view: "text"},
-		{kind: KindLocalPath, value: "internal/infrastructure/config/config.go", node: "node-message", view: "text"},
-		{kind: KindLocalPath, value: `C:\Users\alice\project\main.go`, node: "node-call", view: "arguments"},
+		{kind: KindLocalPath, value: "/home/alice/project/main.go", node: "call-one"},
+		{kind: KindURL, value: "https://api.example.com/docs?page=2", node: "call-two"},
 	}
 	for _, tc := range cases {
 		got := Locate(obs, tc.kind, tc.value)
 		if len(got) != 1 {
 			t.Fatalf("Locate(%q) = %+v, want one occurrence", tc.value, got)
 		}
-		if got[0].NodeID != tc.node || got[0].View != tc.view || got[0].End <= got[0].Start {
-			t.Errorf("Locate(%q) = %+v, want node %q view %q", tc.value, got[0], tc.node, tc.view)
+		if got[0].NodeID != tc.node || got[0].View != viewArguments || got[0].End <= got[0].Start {
+			t.Errorf("Locate(%q) = %+v, want node %q in the arguments view", tc.value, got[0], tc.node)
 		}
 		if got[0].NodePath == "" {
 			t.Errorf("Locate(%q) has no node path: %+v", tc.value, got[0])
 		}
 	}
-
-	for _, value := range []string{"", "modules/identity-tenancy.md ", "../a", `\n\tid`} {
+	for _, value := range []string{"", "/repo/not-there.go", "/gpt-5/i"} {
 		if got := Locate(obs, KindLocalPath, value); len(got) != 0 {
 			t.Errorf("Locate(%q) = %+v, want none", value, got)
 		}
 	}
-	if got := Locate(obs, "other", "modules/identity-tenancy.md"); len(got) != 0 {
+	if got := Locate(obs, "other", "/home/alice/project/main.go"); len(got) != 0 {
 		t.Errorf("Locate with an unknown kind = %+v, want none", got)
 	}
 }
 
-// TestLocateReportsEachNodeOnce keeps the jump list short when the same value
-// appears in several views of one node (a message and its raw payload, or a tool
-// call and its arguments): the conversation only needs the first one.
-func TestLocateReportsEachNodeOnce(t *testing.T) {
-	node := observe.SemanticNode{
-		ID:       "node-both",
-		Path:     "$.messages[0]",
-		Text:     "open /home/alice/project/main.go",
-		Metadata: map[string]any{"arguments": `{"file_path":"/home/alice/project/main.go"}`},
-	}
-	obs := observe.TraceObservation{Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}}}
+// TestLocateReportsEachCallOnce keeps the jump list short when the same value
+// appears in several arguments of one call.
+func TestLocateReportsEachCallOnce(t *testing.T) {
+	obs := observationOf(callNode("call-both", "edit", `{"file_path":"/home/alice/project/main.go","old_string":"open /home/alice/project/main.go"}`))
 	got := Locate(obs, KindLocalPath, "/home/alice/project/main.go")
 	if len(got) != 1 {
-		t.Fatalf("Locate = %+v, want one occurrence for the node", got)
-	}
-	if got[0].View != "text" {
-		t.Errorf("first view = %q, want text", got[0].View)
+		t.Fatalf("Locate = %+v, want one occurrence for the call", got)
 	}
 }
 
 // TestLocateValueReturnsEveryOccurrence pins the audit-side literal search:
 // the credential audit row names the exact original bytes, and the reader wants
-// every place they appear (a prompt and a tool call, or twice in one message),
-// not only the first hit.
+// every place they appear, not only the first.
 func TestLocateValueReturnsEveryOccurrence(t *testing.T) {
 	value := `sk-` + strings.Repeat("A", 20) + "T3BlbkFJ" + strings.Repeat("B", 20)
 	twice := observe.SemanticNode{
@@ -304,10 +442,124 @@ func TestLocateValueReturnsEveryOccurrence(t *testing.T) {
 	if len(byNode["node-twice"]) != 2 || len(byNode["node-call"]) != 1 {
 		t.Errorf("occurrences by node = %+v, want two in the message and one in the call", byNode)
 	}
-	if byNode["node-twice"][0].Start >= byNode["node-twice"][1].Start {
-		t.Errorf("occurrences are not in text order: %+v", byNode["node-twice"])
-	}
 	if got := LocateValue(obs, ""); len(got) != 0 {
 		t.Errorf("LocateValue(\"\") = %+v, want none", got)
+	}
+}
+
+// quoteJSON renders a Go string as a JSON string literal.
+func quoteJSON(value string) string {
+	var builder strings.Builder
+	builder.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '"':
+			builder.WriteString(`\"`)
+		case '\\':
+			builder.WriteString(`\\`)
+		case '\n':
+			builder.WriteString(`\n`)
+		case '\t':
+			builder.WriteString(`\t`)
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	builder.WriteByte('"')
+	return builder.String()
+}
+
+// TestExtractIgnoresHereDocumentBody keeps the code a shell writes through a
+// here-document out of the index: the body is stdin data, not a command, so the
+// import specifier and regex literal inside it are not operands.
+func TestExtractIgnoresHereDocumentBody(t *testing.T) {
+	command := "cat > /tmp/notes.txt <<'EOF'\nimport { formatDateTime } from \"../../lib/monitor\";\nconst re = /gpt-5/i;\nEOF\ncat /tmp/notes.txt"
+	got := extractedValues(observationOf(callNode("bash", "Bash", `{"command":`+quoteJSON(command)+`}`)))
+	for _, unwanted := range []string{"../../lib/monitor", "/gpt-5/i"} {
+		if _, ok := got[unwanted]; ok {
+			t.Errorf("indexed %q from a here-document body", unwanted)
+		}
+	}
+	for _, want := range []string{"/tmp/notes.txt"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
+	}
+	if len(got) != 1 {
+		t.Errorf("extracted %+v, want the redirect target only", got)
+	}
+}
+
+// TestExtractReadsThroughWrapperOptions covers the command word behind sudo,
+// env and nice options: the wrapper's own options are not the command.
+func TestExtractReadsThroughWrapperOptions(t *testing.T) {
+	cases := map[string]string{
+		"sudo -u root cat /etc/shadow":           "/etc/shadow",
+		"env FOO=bar ./scripts/run.sh --dry-run": "./scripts/run.sh",
+		"nice -n 5 cat /var/log/syslog":          "/var/log/syslog",
+		"time -p cat /tmp/report.txt":            "/tmp/report.txt",
+	}
+	for command, want := range cases {
+		got := extractedValues(observationOf(callNode("bash", "Bash", `{"command":`+quoteJSON(command)+`}`)))
+		if _, ok := got[want]; !ok {
+			t.Errorf("%q extracted %+v, missing %q", command, got, want)
+		}
+	}
+}
+
+// TestExtractReadsPluralAndNestedArguments covers the key forms MCP tools use:
+// a list of paths under a plural key, and the arguments re-wrapped as JSON text.
+func TestExtractReadsPluralAndNestedArguments(t *testing.T) {
+	obs := observationOf(
+		callNode("multi", "multi_read", `{"files":["/repo/a.go","/repo/b.go"],"dirs":["/repo/src"]}`),
+		callNode("wrapped", "mcp_tool", `{"arguments":"{\"path\":\"/repo/wrapped.go\"}"}`),
+	)
+	got := extractedValues(obs)
+	for _, want := range []string{"/repo/a.go", "/repo/b.go", "/repo/src", "/repo/wrapped.go"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
+	}
+	if len(got) != 4 {
+		t.Errorf("extracted %+v, want four resources", got)
+	}
+}
+
+// TestExtractIgnoresUnclassifiedSpecifier keeps an import specifier out of the
+// index even when it reaches a field whose name says nothing about a location:
+// an unclassified argument needs a strong path shape, and "../../lib/monitor"
+// has none.
+func TestExtractIgnoresUnclassifiedSpecifier(t *testing.T) {
+	obs := observationOf(callNode("tool", "some_mcp_tool", `{"from":"../../lib/monitor"}`))
+	if got := Extract(obs); len(got) != 0 {
+		t.Fatalf("extracted %+v from an import specifier, want none", got)
+	}
+}
+
+// TestExtractReadsUnclassifiedURL keeps a URL from an unclassified field: a URL
+// is an unambiguous shape, so only local paths need the stronger evidence.
+func TestExtractReadsUnclassifiedURL(t *testing.T) {
+	obs := observationOf(callNode("tool", "mcp_tool", `{"webhook":"https://api.example.com/hook"}`))
+	got := extractedValues(obs)
+	if _, ok := got["https://api.example.com/hook"]; !ok {
+		t.Fatalf("missing the URL from an unclassified field: %+v", got)
+	}
+}
+
+// TestExtractReadsNestedToolCallNode covers the tree shape every protocol
+// parser produces: the call is a child of the message that emitted it, and the
+// extractor reads it from the response tree rather than requiring a flat list.
+func TestExtractReadsNestedToolCallNode(t *testing.T) {
+	call := callNode("nested", "read_file", `{"file_path":"/repo/nested.go"}`)
+	message := observe.SemanticNode{
+		ID:             "message",
+		NormalizedType: observe.NodeMessage,
+		Path:           "$.choices[0].message",
+		Children:       []observe.SemanticNode{call},
+	}
+	obs := observe.TraceObservation{Response: observe.ObservationResponse{Nodes: []observe.SemanticNode{message}}}
+	got := extractedValues(obs)
+	if _, ok := got["/repo/nested.go"]; !ok {
+		t.Fatalf("missing the nested call's path: %+v", got)
 	}
 }

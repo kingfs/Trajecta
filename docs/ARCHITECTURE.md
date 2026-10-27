@@ -40,7 +40,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
-- `internal/resources`：从 Observation IR 提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引。
+- `internal/resources`：从 Observation IR 的模型工具调用中提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引；工具结果、消息正文与代码内容不参与。
 - `internal/observeworker`：从 cassette 解析 Observation IR 并落库的后台 worker。
 - `internal/reanalysis`：trace/session/batch 重分析任务（service 与 worker）。
 - `internal/sessionanalysis`：session 级聚合分析。

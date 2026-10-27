@@ -160,7 +160,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 语义解析与派生分析层已实现：
 
 - `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化紧凑摘要（parser、status、usage、warnings 等）并可在 trace detail 展示；节点树不落库，Protocol/详情视图打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 重解析；parser 失败写入 system events。
-- 资源索引：`internal/resources` 在解析 worker 每次成功解析后提取本地路径与 URL，按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；`GET /api/traces/{id}/resources` 与质量页的 `GET /api/resources` 读取，历史 trace 可通过详情页「解析资源」或 `POST /api/resources/backfill` 排队重解析。
+- 资源索引：`internal/resources` 在解析 worker 每次成功解析后，从模型自己产生的工具调用参数、shell 操作数与 patch 头部提取本地路径与 URL（消息正文、工具结果与代码内容不参与），按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；`GET /api/traces/{id}/resources` 与质量页的 `GET /api/resources` 读取，历史 trace 可通过详情页「解析资源」或 `POST /api/resources/backfill` 排队重解析。
 - deterministic audit detectors：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error，以及复用 `pkg/secretmask` 的个人数据检测（`pii`，只报可改写档的身份证号与手机号，evidence 里的命中值替换为 `[redacted]`）；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。
 - 重分析 job 类型：`trace_reparse`、`trace_rescan`、`trace_repair_usage`、`trace_reanalyze`、`session_reanalyze`、`batch_reanalyze`，状态持久化在 `analysis_jobs`。
 - parser/analyzer/router/upstream 事件写入 system events。

@@ -104,6 +104,13 @@ func (d Detector) Indicators(src []byte) []Finding {
 
 // Indicators returns the report-only access indicators for src using the
 // package's compiled indicator DFA. It is shorthand for the zero Detector.
+//
+// This is a shape detector, not a statement that everything it matches was
+// read: a regular-expression literal and an import specifier have the same
+// bytes as a path. The resource index (internal/resources) therefore calls it on
+// individual tool-call argument tokens and keeps only a match that covers the
+// whole token; scanning arbitrary prose or code with it is what produced the
+// false positives the narrow source now avoids.
 func Indicators(src []byte) []Finding { return Detector{}.Indicators(src) }
 
 // trimIndicatorEnd strips the punctuation that ends a sentence or a markdown

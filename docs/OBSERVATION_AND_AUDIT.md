@@ -288,13 +288,16 @@ type Detector interface {
 
 ## 资源索引
 
-路径与 URL 不是 finding：它们没有严重度，也不该在「发现项」里和拒答、工具错误混在一起。`internal/resources` 从 Observation IR 提取它们，`internal/observeworker` 在每次解析成功后调用，`internal/reanalysis` 在重解析/重扫时同样刷新；这是解析的派生索引，不是检测器，也不改写请求或响应。
+路径与 URL 不是 finding：它们没有严重度，也不该在「发现项」里和拒答、工具错误混在一起。`internal/resources` 从 Observation IR 中**模型自己产生的工具调用**提取它们，`internal/observeworker` 在每次解析成功后调用，`internal/reanalysis` 在重解析/重扫时同样刷新；这是解析的派生索引，不是检测器，也不改写请求或响应。
 
+- **只从模型侧工具调用提取。** 资源是模型准备执行的操作，不是载荷里所有像路径的文本，所以扫描面只有响应侧的工具调用（`Response.ToolCalls` 与流式累计调用；provider 执行的 server tool call 不算），以及 entry 交换里本地 Responses runtime 的客户端可见响应（从其 `output` 数组读 `function_call` / `custom_tool_call` / `local_shell_call` / `apply_patch`）。工具结果、消息正文、reasoning、工具声明与代码内容都不扫描；请求里的 assistant 历史属于产生它的那条 trace，本次交换不重复记录。正因如此，代码里的正则字面量（`/gpt-5/i`）、import 说明符（`../../lib/monitor`）和正文里的 URL 不再变成资源。
+- **按参数语义与命令位置取值。** JSON 参数按 key 判定角色：路径 key（`file_path`、`path`、`cwd`、`*_path`、`*_file`、`*_dir`…）、URL key（`url`、`href`、`*_url`、`*_uri`）、命令 key（`command`、`cmd`、`script`、`shell`）；`content`、`old_string`、`new_string`、`code`、`pattern`、`regex`、`query`、`prompt` 等内容 key 一律不取值。shell 命令按 POSIX 分词后只取操作数：`grep`/`sed`/`awk`/`jq` 的第一个操作数是 pattern，`python -c`/`node -e` 的内联代码、`git commit -m` 的消息、`echo`/`printf` 的参数、`/dev/null` 重定向都不是访问；`sh -c` 的脚本会递归解析，`apply_patch` 只取 `*** ... File:` 头部。
+- **候选必须整体匹配。** 提取器把每个候选 token 交给 `pkg/secretmask.Indicators`，要求 DFA 恰好命中一次且覆盖整个 token；`import ... from "../../lib/monitor"`、`print('/gpt-5/i')` 这类片段即使出现在参数里也不会被截成路径。含空格的路径（`C:\Program Files\…`）因此暂不入索引，这是为精度接受的已知边界。
 - **只记录访问对象。** 每个值是一条路径或一个 URL，不保存文件内容，不写入 `secret_mask_mappings.db`（资源不需要替换，也没有真/假值对），值按提取规则保存（它就是要审计的对象；只做 Windows 转义还原与句末标点裁剪）。
 - **按值去重，两层表。** `resources` 是全局目录：`(kind, value_hash)` 唯一，`kind` 为 `url` 或 `local_path`，保留完整值、`last_trace_id` 与首末出现时间；`trace_resources` 是单条 trace 的关系：`(trace_id, resource_id)` 主键，带该 trace 内的出现步骤数与首次出现顺序。同一路径被多个请求、跨 session、跨很长时间访问，只占一条目录行加每条 trace 一行关系，不随流量增长；访问请求数与出现步数在读取时从关系聚合，重解析用「先删后插」替换该 trace 的关系，不做增量计数。
-- **读取面。** trace 详情的 `GET /api/traces/{id}/resources`（「资源」标签页，`resources` 字段给出计数）按首次出现顺序列出本次交换的路径与 URL；`GET /api/resources?kind=&q=&window=&page=&page_size=`（质量 → 资源）按最近出现排序，返回 `trace_count` 与 `access_count`，`last_trace_id` 可跳到最近一次建立索引的请求。`GET /api/traces/{id}/resources/locate?kind=&value=` 回答「这个值在会话的哪个节点」：它不读索引，而是重新解析 cassette，用与索引相同的文本视图和检出规则找到节点，返回 `node_id`、`node_path`、顶级祖先 `anchor`（会话页展开的轮次）和文本视图内的字节区间；索引里早已不存在于当前解析的值返回空 `anchor`，前端据此提示而不是跳到猜测的位置。
-- **历史流量。** 新解析的 trace 自动入库；已有 trace 在详情页点「解析资源」触发一次 reparse，或在质量 → 资源页用「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`）；cassette 已不存在的陈旧索引行会被跳过，不会产生失败的 parse job。
-- **解析口径。** 复用 `pkg/secretmask.Indicators` 的 report-only DFA（见[凭据遮蔽](./SECRET_MASKING.md)），所以 URL/路径的形状、排除项（API 路由、MIME、import 路径、域名、JSON pointer）、成对括号与 JSON 转义反斜杠的处理与遮蔽侧一致；单个节点只计一次，节点的多份文本视图不会重复计数。
+- **读取面。** trace 详情的 `GET /api/traces/{id}/resources`（「资源」标签页，`resources` 字段给出计数）按首次出现顺序列出本次交换的路径与 URL；`GET /api/resources?kind=&q=&window=&page=&page_size=`（质量 → 资源）按最近出现排序，返回 `trace_count` 与 `access_count`，`last_trace_id` 可跳到最近一次建立索引的请求。`GET /api/traces/{id}/resources/locate?kind=&value=` 回答「这个值在会话的哪个节点」：它不读索引，而是重新解析 cassette，用与索引相同的工具调用提取规则找到节点，返回 `node_id`、`node_path`、顶级祖先 `anchor`（会话页展开的轮次）和参数视图内的字节区间；索引里早已不存在于当前解析的值返回空 `anchor`，前端据此提示而不是跳到猜测的位置。
+- **历史流量。** 新解析的 trace 自动入库；已有 trace 在详情页点「解析资源」触发一次 reparse，或在质量 → 资源页用「为最近请求建立索引」按当前窗口为最多 500 条未索引 trace 排队 parse job（`POST /api/resources/backfill`）；cassette 已不存在的陈旧索引行会被跳过，不会产生失败的 parse job。提取口径只对重解析后的 trace 生效：旧索引里的行不会自动消失，需要触发一次 reparse 才会按新规则重建。
+- **解析口径。** 形状校验复用 `pkg/secretmask.Indicators` 的 report-only DFA（见[凭据遮蔽](./SECRET_MASKING.md)），排除项（API 路由、MIME、import 路径、域名、JSON pointer）、成对括号与 JSON 转义反斜杠的处理与遮蔽侧一致；区别是资源侧只在工具调用的候选 token 上运行它并要求整体命中。同一次工具调用里重复出现的值只计一次，不同调用分别计数；`access_count` 因此是「多少个工具调用访问过它」。
 
 ## 重解析与重分析入口
 
