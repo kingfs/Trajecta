@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // TestProxyHTTPServerHasNoDefaultWriteDeadline pins the fix for responses that
@@ -70,5 +72,51 @@ func TestManagementHTTPServerHasNoWriteDeadline(t *testing.T) {
 	}
 	if srv.Addr != ":18081" {
 		t.Fatalf("Addr = %q, want :18081", srv.Addr)
+	}
+}
+
+// TestCredentialMaskVisibilityRepairRunsOnce pins the upgrade path: the first
+// startup reopens the events an old build left permanently ignored, and the
+// marker stops a later restart from undoing an ignore the reader makes under
+// the new per-occurrence semantics.
+func TestCredentialMaskVisibilityRepairRunsOnce(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	event, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "secretmask:rule:generic_sk_dash",
+		Source:      "secretmask",
+		Category:    "credential_masked",
+		Severity:    "warning",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent() error = %v", err)
+	}
+	if err := st.IgnoreSystemEvent(event.ID); err != nil {
+		t.Fatalf("IgnoreSystemEvent() error = %v", err)
+	}
+
+	repairCredentialMaskEventVisibilityOnce(context.Background(), st)
+	got, err := st.GetSystemEvent(event.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent() error = %v", err)
+	}
+	if got.Status != store.SystemEventStatusUnread {
+		t.Fatalf("status after repair = %q, want unread", got.Status)
+	}
+
+	if err := st.IgnoreSystemEvent(event.ID); err != nil {
+		t.Fatalf("second IgnoreSystemEvent() error = %v", err)
+	}
+	repairCredentialMaskEventVisibilityOnce(context.Background(), st)
+	got, err = st.GetSystemEvent(event.ID)
+	if err != nil {
+		t.Fatalf("second GetSystemEvent() error = %v", err)
+	}
+	if got.Status != store.SystemEventStatusIgnored {
+		t.Fatalf("status after a second repair = %q, want the reader's ignore preserved", got.Status)
 	}
 }

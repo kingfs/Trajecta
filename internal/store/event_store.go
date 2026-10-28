@@ -48,10 +48,15 @@ type SystemEventFilter struct {
 	Source   string
 	Category string
 	Query    string
-	Since    time.Time
-	After    string
-	Page     int
-	PageSize int
+	// TraceQueryFingerprints is not an API parameter. It is the set of
+	// credential_masked fingerprints a trace-id `Query` resolved to through
+	// credential_mask_audits; the free-text clause ORs them in so a historical
+	// trace finds its rule event without a per-trace event row.
+	TraceQueryFingerprints []string
+	Since                  time.Time
+	After                  string
+	Page                   int
+	PageSize               int
 }
 
 type SystemEventPageResult struct {
@@ -105,10 +110,16 @@ const systemEventSelectColumns = `id, fingerprint, source, category, severity, s
 // systemEventInsertSQL is the upsert every notification uses: a repeat of the
 // same fingerprint accumulates on one row instead of growing the feed.
 //
-// The conflict clause keeps an ignored row ignored, but every other state
-// returns to unread, because a new occurrence is new information. It is a
-// single statement rather than a SELECT followed by an INSERT so two writers
-// racing on one fingerprint cannot both miss and then collide.
+// An ignored operational event stays ignored: the reader has said this
+// fingerprint is noise and a repeat should not put it back in the inbox. A
+// credential_masked event is different. Ignoring it acknowledges the occurrence
+// the reader handled; it cannot mute a later credential that leaves the machine,
+// because that is new evidence, not a repeat of the same noise. The category is
+// the one systemEventForCredentialMasked writes, so this needs no second status
+// column and no per-trace event row.
+//
+// It is a single statement rather than a SELECT followed by an INSERT so two
+// writers racing on one fingerprint cannot both miss and then collide.
 const systemEventInsertSQL = `INSERT INTO system_events (
 		id, fingerprint, source, category, severity, status, title, message, details_json,
 		trace_id, session_id, job_id, upstream_id, model, occurrence_count,
@@ -120,7 +131,7 @@ const systemEventInsertSQL = `INSERT INTO system_events (
 		category=excluded.category,
 		severity=excluded.severity,
 		status=CASE
-			WHEN system_events.status = 'ignored' THEN system_events.status
+			WHEN system_events.status = 'ignored' AND excluded.category <> 'credential_masked' THEN system_events.status
 			ELSE 'unread'
 		END,
 		title=excluded.title,
@@ -135,11 +146,11 @@ const systemEventInsertSQL = `INSERT INTO system_events (
 		last_seen_at=excluded.last_seen_at,
 		updated_at=excluded.updated_at,
 		read_at=CASE
-			WHEN system_events.status = 'ignored' THEN system_events.read_at
+			WHEN system_events.status = 'ignored' AND excluded.category <> 'credential_masked' THEN system_events.read_at
 			ELSE NULL
 		END,
 		resolved_at=CASE
-			WHEN system_events.status = 'ignored' THEN system_events.resolved_at
+			WHEN system_events.status = 'ignored' AND excluded.category <> 'credential_masked' THEN system_events.resolved_at
 			ELSE NULL
 		END`
 
@@ -593,7 +604,7 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		pattern := "%" + escapeLike(query) + "%"
-		clauses = append(clauses, `(
+		queryClause := `(
 			LOWER(fingerprint) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(title) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(message) LIKE LOWER(?) ESCAPE '\' OR
@@ -601,10 +612,14 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 			LOWER(session_id) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(upstream_id) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(model) LIKE LOWER(?) ESCAPE '\'
-		)`)
-		for range 7 {
-			args = append(args, pattern)
+		)`
+		queryArgs := []any{pattern, pattern, pattern, pattern, pattern, pattern, pattern}
+		if fingerprints := dedupeNonEmptyStrings(filter.TraceQueryFingerprints); len(fingerprints) > 0 {
+			queryClause = `(` + queryClause + ` OR fingerprint IN (` + placeholders(len(fingerprints)) + `))`
+			queryArgs = append(queryArgs, stringArgs(fingerprints)...)
 		}
+		clauses = append(clauses, queryClause)
+		args = append(args, queryArgs...)
 	}
 	if len(clauses) == 0 {
 		return "1 = 1", nil

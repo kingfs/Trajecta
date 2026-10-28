@@ -383,9 +383,10 @@ func buildResponsesFunctionExecutorManager(ctx context.Context, cfg *config.Conf
 // that predates this build or whose live write was lost, without putting the
 // scan on the request path. It runs once at startup - so an existing audit table
 // shows up in the event feed as soon as the server can answer - and then on a
-// slow timer as a backstop. The pass inserts missing events only, so running it
-// repeatedly cannot inflate an occurrence count or overwrite a status a reader
-// set.
+// slow timer as a backstop. The periodic pass inserts missing events only, so
+// running it repeatedly cannot inflate an occurrence count or overwrite a status
+// a reader set; the one-time repair before the first pass only reopens events
+// the old permanent-mute semantics left ignored.
 func startCredentialMaskEventReconciliation(ctx context.Context, st *store.Store, interval time.Duration, wg *sync.WaitGroup) {
 	if st == nil {
 		return
@@ -411,6 +412,7 @@ func startCredentialMaskEventReconciliation(ctx context.Context, st *store.Store
 			}
 		}
 
+		repairCredentialMaskEventVisibilityOnce(ctx, st)
 		run("startup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -423,6 +425,43 @@ func startCredentialMaskEventReconciliation(ctx context.Context, st *store.Store
 			}
 		}
 	}()
+}
+
+// credentialMaskVisibilityRepairKey marks the one-time repair that reopens the
+// credential_masked events an older build let a reader ignore permanently. The
+// marker keeps a restart from undoing an ignore the reader makes under the new
+// per-occurrence semantics.
+const credentialMaskVisibilityRepairKey = "system_events.credential_mask_visibility_repaired_v1"
+
+// repairCredentialMaskEventVisibilityOnce runs the repair at most once per
+// database. A failed update leaves the marker unset, so the next startup retries;
+// a failed marker write after a successful update only means the update runs
+// again, and it is idempotent because it matches ignored credential events only.
+func repairCredentialMaskEventVisibilityOnce(ctx context.Context, st *store.Store) {
+	if st == nil {
+		return
+	}
+	var done bool
+	found, err := st.LoadAppSettingJSON(ctx, credentialMaskVisibilityRepairKey, &done)
+	if err != nil {
+		slog.Warn("Credential mask event visibility repair skipped", "error", err)
+		return
+	}
+	if found && done {
+		return
+	}
+	reopened, err := st.ReopenIgnoredCredentialMaskEvents()
+	if err != nil {
+		slog.Warn("Credential mask event visibility repair failed", "error", err)
+		return
+	}
+	if err := st.SaveAppSettingJSON(ctx, credentialMaskVisibilityRepairKey, true); err != nil {
+		slog.Warn("Credential mask event visibility repair marker not saved", "error", err)
+		return
+	}
+	if reopened > 0 {
+		slog.Info("Reopened ignored credential mask events", "count", reopened)
+	}
 }
 
 func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {

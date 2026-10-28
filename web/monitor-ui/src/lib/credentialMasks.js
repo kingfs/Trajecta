@@ -47,7 +47,10 @@ export function credentialMaskURLForEvent(event) {
     return null;
   }
   const details = parseEventDetails(event);
-  const traceID = event?.trace_id || details?.trace_id || "";
+  // A trace-id search resolves the rule event to the trace the reader named.
+  // The event row itself keeps the rule's newest trace, so the matched trace has
+  // to win or the detail panel would answer with a different credential.
+  const traceID = event?.matched_trace_id || event?.trace_id || details?.trace_id || "";
   if (!traceID) {
     return null;
   }

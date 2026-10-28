@@ -71,6 +71,7 @@ type systemEventView struct {
 	Message         string          `json:"message"`
 	Details         json.RawMessage `json:"details_json"`
 	TraceID         string          `json:"trace_id,omitempty"`
+	MatchedTraceID  string          `json:"matched_trace_id,omitempty"`
 	SessionID       string          `json:"session_id,omitempty"`
 	JobID           string          `json:"job_id,omitempty"`
 	UpstreamID      string          `json:"upstream_id,omitempty"`
@@ -122,13 +123,19 @@ func systemEventListAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		windowLabel, since := parseSystemEventWindow(r.URL.Query().Get("window"))
 		filter := systemEventFilterFromRequest(r, since)
+		matches, err := st.CredentialMaskTraceMatches(filter.Query)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+		filter.TraceQueryFingerprints = systemEventTraceFingerprints(matches)
 		page, err := st.ListSystemEvents(filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, systemEventListResponse{
-			Items:       systemEventViews(page.Items),
+			Items:       systemEventViewsWithTrace(page.Items, matches),
 			Page:        page.Page,
 			PageSize:    page.PageSize,
 			Total:       page.Total,
@@ -178,6 +185,12 @@ func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
 		case "", "all":
 			filter.Status = store.SystemEventStatusUnread
 		}
+		matches, err := st.CredentialMaskTraceMatches(filter.Query)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+		filter.TraceQueryFingerprints = systemEventTraceFingerprints(matches)
 		count, err := st.MarkAllSystemEventsRead(filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mark read error: " + err.Error()})
@@ -359,6 +372,36 @@ func systemEventViews(events []store.SystemEvent) []systemEventView {
 		out = append(out, systemEventViewFromStore(event))
 	}
 	return out
+}
+
+// systemEventTraceFingerprints returns the stable order the list query binds.
+func systemEventTraceFingerprints(matches map[string]string) []string {
+	if len(matches) == 0 {
+		return nil
+	}
+	fingerprints := make([]string, 0, len(matches))
+	for fingerprint := range matches {
+		fingerprints = append(fingerprints, fingerprint)
+	}
+	sort.Strings(fingerprints)
+	return fingerprints
+}
+
+// systemEventViewsWithTrace attaches the trace a trace-id search matched. The
+// event row keeps the rule's newest trace_id; matched_trace_id is the read-only
+// answer to "which trace did this search name", so the detail panel can show
+// that trace's credential pair instead of the newest occurrence's.
+func systemEventViewsWithTrace(events []store.SystemEvent, matches map[string]string) []systemEventView {
+	views := systemEventViews(events)
+	if len(matches) == 0 {
+		return views
+	}
+	for i := range views {
+		if traceID := matches[views[i].Fingerprint]; traceID != "" {
+			views[i].MatchedTraceID = traceID
+		}
+	}
+	return views
 }
 
 func systemEventViewFromStore(event store.SystemEvent) systemEventView {

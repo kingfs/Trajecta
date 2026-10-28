@@ -475,6 +475,95 @@ func (s *Store) credentialMaskEventFingerprints() (map[string]bool, error) {
 	return existing, rows.Err()
 }
 
+// CredentialMaskTraceMatches resolves a trace-id search to the rules that trace
+// carried, one fingerprint per rule.
+//
+// The event table keeps one row per rule, so it cannot store a trace id per
+// occurrence without duplicating what credential_mask_audits already holds.
+// This read is the join instead: the audit table's ("trace_id", "event_index")
+// index answers the prefix lookup, and the returned fingerprints are ORed into
+// the event search. The map value is the full trace id the prefix matched, which
+// the monitor returns as matched_trace_id so the event detail reads that
+// trace's pair rather than the rule's newest one.
+//
+// Only UUID-shaped input is treated as a trace query. A free-text search for a
+// rule name must not scan the audit table for every keystroke.
+func (s *Store) CredentialMaskTraceMatches(query string) (map[string]string, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if !looksLikeTraceIDQuery(query) {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT trace_id, rule
+		FROM credential_mask_audits
+		WHERE trace_id LIKE ? ESCAPE '\'
+		ORDER BY CASE WHEN trace_id = ? THEN 0 ELSE 1 END, detected_at DESC, id DESC
+		LIMIT 100
+	`, escapeLike(query)+"%", query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	matches := map[string]string{}
+	for rows.Next() {
+		var traceID, rule string
+		if err := rows.Scan(&traceID, &rule); err != nil {
+			return nil, err
+		}
+		fingerprint := "secretmask:rule:" + normalizeEventFingerprintPart(rule)
+		if _, exists := matches[fingerprint]; !exists {
+			matches[fingerprint] = traceID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	return matches, nil
+}
+
+// looksLikeTraceIDQuery accepts the UUID and UUID-prefix shape a reader pastes
+// into the event search. The length floor keeps a short hex rule name from
+// turning every keystroke into an audit-table prefix scan.
+func looksLikeTraceIDQuery(value string) bool {
+	if len(value) < 8 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// ReopenIgnoredCredentialMaskEvents returns every ignored credential_masked
+// event to unread. It is the one-time repair for deployments that ignored the
+// rule under the old permanent-mute semantics; after this build a new occurrence
+// reopens the event by itself, so an operator can still dismiss one occurrence
+// without silencing the next credential.
+func (s *Store) ReopenIgnoredCredentialMaskEvents() (int64, error) {
+	result, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'unread', read_at = NULL, resolved_at = NULL, updated_at = ?
+		WHERE source = 'secretmask' AND category = 'credential_masked' AND status = 'ignored'
+	`, time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if count > 0 {
+		s.notifySystemEventChanged(SystemEvent{Status: SystemEventStatusUnread})
+	}
+	return count, nil
+}
+
 // ReconcileCredentialMaskEvents recreates a credential_masked notification for
 // every rule that has an audit row but no event. It inserts missing rows only,
 // so running it on a timer is idempotent: an existing event keeps its occurrence

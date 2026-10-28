@@ -175,7 +175,11 @@ function EventDetail({ event, busyID, onAction }) {
   // an audit row, not a recorded message. Every other event keeps the default
   // landing, where its own protocol evidence is.
   const traceTab = isCredentialMaskedEvent(event) ? "audit" : "protocol";
-  const traceLink = event.trace_id ? buildTraceLink(event.trace_id, "events", event.session_id || "", traceTab, "observation") : "";
+  // A trace-id search resolves this rule event to the trace the reader named.
+  // The event row keeps the rule's newest trace_id, so the matched one has to
+  // win here or the detail would open a different recording.
+  const traceID = event.matched_trace_id || event.trace_id;
+  const traceLink = traceID ? buildTraceLink(traceID, "events", event.session_id || "", traceTab, "observation") : "";
   return (
     <div className="event-detail">
       <div className="panel-head event-detail-head">
@@ -192,6 +196,7 @@ function EventDetail({ event, busyID, onAction }) {
         <Meta label="occurrences" value={event.occurrence_count ?? 1} />
         <Meta label="first seen" value={formatDateTime(event.first_seen_at)} />
         <Meta label="last seen" value={formatDateTime(event.last_seen_at)} />
+        {event.matched_trace_id ? <Meta label={t("events.matchedTrace")} value={event.matched_trace_id} mono /> : null}
         <Meta label="fingerprint" value={event.fingerprint} mono />
       </div>
       <div className="trace-tag-group event-links">
@@ -202,7 +207,7 @@ function EventDetail({ event, busyID, onAction }) {
       <div className="event-actions">
         <Button variant="ghost" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</Button>
         <Button variant="ghost" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</Button>
-        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{t("events.ignore")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{isCredentialMaskedEvent(event) ? t("events.ignoreCurrent") : t("events.ignore")}</Button>
       </div>
       {isCredentialMaskedEvent(event) ? <CredentialMaskEventSection event={event} t={t} InlineTag={InlineTag} /> : null}
       <pre className="code-block event-details-json">{formatJSON(event.details_json)}</pre>

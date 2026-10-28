@@ -204,6 +204,10 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 通知与审计行在**同一个事务**里提交：事件插入失败时整批审计行一起回滚，不会留下「审计标签有数字、事件中心没有记录」的半状态；提交成功后才发布实时变更。写入发生在录制收尾的**独立旁路队列**（`internal/recorder` 的 mask audit side queue）上，不占请求 goroutine，也不占负责重写 cassette 的 finalize worker；瞬时数据库错误会按短退避重试，队列满或尚未启动 worker 时退回同步写入，最坏情况是旧延迟而不是丢行。服务启动时以及之后每 5 分钟，`ReconcileCredentialMaskEvents` 会按 `rule` 检查已有审计行，只给缺失的事件补一条（`EnsureSystemEvent`，`ON CONFLICT DO NOTHING`），因此升级前或异常退出留下的历史缺口会自动愈合，重复对账也不会累加 `occurrence_count`、覆盖读者设置的 `status` 或改写最近 `trace_id`。
 
+事件表不按 trace 复制行：每条规则仍然只有一条通知，`trace_id` 只保留最近一次命中。按 trace 的归因在**读取时**由审计表补齐——事件搜索输入完整 trace id 或 UUID 前缀时，`CredentialMaskTraceMatches` 用 `credential_mask_audits` 的 `("trace_id", "event_index")` 索引把 trace 解析到它命中的规则，再把对应事件并入搜索；返回视图里的 `matched_trace_id` 是搜索命中的 trace，事件详情的「追踪」链接与替换对优先读它，而不是读事件行上会被后续命中覆盖的 `trace_id`。因此历史 trace 不增加任何事件行，也不会失去自己的替换对。
+
+`credential_masked` 的 `ignored` 只表示“这次已处理”：同一规则再次命中时，`system_events` 的 upsert 会把它改回 `unread` 并清空 `read_at`/`resolved_at`，不会让一次忽略永久静音后续真正离开机器的凭据；其他来源（解析/分析/路由/上游故障）的忽略仍是永久静音。升级到本版本时，`serve` 启动会一次性把历史上 `ignored` 的 `credential_masked` 事件改回 `unread`（`app_settings` 键 `system_events.credential_mask_visibility_repaired_v1` 记录该修复已执行），重启不会重复撤销之后的人工忽略。
+
 读取面：
 
 - `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；`window` 不传时不按时间过滤——这个接口的两个读入口都按 `trace_id` 取某一次录制的替换，读的是录制事实而不是读取时刻，默认 `today` 会把当天之前的 trace 全部藏掉；显式传入才生效。返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。

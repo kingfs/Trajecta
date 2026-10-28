@@ -279,6 +279,8 @@ export default {
   "events.markRead": "Mark read",
   "events.resolve": "Resolve",
   "events.ignore": "Ignore",
+  "events.ignoreCurrent": "Ignore this occurrence",
+  "events.matchedTrace": "Matched trace",
   "events.trace": "Trace",
   "events.session": "Session",
   "events.upstream": "Upstream",

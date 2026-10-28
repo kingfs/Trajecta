@@ -279,6 +279,8 @@ export default {
   "events.markRead": "标为已读",
   "events.resolve": "解决",
   "events.ignore": "忽略",
+  "events.ignoreCurrent": "忽略本次",
+  "events.matchedTrace": "命中的 trace",
   "events.trace": "追踪",
   "events.session": "会话",
   "events.upstream": "上游",

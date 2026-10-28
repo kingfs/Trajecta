@@ -70,6 +70,11 @@ describe("the audit query an event resolves to", () => {
     assert.equal(credentialMaskURLForEvent(event), "/api/secret-masks?trace_id=trace-1&page_size=50&rule=jwt");
   });
 
+  it("prefers the trace a search matched over the rule's newest trace", () => {
+    const event = { ...maskedEvent, matched_trace_id: "trace-matched" };
+    assert.equal(credentialMaskURLForEvent(event), "/api/secret-masks?trace_id=trace-matched&page_size=50&rule=openai.project_key");
+  });
+
   it("still reads the trace when no rule is recorded", () => {
     const event = { ...maskedEvent, details_json: "{}" };
     assert.equal(credentialMaskURLForEvent(event), "/api/secret-masks?trace_id=trace-1&page_size=50");

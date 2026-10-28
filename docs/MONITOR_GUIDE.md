@@ -114,7 +114,7 @@ session ID 的抽取顺序为：
 
 Trajecta 自身的事件收件箱：
 
-- 来源：代码当前只发出 `parser`、`analyzer`、`router`、`upstream` 四种来源；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`、`secretmask`，即过滤项比实际发出的来源更宽。
+- 来源：代码当前发出 `parser`、`analyzer`、`router`、`upstream`、`secretmask`；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
 - 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
@@ -122,6 +122,8 @@ Trajecta 自身的事件收件箱：
 支持按状态、级别、来源过滤和搜索 fingerprint / trace / model / 消息；状态过滤里的「全部」是独立取值（`status=all`）而不是「未指定」，因为事件页默认落在未读，只有选择「全部」才能看到此前标为已读、已解决或已忽略的事件。支持单条标记已读、解决、忽略，以及「全部标为已读」——后者只把未读事件转为已读，`status=all` 不会把已解决事件改回已读。重复事件按 fingerprint 合并。导航上的未读角标由 `GET /api/events/summary` 与 SSE `GET /api/events/stream` 驱动。
 
 `credential_masked`（`source: secretmask`）是代理把请求里的凭据、身份证号或手机号换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)），事件详情面板会就地列出该规则的替换对（原始值与替换值各一行、完整打印，并带偏移、长度、置信度与落盘形态），因此不必离开事件页去确认；详情里的「追踪」链接指向该 trace 的「审计」标签页而不是默认的协议页，因为替换对属于审计面。其他事件保持默认落点。
+
+事件搜索框接受完整 trace id 或 UUID 前缀：后端先用 `credential_mask_audits` 把 trace 解析到它命中的规则，再把该规则事件并入搜索结果。响应里的 `matched_trace_id` 是搜索命中的 trace，事件详情的「追踪」链接和替换对都优先读它，而不是事件行上只保留最近一次命中的 `trace_id`；事件表仍然每条规则一行，不按 trace 复制行。`credential_masked` 的「忽略」只忽略当前这一次，同一规则再次命中时通知会回到未读；其他来源的忽略仍是永久静音。升级到本版本时，服务启动会一次性把历史上被忽略的 `credential_masked` 事件改回未读（`app_settings` 记录该修复已执行，重启不会重复撤销之后的人工忽略）。
 
 这条通知与审计行在同一事务里写入，写入由录制收尾的旁路队列完成并支持重试，因此不会占用 LLM 转发或 cassette finalize；提交后立即通过 `events` 主题推送。服务启动时和每 5 分钟还会按 `rule` 对账一次，为已有审计行补上缺失的事件（只插入、不累加、不覆盖状态），所以升级或异常退出留下的历史缺口会在打开事件页或页面保持连接时自动出现。
 

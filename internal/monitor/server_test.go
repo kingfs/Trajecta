@@ -6108,3 +6108,74 @@ func TestRoutingSummaryReadsPreludesNotWholeCassettes(t *testing.T) {
 			float64(allocated)/(1<<20), (traces*bodyPerTrace)>>20)
 	}
 }
+
+// A trace-id search has to reach the rule notification even though the event row
+// stores only the rule's newest trace. The audit table is the per-trace source;
+// the list response carries the matched trace so the detail panel reads the pair
+// for the trace the reader searched, not the newest occurrence's pair.
+func TestSystemEventListResolvesCredentialMaskTraceQuery(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const (
+		searchedTrace = "f1592da8-2847-4eb5-ac67-10596c0836c7"
+		newestTrace   = "a8198d9e-55fc-4e20-98dd-ddf43306bd08"
+	)
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{
+			TraceID:    searchedTrace,
+			EventIndex: 0,
+			Rule:       "generic.sk_dash",
+			Kind:       "generic_key",
+			Original:   "sk-searched-credential",
+			StandIn:    "sk-searched-standin",
+			DetectedAt: time.Date(2026, 10, 28, 7, 13, 53, 0, time.UTC),
+		},
+		{
+			TraceID:    newestTrace,
+			EventIndex: 0,
+			Rule:       "generic.sk_dash",
+			Kind:       "generic_key",
+			Original:   "sk-newest-credential",
+			StandIn:    "sk-newest-standin",
+			DetectedAt: time.Date(2026, 10, 28, 7, 14, 59, 0, time.UTC),
+		},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.TraceID != newestTrace {
+		t.Fatalf("stored trace_id = %q, want the newest occurrence %q", event.TraceID, newestTrace)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events?status=unread&q="+searchedTrace+"&window=all&page=1&page_size=10", nil)
+	rr := httptest.NewRecorder()
+	systemEventListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload systemEventListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 {
+		t.Fatalf("list payload = %+v, want the one rule event", payload)
+	}
+	item := payload.Items[0]
+	if item.Fingerprint != "secretmask:rule:generic_sk_dash" {
+		t.Errorf("fingerprint = %q", item.Fingerprint)
+	}
+	if item.TraceID != newestTrace {
+		t.Errorf("trace_id = %q, want the stored newest trace", item.TraceID)
+	}
+	if item.MatchedTraceID != searchedTrace {
+		t.Errorf("matched_trace_id = %q, want the searched trace %q", item.MatchedTraceID, searchedTrace)
+	}
+}

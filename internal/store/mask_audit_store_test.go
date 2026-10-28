@@ -294,3 +294,212 @@ func TestReconcileCredentialMaskEventsHealsMissingEvent(t *testing.T) {
 		t.Errorf("occurrence_count after a repeat pass = %d, want 1", event.OccurrenceCount)
 	}
 }
+
+// TestCredentialMaskedEventReopensAfterIgnore pins the visibility rule: an
+// ignored credential notification is only an acknowledgement of the occurrence
+// the reader handled. A later credential that leaves the machine is new
+// evidence, so the same row returns to unread and drops the read/resolved state
+// instead of staying muted forever.
+func TestCredentialMaskedEventReopensAfterIgnore(t *testing.T) {
+	st := configTransactionTestStore(t)
+	event, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "secretmask:rule:generic_sk_dash",
+		Source:      "secretmask",
+		Category:    "credential_masked",
+		Severity:    "warning",
+		Title:       "Sensitive credential replaced before leaving the machine",
+		Message:     "rule generic.sk_dash replaced a credential",
+		TraceID:     "trace-first",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent() error = %v", err)
+	}
+	if err := st.MarkSystemEventRead(event.ID); err != nil {
+		t.Fatalf("MarkSystemEventRead() error = %v", err)
+	}
+	if err := st.ResolveSystemEvent(event.ID); err != nil {
+		t.Fatalf("ResolveSystemEvent() error = %v", err)
+	}
+	if err := st.IgnoreSystemEvent(event.ID); err != nil {
+		t.Fatalf("IgnoreSystemEvent() error = %v", err)
+	}
+
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{{
+		TraceID:    "trace-second",
+		Rule:       "generic.sk_dash",
+		Kind:       "generic_key",
+		Original:   "sk-second-credential",
+		StandIn:    "sk-second-standin",
+		Start:      10,
+		DetectedAt: time.Date(2026, 10, 28, 7, 30, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+
+	got, err := st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if got.Status != SystemEventStatusUnread {
+		t.Errorf("status = %q, want unread after a new credential", got.Status)
+	}
+	if got.OccurrenceCount != 2 {
+		t.Errorf("occurrence_count = %d, want 2", got.OccurrenceCount)
+	}
+	if !got.ReadAt.IsZero() || !got.ResolvedAt.IsZero() {
+		t.Errorf("read_at/resolved_at = %v/%v, want both cleared by the new occurrence", got.ReadAt, got.ResolvedAt)
+	}
+	if got.TraceID != "trace-second" {
+		t.Errorf("trace_id = %q, want the latest occurrence", got.TraceID)
+	}
+}
+
+// TestOperationalEventStaysIgnoredAfterRepeat keeps the new reopening rule
+// narrow: an ignored parse failure is noise the reader chose to mute, so a
+// repeat must not put it back in the inbox.
+func TestOperationalEventStaysIgnoredAfterRepeat(t *testing.T) {
+	st := configTransactionTestStore(t)
+	event, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "parser:trace-repeat:bad-json",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     "bad json",
+		TraceID:     "trace-repeat-1",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent() error = %v", err)
+	}
+	if err := st.IgnoreSystemEvent(event.ID); err != nil {
+		t.Fatalf("IgnoreSystemEvent() error = %v", err)
+	}
+	if _, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "parser:trace-repeat:bad-json",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     "bad json again",
+		TraceID:     "trace-repeat-2",
+	}); err != nil {
+		t.Fatalf("second UpsertSystemEvent() error = %v", err)
+	}
+	got, err := st.GetSystemEventByFingerprint("parser:trace-repeat:bad-json")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if got.Status != SystemEventStatusIgnored {
+		t.Errorf("status = %q, want the operational event to stay ignored", got.Status)
+	}
+	if got.OccurrenceCount != 2 {
+		t.Errorf("occurrence_count = %d, want 2", got.OccurrenceCount)
+	}
+}
+
+// TestCredentialMaskTraceMatchesResolvesPrefix is the read that replaces a
+// per-trace event row: the audit table already names the trace and the rule, so
+// a trace-id search can find the rule notification without storing the id twice.
+func TestCredentialMaskTraceMatchesResolvesPrefix(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const (
+		firstTrace  = "f1592da8-2847-4eb5-ac67-10596c0836c7"
+		secondTrace = "a8198d9e-55fc-4e20-98dd-ddf43306bd08"
+	)
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: firstTrace, Rule: "generic.sk_dash", Original: "sk-first", StandIn: "sk-first-fake"},
+		{TraceID: secondTrace, Rule: "openai.project_key", Original: "sk-second", StandIn: "sk-second-fake"},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+
+	matches, err := st.CredentialMaskTraceMatches(firstTrace[:8])
+	if err != nil {
+		t.Fatalf("CredentialMaskTraceMatches(prefix) error = %v", err)
+	}
+	if got := matches["secretmask:rule:generic_sk_dash"]; got != firstTrace {
+		t.Errorf("prefix match = %q, want %q", got, firstTrace)
+	}
+	if _, ok := matches["secretmask:rule:openai_project_key"]; ok {
+		t.Error("prefix match returned a rule from another trace")
+	}
+
+	matches, err = st.CredentialMaskTraceMatches(firstTrace)
+	if err != nil {
+		t.Fatalf("CredentialMaskTraceMatches(exact) error = %v", err)
+	}
+	if got := matches["secretmask:rule:generic_sk_dash"]; got != firstTrace {
+		t.Errorf("exact match = %q, want %q", got, firstTrace)
+	}
+
+	for _, query := range []string{"generic", "f1592"} {
+		matches, err = st.CredentialMaskTraceMatches(query)
+		if err != nil {
+			t.Fatalf("CredentialMaskTraceMatches(%q) error = %v", query, err)
+		}
+		if len(matches) != 0 {
+			t.Errorf("CredentialMaskTraceMatches(%q) = %v, want no trace scan", query, matches)
+		}
+	}
+}
+
+// TestReopenIgnoredCredentialMaskEvents pins the one-time repair: it reopens
+// only credential notifications and leaves an ignored operational event alone.
+func TestReopenIgnoredCredentialMaskEvents(t *testing.T) {
+	st := configTransactionTestStore(t)
+	credentialEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "secretmask:rule:pii_chinese_id",
+		Source:      "secretmask",
+		Category:    "credential_masked",
+		Severity:    "warning",
+		Title:       "Sensitive credential replaced before leaving the machine",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(credential) error = %v", err)
+	}
+	operationalEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "parser:trace-ignored:bad-json",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(operational) error = %v", err)
+	}
+	for _, id := range []string{credentialEvent.ID, operationalEvent.ID} {
+		if err := st.IgnoreSystemEvent(id); err != nil {
+			t.Fatalf("IgnoreSystemEvent(%s) error = %v", id, err)
+		}
+	}
+
+	reopened, err := st.ReopenIgnoredCredentialMaskEvents()
+	if err != nil {
+		t.Fatalf("ReopenIgnoredCredentialMaskEvents() error = %v", err)
+	}
+	if reopened != 1 {
+		t.Fatalf("reopened = %d, want only the credential event", reopened)
+	}
+	got, err := st.GetSystemEvent(credentialEvent.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(credential) error = %v", err)
+	}
+	if got.Status != SystemEventStatusUnread {
+		t.Errorf("credential status = %q, want unread", got.Status)
+	}
+	got, err = st.GetSystemEvent(operationalEvent.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(operational) error = %v", err)
+	}
+	if got.Status != SystemEventStatusIgnored {
+		t.Errorf("operational status = %q, want ignored", got.Status)
+	}
+
+	reopened, err = st.ReopenIgnoredCredentialMaskEvents()
+	if err != nil {
+		t.Fatalf("second ReopenIgnoredCredentialMaskEvents() error = %v", err)
+	}
+	if reopened != 0 {
+		t.Errorf("second reopened = %d, want 0", reopened)
+	}
+}
