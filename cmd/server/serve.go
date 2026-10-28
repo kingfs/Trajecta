@@ -162,6 +162,7 @@ func runServeWithConfig(configPath string) int {
 		defer background.Done()
 		analysisWorker.Run(syncCtx)
 	}()
+	startCredentialMaskEventReconciliation(syncCtx, traceStore, 5*time.Minute, &background)
 
 	channelService := channel.NewService(traceStore)
 	if imported, err := channelService.BootstrapFromConfig(cfg); err != nil {
@@ -290,8 +291,11 @@ func runServeWithConfig(configPath string) int {
 	if err := handler.FinalizeRecordings(finalizeCtx); err != nil {
 		slog.Warn("Recorder finalize queue did not drain cleanly", "error", err)
 	}
-	if stats := handler.FinalizeStats(); stats.Queued > 0 || stats.Inline > 0 {
-		slog.Info("Recorder finalize queue drained", "queued", stats.Queued, "inline", stats.Inline, "still_queued", stats.Depth)
+	if stats := handler.FinalizeStats(); stats.Queued > 0 || stats.Inline > 0 || stats.AuditQueued > 0 || stats.AuditInline > 0 {
+		slog.Info("Recorder queues drained",
+			"queued", stats.Queued, "inline", stats.Inline, "still_queued", stats.Depth,
+			"audit_queued", stats.AuditQueued, "audit_inline", stats.AuditInline,
+			"audit_retried", stats.AuditRetried, "audit_still_queued", stats.AuditDepth)
 	}
 	return 0
 }
@@ -373,6 +377,52 @@ func buildResponsesFunctionExecutorManager(ctx context.Context, cfg *config.Conf
 		}
 	}
 	return functionexec.NewManager(base)
+}
+
+// startCredentialMaskEventReconciliation heals a credential_masked notification
+// that predates this build or whose live write was lost, without putting the
+// scan on the request path. It runs once at startup - so an existing audit table
+// shows up in the event feed as soon as the server can answer - and then on a
+// slow timer as a backstop. The pass inserts missing events only, so running it
+// repeatedly cannot inflate an occurrence count or overwrite a status a reader
+// set.
+func startCredentialMaskEventReconciliation(ctx context.Context, st *store.Store, interval time.Duration, wg *sync.WaitGroup) {
+	if st == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if wg != nil {
+		wg.Add(1)
+	}
+	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
+		run := func(reason string) {
+			inserted, err := st.ReconcileCredentialMaskEvents()
+			if err != nil {
+				slog.Warn("Credential mask event reconciliation failed", "reason", reason, "error", err)
+				return
+			}
+			if inserted > 0 {
+				slog.Info("Recovered credential mask events", "reason", reason, "inserted", inserted)
+			}
+		}
+
+		run("startup")
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run("periodic")
+			}
+		}
+	}()
 }
 
 func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {

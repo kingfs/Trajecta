@@ -98,7 +98,121 @@ type SystemEventNotification struct {
 	At       time.Time
 }
 
+const systemEventSelectColumns = `id, fingerprint, source, category, severity, status, title, message, details_json,
+	trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+	first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at`
+
+// systemEventInsertSQL is the upsert every notification uses: a repeat of the
+// same fingerprint accumulates on one row instead of growing the feed.
+//
+// The conflict clause keeps an ignored row ignored, but every other state
+// returns to unread, because a new occurrence is new information. It is a
+// single statement rather than a SELECT followed by an INSERT so two writers
+// racing on one fingerprint cannot both miss and then collide.
+const systemEventInsertSQL = `INSERT INTO system_events (
+		id, fingerprint, source, category, severity, status, title, message, details_json,
+		trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+		first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+	)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+	ON CONFLICT(fingerprint) DO UPDATE SET
+		source=excluded.source,
+		category=excluded.category,
+		severity=excluded.severity,
+		status=CASE
+			WHEN system_events.status = 'ignored' THEN system_events.status
+			ELSE 'unread'
+		END,
+		title=excluded.title,
+		message=excluded.message,
+		details_json=excluded.details_json,
+		trace_id=excluded.trace_id,
+		session_id=excluded.session_id,
+		job_id=excluded.job_id,
+		upstream_id=excluded.upstream_id,
+		model=excluded.model,
+		occurrence_count=system_events.occurrence_count + 1,
+		last_seen_at=excluded.last_seen_at,
+		updated_at=excluded.updated_at,
+		read_at=CASE
+			WHEN system_events.status = 'ignored' THEN system_events.read_at
+			ELSE NULL
+		END,
+		resolved_at=CASE
+			WHEN system_events.status = 'ignored' THEN system_events.resolved_at
+			ELSE NULL
+		END`
+
+// systemEventEnsureSQL inserts the first occurrence only. It is what a
+// reconciliation pass uses to heal a row the live write path missed without
+// pretending that pass saw a new occurrence: an existing event keeps its count,
+// status and trace pointer.
+const systemEventEnsureSQL = `INSERT INTO system_events (
+		id, fingerprint, source, category, severity, status, title, message, details_json,
+		trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+		first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+	)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+	ON CONFLICT(fingerprint) DO NOTHING`
+
 func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
+	saved, err := s.persistSystemEvent(event, nil)
+	if err != nil {
+		return SystemEvent{}, err
+	}
+	s.notifySystemEventChanged(saved)
+	return saved, nil
+}
+
+// EnsureSystemEvent writes the event only when its fingerprint does not exist,
+// and reports whether it inserted. A reconciliation pass uses it to recover a
+// notification the live write path missed; unlike UpsertSystemEvent it never
+// changes an existing row, so running it repeatedly cannot inflate an
+// occurrence count or overwrite a status a reader set.
+func (s *Store) EnsureSystemEvent(event SystemEvent) (SystemEvent, bool, error) {
+	normalized, err := normalizeSystemEvent(event)
+	if err != nil {
+		return SystemEvent{}, false, err
+	}
+	result, err := s.db.Exec(systemEventEnsureSQL, systemEventInsertArgs(normalized)...)
+	if err != nil {
+		return SystemEvent{}, false, err
+	}
+	inserted := false
+	if affected, affectedErr := result.RowsAffected(); affectedErr == nil {
+		inserted = affected > 0
+	}
+	saved, err := s.GetSystemEventByFingerprint(normalized.Fingerprint)
+	if err != nil {
+		return SystemEvent{}, false, err
+	}
+	if inserted {
+		s.notifySystemEventChanged(saved)
+	}
+	return saved, inserted, nil
+}
+
+// persistSystemEvent validates one event and writes it, optionally inside a
+// caller's transaction. It never notifies: the caller notifies after its
+// transaction commits, so a subscriber can only refetch rows that are durable.
+func (s *Store) persistSystemEvent(event SystemEvent, tx *sql.Tx) (SystemEvent, error) {
+	normalized, err := normalizeSystemEvent(event)
+	if err != nil {
+		return SystemEvent{}, err
+	}
+	if tx != nil {
+		if _, err := s.execTx(tx, systemEventInsertSQL, systemEventInsertArgs(normalized)...); err != nil {
+			return SystemEvent{}, err
+		}
+		return s.getSystemEventTx(tx, `fingerprint = ?`, normalized.Fingerprint)
+	}
+	if _, err := s.db.Exec(systemEventInsertSQL, systemEventInsertArgs(normalized)...); err != nil {
+		return SystemEvent{}, err
+	}
+	return s.GetSystemEventByFingerprint(normalized.Fingerprint)
+}
+
+func normalizeSystemEvent(event SystemEvent) (SystemEvent, error) {
 	event.Fingerprint = strings.TrimSpace(event.Fingerprint)
 	if event.Fingerprint == "" {
 		return SystemEvent{}, errors.New("upsert system event: fingerprint is required")
@@ -149,57 +263,20 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 	if detailsJSON == "" {
 		detailsJSON = "{}"
 	}
+	event.DetailsJSON = json.RawMessage(detailsJSON)
+	return event, nil
+}
 
-	_, err := s.db.Exec(`
-		INSERT INTO system_events (
-			id, fingerprint, source, category, severity, status, title, message, details_json,
-			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
-			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
-		ON CONFLICT(fingerprint) DO UPDATE SET
-			source=excluded.source,
-			category=excluded.category,
-			severity=excluded.severity,
-			status=CASE
-				WHEN system_events.status = 'ignored' THEN system_events.status
-				ELSE 'unread'
-			END,
-			title=excluded.title,
-			message=excluded.message,
-			details_json=excluded.details_json,
-			trace_id=excluded.trace_id,
-			session_id=excluded.session_id,
-			job_id=excluded.job_id,
-			upstream_id=excluded.upstream_id,
-			model=excluded.model,
-			occurrence_count=system_events.occurrence_count + 1,
-			last_seen_at=excluded.last_seen_at,
-			updated_at=excluded.updated_at,
-			read_at=CASE
-				WHEN system_events.status = 'ignored' THEN system_events.read_at
-				ELSE NULL
-			END,
-			resolved_at=CASE
-				WHEN system_events.status = 'ignored' THEN system_events.resolved_at
-				ELSE NULL
-			END
-	`, sanitizeDBText(event.ID), sanitizeDBText(event.Fingerprint), sanitizeDBText(event.Source),
+func systemEventInsertArgs(event SystemEvent) []any {
+	return []any{
+		sanitizeDBText(event.ID), sanitizeDBText(event.Fingerprint), sanitizeDBText(event.Source),
 		sanitizeDBText(event.Category), sanitizeDBText(event.Severity), sanitizeDBText(event.Status),
 		sanitizeDBText(textPreview(event.Title, 300)), sanitizeDBText(textPreview(event.Message, 2000)),
-		sanitizeDBText(detailsJSON),
+		sanitizeDBText(string(event.DetailsJSON)),
 		sanitizeDBText(event.TraceID), sanitizeDBText(event.SessionID), sanitizeDBText(event.JobID),
 		sanitizeDBText(event.UpstreamID), sanitizeDBText(event.Model), event.OccurrenceCount,
-		event.FirstSeenAt, event.LastSeenAt, event.CreatedAt, event.UpdatedAt)
-	if err != nil {
-		return SystemEvent{}, err
+		event.FirstSeenAt, event.LastSeenAt, event.CreatedAt, event.UpdatedAt,
 	}
-	saved, err := s.GetSystemEventByFingerprint(event.Fingerprint)
-	if err != nil {
-		return SystemEvent{}, err
-	}
-	s.notifySystemEventChanged(saved)
-	return saved, nil
 }
 
 func (s *Store) GetSystemEvent(id string) (SystemEvent, error) {
@@ -549,19 +626,24 @@ func normalizedFilterToken(value string) string {
 }
 
 func (s *Store) getSystemEvent(whereSQL string, arg any) (SystemEvent, error) {
-	var event SystemEvent
 	row := s.db.QueryRow(`
-		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
-			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
-			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+		SELECT `+systemEventSelectColumns+`
 		FROM system_events
 		WHERE `+whereSQL+`
 	`, arg)
-	event, err := scanSystemEvent(row)
-	if err != nil {
-		return SystemEvent{}, err
-	}
-	return event, nil
+	return scanSystemEvent(row)
+}
+
+// getSystemEventTx reads one event back through the transaction that just wrote
+// it, so the caller can return the committed shape without a second round trip
+// after commit (and without another connection seeing the row first).
+func (s *Store) getSystemEventTx(tx *sql.Tx, whereSQL string, arg any) (SystemEvent, error) {
+	row := s.queryRowTx(tx, `
+		SELECT `+systemEventSelectColumns+`
+		FROM system_events
+		WHERE `+whereSQL+`
+	`, arg)
+	return scanSystemEvent(row)
 }
 
 func (s *Store) systemEventCountBy(column string, whereSQL string, args []any, limit int) ([]CountItem, error) {

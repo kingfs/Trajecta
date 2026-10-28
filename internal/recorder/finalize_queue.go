@@ -46,12 +46,17 @@ const FinalizeTimeout = 30 * time.Second
 //     ever existed in memory. It is counted and logged rather than silently
 //     ignored; see Store.Sync and the fragment handling there.
 type asyncFinalizer struct {
-	queue      chan *LogInfo
-	finalize   func(*LogInfo) error
-	workers    int
-	wg         sync.WaitGroup
-	startOnce  sync.Once
-	closeOnce  sync.Once
+	queue     chan *LogInfo
+	finalize  func(*LogInfo) error
+	workers   int
+	wg        sync.WaitGroup
+	startOnce sync.Once
+	closeOnce sync.Once
+	// mu guards the queue close against a concurrent submit. closed is checked
+	// and the send happens under the same lock the closer takes, so a submit can
+	// never race the close into "send on a closed channel" - the panic would
+	// otherwise land on the proxy's request goroutine.
+	mu         sync.RWMutex
 	started    atomic.Bool
 	closed     atomic.Bool
 	inlineRuns atomic.Int64
@@ -102,18 +107,24 @@ func (f *asyncFinalizer) submit(info *LogInfo) error {
 	}
 	// Before the workers exist and after they stop, the only correct thing to do
 	// with the recording is the work itself. Queuing without a consumer would
-	// leave it unfinalised for as long as the process lives.
+	// leave it unfinalised for as long as the process lives. The read lock covers
+	// the whole decision including the send, so close cannot close the queue
+	// between the check and the send.
+	f.mu.RLock()
 	if f.closed.Load() || !f.started.Load() {
+		f.mu.RUnlock()
 		f.inlineRuns.Add(1)
 		return f.finalize(info)
 	}
 	select {
 	case f.queue <- info:
 		f.queuedRuns.Add(1)
+		f.mu.RUnlock()
 		return nil
 	default:
 		// The queue is at its bound: the caller does the work rather than waiting
 		// for a worker or dropping the recording.
+		f.mu.RUnlock()
 		f.inlineRuns.Add(1)
 		return f.finalize(info)
 	}
@@ -136,8 +147,10 @@ func (f *asyncFinalizer) close(ctx context.Context, timeout time.Duration) error
 		return nil
 	}
 	f.closeOnce.Do(func() {
+		f.mu.Lock()
 		f.closed.Store(true)
 		close(f.queue)
+		f.mu.Unlock()
 	})
 	if timeout <= 0 {
 		timeout = FinalizeTimeout
@@ -163,31 +176,52 @@ func (f *asyncFinalizer) close(ctx context.Context, timeout time.Duration) error
 	return err
 }
 
-// Close drains the finalize queue and stops the workers. It is safe to call more
-// than once and on a recorder that never queued anything.
+// Close drains the finalize queue and stops the workers, then drains the mask
+// audit side queue. It is safe to call more than once and on a recorder that
+// never queued anything.
+//
+// The order matters: the finalizers are what submit audit batches, so waiting for
+// them first means the audit queue sees every batch before it is closed.
 func (r *Recorder) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	return r.finalizer.close(ctx, FinalizeTimeout)
+	var finalizeErr, auditErr error
+	if r.finalizer != nil {
+		finalizeErr = r.finalizer.close(ctx, FinalizeTimeout)
+	}
+	if r.audit != nil {
+		auditErr = r.audit.close(ctx, FinalizeTimeout)
+	}
+	return errors.Join(finalizeErr, auditErr)
 }
 
-// FinalizeStats reports how the queue has been used, so an operator can tell
+// FinalizeStats reports how the queues have been used, so an operator can tell
 // whether the workers are keeping up or every request is falling back to the
 // inline path.
 type FinalizeStats struct {
-	Queued int64 `json:"queued"`
-	Inline int64 `json:"inline"`
-	Depth  int   `json:"depth"`
+	Queued       int64 `json:"queued"`
+	Inline       int64 `json:"inline"`
+	Depth        int   `json:"depth"`
+	AuditQueued  int64 `json:"audit_queued"`
+	AuditInline  int64 `json:"audit_inline"`
+	AuditRetried int64 `json:"audit_retried"`
+	AuditDepth   int   `json:"audit_depth"`
 }
 
 func (r *Recorder) FinalizeStats() FinalizeStats {
 	if r == nil || r.finalizer == nil {
 		return FinalizeStats{}
 	}
-	return FinalizeStats{
+	stats := FinalizeStats{
 		Queued: r.finalizer.queuedRuns.Load(),
 		Inline: r.finalizer.inlineRuns.Load(),
 		Depth:  len(r.finalizer.queue),
 	}
+	audit := r.audit.stats()
+	stats.AuditQueued = audit.Queued
+	stats.AuditInline = audit.Inline
+	stats.AuditRetried = audit.Retried
+	stats.AuditDepth = audit.Depth
+	return stats
 }

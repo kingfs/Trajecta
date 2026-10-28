@@ -68,6 +68,7 @@ type Recorder struct {
 	MaskKey   bool
 	store     *store.Store
 	finalizer *asyncFinalizer
+	audit     *asyncMaskAuditWriter
 }
 
 func New(outputDir string, maskKey bool, st *store.Store) *Recorder {
@@ -77,6 +78,7 @@ func New(outputDir string, maskKey bool, st *store.Store) *Recorder {
 		store:     st,
 	}
 	r.finalizer = newAsyncFinalizer(r.UpdateLogFile, DefaultFinalizeWorkers, DefaultFinalizeQueueDepth)
+	r.audit = newAsyncMaskAuditWriter(r.persistMaskAudit, DefaultAuditWorkers, DefaultAuditQueueDepth)
 	return r
 }
 
@@ -101,10 +103,40 @@ func (r *Recorder) SubmitLogFile(info *LogInfo) error {
 // before this call: SubmitLogFile falls back to the inline path until then, so a
 // caller that never starts them keeps today's behaviour.
 func (r *Recorder) StartFinalizeWorkers() {
-	if r == nil || r.finalizer == nil {
+	if r == nil {
 		return
 	}
-	r.finalizer.start()
+	if r.finalizer != nil {
+		r.finalizer.start()
+	}
+	if r.audit != nil {
+		r.audit.start()
+	}
+}
+
+// SubmitMaskAudit hands one exchange's credential replacements to the audit side
+// queue. The write is off the request goroutine and off the cassette finalizer:
+// it writes the audit rows and their notification together, retries a transient
+// failure, and otherwise leaves the recording untouched.
+//
+// Before StartFinalizeWorkers, or when the queue is at its bound, the batch is
+// written inline so a caller that never opted into the workers - every test and
+// short-lived tool - still gets its rows.
+func (r *Recorder) SubmitMaskAudit(records []store.CredentialMaskAuditRecord) error {
+	if r == nil || len(records) == 0 {
+		return nil
+	}
+	if r.audit == nil {
+		return r.persistMaskAudit(records)
+	}
+	return r.audit.submit(records)
+}
+
+func (r *Recorder) persistMaskAudit(records []store.CredentialMaskAuditRecord) error {
+	if r == nil || r.store == nil {
+		return nil
+	}
+	return r.store.UpsertCredentialMaskAudits(records)
 }
 
 func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, error) {
@@ -439,36 +471,36 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		if err != nil {
 			return err
 		}
-		if err := r.store.UpsertLogWithGrouping(info.Path, info.Header, grouping); err != nil {
+		traceID, err := r.store.UpsertLogWithGroupingAndTraceID(info.Path, info.Header, grouping)
+		if err != nil {
 			return err
 		}
-		entry, err := r.store.GetByRequestID(info.Header.Meta.RequestID)
-		if err != nil {
-			slog.Warn("Trace parse job enqueue skipped: indexed trace not found", "request_id", info.Header.Meta.RequestID, "error", err)
-		} else {
-			// The credential mask audit is written here rather than while the
-			// request is in flight because the trace id does not exist until the
-			// row above is indexed, and the audit list has to be able to join a
-			// replacement back to its recording.
-			//
-			// Best effort, like the parse job: the trace is already recorded and
-			// indexed, so a failure to write the audit must not turn a completed
-			// exchange into an error. The next request re-records its own rows.
-			r.writeCredentialMaskAudit(entry.ID, info)
-			if err := r.store.EnqueueParseJob(entry.ID); err != nil {
-				slog.Warn("Trace parse job enqueue failed", "trace_id", entry.ID, "error", err)
-			}
+		// The credential mask audit is submitted here rather than while the request
+		// is in flight because the trace id does not exist until the row above is
+		// indexed, and the audit list has to be able to join a replacement back to
+		// its recording. It goes to its own side queue: the audit row and its
+		// event are derived facts, and a slow or briefly unavailable database must
+		// not hold this cassette's finalize worker (or the next recording's) behind
+		// them.
+		//
+		// Best effort, like the parse job: the trace is already recorded and
+		// indexed, so a failure to write the audit must not turn a completed
+		// exchange into an error. The next request re-records its own rows.
+		r.writeCredentialMaskAudit(traceID, info)
+		if err := r.store.EnqueueParseJob(traceID); err != nil {
+			slog.Warn("Trace parse job enqueue failed", "trace_id", traceID, "error", err)
 		}
 	}
 
 	return nil
 }
 
-// writeCredentialMaskAudit persists the credential replacements of one exchange.
+// writeCredentialMaskAudit hands the credential replacements of one exchange to
+// the audit side queue.
 //
 // It fills in the two fields the request path cannot know: the trace id, which
 // only exists once the cassette is indexed, and the detection time, which is the
-// moment the value was rewritten. Nothing is written when the exchange masked
+// moment the value was rewritten. Nothing is submitted when the exchange masked
 // nothing, which is the common case.
 func (r *Recorder) writeCredentialMaskAudit(traceID string, info *LogInfo) {
 	if len(info.MaskAudit) == 0 {
@@ -485,7 +517,7 @@ func (r *Recorder) writeCredentialMaskAudit(traceID string, info *LogInfo) {
 		}
 		records = append(records, record)
 	}
-	if err := r.store.UpsertCredentialMaskAudits(records); err != nil {
+	if err := r.SubmitMaskAudit(records); err != nil {
 		slog.Warn("Credential mask audit write failed", "trace_id", traceID, "count", len(records), "error", err)
 	}
 }

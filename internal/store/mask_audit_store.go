@@ -10,6 +10,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -112,6 +113,7 @@ func (s *Store) UpsertCredentialMaskAudits(records []CredentialMaskAuditRecord) 
 	defer func() { _ = tx.Rollback() }()
 
 	notified := make(map[string]CredentialMaskAuditRecord, len(prepared))
+	savedEvents := make([]SystemEvent, 0, len(prepared))
 	for _, record := range prepared {
 		original, err := s.encryptMaskAuditValue(record.Original)
 		if err != nil {
@@ -172,14 +174,26 @@ func (s *Store) UpsertCredentialMaskAudits(records []CredentialMaskAuditRecord) 
 		// for every trace that ever contained a credential.
 		notified[record.Rule] = record
 	}
+	// The notification is written in the same transaction as the rows it
+	// announces. If the event insert fails, the audit rows roll back with it and
+	// the caller can retry the batch; committing the rows first is what allowed a
+	// transient system_events failure to leave a trace that shows a masking in its
+	// audit tab while the event feed knows nothing about it.
+	for rule, record := range notified {
+		event, err := s.persistSystemEvent(systemEventForCredentialMasked(rule, record), tx)
+		if err != nil {
+			return fmt.Errorf("store credential mask event: %w", err)
+		}
+		savedEvents = append(savedEvents, event)
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	for rule, record := range notified {
-		if _, err := s.UpsertSystemEvent(systemEventForCredentialMasked(rule, record)); err != nil {
-			return err
-		}
+	// Subscribers are told only after the commit: a refetch they trigger has to
+	// see both the event and the audit row it points at.
+	for _, event := range savedEvents {
+		s.notifySystemEventChanged(event)
 	}
 	return nil
 }
@@ -365,14 +379,157 @@ func (s *Store) scanCredentialMaskAudit(row credentialMaskAuditScanner) (Credent
 	return item, nil
 }
 
+// CredentialMaskEventSeed is the latest audit row of one rule, in the shape the
+// event feed needs. A reconciliation pass builds it from the table rather than
+// from a live request, so it carries the stored value length and never the
+// original value itself.
+type CredentialMaskEventSeed struct {
+	Rule        string
+	Vendor      string
+	Kind        string
+	Confidence  string
+	Score       int
+	ValueLength int
+	Offset      int
+	TraceID     string
+	DetectedAt  time.Time
+}
+
+// CredentialMaskEventSeeds returns one seed per rule that has been rewritten but
+// has no event yet. The distinct-rule query is an index-only scan on
+// credentialmaskaudit_rule_detected_at, existing fingerprints are read once, and
+// only a rule that needs healing pays for the latest-row query, so a
+// reconciliation pass is bounded by the rule table rather than by the traffic.
+func (s *Store) CredentialMaskEventSeeds() ([]CredentialMaskEventSeed, error) {
+	existing, err := s.credentialMaskEventFingerprints()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`
+		SELECT DISTINCT rule
+		FROM credential_mask_audits
+		WHERE rule <> ''
+		ORDER BY rule
+	`)
+	if err != nil {
+		return nil, err
+	}
+	var rules []string
+	for rows.Next() {
+		var rule string
+		if err := rows.Scan(&rule); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !existing["secretmask:rule:"+normalizeEventFingerprintPart(rule)] {
+			rules = append(rules, rule)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	seeds := make([]CredentialMaskEventSeed, 0, len(rules))
+	for _, rule := range rules {
+		var seed CredentialMaskEventSeed
+		seed.Rule = rule
+		err := s.db.QueryRow(`
+			SELECT vendor, kind, confidence, score, value_length, start_offset, trace_id, detected_at
+			FROM credential_mask_audits
+			WHERE rule = ?
+			ORDER BY detected_at DESC, id DESC
+			LIMIT 1
+		`, rule).Scan(&seed.Vendor, &seed.Kind, &seed.Confidence, &seed.Score,
+			&seed.ValueLength, &seed.Offset, &seed.TraceID, &seed.DetectedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		seeds = append(seeds, seed)
+	}
+	return seeds, nil
+}
+
+func (s *Store) credentialMaskEventFingerprints() (map[string]bool, error) {
+	rows, err := s.db.Query(`
+		SELECT fingerprint
+		FROM system_events
+		WHERE source = 'secretmask' AND category = 'credential_masked'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	existing := map[string]bool{}
+	for rows.Next() {
+		var fingerprint string
+		if err := rows.Scan(&fingerprint); err != nil {
+			return nil, err
+		}
+		existing[fingerprint] = true
+	}
+	return existing, rows.Err()
+}
+
+// ReconcileCredentialMaskEvents recreates a credential_masked notification for
+// every rule that has an audit row but no event. It inserts missing rows only,
+// so running it on a timer is idempotent: an existing event keeps its occurrence
+// count, its status and its latest trace pointer.
+//
+// This is the recovery path for the deploy that wrote the cassette and the audit
+// table before this build - or for a process that died between an audit commit
+// and its notification. The live write path already commits both together; this
+// pass is what makes a historical gap heal by itself.
+func (s *Store) ReconcileCredentialMaskEvents() (int, error) {
+	seeds, err := s.CredentialMaskEventSeeds()
+	if err != nil {
+		return 0, err
+	}
+	inserted := 0
+	for _, seed := range seeds {
+		_, added, err := s.EnsureSystemEvent(systemEventForCredentialMaskSeed(seed))
+		if err != nil {
+			return inserted, err
+		}
+		if added {
+			inserted++
+		}
+	}
+	return inserted, nil
+}
+
 // systemEventForCredentialMasked builds the event-feed entry for one rule that
 // rewrote a credential in this request.
 //
 // The event deliberately does not repeat the values: the feed is served to every
 // monitor session and kept as a notification row, so the pair belongs in the
-// audit table and this row only points at it. "sample" carries the trace of the
-// most recent occurrence so the UI can link straight to the recording.
+// audit table and this row only points at it. The trace id carries the most
+// recent occurrence so the UI can link straight to the recording.
 func systemEventForCredentialMasked(rule string, record CredentialMaskAuditRecord) SystemEvent {
+	return systemEventForCredentialMask(rule, record.Vendor, record.Kind, record.Confidence,
+		record.Score, record.TraceID, record.Start, len(record.Original))
+}
+
+func systemEventForCredentialMaskSeed(seed CredentialMaskEventSeed) SystemEvent {
+	event := systemEventForCredentialMask(seed.Rule, seed.Vendor, seed.Kind, seed.Confidence,
+		seed.Score, seed.TraceID, seed.Offset, seed.ValueLength)
+	// A recovered event keeps the audit row's instant. It is not new information
+	// and must not jump to the top of a recency-ordered feed as if it were; a
+	// reader looking at a longer window still sees it because the page defaults to
+	// the all-time window.
+	if !seed.DetectedAt.IsZero() {
+		event.FirstSeenAt = seed.DetectedAt
+		event.LastSeenAt = seed.DetectedAt
+		event.CreatedAt = seed.DetectedAt
+	}
+	return event
+}
+
+func systemEventForCredentialMask(rule, vendor, kind, confidence string, score int, traceID string, offset, valueLength int) SystemEvent {
 	name := strings.TrimSpace(rule)
 	if name == "" {
 		name = "unknown"
@@ -383,18 +540,18 @@ func systemEventForCredentialMasked(rule string, record CredentialMaskAuditRecor
 		Category:    "credential_masked",
 		Severity:    "warning",
 		Title:       "Sensitive credential replaced before leaving the machine",
-		Message:     fmt.Sprintf("rule %s replaced a %s credential; the original and the stand-in are in the credential mask audit", name, record.Vendor),
-		TraceID:     record.TraceID,
+		Message:     fmt.Sprintf("rule %s replaced a %s credential; the original and the stand-in are in the credential mask audit", name, vendor),
+		TraceID:     traceID,
 		Model:       "",
 		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
 			"rule":       name,
-			"vendor":     record.Vendor,
-			"kind":       record.Kind,
-			"confidence": record.Confidence,
-			"score":      record.Score,
-			"length":     len(record.Original),
-			"trace_id":   record.TraceID,
-			"offset":     record.Start,
+			"vendor":     vendor,
+			"kind":       kind,
+			"confidence": confidence,
+			"score":      score,
+			"length":     valueLength,
+			"trace_id":   traceID,
+			"offset":     offset,
 			"audit":      "credential_mask_audits",
 		}),
 	}

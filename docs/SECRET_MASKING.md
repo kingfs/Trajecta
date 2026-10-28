@@ -202,6 +202,8 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 **3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。身份证与手机号替换走同一条通知与 `secretmask:rule:<rule>` 指纹，只是 `rule`/`kind` 不同（`pii.chinese_id`/`national_id`、`pii.cn_mobile`/`mobile`）；两个读入口都按 `kind` 原样显示，不区分凭据与个人数据。
 
+通知与审计行在**同一个事务**里提交：事件插入失败时整批审计行一起回滚，不会留下「审计标签有数字、事件中心没有记录」的半状态；提交成功后才发布实时变更。写入发生在录制收尾的**独立旁路队列**（`internal/recorder` 的 mask audit side queue）上，不占请求 goroutine，也不占负责重写 cassette 的 finalize worker；瞬时数据库错误会按短退避重试，队列满或尚未启动 worker 时退回同步写入，最坏情况是旧延迟而不是丢行。服务启动时以及之后每 5 分钟，`ReconcileCredentialMaskEvents` 会按 `rule` 检查已有审计行，只给缺失的事件补一条（`EnsureSystemEvent`，`ON CONFLICT DO NOTHING`），因此升级前或异常退出留下的历史缺口会自动愈合，重复对账也不会累加 `occurrence_count`、覆盖读者设置的 `status` 或改写最近 `trace_id`。
+
 读取面：
 
 - `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；`window` 不传时不按时间过滤——这个接口的两个读入口都按 `trace_id` 取某一次录制的替换，读的是录制事实而不是读取时刻，默认 `today` 会把当天之前的 trace 全部藏掉；显式传入才生效。返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。

@@ -2433,6 +2433,15 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	return s.upsertLogWithGrouping(path, header, grouping)
 }
 
+// UpsertLogWithGroupingAndTraceID indexes one cassette and returns the trace id
+// it belongs to. The recorder uses the returned id to attach the credential audit
+// and the parse job without a second lookup by request id: the index write just
+// resolved or created exactly this id, and a lookup can come back empty (or
+// stale) in the window between the two statements.
+func (s *Store) UpsertLogWithGroupingAndTraceID(path string, header recordfile.RecordHeader, grouping GroupingInfo) (string, error) {
+	return s.upsertLogWithGroupingTraceID(path, header, grouping)
+}
+
 // upsertLogWithGroupingTraceID indexes one cassette and returns the trace id it
 // belongs to, so a caller that discovers a cassette the write path never saw can
 // enqueue the parse job that the write path would have enqueued.

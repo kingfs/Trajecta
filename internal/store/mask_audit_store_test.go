@@ -208,3 +208,89 @@ func TestCredentialMaskAuditRaisesOneEventPerRule(t *testing.T) {
 		}
 	}
 }
+
+// TestCredentialMaskAuditAndEventAreAtomic pins the failure mode that made a
+// trace show a masked credential in its audit tab while the event feed stayed
+// empty: the rows were committed first and the notification was written after.
+// If the event cannot be written, the rows have to roll back with it so the next
+// attempt can write both.
+func TestCredentialMaskAuditAndEventAreAtomic(t *testing.T) {
+	st := configTransactionTestStore(t)
+	if _, err := st.db.Exec(`DROP TABLE system_events`); err != nil {
+		t.Fatalf("DROP TABLE system_events error = %v", err)
+	}
+	err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{{
+		TraceID:  "trace-atomic",
+		Rule:     "pii.chinese_id",
+		Kind:     "national_id",
+		Original: "11010519491231002X",
+		StandIn:  "110101195001011234",
+	}})
+	if err == nil {
+		t.Fatal("UpsertCredentialMaskAudits() error = nil, want the event failure to surface")
+	}
+	page, err := st.ListCredentialMaskAudits(CredentialMaskAuditFilter{TraceID: "trace-atomic"})
+	if err != nil {
+		t.Fatalf("ListCredentialMaskAudits() error = %v", err)
+	}
+	if page.Total != 0 {
+		t.Fatalf("audit rows = %d, want none after the event insert rolled the transaction back", page.Total)
+	}
+}
+
+// TestReconcileCredentialMaskEventsHealsMissingEvent pins the historical repair
+// path. An audit table written before the notification existed - or by a process
+// killed between the two writes - has rows but no event; a pass recreates the
+// event once, keeps its count at one, and does nothing on the next pass.
+func TestReconcileCredentialMaskEventsHealsMissingEvent(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const original = "11010519491231002X"
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: "trace-heal-1", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 12, Original: original, StandIn: "110101195001011234"},
+		{TraceID: "trace-heal-2", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 24, Original: original, StandIn: "110101195001011234"},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM system_events WHERE source = 'secretmask'`); err != nil {
+		t.Fatalf("delete events error = %v", err)
+	}
+
+	inserted, err := st.ReconcileCredentialMaskEvents()
+	if err != nil {
+		t.Fatalf("ReconcileCredentialMaskEvents() error = %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want one event for the one rule", inserted)
+	}
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:pii_chinese_id")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.OccurrenceCount != 1 {
+		t.Errorf("occurrence_count = %d, want 1 for a recovered first occurrence", event.OccurrenceCount)
+	}
+	if event.TraceID != "trace-heal-2" {
+		t.Errorf("trace_id = %q, want the latest occurrence trace-heal-2", event.TraceID)
+	}
+	if !strings.Contains(string(event.DetailsJSON), `"length":18`) {
+		t.Errorf("details_json = %s, want the stored value length without the value", event.DetailsJSON)
+	}
+	if strings.Contains(string(event.DetailsJSON), original) {
+		t.Errorf("details_json carries the identity number: %s", event.DetailsJSON)
+	}
+
+	inserted, err = st.ReconcileCredentialMaskEvents()
+	if err != nil {
+		t.Fatalf("second ReconcileCredentialMaskEvents() error = %v", err)
+	}
+	if inserted != 0 {
+		t.Fatalf("second inserted = %d, want 0: reconciliation must be idempotent", inserted)
+	}
+	event, err = st.GetSystemEventByFingerprint("secretmask:rule:pii_chinese_id")
+	if err != nil {
+		t.Fatalf("second GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.OccurrenceCount != 1 {
+		t.Errorf("occurrence_count after a repeat pass = %d, want 1", event.OccurrenceCount)
+	}
+}

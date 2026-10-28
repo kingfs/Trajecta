@@ -157,6 +157,42 @@ func TestRealtimeSocketPushesOnlySubscribedTopics(t *testing.T) {
 	}
 }
 
+// TestRealtimeSocketPushesTheEventsTopicForACredentialMaskAudit drives the
+// push half of the detection chain: a masked credential writes its audit row and
+// notification in one store call, and a tab subscribed to the event feed has to
+// be told the feed changed without anyone refetching it first.
+func TestRealtimeSocketPushesTheEventsTopicForACredentialMaskAudit(t *testing.T) {
+	t.Parallel()
+	st := newRealtimeTestStore(t)
+	hub := newRealtimeHub(st)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(realtimeSocketPath, realtimeSocketAPIHandler(hub))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	conn := dialRealtimeSocket(t, server.URL, "")
+	subscribeRealtimeTopics(t, conn, realtimeTopicEvents)
+	// The subscription itself answers with one catch-up push; consume it so the
+	// push asserted below can only have been caused by the audit write.
+	readRealtimeTopics(t, conn, realtimeTopicEvents)
+
+	const original = "11010519491231002X"
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{{
+		TraceID:  "trace-realtime-mask",
+		Rule:     "pii.chinese_id",
+		Kind:     "national_id",
+		Original: original,
+		StandIn:  "110101195001011234",
+	}}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+	seen := readRealtimeTopics(t, conn, realtimeTopicEvents)
+	if !seen[realtimeTopicEvents] {
+		t.Fatalf("pushed topics = %v, want events after the audit write", seen)
+	}
+}
+
 func TestRealtimeSocketStopsListeningWhenTheLastTabLeaves(t *testing.T) {
 	t.Parallel()
 	st := newRealtimeTestStore(t)
