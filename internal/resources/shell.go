@@ -102,22 +102,57 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 		}
 	}
 	patternPending := patternFirstCommands[command]
+	gitMode := gitOperandsRefs
 	if command == "git" {
 		// The subcommand is not an operand, and `git grep` takes a pattern in
-		// the position that would otherwise be a path.
+		// the position that would otherwise be a path. The subcommand also
+		// decides whether the remaining operands are paths or revisions:
+		// `git log origin/main` names a ref, while `git add src/main.go` names
+		// a path.
 		if subcommand, at, ok := gitSubcommand(rest); ok {
-			patternPending = subcommand == "grep"
+			emitGitGlobalPathOptions(rest[:at], emit)
 			rest = rest[at+1:]
+			patternPending = subcommand == "grep"
+			gitMode = gitModeForSubcommand(subcommand)
+			if subcommand == "worktree" || subcommand == "submodule" {
+				action, actionAt := gitFirstOperand(rest)
+				if actionAt >= 0 {
+					rest = rest[actionAt+1:]
+					gitMode = gitModeForAction(subcommand, action)
+				} else {
+					gitMode = gitOperandsNone
+				}
+			}
 		}
 	}
 	skipNext := false
+	nextPath := false
+	afterDashDash := false
+	seenOperand := 0
 	for _, token := range rest {
 		if token.flags&shellRedirect != 0 {
 			continue // already emitted
 		}
 		text := token.text
+		if nextPath {
+			nextPath = false
+			emitShellOperand(emit, text, token.start, token.end)
+			continue
+		}
 		if skipNext {
 			skipNext = false
+			continue
+		}
+		if afterDashDash {
+			// Everything after `--` is an operand, even a word that starts
+			// with '-'. For git this is the only reliable path/revision
+			// boundary (`git log main -- src`), and for a normal command it is
+			// how a file called "-x" is named.
+			emitShellOperand(emit, text, token.start, token.end)
+			continue
+		}
+		if text == "--" {
+			afterDashDash = true
 			continue
 		}
 		if isShellAssignment(text) {
@@ -125,6 +160,36 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 		}
 		if isShellOption(text) {
 			name, value, hasValue := splitShellOption(text)
+			if command == "git" {
+				if name == "--no-index" {
+					// `git diff --no-index <a> <b>` compares two filesystem paths.
+					gitMode = gitOperandsPaths
+					continue
+				}
+				switch gitOptionValueRole(name) {
+				case gitValuePath:
+					if hasValue {
+						emitShellOperand(emit, value, token.start, token.end)
+					} else {
+						nextPath = true
+					}
+					continue
+				case gitValueRef, gitValueContent:
+					if name == "-e" || name == "--regexp" || name == "-f" || name == "--file" {
+						patternPending = false
+					}
+					if !hasValue {
+						skipNext = true
+					}
+					continue
+				}
+				if hasValue {
+					// An unknown git option's value is not a path by default:
+					// `--max-count=3`, `--depth=1`, `--filter=blob:none`. The
+					// path-valued options are named in gitOptionValueRole.
+					continue
+				}
+			}
 			if !hasValue && (name == "-f" || name == "--file") {
 				// A script or pattern file is a real read, and the pattern no
 				// longer comes from an operand.
@@ -148,6 +213,13 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 		if patternPending {
 			patternPending = false
 			continue
+		}
+		if command == "git" {
+			keep := gitOperandIsPath(gitMode, seenOperand) || looksLikeURLToken(text)
+			seenOperand++
+			if !keep {
+				continue
+			}
 		}
 		emitShellOperand(emit, text, token.start, token.end)
 	}
@@ -478,6 +550,194 @@ func gitSubcommand(rest []shellToken) (string, int, bool) {
 		return token.text, index, true
 	}
 	return "", 0, false
+}
+
+// gitOperandMode is what a git subcommand does with the words after it. Git is
+// the one common command family whose operands are routinely refs
+// (origin/main, feat/topic) that have the exact shape of a relative path, so
+// the command context, not the DFA, has to decide.
+type gitOperandMode uint8
+
+const (
+	// gitOperandsRefs are revisions, branches, tags and remotes: never paths.
+	gitOperandsRefs gitOperandMode = iota
+	// gitOperandsPaths are paths by default (`git add`, `git diff --`).
+	gitOperandsPaths
+	// gitOperandsFirstPath has one path and then revisions (`git worktree
+	// add <path> [<commit-ish>]`).
+	gitOperandsFirstPath
+	// gitOperandsNone takes no path operand.
+	gitOperandsNone
+)
+
+// gitValueRole is what a git option's value means.
+type gitValueRole uint8
+
+const (
+	gitValueNone gitValueRole = iota
+	gitValuePath
+	gitValueRef
+	gitValueContent
+)
+
+// gitModeForSubcommand returns the default operand role of a git subcommand.
+// Path-taking subcommands keep their operands; revision-taking ones drop them.
+// `worktree` and `submodule` are refined after their action word is read.
+func gitModeForSubcommand(subcommand string) gitOperandMode {
+	switch subcommand {
+	case "add", "rm", "mv", "restore", "clean", "status", "blame", "ls-files",
+		"check-ignore", "check-attr", "hash-object", "init", "apply", "am",
+		"commit", "clone", "grep":
+		return gitOperandsPaths
+	case "worktree", "submodule":
+		return gitOperandsNone
+	default:
+		// log, show, diff, merge, rebase, cherry-pick, revert, reset,
+		// checkout, switch, branch, tag, push, fetch, pull, remote,
+		// describe, rev-parse, reflog, bisect, archive, format-patch, config,
+		// stash and anything unknown: revisions or no path operand.
+		return gitOperandsRefs
+	}
+}
+
+// gitModeForAction refines a subcommand that has its own action word.
+func gitModeForAction(subcommand, action string) gitOperandMode {
+	switch subcommand {
+	case "worktree":
+		switch action {
+		case "add":
+			return gitOperandsFirstPath
+		case "remove", "move", "lock", "unlock":
+			return gitOperandsPaths
+		}
+	case "submodule":
+		switch action {
+		case "add", "update", "status", "sync", "deinit":
+			return gitOperandsPaths
+		}
+	}
+	return gitOperandsNone
+}
+
+// gitFirstOperand returns the first non-option word and its token index,
+// skipping the value of an option that takes one. It is how `worktree add` and
+// `submodule add` find their action word.
+func gitFirstOperand(tokens []shellToken) (string, int) {
+	skipNext := false
+	for index, token := range tokens {
+		if token.flags&shellRedirect != 0 {
+			continue
+		}
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if !isShellOption(token.text) {
+			return token.text, index
+		}
+		name, _, hasValue := splitShellOption(token.text)
+		if !hasValue && gitOptionValueRole(name) != gitValueNone {
+			skipNext = true
+		}
+	}
+	return "", -1
+}
+
+// gitOperandIsPath decides whether the operand at index is a path under mode.
+func gitOperandIsPath(mode gitOperandMode, index int) bool {
+	switch mode {
+	case gitOperandsPaths:
+		return true
+	case gitOperandsFirstPath:
+		return index == 0
+	default:
+		return false
+	}
+}
+
+// looksLikeURLToken reports whether a git ref-mode operand is an unambiguous
+// URL. `git remote add origin https://...` and `git push https://...` name an
+// address, not a revision, and the URL stays a resource even though every
+// other operand of those subcommands is a ref.
+func looksLikeURLToken(text string) bool {
+	for _, scheme := range []string{"http://", "https://", "ws://", "wss://"} {
+		if strings.HasPrefix(text, scheme) {
+			return true
+		}
+	}
+	return false
+}
+
+// gitOptionValueRole maps a git option to the kind of value it takes. It is
+// only consulted for git: the same short flag can be boolean elsewhere.
+func gitOptionValueRole(name string) gitValueRole {
+	switch name {
+	case "-C", "--git-dir", "--work-tree", "--exec-path", "-F", "--file", "-o", "--output", "--repo",
+		"--pathspec-from-file":
+		return gitValuePath
+	case "-b", "-B", "--branch", "-u", "--set-upstream-to", "--track", "--source":
+		return gitValueRef
+	case "-c", "--namespace", "-m", "--message", "--author", "--committer",
+		"--grep", "-e", "--regexp", "--format", "--pretty", "--date",
+		"--since", "--until", "--sort", "--contains", "--no-contains",
+		"--merged", "--no-merged", "--points-at", "--word-diff-regex",
+		"--diff-filter", "--exclude", "--match", "--glob", "--before",
+		"--after", "--chmod", "--src-prefix", "--dst-prefix":
+		return gitValueContent
+	}
+	// A short-option cluster (`-am`, `-ab`) takes the value of the first
+	// value-taking letter in it. `-am` is a very common commit form, and
+	// without this the message would be read as an operand.
+	if len(name) > 2 && name[0] == '-' && name[1] != '-' {
+		for _, letter := range name[1:] {
+			switch letter {
+			case 'C', 'F', 'o':
+				return gitValuePath
+			case 'b', 'B', 'u':
+				return gitValueRef
+			case 'c', 'm', 'e':
+				return gitValueContent
+			}
+		}
+	}
+	return gitValueNone
+}
+
+// emitGitGlobalPathOptions emits the path-valued options that precede a git
+// subcommand (`git -C /repo log`, `git --git-dir=/repo/.git status`). They are
+// consumed by gitSubcommand, so the operand loop never sees them.
+func emitGitGlobalPathOptions(tokens []shellToken, emit func(mode, token string, start, end int)) {
+	skipNext := false
+	for index := 0; index < len(tokens); index++ {
+		token := tokens[index]
+		if token.flags&shellRedirect != 0 {
+			continue
+		}
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if !isShellOption(token.text) {
+			continue
+		}
+		name, value, hasValue := splitShellOption(token.text)
+		role := gitOptionValueRole(name)
+		if hasValue {
+			if role == gitValuePath {
+				emitShellOperand(emit, value, token.start, token.end)
+			}
+			continue
+		}
+		if role == gitValueNone {
+			continue
+		}
+		if index+1 < len(tokens) {
+			if role == gitValuePath {
+				emitShellOperand(emit, tokens[index+1].text, tokens[index+1].start, tokens[index+1].end)
+			}
+			skipNext = true
+		}
+	}
 }
 
 // isShellOption reports whether a token is an option rather than an operand.

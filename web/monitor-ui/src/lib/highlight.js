@@ -29,9 +29,43 @@ export function highlightNeedles(value) {
   if (!target) {
     return [];
   }
-  const needles = [target];
+  const needles = [];
+  const add = (candidate) => {
+    if (candidate && !needles.includes(candidate)) {
+      needles.push(candidate);
+    }
+  };
+  add(target);
   if (target.includes("\\")) {
-    needles.push(target.replaceAll("\\", "\\\\"));
+    add(target.replaceAll("\\", "\\\\"));
+  }
+  // A URL reaches the page through several spellings. The tool-call arguments
+  // are JSON, Markdown may HTML-escape the ampersand, and an API URL can be
+  // percent-encoded. The index stores the decoded value, so try the spellings a
+  // rendered conversation can show instead of giving up on the first miss.
+  if (target.includes("&")) {
+    if (target.includes("&amp;")) {
+      add(target.replaceAll("&amp;", "&"));
+    } else {
+      add(target.replaceAll("&", "&amp;"));
+    }
+    add(target.replaceAll("&", "\\u0026"));
+    add(target.replaceAll("&", "%26"));
+  }
+  if (target.includes("%")) {
+    try {
+      add(decodeURIComponent(target));
+    } catch {
+      // A bare percent in prose is not an escape; keep the raw needle.
+    }
+  }
+  if (target.includes("&") || target.includes("?") || target.includes("%")) {
+    try {
+      add(encodeURIComponent(target));
+    } catch {
+      // encodeURIComponent only throws on a lone surrogate, which the value
+      // cannot contain after the server coerced it to valid UTF-8.
+    }
   }
   return needles;
 }

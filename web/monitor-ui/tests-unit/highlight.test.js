@@ -21,6 +21,15 @@ describe("highlightNeedles", () => {
     assert.deepEqual(highlightNeedles("/home/alice/main.go"), ["/home/alice/main.go"]);
     assert.deepEqual(highlightNeedles(""), []);
   });
+
+  it("tries the HTML-escaped and percent-encoded spellings of a URL", () => {
+    const value = "https://api.github.com/orgs/chaitin/repos?per_page=100&type=all";
+    const needles = highlightNeedles(value);
+    assert.ok(needles.includes(value));
+    assert.ok(needles.includes(value.replaceAll("&", "&amp;")));
+    assert.ok(needles.includes(encodeURIComponent(value)));
+    assert.ok(needles.includes(value.replaceAll("&", "%26")));
+  });
 });
 
 describe("findHighlight", () => {
@@ -39,6 +48,14 @@ describe("findHighlight", () => {
   it("does not mark a prefix of a longer word", () => {
     assert.equal(findHighlight("/home/alice/main.go.bak", "/home/alice/main.go"), null);
     assert.equal(findHighlight("/home/alice/other.go", "/home/alice/main.go"), null);
+  });
+
+  it("finds a URL whose ampersand is HTML-escaped or percent-encoded", () => {
+    const value = "https://api.github.com/orgs/chaitin/repos?per_page=100&type=all";
+    const escaped = value.replaceAll("&", "&amp;");
+    assert.equal(findHighlight(`fetch ${escaped} now`, value)?.needle, escaped);
+    const encoded = encodeURIComponent(value);
+    assert.equal(findHighlight(`fetch ${encoded} now`, value)?.needle, encoded);
   });
 
   it("refuses a value repeated so often it is a pattern", () => {

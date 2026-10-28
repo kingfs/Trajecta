@@ -188,6 +188,73 @@ func TestExtractKeepsShellRealPaths(t *testing.T) {
 	}
 }
 
+// TestExtractIgnoresGitRefs pins the git operand roles: a branch or remote ref
+// has the shape of a relative path, so the command context, not the DFA, has
+// to keep it out of the index.
+func TestExtractIgnoresGitRefs(t *testing.T) {
+	cases := []struct {
+		command  string
+		unwanted []string
+	}{
+		{"git log --oneline -3 origin/main", []string{"origin/main"}},
+		{"git diff origin/main -- src/main.go", []string{"origin/main"}},
+		{"git checkout -b feat/agentbuilder-43-background-upgrade main", []string{"feat/agentbuilder-43-background-upgrade", "main"}},
+		{"git merge origin/main", []string{"origin/main"}},
+		{"git branch feat/agentbuilder-43-background-upgrade", []string{"feat/agentbuilder-43-background-upgrade"}},
+		{"git push origin main", []string{"origin/main", "main"}},
+		{"git reset --hard origin/main", []string{"origin/main"}},
+		{"git switch feat/agentbuilder-43-background-upgrade", []string{"feat/agentbuilder-43-background-upgrade"}},
+		{"git log --author=agentbuilder/43 origin/main", []string{"agentbuilder/43", "origin/main"}},
+		{"git commit -am origin/main", []string{"origin/main"}},
+		{"git log --source origin/main", []string{"origin/main"}},
+		{"git log --max-count=3 origin/main", []string{"origin/main"}},
+		{"git ls-files --exclude='agentbuilder/43'", []string{"agentbuilder/43"}},
+	}
+	for _, tc := range cases {
+		got := extractedValues(observationOf(callNode("bash", "Bash", `{"command":`+quoteJSON(tc.command)+`}`)))
+		for _, value := range tc.unwanted {
+			if _, ok := got[value]; ok {
+				t.Errorf("%q extracted %+v, want %q excluded", tc.command, got, value)
+			}
+		}
+	}
+}
+
+// TestExtractKeepsGitPaths is the other half of the git rules: real paths in a
+// path operand position stay, including the working tree a subcommand creates
+// and the pathspec after `--`.
+func TestExtractKeepsGitPaths(t *testing.T) {
+	cases := map[string][]string{
+		"git worktree add .worktrees/agentbuilder-43-background-upgrade -b feat/agentbuilder-43-background-upgrade": {".worktrees/agentbuilder-43-background-upgrade"},
+		"git worktree add -b feat/agentbuilder-43-background-upgrade .worktrees/agentbuilder-43-background-upgrade": {".worktrees/agentbuilder-43-background-upgrade"},
+		"git worktree remove .worktrees/agentbuilder-43-background-upgrade":                                         {".worktrees/agentbuilder-43-background-upgrade"},
+		"git worktree move .worktrees/old .worktrees/new":                                                           {".worktrees/old", ".worktrees/new"},
+		"git diff origin/main -- src/main.go":                                                                       {"src/main.go"},
+		"git checkout main -- web/dist/learn":                                                                       {"web/dist/learn"},
+		"git checkout -- web/dist/learn":                                                                            {"web/dist/learn"},
+		"git add web/dist/learn":                                                                                    {"web/dist/learn"},
+		"git grep -e 'origin/main' -- web/dist/learn":                                                               {"web/dist/learn"},
+		"git grep origin/main web/dist/learn":                                                                       {"web/dist/learn"},
+		"git clone https://github.com/x/y.git web/dist/learn":                                                       {"https://github.com/x/y.git", "web/dist/learn"},
+		"git -C /repo log origin/main":                                                                              {"/repo"},
+		"git commit -m 'update origin/main' -- src/main.go":                                                         {"src/main.go"},
+		"git submodule add https://github.com/x/y.git web/dist/learn":                                               {"https://github.com/x/y.git", "web/dist/learn"},
+		"git status web/dist/learn":                                                                                 {"web/dist/learn"},
+		"git blame src/main.go":                                                                                     {"src/main.go"},
+		"git diff --no-index web/dist/learn src/main.go":                                                            {"web/dist/learn", "src/main.go"},
+		"git config --file .git/config core.editor true":                                                            {".git/config"},
+		"git commit -F .git/COMMIT_EDITMSG":                                                                         {".git/COMMIT_EDITMSG"},
+	}
+	for command, want := range cases {
+		got := extractedValues(observationOf(callNode("bash", "Bash", `{"command":`+quoteJSON(command)+`}`)))
+		for _, value := range want {
+			if _, ok := got[value]; !ok {
+				t.Errorf("%q extracted %+v, missing %q", command, got, value)
+			}
+		}
+	}
+}
+
 // TestExtractIgnoresShellPlumbing keeps redirect sinks out: /dev/null is in
 // nearly every command and is not a file anyone read.
 func TestExtractIgnoresShellPlumbing(t *testing.T) {
