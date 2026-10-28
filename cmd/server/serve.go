@@ -413,6 +413,7 @@ func startCredentialMaskEventReconciliation(ctx context.Context, st *store.Store
 		}
 
 		repairCredentialMaskEventVisibilityOnce(ctx, st)
+		backfillCredentialMaskEventStatesOnce(ctx, st)
 		run("startup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -461,6 +462,38 @@ func repairCredentialMaskEventVisibilityOnce(ctx context.Context, st *store.Stor
 	}
 	if reopened > 0 {
 		slog.Info("Reopened ignored credential mask events", "count", reopened)
+	}
+}
+
+// credentialMaskStateBackfillKey marks the one-time move from the old
+// rule-level status to per-occurrence state. The visibility repair runs first,
+// so ignored events it reopened are unread and are not seeded back as ignored.
+const credentialMaskStateBackfillKey = "system_events.credential_mask_occurrence_states_backfilled_v1"
+
+func backfillCredentialMaskEventStatesOnce(ctx context.Context, st *store.Store) {
+	if st == nil {
+		return
+	}
+	var done bool
+	found, err := st.LoadAppSettingJSON(ctx, credentialMaskStateBackfillKey, &done)
+	if err != nil {
+		slog.Warn("Credential mask occurrence backfill skipped", "error", err)
+		return
+	}
+	if found && done {
+		return
+	}
+	inserted, err := st.BackfillCredentialMaskEventStates()
+	if err != nil {
+		slog.Warn("Credential mask occurrence backfill failed", "error", err)
+		return
+	}
+	if err := st.SaveAppSettingJSON(ctx, credentialMaskStateBackfillKey, true); err != nil {
+		slog.Warn("Credential mask occurrence backfill marker not saved", "error", err)
+		return
+	}
+	if inserted > 0 {
+		slog.Info("Backfilled credential mask occurrence states", "count", inserted)
 	}
 }
 

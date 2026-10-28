@@ -11,8 +11,10 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -183,6 +185,15 @@ func (s *Store) UpsertCredentialMaskAudits(records []CredentialMaskAuditRecord) 
 		event, err := s.persistSystemEvent(systemEventForCredentialMasked(rule, record), tx)
 		if err != nil {
 			return fmt.Errorf("store credential mask event: %w", err)
+		}
+		// A trace that was already acknowledged (or re-indexed) keeps its
+		// occurrence state even though the notification row itself is one per rule.
+		if err := s.syncCredentialMaskEventRowTx(tx, record.TraceID, rule); err != nil {
+			return fmt.Errorf("sync credential mask event: %w", err)
+		}
+		event, err = s.getSystemEventTx(tx, `fingerprint = ?`, event.Fingerprint)
+		if err != nil {
+			return fmt.Errorf("read credential mask event: %w", err)
 		}
 		savedEvents = append(savedEvents, event)
 	}
@@ -481,8 +492,9 @@ func (s *Store) credentialMaskEventFingerprints() (map[string]bool, error) {
 // The event table keeps one row per rule, so it cannot store a trace id per
 // occurrence without duplicating what credential_mask_audits already holds.
 // This read is the join instead: the audit table's ("trace_id", "event_index")
-// index answers the prefix lookup, and the returned fingerprints are ORed into
-// the event search. The map value is the full trace id the prefix matched, which
+// index answers the prefix lookup, grouped by (trace_id, rule) so a value-heavy
+// trace cannot push one of its rules past the row limit, and the returned
+// fingerprints are ORed into the event search. The map value is the full trace id the prefix matched, which
 // the monitor returns as matched_trace_id so the event detail reads that
 // trace's pair rather than the rule's newest one.
 //
@@ -494,10 +506,11 @@ func (s *Store) CredentialMaskTraceMatches(query string) (map[string]string, err
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT trace_id, rule
+		SELECT trace_id, rule, MAX(detected_at) AS last_seen
 		FROM credential_mask_audits
 		WHERE trace_id LIKE ? ESCAPE '\'
-		ORDER BY CASE WHEN trace_id = ? THEN 0 ELSE 1 END, detected_at DESC, id DESC
+		GROUP BY trace_id, rule
+		ORDER BY CASE WHEN trace_id = ? THEN 0 ELSE 1 END, last_seen DESC
 		LIMIT 100
 	`, escapeLike(query)+"%", query)
 	if err != nil {
@@ -507,7 +520,8 @@ func (s *Store) CredentialMaskTraceMatches(query string) (map[string]string, err
 	matches := map[string]string{}
 	for rows.Next() {
 		var traceID, rule string
-		if err := rows.Scan(&traceID, &rule); err != nil {
+		var lastSeen any
+		if err := rows.Scan(&traceID, &rule, &lastSeen); err != nil {
 			return nil, err
 		}
 		fingerprint := "secretmask:rule:" + normalizeEventFingerprintPart(rule)
@@ -559,9 +573,574 @@ func (s *Store) ReopenIgnoredCredentialMaskEvents() (int64, error) {
 		return 0, err
 	}
 	if count > 0 {
+		if err := s.syncAllCredentialMaskEventRows(); err != nil {
+			return count, err
+		}
 		s.notifySystemEventChanged(SystemEvent{Status: SystemEventStatusUnread})
 	}
 	return count, nil
+}
+
+var ErrCredentialMaskOccurrenceNotFound = errors.New("credential mask occurrence not found")
+
+// CredentialMaskEventState is one occurrence's read/resolve/ignore state. Rows
+// exist only for non-default states; an absent row is unread.
+type CredentialMaskEventState struct {
+	TraceID    string
+	Rule       string
+	Status     string
+	ReadAt     time.Time
+	ResolvedAt time.Time
+	UpdatedAt  time.Time
+}
+
+// CredentialMaskEventOccurrence is one rule's evidence inside one trace: the
+// values that rule replaced, their time span, and the reader's state. It is
+// derived from credential_mask_audits plus the optional state row, never stored
+// as a second event row.
+type CredentialMaskEventOccurrence struct {
+	TraceID         string
+	Rule            string
+	Vendor          string
+	Kind            string
+	Confidence      string
+	Score           int
+	ValueLength     int
+	Offset          int
+	Count           int
+	FirstDetectedAt time.Time
+	LastDetectedAt  time.Time
+	Status          string
+	ReadAt          time.Time
+	ResolvedAt      time.Time
+}
+
+// CredentialMaskRuleFromEvent returns the rule named by a credential event's
+// details. The event exists for every rule occurrence, so a missing rule means
+// the details are malformed rather than the rule being empty.
+func CredentialMaskRuleFromEvent(event SystemEvent) string {
+	return credentialMaskRuleFromDetails(event.DetailsJSON)
+}
+
+func credentialMaskRuleFromDetails(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var details struct {
+		Rule string `json:"rule"`
+	}
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(details.Rule)
+}
+
+// CredentialMaskEventOccurrences returns one derived event occurrence per rule
+// in a trace, newest first. It reads the audit ledger and joins the optional
+// state row; it never writes.
+func (s *Store) CredentialMaskEventOccurrences(traceID string) ([]CredentialMaskEventOccurrence, error) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT rule, vendor, kind, confidence, score, value_length, start_offset, detected_at
+		FROM credential_mask_audits
+		WHERE trace_id = ?
+		ORDER BY event_index ASC, detected_at ASC, id ASC
+	`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	byRule := map[string]*CredentialMaskEventOccurrence{}
+	for rows.Next() {
+		var (
+			rule, vendor, kind, confidence string
+			score, valueLength, offset     int
+			detectedAt                     time.Time
+		)
+		if err := rows.Scan(&rule, &vendor, &kind, &confidence, &score, &valueLength, &offset, &detectedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		occurrence, ok := byRule[rule]
+		if !ok {
+			occurrence = &CredentialMaskEventOccurrence{
+				TraceID:         traceID,
+				Rule:            rule,
+				Vendor:          vendor,
+				Kind:            kind,
+				Confidence:      confidence,
+				Score:           score,
+				ValueLength:     valueLength,
+				Offset:          offset,
+				FirstDetectedAt: detectedAt,
+				LastDetectedAt:  detectedAt,
+				Status:          SystemEventStatusUnread,
+			}
+			byRule[rule] = occurrence
+		}
+		occurrence.Count++
+		if detectedAt.Before(occurrence.FirstDetectedAt) {
+			occurrence.FirstDetectedAt = detectedAt
+		}
+		if detectedAt.After(occurrence.LastDetectedAt) {
+			occurrence.LastDetectedAt = detectedAt
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	stateRows, err := s.db.Query(`
+		SELECT rule, status, read_at, resolved_at
+		FROM credential_mask_event_states
+		WHERE trace_id = ?
+	`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	for stateRows.Next() {
+		var (
+			rule               string
+			status             string
+			readAt, resolvedAt any
+		)
+		if err := stateRows.Scan(&rule, &status, &readAt, &resolvedAt); err != nil {
+			stateRows.Close()
+			return nil, err
+		}
+		occurrence, ok := byRule[rule]
+		if !ok {
+			continue
+		}
+		occurrence.Status = status
+		if occurrence.ReadAt, err = timeParseNullableValue(readAt); err != nil {
+			stateRows.Close()
+			return nil, err
+		}
+		if occurrence.ResolvedAt, err = timeParseNullableValue(resolvedAt); err != nil {
+			stateRows.Close()
+			return nil, err
+		}
+	}
+	if err := stateRows.Err(); err != nil {
+		stateRows.Close()
+		return nil, err
+	}
+	stateRows.Close()
+
+	out := make([]CredentialMaskEventOccurrence, 0, len(byRule))
+	for _, occurrence := range byRule {
+		out = append(out, *occurrence)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LastDetectedAt.Equal(out[j].LastDetectedAt) {
+			return out[i].LastDetectedAt.After(out[j].LastDetectedAt)
+		}
+		return out[i].Rule < out[j].Rule
+	})
+	return out, nil
+}
+
+// CredentialMaskEventOccurrence returns one rule's occurrence inside a trace.
+func (s *Store) CredentialMaskEventOccurrence(traceID, rule string) (CredentialMaskEventOccurrence, bool, error) {
+	occurrences, err := s.CredentialMaskEventOccurrences(traceID)
+	if err != nil {
+		return CredentialMaskEventOccurrence{}, false, err
+	}
+	rule = strings.TrimSpace(rule)
+	for _, occurrence := range occurrences {
+		if occurrence.Rule == rule {
+			return occurrence, true, nil
+		}
+	}
+	return CredentialMaskEventOccurrence{}, false, nil
+}
+
+// SetCredentialMaskEventStatus writes the reader's state for one occurrence and
+// refreshes the rule-level notification only when this trace is the rule's
+// newest occurrence. An older trace's action is intentionally invisible to the
+// global feed and to every other trace; that is the point of scoping the action.
+func (s *Store) SetCredentialMaskEventStatus(traceID, rule, status string) (CredentialMaskEventState, error) {
+	traceID = strings.TrimSpace(traceID)
+	rule = strings.TrimSpace(rule)
+	if traceID == "" || rule == "" {
+		return CredentialMaskEventState{}, errors.New("credential mask event state: trace_id and rule are required")
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case SystemEventStatusRead, SystemEventStatusResolved, SystemEventStatusIgnored:
+	default:
+		return CredentialMaskEventState{}, fmt.Errorf("credential mask event state: unsupported status %q", status)
+	}
+
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM credential_mask_audits WHERE trace_id = ? AND rule = ? LIMIT 1`, traceID, rule).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CredentialMaskEventState{}, ErrCredentialMaskOccurrenceNotFound
+	}
+	if err != nil {
+		return CredentialMaskEventState{}, err
+	}
+
+	now := time.Now().UTC()
+	var readAt, resolvedAt any
+	if status == SystemEventStatusRead {
+		readAt = now
+	}
+	if status == SystemEventStatusResolved {
+		resolvedAt = now
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO credential_mask_event_states (trace_id, rule, status, read_at, resolved_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(trace_id, rule) DO UPDATE SET
+			status = excluded.status,
+			read_at = CASE
+				WHEN excluded.status = 'read' THEN excluded.read_at
+				ELSE credential_mask_event_states.read_at
+			END,
+			resolved_at = CASE
+				WHEN excluded.status = 'resolved' THEN excluded.resolved_at
+				ELSE credential_mask_event_states.resolved_at
+			END,
+			updated_at = excluded.updated_at
+	`, traceID, rule, status, readAt, resolvedAt, now); err != nil {
+		return CredentialMaskEventState{}, err
+	}
+
+	state, found, err := s.getCredentialMaskEventState(traceID, rule)
+	if err != nil {
+		return CredentialMaskEventState{}, err
+	}
+	if !found {
+		return CredentialMaskEventState{}, ErrCredentialMaskOccurrenceNotFound
+	}
+
+	latest, err := s.latestCredentialMaskTrace(rule)
+	if err != nil {
+		return CredentialMaskEventState{}, err
+	}
+	if latest == traceID {
+		if err := s.syncCredentialMaskEventRow(traceID, rule); err != nil {
+			return CredentialMaskEventState{}, err
+		}
+	}
+	if event, err := s.GetSystemEventByFingerprint("secretmask:rule:" + normalizeEventFingerprintPart(rule)); err == nil {
+		s.notifySystemEventChanged(event)
+	}
+	return state, nil
+}
+
+func (s *Store) getCredentialMaskEventState(traceID, rule string) (CredentialMaskEventState, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT trace_id, rule, status, read_at, resolved_at, updated_at
+		FROM credential_mask_event_states
+		WHERE trace_id = ? AND rule = ?
+	`, traceID, rule)
+	return scanCredentialMaskEventState(row)
+}
+
+func (s *Store) getCredentialMaskEventStateTx(tx *sql.Tx, traceID, rule string) (CredentialMaskEventState, bool, error) {
+	row := s.queryRowTx(tx, `
+		SELECT trace_id, rule, status, read_at, resolved_at, updated_at
+		FROM credential_mask_event_states
+		WHERE trace_id = ? AND rule = ?
+	`, traceID, rule)
+	return scanCredentialMaskEventState(row)
+}
+
+func scanCredentialMaskEventState(row interface{ Scan(...any) error }) (CredentialMaskEventState, bool, error) {
+	var (
+		state              CredentialMaskEventState
+		readAt, resolvedAt any
+	)
+	err := row.Scan(&state.TraceID, &state.Rule, &state.Status, &readAt, &resolvedAt, &state.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CredentialMaskEventState{}, false, nil
+	}
+	if err != nil {
+		return CredentialMaskEventState{}, false, err
+	}
+	if state.ReadAt, err = timeParseNullableValue(readAt); err != nil {
+		return CredentialMaskEventState{}, false, err
+	}
+	if state.ResolvedAt, err = timeParseNullableValue(resolvedAt); err != nil {
+		return CredentialMaskEventState{}, false, err
+	}
+	return state, true, nil
+}
+
+func (s *Store) latestCredentialMaskTrace(rule string) (string, error) {
+	var traceID string
+	err := s.db.QueryRow(`
+		SELECT trace_id
+		FROM credential_mask_audits
+		WHERE rule = ?
+		ORDER BY detected_at DESC, id DESC
+		LIMIT 1
+	`, rule).Scan(&traceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return traceID, err
+}
+
+// syncCredentialMaskEventRow refreshes the rule-level notification's cached
+// status from the newest occurrence's state. The audit row is the fact; the
+// event row is the bounded, latest-occurrence projection the global feed reads.
+func (s *Store) syncCredentialMaskEventRow(traceID, rule string) error {
+	state, found, err := s.getCredentialMaskEventState(traceID, rule)
+	if err != nil {
+		return err
+	}
+	status := SystemEventStatusUnread
+	var readAt, resolvedAt time.Time
+	if found {
+		status = state.Status
+		readAt = state.ReadAt
+		resolvedAt = state.ResolvedAt
+	}
+	_, err = s.db.Exec(`
+		UPDATE system_events
+		SET status = ?, read_at = ?, resolved_at = ?, updated_at = ?
+		WHERE source = 'secretmask' AND category = 'credential_masked' AND fingerprint = ? AND trace_id = ?
+	`, status, nullableTime(readAt), nullableTime(resolvedAt), time.Now().UTC(),
+		"secretmask:rule:"+normalizeEventFingerprintPart(rule), traceID)
+	return err
+}
+
+func (s *Store) syncCredentialMaskEventRowTx(tx *sql.Tx, traceID, rule string) error {
+	state, found, err := s.getCredentialMaskEventStateTx(tx, traceID, rule)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	_, err = s.execTx(tx, `
+		UPDATE system_events
+		SET status = ?, read_at = ?, resolved_at = ?, updated_at = ?
+		WHERE source = 'secretmask' AND category = 'credential_masked' AND fingerprint = ? AND trace_id = ?
+	`, state.Status, nullableTime(state.ReadAt), nullableTime(state.ResolvedAt), time.Now().UTC(),
+		"secretmask:rule:"+normalizeEventFingerprintPart(rule), traceID)
+	return err
+}
+
+// MarkTraceSystemEventsRead is the trace-scoped "mark all read": it changes the
+// unread occurrences of that trace only, never the newest occurrence of the same
+// rule in another trace. Non-credential events of the trace follow the normal
+// unread-only rule.
+func (s *Store) MarkTraceSystemEventsRead(traceID string, filter SystemEventFilter) (int, error) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return 0, errors.New("mark trace events read: trace_id is required")
+	}
+	occurrences, err := s.CredentialMaskEventOccurrences(traceID)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, occurrence := range occurrences {
+		if occurrence.Status != SystemEventStatusUnread {
+			continue
+		}
+		if !filter.Since.IsZero() && occurrence.LastDetectedAt.Before(filter.Since) {
+			continue
+		}
+		if source := strings.ToLower(strings.TrimSpace(filter.Source)); source != "" && source != "all" && source != "secretmask" {
+			continue
+		}
+		if category := strings.ToLower(strings.TrimSpace(filter.Category)); category != "" && category != "all" && category != "credential_masked" {
+			continue
+		}
+		if severity := strings.ToLower(strings.TrimSpace(filter.Severity)); severity != "" && severity != "all" && severity != "warning" {
+			continue
+		}
+		if _, err := s.SetCredentialMaskEventStatus(traceID, occurrence.Rule, SystemEventStatusRead); err != nil {
+			return count, err
+		}
+		count++
+	}
+
+	whereSQL, args := buildSystemEventFilterClause(filter)
+	now := time.Now().UTC()
+	args = append([]any{now, now, traceID}, args...)
+	result, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'read', read_at = ?, updated_at = ?
+		WHERE source <> 'secretmask' AND trace_id = ? AND status = 'unread' AND `+whereSQL,
+		args...)
+	if err != nil {
+		return count, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return count, err
+	}
+	count += int(affected)
+	if count > 0 {
+		s.notifySystemEventChanged(SystemEvent{Status: SystemEventStatusRead})
+	}
+	return count, nil
+}
+
+// BackfillCredentialMaskEventStates seeds the occurrence state from the old
+// rule-level status on an upgrade. Before this build a credential event carried
+// one status for the whole rule; the closest per-occurrence equivalent is its
+// newest trace. Existing state rows win, and unread rows stay absent. The
+// visibility repair runs first when its marker is absent, so historical ignored
+// events are already reopened and are not seeded back into ignored here.
+func (s *Store) BackfillCredentialMaskEventStates() (int, error) {
+	rows, err := s.db.Query(`
+		SELECT trace_id, details_json, status, read_at, resolved_at
+		FROM system_events
+		WHERE source = 'secretmask' AND category = 'credential_masked'
+			AND trace_id <> '' AND status IN ('read', 'resolved', 'ignored')
+	`)
+	if err != nil {
+		return 0, err
+	}
+	type seed struct {
+		traceID    string
+		rule       string
+		status     string
+		readAt     any
+		resolvedAt any
+	}
+	var seeds []seed
+	for rows.Next() {
+		var (
+			traceID, details, status string
+			readAt, resolvedAt       any
+		)
+		if err := rows.Scan(&traceID, &details, &status, &readAt, &resolvedAt); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		rule := credentialMaskRuleFromDetails(json.RawMessage(details))
+		if rule == "" {
+			continue
+		}
+		seeds = append(seeds, seed{
+			traceID: traceID, rule: rule, status: status,
+			readAt: readAt, resolvedAt: resolvedAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	inserted := 0
+	now := time.Now().UTC()
+	for _, item := range seeds {
+		result, err := s.db.Exec(`
+			INSERT INTO credential_mask_event_states (trace_id, rule, status, read_at, resolved_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(trace_id, rule) DO NOTHING
+		`, item.traceID, item.rule, item.status, item.readAt, item.resolvedAt, now)
+		if err != nil {
+			return inserted, err
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected > 0 {
+			inserted++
+		}
+	}
+	if err := s.syncAllCredentialMaskEventRows(); err != nil {
+		return inserted, err
+	}
+	return inserted, nil
+}
+
+// markLatestCredentialMaskOccurrencesRead makes "mark all read" mean the same
+// thing for a credential event that clicking it means: the newest occurrence is
+// read. Historical occurrences keep their own state.
+func (s *Store) markLatestCredentialMaskOccurrencesRead(filter SystemEventFilter) (int, error) {
+	whereSQL, args := buildSystemEventFilterClause(filter)
+	rows, err := s.db.Query(`
+		SELECT details_json
+		FROM system_events
+		WHERE source = 'secretmask' AND category = 'credential_masked' AND status = 'unread' AND `+whereSQL,
+		args...)
+	if err != nil {
+		return 0, err
+	}
+	var rules []string
+	for rows.Next() {
+		var details string
+		if err := rows.Scan(&details); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if rule := credentialMaskRuleFromDetails(json.RawMessage(details)); rule != "" {
+			rules = append(rules, rule)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	marked := 0
+	for _, rule := range dedupeNonEmptyStrings(rules) {
+		latest, err := s.latestCredentialMaskTrace(rule)
+		if err != nil {
+			return marked, err
+		}
+		if latest == "" {
+			continue
+		}
+		if _, err := s.SetCredentialMaskEventStatus(latest, rule, SystemEventStatusRead); err != nil {
+			return marked, err
+		}
+		marked++
+	}
+	return marked, nil
+}
+
+// syncAllCredentialMaskEventRows reapplies the state table to every rule-level
+// notification. The one-time repair uses it so a state that already exists for a
+// trace is not overwritten by the historical-ignore reset.
+func (s *Store) syncAllCredentialMaskEventRows() error {
+	rows, err := s.db.Query(`
+		SELECT trace_id, details_json
+		FROM system_events
+		WHERE source = 'secretmask' AND category = 'credential_masked'
+	`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		traceID string
+		rule    string
+	}
+	var pending []row
+	for rows.Next() {
+		var traceID, details string
+		if err := rows.Scan(&traceID, &details); err != nil {
+			rows.Close()
+			return err
+		}
+		if rule := credentialMaskRuleFromDetails(json.RawMessage(details)); rule != "" && strings.TrimSpace(traceID) != "" {
+			pending = append(pending, row{traceID: traceID, rule: rule})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range pending {
+		if err := s.syncCredentialMaskEventRow(item.traceID, item.rule); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReconcileCredentialMaskEvents recreates a credential_masked notification for
@@ -574,6 +1153,7 @@ func (s *Store) ReopenIgnoredCredentialMaskEvents() (int64, error) {
 // and its notification. The live write path already commits both together; this
 // pass is what makes a historical gap heal by itself.
 func (s *Store) ReconcileCredentialMaskEvents() (int, error) {
+
 	seeds, err := s.CredentialMaskEventSeeds()
 	if err != nil {
 		return 0, err

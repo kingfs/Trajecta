@@ -9,7 +9,7 @@ import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { StatCard } from "../components/common/Display";
 import { CredentialMaskEventSection } from "../components/monitor/CredentialMasks";
-import { isCredentialMaskedEvent } from "../lib/credentialMasks";
+import { isCredentialMaskedEvent, scopedEventActionPath } from "../lib/credentialMasks";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
@@ -77,8 +77,9 @@ export function EventsPage() {
     onSuccess: announce,
   });
 
-  const mutateEventAction = (eventID, action) => {
-    const path = {
+  const mutateEventAction = (event, action) => {
+    const eventID = event.id;
+    let path = {
       read: apiPaths.eventRead(eventID),
       resolve: apiPaths.eventResolve(eventID),
       ignore: apiPaths.eventIgnore(eventID),
@@ -86,6 +87,10 @@ export function EventsPage() {
     if (!path) {
       return;
     }
+    // A credential_masked action is scoped to one trace occurrence. The event
+    // id stays the rule-level notification; trace_id tells the server which
+    // occurrence the reader is acting on, so another trace is untouched.
+    path = scopedEventActionPath(event, path);
     mutateEvent.mutate({ key: `${eventID}:${action}`, path });
   };
 
@@ -205,9 +210,9 @@ function EventDetail({ event, busyID, onAction }) {
         {event.upstream_id ? <Button asChild variant="ghost" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}><Link to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>{t("events.upstream")}</Link></Button> : null}
       </div>
       <div className="event-actions">
-        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</Button>
-        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</Button>
-        <Button variant="ghost" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{isCredentialMaskedEvent(event) ? t("events.ignoreCurrent") : t("events.ignore")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</Button>
+        <Button variant="ghost" type="button" onClick={() => onAction(event, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{isCredentialMaskedEvent(event) ? t("events.ignoreCurrent") : t("events.ignore")}</Button>
       </div>
       {isCredentialMaskedEvent(event) ? <CredentialMaskEventSection event={event} t={t} InlineTag={InlineTag} /> : null}
       <pre className="code-block event-details-json">{formatJSON(event.details_json)}</pre>

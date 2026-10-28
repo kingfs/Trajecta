@@ -33,6 +33,9 @@ func (s *Store) initSchema() error {
 		if err := s.ensureResourcesSchema(); err != nil {
 			return err
 		}
+		if err := s.ensureCredentialMaskEventStatesSchema(); err != nil {
+			return err
+		}
 		if err := s.ensureLogExchangeColumns(); err != nil {
 			return err
 		}
@@ -46,6 +49,23 @@ func (s *Store) initSchema() error {
 		}
 	}
 	return s.applySQLiteSchemaUpgrades()
+}
+
+func (s *Store) ensureCredentialMaskEventStatesSchema() error {
+	timeType := "datetime"
+	if s.driver == "postgres" {
+		timeType = "timestamptz"
+	}
+	_, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS credential_mask_event_states (
+		trace_id TEXT NOT NULL DEFAULT '',
+		rule TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		read_at %s NULL,
+		resolved_at %s NULL,
+		updated_at %s NOT NULL,
+		PRIMARY KEY (trace_id, rule)
+	)`, timeType, timeType, timeType))
+	return err
 }
 
 func (s *Store) ensureSessionSummariesSchema() error {

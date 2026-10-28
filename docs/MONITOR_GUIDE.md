@@ -123,7 +123,15 @@ Trajecta 自身的事件收件箱：
 
 `credential_masked`（`source: secretmask`）是代理把请求里的凭据、身份证号或手机号换成保形假值后发出的通知，每条规则一条，重复命中累加次数。**事件本身不含凭据字节**，只带 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id`；真值与上游实际收到的假值从 `GET /api/secret-masks` 取（见 [凭据遮蔽](./SECRET_MASKING.md)），事件详情面板会就地列出该规则的替换对（原始值与替换值各一行、完整打印，并带偏移、长度、置信度与落盘形态），因此不必离开事件页去确认；详情里的「追踪」链接指向该 trace 的「审计」标签页而不是默认的协议页，因为替换对属于审计面。其他事件保持默认落点。
 
-事件搜索框接受完整 trace id 或 UUID 前缀：后端先用 `credential_mask_audits` 把 trace 解析到它命中的规则，再把该规则事件并入搜索结果。响应里的 `matched_trace_id` 是搜索命中的 trace，事件详情的「追踪」链接和替换对都优先读它，而不是事件行上只保留最近一次命中的 `trace_id`；事件表仍然每条规则一行，不按 trace 复制行。`credential_masked` 的「忽略」只忽略当前这一次，同一规则再次命中时通知会回到未读；其他来源的忽略仍是永久静音。升级到本版本时，服务启动会一次性把历史上被忽略的 `credential_masked` 事件改回未读（`app_settings` 记录该修复已执行，重启不会重复撤销之后的人工忽略）。
+`credential_masked` 的读/解决/忽略按 **occurrence** 生效：状态以 `(trace_id, rule)` 存在 `credential_mask_event_states`，没有行就是未读。事件行仍按规则一行，只缓存最近一次 occurrence 的状态，供全局列表和未读角标使用；对某条 trace 的操作只写该 trace 的状态，不会影响其他会话/trace 中同一规则的事件。全局列表上的操作默认作用于最近一次 occurrence；从 trace 搜索进入时作用于命中的那条 trace。trace 侧「全部标为已读」也只清该 trace 的未读 occurrence。
+
+事件 API 的 trace 范围统一用 **query 参数**，与 `GET /api/secret-masks?trace_id=` 保持一致；事件 id 仍是路径资源：
+
+- `GET /api/events?trace_id=<trace>`：该 trace 的事件（credential 事件会被投影成该 trace 的 occurrence，状态/时间/详情来自该 occurrence）。
+- `GET /api/events/<eventID>?trace_id=<trace>`：该事件在该 trace 上的详情。
+- `POST /api/events/<eventID>/read|resolve|ignore?trace_id=<trace>`：只改该 occurrence 的状态。
+
+`trace_id` 必须是完整 UUID；`q` 仍支持 UUID 前缀用于发现，前缀命中多条 trace 时按规则取最近一条。`credential_masked` 的「忽略」在 UI 中显示为「忽略本次」，只作用于当前 `(trace, rule)` occurrence；同一规则在另一条 trace 的 occurrence 默认仍是未读，同一 trace 内新增的值仍属于同一 occurrence，保持已处理状态。其他来源的忽略仍是规则级永久静音。升级到本版本时，服务启动会先一次性把历史上被忽略的 `credential_masked` 事件改回未读，再把旧的规则级 `read`/`resolved`/`ignored` 状态迁到该规则**最近一次** occurrence（`app_settings` 记录两次修复已执行；更早的 occurrence 没有旧状态可继承，按未读处理；重启不会重复撤销之后的人工忽略）。
 
 这条通知与审计行在同一事务里写入，写入由录制收尾的旁路队列完成并支持重试，因此不会占用 LLM 转发或 cassette finalize；提交后立即通过 `events` 主题推送。服务启动时和每 5 分钟还会按 `rule` 对账一次，为已有审计行补上缺失的事件（只插入、不累加、不覆盖状态），所以升级或异常退出留下的历史缺口会在打开事件页或页面保持连接时自动出现。
 

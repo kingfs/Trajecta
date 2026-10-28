@@ -449,6 +449,14 @@ func (s *Store) MarkSystemEventRead(id string) error {
 
 func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 	whereSQL, args := buildSystemEventFilterClause(filter)
+	// A credential event's visible occurrence is its newest trace. Marking the
+	// rule row read without writing that occurrence's state would make the global
+	// feed and a trace-scoped view disagree, so the per-occurrence rows are
+	// updated first.
+	credentialMarked, err := s.markLatestCredentialMaskOccurrencesRead(filter)
+	if err != nil {
+		return 0, err
+	}
 	now := time.Now().UTC()
 	args = append([]any{now, now}, args...)
 	result, err := s.db.Exec(`
@@ -459,10 +467,14 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 		return 0, err
 	}
 	count, err := result.RowsAffected()
-	if err == nil && count > 0 {
+	if err != nil {
+		return credentialMarked, err
+	}
+	total := credentialMarked + int(count)
+	if total > 0 {
 		s.notifySystemEventChanged(SystemEvent{Status: SystemEventStatusRead})
 	}
-	return int(count), err
+	return total, nil
 }
 
 func (s *Store) ResolveSystemEvent(id string) error {

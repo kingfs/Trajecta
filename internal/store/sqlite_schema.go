@@ -438,6 +438,15 @@ var sqliteSchemaStatements = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS credentialmaskaudit_trace_id_event_index ON credential_mask_audits(trace_id, event_index);`,
 	`CREATE INDEX IF NOT EXISTS credentialmaskaudit_detected_at_id ON credential_mask_audits(detected_at DESC, id DESC);`,
 	`CREATE INDEX IF NOT EXISTS credentialmaskaudit_rule_detected_at ON credential_mask_audits(rule, detected_at DESC);`,
+	`CREATE TABLE IF NOT EXISTS credential_mask_event_states (
+			trace_id TEXT NOT NULL DEFAULT '',
+			rule TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			read_at datetime NULL,
+			resolved_at datetime NULL,
+			updated_at datetime NOT NULL,
+			PRIMARY KEY (trace_id, rule)
+		);`,
 	`CREATE TABLE IF NOT EXISTS responses (
 			id TEXT PRIMARY KEY,
 			conversation_id TEXT NOT NULL DEFAULT '',

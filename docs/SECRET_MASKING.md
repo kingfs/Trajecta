@@ -204,9 +204,11 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 通知与审计行在**同一个事务**里提交：事件插入失败时整批审计行一起回滚，不会留下「审计标签有数字、事件中心没有记录」的半状态；提交成功后才发布实时变更。写入发生在录制收尾的**独立旁路队列**（`internal/recorder` 的 mask audit side queue）上，不占请求 goroutine，也不占负责重写 cassette 的 finalize worker；瞬时数据库错误会按短退避重试，队列满或尚未启动 worker 时退回同步写入，最坏情况是旧延迟而不是丢行。服务启动时以及之后每 5 分钟，`ReconcileCredentialMaskEvents` 会按 `rule` 检查已有审计行，只给缺失的事件补一条（`EnsureSystemEvent`，`ON CONFLICT DO NOTHING`），因此升级前或异常退出留下的历史缺口会自动愈合，重复对账也不会累加 `occurrence_count`、覆盖读者设置的 `status` 或改写最近 `trace_id`。
 
-事件表不按 trace 复制行：每条规则仍然只有一条通知，`trace_id` 只保留最近一次命中。按 trace 的归因在**读取时**由审计表补齐——事件搜索输入完整 trace id 或 UUID 前缀时，`CredentialMaskTraceMatches` 用 `credential_mask_audits` 的 `("trace_id", "event_index")` 索引把 trace 解析到它命中的规则，再把对应事件并入搜索；返回视图里的 `matched_trace_id` 是搜索命中的 trace，事件详情的「追踪」链接与替换对优先读它，而不是读事件行上会被后续命中覆盖的 `trace_id`。因此历史 trace 不增加任何事件行，也不会失去自己的替换对。
+事件表不按 trace 复制行：每条规则仍然只有一条通知，`trace_id` 只保留最近一次命中。按 trace 的归因在**读取时**由审计表补齐——`CredentialMaskTraceMatches` 用 `credential_mask_audits` 的 `("trace_id", "event_index")` 索引把 trace 解析到它命中的规则；`GET /api/events?trace_id=<trace>` 返回该 trace 的 occurrence 视图，`matched_trace_id` 是搜索命中的 trace，事件详情的「追踪」链接与替换对优先读它。因此历史 trace 不增加任何事件行，也不会失去自己的替换对。
 
-`credential_masked` 的 `ignored` 只表示“这次已处理”：同一规则再次命中时，`system_events` 的 upsert 会把它改回 `unread` 并清空 `read_at`/`resolved_at`，不会让一次忽略永久静音后续真正离开机器的凭据；其他来源（解析/分析/路由/上游故障）的忽略仍是永久静音。升级到本版本时，`serve` 启动会一次性把历史上 `ignored` 的 `credential_masked` 事件改回 `unread`（`app_settings` 键 `system_events.credential_mask_visibility_repaired_v1` 记录该修复已执行），重启不会重复撤销之后的人工忽略。
+读/解决/忽略的状态不在事件行上按规则共享，而是按 occurrence 保存：`credential_mask_event_states` 以 `(trace_id, rule)` 为主键，只在读者操作后写入 `read`/`resolved`/`ignored`（以及对应时间），没有行就是 `unread`。这使一条 trace 的忽略不会影响其他 trace 中同一规则的事件，表的大小只随“读者操作过的 occurrence”增长，而不是随每次脱敏增长。事件行上的 `status`/`read_at`/`resolved_at` 只是最近一次 occurrence 的缓存，写路径在 upsert 后从状态表同步；历史 occurrence 的操作不会改动这个缓存。全局列表/摘要读缓存，trace 范围读取从状态表覆盖。
+
+API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace_id=` 一致：`GET /api/events?trace_id=`、`GET /api/events/<id>?trace_id=`、`POST /api/events/<id>/read|resolve|ignore?trace_id=`。`trace_id` 必须是完整 UUID；`q` 仍可用 UUID 前缀发现，前缀命中多条时按规则取最近一条。`credential_masked` 的 `ignored` 只忽略该 `(trace_id, rule)` occurrence；同一规则在另一条 trace 的 occurrence 默认仍是 `unread`，同一 trace 内新增的值仍属于同一 occurrence，保持已处理状态。其他来源（解析/分析/路由/上游故障）的忽略仍是规则级永久静音。升级到本版本时，`serve` 启动会先一次性把历史上 `ignored` 的 `credential_masked` 事件改回 `unread`（`app_settings` 键 `system_events.credential_mask_visibility_repaired_v1`），再把旧的规则级 `read`/`resolved`/`ignored` 状态迁到最近一次 occurrence（键 `system_events.credential_mask_occurrence_states_backfilled_v1`）；更早的 occurrence 按未读处理，重启不会重复撤销之后的人工忽略。
 
 读取面：
 

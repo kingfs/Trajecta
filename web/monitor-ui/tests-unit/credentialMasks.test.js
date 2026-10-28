@@ -13,6 +13,7 @@ import {
   credentialMaskURLForTrace,
   isCredentialMaskedEvent,
   parseEventDetails,
+  scopedEventActionPath,
   sortCredentialMasks,
 } from "../src/lib/credentialMasks.js";
 
@@ -91,6 +92,34 @@ describe("the audit query an event resolves to", () => {
   it("escapes the trace in the trace-scoped read", () => {
     assert.equal(credentialMaskURLForTrace("a/b"), "/api/secret-masks?trace_id=a%2Fb&page_size=50");
     assert.equal(credentialMaskURLForTrace(""), null);
+  });
+});
+
+describe("scoping an event action", () => {
+  it("adds the shown trace to a credential action", () => {
+    assert.equal(
+      scopedEventActionPath(maskedEvent, "/api/events/evt-1/ignore"),
+      "/api/events/evt-1/ignore?trace_id=trace-1",
+    );
+  });
+
+  it("prefers the trace a search matched", () => {
+    const event = { ...maskedEvent, matched_trace_id: "trace-match" };
+    assert.equal(
+      scopedEventActionPath(event, "/api/events/evt-1/ignore"),
+      "/api/events/evt-1/ignore?trace_id=trace-match",
+    );
+  });
+
+  it("leaves an operational event rule-level", () => {
+    assert.equal(
+      scopedEventActionPath({ ...maskedEvent, category: "parse_failure" }, "/api/events/evt-1/ignore"),
+      "/api/events/evt-1/ignore",
+    );
+  });
+
+  it("does not invent a trace", () => {
+    assert.equal(scopedEventActionPath({ ...maskedEvent, trace_id: "", details_json: "{}" }, "/api/events/evt-1/ignore"), "/api/events/evt-1/ignore");
   });
 });
 

@@ -121,8 +121,23 @@ func systemEventListAPIHandler(st *store.Store) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		if !explicitTraceIDValid(r) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trace_id must be a full trace id"})
+			return
+		}
 		windowLabel, since := parseSystemEventWindow(r.URL.Query().Get("window"))
 		filter := systemEventFilterFromRequest(r, since)
+		if traceID := requestTraceID(r); traceID != "" {
+			response, err := listTraceScopedSystemEvents(st, traceID, filter)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+				return
+			}
+			response.Window = windowLabel
+			response.RefreshedAt = time.Now().UTC()
+			writeJSON(w, http.StatusOK, response)
+			return
+		}
 		matches, err := st.CredentialMaskTraceMatches(filter.Query)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
@@ -134,8 +149,13 @@ func systemEventListAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
 		}
+		views, err := systemEventViewsWithTrace(st, page.Items, matches)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusOK, systemEventListResponse{
-			Items:       systemEventViewsWithTrace(page.Items, matches),
+			Items:       views,
 			Page:        page.Page,
 			PageSize:    page.PageSize,
 			Total:       page.Total,
@@ -144,6 +164,112 @@ func systemEventListAPIHandler(st *store.Store) http.HandlerFunc {
 			RefreshedAt: time.Now().UTC(),
 		})
 	}
+}
+
+// listTraceScopedSystemEvents answers a trace-scoped event read. It overlays the
+// rule-level notification with the occurrence's state and metadata, so
+// read/resolve/ignore on one trace is independent of every other trace. The
+// intermediate read deliberately drops the status filter: the status belongs to
+// the occurrence, not to the rule row the SQL filter would see.
+func listTraceScopedSystemEvents(st *store.Store, traceID string, filter store.SystemEventFilter) (systemEventListResponse, error) {
+	page, pageSize := filter.Page, filter.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	statusFilter := systemEventStatusFilter(filter.Status)
+	since := filter.Since
+	matches, err := st.CredentialMaskTraceMatches(traceID)
+	if err != nil {
+		return systemEventListResponse{}, err
+	}
+	filter.Query = traceID
+	filter.TraceQueryFingerprints = systemEventTraceFingerprints(matches)
+	filter.Status = ""
+	filter.Since = time.Time{}
+	filter.After = ""
+	filter.Page = 1
+	filter.PageSize = 200
+
+	var events []store.SystemEvent
+	for round := 1; round <= 4; round++ {
+		filter.Page = round
+		pageResult, err := st.ListSystemEvents(filter)
+		if err != nil {
+			return systemEventListResponse{}, err
+		}
+		events = append(events, pageResult.Items...)
+		if len(events) >= pageResult.Total || len(pageResult.Items) < filter.PageSize {
+			break
+		}
+	}
+
+	traceIDs := make([]string, 0, len(matches))
+	for _, matchedTrace := range matches {
+		traceIDs = append(traceIDs, matchedTrace)
+	}
+	occurrences, err := credentialMaskOccurrencesByRule(st, traceIDs)
+	if err != nil {
+		return systemEventListResponse{}, err
+	}
+
+	views := make([]systemEventView, 0, len(events))
+	for _, event := range events {
+		var view systemEventView
+		if event.Source == "secretmask" && event.Category == "credential_masked" {
+			matchedTrace := matches[event.Fingerprint]
+			rule := store.CredentialMaskRuleFromEvent(event)
+			if matchedTrace == "" || rule == "" {
+				continue
+			}
+			occurrence, ok := occurrences[matchedTrace][rule]
+			if !ok {
+				continue
+			}
+			view = systemEventViewWithOccurrence(event, occurrence)
+		} else {
+			if strings.TrimSpace(event.TraceID) != traceID {
+				continue
+			}
+			view = systemEventViewFromStore(event)
+		}
+		if statusFilter != "" && view.Status != statusFilter {
+			continue
+		}
+		if !since.IsZero() && view.LastSeenAt.Before(since) {
+			continue
+		}
+		views = append(views, view)
+	}
+	sort.Slice(views, func(i, j int) bool {
+		if !views[i].LastSeenAt.Equal(views[j].LastSeenAt) {
+			return views[i].LastSeenAt.After(views[j].LastSeenAt)
+		}
+		return views[i].ID < views[j].ID
+	})
+
+	total := len(views)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	return systemEventListResponse{
+		Items:      views[start:end],
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
 }
 
 func systemEventSummaryAPIHandler(st *store.Store) http.HandlerFunc {
@@ -176,6 +302,10 @@ func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		if !explicitTraceIDValid(r) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trace_id must be a full trace id"})
+			return
+		}
 		_, since := parseSystemEventWindow(r.URL.Query().Get("window"))
 		filter := systemEventFilterFromRequest(r, since)
 		// "Mark all read" is a transition out of unread. An absent status, or the
@@ -184,6 +314,15 @@ func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
 		switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 		case "", "all":
 			filter.Status = store.SystemEventStatusUnread
+		}
+		if traceID := requestTraceID(r); traceID != "" {
+			count, err := st.MarkTraceSystemEventsRead(traceID, filter)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mark read error: " + err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"updated": count})
+			return
 		}
 		matches, err := st.CredentialMaskTraceMatches(filter.Query)
 		if err != nil {
@@ -253,17 +392,82 @@ func systemEventDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		rest := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/events/"), "/")
 		parts := strings.Split(rest, "/")
-		if len(parts) != 2 || parts[0] == "" {
+		if len(parts) == 0 || parts[0] == "" {
 			http.NotFound(w, r)
+			return
+		}
+		if !explicitTraceIDValid(r) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trace_id must be a full trace id"})
 			return
 		}
 		eventID := parts[0]
-		action := parts[1]
-		if r.Method != http.MethodPost {
+		traceID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("trace_id")))
+
+		event, err := st.GetSystemEvent(eventID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+
+		if r.Method == http.MethodGet && len(parts) == 1 {
+			view, explicitMissing, err := systemEventViewForTrace(st, event, traceID)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+				return
+			}
+			if explicitMissing {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential mask occurrence not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+			return
+		}
+
+		if r.Method != http.MethodPost || len(parts) != 2 {
 			http.NotFound(w, r)
 			return
 		}
-		var err error
+		action := parts[1]
+		if !isSystemEventAction(action) {
+			http.NotFound(w, r)
+			return
+		}
+
+		if isCredentialMaskedEventRecord(event) {
+			rule := store.CredentialMaskRuleFromEvent(event)
+			scopeTrace := traceID
+			if scopeTrace == "" {
+				scopeTrace = event.TraceID
+			}
+			if rule == "" || scopeTrace == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential mask event requires trace_id and rule"})
+				return
+			}
+			if _, err := st.SetCredentialMaskEventStatus(scopeTrace, rule, systemEventActionStatus(action)); err != nil {
+				if errors.Is(err, store.ErrCredentialMaskOccurrenceNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential mask occurrence not found"})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update error: " + err.Error()})
+				return
+			}
+			occurrence, found, err := st.CredentialMaskEventOccurrence(scopeTrace, rule)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+				return
+			}
+			if !found {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential mask occurrence not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, systemEventViewWithOccurrence(event, occurrence))
+			return
+		}
+
 		switch action {
 		case "read":
 			err = st.MarkSystemEventRead(eventID)
@@ -271,15 +475,12 @@ func systemEventDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			err = st.ResolveSystemEvent(eventID)
 		case "ignore":
 			err = st.IgnoreSystemEvent(eventID)
-		default:
-			http.NotFound(w, r)
-			return
 		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update error: " + err.Error()})
 			return
 		}
-		event, err := st.GetSystemEvent(eventID)
+		event, err = st.GetSystemEvent(eventID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
@@ -290,6 +491,55 @@ func systemEventDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, systemEventViewFromStore(event))
 	}
+}
+
+func isSystemEventAction(action string) bool {
+	switch action {
+	case "read", "resolve", "ignore":
+		return true
+	default:
+		return false
+	}
+}
+
+func systemEventActionStatus(action string) string {
+	switch action {
+	case "resolve":
+		return store.SystemEventStatusResolved
+	case "ignore":
+		return store.SystemEventStatusIgnored
+	default:
+		return store.SystemEventStatusRead
+	}
+}
+
+func isCredentialMaskedEventRecord(event store.SystemEvent) bool {
+	return event.Source == "secretmask" && event.Category == "credential_masked"
+}
+
+// systemEventViewForTrace returns the event projected onto a trace's credential
+// occurrence. A missing explicit trace is reported separately so GET can answer
+// 404 instead of silently falling back to the newest occurrence.
+func systemEventViewForTrace(st *store.Store, event store.SystemEvent, traceID string) (systemEventView, bool, error) {
+	if !isCredentialMaskedEventRecord(event) {
+		return systemEventViewFromStore(event), false, nil
+	}
+	rule := store.CredentialMaskRuleFromEvent(event)
+	scopeTrace := strings.TrimSpace(traceID)
+	if scopeTrace == "" {
+		scopeTrace = event.TraceID
+	}
+	if rule == "" || scopeTrace == "" {
+		return systemEventViewFromStore(event), false, nil
+	}
+	occurrence, found, err := st.CredentialMaskEventOccurrence(scopeTrace, rule)
+	if err != nil {
+		return systemEventView{}, false, err
+	}
+	if !found {
+		return systemEventViewFromStore(event), strings.TrimSpace(traceID) != "", nil
+	}
+	return systemEventViewWithOccurrence(event, occurrence), false, nil
 }
 
 func parseSystemEventWindow(value string) (string, time.Time) {
@@ -391,17 +641,160 @@ func systemEventTraceFingerprints(matches map[string]string) []string {
 // event row keeps the rule's newest trace_id; matched_trace_id is the read-only
 // answer to "which trace did this search name", so the detail panel can show
 // that trace's credential pair instead of the newest occurrence's.
-func systemEventViewsWithTrace(events []store.SystemEvent, matches map[string]string) []systemEventView {
-	views := systemEventViews(events)
+func systemEventViewsWithTrace(st *store.Store, events []store.SystemEvent, matches map[string]string) ([]systemEventView, error) {
 	if len(matches) == 0 {
-		return views
+		return systemEventViews(events), nil
 	}
-	for i := range views {
-		if traceID := matches[views[i].Fingerprint]; traceID != "" {
-			views[i].MatchedTraceID = traceID
+	traceIDs := make([]string, 0, len(matches))
+	for _, traceID := range matches {
+		traceIDs = append(traceIDs, traceID)
+	}
+	occurrences, err := credentialMaskOccurrencesByRule(st, traceIDs)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]systemEventView, 0, len(events))
+	for _, event := range events {
+		traceID := matches[event.Fingerprint]
+		if traceID == "" {
+			views = append(views, systemEventViewFromStore(event))
+			continue
 		}
+		if isCredentialMaskedEventRecord(event) {
+			rule := store.CredentialMaskRuleFromEvent(event)
+			if occurrence, ok := occurrences[traceID][rule]; ok {
+				views = append(views, systemEventViewWithOccurrence(event, occurrence))
+				continue
+			}
+		}
+		view := systemEventViewFromStore(event)
+		view.MatchedTraceID = traceID
+		views = append(views, view)
 	}
-	return views
+	return views, nil
+}
+
+// requestTraceID is the one trace scope the event API accepts: an explicit
+// trace_id query parameter, or a full UUID typed into the search box. Keeping it
+// a query parameter follows /api/secret-masks?trace_id=; the event id stays the
+// path resource.
+func requestTraceID(r *http.Request) string {
+	if traceID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("trace_id"))); traceID != "" {
+		return traceID
+	}
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	if looksLikeFullTraceID(query) {
+		return query
+	}
+	return ""
+}
+
+// explicitTraceIDValid rejects a partial trace_id on the API surfaces that act
+// on an occurrence: a prefix cannot name one occurrence, and silently resolving
+// it to the newest match would make an action target the wrong trace. Prefix
+// discovery remains available through the list's q search.
+func explicitTraceIDValid(r *http.Request) bool {
+	raw := strings.TrimSpace(r.URL.Query().Get("trace_id"))
+	return raw == "" || looksLikeFullTraceID(raw)
+}
+
+func looksLikeFullTraceID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// credentialMaskOccurrencesByRule loads the derived occurrence rows for each
+// trace once. A trace-scoped page touches only the rules that matched that trace.
+func credentialMaskOccurrencesByRule(st *store.Store, traceIDs []string) (map[string]map[string]store.CredentialMaskEventOccurrence, error) {
+	out := map[string]map[string]store.CredentialMaskEventOccurrence{}
+	for _, traceID := range dedupeStrings(traceIDs) {
+		occurrences, err := st.CredentialMaskEventOccurrences(traceID)
+		if err != nil {
+			return nil, err
+		}
+		byRule := make(map[string]store.CredentialMaskEventOccurrence, len(occurrences))
+		for _, occurrence := range occurrences {
+			byRule[occurrence.Rule] = occurrence
+		}
+		out[traceID] = byRule
+	}
+	return out, nil
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+// systemEventViewWithOccurrence replaces the rule-level cache fields with the
+// selected trace's occurrence. The event id stays the rule event's id because
+// the notification is still one row per rule; trace_id in the action query is
+// what scopes the write.
+func systemEventViewWithOccurrence(event store.SystemEvent, occurrence store.CredentialMaskEventOccurrence) systemEventView {
+	view := systemEventViewFromStore(event)
+	view.TraceID = occurrence.TraceID
+	view.MatchedTraceID = occurrence.TraceID
+	view.Status = occurrence.Status
+	view.ReadAt = optionalTime(occurrence.ReadAt)
+	view.ResolvedAt = optionalTime(occurrence.ResolvedAt)
+	view.OccurrenceCount = 1
+	view.FirstSeenAt = occurrence.FirstDetectedAt
+	view.LastSeenAt = occurrence.LastDetectedAt
+	view.Details = credentialMaskOccurrenceDetails(occurrence)
+	if event.TraceID != occurrence.TraceID {
+		// These columns on the rule row belong to its newest trace. A historical
+		// occurrence must not inherit the session/upstream/model of a different
+		// recording; the trace link is the authoritative destination.
+		view.SessionID = ""
+		view.UpstreamID = ""
+		view.Model = ""
+	}
+	return view
+}
+
+func credentialMaskOccurrenceDetails(occurrence store.CredentialMaskEventOccurrence) json.RawMessage {
+	payload := map[string]any{
+		"audit":      "credential_mask_audits",
+		"rule":       occurrence.Rule,
+		"vendor":     occurrence.Vendor,
+		"kind":       occurrence.Kind,
+		"confidence": occurrence.Confidence,
+		"score":      occurrence.Score,
+		"length":     occurrence.ValueLength,
+		"offset":     occurrence.Offset,
+		"values":     occurrence.Count,
+		"trace_id":   occurrence.TraceID,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return encoded
+}
+
+func systemEventStatusFilter(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || value == "all" {
+		return ""
+	}
+	return value
 }
 
 func systemEventViewFromStore(event store.SystemEvent) systemEventView {

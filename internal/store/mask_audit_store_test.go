@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -501,5 +502,221 @@ func TestReopenIgnoredCredentialMaskEvents(t *testing.T) {
 	}
 	if reopened != 0 {
 		t.Errorf("second reopened = %d, want 0", reopened)
+	}
+}
+
+// TestCredentialMaskEventStatusIsScopedToTrace is the contract the UI depends
+// on: acknowledging one trace's occurrence must not change the same rule's
+// occurrence in another trace or the rule-level notification's newest pointer.
+func TestCredentialMaskEventStatusIsScopedToTrace(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const (
+		rule   = "generic.sk_dash"
+		traceA = "11111111-1111-4111-8111-111111111111"
+		traceB = "22222222-2222-4222-8222-222222222222"
+	)
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: traceA, Rule: rule, Original: "sk-a", StandIn: "sk-a-fake", DetectedAt: time.Date(2026, 10, 28, 7, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(A) error = %v", err)
+	}
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: traceB, Rule: rule, Original: "sk-b", StandIn: "sk-b-fake", DetectedAt: time.Date(2026, 10, 28, 7, 1, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(B) error = %v", err)
+	}
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.TraceID != traceB {
+		t.Fatalf("event trace_id = %q, want newest %q", event.TraceID, traceB)
+	}
+
+	if _, err := st.SetCredentialMaskEventStatus(traceA, rule, SystemEventStatusIgnored); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus(A, ignored) error = %v", err)
+	}
+	occurrenceA, found, err := st.CredentialMaskEventOccurrence(traceA, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(A) = %+v, %v", occurrenceA, err)
+	}
+	if occurrenceA.Status != SystemEventStatusIgnored {
+		t.Errorf("trace A status = %q, want ignored", occurrenceA.Status)
+	}
+	occurrenceB, found, err := st.CredentialMaskEventOccurrence(traceB, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(B) = %+v, %v", occurrenceB, err)
+	}
+	if occurrenceB.Status != SystemEventStatusUnread {
+		t.Errorf("trace B status = %q, want unread; trace A's action leaked", occurrenceB.Status)
+	}
+	event, err = st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("second GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != SystemEventStatusUnread {
+		t.Errorf("newest event status = %q, want unread after a historical occurrence was ignored", event.Status)
+	}
+
+	if _, err := st.SetCredentialMaskEventStatus(traceB, rule, SystemEventStatusIgnored); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus(B, ignored) error = %v", err)
+	}
+	event, err = st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("third GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != SystemEventStatusIgnored {
+		t.Errorf("newest event status = %q, want ignored after the newest occurrence was ignored", event.Status)
+	}
+
+	if _, err := st.SetCredentialMaskEventStatus(traceA, rule, SystemEventStatusRead); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus(A, read) error = %v", err)
+	}
+	event, err = st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("fourth GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != SystemEventStatusIgnored {
+		t.Errorf("newest event status = %q, want the newest occurrence's ignored state", event.Status)
+	}
+}
+
+// TestCredentialMaskEventUpsertPreservesOccurrenceState pins the re-index path:
+// a trace whose occurrence was already acknowledged keeps that state when its
+// audit row is written again.
+func TestCredentialMaskEventUpsertPreservesOccurrenceState(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const (
+		rule  = "openai.project_key"
+		trace = "33333333-3333-4333-8333-333333333333"
+	)
+	record := CredentialMaskAuditRecord{
+		TraceID: trace, Rule: rule, Original: "sk-reindex", StandIn: "sk-reindex-fake",
+		DetectedAt: time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC),
+	}
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{record}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+	if _, err := st.SetCredentialMaskEventStatus(trace, rule, SystemEventStatusResolved); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus() error = %v", err)
+	}
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{record}); err != nil {
+		t.Fatalf("re-index UpsertCredentialMaskAudits() error = %v", err)
+	}
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:openai_project_key")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != SystemEventStatusResolved {
+		t.Errorf("event status = %q, want the occurrence's resolved state after re-index", event.Status)
+	}
+	occurrence, found, err := st.CredentialMaskEventOccurrence(trace, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence() = %+v, %v", occurrence, err)
+	}
+	if occurrence.Status != SystemEventStatusResolved {
+		t.Errorf("occurrence status = %q, want resolved", occurrence.Status)
+	}
+}
+
+// TestCredentialMaskEventStatusRejectsUnknownOccurrence prevents an event id
+// from acknowledging a trace that never carried its rule.
+func TestCredentialMaskEventStatusRejectsUnknownOccurrence(t *testing.T) {
+	st := configTransactionTestStore(t)
+	_, err := st.SetCredentialMaskEventStatus("44444444-4444-4444-8444-444444444444", "generic.sk_dash", SystemEventStatusIgnored)
+	if !errors.Is(err, ErrCredentialMaskOccurrenceNotFound) {
+		t.Fatalf("SetCredentialMaskEventStatus() error = %v, want ErrCredentialMaskOccurrenceNotFound", err)
+	}
+}
+
+// TestBackfillCredentialMaskEventStates pins the upgrade path from a rule-level
+// status to the newest occurrence's state. Unread stays absent, an existing
+// occurrence state wins, and ignored is seeded only when the visibility repair
+// did not reopen it first.
+func TestBackfillCredentialMaskEventStates(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const (
+		rule   = "generic.sk_dash"
+		traceA = "55555555-5555-4555-8555-555555555555"
+		traceB = "66666666-6666-4666-8666-666666666666"
+	)
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: traceA, Rule: rule, Original: "sk-a", StandIn: "sk-a-fake", DetectedAt: time.Date(2026, 10, 28, 7, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(A) error = %v", err)
+	}
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: traceB, Rule: rule, Original: "sk-b", StandIn: "sk-b-fake", DetectedAt: time.Date(2026, 10, 28, 7, 1, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(B) error = %v", err)
+	}
+	// Simulate the old rule-level read status, and seed a conflicting state for
+	// the newest occurrence that must win.
+	if _, err := st.db.Exec(`UPDATE system_events SET status = 'read', read_at = ?, updated_at = ? WHERE fingerprint = 'secretmask:rule:generic_sk_dash'`,
+		time.Date(2026, 10, 28, 7, 2, 0, 0, time.UTC), time.Date(2026, 10, 28, 7, 2, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("seed rule status error = %v", err)
+	}
+	if _, err := st.SetCredentialMaskEventStatus(traceB, rule, SystemEventStatusResolved); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus(B) error = %v", err)
+	}
+
+	inserted, err := st.BackfillCredentialMaskEventStates()
+	if err != nil {
+		t.Fatalf("BackfillCredentialMaskEventStates() error = %v", err)
+	}
+	if inserted != 0 {
+		t.Fatalf("inserted = %d, want 0 because the newest occurrence already has a state", inserted)
+	}
+	occurrenceA, found, err := st.CredentialMaskEventOccurrence(traceA, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(A) = %+v, %v", occurrenceA, err)
+	}
+	if occurrenceA.Status != SystemEventStatusUnread {
+		t.Errorf("occurrence A status = %q, want unread: only the newest occurrence inherits the old status", occurrenceA.Status)
+	}
+	occurrenceB, found, err := st.CredentialMaskEventOccurrence(traceB, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(B) = %+v, %v", occurrenceB, err)
+	}
+	if occurrenceB.Status != SystemEventStatusResolved {
+		t.Errorf("occurrence B status = %q, want the existing resolved state", occurrenceB.Status)
+	}
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != SystemEventStatusResolved {
+		t.Errorf("event status = %q, want resolved from the newest occurrence", event.Status)
+	}
+}
+
+func TestBackfillCredentialMaskEventStatesSeedsReadStatus(t *testing.T) {
+	st := configTransactionTestStore(t)
+	const trace = "77777777-7777-4777-8777-777777777777"
+	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
+		{TraceID: trace, Rule: "openai.project_key", Original: "sk-read", StandIn: "sk-read-fake", DetectedAt: time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
+	}
+	readAt := time.Date(2026, 10, 28, 9, 1, 0, 0, time.UTC)
+	if _, err := st.db.Exec(`UPDATE system_events SET status = 'read', read_at = ?, updated_at = ? WHERE fingerprint = 'secretmask:rule:openai_project_key'`, readAt, readAt); err != nil {
+		t.Fatalf("seed rule status error = %v", err)
+	}
+	inserted, err := st.BackfillCredentialMaskEventStates()
+	if err != nil {
+		t.Fatalf("BackfillCredentialMaskEventStates() error = %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1", inserted)
+	}
+	occurrence, found, err := st.CredentialMaskEventOccurrence(trace, "openai.project_key")
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence() = %+v, %v", occurrence, err)
+	}
+	if occurrence.Status != SystemEventStatusRead {
+		t.Errorf("occurrence status = %q, want read", occurrence.Status)
+	}
+	if !occurrence.ReadAt.Equal(readAt) {
+		t.Errorf("read_at = %s, want %s", occurrence.ReadAt, readAt)
 	}
 }

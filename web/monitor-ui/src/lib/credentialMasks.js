@@ -61,6 +61,23 @@ export function credentialMaskURLForEvent(event) {
   return apiURL(apiPaths.secretMasks, params);
 }
 
+/**
+ * The action URL for one event row. A credential_masked read/resolve/ignore is
+ * scoped to the trace the row is showing; the event id stays the rule-level
+ * notification, so other traces are untouched. Every other event keeps the
+ * existing rule-level path.
+ */
+export function scopedEventActionPath(event, path) {
+  if (!path || !isCredentialMaskedEvent(event)) {
+    return path;
+  }
+  const traceID = event?.matched_trace_id || event?.trace_id || "";
+  if (!traceID) {
+    return path;
+  }
+  return `${path}?trace_id=${encodeURIComponent(traceID)}`;
+}
+
 /** The URL the audit tab reads for one trace. */
 export function credentialMaskURLForTrace(traceID) {
   return traceID ? apiURL(apiPaths.secretMasks, { trace_id: traceID, page_size: 50 }) : null;

@@ -6172,10 +6172,194 @@ func TestSystemEventListResolvesCredentialMaskTraceQuery(t *testing.T) {
 	if item.Fingerprint != "secretmask:rule:generic_sk_dash" {
 		t.Errorf("fingerprint = %q", item.Fingerprint)
 	}
-	if item.TraceID != newestTrace {
-		t.Errorf("trace_id = %q, want the stored newest trace", item.TraceID)
+	if item.TraceID != searchedTrace {
+		t.Errorf("trace_id = %q, want the searched trace %q", item.TraceID, searchedTrace)
 	}
 	if item.MatchedTraceID != searchedTrace {
 		t.Errorf("matched_trace_id = %q, want the searched trace %q", item.MatchedTraceID, searchedTrace)
+	}
+	if item.Status != store.SystemEventStatusUnread {
+		t.Errorf("status = %q, want unread", item.Status)
+	}
+}
+
+// TestCredentialMaskEventActionsAreTraceScoped is the API contract for the
+// reader's expectation: ignoring one trace's credential event does not touch the
+// same rule in another trace, and the trace_id query parameter selects the
+// occurrence the event id addresses.
+func TestCredentialMaskEventActionsAreTraceScoped(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const (
+		rule   = "generic.sk_dash"
+		traceA = "11111111-1111-4111-8111-111111111111"
+		traceB = "22222222-2222-4222-8222-222222222222"
+	)
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{TraceID: traceA, Rule: rule, Kind: "generic_key", Original: "sk-a", StandIn: "sk-a-fake", DetectedAt: time.Date(2026, 10, 28, 7, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(A) error = %v", err)
+	}
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{TraceID: traceB, Rule: rule, Kind: "generic_key", Original: "sk-b", StandIn: "sk-b-fake", DetectedAt: time.Date(2026, 10, 28, 7, 1, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(B) error = %v", err)
+	}
+	event, err := st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint() error = %v", err)
+	}
+
+	list := func(traceID string) systemEventListResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/events?trace_id="+traceID+"&status=all&window=all&page=1&page_size=10", nil)
+		rr := httptest.NewRecorder()
+		systemEventListAPIHandler(st).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list status = %d, body=%s", rr.Code, rr.Body.String())
+		}
+		var payload systemEventListResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("json.Unmarshal(list) error = %v", err)
+		}
+		return payload
+	}
+
+	payload := list(traceA)
+	if payload.Total != 1 || len(payload.Items) != 1 {
+		t.Fatalf("trace A list = %+v", payload)
+	}
+	if payload.Items[0].TraceID != traceA || payload.Items[0].MatchedTraceID != traceA {
+		t.Fatalf("trace A item trace = %q/%q, want %q", payload.Items[0].TraceID, payload.Items[0].MatchedTraceID, traceA)
+	}
+
+	action := func(traceID, name string) systemEventView {
+		t.Helper()
+		path := "/api/events/" + event.ID + "/" + name + "?trace_id=" + traceID
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rr := httptest.NewRecorder()
+		systemEventDetailAPIHandler(st).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body=%s", name, rr.Code, rr.Body.String())
+		}
+		var payload systemEventView
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("json.Unmarshal(%s) error = %v", name, err)
+		}
+		return payload
+	}
+
+	ignored := action(traceA, "ignore")
+	if ignored.Status != store.SystemEventStatusIgnored || ignored.TraceID != traceA {
+		t.Fatalf("ignore A payload = %+v", ignored)
+	}
+	if items := list(traceB).Items; len(items) != 1 || items[0].Status != store.SystemEventStatusUnread {
+		t.Fatalf("trace B after ignoring A = %+v, want unread", items)
+	}
+	if items := list(traceA).Items; len(items) != 1 || items[0].Status != store.SystemEventStatusIgnored {
+		t.Fatalf("trace A after ignore = %+v, want ignored", items)
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/events/"+event.ID+"?trace_id="+traceA, nil)
+	detailRR := httptest.NewRecorder()
+	systemEventDetailAPIHandler(st).ServeHTTP(detailRR, detailReq)
+	if detailRR.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body=%s", detailRR.Code, detailRR.Body.String())
+	}
+	var detail systemEventView
+	if err := json.Unmarshal(detailRR.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if detail.Status != store.SystemEventStatusIgnored || detail.TraceID != traceA {
+		t.Fatalf("detail = %+v, want trace A ignored", detail)
+	}
+
+	read := action(traceB, "read")
+	if read.Status != store.SystemEventStatusRead || read.TraceID != traceB {
+		t.Fatalf("read B payload = %+v", read)
+	}
+	if items := list(traceA).Items; len(items) != 1 || items[0].Status != store.SystemEventStatusIgnored {
+		t.Fatalf("trace A after reading B = %+v, want still ignored", items)
+	}
+	event, err = st.GetSystemEventByFingerprint("secretmask:rule:generic_sk_dash")
+	if err != nil {
+		t.Fatalf("second GetSystemEventByFingerprint() error = %v", err)
+	}
+	if event.Status != store.SystemEventStatusRead {
+		t.Errorf("newest event status = %q, want read", event.Status)
+	}
+}
+
+// TestTraceScopedMarkAllReadOnlyThatTrace pins the bulk action to the same
+// occurrence scope as the single-row actions.
+func TestTraceScopedMarkAllReadOnlyThatTrace(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	const (
+		rule   = "generic.sk_dash"
+		traceA = "11111111-1111-4111-8111-111111111111"
+		traceB = "22222222-2222-4222-8222-222222222222"
+	)
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{TraceID: traceA, Rule: rule, Original: "sk-a", StandIn: "sk-a-fake", DetectedAt: time.Date(2026, 10, 28, 7, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(A) error = %v", err)
+	}
+	if err := st.UpsertCredentialMaskAudits([]store.CredentialMaskAuditRecord{
+		{TraceID: traceB, Rule: rule, Original: "sk-b", StandIn: "sk-b-fake", DetectedAt: time.Date(2026, 10, 28, 7, 1, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("UpsertCredentialMaskAudits(B) error = %v", err)
+	}
+	if _, err := st.SetCredentialMaskEventStatus(traceA, rule, store.SystemEventStatusIgnored); err != nil {
+		t.Fatalf("SetCredentialMaskEventStatus(A) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/read-all?trace_id="+traceA+"&window=all&status=unread", nil)
+	rr := httptest.NewRecorder()
+	systemEventReadAllAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read-all A status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload map[string]int
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(read-all A) error = %v", err)
+	}
+	if payload["updated"] != 0 {
+		t.Fatalf("read-all A updated = %d, want 0 (the A occurrence is ignored)", payload["updated"])
+	}
+	occurrenceB, found, err := st.CredentialMaskEventOccurrence(traceB, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(B) = %+v, %v", occurrenceB, err)
+	}
+	if occurrenceB.Status != store.SystemEventStatusUnread {
+		t.Fatalf("trace B status = %q, want unread after read-all on A", occurrenceB.Status)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/events/read-all?trace_id="+traceB+"&window=all&status=unread", nil)
+	rr = httptest.NewRecorder()
+	systemEventReadAllAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read-all B status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(read-all B) error = %v", err)
+	}
+	if payload["updated"] != 1 {
+		t.Fatalf("read-all B updated = %d, want 1", payload["updated"])
+	}
+	occurrenceA, found, err := st.CredentialMaskEventOccurrence(traceA, rule)
+	if err != nil || !found {
+		t.Fatalf("CredentialMaskEventOccurrence(A) = %+v, %v", occurrenceA, err)
+	}
+	if occurrenceA.Status != store.SystemEventStatusIgnored {
+		t.Fatalf("trace A status = %q, want ignored after read-all on B", occurrenceA.Status)
 	}
 }
