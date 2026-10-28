@@ -215,6 +215,85 @@ func TestOverviewPercentilesIgnoreZeroSamples(t *testing.T) {
 	}
 }
 
+// The finding-category breakdown is part of the same windowed distribution set
+// as the log columns, so it must answer for the window's traces. It used to
+// GROUP BY the whole trace_findings table, which both reported all-time
+// categories under a "today" selector and made the page scan a table that has
+// nothing to do with the window.
+func TestOverviewFindingCategoriesFollowTheLogWindow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	seed := func(name, category string, recordedAt time.Time) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("# finding window\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+		header.Meta.RequestID = name
+		header.Meta.Time = recordedAt
+		header.Meta.URL = "https://api.openai.com/v1/responses"
+		header.Meta.Method = http.MethodPost
+		header.Meta.StatusCode = http.StatusOK
+		header.Meta.ExchangeKind = "entry"
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%s) error = %v", name, err)
+		}
+		entry, err := st.GetByRequestID(name)
+		if err != nil {
+			t.Fatalf("GetByRequestID(%s) error = %v", name, err)
+		}
+		if err := st.SaveFindings(entry.ID, []observe.Finding{{
+			ID:       "finding-" + name,
+			TraceID:  entry.ID,
+			Category: category,
+			Severity: observe.SeverityHigh,
+		}}); err != nil {
+			t.Fatalf("SaveFindings(%s) error = %v", name, err)
+		}
+	}
+	seed("finding-window-old.http", "old_category", base.Add(-2*time.Hour))
+	seed("finding-window-new.http", "new_category", base.Add(-time.Minute))
+
+	windowed, err := st.Overview(OverviewOptions{
+		Since:       base.Add(-time.Hour),
+		Limit:       5,
+		BucketSize:  time.Hour,
+		BucketCount: 2,
+		Sections:    OverviewSections{Traffic: true},
+	})
+	if err != nil {
+		t.Fatalf("Overview(windowed) error = %v", err)
+	}
+	if len(windowed.Breakdown.FindingCategories) != 1 || windowed.Breakdown.FindingCategories[0].Label != "new_category" {
+		t.Fatalf("windowed finding categories = %+v, want only new_category", windowed.Breakdown.FindingCategories)
+	}
+	if windowed.Analysis.Total != 0 || windowed.Observation.TotalObservations != 0 {
+		t.Fatalf("traffic-only overview computed health: analysis=%+v observation=%+v", windowed.Analysis, windowed.Observation)
+	}
+
+	// No window means nothing to narrow: both categories, without joining the
+	// whole findings table to the whole log table.
+	all, err := st.Overview(OverviewOptions{
+		Limit:       5,
+		BucketSize:  time.Hour,
+		BucketCount: 2,
+		Sections:    OverviewSections{Traffic: true},
+	})
+	if err != nil {
+		t.Fatalf("Overview(all) error = %v", err)
+	}
+	if !countItemsContain(all.Breakdown.FindingCategories, "old_category") || !countItemsContain(all.Breakdown.FindingCategories, "new_category") {
+		t.Fatalf("all-time finding categories = %+v, want both categories", all.Breakdown.FindingCategories)
+	}
+}
+
 func TestBackfillExchangeMetadataUpdatesMissingModelFromV3Cassette(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
@@ -1152,8 +1231,8 @@ func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
 	if !parseJobListContainsError(dashboard.Observation.RecentFailures, failedTraceID, "postgres readmodel parse failure") {
 		t.Fatalf("overview recent parse failures = %+v, want trace %s with persisted error text", dashboard.Observation.RecentFailures, failedTraceID)
 	}
-	if dashboard.Analysis.Failed < 1 || !analysisRunListContains(dashboard.Analysis.Recent, runID) {
-		t.Fatalf("overview analysis = %+v, want failed run %d", dashboard.Analysis, runID)
+	if dashboard.Analysis.Failed < 1 {
+		t.Fatalf("overview analysis = %+v, want a failed run", dashboard.Analysis)
 	}
 	if !findingListContains(dashboard.Attention.HighRiskFindings, finding.ID) {
 		t.Fatalf("overview high risk findings = %+v, want finding %s", dashboard.Attention.HighRiskFindings, finding.ID)
@@ -1202,15 +1281,6 @@ func findingListContains(findings []observe.Finding, id string) bool {
 func countItemsContain(items []CountItem, label string) bool {
 	for _, item := range items {
 		if item.Label == label && item.Count > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func analysisRunListContains(runs []AnalysisRunRecord, id int64) bool {
-	for _, run := range runs {
-		if run.ID == id {
 			return true
 		}
 	}

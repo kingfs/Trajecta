@@ -42,8 +42,14 @@ export function OverviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [breakdownKind, setBreakdownKind] = useState("models");
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue]);
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue]);
+  // The traffic half only. The pipeline-health half is all-time and scans tables
+  // that do not shrink with the window, and this page renders none of it.
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue, sections: "traffic" }), [windowValue]);
+  // The same URL the rail reads for its unread badge. Asking for it with this
+  // page's window used to make the page issue a second summary request whose
+  // unread count disagreed with the badge ten pixels to its left; one URL also
+  // lets TanStack Query answer both call sites with one request.
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
 
   const summary = data?.summary || {};
   const breakdown = data?.breakdown || {};

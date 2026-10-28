@@ -2680,6 +2680,50 @@ test("a realtime topic message refetches the reads that belong to it", async ({ 
   await expect.poll(() => listTraces, { timeout: 5_000 }).toBeGreaterThan(afterLoad);
 });
 
+// The rail and the Overview page show the same unread count. The page used to
+// ask for it with its own analytics window, so one screen fired two summary
+// requests and the two badges could disagree.
+test("the overview and the rail share one global event-summary request", async ({ page }) => {
+  const summaries = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/events/summary") {
+      summaries.push(url.searchParams.get("window"));
+    }
+  });
+
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect.poll(() => summaries.length).toBeGreaterThan(0);
+  // No timer and no push runs here, so a second entry would be a second mount
+  // with a different URL, which is exactly the duplication this pins.
+  await page.waitForTimeout(300);
+  expect(summaries).toEqual(["all"]);
+});
+
+// The overview half reads the windowed traffic aggregates, the health half reads
+// the all-time pipeline state. Each page asks for one, so neither pays for the
+// scans the other needs.
+test("the overview and the data-health tab ask for only their own sections", async ({ page }) => {
+  const sections = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/overview") {
+      sections.push(url.searchParams.get("sections"));
+    }
+  });
+
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect.poll(() => sections.length).toBeGreaterThan(0);
+  expect(sections.at(-1)).toBe("traffic");
+
+  await page.goto("/audit?tab=health");
+  await expect(page.getByRole("heading", { name: "Quality" })).toBeVisible();
+  await expect.poll(() => sections.length).toBeGreaterThan(1);
+  expect(sections.at(-1)).toBe("health");
+});
+
 // The date formatters hardcoded "zh-CN", so the English console printed
 // Chinese-ordered dates under English labels. They resolve the language when they
 // format, so a switch re-formats the rows already on screen rather than waiting
@@ -3253,8 +3297,10 @@ test("the card sections keep the panel box", async ({ page }) => {
 // pushed the content down; the range control that used to sit in whichever
 // panel happened to own it now sits at the right of the title.
 test("every page has one heading layer and its range control in the header", async ({ page }) => {
-  const WINDOWED = ["/overview", "/events", "/traces", "/providers", "/models", "/routing", "/audit?tab=health"];
-  const PLAIN = ["/system", "/connect"];
+  const WINDOWED = ["/overview", "/events", "/traces", "/providers", "/models", "/routing"];
+  // Data health reports the parse pipeline over every indexed trace, not a
+  // window of traffic, so it deliberately has no range control.
+  const PLAIN = ["/audit?tab=health", "/system", "/connect"];
   for (const route of [...WINDOWED, ...PLAIN]) {
     await page.goto(route);
     const header = page.locator(".page-header");

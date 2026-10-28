@@ -88,9 +88,8 @@ type overviewAttentionView struct {
 }
 
 type overviewAnalysisSummary struct {
-	Total  int               `json:"total"`
-	Failed int               `json:"failed"`
-	Recent []analysisRunView `json:"recent"`
+	Total  int `json:"total"`
+	Failed int `json:"failed"`
 }
 
 type overviewObservationView struct {
@@ -1652,6 +1651,40 @@ func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
 	}
 }
 
+// parseOverviewSections reads the Overview's `sections` query parameter.
+//
+// The Overview page renders only the windowed traffic half; the data-health tab
+// renders only the pipeline state, whose statements intentionally cover every
+// trace and finding and therefore do not shrink with the window. Computing both
+// on every page load was the reason a cold `/api/overview` took seconds: the
+// traffic half reads the window's rows, while the health half scanned `logs` and
+// `trace_findings` in full. An absent parameter keeps the complete response for
+// callers that predate the split.
+func parseOverviewSections(value string) (store.OverviewSections, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return store.OverviewSections{Traffic: true, Health: true}, nil
+	}
+	var sections store.OverviewSections
+	for _, raw := range strings.Split(value, ",") {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "traffic":
+			sections.Traffic = true
+		case "health":
+			sections.Health = true
+		case "all":
+			sections.Traffic = true
+			sections.Health = true
+		default:
+			return store.OverviewSections{}, fmt.Errorf("unknown overview section %q: use traffic, health or all", strings.TrimSpace(raw))
+		}
+	}
+	if !sections.Traffic && !sections.Health {
+		return store.OverviewSections{}, errors.New("overview sections must name traffic, health or all")
+	}
+	return sections, nil
+}
+
 func parseAnalyticsWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -1893,24 +1926,32 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		windowLabel, since, bucketSize, bucketCount := parseOverviewWindow(r.URL.Query().Get("window"))
+		sections, err := parseOverviewSections(r.URL.Query().Get("sections"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		dashboard, err := st.Overview(store.OverviewOptions{
 			Since:       since,
 			Location:    DisplayLocation(),
 			BucketSize:  bucketSize,
 			BucketCount: bucketCount,
 			Limit:       5,
+			Sections:    sections,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "overview error: " + err.Error()})
 			return
 		}
 		resp := overviewResponseFromStore(windowLabel, dashboard)
-		if err := attachTraceAudit(st, resp.Attention.RecentFailures, resp.Attention.SlowTraces); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
-			return
+		if sections.Traffic {
+			if err := attachTraceAudit(st, resp.Attention.RecentFailures, resp.Attention.SlowTraces); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
+				return
+			}
+			attachTracePreviews(resp.Attention.RecentFailures)
+			attachTracePreviews(resp.Attention.SlowTraces)
 		}
-		attachTracePreviews(resp.Attention.RecentFailures)
-		attachTracePreviews(resp.Attention.SlowTraces)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -2423,7 +2464,6 @@ func overviewResponseFromStore(window string, dashboard store.OverviewDashboard)
 		Analysis: overviewAnalysisSummary{
 			Total:  dashboard.Analysis.Total,
 			Failed: dashboard.Analysis.Failed,
-			Recent: analysisRunViews(dashboard.Analysis.Recent),
 		},
 		Observation: overviewObservationView{
 			TotalObservations: dashboard.Observation.TotalObservations,

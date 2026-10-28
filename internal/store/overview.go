@@ -11,6 +11,19 @@ import (
 	"github.com/kingfs/Trajecta/pkg/observe"
 )
 
+// OverviewSections selects which halves of the dashboard a caller needs.
+//
+// Traffic is the windowed aggregate set the Overview page renders; health is the
+// pipeline state (observations, parse jobs, analysis runs), which is all-time and
+// scans tables that do not shrink with the window. They are separate because the
+// Overview page renders none of the health half: computing it there cost a full
+// pass over `logs` and `trace_findings` on every page load, which on a cold
+// database was the difference between milliseconds and a double-digit second.
+type OverviewSections struct {
+	Traffic bool
+	Health  bool
+}
+
 type OverviewOptions struct {
 	Since time.Time
 	// Location anchors the calendar buckets. Nil keeps the UTC grid.
@@ -18,6 +31,9 @@ type OverviewOptions struct {
 	BucketSize  time.Duration
 	BucketCount int
 	Limit       int
+	// Sections selects what to compute. The zero value means both, so a caller
+	// that predates the split keeps the complete response.
+	Sections OverviewSections
 }
 
 type OverviewSummary struct {
@@ -62,7 +78,6 @@ type OverviewAttention struct {
 type OverviewAnalysisSummary struct {
 	Total  int
 	Failed int
-	Recent []AnalysisRunRecord
 }
 
 type OverviewObservationSummary struct {
@@ -107,40 +122,48 @@ func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 	if opts.BucketCount <= 0 {
 		opts.BucketCount = 12
 	}
+	sections := opts.Sections
+	if !sections.Traffic && !sections.Health {
+		sections = OverviewSections{Traffic: true, Health: true}
+	}
 
-	whereSQL, whereArgs := overviewLogWhere(opts.Since)
-	summary, err := s.overviewSummary(whereSQL, whereArgs)
-	if err != nil {
-		return OverviewDashboard{}, err
+	var dashboard OverviewDashboard
+	if sections.Traffic {
+		whereSQL, whereArgs := overviewLogWhere(opts.Since)
+		summary, err := s.overviewSummary(whereSQL, whereArgs)
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		timeline, err := s.overviewTimeline(whereSQL, whereArgs, opts)
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		breakdown, err := s.overviewBreakdown(whereSQL, whereArgs, opts.Since, opts.Limit)
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		attention, err := s.overviewAttention(whereSQL, whereArgs, opts.Limit)
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		dashboard.Summary = summary
+		dashboard.Timeline = timeline
+		dashboard.Breakdown = breakdown
+		dashboard.Attention = attention
 	}
-	timeline, err := s.overviewTimeline(whereSQL, whereArgs, opts)
-	if err != nil {
-		return OverviewDashboard{}, err
+	if sections.Health {
+		analysis, err := s.overviewAnalysis()
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		observation, err := s.overviewObservation(opts.Limit)
+		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		dashboard.Analysis = analysis
+		dashboard.Observation = observation
 	}
-	breakdown, err := s.overviewBreakdown(whereSQL, whereArgs, opts.Limit)
-	if err != nil {
-		return OverviewDashboard{}, err
-	}
-	attention, err := s.overviewAttention(whereSQL, whereArgs, opts.Limit)
-	if err != nil {
-		return OverviewDashboard{}, err
-	}
-	analysis, err := s.overviewAnalysis(opts.Limit)
-	if err != nil {
-		return OverviewDashboard{}, err
-	}
-	observation, err := s.overviewObservation(opts.Limit)
-	if err != nil {
-		return OverviewDashboard{}, err
-	}
-	return OverviewDashboard{
-		Summary:     summary,
-		Timeline:    timeline,
-		Breakdown:   breakdown,
-		Attention:   attention,
-		Analysis:    analysis,
-		Observation: observation,
-	}, nil
+	return dashboard, nil
 }
 
 func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSummary, error) {
@@ -321,7 +344,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 // distributions, in the order the dashboard groups them.
 var overviewBreakdownColumns = []string{"model", "provider", "endpoint", "selected_upstream_id", "routing_failure_reason"}
 
-func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, limit int) (OverviewBreakdown, error) {
+func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, since time.Time, limit int) (OverviewBreakdown, error) {
 	distributions, err := s.overviewDistributions(overviewBreakdownColumns, whereSQL, whereArgs, limit)
 	if err != nil {
 		return OverviewBreakdown{}, err
@@ -333,7 +356,7 @@ func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, limit int) (
 		Upstreams:             distributions["selected_upstream_id"],
 		RoutingFailureReasons: distributions["routing_failure_reason"],
 	}
-	if out.FindingCategories, err = s.overviewFindingCategories(limit); err != nil {
+	if out.FindingCategories, err = s.overviewFindingCategories(since, limit); err != nil {
 		return OverviewBreakdown{}, err
 	}
 	return out, nil
@@ -472,15 +495,43 @@ func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any,
 	return scanCountItems(rows)
 }
 
-func (s *Store) overviewFindingCategories(limit int) ([]CountItem, error) {
+// overviewFindingCategories is the one breakdown that does not come from the log
+// window directly, so it has to join the window's traces to reach the findings.
+//
+// A windowed request joins the window's log rows to `trace_findings` by trace id:
+// the log window drives the plan, and each finding is reached through the
+// (trace_id, finding_id) index instead of the whole table being grouped. With no
+// window there is nothing to narrow, so the plain GROUP BY stays - joining the
+// whole table to the whole log table is strictly more work for the same answer.
+func (s *Store) overviewFindingCategories(since time.Time, limit int) ([]CountItem, error) {
+	if since.IsZero() {
+		rows, err := s.db.Query(`
+			SELECT category, COUNT(*) AS count
+			FROM trace_findings
+			WHERE category != ''
+			GROUP BY category
+			ORDER BY count DESC, category ASC
+			LIMIT ?
+		`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanCountItems(rows)
+	}
+
+	whereSQL, whereArgs := overviewLogWhereFor("l", since)
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, limit)
 	rows, err := s.db.Query(`
-		SELECT category, COUNT(*) AS count
-		FROM trace_findings
-		WHERE category != ''
-		GROUP BY category
-		ORDER BY count DESC, category ASC
+		SELECT f.category, COUNT(*) AS count
+		FROM trace_findings f
+		JOIN logs l ON l.trace_id = f.trace_id
+		WHERE `+whereSQL+` AND f.category != ''
+		GROUP BY f.category
+		ORDER BY count DESC, f.category ASC
 		LIMIT ?
-	`, limit)
+	`, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +668,14 @@ func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit 
 	return out, rows.Err()
 }
 
-func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
+// overviewAnalysis counts the analysis runs and how many of them did not finish.
+//
+// It deliberately returns no run rows: the Overview renders only the two counts,
+// and carrying the newest run's `output_json` made the response megabytes wide
+// (a session-summary run embeds every finding reference it produced) for data no
+// caller read. The runs themselves are served by ListAnalysisRuns and the
+// analysis endpoints.
+func (s *Store) overviewAnalysis() (OverviewAnalysisSummary, error) {
 	var summary OverviewAnalysisSummary
 	if err := s.db.QueryRow(`
 		SELECT
@@ -627,11 +685,6 @@ func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 	`).Scan(&summary.Total, &summary.Failed); err != nil {
 		return OverviewAnalysisSummary{}, err
 	}
-	runs, err := s.ListAnalysisRuns("", "", "", limit)
-	if err != nil {
-		return OverviewAnalysisSummary{}, err
-	}
-	summary.Recent = runs
 	return summary, nil
 }
 
@@ -689,9 +742,19 @@ func (s *Store) overviewRecentParseFailures(limit int) ([]ParseJobRecord, error)
 }
 
 func overviewLogWhere(since time.Time) (string, []any) {
-	visible := clientVisibleLogClause("")
+	return overviewLogWhereFor("", since)
+}
+
+// overviewLogWhereFor is overviewLogWhere with the log table aliased, for the
+// statements that join another table to the window.
+func overviewLogWhereFor(alias string, since time.Time) (string, []any) {
+	visible := clientVisibleLogClause(alias)
 	if since.IsZero() {
 		return visible, nil
 	}
-	return andSQL("recorded_at >= ?", visible), []any{since.UTC().Format(timeLayout)}
+	recordedAt := "recorded_at"
+	if alias != "" {
+		recordedAt = alias + ".recorded_at"
+	}
+	return andSQL(recordedAt+" >= ?", visible), []any{since.UTC().Format(timeLayout)}
 }

@@ -1354,11 +1354,55 @@ func TestOverviewAPIHandlerReturnsDashboardFromIndexedData(t *testing.T) {
 	if len(payload.Attention.HighRiskFindings) != 1 || payload.Attention.HighRiskFindings[0].Severity != "high" {
 		t.Fatalf("high risk findings = %+v", payload.Attention.HighRiskFindings)
 	}
-	if payload.Analysis.Total != 1 || payload.Analysis.Failed != 1 || len(payload.Analysis.Recent) != 1 {
-		t.Fatalf("analysis = %+v, want 1 failed recent run", payload.Analysis)
+	if payload.Analysis.Total != 1 || payload.Analysis.Failed != 1 {
+		t.Fatalf("analysis = %+v, want 1 failed run", payload.Analysis)
 	}
 	if payload.Observation.TotalObservations != 0 || payload.Observation.Unparsed != 2 {
 		t.Fatalf("observation = %+v, want 0 observations and 2 unparsed", payload.Observation)
+	}
+
+	// The Overview page asks for the traffic half only; the data-health tab asks
+	// for the health half only. Each response must leave the other half zeroed
+	// rather than doing its work and throwing it away.
+	req = httptest.NewRequest(http.MethodGet, "/api/overview?window=all&sections=traffic", nil)
+	rr = httptest.NewRecorder()
+	overviewAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("traffic sections status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var trafficPayload overviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &trafficPayload); err != nil {
+		t.Fatalf("json.Unmarshal(traffic) error = %v", err)
+	}
+	if trafficPayload.Summary.RequestCount != 2 || len(trafficPayload.Timeline) == 0 {
+		t.Fatalf("traffic sections = %+v, want the window aggregates", trafficPayload.Summary)
+	}
+	if trafficPayload.Analysis.Total != 0 || trafficPayload.Observation.TotalObservations != 0 || trafficPayload.Observation.Unparsed != 0 {
+		t.Fatalf("traffic sections computed health: analysis=%+v observation=%+v", trafficPayload.Analysis, trafficPayload.Observation)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/overview?window=all&sections=health", nil)
+	rr = httptest.NewRecorder()
+	overviewAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("health sections status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var healthPayload overviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &healthPayload); err != nil {
+		t.Fatalf("json.Unmarshal(health) error = %v", err)
+	}
+	if healthPayload.Analysis.Total != 1 || healthPayload.Observation.Unparsed != 2 {
+		t.Fatalf("health sections = analysis:%+v observation:%+v, want the pipeline state", healthPayload.Analysis, healthPayload.Observation)
+	}
+	if healthPayload.Summary.RequestCount != 0 || len(healthPayload.Timeline) != 0 || len(healthPayload.Attention.SlowTraces) != 0 {
+		t.Fatalf("health sections computed traffic: summary=%+v timeline=%d slow=%d", healthPayload.Summary, len(healthPayload.Timeline), len(healthPayload.Attention.SlowTraces))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/overview?window=all&sections=nope", nil)
+	rr = httptest.NewRecorder()
+	overviewAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown section status = %d, want 400", rr.Code)
 	}
 }
 

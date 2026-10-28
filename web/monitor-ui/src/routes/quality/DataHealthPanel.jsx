@@ -1,13 +1,13 @@
 import React from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { formatDateTime, normalizeAnalyticsWindow } from "../../lib/monitor";
+import { formatDateTime } from "../../lib/monitor";
 
 /**
  * Derived-data health: how much of the indexed traffic has been parsed into
@@ -15,13 +15,16 @@ import { formatDateTime, normalizeAnalyticsWindow } from "../../lib/monitor";
  * many runtime events nobody has looked at. This panel used to sit on the
  * overview page next to the traffic tiles, where a pipeline backlog read like a
  * property of the last hour of traffic.
+ *
+ * It is pipeline state, not a window of traffic: the counts cover every indexed
+ * trace, so the page has no range control and this read asks for the health
+ * section only. The event-summary URL is the rail's own, so the two share one
+ * request.
  */
 export function DataHealthPanel() {
   const { t } = useI18n();
-  const [searchParams] = useSearchParams();
-  const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
-  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue]);
-  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue]);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: "all", sections: "health" }));
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
 
   const observation = data?.observation || {};
   const analysis = data?.analysis || {};
