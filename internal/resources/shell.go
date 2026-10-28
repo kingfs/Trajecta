@@ -53,12 +53,15 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 		return
 	}
 	// Redirection targets are files regardless of what the command is. Device
-	// sinks (/dev/null) are excluded: they are plumbing, not a read.
+	// sinks (/dev/null) are excluded: they are plumbing, not a read. Every
+	// operand goes through emitShellOperand for the same reason: `curl -o
+	// /dev/null` names a sink in an option value, not an operand of the
+	// command, and it must not become a resource either.
 	for _, token := range tokens {
-		if token.flags&shellRedirect == 0 || isDevicePath(token.text) {
+		if token.flags&shellRedirect == 0 {
 			continue
 		}
-		emit("", token.text, token.start, token.end)
+		emitShellOperand(emit, token.text, token.start, token.end)
 	}
 	index := 0
 	for index < len(tokens) {
@@ -85,7 +88,7 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 	command := commandBasename(commandToken.text)
 	if commandToken.flags&shellRedirect == 0 && looksLikePathToken(commandToken.text) {
 		// The command itself is a file the shell executed (./scripts/build.sh).
-		emit("", commandToken.text, commandToken.start, commandToken.end)
+		emitShellOperand(emit, commandToken.text, commandToken.start, commandToken.end)
 	}
 	rest := tokens[index+1:]
 	if len(rest) == 0 || noPathCommands[command] {
@@ -133,7 +136,7 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 					patternPending = false
 					continue
 				}
-				emit("", value, token.start, token.end)
+				emitShellOperand(emit, value, token.start, token.end)
 				continue
 			}
 			if flagTakesContent(command, name) {
@@ -146,8 +149,18 @@ func processShellSegment(tokens []shellToken, emit func(mode, token string, star
 			patternPending = false
 			continue
 		}
-		emit("", text, token.start, token.end)
+		emitShellOperand(emit, text, token.start, token.end)
 	}
+}
+
+// emitShellOperand emits one shell operand in the shell-path mode and drops the
+// device sinks (/dev/null and friends) that a command may name as an output or
+// input. A device is plumbing, not a file an agent read or wrote.
+func emitShellOperand(emit func(mode, token string, start, end int), text string, start, end int) {
+	if text == "" || isDevicePath(text) {
+		return
+	}
+	emit(modeShellPath, text, start, end)
 }
 
 // skipShellPrefixOptions skips the options of a wrapper command (sudo -u root,

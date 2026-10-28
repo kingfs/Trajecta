@@ -33,13 +33,30 @@ const (
 	accessTrimRight = ".,;:!?)]}'*"
 )
 
+// IndicatorOptions carries evidence a caller already has about where src came
+// from. The zero value is the plain shape check: a path is accepted only when
+// validLocalPathShape can tell it apart from prose, an API route, a MIME type
+// or a domain.
+type IndicatorOptions struct {
+	// PathOperand marks src as one token in a position that already names a
+	// location: a shell command's operand, or a tool argument whose key is a
+	// path (file_path, path, cwd, ...). The position is evidence that a
+	// relative token is a path even when its last segment has no file
+	// extension: `ls web/dist/learn` names a directory, while the same bytes in
+	// arbitrary prose are not enough to call a read. Only the relative
+	// directory forms gain this relaxation; route prefixes, domains, MIME
+	// subtypes and escape debris are still rejected, and URLs are unchanged.
+	PathOperand bool
+}
+
 // indicatorCollector receives lexical candidates from the generated indicator
 // DFA. Unlike collector it scores nothing: an access indicator is reported at
 // info level, and relevance is decided by the caller's audit, not by credential
 // evidence.
 type indicatorCollector struct {
-	src      []byte
-	findings []Finding
+	src         []byte
+	findings    []Finding
+	pathOperand bool
 }
 
 // emit is called from the generated indicator machine for every completed
@@ -75,24 +92,39 @@ func (c *indicatorCollector) emit(id RuleID, start, end int) {
 		return
 	}
 	if r.CandidateCheck != "" && !runCandidateCheck(r.CandidateCheck, c.src[start:end]) {
-		return
+		// A path position (a shell operand or a path-named argument) is the one
+		// place a relative directory without a file extension is evidence of a
+		// read rather than prose: `ls web/dist/learn` names a directory, and the
+		// position proves it. The fallback only covers local paths; a URL keeps
+		// the strict authority check.
+		if !c.pathOperand || id != RuleLocalPath || !validPathOperand(c.src[start:end]) {
+			return
+		}
 	}
 	c.findings = append(c.findings, Finding{Span: Span{Start: start, End: end, ID: id}})
 }
 
 // AppendIndicators appends the report-only access indicators (local paths and
 // URLs) for src to dst and returns the extended slice. Reusing dst avoids
-// allocating on the hot path.
+// allocating on the hot path. It is AppendIndicatorsWithOptions with the plain
+// shape check.
 //
 // Every returned Finding has a ReportOnly rule and is not Maskable. Callers
 // that want one event per distinct value - the audit path - deduplicate on the
 // bytes from Span.Bytes themselves; this layer reports every occurrence so a
 // caller can also count them.
 func (Detector) AppendIndicators(dst []Finding, src []byte) []Finding {
+	return Detector{}.AppendIndicatorsWithOptions(dst, src, IndicatorOptions{})
+}
+
+// AppendIndicatorsWithOptions is AppendIndicators with caller-supplied evidence
+// about the bytes. The option only widens the local-path check for a token in a
+// path position; every other rule is unchanged.
+func (Detector) AppendIndicatorsWithOptions(dst []Finding, src []byte, opts IndicatorOptions) []Finding {
 	if len(src) == 0 {
 		return dst
 	}
-	c := indicatorCollector{src: src, findings: dst}
+	c := indicatorCollector{src: src, findings: dst, pathOperand: opts.PathOperand}
 	scanIndicatorDFA(src, &c)
 	return c.findings
 }
@@ -100,6 +132,13 @@ func (Detector) AppendIndicators(dst []Finding, src []byte) []Finding {
 // Indicators returns the report-only access indicators for src.
 func (d Detector) Indicators(src []byte) []Finding {
 	return d.AppendIndicators(nil, src)
+}
+
+// IndicatorsWithOptions returns the report-only access indicators for src with
+// the caller's evidence about where it came from. It is the resource index's
+// entry point for a token in a path position.
+func (d Detector) IndicatorsWithOptions(src []byte, opts IndicatorOptions) []Finding {
+	return d.AppendIndicatorsWithOptions(nil, src, opts)
 }
 
 // Indicators returns the report-only access indicators for src using the
@@ -112,6 +151,13 @@ func (d Detector) Indicators(src []byte) []Finding {
 // whole token; scanning arbitrary prose or code with it is what produced the
 // false positives the narrow source now avoids.
 func Indicators(src []byte) []Finding { return Detector{}.Indicators(src) }
+
+// IndicatorsWithOptions returns the report-only access indicators for src using
+// the package's compiled indicator DFA and the caller's evidence. It is
+// shorthand for the zero Detector.
+func IndicatorsWithOptions(src []byte, opts IndicatorOptions) []Finding {
+	return Detector{}.IndicatorsWithOptions(src, opts)
+}
 
 // trimIndicatorEnd strips the punctuation that ends a sentence or a markdown
 // wrapper from a report-only match. A closing bracket is only stripped when it
@@ -311,6 +357,87 @@ func validRelativeTail(rest []byte) bool {
 		return true
 	}
 	return len(segments) >= 2
+}
+
+// validPathOperand is the relaxed local-path check for a token in a position
+// that already names a location: a shell command's operand, or a path-valued
+// tool argument. The position is the evidence that the token names a path:
+// `ls web/dist/learn` reads a directory even though its last segment has no
+// file extension, which is exactly the shape validLocalPathShape rejects when
+// those bytes come from arbitrary prose.
+//
+// Only the directory forms gain the relaxation. An absolute path is accepted
+// without the known-root/extension test but still cannot be an API route; a
+// relative path needs two segments, cannot start with a domain or an all-digit
+// segment, and cannot end in a MIME-style '+'; a home or dot-relative path may
+// name a single directory. Nothing here accepts a bare name, so a one-word
+// operand is never a path.
+func validPathOperand(tok []byte) bool {
+	if len(tok) == 0 {
+		return false
+	}
+	if tok[0] == '\\' {
+		// A backslash root is already directory-capable through the strict
+		// check: UNC has no file-extension requirement.
+		return false
+	}
+	if tok[0] == '~' {
+		return len(tok) > 1 && tok[1] == '/' && validPathRelativeTail(tok[2:])
+	}
+	if tok[0] == '.' {
+		if len(tok) >= 3 && tok[1] == '.' && tok[2] == '/' {
+			return validPathRelativeTail(tok[3:])
+		}
+		if len(tok) >= 2 && tok[1] == '/' {
+			return validPathRelativeTail(tok[2:])
+		}
+	}
+	if isASCIIAlpha(tok[0]) && len(tok) >= 3 && tok[1] == ':' && (tok[2] == '\\' || tok[2] == '/') {
+		// The drive check already accepts a directory after the drive.
+		return false
+	}
+	if len(tok) >= 2 && tok[0] == '/' && tok[1] == '/' {
+		// The forward UNC check already accepts a share with two segments.
+		return false
+	}
+	if tok[0] == '/' {
+		segments := splitPathSegments(tok[1:], false)
+		if len(segments) == 0 || isRoutePrefix(segments[0]) {
+			return false
+		}
+		return plausibleSegments(segments)
+	}
+	segments := splitPathSegments(tok, false)
+	if len(segments) < 2 {
+		return false
+	}
+	first := segments[0]
+	if len(first) == 0 || allDigits(first) {
+		return false
+	}
+	// A dot after the first byte is a domain name (example.com/path), not a
+	// directory. A leading dot is a dot-directory (.git/config).
+	if bytes.IndexByte(first[1:], '.') >= 0 {
+		return false
+	}
+	if !plausibleSegments(segments) {
+		return false
+	}
+	// A '+' in the last segment is a MIME subtype (application/vnd.api+json),
+	// not a directory name.
+	return bytes.IndexByte(segments[len(segments)-1], '+') < 0
+}
+
+// validPathRelativeTail accepts what follows "~/", "./" or "../" in a path
+// position. Unlike validRelativeTail it does not require a file extension: a
+// single directory segment is a real operand (`cd ../src`). The segment shape
+// still has to be plausible, so "./$" and "../" stay out.
+func validPathRelativeTail(rest []byte) bool {
+	segments := splitPathSegments(rest, false)
+	if len(segments) == 0 || !plausibleSegments(segments) {
+		return false
+	}
+	return bytes.IndexByte(segments[len(segments)-1], '+') < 0
 }
 
 // validDrivePath checks the segments after a Windows drive. The drive itself

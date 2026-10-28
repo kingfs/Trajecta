@@ -167,6 +167,40 @@ func TestIndicatorsDetectURLsAndPaths(t *testing.T) {
 	}
 }
 
+// TestIndicatorsPathOperandDirectory pins the relaxation the resource index
+// uses for a token in a path position: a relative directory without an
+// extension is a path there, while the same bytes in prose are not.
+func TestIndicatorsPathOperandDirectory(t *testing.T) {
+	cases := []struct {
+		name    string
+		text    string
+		plain   int
+		operand int
+	}{
+		{"relative directory", "web/dist/learn", 0, 1},
+		{"nested directory", "internal/resources", 0, 1},
+		{"relative file", "src/main.go", 1, 1},
+		{"absolute directory", "/Users/alice/project", 1, 1},
+		{"home directory", "~/project", 0, 1},
+		{"dot relative directory", "../src", 0, 1},
+		{"route", "/api/v1/models", 0, 0},
+		{"mime", "application/vnd.api+json", 0, 0},
+		{"domain", "example.com/path", 0, 0},
+		{"numeric", "2024/01", 0, 0},
+		{"bare name", "learn", 0, 0},
+		{"dot shell", "./$", 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plain := len(Indicators([]byte(tc.text)))
+			operand := len(IndicatorsWithOptions([]byte(tc.text), IndicatorOptions{PathOperand: true}))
+			if plain != tc.plain || operand != tc.operand {
+				t.Errorf("%q: plain=%d operand=%d, want %d/%d", tc.text, plain, operand, tc.plain, tc.operand)
+			}
+		})
+	}
+}
+
 // TestIndicatorsIgnoreNonLocalSlashText keeps the precision claim honest. These
 // are the shapes a transcript is full of that look like a path or a URL but are
 // an API route, a MIME type, an import path, a domain or prose.

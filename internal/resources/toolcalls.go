@@ -33,6 +33,7 @@ import (
 // (local_shell_call's action).
 type toolCall struct {
 	key      string
+	id       string
 	nodeID   string
 	nodePath string
 	name     string
@@ -42,10 +43,17 @@ type toolCall struct {
 	command  []string
 }
 
-// modelToolCalls returns every tool call the model produced in this exchange, in
-// output order. Calls the provider executed (web search, file search, code
-// interpreter) are not accesses the client can attribute to a path or URL and
-// are skipped.
+// modelToolCalls returns every tool call the model produced and that this
+// exchange carries, in payload order: the assistant history in the request
+// first, then the response. A call carried back in the request is still a call
+// the model made, and a reader of this exchange should see the paths and URLs
+// it named; the response is this turn's output. Calls the provider executed
+// (web search, file search, code interpreter) are not accesses the client can
+// attribute to a path or URL and are skipped.
+//
+// The same call can appear in both the request history and the response (a
+// provider that echoes the call), so the result is deduplicated by the call id
+// the provider assigned; a call without an id is deduplicated by its node.
 func modelToolCalls(obs observe.TraceObservation) []toolCall {
 	index := make(map[string]observe.ToolCallObservation, len(obs.Tools.Calls))
 	for _, call := range obs.Tools.Calls {
@@ -53,7 +61,7 @@ func modelToolCalls(obs observe.TraceObservation) []toolCall {
 			index[call.NodeID] = call
 		}
 	}
-	calls := make([]toolCall, 0, len(obs.Response.ToolCalls))
+	calls := make([]toolCall, 0, len(obs.Response.ToolCalls)+len(obs.Request.Nodes))
 	seen := make(map[string]struct{}, len(obs.Response.ToolCalls))
 	add := func(node observe.SemanticNode) {
 		key := node.ID
@@ -74,9 +82,10 @@ func modelToolCalls(obs observe.TraceObservation) []toolCall {
 		call.key = key
 		calls = append(calls, call)
 	}
-	// The response tree is the primary source: every parser puts its tool-call
-	// nodes in it, and walking it keeps the payload order. The two normalized
-	// lists are read as well so a parser that only fills them is not missed.
+	// The request and response trees are the primary source: every parser puts
+	// its tool-call nodes in them, and walking them keeps the payload order.
+	// The normalized lists are read as well so a parser that only fills them is
+	// not missed.
 	var walk func([]observe.SemanticNode)
 	walk = func(nodes []observe.SemanticNode) {
 		for _, node := range nodes {
@@ -84,6 +93,8 @@ func modelToolCalls(obs observe.TraceObservation) []toolCall {
 			walk(node.Children)
 		}
 	}
+	walk(obs.Request.Nodes)
+	calls = append(calls, entryRequestToolCalls(obs)...)
 	walk(obs.Response.Nodes)
 	for _, node := range obs.Response.ToolCalls {
 		add(node)
@@ -92,7 +103,39 @@ func modelToolCalls(obs observe.TraceObservation) []toolCall {
 		add(node)
 	}
 	calls = append(calls, entryResponseToolCalls(obs)...)
-	return calls
+	return dedupeToolCalls(calls)
+}
+
+// dedupeToolCalls folds the calls that name the same provider call id. The
+// request history and the response can carry one call twice, and a call that
+// appears in two text views of one node is the same call, not two accesses.
+func dedupeToolCalls(calls []toolCall) []toolCall {
+	if len(calls) < 2 {
+		return calls
+	}
+	seen := make(map[string]struct{}, len(calls))
+	out := calls[:0]
+	for _, call := range calls {
+		key := call.identity()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, call)
+	}
+	return out
+}
+
+// identity is the key a call is deduplicated by. The provider's call id is the
+// real identity; a node key is the fallback for a provider that sends none.
+func (c toolCall) identity() string {
+	if c.id != "" {
+		return "id:" + c.id
+	}
+	if c.key != "" {
+		return "node:" + c.key
+	}
+	return "call:" + c.name + "\x00" + c.args + "\x00" + c.input
 }
 
 // toolCallFromNode reads one IR tool-call node. The normalized call observation
@@ -105,6 +148,11 @@ func toolCallFromNode(node observe.SemanticNode, call observe.ToolCallObservatio
 		nodePath: node.Path,
 		name:     firstNonEmptyText(metadataText(node.Metadata, "name"), call.Name, node.Text),
 		kind:     firstNonEmptyText(call.Kind, node.ProviderType),
+		id: firstNonEmptyText(
+			metadataText(node.Metadata, "id"),
+			metadataText(node.Metadata, "call_id"),
+			metadataText(node.Metadata, "tool_use_id"),
+		),
 	}
 	out.args = firstNonEmptyText(call.ArgsText, observe.NodeArguments(node))
 	if out.args == "" {
@@ -122,6 +170,9 @@ func toolCallFromNode(node observe.SemanticNode, call observe.ToolCallObservatio
 		}
 		if out.input == "" {
 			out.input = jsonStringField(obj, "input")
+		}
+		if out.id == "" {
+			out.id = firstNonEmptyText(jsonStringField(obj, "id"), jsonStringField(obj, "call_id"))
 		}
 		if fn, err := decodeJSONObject(obj["function"]); err == nil {
 			if out.name == "" {
@@ -174,9 +225,9 @@ func commandVector(raw json.RawMessage) []string {
 
 // entryResponseToolCalls reads the calls out of the raw payload the entry parser
 // keeps whole. That exchange is the client-visible side of the local Responses
-// runtime: the request is history (already indexed by the trace that produced
-// it) and only the response is a model output. The payload is a Responses API
-// object, with a Chat Completions shape accepted for the translated path.
+// runtime: the response is the model output the client sees. The payload is a
+// Responses API object, with a Chat Completions shape accepted for the
+// translated path.
 func entryResponseToolCalls(obs observe.TraceObservation) []toolCall {
 	if obs.ExchangeKind != observeExchangeKindEntry {
 		return nil
@@ -196,6 +247,30 @@ func entryResponseToolCalls(obs observe.TraceObservation) []toolCall {
 	return out
 }
 
+// entryRequestToolCalls reads the model calls the client carried back in the
+// entry request. The entry parser keeps the request whole, so its `input`
+// (Responses API) or `messages` (Chat Completions / Anthropic) array has to be
+// read here instead of from the IR's request tree. Only structured call items
+// are read; message text and tool results are never scanned.
+func entryRequestToolCalls(obs observe.TraceObservation) []toolCall {
+	if obs.ExchangeKind != observeExchangeKindEntry {
+		return nil
+	}
+	var out []toolCall
+	for _, node := range obs.Request.Nodes {
+		if len(node.Raw) == 0 {
+			continue
+		}
+		obj, err := decodeJSONObject(node.Raw)
+		if err != nil {
+			continue
+		}
+		out = append(out, callsFromResponsesItems(obj["input"], node, "input")...)
+		out = append(out, callsFromMessages(obj["messages"], node, "messages")...)
+	}
+	return out
+}
+
 // observeExchangeKindEntry is the exchange kind the entry parser owns.
 const observeExchangeKindEntry = "entry"
 
@@ -210,6 +285,14 @@ var responsesCallTypes = map[string]bool{
 }
 
 func callsFromResponsesOutput(raw json.RawMessage, node observe.SemanticNode) []toolCall {
+	return callsFromResponsesItems(raw, node, "output")
+}
+
+// callsFromResponsesItems reads the Responses API items under label, which is
+// "output" for a response and "input" for the request history. Both arrays use
+// the same item types; only function_call_output and message items differ, and
+// those are not calls.
+func callsFromResponsesItems(raw json.RawMessage, node observe.SemanticNode, label string) []toolCall {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -228,7 +311,8 @@ func callsFromResponsesOutput(raw json.RawMessage, node observe.SemanticNode) []
 			continue
 		}
 		call := toolCall{
-			key:      firstNonEmptyText(node.ID, node.Path) + "#output[" + strconv.Itoa(i) + "]",
+			key:      firstNonEmptyText(node.ID, node.Path) + "#" + label + "[" + strconv.Itoa(i) + "]",
+			id:       firstNonEmptyText(jsonStringField(obj, "id"), jsonStringField(obj, "call_id")),
 			nodeID:   node.ID,
 			nodePath: node.Path,
 			name:     jsonStringField(obj, "name"),
@@ -266,32 +350,105 @@ func callsFromChatChoices(raw json.RawMessage, node observe.SemanticNode) []tool
 		if err != nil {
 			continue
 		}
-		var toolCalls []json.RawMessage
-		if err := json.Unmarshal(message["tool_calls"], &toolCalls); err != nil {
+		prefix := firstNonEmptyText(node.ID, node.Path) + "#choices[" + strconv.Itoa(i) + "].tool_calls"
+		out = append(out, callsFromChatToolCalls(message["tool_calls"], node, prefix)...)
+	}
+	return out
+}
+
+// callsFromMessages reads the model calls in a Chat Completions or Anthropic
+// `messages` array: a Chat message carries tool_calls, an Anthropic message
+// carries tool_use content blocks. Tool results and ordinary content are
+// skipped.
+func callsFromMessages(raw json.RawMessage, node observe.SemanticNode, label string) []toolCall {
+	if len(raw) == 0 {
+		return nil
+	}
+	var messages []json.RawMessage
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil
+	}
+	var out []toolCall
+	for i, messageRaw := range messages {
+		message, err := decodeJSONObject(messageRaw)
+		if err != nil {
 			continue
 		}
-		for j, callRaw := range toolCalls {
-			callObj, err := decodeJSONObject(callRaw)
-			if err != nil {
-				continue
-			}
-			fn, err := decodeJSONObject(callObj["function"])
-			if err != nil {
-				continue
-			}
-			call := toolCall{
-				key:      firstNonEmptyText(node.ID, node.Path) + "#choices[" + strconv.Itoa(i) + "].tool_calls[" + strconv.Itoa(j) + "]",
-				nodeID:   node.ID,
-				nodePath: node.Path,
-				name:     jsonStringField(fn, "name"),
-				kind:     "tool_call",
-				args:     jsonStringField(fn, "arguments"),
-			}
-			if call.args == "" && call.name == "" {
-				continue
-			}
-			out = append(out, call)
+		prefix := firstNonEmptyText(node.ID, node.Path) + "#" + label + "[" + strconv.Itoa(i) + "]"
+		out = append(out, callsFromChatToolCalls(message["tool_calls"], node, prefix+".tool_calls")...)
+		out = append(out, callsFromAnthropicContent(message["content"], node, prefix+".content")...)
+	}
+	return out
+}
+
+// callsFromChatToolCalls reads the OpenAI Chat Completions tool_calls array.
+func callsFromChatToolCalls(raw json.RawMessage, node observe.SemanticNode, keyPrefix string) []toolCall {
+	if len(raw) == 0 {
+		return nil
+	}
+	var toolCalls []json.RawMessage
+	if err := json.Unmarshal(raw, &toolCalls); err != nil {
+		return nil
+	}
+	out := make([]toolCall, 0, len(toolCalls))
+	for j, callRaw := range toolCalls {
+		callObj, err := decodeJSONObject(callRaw)
+		if err != nil {
+			continue
 		}
+		fn, err := decodeJSONObject(callObj["function"])
+		if err != nil {
+			continue
+		}
+		call := toolCall{
+			key:      keyPrefix + "[" + strconv.Itoa(j) + "]",
+			id:       firstNonEmptyText(jsonStringField(callObj, "id"), jsonStringField(callObj, "call_id")),
+			nodeID:   node.ID,
+			nodePath: node.Path,
+			name:     jsonStringField(fn, "name"),
+			kind:     "tool_call",
+			args:     jsonStringField(fn, "arguments"),
+		}
+		if call.args == "" && call.name == "" {
+			continue
+		}
+		out = append(out, call)
+	}
+	return out
+}
+
+// callsFromAnthropicContent reads the tool_use blocks of an Anthropic message.
+// A content value that is a plain string is text, not a block array.
+func callsFromAnthropicContent(raw json.RawMessage, node observe.SemanticNode, keyPrefix string) []toolCall {
+	if len(raw) == 0 {
+		return nil
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil
+	}
+	out := make([]toolCall, 0, len(blocks))
+	for j, blockRaw := range blocks {
+		block, err := decodeJSONObject(blockRaw)
+		if err != nil {
+			continue
+		}
+		if jsonStringField(block, "type") != "tool_use" {
+			continue
+		}
+		call := toolCall{
+			key:      keyPrefix + "[" + strconv.Itoa(j) + "]",
+			id:       firstNonEmptyText(jsonStringField(block, "id"), jsonStringField(block, "call_id")),
+			nodeID:   node.ID,
+			nodePath: node.Path,
+			name:     jsonStringField(block, "name"),
+			kind:     "tool_use",
+			args:     rawFieldText(block, "input"),
+		}
+		if call.args == "" && call.name == "" {
+			continue
+		}
+		out = append(out, call)
 	}
 	return out
 }
@@ -357,7 +514,7 @@ func forEachPatchPath(text string, emit func(mode, token string, start, end int)
 			}
 			path := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 			if path != "" {
-				emit("", path, 0, len(path))
+				emit(modePathField, path, 0, len(path))
 			}
 		}
 	}

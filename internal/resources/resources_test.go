@@ -267,18 +267,134 @@ func TestExtractReadsEntryRawOutput(t *testing.T) {
 	}
 }
 
-// TestExtractIgnoresEntryRequestHistory keeps the entry request out of the
-// index: it carries the client's history, whose calls belong to the traces
-// that produced them.
-func TestExtractIgnoresEntryRequestHistory(t *testing.T) {
-	raw := `{"messages":[{"role":"assistant","tool_calls":[{"function":{"name":"read","arguments":"{\"file_path\":\"/old/history.txt\"}"}}]}]}`
+// TestExtractReadsEntryRequestHistory covers the entry request: the client
+// carries the assistant history back, and a call in it is still a call the
+// model produced. The entry parser keeps the request whole, so the extractor
+// reads the raw messages instead of the IR request tree.
+func TestExtractReadsEntryRequestHistory(t *testing.T) {
+	raw := `{"messages":[{"role":"assistant","tool_calls":[{"id":"call-old","function":{"name":"read","arguments":"{\"file_path\":\"/old/history.txt\"}"}}]}]}`
 	node := observe.SemanticNode{ID: "entry-request", NormalizedType: observe.NodeUnknown, Raw: []byte(raw)}
 	obs := observe.TraceObservation{
 		ExchangeKind: "entry",
 		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
 	}
-	if got := Extract(obs); len(got) != 0 {
-		t.Fatalf("extracted history %+v, want none", got)
+	got := Extract(obs)
+	if len(got) != 1 || got[0].Kind != KindLocalPath || got[0].Value != "/old/history.txt" {
+		t.Fatalf("extracted %+v, want the request history path", got)
+	}
+}
+
+// TestExtractReadsEntryAnthropicHistory covers the same entry request in the
+// Anthropic shape: a tool_use content block carries the input object.
+func TestExtractReadsEntryAnthropicHistory(t *testing.T) {
+	raw := `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_old","name":"Bash","input":{"command":"ls web/dist/learn"}}]}]}`
+	node := observe.SemanticNode{ID: "entry-request", NormalizedType: observe.NodeUnknown, Raw: []byte(raw)}
+	obs := observe.TraceObservation{
+		ExchangeKind: "entry",
+		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
+	got := Extract(obs)
+	if len(got) != 1 || got[0].Kind != KindLocalPath || got[0].Value != "web/dist/learn" {
+		t.Fatalf("extracted %+v, want the Anthropic history directory", got)
+	}
+}
+
+// TestExtractReadsEntryResponsesInputHistory covers the Responses API entry
+// request: the client sends the earlier function_call items in `input`.
+func TestExtractReadsEntryResponsesInputHistory(t *testing.T) {
+	raw := `{"input":[{"type":"function_call","call_id":"call_old","name":"Bash","arguments":"{\"command\":\"ls web/dist/learn\"}"},{"type":"function_call_output","call_id":"call_old","output":"ok"}]}`
+	node := observe.SemanticNode{ID: "entry-request", NormalizedType: observe.NodeUnknown, Raw: []byte(raw)}
+	obs := observe.TraceObservation{
+		ExchangeKind: "entry",
+		Request:      observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
+	got := Extract(obs)
+	if len(got) != 1 || got[0].Kind != KindLocalPath || got[0].Value != "web/dist/learn" {
+		t.Fatalf("extracted %+v, want the Responses input history directory", got)
+	}
+}
+
+// TestExtractReadsRequestToolCalls covers a model exchange whose request
+// carries the earlier assistant turn: the call nodes are in the request tree,
+// and the paths they name belong to this exchange's resource list.
+func TestExtractReadsRequestToolCalls(t *testing.T) {
+	obs := observe.TraceObservation{
+		Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{
+			callNode("history", "Bash", `{"command":"cd /Users/kingfs/go/src/github.com/kingfs/Linear-Algebra-to-LLM && ls web/dist/learn"}`),
+		}},
+		Response: observe.ObservationResponse{ToolCalls: []observe.SemanticNode{
+			callNode("current", "web_fetch", `{"url":"https://www.yongzhen.wang/Linear-Algebra-to-LLM/figures/basis-dimension.svg"}`),
+		}},
+	}
+	got := extractedValues(obs)
+	for _, want := range []string{
+		"/Users/kingfs/go/src/github.com/kingfs/Linear-Algebra-to-LLM",
+		"web/dist/learn",
+		"https://www.yongzhen.wang/Linear-Algebra-to-LLM/figures/basis-dimension.svg",
+	} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing %q from %+v", want, got)
+		}
+	}
+	if access := got["web/dist/learn"]; access.Kind != KindLocalPath {
+		t.Errorf("web/dist/learn kind = %q, want %q", access.Kind, KindLocalPath)
+	}
+	if len(got) != 3 {
+		t.Errorf("extracted %+v, want three resources", got)
+	}
+}
+
+// TestExtractDedupesACallCarriedOnBothSides keeps one provider call id from
+// being counted twice when a response echoes a request-history call.
+func TestExtractDedupesACallCarriedOnBothSides(t *testing.T) {
+	requestCall := callNode("request-call", "read_file", `{"file_path":"/repo/main.go"}`)
+	requestCall.Metadata["id"] = "call-1"
+	responseCall := callNode("response-call", "read_file", `{"file_path":"/repo/main.go"}`)
+	responseCall.Metadata["id"] = "call-1"
+	obs := observe.TraceObservation{
+		Request:  observe.ObservationRequest{Nodes: []observe.SemanticNode{requestCall}},
+		Response: observe.ObservationResponse{ToolCalls: []observe.SemanticNode{responseCall}},
+	}
+	got := extractedValues(obs)
+	access, ok := got["/repo/main.go"]
+	if !ok || access.Count != 1 {
+		t.Fatalf("extracted %+v, want one access for the shared call id", got)
+	}
+}
+
+// TestExtractReadsRelativeDirectoryOperands covers the directory half of the
+// shell rule: `ls` and `find` name a directory without a file extension, and a
+// path-valued argument does too.
+func TestExtractReadsRelativeDirectoryOperands(t *testing.T) {
+	command := "cd /Users/kingfs/go/src/github.com/kingfs/Linear-Algebra-to-LLM && ls web/dist/learn | head && find web/dist/learn -maxdepth 2 -name index.html | head -20"
+	obs := observationOf(
+		callNode("bash", "Bash", `{"command":`+quoteJSON(command)+`}`),
+		callNode("list", "list_directory", `{"path":"web/dist/learn"}`),
+	)
+	got := extractedValues(obs)
+	access, ok := got["web/dist/learn"]
+	if !ok {
+		t.Fatalf("missing the relative directory from %+v", got)
+	}
+	if access.Kind != KindLocalPath || access.Count != 2 {
+		t.Errorf("web/dist/learn = %+v, want 2 accesses (the Bash call and the path field)", access)
+	}
+	if _, ok := got["/Users/kingfs/go/src/github.com/kingfs/Linear-Algebra-to-LLM"]; !ok {
+		t.Errorf("missing the absolute directory from %+v", got)
+	}
+}
+
+// TestExtractIgnoresDeviceOperands covers a device sink that arrives as an
+// option value rather than a redirection: `curl -o /dev/null` writes to a
+// sink, which is plumbing and not a resource.
+func TestExtractIgnoresDeviceOperands(t *testing.T) {
+	obs := observationOf(callNode("bash", "Bash", `{"command":"curl -k -L -sS --max-time 20 -o /dev/null -w '%{http_code}' https://example.com/a.svg"}`))
+	got := extractedValues(obs)
+	if _, ok := got["/dev/null"]; ok {
+		t.Fatalf("indexed a device sink: %+v", got)
+	}
+	if _, ok := got["https://example.com/a.svg"]; !ok {
+		t.Fatalf("missing the URL from %+v", got)
 	}
 }
 

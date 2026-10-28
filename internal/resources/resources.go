@@ -41,6 +41,18 @@ const (
 	// "../../lib/monitor" is an import specifier, not a file read.
 	modeStrictPath = "strict_local_path"
 
+	// modeShellPath is the internal mode of a token in a shell command's
+	// operand position. The command position is evidence that a relative
+	// directory without a file extension is a path (`ls web/dist/learn`), so
+	// the shape check is relaxed for exactly that form; a URL is still a URL.
+	modeShellPath = "shell_path"
+
+	// modePathField is the internal mode of a value under a path-named
+	// argument key (file_path, path, cwd, *_dir). The key is the same evidence
+	// as a shell operand: the value names a location, so a relative directory
+	// without a file extension is accepted.
+	modePathField = "path_field"
+
 	// maxValueBytes bounds a stored value. A path or URL longer than this is
 	// not indexed rather than truncated: a truncated value would collide with
 	// every other value sharing its prefix, and no real path or endpoint is
@@ -227,7 +239,9 @@ func resolveCandidate(c candidate) (kind, value string, ok bool) {
 		return "", "", false
 	}
 	src := []byte(token)
-	matches := secretmask.Indicators(src)
+	matches := secretmask.IndicatorsWithOptions(src, secretmask.IndicatorOptions{
+		PathOperand: relaxedPathMode(c.mode),
+	})
 	if len(matches) != 1 {
 		return "", "", false
 	}
@@ -250,6 +264,10 @@ func resolveCandidate(c candidate) (kind, value string, ok bool) {
 		if kind == KindLocalPath && !isStrongPathToken(token) {
 			return "", "", false
 		}
+	case c.mode == modeShellPath || c.mode == modePathField:
+		// A shell operand can be either a URL or a local path; a path field is
+		// normally a path but a URL is still a location. The relaxed local-path
+		// check already ran inside IndicatorsWithOptions.
 	case c.mode != "" && c.mode != kind:
 		return "", "", false
 	}
@@ -261,6 +279,12 @@ func resolveCandidate(c candidate) (kind, value string, ok bool) {
 		return "", "", false
 	}
 	return kind, value, true
+}
+
+// relaxedPathMode reports whether a mode already establishes that its token is
+// a location, so a relative directory without a file extension is a path.
+func relaxedPathMode(mode string) bool {
+	return mode == modeShellPath || mode == modePathField
 }
 
 // isStrongPathToken reports whether a relative path candidate has evidence of

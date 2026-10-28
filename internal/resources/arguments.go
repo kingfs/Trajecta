@@ -262,7 +262,7 @@ func (w argumentWalker) emitString(role keyRole, text string) {
 	case roleURL:
 		w.emit(KindURL, text, 0, len(text))
 	case rolePath:
-		w.emit("", text, 0, len(text))
+		w.emit(modePathField, text, 0, len(text))
 	case roleContent:
 		return
 	default:
