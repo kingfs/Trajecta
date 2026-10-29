@@ -1,0 +1,511 @@
+/*
+ * Console refresh layer.
+ *
+ * Loaded after pages.css in the same `legacy` cascade layer, so it settles the
+ * frame, the overview's readout strip and the quick-navigation palette without
+ * reaching for utilities or !important. The new visual language is deliberately
+ * narrow: warm graphite surfaces, one signal-copper accent, hairlines instead
+ * of shadows, and flat data regions instead of cards inside cards. Everything
+ * here is still a token consumer - the palette lives in tokens.css.
+ */
+
+/* ---------------------------------------------------- browser surfaces */
+
+::selection {
+  background: color-mix(in srgb, var(--accent-solid) 34%, transparent);
+  color: var(--text-primary);
+}
+
+:root {
+  caret-color: var(--accent);
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+/* Numerals in this console are read in columns, so they get the tabular set
+ * everywhere instead of only inside the tiles. Body copy is unaffected by
+ * `tabular-nums` on a proportional face beyond a slightly wider `1`. */
+body {
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* -------------------------------------------------------- rail identity */
+
+.primary-nav {
+  /* The quick-jump control is a fourth row: brand, search, destinations,
+     account. Without this the destinations row collapsed and the account block
+     floated over the list. */
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.nav-brand-mark,
+.about-mark {
+  background: var(--accent-solid);
+  color: var(--on-accent);
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  box-shadow: none;
+}
+
+.nav-brand-mark {
+  border-radius: 8px;
+}
+
+.about-mark {
+  border-radius: 14px;
+}
+
+.nav-brand strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+}
+
+.nav-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 34px;
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-search:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.nav-search:focus-visible {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.nav-search svg {
+  flex: none;
+}
+
+.nav-search-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-search-kbd,
+.command-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.app-shell-collapsed .nav-search {
+  justify-content: center;
+  padding: 0;
+}
+
+.app-shell-collapsed .nav-search-label,
+.app-shell-collapsed .nav-search-kbd {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .nav-search {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .nav-search-label,
+  .nav-search-kbd {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------- overview readout */
+
+/* Six metrics are one instrument strip, not six floating cards. The dividers
+ * carry the grouping the gap used to, and the strip gets one border instead of
+ * six. It stays six columns at the width a dashboard is actually read at, so
+ * the two-row 4 + 2 orphan disappears. */
+.overview-kpi-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.overview-kpi-grid .stat-card {
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 20px;
+}
+
+.overview-kpi-grid .stat-card:last-child {
+  border-right: 0;
+}
+
+.overview-kpi-grid .stat-card strong {
+  font-size: 1.75rem;
+}
+
+@media (max-width: 1280px) {
+  .overview-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overview-kpi-grid .stat-card {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .overview-kpi-grid .stat-card:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .overview-kpi-grid .stat-card:nth-last-child(-n + 3) {
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .overview-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-kpi-grid .stat-card {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .overview-kpi-grid .stat-card:nth-child(3n) {
+    border-right: 1px solid var(--border-subtle);
+  }
+
+  .overview-kpi-grid .stat-card:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .overview-kpi-grid .stat-card:nth-last-child(-n + 3) {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .overview-kpi-grid .stat-card:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .overview-kpi-grid .stat-card strong {
+    font-size: 1.5rem;
+  }
+}
+
+/* The overview's two inner surfaces are data regions inside a panel, not
+ * independent cards. Flattening them removes the card-in-card stack the
+ * detector flags and lets the rows themselves carry the grid. */
+.overview-breakdown .breakdown-card {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.overview-attention-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-8);
+}
+
+.overview-attention-panel {
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  padding: var(--space-4) 0;
+}
+
+.overview-attention-panel:nth-child(-n + 2) {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.overview-attention-panel:last-child,
+.overview-attention-panel:nth-last-child(2) {
+  padding-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .overview-attention-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-attention-panel {
+    border-top: 1px solid var(--border-subtle);
+    padding: var(--space-4) 0;
+  }
+
+  .overview-attention-panel:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .overview-attention-panel:last-child {
+    padding-bottom: 0;
+  }
+}
+
+/* --------------------------------------------------------- trace rows */
+
+/* A failed row is still a row. The red wash turned every cell into a tinted
+ * surface and grey secondary text lost its contrast on it; a neutral row with
+ * the status chips doing the signalling is both calmer and more legible. */
+.trace-row-failed,
+.trace-row-failed:hover,
+.trace-row-group,
+.trace-row-group:hover {
+  background: var(--surface-2);
+}
+
+.trace-row-failed:hover,
+.trace-row-group:hover {
+  background: var(--surface-3);
+}
+
+.trace-row-group {
+  box-shadow: none;
+}
+
+/* --------------------------------------------------- quick navigation */
+
+.command-dialog.nav-modal {
+  border-radius: var(--radius-lg);
+  border-color: var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.command-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.command-search-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-tertiary);
+}
+
+.command-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  outline: none;
+}
+
+.command-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.command-list {
+  max-height: min(420px, 56vh);
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.command-group-label {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-item[aria-selected="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.command-item-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.command-item[aria-selected="true"] .command-item-icon {
+  color: var(--accent);
+}
+
+.command-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-item-path {
+  flex: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.command-empty {
+  margin: 0;
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.command-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.command-foot span + kbd,
+.command-foot kbd + span {
+  margin-left: var(--space-1);
+}
+
+.command-foot kbd:not(:first-child) {
+  margin-left: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .command-dialog.nav-modal {
+    width: calc(100vw - 16px) !important;
+  }
+
+  .command-item-path {
+    display: none;
+  }
+
+  .command-foot {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------- flat inner surfaces */
+
+/* A card is the page's one elevation step; a bordered table, filter bar or
+ * empty state inside it is a second step doing the same job. These inner
+ * surfaces keep their layout and lose the card costume, so the reader sees one
+ * frame and a set of data regions rather than a box inside a box. */
+[data-slot="card"] .filter-bar,
+[data-slot="card"] .trace-table,
+[data-slot="card"] .session-table,
+[data-slot="card"] .empty-state,
+[data-slot="card"] .empty-state-inline,
+[data-slot="card"] .breakdown-card,
+[data-slot="card"] .system-gauge,
+[data-slot="card"] .system-table {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-slot="card"] .filter-bar {
+  padding: 0 0 var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+[data-slot="card"] .empty-state-inline {
+  padding: var(--space-4) 0;
+  text-align: left;
+}
+
+[data-slot="card"] .empty-state-inline .empty-state-action {
+  justify-content: flex-start;
+}
+
+[data-slot="card"] .system-gauge {
+  padding: 0;
+}
+
+/* The table head is the row that still needs a surface: it is the sticky
+ * reference for the columns below it. */
+[data-slot="card"] .trace-table-head,
+[data-slot="card"] .session-table-head {
+  border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* The provider list is a set of rows inside one panel, not a grid of cards. */
+[data-slot="card"] .upstream-card,
+[data-slot="card"] .provider-entry-card {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-slot="card"] .upstream-card:first-of-type,
+[data-slot="card"] .provider-entry-card:first-of-type {
+  border-top: 0;
+}

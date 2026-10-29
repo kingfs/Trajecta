@@ -29,7 +29,7 @@ const buttonVariants = cva(
         // .ghost-button
         ghost: "border-border bg-secondary text-foreground hover:border-border-strong hover:bg-accent",
         subtle: "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-        danger: "border-transparent bg-danger text-primary-foreground hover:border-transparent hover:opacity-90",
+        danger: "border-transparent bg-danger-solid text-destructive-foreground hover:border-transparent hover:bg-danger-hover",
         link: "border-transparent bg-transparent p-0 text-brand underline-offset-4 hover:underline",
       },
       size: {

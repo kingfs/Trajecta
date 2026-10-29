@@ -7,37 +7,29 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { SegmentedControl, SegmentedControlItem } from "./ui/segmented-control";
 import { Separator } from "./ui/separator";
 import {
-  Activity,
-  Bell,
   Info,
   LoaderCircle,
   Monitor,
   Moon,
   Radio,
+  Search,
   WifiOff,
   Sun,
-  LayoutGrid,
-  Lock,
-  LogOut,
-  Package,
-  PanelLeft,
-  Plug,
-  Route,
-  Settings,
-  Shield,
-  Terminal,
   X,
 } from "lucide-react";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
 import { useJSON } from "../hooks/useJSON";
 import { useRealtimeStatus } from "../hooks/useRealtimeStatus";
 import { GitHubMark } from "./common/GitHubMark";
+import { NavIcon } from "./NavIcon";
 import { isLegacyActive, navGroups } from "../lib/nav";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { RealtimeStatus } from "../lib/realtime";
 import { useWriteMutation } from "../lib/mutations";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 import { cn } from "../lib/utils";
+
+const PALETTE_SHORTCUT = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
 
 /**
  * The rail.
@@ -46,7 +38,7 @@ import { cn } from "../lib/utils";
  * header names the group a page belongs to and that label has to come from the
  * same list this renders.
  */
-export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
+export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed, onOpenPalette }) {
   const { t } = useI18n();
   const [accountOpen, setAccountOpen] = useState(false);
   // The account button, as the place focus returns to after a form opened from
@@ -86,6 +78,21 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           <NavIcon name={collapsed ? "sidebar" : "sidebar-collapse"} />
         </button>
       </div>
+
+      {/* The quick-jump control sits above the destinations rather than in the
+          page header: it is rail chrome, it has to survive every route, and the
+          header is already the one place a page spends on its own controls. */}
+      <button
+        className="nav-search"
+        type="button"
+        onClick={onOpenPalette}
+        aria-label={t("palette.open")}
+        title={t("palette.open")}
+      >
+        <Search size={15} aria-hidden="true" />
+        <span className="nav-search-label">{t("palette.title")}</span>
+        <kbd className="nav-search-kbd">{PALETTE_SHORTCUT}</kbd>
+      </button>
 
       <div className="nav-scroll">
         {navGroups(user).map((group) => (
@@ -435,43 +442,6 @@ function PasswordDialog({ onClose, returnFocusTo }) {
       </DialogContent>
     </Dialog>
   );
-}
-
-/*
- * Navigation glyphs, from lucide-react. The thirteen cases that used to be
- * hand-drawn 24x24 paths are one word each now, and they match the icons the
- * rest of the console uses.
- *
- * The sidebar toggle is the one case that needs a decision rather than a
- * lookup: lucide draws a single PanelLeft whose chevron always points right, so
- * the expanded rail and the collapsed rail would look identical. The two states
- * are mirrored with a horizontal flip, which is what the hand-drawn pair did.
- */
-const NAV_ICONS = {
-  sidebar: PanelLeft,
-  grid: LayoutGrid,
-  bell: Bell,
-  activity: Activity,
-  shield: Shield,
-  route: Route,
-  box: Package,
-  plug: Plug,
-  terminal: Terminal,
-  lock: Lock,
-  logout: LogOut,
-  settings: Settings,
-  info: Info,
-};
-
-function NavIcon({ name }) {
-  if (name === "sidebar-collapse") {
-    return <PanelLeft size={15} className="-scale-x-100" aria-hidden="true" />;
-  }
-  const Icon = NAV_ICONS[name];
-  if (!Icon) {
-    return null;
-  }
-  return <Icon size={15} aria-hidden="true" />;
 }
 
 function displayName(user) {

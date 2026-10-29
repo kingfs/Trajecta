@@ -152,7 +152,7 @@ export function OverviewPage() {
       {/* Six separate breakdown lists used to be six full-height columns of the
           same shape; one list plus a dimension switch shows the same data
           without making the page scroll sideways. */}
-      <Card as="section">
+      <Card as="section" className="overview-breakdown">
         <div className="panel-head">
           <div>
             <h2>{t("overview.topBreakdowns")}</h2>

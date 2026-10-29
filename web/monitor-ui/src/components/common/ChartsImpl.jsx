@@ -16,9 +16,11 @@ import { formatCount, formatTimelineBucketLabel } from "../../lib/monitor";
 import { useI18n } from "../../lib/i18n";
 
 // Series palette. It has to stay legible on both themes, so the hues are the
-// desaturated cousins of the semantic colours rather than the raw tokens: the
-// accent leads, then green/amber/rose/violet, then supporting teals.
-const COLORS = ["#5b8cff", "#3ecf8e", "#e3a008", "#f2555a", "#a78bfa", "#22a7c4", "#e07b39", "#4f9d7a"];
+// desaturated cousins of the semantic colours rather than the raw tokens. The
+// signal copper leads so a one-series chart belongs to the same console as the
+// buttons and the active rail entry; the rest are chosen for separation, not
+// for matching a state - a chart series is a category, not a status.
+const COLORS = ["#d9653b", "#5b8cff", "#3ecf8e", "#a78bfa", "#e3a008", "#22a7c4", "#f2555a", "#8f9b93"];
 
 export function MultiLineChart({
   items = [],

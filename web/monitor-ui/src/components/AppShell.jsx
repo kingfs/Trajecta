@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { PrimaryNav } from "./PrimaryNav";
 import { PageLoadingMask } from "./common/LoadingOverlay";
+import { CommandPalette } from "./CommandPalette";
 import { useI18n } from "../lib/i18n";
 
 const SIDEBAR_COLLAPSED_KEY = "trajecta.monitor.sidebar.collapsed";
@@ -10,6 +11,7 @@ export function AppShell({ children, user, onLogout }) {
   const { t } = useI18n();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const mainRef = useRef(null);
   // The first render is not a navigation: focusing the content then would drop a
   // focus ring on the page before the reader has done anything.
@@ -18,6 +20,20 @@ export function AppShell({ children, user, onLogout }) {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
   }, [collapsed]);
+
+  // The shortcut is global on purpose: a reader can be anywhere in the console
+  // and does not have to find the rail control first. Typing Cmd/Ctrl+K into a
+  // field is still the palette, which is what every editor and browser does.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // A route change is a new page, and a single-page app never tells a screen
   // reader that. Moving focus to the content is what turns "the router swapped
@@ -95,12 +111,19 @@ export function AppShell({ children, user, onLogout }) {
         {t("nav.skipToContent")}
       </a>
       <aside className="app-sidebar">
-        <PrimaryNav user={user} onLogout={onLogout} collapsed={collapsed} onToggleCollapsed={() => setCollapsed((value) => !value)} />
+        <PrimaryNav
+          user={user}
+          onLogout={onLogout}
+          collapsed={collapsed}
+          onToggleCollapsed={() => setCollapsed((value) => !value)}
+          onOpenPalette={() => setPaletteOpen(true)}
+        />
       </aside>
       <main className="app-main" id="main-content" ref={mainRef} tabIndex={-1}>
         {children}
         <PageLoadingMask />
       </main>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} user={user} />
     </div>
   );
 }

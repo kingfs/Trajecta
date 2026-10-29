@@ -1,9 +1,3 @@
-@import "@radix-ui/colors/slate.css";
-@import "@radix-ui/colors/slate-dark.css";
-@import "@radix-ui/colors/slate-alpha.css";
-@import "@radix-ui/colors/slate-dark-alpha.css";
-@import "@radix-ui/colors/blue.css";
-@import "@radix-ui/colors/blue-dark.css";
 @import "@radix-ui/colors/green.css";
 @import "@radix-ui/colors/green-dark.css";
 @import "@radix-ui/colors/amber.css";
@@ -18,43 +12,44 @@
 /*
  * Trajecta Console design tokens.
  *
- * Colour comes from @radix-ui/colors. Each semantic token names the step Radix
- * designed for that job rather than a colour picked by eye:
+ * The neutral axis and the accent are declared here, not taken from a ramp: the
+ * console is a warm graphite instrument with one signal-copper accent, and a
+ * slate ramp beside it reads as two palettes. Status hues (green, amber, red,
+ * cyan, violet) still come from @radix-ui/colors, because their steps are
+ * already tuned against each other and give the console a state vocabulary that
+ * does not depend on the accent:
  *
- *   step 1  app background            step 7  element border, focus ring
- *   step 2  subtle background         step 8  hovered element border
- *   step 3  element background        step 9  solid fill, the accent itself
- *   step 4  hovered element           step 10 hovered solid
- *   step 5  active/selected element   step 11 low-contrast text
- *   step 6  subtle border             step 12 high-contrast text
+ *   step 3  tint background           step 9  solid fill
+ *   step 7  tint border               step 11 status text
+ *   step 12 high-contrast label
  *
- * Both themes resolve the same names. The imported `-dark` stylesheets re-point
- * --slate-N and the six hues under `.dark`, and applyTheme() puts `dark` on
- * <html> beside `data-theme`, so a semantic token needs one declaration rather
- * than one per theme. The six hues are slate's siblings by construction: each
- * ramp is tuned against the same neutrals, which is why a success green and a
- * danger red sit at the same lightness and neither shouts.
+ * Both themes declare the same semantic names. The imported `-dark`
+ * stylesheets re-point the five status ramps under `.dark`, and applyTheme()
+ * puts `dark` on <html> beside `data-theme`, so a status token needs one
+ * declaration rather than one per theme. The surfaces, text levels, borders and
+ * the accent are stated twice on purpose: the light theme is warm paper, the
+ * dark theme is near-black graphite, and neither is a tint of the other.
  *
- * Only what Radix does not model is declared twice: the surface order (a light
- * theme stacks near-white cards on a tinted canvas, a dark theme stacks lifted
- * cards on a near-black canvas, so the steps swap) and the shadows, which are
- * invisible on a dark background.
+ * The surface order is part of the design: a light theme stacks near-white cards
+ * on a darker paper canvas, a dark theme lifts cards off a near-black canvas, so
+ * the steps swap direction rather than values. Shadows are themed separately
+ * because they are invisible on a dark background.
  *
  * Everything else here is theme-independent: type, spacing, radii and motion.
  */
 
 :root {
   /* Typography */
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --text-label: 0.6875rem;
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
   --text-md: 0.9375rem;
   --text-lg: 1.0625rem;
-  --text-xl: 1.375rem;
-  --text-2xl: 1.75rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 1.875rem;
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
@@ -99,47 +94,43 @@
  * complete theme.
  */
 :root {
-  /* Surfaces. A dark theme lifts a card off the canvas; the light theme below
-     turns the pair around.
-     Each dark step is pulled a few percent towards the brand ramp. A pure
-     neutral slate beside a blue accent reads as unstyled chrome, and at these
-     lightnesses a few percent of blue is all it takes to make the frame and the
-     accent look like one palette. The tint is deliberately small: the surface
-     steps still have to stay 1.05:1 apart and every text step still has to clear
-     AA on all five of them, which tests-unit/tokens.test.js asserts on the
-     resolved values rather than on the mix. */
-  --bg-canvas: color-mix(in oklab, var(--slate-1) 88%, var(--blue-9));
-  --bg-base: color-mix(in oklab, var(--slate-1) 93%, var(--blue-9));
-  --surface-1: color-mix(in oklab, var(--slate-2) 90%, var(--blue-9));
-  --surface-2: color-mix(in oklab, var(--slate-3) 90%, var(--blue-9));
-  --surface-3: color-mix(in oklab, var(--slate-4) 90%, var(--blue-9));
-  --surface-inset: color-mix(in oklab, var(--slate-1) 96%, var(--blue-9));
-  --surface-hover: var(--slate-a3);
-  --surface-inverse: var(--slate-12);
-  --on-inverse: var(--slate-1);
+  /* Surfaces. A warm graphite frame, not a blue-black one: the tint comes from
+     the signal copper at the very bottom of its chroma, which keeps the frame
+     and the accent in the same family without washing the neutrals. The values
+     are composites rather than ramp steps because the console needs a neutral
+     axis of its own - a slate scale beside a warm accent reads as two
+     palettes. */
+  --bg-canvas: #0b0b0c;
+  --bg-base: #0e0e0f;
+  --surface-1: #131312;
+  --surface-2: #191917;
+  --surface-3: #201f1c;
+  --surface-inset: #0a0a0b;
+  --surface-hover: #26231f;
+  --surface-inverse: #f2eee6;
+  --on-inverse: #141210;
 
-  /* Borders. Solid steps, not a translucent white: the reason light mode read
-     as one flat sheet was a 9% hairline that vanished against a white card. */
-  --border-subtle: color-mix(in oklab, var(--slate-6) 88%, var(--blue-9));
-  --border: color-mix(in oklab, var(--slate-7) 88%, var(--blue-9));
-  --border-strong: color-mix(in oklab, var(--slate-8) 88%, var(--blue-9));
+  /* Borders. Three deliberate steps: a hairline that is visible on the canvas,
+     a control edge, and a boundary a reader can find without looking. */
+  --border-subtle: #2a2825;
+  --border: #3a3732;
+  --border-strong: #4d4841;
 
-  --text-primary: var(--slate-12);
-  --text-secondary: var(--slate-11);
-  /* The scales only publish two text steps, 11 and 12, and step 10 is not a
-     text colour in either theme: as ink on the canvas it lands at 4.4:1 in
-     dark and 3.7:1 in light. 90% of step 11 keeps a third, dimmer level that
-     still clears AA on every surface. */
-  --text-tertiary: color-mix(in oklab, var(--slate-11) 90%, var(--slate-1));
-  --text-inverse: var(--slate-1);
+  --text-primary: #f2eee6;
+  --text-secondary: #b8b1a5;
+  --text-tertiary: #8f887c;
+  --text-inverse: #141210;
 
-  --accent: var(--blue-11);
-  --accent-solid: var(--blue-9);
-  --accent-hover: var(--blue-10);
-  --accent-soft: var(--blue-3);
-  --accent-border: var(--blue-7);
-  --accent-strong: var(--blue-12);
-  --on-accent: #ffffff;
+  /* Signal copper. It is the one chromatic accent: primary action, current
+     selection, focus and the recording mark. Status still owns green, amber,
+     red and cyan, so the accent never has to mean "good" or "bad". */
+  --accent: #ff9b73;
+  --accent-solid: #c24a22;
+  --accent-hover: #d65a2e;
+  --accent-soft: #2a1710;
+  --accent-border: #5e2d1c;
+  --accent-strong: #ffc7ad;
+  --on-accent: #fff8f3;
 
   --success: var(--green-11);
   --success-solid: var(--green-9);
@@ -161,8 +152,11 @@
   --on-warning: #4f3422;
 
   --danger: var(--red-11);
-  --danger-solid: var(--red-9);
-  --danger-hover: var(--red-10);
+  /* Step 9 is the ramp's solid red and white on it is 3.9:1, which is below AA
+     for the 11px badge that uses it. The solid fill is darkened rather than the
+     badge alone: every destructive action and count badge shares this pair. */
+  --danger-solid: #c62a2f;
+  --danger-hover: #b32227;
   --danger-soft: var(--red-3);
   --danger-border: var(--red-7);
   --danger-strong: var(--red-12);
@@ -184,12 +178,12 @@
   --violet-strong: var(--violet-12);
   --on-violet: #ffffff;
 
-  --chart-grid: var(--slate-a5);
+  --chart-grid: color-mix(in srgb, var(--border-subtle) 72%, transparent);
   --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.4);
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
-  --shadow-md: 0 8px 24px oklch(0 0 0 / 0.36);
-  --shadow-lg: 0 24px 60px oklch(0 0 0 / 0.48);
-  --scrim: oklch(0.09 0.01 265 / 0.72);
+  --shadow-md: 0 8px 24px oklch(0 0 0 / 0.42);
+  --shadow-lg: 0 24px 60px oklch(0 0 0 / 0.54);
+  --scrim: oklch(0.01 0.002 70 / 0.85);
   color-scheme: dark;
 }
 
@@ -201,73 +195,71 @@
  * through lightness.
  */
 :root[data-theme="light"] {
-  /* The canvas is a step darker than the cards, so a panel is a surface rather
-     than a border floating on white. It carries the same brand tint the dark
-     theme uses, in the opposite direction: a cool desk under white paper. */
-  --bg-canvas: color-mix(in oklab, var(--slate-2) 95%, var(--blue-9));
+  /* A warm paper desk under near-white cards. The canvas is a step darker than
+     the cards so a panel is a surface rather than a border floating on white. */
+  --bg-canvas: #f2eee7;
   --bg-base: var(--bg-canvas);
-  /* A card is paper, so it is white rather than slate's step 1: the step is
-     #fcfcfd, three channel values off the canvas, which is the flat sheet the
-     light theme used to be. Everything else stays on the ramp. */
-  --surface-1: #ffffff;
-  --surface-2: color-mix(in oklab, var(--slate-3) 94%, var(--blue-9));
-  --surface-3: color-mix(in oklab, var(--slate-4) 94%, var(--blue-9));
-  --surface-inset: color-mix(in oklab, var(--slate-2) 96%, var(--blue-9));
-  --surface-hover: var(--slate-3);
+  --surface-1: #fbf8f2;
+  --surface-2: #f2ede4;
+  --surface-3: #e8e1d6;
+  --surface-inset: #e9e3d9;
+  --surface-hover: #e5ddd1;
+  --surface-inverse: #1c1a17;
+  --on-inverse: #f7f3ec;
 
-  /* The hairline keeps its contrast against the cooler canvas by staying close
-     to the neutral ramp: mixing it any further towards blue lifts it off the
-     canvas and the 1.2:1 floor below fails. */
-  --border-subtle: color-mix(in oklab, var(--slate-6) 94%, var(--blue-9));
-  --border: color-mix(in oklab, var(--slate-7) 94%, var(--blue-9));
-  --border-strong: color-mix(in oklab, var(--slate-8) 94%, var(--blue-9));
+  --border-subtle: #ddd5c9;
+  --border: #ccc2b3;
+  --border-strong: #b2a695;
 
-  /* The ramps publish two text steps, so the middle of the three levels is
-     pulled towards step 12 and the dimmest is step 11 itself - the darkest ink
-     that still clears AA on this theme's raised surfaces. */
-  --text-secondary: color-mix(in oklab, var(--slate-11) 70%, var(--slate-12));
-  --text-tertiary: var(--slate-11);
+  --text-primary: #1c1a17;
+  --text-secondary: #544d44;
+  --text-tertiary: #675e52;
+  --text-inverse: #f7f3ec;
 
-  /* Green's and amber's step 11 sit just under AA on a near-white page -
-     4.49:1 and 4.38:1 - so the light theme pulls that ink slightly towards step
-     12 rather than shipping status colours that fail by a rounding error. Blue's
-     step 11 is the third: it clears AA on white and on the old near-white
-     canvas, but the canvas is a shade cooler now and 4.32:1 is a fail. */
-  --accent: color-mix(in oklab, var(--blue-11) 90%, var(--blue-12));
-  --info: color-mix(in oklab, var(--cyan-11) 90%, var(--cyan-12));
-  --success: color-mix(in oklab, var(--green-11) 92%, var(--green-12));
-  --warning: color-mix(in oklab, var(--amber-11) 88%, var(--amber-12));
-  --violet: color-mix(in oklab, var(--violet-11) 94%, var(--violet-12));
-  --danger: color-mix(in oklab, var(--red-11) 94%, var(--red-12));
+  --accent: #a83a17;
+  --accent-solid: #a83a17;
+  --accent-hover: #8f2f10;
+  --accent-soft: #f8e7dc;
+  --accent-border: #e6b69f;
+  --accent-strong: #6f2408;
+  --on-accent: #fffaf5;
 
-  --shadow-xs: 0 1px 2px oklch(0.25 0.02 265 / 0.05);
-  --shadow-sm: 0 1px 2px oklch(0.25 0.02 265 / 0.06), 0 1px 3px oklch(0.25 0.02 265 / 0.04);
-  --shadow-md: 0 6px 20px oklch(0.25 0.02 265 / 0.08);
-  --shadow-lg: 0 20px 48px oklch(0.25 0.02 265 / 0.12);
-  --scrim: oklch(0.20 0.02 265 / 0.42);
+  --success: color-mix(in oklab, var(--green-11) 82%, var(--green-12));
+  --warning: color-mix(in oklab, var(--amber-11) 80%, var(--amber-12));
+  --danger: color-mix(in oklab, var(--red-11) 88%, var(--red-12));
+  --info: color-mix(in oklab, var(--cyan-11) 82%, var(--cyan-12));
+  --violet: color-mix(in oklab, var(--violet-11) 88%, var(--violet-12));
+
+  --chart-grid: color-mix(in srgb, var(--border-subtle) 78%, transparent);
+  --shadow-xs: 0 1px 2px oklch(0.25 0.02 70 / 0.05);
+  --shadow-sm: 0 1px 2px oklch(0.25 0.02 70 / 0.06), 0 1px 3px oklch(0.25 0.02 70 / 0.04);
+  --shadow-md: 0 6px 20px oklch(0.25 0.02 70 / 0.08);
+  --shadow-lg: 0 20px 48px oklch(0.25 0.02 70 / 0.12);
+  --scrim: oklch(0.20 0.02 70 / 0.42);
   color-scheme: light;
 }
 
 /*
  * Chrome. These are composites rather than ramp steps, because the sticky
- * header, the rail and the page glow are all derived from the canvas: naming
- * them once here is what stops a later `--bg-canvas` edit from leaving the
- * frame behind. The two themes need different mixes - a translucent dark header
- * has to lift, a translucent light one has to stay paper - so both are stated.
+ * header and the rail are derived from the canvas. The dark theme lifts the
+ * chrome with a hairline and a slightly darker rail; the light theme keeps it
+ * paper. No page-wide glow: the frame is an instrument panel, and a coloured
+ * radial wash behind it was the one decorative layer the content never used.
  */
 :root {
-  --chrome-bg: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
-  --chrome-blur: saturate(150%) blur(14px);
-  --page-glow: radial-gradient(1100px 520px at 76% -14%, color-mix(in srgb, var(--accent-solid) 17%, transparent), transparent 68%);
-  --rail-bg: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 94%, var(--accent-solid)) 0%, var(--bg-base) 76%);
-  --rail-shadow: 24px 0 56px -38px oklch(0 0 0 / 0.7);
-  --edge-highlight: inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+  --chrome-bg: color-mix(in srgb, var(--bg-canvas) 80%, transparent);
+  --chrome-blur: saturate(130%) blur(14px);
+  --page-glow: none;
+  --rail-bg: var(--bg-base);
+  --rail-shadow: none;
+  --edge-highlight: inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
 }
 
 :root[data-theme="light"] {
-  --page-glow: radial-gradient(1000px 460px at 78% -16%, color-mix(in srgb, var(--accent-solid) 9%, transparent), transparent 66%);
-  --rail-bg: linear-gradient(180deg, #ffffff 0%, color-mix(in srgb, var(--bg-canvas) 72%, #ffffff) 100%);
-  --rail-shadow: 20px 0 44px -40px oklch(0.35 0.05 250 / 0.4);
+  --chrome-bg: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --page-glow: none;
+  --rail-bg: #f7f3ec;
+  --rail-shadow: none;
   --edge-highlight: inset 0 1px 0 #ffffff;
 }
 

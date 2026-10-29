@@ -92,8 +92,8 @@
   border-radius: var(--radius-lg);
   background: linear-gradient(135deg, rgba(124,108,255,.08), rgba(255,255,255,.02));
 }
-.session-trajectory-user { border-left: 3px solid var(--accent-solid); }
-.session-trajectory-agent { border-left: 3px solid var(--success); }
+.session-trajectory-user { border-left: 1px solid var(--accent-border); background: color-mix(in srgb, var(--accent-soft) 34%, var(--surface-1)); }
+.session-trajectory-agent { border-left: 1px solid var(--success-border); background: color-mix(in srgb, var(--success-soft) 26%, var(--surface-1)); }
 .session-trajectory-marker {
   display: grid;
   place-items: center;
@@ -189,7 +189,7 @@
 }
 
 .trace-row-group {
-  box-shadow: inset 2px 0 0 var(--danger-solid);
+  box-shadow: none;
 }
 
 .trace-failure-panel {
@@ -524,7 +524,7 @@
   gap: var(--space-2);
   padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface-1);
   /* The console's topbar is sticky; without this a target scrolls under it. */
@@ -669,7 +669,7 @@
   gap: var(--space-1);
   padding: var(--space-2);
   border: 1px solid var(--accent-border);
-  border-left-width: 3px;
+  border-left-width: 1px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   scroll-margin-top: 5.5rem;

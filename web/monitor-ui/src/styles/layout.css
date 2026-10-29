@@ -145,7 +145,7 @@
   }
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1180px) {
   .app-shell,
   .app-shell-collapsed {
     grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
@@ -465,7 +465,7 @@
   line-height: 13px;
 }
 
-/* Below 1000px the rail keeps its icons and gives up its width: the shell
+/* Below 1180px the rail keeps its icons and gives up its width: the shell
    switches the grid column to `--sidebar-width-collapsed`, so the labels have
    nowhere to go. They used to stay in the markup and be clipped mid-character
    by the rail's `overflow: hidden`, which read as a rendering fault, and with
@@ -477,7 +477,7 @@
  * by a media query and classes cannot be. It leaves the layout but stays in the
  * accessibility tree, so the link keeps the name the rail can no longer show,
  * and `title` puts it back on hover. */
-@media (max-width: 1000px) {
+@media (max-width: 1180px) {
   .nav-brand-copy strong,
   .nav-section-label,
   .account-copy,
@@ -804,7 +804,7 @@ html {
 /* The narrow rail is the collapsed rail: the same 72px column, so the footer
    gives up the same things. This has to come after the base rules above rather
    than inside the earlier media block, which it would lose the cascade to. */
-@media (max-width: 1000px) {
+@media (max-width: 1180px) {
   .nav-footer {
     justify-content: center;
     gap: 0;

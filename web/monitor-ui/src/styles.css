@@ -1294,23 +1294,6 @@ a:focus-visible {
   overflow: hidden;
 }
 
-.stat-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 88% 0%, var(--accent-soft), transparent 12rem);
-  pointer-events: none;
-}
-
-.stat-card::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--accent-solid), var(--success-solid));
-  opacity: 0.72;
-}
-
 .stat-card span {
   color: var(--muted);
   text-transform: uppercase;
@@ -3036,7 +3019,7 @@ a:focus-visible {
 
 .rendered-markdown blockquote {
   padding-left: 14px;
-  border-left: 3px solid var(--accent-border);
+  border-left: 2px solid var(--accent-border);
   color: var(--muted);
 }
 

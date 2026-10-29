@@ -2435,6 +2435,29 @@ test("collapsed sidebar keeps a visible expand control", async ({ page, isMobile
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
 });
 
+test("quick navigation opens from the rail and the keyboard", async ({ page }) => {
+  await page.goto("/overview");
+  await page.getByRole("button", { name: "Quick navigation" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Quick navigation" });
+  await expect(dialog).toBeVisible();
+
+  const search = page.getByRole("combobox");
+  await search.fill("routing");
+  await expect(page.getByRole("option", { name: /Routing/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+
+  await expect(page).toHaveURL(/\/routing$/);
+  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
+
+  // The shortcut is the part that works from any route, so it gets its own
+  // open/close round trip rather than relying on the rail button.
+  await page.keyboard.press("Control+k");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
 // The account surface has been three shapes: a hand-positioned popover clamped
 // to the rail, a centred modal, and now a panel anchored to the account button.
 // The two properties below are the ones both earlier shapes got wrong - it opens
@@ -3693,9 +3716,13 @@ test("the About page draws its identity block and every project link", async ({ 
   const mark = page.locator(".about-mark");
   await expect(mark).toBeVisible();
   await expect(mark).toHaveText("T");
-  // Filled rather than an outline: "none" here means the brand gradient failed
-  // to resolve and the letter is sitting on the bare card.
-  expect(await mark.evaluate((node) => getComputedStyle(node).backgroundImage)).not.toBe("none");
+  // Filled rather than an outline: a transparent background and no image means
+  // the mark's fill failed to resolve and the letter is sitting on the bare card.
+  const markPaint = await mark.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { image: style.backgroundImage, color: style.backgroundColor };
+  });
+  expect(markPaint.image !== "none" || markPaint.color !== "rgba(0, 0, 0, 0)").toBe(true);
 
   // Repository, releases, issues, documentation.
   await expect(page.locator(".about-link")).toHaveCount(4);
