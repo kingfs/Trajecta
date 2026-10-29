@@ -80,7 +80,6 @@
 /* ---------------------------------------------------------- stat tiles */
 
 .hero-grid,
-.overview-kpi-grid,
 .overview-health-grid,
 .session-breakdown-grid,
 .overview-breakdown-grid,
@@ -95,10 +94,6 @@
   grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
   gap: var(--space-4);
   margin-bottom: var(--space-4);
-}
-
-.overview-kpi-grid {
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
 }
 
 .hero-grid-compact {

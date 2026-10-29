@@ -82,7 +82,7 @@ export function OverviewPage() {
       {error ? <EmptyState title={t("overview.loadError")} detail={error} tone="danger" /> : null}
       {loading && !data ? <EmptyState title={t("overview.loading")} detail={t("overview.loadingDetail")} /> : null}
 
-      <section className="hero-grid overview-kpi-grid" aria-label={t("overview.title")}>
+      <section className="hero-grid" aria-label={t("overview.title")}>
         <StatCard label={t("overview.requests")} value={formatCount(summary.request_count ?? 0)} detail={t("overview.activeSessions", { count: formatCount(summary.session_count ?? 0) })} />
         <StatCard label={t("common.successRate")} value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={t("overview.successful", { count: formatCount(summary.success_request ?? 0) })} accent="accent-green" />
         <StatCard label={t("overview.failed")} value={formatCount(summary.failed_request ?? 0)} detail={t("overview.recentFailures", { count: attention.recent_failures?.length ?? 0 })} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />

@@ -57,6 +57,13 @@ export function ModelsPage() {
         actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("models.window")} />}
       />
 
+      <section className="hero-grid" aria-label={t("models.catalogTitle")}>
+        <StatCard label={t("models.title")} value={formatCount(items.length)} />
+        <StatCard label={t("common.requests")} value={formatCount(totals.requests)} />
+        <StatCard label={t("common.failed")} value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
+        <StatCard label={t("common.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
+      </section>
+
       <Card as="section">
         <div className="panel-head">
           <div>
@@ -79,12 +86,6 @@ export function ModelsPage() {
             {t("common.reset")}
           </Button>
         </form>
-        <div className="hero-grid hero-grid-compact">
-          <StatCard label={t("models.title")} value={formatCount(items.length)} />
-          <StatCard label={t("common.requests")} value={formatCount(totals.requests)} />
-          <StatCard label={t("common.failed")} value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
-          <StatCard label={t("common.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
-        </div>
       </Card>
 
       {models.error ? <EmptyState title={t("models.loadError")} detail={models.error} tone="danger" /> : null}

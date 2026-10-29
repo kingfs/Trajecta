@@ -1271,10 +1271,6 @@ a:focus-visible {
   margin-bottom: 20px;
 }
 
-.overview-kpi-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 .overview-health-grid {
   margin-bottom: 16px;
 }

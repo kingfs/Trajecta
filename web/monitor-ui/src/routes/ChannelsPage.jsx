@@ -72,17 +72,18 @@ export function ProvidersPage() {
         actions={<WindowToggle value={windowValue} onChange={setWindow} label={t("providers.analyticsWindow")} />}
       />
 
+      <section className="hero-grid" aria-label={t("providers.managed")}>
+        <StatCard label={t("providers.title")} value={formatCount(items.length)} />
+        <StatCard label={t("providers.enabled")} value={formatCount(totals.enabled)} />
+        <StatCard label={t("overview.requests")} value={formatCount(totals.requests)} />
+        <StatCard label={t("overview.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
+      </section>
+
       <Card as="section">
         <div className="panel-head">
           <div>
             <h2>{t("providers.managed")}</h2>
           </div>
-        </div>
-        <div className="hero-grid hero-grid-compact">
-          <StatCard label={t("providers.title")} value={formatCount(items.length)} />
-          <StatCard label={t("providers.enabled")} value={formatCount(totals.enabled)} />
-          <StatCard label={t("overview.requests")} value={formatCount(totals.requests)} />
-          <StatCard label={t("overview.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
         </div>
         <div className="usage-chart-grid chart-grid-two">
           <section className="usage-chart-panel">

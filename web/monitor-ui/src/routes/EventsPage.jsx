@@ -113,7 +113,7 @@ export function EventsPage() {
       {error ? <EmptyState title={t("events.loadError")} detail={error} tone="danger" /> : null}
       {loading && !data ? <EmptyState title={t("events.loading")} detail={t("events.loadingDetail")} /> : null}
 
-      <section className="hero-grid overview-kpi-grid">
+      <section className="hero-grid">
         <StatCard label={t("events.unread")} value={summary?.unread ?? 0} detail={t("events.totalEvents", { count: summary?.total ?? 0 })} accent={(summary?.unread ?? 0) ? "accent-red" : "accent-green"} />
         <StatCard label={t("events.critical")} value={summary?.critical ?? 0} detail={t("events.criticalDetail")} accent={(summary?.critical ?? 0) ? "accent-red" : ""} />
         <StatCard label={t("events.error")} value={summary?.error ?? 0} detail={t("events.errorDetail")} accent={(summary?.error ?? 0) ? "accent-red" : ""} />
