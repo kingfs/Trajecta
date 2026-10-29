@@ -287,16 +287,17 @@ body {
 /* A failed row is still a row. The red wash turned every cell into a tinted
  * surface and grey secondary text lost its contrast on it; a neutral row with
  * the status chips doing the signalling is both calmer and more legible. */
+/* The status code carries the failure on desktop; a tinted row was the last
+ * nested-card warning on an otherwise flat table. The phone layout below adds a
+ * restrained tint back because a failed card needs to be findable in a stack. */
 .trace-row-failed,
-.trace-row-failed:hover,
-.trace-row-group,
-.trace-row-group:hover {
-  background: var(--surface-2);
+.trace-row-group {
+  background: transparent;
 }
 
 .trace-row-failed:hover,
 .trace-row-group:hover {
-  background: var(--surface-3);
+  background: var(--surface-hover);
 }
 
 .trace-row-group {
@@ -508,4 +509,461 @@ body {
 [data-slot="card"] .upstream-card:first-of-type,
 [data-slot="card"] .provider-entry-card:first-of-type {
   border-top: 0;
+}
+
+/* ------------------------------------------------- trace list density */
+
+/* The real list is read by scanning, not by reading every cell. The legacy
+ * template reserved fixed widths for the speed, token and action columns, which
+ * left the model column at ~100px on a 1280 screen and pushed a row to 175px
+ * tall. A proportional template gives the model enough room to stay on one
+ * line and lets the measuring columns wrap only when they really have to. */
+.trace-table-head,
+.trace-row {
+  grid-template-columns: minmax(0, 1.9fr) 72px minmax(0, 1.3fr) minmax(0, 1.45fr) 118px;
+  gap: 10px;
+}
+
+/* A long list is read top-to-bottom; a header that scrolls away makes the
+ * columns unknowable after the first screen. The head sticks under the page
+ * chrome, and the table stops clipping it. */
+@media (min-width: 1101px) {
+  .trace-table {
+    overflow: visible;
+  }
+
+  .trace-table-head {
+    position: sticky;
+    top: var(--sticky-chrome-h, 0px);
+    z-index: 6;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 1px 0 var(--border-subtle);
+  }
+}
+
+/* Below 1100px the old layout turned every row into a five-block column
+ * (263px on a phone, 14k pages for 50 traces). The compact two-column shape
+ * keeps the identity, status and actions visible together and drops the
+ * measuring chips that the detail page owns. */
+@media (max-width: 1100px) {
+  .trace-table {
+    display: block;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  .trace-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main status"
+      "metrics metrics"
+      "tokens actions";
+    gap: 8px 10px;
+    align-items: start;
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1);
+  }
+
+  .trace-main {
+    grid-area: main;
+    min-width: 0;
+  }
+
+  .trace-metric-stack {
+    grid-area: status;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .latency-metric-stack {
+    grid-area: metrics;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .trace-token-stack {
+    grid-area: tokens;
+    min-width: 0;
+  }
+
+  .trace-row-actions {
+    grid-area: actions;
+    justify-content: flex-end;
+    align-self: end;
+  }
+
+  .trace-row-failed {
+    border-color: var(--danger-border);
+    background: color-mix(in srgb, var(--danger-soft) 24%, var(--surface-1));
+  }
+
+  .trace-row-grouped-child {
+    padding-left: 26px;
+  }
+
+  .trace-preview {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
+/* The overview's attention panels are queues, not a second copy of the full
+ * traffic table: the reader needs the model, the failure/status and the preview,
+ * then the row action. Latency and token chips belong on the list page. */
+.overview-attention-panel .trace-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "main status"
+    "main actions";
+  gap: 6px 10px;
+  align-items: start;
+  padding: 10px 0;
+}
+
+.overview-attention-panel .trace-main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.overview-attention-panel .trace-metric-stack {
+  grid-area: status;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.overview-attention-panel .trace-row-actions {
+  grid-area: actions;
+  justify-content: flex-end;
+}
+
+.overview-attention-panel .latency-metric-stack,
+.overview-attention-panel .trace-token-stack {
+  display: none;
+}
+
+/* ------------------------------------------------ conversation density */
+
+/* A conversation is a continuous log. Bordered cards around every step made a
+ * long transcript look like a deck of unrelated panels and doubled its height;
+ * a hairline between steps plus one role dot keeps the authorship clear. */
+.conversation-list {
+  gap: 0;
+}
+
+.conversation-step {
+  padding: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.conversation-step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.conversation-step:last-child {
+  padding-bottom: 0;
+}
+
+.conversation-step[data-kind],
+.conversation-step[data-kind]:hover {
+  border-left: 0;
+}
+
+.conversation-step[data-failed="true"] {
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  border-top-color: var(--danger-border);
+}
+
+.conversation-step-head::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.conversation-step[data-kind="reasoning"] .conversation-step-head::before {
+  background: var(--accent-solid);
+}
+
+.conversation-step[data-kind="tool_call"] .conversation-step-head::before,
+.conversation-step[data-kind="server_tool_call"] .conversation-step-head::before {
+  background: var(--warning-solid);
+}
+
+.conversation-step[data-kind="tool_result"] .conversation-step-head::before,
+.conversation-step[data-kind="server_tool_result"] .conversation-step-head::before {
+  background: var(--success-solid);
+}
+
+.conversation-step[data-failed="true"] .conversation-step-head::before {
+  background: var(--danger);
+}
+
+/* ------------------------------------------------- finding / tool rows */
+
+/* Findings, tool rows, credential replacements and timeline events are all
+ * rows inside a panel. They keep their head and actions and lose the second
+ * border/radius/background that made each one a card inside a card. */
+.finding-list,
+.tool-rows {
+  gap: 0;
+}
+
+[data-slot="card"] .finding-card,
+[data-slot="card"] .credential-mask-card,
+[data-slot="card"] .tool-row,
+[data-slot="card"] .timeline-card,
+[data-slot="card"] .routing-candidate-card {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-slot="card"] .finding-card {
+  padding: 14px 0;
+}
+
+[data-slot="card"] .tool-row,
+[data-slot="card"] .timeline-card,
+[data-slot="card"] .routing-candidate-card {
+  padding: 12px 0;
+}
+
+[data-slot="card"] .finding-card:first-child,
+[data-slot="card"] .tool-row:first-child,
+[data-slot="card"] .timeline-item:first-child .timeline-card,
+[data-slot="card"] .routing-candidate-card:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+[data-slot="card"] .timeline-card .collapse-card,
+[data-slot="card"] .routing-decision-panel .collapse-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+[data-slot="card"] .tool-row:hover,
+[data-slot="card"] .routing-candidate-card:hover {
+  background: var(--surface-hover);
+}
+
+/* ---------------------------------------------------- protocol density */
+
+.protocol-sections {
+  gap: 18px;
+}
+
+.json-node-row {
+  padding-top: 8px;
+}
+
+/* ------------------------------------------------------ phone geometry */
+
+/* The rail is the largest fixed cost on a 390px screen. At 64px it still holds
+ * the three 18px footer glyphs (56px of inner width), and the content column
+ * gains 8px; the 12px page gutter and 16px card padding add 16px more of usable
+ * line length where it is scarcest. */
+@media (max-width: 720px) {
+  .app-shell,
+  .app-shell-collapsed {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .page-loading-mask {
+    left: 64px;
+  }
+
+  .app-sidebar {
+    padding: var(--space-2) 4px;
+  }
+
+  .shell {
+    --page-pad-x: 12px;
+  }
+}
+
+@media (min-width: 1101px) {
+  .trace-table > .trace-row:last-child {
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+}
+
+/* On a phone the two-column row still left the token chips in a 160px well,
+ * where five chips wrapped into 90px and made the row taller than the old
+ * stacked card. The phone layout gives the tokens the full column and keeps the
+ * status and actions in a narrow right-hand rail; latency chips are omitted
+ * from the list because the detail page is one tap away. */
+@media (max-width: 600px) {
+  .trace-row {
+    grid-template-columns: minmax(0, 1fr) 72px;
+    grid-template-areas:
+      "main status"
+      "main actions"
+      "metrics metrics"
+      "tokens tokens";
+  }
+
+  .trace-main {
+    grid-row: span 2;
+  }
+
+  .trace-metric-stack {
+    grid-area: status;
+    align-self: start;
+  }
+
+  .trace-row-actions {
+    grid-area: actions;
+    align-self: end;
+  }
+
+  .trace-row .latency-metric-stack {
+    grid-area: metrics;
+  }
+
+  .trace-token-stack {
+    grid-area: tokens;
+  }
+
+  /* Two readings are enough for the list: total duration and TTFT. Prefill and
+   * generation speed remain on the trace detail toolbar. */
+  .trace-row .latency-metric-stack .latency-metric:nth-child(n + 3) {
+    display: none;
+  }
+}
+
+/* Three token readings are enough to scan a row: input, output and total. The
+ * cached count and cache rate remain on the trace detail toolbar, where they
+ * belong to a decision about caching rather than to the list's first read. */
+@media (max-width: 600px) {
+  .trace-row .trace-token-stack .mini-token:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .trace-row .trace-subline.mono {
+    display: none;
+  }
+}
+
+/* -------------------------------------------- request performance strip */
+
+/* The request tab puts four metrics in a card, and the old row rendered those
+ * as four stat cards inside it. They are a readout strip: one row, hairline
+ * dividers, no second frame. */
+.performance-panel .hero-grid {
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.performance-panel .stat-card {
+  padding: 0 var(--space-4);
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.performance-panel .stat-card:first-child {
+  padding-left: 0;
+}
+
+.performance-panel .stat-card:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.performance-panel .stat-card strong {
+  font-size: 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .performance-panel .hero-grid {
+    gap: var(--space-4);
+  }
+
+  .performance-panel .stat-card {
+    padding: 0;
+    border-right: 0;
+  }
+}
+
+/* The request/failure trend is the page's primary reading; tokens and latency
+ * answer follow-up questions. A modest width advantage is enough to order them
+ * without turning the other two into thumbnails. */
+@media (min-width: 1200px) {
+  .overview-chart-grid {
+    grid-template-columns: 1.25fr 1fr 1fr;
+  }
+}
+
+/* A grid item's automatic minimum is its min-content width; the request tab's
+ * performance strip is wide enough at 390px that the item refused to shrink and
+ * pushed the whole detail column 136px off-screen. Zero is the correct minimum
+ * here: every child either reflows or scrolls its own overflow. */
+.detail-grid > *,
+.performance-panel,
+.performance-panel .hero-grid {
+  min-width: 0;
+}
+
+/* The request details carry URLs and model ids that have no spaces. A grid item
+ * defaults to its min-content width, so one long URL widened a breakdown card
+ * past the phone. Let those strings wrap and let the cards shrink to the column. */
+.breakdown-card,
+.route-plan-candidates,
+.routing-summary-stack,
+.routing-summary-stack .trace-subline,
+.routing-summary-stack .trace-model-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.routing-summary-stack .trace-subline,
+.routing-summary-stack .trace-model-name {
+  white-space: normal;
+}
+
+/* The system page's wide statistic tables are the one table family that must
+ * scroll inside its card rather than widen the document; the trace-table
+ * sticky-header rule above set `overflow: visible` on the shared class, so the
+ * system variant restates the scroll container it owns. */
+.system-table {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* A metadata pill can hold a base URL with no spaces. Its value is allowed to
+ * wrap so the strip stays inside the detail column instead of widening it. */
+.detail-meta-strip,
+.detail-meta-pill,
+.detail-meta-pill strong {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.detail-meta-pill strong {
+  overflow-wrap: anywhere;
+  white-space: normal;
 }

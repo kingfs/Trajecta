@@ -77,7 +77,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
 
   return (
     <article className={`${failed ? "trace-row trace-row-failed" : "trace-row"}${groupedChild ? " trace-row-grouped-child" : ""}`}>
-      <div>
+      <div className="trace-main">
         <div className="trace-title-row">
           {childRole === "upstream" ? <span className="trace-child-rail" aria-hidden="true" /> : null}
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
@@ -253,7 +253,7 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
   const first = group.items[0] || {};
   return (
     <article className="trace-row trace-row-failed trace-row-group">
-      <div>
+      <div className="trace-main">
         <div className="trace-title-row">
           <strong className="trace-model-name">{first.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
@@ -289,7 +289,7 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
 function TokenMetrics({ item }) {
   const { t } = useI18n();
   return (
-    <div>
+    <div className="trace-token-stack">
       <div className="token-inline-row">
         <MiniToken metric={t("metric.inputTokens")} value={item.prompt_tokens} tone="accent" icon="input" />
         <MiniToken metric={t("metric.outputTokens")} value={item.completion_tokens} tone="green" icon="output" />

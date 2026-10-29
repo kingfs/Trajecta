@@ -661,7 +661,7 @@
   font-size: 0.98rem;
 }
 
-.finding-card-head span {
+.finding-card-head > div:first-child span {
   display: block;
   color: var(--muted);
   font-family: var(--font-sans);
@@ -1491,7 +1491,9 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.overview-queue-row span {
+/* The description under the title, not every span in the row: the tone chips
+   live in the second column and must keep their own colour. */
+.overview-queue-row > div:first-child > span {
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.35;
@@ -1583,7 +1585,7 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-.event-row-main span,
+.event-row-main span:not(.inline-tag),
 .event-row-meta small,
 .event-message {
   color: var(--muted);

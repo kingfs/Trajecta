@@ -167,7 +167,11 @@
   color: var(--accent);
 }
 
-.overview-queue-row span {
+/* Only the sub-line directly under the title is muted. The broader `span`
+   selector also caught the tone chips beside it and painted a danger or gold
+   tag tertiary grey on its own tint, which is why the tag looked washed out
+   and measured 4.48:1 on the amber tint. */
+.overview-queue-row > div:first-child > span {
   color: var(--text-tertiary);
   font-size: var(--text-xs);
 }
@@ -562,12 +566,10 @@
 @keyframes conversation-step-focus {
   0% {
     box-shadow: 0 0 0 3px var(--accent-soft);
-    background: color-mix(in srgb, var(--accent-solid) 8%, var(--surface-1));
   }
 
   100% {
     box-shadow: none;
-    background: var(--surface-1);
   }
 }
 

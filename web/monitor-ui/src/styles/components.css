@@ -315,26 +315,26 @@ button:disabled {
 .inline-tag-green {
   background: var(--success-soft);
   border-color: transparent;
-  color: var(--success);
+  color: var(--success-strong);
 }
 
 .inline-tag-danger {
   background: var(--danger-soft);
   border-color: transparent;
-  color: var(--danger);
+  color: var(--danger-strong);
 }
 
 .inline-tag-gold {
   background: var(--warning-soft);
   border-color: transparent;
-  color: var(--warning);
+  color: var(--warning-strong);
 }
 
 .inline-tag-accent,
 .inline-tag-blue {
   background: var(--accent-soft);
   border-color: transparent;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 /* `styles.css` normalises every chip in the light theme with
@@ -345,26 +345,26 @@ button:disabled {
 :root[data-theme="light"] .inline-tag-green {
   background: var(--success-soft);
   border-color: transparent;
-  color: var(--success);
+  color: var(--success-strong);
 }
 
 :root[data-theme="light"] .inline-tag-danger {
   background: var(--danger-soft);
   border-color: transparent;
-  color: var(--danger);
+  color: var(--danger-strong);
 }
 
 :root[data-theme="light"] .inline-tag-gold {
   background: var(--warning-soft);
   border-color: transparent;
-  color: var(--warning);
+  color: var(--warning-strong);
 }
 
 :root[data-theme="light"] .inline-tag-accent,
 :root[data-theme="light"] .inline-tag-blue {
   background: var(--accent-soft);
   border-color: transparent;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .detail-meta-pill,
