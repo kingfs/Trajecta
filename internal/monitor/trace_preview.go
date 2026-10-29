@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -22,31 +24,83 @@ const (
 	// has hundreds of traces. The list view shows fifty rows; the cap only
 	// matters for the endpoints that return a whole session.
 	tracePreviewMaxItems = 200
+	// A preview is one random cassette read. On the production trace volume a
+	// 200-row page spent 19 s doing those reads sequentially; eight readers and
+	// a short budget keep the page responsive while still filling the rows a
+	// reader actually sees. A row whose read misses the budget simply has no
+	// preview.
+	tracePreviewWorkers = 8
+	tracePreviewBudget  = 2 * time.Second
 )
 
 // attachTracePreviews fills RequestPreview from each row's cassette. Rows that
 // share a cassette (a parent and its child never do, but a repeated row in one
 // response might) are read once.
 func attachTracePreviews(items []traceListItem) {
-	cache := make(map[string]string, 16)
-	budget := tracePreviewMaxItems
-	scroll := func(item *traceListItem) {
+	previews := map[string]string{}
+	paths := make([]string, 0, 16)
+	seen := make(map[string]struct{}, 16)
+	eachTraceItem(items, func(item *traceListItem) {
 		if item.logPath == "" {
 			return
 		}
-		if cached, ok := cache[item.logPath]; ok {
-			item.RequestPreview = cached
+		if _, ok := seen[item.logPath]; ok {
 			return
 		}
-		if budget <= 0 {
+		if len(paths) >= tracePreviewMaxItems {
 			return
 		}
-		budget--
-		preview := traceRequestPreview(item.logPath)
-		cache[item.logPath] = preview
-		item.RequestPreview = preview
+		seen[item.logPath] = struct{}{}
+		paths = append(paths, item.logPath)
+	})
+	if len(paths) == 0 {
+		return
 	}
-	eachTraceItem(items, scroll)
+
+	deadline := time.Now().Add(tracePreviewBudget)
+	jobs := make(chan string)
+	results := make(chan struct {
+		path string
+		text string
+	}, len(paths))
+	workers := tracePreviewWorkers
+	if workers > len(paths) {
+		workers = len(paths)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				text := ""
+				if time.Now().Before(deadline) {
+					text = traceRequestPreview(path)
+				}
+				results <- struct {
+					path string
+					text string
+				}{path: path, text: text}
+			}
+		}()
+	}
+	go func() {
+		for _, path := range paths {
+			jobs <- path
+		}
+		close(jobs)
+	}()
+	wg.Wait()
+	close(results)
+	for result := range results {
+		previews[result.path] = result.text
+	}
+
+	eachTraceItem(items, func(item *traceListItem) {
+		if text, ok := previews[item.logPath]; ok {
+			item.RequestPreview = text
+		}
+	})
 }
 
 // traceRequestPreview reads one cassette's request body and returns the opening

@@ -281,6 +281,9 @@ body {
   border-top: 1px solid var(--border-subtle);
   background: transparent;
   padding: var(--space-4) 0;
+  /* The panel lost its border, so its content needs an explicit inset on the
+   * right; without it the queue rows end exactly on the column edge. */
+  padding-right: var(--space-4);
 }
 
 .overview-attention-panel:nth-child(-n + 2) {
@@ -301,6 +304,7 @@ body {
   .overview-attention-panel {
     border-top: 1px solid var(--border-subtle);
     padding: var(--space-4) 0;
+    padding-right: var(--space-4);
   }
 
   .overview-attention-panel:first-child {
@@ -774,7 +778,7 @@ body {
 [data-slot="card"] .tool-row,
 [data-slot="card"] .timeline-card,
 [data-slot="card"] .routing-candidate-card {
-  padding: 12px 0;
+  padding: 12px 14px;
 }
 
 [data-slot="card"] .finding-card:first-child,

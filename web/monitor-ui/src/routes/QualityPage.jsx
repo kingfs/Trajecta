@@ -5,7 +5,6 @@ import { FindingsPanel } from "./quality/FindingsPanel";
 import { LineagePanel } from "./quality/LineagePanel";
 import { AnalysisPanel } from "./quality/AnalysisPanel";
 import { DataHealthPanel } from "./quality/DataHealthPanel";
-import { ResourcesPanel } from "./quality/ResourcesPanel";
 import { useI18n } from "../lib/i18n";
 
 // The audit page used to be three unrelated things stacked in one scroll: a
@@ -27,7 +26,6 @@ export function QualityPage() {
       tabs={[
         { id: "findings", label: t("quality.tabFindings"), element: <FindingsPanel /> },
         { id: "lineage", label: t("quality.tabLineage"), element: <LineagePanel /> },
-        { id: "resources", label: t("resources.tab"), element: <ResourcesPanel /> },
         { id: "analysis", label: t("quality.tabAnalysis"), element: <AnalysisPanel /> },
         // Data health is pipeline state, not a traffic window, so it carries no
         // range control; see DataHealthPanel.
