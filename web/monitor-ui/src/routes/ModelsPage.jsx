@@ -8,6 +8,7 @@ import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { Pager } from "../components/common/Pager";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -19,11 +20,14 @@ import {
   setOrDeleteParam,
 } from "../lib/monitor";
 
+const PAGE_SIZE = 18;
+
 export function ModelsPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const queryValue = searchParams.get("q") || "";
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
   const [queryDraft, setQueryDraft] = useState(queryValue);
   const params = new URLSearchParams();
   params.set("window", windowValue);
@@ -33,20 +37,40 @@ export function ModelsPage() {
   const models = useJSON(apiURL(apiPaths.models, params), [windowValue, queryValue]);
   const items = models.data?.items || [];
   const totals = useMemo(() => summarizeModels(items), [items]);
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = useMemo(() => items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE), [items, currentPage]);
 
   useEffect(() => {
     setQueryDraft(queryValue);
   }, [queryValue]);
 
+  // A filter or a window change can leave the URL on a page that no longer
+  // exists. Clamp it once the new list arrives instead of showing an empty grid.
+  useEffect(() => {
+    if (!models.data || page <= totalPages) {
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    if (totalPages <= 1) {
+      next.delete("page");
+    } else {
+      next.set("page", String(totalPages));
+    }
+    setSearchParams(next, { replace: true });
+  }, [models.data, page, totalPages, searchParams, setSearchParams]);
+
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
+    next.delete("page");
     setSearchParams(next);
   };
   const applySearch = (event) => {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "q", queryDraft);
+    next.delete("page");
     setSearchParams(next);
   };
 
@@ -69,6 +93,9 @@ export function ModelsPage() {
           <div>
             <h2>{t("models.catalogTitle")}</h2>
           </div>
+          <div className="panel-head-actions">
+            <Pager page={currentPage} totalPages={totalPages} onChange={(nextPage) => setPage(searchParams, setSearchParams, nextPage)} />
+          </div>
         </div>
         <form className="filter-bar" onSubmit={applySearch}>
           <Input className="min-w-[260px]" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={t("models.search")} />
@@ -80,6 +107,7 @@ export function ModelsPage() {
               setQueryDraft("");
               const next = new URLSearchParams(searchParams);
               next.delete("q");
+              next.delete("page");
               setSearchParams(next);
             }}
           >
@@ -93,11 +121,21 @@ export function ModelsPage() {
 
       {models.data ? (
         <section className="model-market-grid" aria-label="Model cards">
-          {items.length ? items.map((item) => <ModelCard key={item.model} item={item} windowValue={windowValue} />) : <EmptyState title={t("models.noModels")} detail={t("models.noModelsDetail")} />}
+          {pageItems.length ? pageItems.map((item) => <ModelCard key={item.model} item={item} windowValue={windowValue} />) : <EmptyState title={t("models.noModels")} detail={t("models.noModelsDetail")} />}
         </section>
       ) : null}
     </div>
   );
+}
+
+function setPage(searchParams, setSearchParams, nextPage) {
+  const next = new URLSearchParams(searchParams);
+  if (nextPage <= 1) {
+    next.delete("page");
+  } else {
+    next.set("page", String(nextPage));
+  }
+  setSearchParams(next);
 }
 
 function ModelCard({ item, windowValue }) {
@@ -124,7 +162,7 @@ function ModelCard({ item, windowValue }) {
         <Metric label={t("models.today")} value={formatCount(today.total_tokens)} detail={usageCoverageDetail(today.missing_usage_request, t)} />
       </div>
       <div className="model-market-footer">
-        <span>{(item.channels || []).slice(0, 4).join(" · ") || t("models.noChannel")}</span>
+        <span title={(item.channels || []).join(" · ")}>{(item.channels || []).slice(0, 4).join(" · ") || t("models.noChannel")}</span>
         <span>{formatDateTime(summary.last_seen)}</span>
       </div>
     </Link>

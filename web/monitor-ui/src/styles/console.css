@@ -955,3 +955,140 @@ body {
   overflow-wrap: anywhere;
   white-space: normal;
 }
+
+/* ------------------------------------------------------ model card fit */
+
+/* A model card's footer carries up to four channel ids and a timestamp. Those
+ * ids have no spaces, so the card's min-content width used to exceed its grid
+ * column: at 1440px the second column started at 881px and ran past the
+ * viewport, covering the neighbouring card's text. Zero the minimum at every
+ * level and let the footer ellipsize inside its own card. */
+.model-market-grid {
+  align-items: start;
+}
+
+.model-market-card,
+.model-market-card-head,
+.model-market-card-head > div:first-child,
+.model-market-card-head .trace-tag-group,
+.model-market-metrics,
+.model-market-footer {
+  min-width: 0;
+}
+
+.model-market-card {
+  overflow: hidden;
+}
+
+.model-market-card-head,
+.model-market-footer {
+  flex-wrap: wrap;
+}
+
+.model-market-footer span {
+  max-width: 100%;
+}
+
+/* ------------------------------------------------ conversation worklog */
+
+/* One turn's reasoning and tool loop, folded behind a single line. The body is
+ * only mounted while open, so a 1,107-step agent trace starts with a few
+ * dozen message rows instead of 21k DOM nodes. */
+.conversation-worklog {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.conversation-worklog-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-worklog-head:hover {
+  color: var(--text-primary);
+}
+
+.conversation-worklog-title {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.conversation-worklog-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.conversation-worklog-head .trace-tag-group {
+  margin-left: auto;
+}
+
+.conversation-worklog-body {
+  margin: 2px 0 8px 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.conversation-worklog-body .conversation-step {
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.conversation-worklog-body .conversation-step:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.conversation-worklog-body .conversation-step:last-child {
+  padding-bottom: 0;
+}
+
+/* The routing page keeps the 200-row summary read but paints 50 rows at a
+ * time; the pager sits above the list, not inside the summary card. */
+.routing-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+
+/* The pager field is a small numeric input, not another full form control. */
+.pager-jump {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pager-input {
+  width: 48px;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  line-height: 1;
+  text-align: center;
+}
+
+.pager-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* The provider metric pills carry a missing-usage note; the browser's default
+ * <small> (10px) is below the console's functional-text floor. */
+.detail-meta-pill small {
+  font-size: var(--text-label);
+}

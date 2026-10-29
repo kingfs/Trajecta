@@ -337,6 +337,8 @@ type findingListResponse struct {
 	ID       string        `json:"id"`
 	Items    []findingView `json:"items"`
 	Total    int           `json:"total"`
+	Page     int           `json:"page,omitempty"`
+	PageSize int           `json:"page_size,omitempty"`
 	Severity string        `json:"severity,omitempty"`
 	Category string        `json:"category,omitempty"`
 }
@@ -1896,7 +1898,17 @@ func findingListAPIHandler(st *store.Store) http.HandlerFunc {
 			Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
 		}
 		limit := parseInt(r.URL.Query().Get("limit"), 50)
-		findings, err := st.ListAllFindings(filter, limit)
+		if limit <= 0 {
+			limit = 50
+		}
+		if limit > 200 {
+			limit = 200
+		}
+		page := parseInt(r.URL.Query().Get("page"), 1)
+		if page < 1 {
+			page = 1
+		}
+		findings, total, err := st.ListAllFindingsPage(filter, limit, (page-1)*limit)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -1907,7 +1919,9 @@ func findingListAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, findingListResponse{
 			Items:    items,
-			Total:    len(items),
+			Total:    total,
+			Page:     page,
+			PageSize: limit,
 			Severity: filter.Severity,
 			Category: filter.Category,
 		})

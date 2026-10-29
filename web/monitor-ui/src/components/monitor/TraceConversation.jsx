@@ -41,6 +41,55 @@ import {
 const CALL_KINDS = new Set(["tool_call", "server_tool_call", "code"]);
 const RESULT_KINDS = new Set(["tool_result", "server_tool_result", "code_result"]);
 const PLAIN_KINDS = new Set(["instruction", "message", "text", "refusal", "safety", "error", "citation"]);
+const WORK_KINDS = new Set([...CALL_KINDS, ...RESULT_KINDS, "reasoning"]);
+// A short tool call belongs inline with the messages; only a long run is worth
+// hiding. This keeps a normal six-step trace exactly as it was and folds the
+// 100-step runs that make a real agent transcript unreadable.
+const WORKLOG_MIN_STEPS = 12;
+
+function isWorkStep(step) {
+  return WORK_KINDS.has(step.kind);
+}
+
+/*
+ * One input turn is a message the reader wrote, the agent's reasoning and tool
+ * loop, then the answer. The old list rendered every reasoning and tool step as
+ * a peer card; on a 1,107-step agent trace that is 21k DOM nodes and a 410k-pixel
+ * page before the reader has asked for any of it. Keep the conversation turning
+ * on messages and fold each contiguous run of work behind one disclosure.
+ */
+function buildConversationSegments(steps) {
+  const segments = [];
+  // A six-step trace keeps every step inline; a trace this long is already a
+  // worklog by nature, so even short reasoning/tool runs fold into the run
+  // around them.
+  const threshold = steps.length >= 200 ? 4 : WORKLOG_MIN_STEPS;
+  let work = null;
+  const flush = () => {
+    if (!work || !work.length) {
+      return;
+    }
+    if (work.length >= threshold) {
+      segments.push({ type: "work", key: `work-${stepKey(work[0])}`, steps: work });
+    } else {
+      for (const step of work) {
+        segments.push({ type: "step", key: stepKey(step), step });
+      }
+    }
+    work = null;
+  };
+  for (const step of steps) {
+    if (isWorkStep(step)) {
+      work = work || [];
+      work.push(step);
+      continue;
+    }
+    flush();
+    segments.push({ type: "step", key: stepKey(step), step });
+  }
+  flush();
+  return segments;
+}
 
 /*
  * The steps the navigation rail marks, and the one the conversation lands on by
@@ -376,14 +425,46 @@ function ConversationStep({ step, ordinal, focused, open, onToggleOpen, onSelect
   );
 }
 
+function ConversationWorklog({ steps, open, onToggle, renderStep, t }) {
+  const bodyID = React.useId();
+  const reasoning = steps.filter((step) => step.kind === "reasoning").length;
+  const calls = steps.filter((step) => CALL_KINDS.has(step.kind)).length;
+  const results = steps.filter((step) => RESULT_KINDS.has(step.kind)).length;
+  const failed = steps.filter((step) => step.failed || step.results.some(resultFailed)).length;
+  return (
+    <section className="conversation-worklog">
+      <button
+        type="button"
+        className="conversation-worklog-head"
+        aria-expanded={open}
+        aria-controls={bodyID}
+        onClick={onToggle}
+      >
+        {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+        <span className="conversation-worklog-title">{t("conversation.worklog")}</span>
+        <span className="conversation-worklog-count mono">{t("conversation.worklogCount", { count: steps.length })}</span>
+        <span className="trace-tag-group">
+          {reasoning ? <InlineTag tone="accent">{t("conversation.statReasoning", { count: reasoning })}</InlineTag> : null}
+          {calls ? <InlineTag tone="gold">{t("conversation.statCalls", { count: calls })}</InlineTag> : null}
+          {results ? <InlineTag tone="green">{t("conversation.statResults", { count: results })}</InlineTag> : null}
+          {failed ? <InlineTag tone="danger">{t("conversation.statFailed", { count: failed })}</InlineTag> : null}
+        </span>
+      </button>
+      {open ? <div className="conversation-worklog-body" id={bodyID}>{steps.map(renderStep)}</div> : null}
+    </section>
+  );
+}
+
 export function TraceConversation({ observation, anchor = "", highlight = "", highlightAnchors = [], renderMarkdown, onRenderMarkdownChange, onSelectAnchor, fallback = null }) {
   const { t } = useI18n();
   const steps = useMemo(() => buildConversationSteps(observation?.nodes || []), [observation]);
   const stats = useMemo(() => conversationStats(steps), [steps]);
+  const segments = useMemo(() => buildConversationSegments(steps), [steps]);
   const [query, setQuery] = useState("");
   const [failuresOnly, setFailuresOnly] = useState(false);
   const [openAll, setOpenAll] = useState(null);
   const [overrides, setOverrides] = useState({});
+  const [openWork, setOpenWork] = useState({});
   const [landedInput, setLandedInput] = useState("");
   const [railTicks, setRailTicks] = useState([]);
   const [matchCount, setMatchCount] = useState(0);
@@ -457,6 +538,27 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
     return fallback;
   };
   const toggleOpen = (key) => setOverrides((current) => ({ ...current, [key]: !isOpen(key, false) }));
+
+  // A worklog opens for an anchor, a locate read, or a find hit even when the
+  // reader has not touched it; those paths name a step that would otherwise be
+  // behind the disclosure. An explicit toggle wins after that.
+  const isWorkOpen = (segment) => {
+    const forced = segment.steps.some(
+      (step) => step.id === target || openedAnchors.has(step.id) || findOpenKeys.has(stepKey(step)),
+    );
+    if (forced) {
+      return true;
+    }
+    if (Object.prototype.hasOwnProperty.call(openWork, segment.key)) {
+      return openWork[segment.key];
+    }
+    if (openAll !== null) {
+      return openAll;
+    }
+    return false;
+  };
+  const toggleWork = (segment) =>
+    setOpenWork((current) => ({ ...current, [segment.key]: !isWorkOpen(segment) }));
 
   // Landing on a finding's anchor is the whole point of the addresses: scroll
   // the step into view once, and leave the URL alone (the reader may scroll
@@ -674,6 +776,15 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
     }
     return true;
   });
+  // The count names what is actually mounted: a folded worklog is not "shown"
+  // just because its steps exist in the trace.
+  const renderedSteps = failuresOnly
+    ? visible.length
+    : segments.reduce(
+        (total, segment) =>
+          total + (segment.type === "step" ? 1 : isWorkOpen(segment) ? segment.steps.length : 0),
+        0,
+      );
 
   const registerStepRef = (key) => (element) => {
     if (element) {
@@ -732,6 +843,29 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
     }
   };
   const railVisible = steps.length > 1 || findTicks.length > 0;
+
+  const renderStep = (step) => (
+    <ConversationStep
+      key={stepKey(step)}
+      step={step}
+      ordinal={steps.indexOf(step) + 1}
+      focused={step.id === target && !highlight && !findQuery}
+      open={
+        isOpen(step.id, false) ||
+        step.id === target ||
+        stepKey(step) === landedInput ||
+        openedAnchors.has(step.id) ||
+        findOpenKeys.has(stepKey(step))
+      }
+      onToggleOpen={toggleOpen}
+      onSelectAnchor={onSelectAnchor}
+      renderMarkdown={renderMarkdown}
+      highlight={highlight}
+      find={findQuery}
+      registerRef={registerStepRef(stepKey(step))}
+      t={t}
+    />
+  );
 
   return (
     // The rail is a grid column of its own rather than a floating element over
@@ -796,7 +930,7 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
             <input type="checkbox" checked={renderMarkdown} onChange={(event) => onRenderMarkdownChange(event.target.checked)} />
             {t("traceDetail.renderMarkdown")}
           </label>
-          <Button variant="ghost" size="sm" onClick={() => { setOverrides({}); setOpenAll(openAll === true ? false : true); }}>
+          <Button variant="ghost" size="sm" onClick={() => { setOverrides({}); setOpenWork({}); setOpenAll(openAll === true ? false : true); }}>
             {openAll === true ? t("conversation.collapseAll") : t("conversation.expandAll")}
           </Button>
           {/*
@@ -819,7 +953,7 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
             </>
           ) : null}
           <span className="conversation-count mono">
-            {t("conversation.count", { shown: visible.length, total: steps.length })}
+            {t("conversation.count", { shown: renderedSteps, total: steps.length })}
           </span>
         </div>
 
@@ -836,38 +970,22 @@ export function TraceConversation({ observation, anchor = "", highlight = "", hi
           // conversation, not in the filtered view: a search must not renumber the
           // trace a reader is looking at.
           <div className="conversation-list" ref={listRef}>
-            {visible.map((step) => (
-              <ConversationStep
-                key={stepKey(step)}
-                step={step}
-                ordinal={steps.indexOf(step) + 1}
-                // The mark lasts as long as the URL names this step, because the
-                // URL is what a shared finding link carries; the ring it draws is
-                // an animation, so the page does not look like something is
-                // selected after the reader has moved on.
-                // With a matched value the exact bytes carry the location; the
-                // whole-card ring would read as if the entire message matched.
-                focused={step.id === target && !highlight && !findQuery}
-                // A step the URL points at opens: a clamped block would hide the
-                // sentence the finding was about. The step the page landed on by
-                // default opens too, because the newest input is what the reader
-                // came to read.
-                open={
-                  isOpen(step.id, false) ||
-                  step.id === target ||
-                  stepKey(step) === landedInput ||
-                  openedAnchors.has(step.id) ||
-                  findOpenKeys.has(stepKey(step))
-                }
-                onToggleOpen={toggleOpen}
-                onSelectAnchor={onSelectAnchor}
-                renderMarkdown={renderMarkdown}
-                highlight={highlight}
-                find={findQuery}
-                registerRef={registerStepRef(stepKey(step))}
-                t={t}
-              />
-            ))}
+            {failuresOnly
+              ? visible.map(renderStep)
+              : segments.map((segment) =>
+                  segment.type === "work" ? (
+                    <ConversationWorklog
+                      key={segment.key}
+                      steps={segment.steps}
+                      open={isWorkOpen(segment)}
+                      onToggle={() => toggleWork(segment)}
+                      renderStep={renderStep}
+                      t={t}
+                    />
+                  ) : (
+                    renderStep(segment.step)
+                  ),
+                )}
           </div>
         ) : (
           <EmptyState title={t("conversation.noMatch")} detail={t("conversation.noMatchDetail")} compact />

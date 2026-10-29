@@ -110,6 +110,23 @@ func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
 			}
 		})
 	}
+
+	// The global list is paged now. The total is the filtered count, not the
+	// number of rows the page happened to return.
+	first, total, err := st.ListAllFindingsPage(FindingFilter{}, 1, 0)
+	if err != nil {
+		t.Fatalf("ListAllFindingsPage(page 1) error = %v", err)
+	}
+	second, total2, err := st.ListAllFindingsPage(FindingFilter{}, 1, 1)
+	if err != nil {
+		t.Fatalf("ListAllFindingsPage(page 2) error = %v", err)
+	}
+	if total != 2 || total2 != 2 {
+		t.Fatalf("ListAllFindingsPage totals = %d, %d; want 2, 2", total, total2)
+	}
+	if len(first) != 1 || len(second) != 1 || first[0].ID == second[0].ID {
+		t.Fatalf("ListAllFindingsPage pages = %v, %v; want two distinct rows", findingIDsOf(first), findingIDsOf(second))
+	}
 }
 
 func findingIDsOf(findings []observe.Finding) []string {

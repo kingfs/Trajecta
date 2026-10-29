@@ -4,6 +4,7 @@ import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../../components/common/EmptyState";
+import { Pager } from "../../components/common/Pager";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
@@ -11,32 +12,61 @@ import { useI18n } from "../../lib/i18n";
 import { buildTraceLink, setOrDeleteParam } from "../../lib/monitor";
 import { formatEvidenceTarget } from "../../lib/conversation";
 
+const PAGE_SIZE = 25;
+
 export function FindingsPanel() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
   const category = searchParams.get("category") || "";
   const severity = searchParams.get("severity") || "";
-  const params = new URLSearchParams({ limit: "50" });
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), page: String(page) });
   if (category) {
     params.set("category", category);
   }
   if (severity) {
     params.set("severity", severity);
   }
-  const findings = useJSON(apiURL(apiPaths.findings, params), [category, severity]);
+  const findings = useJSON(apiURL(apiPaths.findings, params), [category, severity, page]);
   const items = findings.data?.items || [];
+  const total = findings.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, key, value);
+    next.delete("page");
     setSearchParams(next);
   };
   const resetFilters = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("category");
     next.delete("severity");
+    next.delete("page");
     setSearchParams(next);
   };
+  const setPage = (nextPage) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage <= 1) {
+      next.delete("page");
+    } else {
+      next.set("page", String(nextPage));
+    }
+    setSearchParams(next);
+  };
+
+  React.useEffect(() => {
+    if (findings.data && page > totalPages) {
+      const next = new URLSearchParams(searchParams);
+      if (totalPages <= 1) {
+        next.delete("page");
+      } else {
+        next.set("page", String(totalPages));
+      }
+      setSearchParams(next, { replace: true });
+    }
+  }, [findings.data, page, totalPages, searchParams, setSearchParams]);
 
   return (
     <>
@@ -45,7 +75,10 @@ export function FindingsPanel() {
           <div>
             <h2>{t("audit.crossTraceFindings")}</h2>
           </div>
-          <InlineTag tone={items.length ? "danger" : "green"}>{t("audit.totalFindings", { count: findings.data?.total ?? 0 })}</InlineTag>
+          <div className="panel-head-actions">
+            <InlineTag tone={items.length ? "danger" : "green"}>{t("audit.totalFindings", { count: total })}</InlineTag>
+            <Pager page={currentPage} totalPages={totalPages} onChange={setPage} />
+          </div>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
           <Input className="min-w-[180px]" type="search" placeholder={t("audit.category")} value={category} onChange={(event) => setFilter("category", event.target.value)} />

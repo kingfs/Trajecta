@@ -9,6 +9,7 @@ import { StatCard } from "../components/common/Display";
 import { TabbedPage } from "../components/TabbedPage";
 import { WindowToggle } from "../components/common/Tabs";
 import { EmptyState } from "../components/common/EmptyState";
+import { Pager } from "../components/common/Pager";
 import { InlineTag } from "../components/common/Badges";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
@@ -68,9 +69,12 @@ export function RoutingPage() {
  * the settings form still pulled two hundred exchanges and a credential
  * summary that the form never displayed.
  */
+const ROUTING_PAGE_SIZE = 50;
+
 function RouteDecisionsPanel({ windowValue }) {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
   const activeFilters = readRoutingFilters(searchParams);
   const [filters, setFilters] = useState(activeFilters);
   const params = new URLSearchParams();
@@ -89,6 +93,9 @@ function RouteDecisionsPanel({ windowValue }) {
   const traces = useJSON(apiURL(apiPaths.routingExchanges, params), [windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
   const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [windowValue, activeFilters.model]);
   const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
+  const totalPages = Math.max(1, Math.ceil(routedItems.length / ROUTING_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = routedItems.slice((currentPage - 1) * ROUTING_PAGE_SIZE, currentPage * ROUTING_PAGE_SIZE);
   const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
   const credentialSummary = useMemo(() => normalizeCredentialRoutingSummary(routingSummary.data), [routingSummary.data]);
 
@@ -100,15 +107,26 @@ function RouteDecisionsPanel({ windowValue }) {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
     FILTER_KEYS.forEach((key) => setOrDeleteParam(next, key, filters[key]));
+    next.delete("page");
     setSearchParams(next);
   };
   const resetFilters = () => {
     setFilters(emptyRoutingFilters());
     const next = new URLSearchParams(searchParams);
     FILTER_KEYS.forEach((key) => next.delete(key));
+    next.delete("page");
     setSearchParams(next);
   };
   const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+  const setPage = (nextPage) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage <= 1) {
+      next.delete("page");
+    } else {
+      next.set("page", String(nextPage));
+    }
+    setSearchParams(next);
+  };
 
   return (
     <>
@@ -147,7 +165,14 @@ function RouteDecisionsPanel({ windowValue }) {
       {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
       {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
       {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
-      {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
+      {traces.data ? (
+        <>
+          <div className="routing-pager">
+            <Pager page={currentPage} totalPages={totalPages} onChange={setPage} />
+          </div>
+          <RequestList items={pageItems} fromView="routing" focusFailures />
+        </>
+      ) : null}
     </>
   );
 }

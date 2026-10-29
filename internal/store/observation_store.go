@@ -537,33 +537,49 @@ func (s *Store) CountFindingsByTraceIDs(traceIDs []string) (map[string][]Finding
 }
 
 func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Finding, error) {
+	findings, _, err := s.ListAllFindingsPage(filter, limit, 0)
+	return findings, err
+}
+
+// ListAllFindingsPage is the same read with a page offset and the unfiltered
+// total, so the Monitor can offer page jumps over the global findings list
+// instead of silently serving the same first 50 rows.
+func (s *Store) ListAllFindingsPage(filter FindingFilter, limit, offset int) ([]observe.Finding, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := ` WHERE 1 = 1`
+	var filterArgs []any
+	if category := normalizedFilterToken(filter.Category); category != "" {
+		where += ` AND category = ?`
+		filterArgs = append(filterArgs, category)
+	}
+	if severity := normalizedFilterToken(filter.Severity); severity != "" {
+		where += ` AND severity = ?`
+		filterArgs = append(filterArgs, severity)
+	}
+
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM trace_findings`+where, filterArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
 	query := `
 		SELECT finding_id, trace_id, category, severity, confidence, title, description,
 			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
-		FROM trace_findings
-		WHERE 1 = 1
-	`
-	var args []any
-	if category := normalizedFilterToken(filter.Category); category != "" {
-		query += ` AND category = ?`
-		args = append(args, category)
-	}
-	if severity := normalizedFilterToken(filter.Severity); severity != "" {
-		query += ` AND severity = ?`
-		args = append(args, severity)
-	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
-	args = append(args, limit)
-
+		FROM trace_findings` + where + `
+		ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	args := append(append([]any{}, filterArgs...), limit, offset)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	return scanFindings(rows)
+	out, err := scanFindings(rows)
+	return out, total, err
 }
 
 func scanFindings(rows *sql.Rows) ([]observe.Finding, error) {

@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
+import { Pager } from "../../components/common/Pager";
 import { RequestList } from "../../components/monitor/RequestList";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
@@ -16,7 +17,7 @@ const PAGE_SIZE = 50;
 export function RequestsPanel() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
-  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
@@ -89,17 +90,7 @@ export function RequestsPanel() {
             <h2>{t("requests.recentTitle")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="pager">
-              <Button variant="ghost" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-                {t("common.previous")}
-              </Button>
-              <span className="pager-label">
-                {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
-              </span>
-              <Button variant="ghost" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
-                {t("common.next")}
-              </Button>
-            </div>
+            <Pager page={data?.page ?? page} totalPages={Math.max(data?.total_pages ?? 1, 1)} onChange={goToPage} />
           </div>
         </div>
         <form className="filter-bar" onSubmit={applyFilters}>
