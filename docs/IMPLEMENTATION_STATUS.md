@@ -43,6 +43,10 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 本地 Responses runtime 调用内部上游 `/v1/chat/completions` 时，该上游 HTTP exchange 也按同一 recorder 写入 `.http` cassette；Responses semantic state 不替代 raw cassette。回放由 `pkg/replay` 提供硬性保证，测试回放不访问上游网络。相关背景见 [./ARCHITECTURE.md](./ARCHITECTURE.md)。
 
+## 客户端 Harness 识别
+
+`internal/harness` 在录制路径对每个客户端可见的请求做一次只读分类：依据 User-Agent 产品 token、产品私有 header（如 Codex 的 `originator` 与 `x-codex-*`、Copilot 的 `Copilot-Integration-Id`、Cline/Roo 的 `HTTP-Referer`）、URL path 以及请求体首尾窗口内的系统提示词与工具名，识别 Claude Code、Codex CLI/VS Code/App、Gemini CLI、Qwen Code、OpenCode、Cursor、Windsurf、GitHub Copilot Chat、Continue、Cline、Roo Code、Kilo Code、Crush、LiteLLM 等客户端；普通 SDK 不冒充实测 harness，只保留 `sdk:*` 与 `capability:*` 标签。结论写入 cassette meta 的 `client_harness` / `client_harness_name` / `client_harness_version` / `client_harness_kind` / `client_harness_confidence` / `client_harness_tags`，并写一条 `harness.detected` prelude 事件；`logs` 表有对应的六个索引列（Postgres migration `20261105120000_add_log_client_harness`，SQLite 启动 schema），`GET /api/traces` 返回这些字段并支持 `?harness=`，MCP `list_traces` 暴露同一过滤，Monitor 请求列表显示可点击标签、详情页显示能力/SDK 标签。本地 Responses runtime 的内部 model child exchange 不参与识别；本次改动之前的 cassette 没有分类，也不回填。证据只保存信号名，不保存 header 值或 prompt 原文；识别是流量标注，不是鉴权事实。细节与误判边界见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
+
 ## 存储与派生数据
 
 生产环境的结构化状态主路径是 Postgres：checked-in SQL 位于 `ent/postgres-migrations/`，由 `internal/appdbmigrate` 和 `golang-migrate` 应用，入口是 `db migrate up`。命令与 server 打开应用库时已拆分 migrate 与 open：`database.auto_migrate=true` 先执行应用迁移再以 no-auto-migrate 模式打开 store，`false` 只打开已存在的 schema。

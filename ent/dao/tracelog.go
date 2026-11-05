@@ -117,7 +117,19 @@ type TraceLog struct {
 	StickyStatus string `json:"sticky_status,omitempty"`
 	// StickyPreviousUpstreamID holds the value of the "sticky_previous_upstream_id" field.
 	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
-	selectValues             sql.SelectValues
+	// ClientHarness holds the value of the "client_harness" field.
+	ClientHarness string `json:"client_harness,omitempty"`
+	// ClientHarnessName holds the value of the "client_harness_name" field.
+	ClientHarnessName string `json:"client_harness_name,omitempty"`
+	// ClientHarnessVersion holds the value of the "client_harness_version" field.
+	ClientHarnessVersion string `json:"client_harness_version,omitempty"`
+	// ClientHarnessKind holds the value of the "client_harness_kind" field.
+	ClientHarnessKind string `json:"client_harness_kind,omitempty"`
+	// ClientHarnessConfidence holds the value of the "client_harness_confidence" field.
+	ClientHarnessConfidence string `json:"client_harness_confidence,omitempty"`
+	// ClientHarnessTagsJSON holds the value of the "client_harness_tags_json" field.
+	ClientHarnessTagsJSON string `json:"client_harness_tags_json,omitempty"`
+	selectValues          sql.SelectValues
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -131,7 +143,7 @@ func (*TraceLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case tracelog.FieldModTimeNs, tracelog.FieldFileSize, tracelog.FieldStatusCode, tracelog.FieldDurationMs, tracelog.FieldTtftMs, tracelog.FieldContentLength, tracelog.FieldPromptTokens, tracelog.FieldCompletionTokens, tracelog.FieldTotalTokens, tracelog.FieldCachedTokens, tracelog.FieldReqHeaderLen, tracelog.FieldReqBodyLen, tracelog.FieldResHeaderLen, tracelog.FieldResBodyLen, tracelog.FieldSequenceIndex, tracelog.FieldRoutingCandidateCount:
 			values[i] = new(sql.NullInt64)
-		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldRequestAuditID, tracelog.FieldResponseID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldExchangeID, tracelog.FieldExchangeKind, tracelog.FieldExchangeRole, tracelog.FieldParentExchangeID, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason, tracelog.FieldRouteTargetID, tracelog.FieldChannelID, tracelog.FieldCredentialID, tracelog.FieldStickyStatus, tracelog.FieldStickyPreviousUpstreamID:
+		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldRequestAuditID, tracelog.FieldResponseID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldExchangeID, tracelog.FieldExchangeKind, tracelog.FieldExchangeRole, tracelog.FieldParentExchangeID, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason, tracelog.FieldRouteTargetID, tracelog.FieldChannelID, tracelog.FieldCredentialID, tracelog.FieldStickyStatus, tracelog.FieldStickyPreviousUpstreamID, tracelog.FieldClientHarness, tracelog.FieldClientHarnessName, tracelog.FieldClientHarnessVersion, tracelog.FieldClientHarnessKind, tracelog.FieldClientHarnessConfidence, tracelog.FieldClientHarnessTagsJSON:
 			values[i] = new(sql.NullString)
 		case tracelog.FieldRecordedAt:
 			values[i] = new(sql.NullTime)
@@ -456,6 +468,42 @@ func (_m *TraceLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.StickyPreviousUpstreamID = value.String
 			}
+		case tracelog.FieldClientHarness:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness", values[i])
+			} else if value.Valid {
+				_m.ClientHarness = value.String
+			}
+		case tracelog.FieldClientHarnessName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness_name", values[i])
+			} else if value.Valid {
+				_m.ClientHarnessName = value.String
+			}
+		case tracelog.FieldClientHarnessVersion:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness_version", values[i])
+			} else if value.Valid {
+				_m.ClientHarnessVersion = value.String
+			}
+		case tracelog.FieldClientHarnessKind:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness_kind", values[i])
+			} else if value.Valid {
+				_m.ClientHarnessKind = value.String
+			}
+		case tracelog.FieldClientHarnessConfidence:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness_confidence", values[i])
+			} else if value.Valid {
+				_m.ClientHarnessConfidence = value.String
+			}
+		case tracelog.FieldClientHarnessTagsJSON:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_harness_tags_json", values[i])
+			} else if value.Valid {
+				_m.ClientHarnessTagsJSON = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -641,6 +689,24 @@ func (_m *TraceLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("sticky_previous_upstream_id=")
 	builder.WriteString(_m.StickyPreviousUpstreamID)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness=")
+	builder.WriteString(_m.ClientHarness)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness_name=")
+	builder.WriteString(_m.ClientHarnessName)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness_version=")
+	builder.WriteString(_m.ClientHarnessVersion)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness_kind=")
+	builder.WriteString(_m.ClientHarnessKind)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness_confidence=")
+	builder.WriteString(_m.ClientHarnessConfidence)
+	builder.WriteString(", ")
+	builder.WriteString("client_harness_tags_json=")
+	builder.WriteString(_m.ClientHarnessTagsJSON)
 	builder.WriteByte(')')
 	return builder.String()
 }

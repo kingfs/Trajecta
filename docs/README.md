@@ -7,6 +7,7 @@
 - 第一次接触项目：先读 [当前实现状态](./IMPLEMENTATION_STATUS.md)，再读 [架构与代码地图](./ARCHITECTURE.md)。
 - 要接入上游或客户端：读 [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md) 与 [代理使用示例](./PROXY_USAGE_EXAMPLES.md)。
 - 要管理渠道、模型、凭据与限流：读 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)。
+- 要知道每段流量来自哪个客户端 harness（Claude Code、Codex、Cline 等）：读 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - 要让 Codex 或客户端走本地 Responses：读 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 - 要看 Monitor 界面：读 [Monitor 使用指南](./MONITOR_GUIDE.md)。
 - 要用 MCP：读 [MCP 使用指南](./MCP_GUIDE.md)。
@@ -26,6 +27,7 @@
 | [架构与代码地图](./ARCHITECTURE.md) | 代码怎么组织、数据怎么流动、事实源边界在哪 |
 | [协议族与上游 Provider](./PROTOCOLS_AND_PROVIDERS.md) | 支持哪些协议族、有哪些 provider preset、能力怎么声明 |
 | [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) | 配置从哪来、怎么写库、路由与限流怎么生效 |
+| [客户端 Harness 识别](./HARNESS_DETECTION.md) | 怎么从请求识别客户端 agent、结果落到哪些字段与标签、有哪些已知误判 |
 | [本地 Responses Runtime](./RESPONSES_RUNTIME.md) | `/v1/responses` 怎么处理、Codex 兼容面、hosted tools |
 | [语义解析、Observation IR 与审计](./OBSERVATION_AND_AUDIT.md) | 录制怎么变成 Observation IR、findings 与重分析怎么工作 |
 | [存储与部署](./STORAGE_AND_DEPLOYMENT.md) | 数据放在哪、怎么迁移、怎么部署 |

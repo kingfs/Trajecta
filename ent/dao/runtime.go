@@ -1166,6 +1166,30 @@ func init() {
 	tracelogDescStickyPreviousUpstreamID := tracelogFields[50].Descriptor()
 	// tracelog.DefaultStickyPreviousUpstreamID holds the default value on creation for the sticky_previous_upstream_id field.
 	tracelog.DefaultStickyPreviousUpstreamID = tracelogDescStickyPreviousUpstreamID.Default.(string)
+	// tracelogDescClientHarness is the schema descriptor for client_harness field.
+	tracelogDescClientHarness := tracelogFields[51].Descriptor()
+	// tracelog.DefaultClientHarness holds the default value on creation for the client_harness field.
+	tracelog.DefaultClientHarness = tracelogDescClientHarness.Default.(string)
+	// tracelogDescClientHarnessName is the schema descriptor for client_harness_name field.
+	tracelogDescClientHarnessName := tracelogFields[52].Descriptor()
+	// tracelog.DefaultClientHarnessName holds the default value on creation for the client_harness_name field.
+	tracelog.DefaultClientHarnessName = tracelogDescClientHarnessName.Default.(string)
+	// tracelogDescClientHarnessVersion is the schema descriptor for client_harness_version field.
+	tracelogDescClientHarnessVersion := tracelogFields[53].Descriptor()
+	// tracelog.DefaultClientHarnessVersion holds the default value on creation for the client_harness_version field.
+	tracelog.DefaultClientHarnessVersion = tracelogDescClientHarnessVersion.Default.(string)
+	// tracelogDescClientHarnessKind is the schema descriptor for client_harness_kind field.
+	tracelogDescClientHarnessKind := tracelogFields[54].Descriptor()
+	// tracelog.DefaultClientHarnessKind holds the default value on creation for the client_harness_kind field.
+	tracelog.DefaultClientHarnessKind = tracelogDescClientHarnessKind.Default.(string)
+	// tracelogDescClientHarnessConfidence is the schema descriptor for client_harness_confidence field.
+	tracelogDescClientHarnessConfidence := tracelogFields[55].Descriptor()
+	// tracelog.DefaultClientHarnessConfidence holds the default value on creation for the client_harness_confidence field.
+	tracelog.DefaultClientHarnessConfidence = tracelogDescClientHarnessConfidence.Default.(string)
+	// tracelogDescClientHarnessTagsJSON is the schema descriptor for client_harness_tags_json field.
+	tracelogDescClientHarnessTagsJSON := tracelogFields[56].Descriptor()
+	// tracelog.DefaultClientHarnessTagsJSON holds the default value on creation for the client_harness_tags_json field.
+	tracelog.DefaultClientHarnessTagsJSON = tracelogDescClientHarnessTagsJSON.Default.(string)
 	// tracelogDescID is the schema descriptor for id field.
 	tracelogDescID := tracelogFields[0].Descriptor()
 	// tracelog.IDValidator is a validator for the "id" field. It is called by the builders before save.

@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { Button } from "../ui/button";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
 import { apiPaths } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
+import { harnessBadgeLabel, harnessFilterHref, harnessTooltip } from "../../lib/harness";
 import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatRate, formatRawCacheRate, formatRawDuration, formatRawRate, formatProviderTag, generationTokensPerSecond, prefillTokensPerSecond } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false, groupSessionFailures = false }) {
@@ -90,6 +91,10 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
                 it went, and the two exceptions worth interrupting a scan for -
                 a stream, and a parse that did not land on "parsed". */}
             {childRole === "upstream" ? <InlineTag tone="gold">{t("requests.childTag")}</InlineTag> : null}
+            {/* An upstream child exchange was sent by the proxy, not by a
+                client harness, so the classification only belongs on the
+                client row. */}
+            {childRole === "upstream" ? null : <HarnessTag item={item} />}
             {noteworthyExchange(item) ? <ExchangeTag item={item} /> : null}
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <UpstreamTag item={item} />
@@ -122,6 +127,31 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
       <TokenMetrics item={item} />
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
     </article>
+  );
+}
+
+// The client harness tag is the one chip in a row that navigates: filtering the
+// list by the classification is the action the badge invites. The anchor wraps
+// the pill so the whole tag is clickable, keeps the drawing from InlineTag, and
+// is a real link, so the filtered view can be opened in a new tab or bookmarked.
+// The visible label carries the display name and version; the canonical id,
+// kind, confidence and capability tags that do not fit stay in the tooltip.
+function HarnessTag({ item }) {
+  const { t } = useI18n();
+  const location = useLocation();
+  const label = harnessBadgeLabel(item);
+  if (!label) {
+    return null;
+  }
+  return (
+    <Link
+      className="harness-tag-link"
+      to={harnessFilterHref("/traces", location.search, item.client_harness)}
+      title={harnessTooltip(item, t)}
+      aria-label={`${label} · ${t("requests.harnessFilter")}`}
+    >
+      <InlineTag tone="accent">{label}</InlineTag>
+    </Link>
   );
 }
 

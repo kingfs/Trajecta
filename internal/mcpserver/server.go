@@ -40,6 +40,7 @@ type listTracesInput struct {
 	Model             string `json:"model,omitempty" jsonschema:"optional model substring filter"`
 	Query             string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
 	ObservationStatus string `json:"observation,omitempty" jsonschema:"optional Observation IR status filter: parsed, unsupported, failed, queued, running, or unparsed"`
+	Harness           string `json:"harness,omitempty" jsonschema:"optional client harness id filter, for example claude-code or codex-cli"`
 }
 
 type getTraceInput struct {
@@ -381,7 +382,7 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_traces",
-		Description: "List recorded traces with pagination and optional provider/model/query/Observation status filters.",
+		Description: "List recorded traces with pagination and optional provider/model/query/Observation status/harness filters.",
 	}, api.listTraces)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_trace",
@@ -481,6 +482,7 @@ func (a *serverAPI) listTraces(ctx context.Context, req *mcp.CallToolRequest, in
 	setIfNotEmpty(values, "model", in.Model)
 	setIfNotEmpty(values, "q", in.Query)
 	setIfNotEmpty(values, "observation", in.ObservationStatus)
+	setIfNotEmpty(values, "harness", in.Harness)
 
 	var out traceListOutput
 	if err := a.getJSON(ctx, "/api/traces", values, &out); err != nil {

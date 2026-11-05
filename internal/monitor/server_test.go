@@ -6351,3 +6351,98 @@ func TestTraceScopedMarkAllReadOnlyThatTrace(t *testing.T) {
 		t.Fatalf("trace A status = %q, want ignored after read-all on B", occurrenceA.Status)
 	}
 }
+
+// The client harness classification is stored as an indexed column at record
+// time and surfaced on the trace list, where the console's harness facet sends
+// it back as `?harness=`. A trace recorded before the classification existed
+// must keep rendering exactly as it did - the fields are omitted, not zeroed -
+// and the counters above the list must apply the same filter as the page.
+func TestListAPIHandlerExposesAndFiltersClientHarness(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	writeTraceFixture(t, outputDir, "claude-code.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/messages", false, "200 OK", nil,
+		`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`,
+		`{"content":[{"type":"text","text":"ok"}]}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-harness-claude"
+			header.Meta.Provider = "anthropic"
+			header.Meta.Operation = "messages"
+			header.Meta.Endpoint = "/v1/messages"
+			header.Meta.ClientHarness = "claude-code"
+			header.Meta.ClientHarnessName = "Claude Code"
+			header.Meta.ClientHarnessVersion = "1.2.3"
+			header.Meta.ClientHarnessKind = "agent-cli"
+			header.Meta.ClientHarnessConfidence = "high"
+			header.Meta.ClientHarnessTags = []string{"anthropic-sdk", "tools"}
+		}))
+	writeTraceFixture(t, outputDir, "legacy.http", buildRecordFixture(t, "/v1/chat/completions", false,
+		`{"messages":[{"role":"user","content":"hi"}]}`,
+		`{"choices":[{"message":{"content":"ok"}}]}`))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	list := func(query string) listResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/traces?page=1&page_size=50"+query, nil)
+		rr := httptest.NewRecorder()
+		listAPIHandler(st).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET /api/traces%s status = %d, body=%s", query, rr.Code, rr.Body.String())
+		}
+		var payload listResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("json.Unmarshal(%s) error = %v", query, err)
+		}
+		return payload
+	}
+
+	all := list("")
+	if len(all.Items) != 2 {
+		t.Fatalf("len(all items) = %d, want 2", len(all.Items))
+	}
+	var classified *traceListItem
+	for idx := range all.Items {
+		item := &all.Items[idx]
+		if item.ClientHarness != "" {
+			classified = item
+			continue
+		}
+		// A legacy trace omits the fields from its JSON rather than serialising
+		// empty strings, so an old console payload stays byte-identical.
+		raw, err := json.Marshal(item)
+		if err != nil {
+			t.Fatalf("json.Marshal(legacy item) error = %v", err)
+		}
+		if strings.Contains(string(raw), "client_harness") {
+			t.Errorf("legacy trace JSON carries a harness field: %s", raw)
+		}
+	}
+	if classified == nil {
+		t.Fatal("the classified trace is missing from the unfiltered list")
+	}
+	if classified.ClientHarnessName != "Claude Code" || classified.ClientHarnessVersion != "1.2.3" ||
+		classified.ClientHarnessKind != "agent-cli" || classified.ClientHarnessConfidence != "high" {
+		t.Errorf("classified trace = %+v, want the recorded harness detail", classified)
+	}
+	if want := []string{"anthropic-sdk", "tools"}; !slices.Equal(classified.ClientHarnessTags, want) {
+		t.Errorf("client_harness_tags = %v, want %v", classified.ClientHarnessTags, want)
+	}
+
+	filtered := list("&harness=CLAUDE-CODE")
+	if filtered.Total != 1 || len(filtered.Items) != 1 || filtered.Items[0].ClientHarness != "claude-code" {
+		t.Fatalf("?harness=CLAUDE-CODE = %d items (total %d), want only the claude trace", len(filtered.Items), filtered.Total)
+	}
+	if filtered.Stats.TotalRequest != 1 {
+		t.Errorf("?harness=CLAUDE-CODE stats.total_request = %d, want 1 (counters must agree with the page)", filtered.Stats.TotalRequest)
+	}
+
+	if missing := list("&harness=codex-cli"); missing.Total != 0 || len(missing.Items) != 0 {
+		t.Errorf("?harness=codex-cli = %d items (total %d), want none", len(missing.Items), missing.Total)
+	}
+}

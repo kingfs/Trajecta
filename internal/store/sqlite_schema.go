@@ -92,7 +92,13 @@ var sqliteSchemaStatements = []string{
 			channel_id TEXT NOT NULL DEFAULT '',
 			credential_id TEXT NOT NULL DEFAULT '',
 			sticky_status TEXT NOT NULL DEFAULT '',
-			sticky_previous_upstream_id TEXT NOT NULL DEFAULT ''
+			sticky_previous_upstream_id TEXT NOT NULL DEFAULT '',
+			client_harness TEXT NOT NULL DEFAULT '',
+			client_harness_name TEXT NOT NULL DEFAULT '',
+			client_harness_version TEXT NOT NULL DEFAULT '',
+			client_harness_kind TEXT NOT NULL DEFAULT '',
+			client_harness_confidence TEXT NOT NULL DEFAULT '',
+			client_harness_tags_json TEXT NOT NULL DEFAULT '[]'
 		);`,
 	`CREATE TABLE IF NOT EXISTS upstream_targets (
 			id TEXT PRIMARY KEY,
@@ -666,6 +672,24 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "sticky_previous_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_version", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_confidence", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_tags_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("upstream_exchanges", "request_id", "TEXT NULL"); err != nil {

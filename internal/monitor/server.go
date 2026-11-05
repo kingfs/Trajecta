@@ -113,37 +113,47 @@ type overviewParseJob struct {
 }
 
 type traceListItem struct {
-	ID                string              `json:"id"`
-	SessionID         string              `json:"session_id,omitempty"`
-	SessionSource     string              `json:"session_source,omitempty"`
-	RecordedAt        time.Time           `json:"recorded_at"`
-	Model             string              `json:"model"`
-	Provider          string              `json:"provider"`
-	SelectedUpstream  string              `json:"selected_upstream_id,omitempty"`
-	SelectedPreset    string              `json:"selected_upstream_provider_preset,omitempty"`
-	Operation         string              `json:"operation"`
-	Endpoint          string              `json:"endpoint"`
-	Method            string              `json:"method"`
-	URL               string              `json:"url"`
-	StatusCode        int                 `json:"status_code"`
-	DurationMs        int64               `json:"duration_ms"`
-	TTFTMs            int64               `json:"ttft_ms"`
-	TotalTokens       int                 `json:"total_tokens"`
-	PromptTokens      int                 `json:"prompt_tokens"`
-	CompletionTokens  int                 `json:"completion_tokens"`
-	CachedTokens      int                 `json:"cached_tokens"`
-	IsStream          bool                `json:"is_stream"`
-	Error             string              `json:"error,omitempty"`
-	RequestAuditID    string              `json:"request_audit_id,omitempty"`
-	ResponseID        string              `json:"response_id,omitempty"`
-	ExchangeID        string              `json:"exchange_id,omitempty"`
-	ExchangeKind      string              `json:"exchange_kind,omitempty"`
-	ExchangeRole      string              `json:"exchange_role,omitempty"`
-	ParentExchangeID  string              `json:"parent_exchange_id,omitempty"`
-	SequenceIndex     int                 `json:"sequence_index,omitempty"`
-	UpstreamCallCount int                 `json:"upstream_call_count,omitempty"`
-	UpstreamCalls     []traceListItem     `json:"upstream_calls,omitempty"`
-	Observation       observationListView `json:"observation"`
+	ID               string    `json:"id"`
+	SessionID        string    `json:"session_id,omitempty"`
+	SessionSource    string    `json:"session_source,omitempty"`
+	RecordedAt       time.Time `json:"recorded_at"`
+	Model            string    `json:"model"`
+	Provider         string    `json:"provider"`
+	SelectedUpstream string    `json:"selected_upstream_id,omitempty"`
+	SelectedPreset   string    `json:"selected_upstream_provider_preset,omitempty"`
+	// The client harness that produced the request, derived by internal/harness
+	// at record time. The canonical id is what the list filters on; the rest is
+	// display detail. They are omitted when empty so a legacy trace without a
+	// classification renders exactly as before.
+	ClientHarness           string              `json:"client_harness,omitempty"`
+	ClientHarnessName       string              `json:"client_harness_name,omitempty"`
+	ClientHarnessVersion    string              `json:"client_harness_version,omitempty"`
+	ClientHarnessKind       string              `json:"client_harness_kind,omitempty"`
+	ClientHarnessConfidence string              `json:"client_harness_confidence,omitempty"`
+	ClientHarnessTags       []string            `json:"client_harness_tags,omitempty"`
+	Operation               string              `json:"operation"`
+	Endpoint                string              `json:"endpoint"`
+	Method                  string              `json:"method"`
+	URL                     string              `json:"url"`
+	StatusCode              int                 `json:"status_code"`
+	DurationMs              int64               `json:"duration_ms"`
+	TTFTMs                  int64               `json:"ttft_ms"`
+	TotalTokens             int                 `json:"total_tokens"`
+	PromptTokens            int                 `json:"prompt_tokens"`
+	CompletionTokens        int                 `json:"completion_tokens"`
+	CachedTokens            int                 `json:"cached_tokens"`
+	IsStream                bool                `json:"is_stream"`
+	Error                   string              `json:"error,omitempty"`
+	RequestAuditID          string              `json:"request_audit_id,omitempty"`
+	ResponseID              string              `json:"response_id,omitempty"`
+	ExchangeID              string              `json:"exchange_id,omitempty"`
+	ExchangeKind            string              `json:"exchange_kind,omitempty"`
+	ExchangeRole            string              `json:"exchange_role,omitempty"`
+	ParentExchangeID        string              `json:"parent_exchange_id,omitempty"`
+	SequenceIndex           int                 `json:"sequence_index,omitempty"`
+	UpstreamCallCount       int                 `json:"upstream_call_count,omitempty"`
+	UpstreamCalls           []traceListItem     `json:"upstream_calls,omitempty"`
+	Observation             observationListView `json:"observation"`
 	// The user's opening message, trimmed to tracePreviewRunes. It is derived
 	// from the cassette by the list handlers rather than stored, so traces
 	// recorded before this field existed get it too.
@@ -2638,36 +2648,42 @@ func sessionSummaryItem(summary store.SessionSummary) sessionListItem {
 
 func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 	return traceListItem{
-		ID:               entry.ID,
-		SessionID:        entry.SessionID,
-		SessionSource:    entry.SessionSource,
-		RecordedAt:       entry.Header.Meta.Time,
-		Model:            entry.Header.Meta.Model,
-		Provider:         entry.Header.Meta.Provider,
-		SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
-		SelectedPreset:   entry.Header.Meta.SelectedUpstreamProviderPreset,
-		Operation:        entry.Header.Meta.Operation,
-		Endpoint:         entry.Header.Meta.Endpoint,
-		Method:           entry.Header.Meta.Method,
-		URL:              entry.Header.Meta.URL,
-		StatusCode:       entry.Header.Meta.StatusCode,
-		DurationMs:       entry.Header.Meta.DurationMs,
-		TTFTMs:           entry.Header.Meta.TTFTMs,
-		TotalTokens:      entry.Header.Usage.TotalTokens,
-		PromptTokens:     entry.Header.Usage.PromptTokens,
-		CompletionTokens: entry.Header.Usage.CompletionTokens,
-		CachedTokens:     cachedTokens(entry),
-		IsStream:         entry.Header.Layout.IsStream,
-		Error:            entry.Header.Meta.Error,
-		RequestAuditID:   entry.Header.Meta.RequestAuditID,
-		ResponseID:       entry.Header.Meta.ResponseID,
-		ExchangeID:       entry.Header.Meta.ExchangeID,
-		ExchangeKind:     entry.Header.Meta.ExchangeKind,
-		ExchangeRole:     entry.Header.Meta.ExchangeRole,
-		ParentExchangeID: entry.Header.Meta.ParentExchangeID,
-		SequenceIndex:    entry.Header.Meta.SequenceIndex,
-		Observation:      observationListViewFromStore(entry.Observation),
-		logPath:          entry.LogPath,
+		ID:                      entry.ID,
+		SessionID:               entry.SessionID,
+		SessionSource:           entry.SessionSource,
+		RecordedAt:              entry.Header.Meta.Time,
+		Model:                   entry.Header.Meta.Model,
+		Provider:                entry.Header.Meta.Provider,
+		SelectedUpstream:        entry.Header.Meta.SelectedUpstreamID,
+		SelectedPreset:          entry.Header.Meta.SelectedUpstreamProviderPreset,
+		ClientHarness:           entry.Header.Meta.ClientHarness,
+		ClientHarnessName:       entry.Header.Meta.ClientHarnessName,
+		ClientHarnessVersion:    entry.Header.Meta.ClientHarnessVersion,
+		ClientHarnessKind:       entry.Header.Meta.ClientHarnessKind,
+		ClientHarnessConfidence: entry.Header.Meta.ClientHarnessConfidence,
+		ClientHarnessTags:       entry.Header.Meta.ClientHarnessTags,
+		Operation:               entry.Header.Meta.Operation,
+		Endpoint:                entry.Header.Meta.Endpoint,
+		Method:                  entry.Header.Meta.Method,
+		URL:                     entry.Header.Meta.URL,
+		StatusCode:              entry.Header.Meta.StatusCode,
+		DurationMs:              entry.Header.Meta.DurationMs,
+		TTFTMs:                  entry.Header.Meta.TTFTMs,
+		TotalTokens:             entry.Header.Usage.TotalTokens,
+		PromptTokens:            entry.Header.Usage.PromptTokens,
+		CompletionTokens:        entry.Header.Usage.CompletionTokens,
+		CachedTokens:            cachedTokens(entry),
+		IsStream:                entry.Header.Layout.IsStream,
+		Error:                   entry.Header.Meta.Error,
+		RequestAuditID:          entry.Header.Meta.RequestAuditID,
+		ResponseID:              entry.Header.Meta.ResponseID,
+		ExchangeID:              entry.Header.Meta.ExchangeID,
+		ExchangeKind:            entry.Header.Meta.ExchangeKind,
+		ExchangeRole:            entry.Header.Meta.ExchangeRole,
+		ParentExchangeID:        entry.Header.Meta.ParentExchangeID,
+		SequenceIndex:           entry.Header.Meta.SequenceIndex,
+		Observation:             observationListViewFromStore(entry.Observation),
+		logPath:                 entry.LogPath,
 	}
 }
 
@@ -2875,6 +2891,7 @@ func parseListFilter(r *http.Request) store.ListFilter {
 		Model:             strings.TrimSpace(query.Get("model")),
 		Endpoint:          strings.TrimSpace(query.Get("endpoint")),
 		SelectedUpstream:  strings.TrimSpace(query.Get("upstream")),
+		Harness:           strings.TrimSpace(query.Get("harness")),
 		Status:            strings.TrimSpace(query.Get("status")),
 		ObservationStatus: strings.TrimSpace(firstNonEmptyLocal(query.Get("observation"), query.Get("observation_status"))),
 		MissingUsage:      parseBool(query.Get("missing_usage")),

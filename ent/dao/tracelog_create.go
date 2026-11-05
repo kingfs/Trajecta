@@ -691,6 +691,90 @@ func (_c *TraceLogCreate) SetNillableStickyPreviousUpstreamID(v *string) *TraceL
 	return _c
 }
 
+// SetClientHarness sets the "client_harness" field.
+func (_c *TraceLogCreate) SetClientHarness(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarness(v)
+	return _c
+}
+
+// SetNillableClientHarness sets the "client_harness" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarness(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarness(*v)
+	}
+	return _c
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (_c *TraceLogCreate) SetClientHarnessName(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarnessName(v)
+	return _c
+}
+
+// SetNillableClientHarnessName sets the "client_harness_name" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarnessName(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarnessName(*v)
+	}
+	return _c
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (_c *TraceLogCreate) SetClientHarnessVersion(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarnessVersion(v)
+	return _c
+}
+
+// SetNillableClientHarnessVersion sets the "client_harness_version" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarnessVersion(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarnessVersion(*v)
+	}
+	return _c
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (_c *TraceLogCreate) SetClientHarnessKind(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarnessKind(v)
+	return _c
+}
+
+// SetNillableClientHarnessKind sets the "client_harness_kind" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarnessKind(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarnessKind(*v)
+	}
+	return _c
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (_c *TraceLogCreate) SetClientHarnessConfidence(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarnessConfidence(v)
+	return _c
+}
+
+// SetNillableClientHarnessConfidence sets the "client_harness_confidence" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarnessConfidence(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarnessConfidence(*v)
+	}
+	return _c
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (_c *TraceLogCreate) SetClientHarnessTagsJSON(v string) *TraceLogCreate {
+	_c.mutation.SetClientHarnessTagsJSON(v)
+	return _c
+}
+
+// SetNillableClientHarnessTagsJSON sets the "client_harness_tags_json" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableClientHarnessTagsJSON(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetClientHarnessTagsJSON(*v)
+	}
+	return _c
+}
+
 // SetID sets the "id" field.
 func (_c *TraceLogCreate) SetID(v string) *TraceLogCreate {
 	_c.mutation.SetID(v)
@@ -916,6 +1000,30 @@ func (_c *TraceLogCreate) defaults() {
 		v := tracelog.DefaultStickyPreviousUpstreamID
 		_c.mutation.SetStickyPreviousUpstreamID(v)
 	}
+	if _, ok := _c.mutation.ClientHarness(); !ok {
+		v := tracelog.DefaultClientHarness
+		_c.mutation.SetClientHarness(v)
+	}
+	if _, ok := _c.mutation.ClientHarnessName(); !ok {
+		v := tracelog.DefaultClientHarnessName
+		_c.mutation.SetClientHarnessName(v)
+	}
+	if _, ok := _c.mutation.ClientHarnessVersion(); !ok {
+		v := tracelog.DefaultClientHarnessVersion
+		_c.mutation.SetClientHarnessVersion(v)
+	}
+	if _, ok := _c.mutation.ClientHarnessKind(); !ok {
+		v := tracelog.DefaultClientHarnessKind
+		_c.mutation.SetClientHarnessKind(v)
+	}
+	if _, ok := _c.mutation.ClientHarnessConfidence(); !ok {
+		v := tracelog.DefaultClientHarnessConfidence
+		_c.mutation.SetClientHarnessConfidence(v)
+	}
+	if _, ok := _c.mutation.ClientHarnessTagsJSON(); !ok {
+		v := tracelog.DefaultClientHarnessTagsJSON
+		_c.mutation.SetClientHarnessTagsJSON(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -1079,6 +1187,24 @@ func (_c *TraceLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.StickyPreviousUpstreamID(); !ok {
 		return &ValidationError{Name: "sticky_previous_upstream_id", err: errors.New(`dao: missing required field "TraceLog.sticky_previous_upstream_id"`)}
+	}
+	if _, ok := _c.mutation.ClientHarness(); !ok {
+		return &ValidationError{Name: "client_harness", err: errors.New(`dao: missing required field "TraceLog.client_harness"`)}
+	}
+	if _, ok := _c.mutation.ClientHarnessName(); !ok {
+		return &ValidationError{Name: "client_harness_name", err: errors.New(`dao: missing required field "TraceLog.client_harness_name"`)}
+	}
+	if _, ok := _c.mutation.ClientHarnessVersion(); !ok {
+		return &ValidationError{Name: "client_harness_version", err: errors.New(`dao: missing required field "TraceLog.client_harness_version"`)}
+	}
+	if _, ok := _c.mutation.ClientHarnessKind(); !ok {
+		return &ValidationError{Name: "client_harness_kind", err: errors.New(`dao: missing required field "TraceLog.client_harness_kind"`)}
+	}
+	if _, ok := _c.mutation.ClientHarnessConfidence(); !ok {
+		return &ValidationError{Name: "client_harness_confidence", err: errors.New(`dao: missing required field "TraceLog.client_harness_confidence"`)}
+	}
+	if _, ok := _c.mutation.ClientHarnessTagsJSON(); !ok {
+		return &ValidationError{Name: "client_harness_tags_json", err: errors.New(`dao: missing required field "TraceLog.client_harness_tags_json"`)}
 	}
 	if v, ok := _c.mutation.ID(); ok {
 		if err := tracelog.IDValidator(v); err != nil {
@@ -1321,6 +1447,30 @@ func (_c *TraceLogCreate) createSpec() (*TraceLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.StickyPreviousUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
 		_node.StickyPreviousUpstreamID = value
+	}
+	if value, ok := _c.mutation.ClientHarness(); ok {
+		_spec.SetField(tracelog.FieldClientHarness, field.TypeString, value)
+		_node.ClientHarness = value
+	}
+	if value, ok := _c.mutation.ClientHarnessName(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessName, field.TypeString, value)
+		_node.ClientHarnessName = value
+	}
+	if value, ok := _c.mutation.ClientHarnessVersion(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessVersion, field.TypeString, value)
+		_node.ClientHarnessVersion = value
+	}
+	if value, ok := _c.mutation.ClientHarnessKind(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessKind, field.TypeString, value)
+		_node.ClientHarnessKind = value
+	}
+	if value, ok := _c.mutation.ClientHarnessConfidence(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessConfidence, field.TypeString, value)
+		_node.ClientHarnessConfidence = value
+	}
+	if value, ok := _c.mutation.ClientHarnessTagsJSON(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessTagsJSON, field.TypeString, value)
+		_node.ClientHarnessTagsJSON = value
 	}
 	return _node, _spec
 }
@@ -2073,6 +2223,78 @@ func (u *TraceLogUpsert) SetStickyPreviousUpstreamID(v string) *TraceLogUpsert {
 // UpdateStickyPreviousUpstreamID sets the "sticky_previous_upstream_id" field to the value that was provided on create.
 func (u *TraceLogUpsert) UpdateStickyPreviousUpstreamID() *TraceLogUpsert {
 	u.SetExcluded(tracelog.FieldStickyPreviousUpstreamID)
+	return u
+}
+
+// SetClientHarness sets the "client_harness" field.
+func (u *TraceLogUpsert) SetClientHarness(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarness, v)
+	return u
+}
+
+// UpdateClientHarness sets the "client_harness" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarness() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarness)
+	return u
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (u *TraceLogUpsert) SetClientHarnessName(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarnessName, v)
+	return u
+}
+
+// UpdateClientHarnessName sets the "client_harness_name" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarnessName() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarnessName)
+	return u
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (u *TraceLogUpsert) SetClientHarnessVersion(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarnessVersion, v)
+	return u
+}
+
+// UpdateClientHarnessVersion sets the "client_harness_version" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarnessVersion() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarnessVersion)
+	return u
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (u *TraceLogUpsert) SetClientHarnessKind(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarnessKind, v)
+	return u
+}
+
+// UpdateClientHarnessKind sets the "client_harness_kind" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarnessKind() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarnessKind)
+	return u
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (u *TraceLogUpsert) SetClientHarnessConfidence(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarnessConfidence, v)
+	return u
+}
+
+// UpdateClientHarnessConfidence sets the "client_harness_confidence" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarnessConfidence() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarnessConfidence)
+	return u
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (u *TraceLogUpsert) SetClientHarnessTagsJSON(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldClientHarnessTagsJSON, v)
+	return u
+}
+
+// UpdateClientHarnessTagsJSON sets the "client_harness_tags_json" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateClientHarnessTagsJSON() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldClientHarnessTagsJSON)
 	return u
 }
 
@@ -2940,6 +3162,90 @@ func (u *TraceLogUpsertOne) SetStickyPreviousUpstreamID(v string) *TraceLogUpser
 func (u *TraceLogUpsertOne) UpdateStickyPreviousUpstreamID() *TraceLogUpsertOne {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateStickyPreviousUpstreamID()
+	})
+}
+
+// SetClientHarness sets the "client_harness" field.
+func (u *TraceLogUpsertOne) SetClientHarness(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarness(v)
+	})
+}
+
+// UpdateClientHarness sets the "client_harness" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarness() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarness()
+	})
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (u *TraceLogUpsertOne) SetClientHarnessName(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessName(v)
+	})
+}
+
+// UpdateClientHarnessName sets the "client_harness_name" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarnessName() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessName()
+	})
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (u *TraceLogUpsertOne) SetClientHarnessVersion(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessVersion(v)
+	})
+}
+
+// UpdateClientHarnessVersion sets the "client_harness_version" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarnessVersion() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessVersion()
+	})
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (u *TraceLogUpsertOne) SetClientHarnessKind(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessKind(v)
+	})
+}
+
+// UpdateClientHarnessKind sets the "client_harness_kind" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarnessKind() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessKind()
+	})
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (u *TraceLogUpsertOne) SetClientHarnessConfidence(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessConfidence(v)
+	})
+}
+
+// UpdateClientHarnessConfidence sets the "client_harness_confidence" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarnessConfidence() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessConfidence()
+	})
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (u *TraceLogUpsertOne) SetClientHarnessTagsJSON(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessTagsJSON(v)
+	})
+}
+
+// UpdateClientHarnessTagsJSON sets the "client_harness_tags_json" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateClientHarnessTagsJSON() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessTagsJSON()
 	})
 }
 
@@ -3974,6 +4280,90 @@ func (u *TraceLogUpsertBulk) SetStickyPreviousUpstreamID(v string) *TraceLogUpse
 func (u *TraceLogUpsertBulk) UpdateStickyPreviousUpstreamID() *TraceLogUpsertBulk {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateStickyPreviousUpstreamID()
+	})
+}
+
+// SetClientHarness sets the "client_harness" field.
+func (u *TraceLogUpsertBulk) SetClientHarness(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarness(v)
+	})
+}
+
+// UpdateClientHarness sets the "client_harness" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarness() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarness()
+	})
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (u *TraceLogUpsertBulk) SetClientHarnessName(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessName(v)
+	})
+}
+
+// UpdateClientHarnessName sets the "client_harness_name" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarnessName() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessName()
+	})
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (u *TraceLogUpsertBulk) SetClientHarnessVersion(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessVersion(v)
+	})
+}
+
+// UpdateClientHarnessVersion sets the "client_harness_version" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarnessVersion() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessVersion()
+	})
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (u *TraceLogUpsertBulk) SetClientHarnessKind(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessKind(v)
+	})
+}
+
+// UpdateClientHarnessKind sets the "client_harness_kind" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarnessKind() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessKind()
+	})
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (u *TraceLogUpsertBulk) SetClientHarnessConfidence(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessConfidence(v)
+	})
+}
+
+// UpdateClientHarnessConfidence sets the "client_harness_confidence" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarnessConfidence() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessConfidence()
+	})
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (u *TraceLogUpsertBulk) SetClientHarnessTagsJSON(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetClientHarnessTagsJSON(v)
+	})
+}
+
+// UpdateClientHarnessTagsJSON sets the "client_harness_tags_json" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateClientHarnessTagsJSON() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateClientHarnessTagsJSON()
 	})
 }
 

@@ -290,7 +290,13 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		channel_id TEXT NOT NULL DEFAULT '',
 		credential_id TEXT NOT NULL DEFAULT '',
 		sticky_status TEXT NOT NULL DEFAULT '',
-		sticky_previous_upstream_id TEXT NOT NULL DEFAULT ''
+		sticky_previous_upstream_id TEXT NOT NULL DEFAULT '',
+		client_harness TEXT NOT NULL DEFAULT '',
+		client_harness_name TEXT NOT NULL DEFAULT '',
+		client_harness_version TEXT NOT NULL DEFAULT '',
+		client_harness_kind TEXT NOT NULL DEFAULT '',
+		client_harness_confidence TEXT NOT NULL DEFAULT '',
+		client_harness_tags_json TEXT NOT NULL DEFAULT '[]'
 	)`); err != nil {
 		return err
 	}
@@ -304,7 +310,9 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
-		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
+		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id,
+		client_harness, client_harness_name, client_harness_version, client_harness_kind,
+		client_harness_confidence, client_harness_tags_json
 	)
 	SELECT
 		path, trace_id, mod_time_ns, file_size, version, request_id,
@@ -319,7 +327,8 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		'', '', '', '', 0,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
-		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
+		route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id,
+		'', '', '', '', '', '[]'
 	FROM logs_old`); err != nil {
 		return err
 	}
@@ -430,6 +439,27 @@ func (s *Store) ensureLogExchangeColumns() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// The client harness classification mirrors the `harness.detected` prelude
+	// event. These columns are indexed like the routing detail above, and the
+	// list filter is their only predicate, so they carry no index of their own.
+	if err := s.ensureColumn("logs", "client_harness", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_version", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_confidence", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_harness_tags_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	// `(request_audit_id, recorded_at)` and `(exchange_kind, recorded_at)` used to

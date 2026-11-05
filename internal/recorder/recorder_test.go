@@ -526,3 +526,225 @@ func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testin
 		}
 	}
 }
+
+func TestPrepareLogFileRecordsHarnessDetection(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	body := `{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true,"system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"Bash"}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+	req.Header.Set("x-app", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-stainless-lang", "js")
+
+	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	defer info.File.Close()
+
+	meta := info.Header.Meta
+	if meta.ClientHarness != "claude-code" || meta.ClientHarnessName != "Claude Code" || meta.ClientHarnessVersion != "2.0.14" || meta.ClientHarnessKind != "agent-cli" || meta.ClientHarnessConfidence != "high" {
+		t.Fatalf("harness metadata = %+v, want claude-code/Claude Code/2.0.14/agent-cli/high", meta)
+	}
+	if len(meta.ClientHarnessTags) == 0 {
+		t.Fatalf("harness tags are empty")
+	}
+	found := false
+	for _, event := range info.Events {
+		if event.Type != "harness.detected" {
+			continue
+		}
+		found = true
+		if event.Attributes["harness"] != "claude-code" {
+			t.Fatalf("event harness = %#v, want claude-code", event.Attributes["harness"])
+		}
+		if _, ok := event.Attributes["evidence"]; !ok {
+			t.Fatalf("event evidence missing: %#v", event.Attributes)
+		}
+	}
+	if !found {
+		t.Fatalf("harness.detected event not recorded: %+v", info.Events)
+	}
+}
+
+func TestPrepareLogFileSkipsHarnessDetectionForModelChild(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	// A child model exchange of the local Responses runtime has synthetic headers
+	// and a converted body; classifying it would attribute the client's harness
+	// to the internal upstream call.
+	body := `{"model":"gpt-5","messages":[{"role":"system","content":"You are Claude Code, Anthropic's official CLI for Claude."}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+
+	info, err := rec.PrepareLogFileWithOptions(req, PrepareOptions{
+		SiteURL:      "https://api.openai.com",
+		ExchangeKind: "model",
+	})
+	if err != nil {
+		t.Fatalf("PrepareLogFileWithOptions() error = %v", err)
+	}
+	defer info.File.Close()
+
+	if info.Header.Meta.ClientHarness != "" || len(info.Header.Meta.ClientHarnessTags) != 0 {
+		t.Fatalf("model child was classified: %+v", info.Header.Meta)
+	}
+	if len(info.Events) != 0 {
+		t.Fatalf("model child recorded events: %+v", info.Events)
+	}
+}
+
+func TestPrepareLogFileRecordsSDKTagsWithoutHarness(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	body := `{"model":"gpt-4.1","stream":true,"messages":[],"tools":[{"type":"function","function":{"name":"lookup"}}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("User-Agent", "OpenAI/Python 1.40.0")
+	req.Header.Set("x-stainless-lang", "python")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	defer info.File.Close()
+
+	if info.Header.Meta.ClientHarness != "" {
+		t.Fatalf("ClientHarness = %q, want empty for a plain SDK call", info.Header.Meta.ClientHarness)
+	}
+	if len(info.Header.Meta.ClientHarnessTags) == 0 {
+		t.Fatalf("SDK/capability tags were dropped")
+	}
+	if len(info.Events) != 0 {
+		t.Fatalf("tag-only detection must not write a harness event: %+v", info.Events)
+	}
+}
+
+func TestUpdateLogFilePersistsHarnessEvent(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	body := `{"model":"claude-sonnet-4-5","system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[]}`
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	info.Header.Meta.StatusCode = 200
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"ok":true}`
+	info.Header.Layout.ResHeaderLen = int64(len(resHead))
+	info.Header.Layout.ResBodyLen = int64(len(resBody))
+	if _, err := info.File.Write([]byte("\n" + resHead + resBody)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := rec.UpdateLogFile(info); err != nil {
+		t.Fatalf("UpdateLogFile() error = %v", err)
+	}
+
+	content, err := os.ReadFile(info.Path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	parsed, err := recordfile.ParsePrelude(content)
+	if err != nil {
+		t.Fatalf("ParsePrelude() error = %v", err)
+	}
+	if parsed.Header.Meta.ClientHarness != "claude-code" {
+		t.Fatalf("persisted ClientHarness = %q, want claude-code", parsed.Header.Meta.ClientHarness)
+	}
+	found := false
+	for _, event := range parsed.Events {
+		if event.Type == "harness.detected" {
+			found = true
+			if event.Attributes["harness"] != "claude-code" {
+				t.Fatalf("event harness = %#v", event.Attributes["harness"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("harness.detected event not persisted: %+v", parsed.Events)
+	}
+}
+
+// TestUpdateLogFileIndexesClientHarness wires the recorder, the cassette and the
+// store together: the detection written into the prelude is what the index row
+// carries, and the list filter selects the row from the database. The pieces are
+// unit-tested separately; this pins the hand-off between them.
+func TestUpdateLogFileIndexesClientHarness(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	rec := New(dir, false, st)
+	body := `{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true,"system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"Bash"}]}`
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+	req.Header.Set("x-app", "cli")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-stainless-lang", "js")
+
+	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	info.Header.Meta.StatusCode = 200
+	info.Header.Meta.DurationMs = 12
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"ok":true}`
+	info.Header.Layout.ResHeaderLen = int64(len(resHead))
+	info.Header.Layout.ResBodyLen = int64(len(resBody))
+	if _, err := info.File.Write([]byte("\n" + resHead + resBody)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := rec.UpdateLogFile(info); err != nil {
+		t.Fatalf("UpdateLogFile() error = %v", err)
+	}
+
+	entries, err := st.ListPage(1, 10, store.ListFilter{Harness: "claude-code"})
+	if err != nil {
+		t.Fatalf("ListPage(harness) error = %v", err)
+	}
+	if len(entries.Items) != 1 {
+		t.Fatalf("harness-filtered items = %d, want 1", len(entries.Items))
+	}
+	meta := entries.Items[0].Header.Meta
+	if meta.ClientHarness != "claude-code" || meta.ClientHarnessKind != "agent-cli" || meta.ClientHarnessVersion != "2.0.14" {
+		t.Fatalf("indexed harness = %+v, want claude-code/agent-cli/2.0.14", meta)
+	}
+	if len(meta.ClientHarnessTags) == 0 {
+		t.Fatalf("indexed harness tags are empty")
+	}
+
+	if other, err := st.ListPage(1, 10, store.ListFilter{Harness: "codex-cli"}); err != nil {
+		t.Fatalf("ListPage(other harness) error = %v", err)
+	} else if len(other.Items) != 0 {
+		t.Fatalf("other-harness items = %d, want 0", len(other.Items))
+	}
+}

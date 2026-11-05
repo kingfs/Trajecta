@@ -75,6 +75,18 @@ func (TraceLog) Fields() []ent.Field {
 		field.String("credential_id").Default(""),
 		field.String("sticky_status").Default(""),
 		field.String("sticky_previous_upstream_id").Default(""),
+		// The client harness classification mirrors the `harness.detected`
+		// cassette event so the Monitor can filter the list without opening
+		// every cassette. internal/harness produces it from the request headers
+		// and body; the columns are an index of that event, and a cassette
+		// recorded before the detection existed simply carries the defaults.
+		// No index: see the migration comment on the write path's cost.
+		field.String("client_harness").Default(""),
+		field.String("client_harness_name").Default(""),
+		field.String("client_harness_version").Default(""),
+		field.String("client_harness_kind").Default(""),
+		field.String("client_harness_confidence").Default(""),
+		field.String("client_harness_tags_json").Default("[]"),
 	}
 }
 

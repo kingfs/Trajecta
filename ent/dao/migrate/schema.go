@@ -886,6 +886,12 @@ var (
 		{Name: "credential_id", Type: field.TypeString, Default: ""},
 		{Name: "sticky_status", Type: field.TypeString, Default: ""},
 		{Name: "sticky_previous_upstream_id", Type: field.TypeString, Default: ""},
+		{Name: "client_harness", Type: field.TypeString, Default: ""},
+		{Name: "client_harness_name", Type: field.TypeString, Default: ""},
+		{Name: "client_harness_version", Type: field.TypeString, Default: ""},
+		{Name: "client_harness_kind", Type: field.TypeString, Default: ""},
+		{Name: "client_harness_confidence", Type: field.TypeString, Default: ""},
+		{Name: "client_harness_tags_json", Type: field.TypeString, Default: "[]"},
 	}
 	// LogsTable holds the schema information for the "logs" table.
 	LogsTable = &schema.Table{

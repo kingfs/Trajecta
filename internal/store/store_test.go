@@ -3301,7 +3301,16 @@ func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 		t.Fatalf("rows.Err() error = %v", err)
 	}
 
-	for _, name := range []string{"session_id", "session_source", "window_id", "client_request_id"} {
+	// The upgrade adds the columns introduced since this legacy schema, including
+	// the client-harness mirror. That path renames the old table and copies it
+	// into a freshly created one, so a column missing from the rebuild DDL or its
+	// copy list would silently disappear on exactly the old database the upgrade
+	// exists for.
+	for _, name := range []string{
+		"session_id", "session_source", "window_id", "client_request_id",
+		"client_harness", "client_harness_name", "client_harness_version",
+		"client_harness_kind", "client_harness_confidence", "client_harness_tags_json",
+	} {
 		if !columns[name] {
 			t.Fatalf("column %q missing after upgrade", name)
 		}

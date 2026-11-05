@@ -650,6 +650,7 @@ ORDER BY pg_total_relation_size(c.oid) DESC;
 
 - `20261009090000_add_hot_path_indexes`：新增 `tracefinding_created_at_id`（`trace_findings(created_at DESC, id DESC)`，findings 列表默认排序）与 `analysisjob_created_at_id`（`analysis_jobs(created_at DESC, id DESC)`，analysis job 列表默认排序）；新增 `tracefinding_severity_created_at_id`（`(severity, created_at DESC, id DESC)`）并 `DROP` 掉 `tracefinding_severity_created_at`；`DROP` 掉从未被扫描的 `tracelog_request_audit_id_recorded_at` 与 `tracelog_exchange_kind_recorded_at`（各约 15 MB，`logs` 是最热写入路径，无人读取的索引就是纯写入放大）。down 迁移把四者反转。
 - `20261008120000_add_log_routing_detail`：给 `logs` 新增 `route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id` 五列（`NOT NULL DEFAULT ''`），让路由 summary 从逐 cassette 读 prelude 变成对 `logs` 的一次 `GROUP BY`。它**不**建新索引：summary 唯一的谓词是时间窗口，已有的 `tracelog_recorded_at`（`logs(recorded_at)`）已经用 bitmap index scan 覆盖它，而 `sticky_status` 在代码里从来不是谓词，所以 `(recorded_at, sticky_status)` 只会是更宽、永远不会被选中的死索引——在这张全进程最热的写入表上，无人读的索引就是纯粹的写放大。
+- `20261105120000_add_log_client_harness`：给 `logs` 新增 `client_harness`、`client_harness_name`、`client_harness_version`、`client_harness_kind`、`client_harness_confidence`、`client_harness_tags_json` 六列（文本默认 `''`，标签默认 `'[]'`）。它们是 cassette `harness.detected` 事件的索引投影，供 trace 列表标签与 `?harness=` 精确过滤使用；同样**不**建索引：唯一谓词是列表的 harness 过滤，时间窗口已经由 `tracelog_recorded_at` 收窄，而 `logs` 是最热写入表。规则与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 
 ## 并发索引变更
 

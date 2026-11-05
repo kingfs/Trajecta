@@ -314,6 +314,36 @@ func StickyPreviousUpstreamID(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldEQ(FieldStickyPreviousUpstreamID, v))
 }
 
+// ClientHarness applies equality check predicate on the "client_harness" field. It's identical to ClientHarnessEQ.
+func ClientHarness(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarness, v))
+}
+
+// ClientHarnessName applies equality check predicate on the "client_harness_name" field. It's identical to ClientHarnessNameEQ.
+func ClientHarnessName(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessName, v))
+}
+
+// ClientHarnessVersion applies equality check predicate on the "client_harness_version" field. It's identical to ClientHarnessVersionEQ.
+func ClientHarnessVersion(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessKind applies equality check predicate on the "client_harness_kind" field. It's identical to ClientHarnessKindEQ.
+func ClientHarnessKind(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessConfidence applies equality check predicate on the "client_harness_confidence" field. It's identical to ClientHarnessConfidenceEQ.
+func ClientHarnessConfidence(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessTagsJSON applies equality check predicate on the "client_harness_tags_json" field. It's identical to ClientHarnessTagsJSONEQ.
+func ClientHarnessTagsJSON(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessTagsJSON, v))
+}
+
 // TraceIDEQ applies the EQ predicate on the "trace_id" field.
 func TraceIDEQ(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldEQ(FieldTraceID, v))
@@ -3057,6 +3087,396 @@ func StickyPreviousUpstreamIDEqualFold(v string) predicate.TraceLog {
 // StickyPreviousUpstreamIDContainsFold applies the ContainsFold predicate on the "sticky_previous_upstream_id" field.
 func StickyPreviousUpstreamIDContainsFold(v string) predicate.TraceLog {
 	return predicate.TraceLog(sql.FieldContainsFold(FieldStickyPreviousUpstreamID, v))
+}
+
+// ClientHarnessEQ applies the EQ predicate on the "client_harness" field.
+func ClientHarnessEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarness, v))
+}
+
+// ClientHarnessNEQ applies the NEQ predicate on the "client_harness" field.
+func ClientHarnessNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarness, v))
+}
+
+// ClientHarnessIn applies the In predicate on the "client_harness" field.
+func ClientHarnessIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarness, vs...))
+}
+
+// ClientHarnessNotIn applies the NotIn predicate on the "client_harness" field.
+func ClientHarnessNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarness, vs...))
+}
+
+// ClientHarnessGT applies the GT predicate on the "client_harness" field.
+func ClientHarnessGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarness, v))
+}
+
+// ClientHarnessGTE applies the GTE predicate on the "client_harness" field.
+func ClientHarnessGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarness, v))
+}
+
+// ClientHarnessLT applies the LT predicate on the "client_harness" field.
+func ClientHarnessLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarness, v))
+}
+
+// ClientHarnessLTE applies the LTE predicate on the "client_harness" field.
+func ClientHarnessLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarness, v))
+}
+
+// ClientHarnessContains applies the Contains predicate on the "client_harness" field.
+func ClientHarnessContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarness, v))
+}
+
+// ClientHarnessHasPrefix applies the HasPrefix predicate on the "client_harness" field.
+func ClientHarnessHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarness, v))
+}
+
+// ClientHarnessHasSuffix applies the HasSuffix predicate on the "client_harness" field.
+func ClientHarnessHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarness, v))
+}
+
+// ClientHarnessEqualFold applies the EqualFold predicate on the "client_harness" field.
+func ClientHarnessEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarness, v))
+}
+
+// ClientHarnessContainsFold applies the ContainsFold predicate on the "client_harness" field.
+func ClientHarnessContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarness, v))
+}
+
+// ClientHarnessNameEQ applies the EQ predicate on the "client_harness_name" field.
+func ClientHarnessNameEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameNEQ applies the NEQ predicate on the "client_harness_name" field.
+func ClientHarnessNameNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameIn applies the In predicate on the "client_harness_name" field.
+func ClientHarnessNameIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarnessName, vs...))
+}
+
+// ClientHarnessNameNotIn applies the NotIn predicate on the "client_harness_name" field.
+func ClientHarnessNameNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarnessName, vs...))
+}
+
+// ClientHarnessNameGT applies the GT predicate on the "client_harness_name" field.
+func ClientHarnessNameGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameGTE applies the GTE predicate on the "client_harness_name" field.
+func ClientHarnessNameGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameLT applies the LT predicate on the "client_harness_name" field.
+func ClientHarnessNameLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameLTE applies the LTE predicate on the "client_harness_name" field.
+func ClientHarnessNameLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameContains applies the Contains predicate on the "client_harness_name" field.
+func ClientHarnessNameContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameHasPrefix applies the HasPrefix predicate on the "client_harness_name" field.
+func ClientHarnessNameHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameHasSuffix applies the HasSuffix predicate on the "client_harness_name" field.
+func ClientHarnessNameHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameEqualFold applies the EqualFold predicate on the "client_harness_name" field.
+func ClientHarnessNameEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarnessName, v))
+}
+
+// ClientHarnessNameContainsFold applies the ContainsFold predicate on the "client_harness_name" field.
+func ClientHarnessNameContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarnessName, v))
+}
+
+// ClientHarnessVersionEQ applies the EQ predicate on the "client_harness_version" field.
+func ClientHarnessVersionEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionNEQ applies the NEQ predicate on the "client_harness_version" field.
+func ClientHarnessVersionNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionIn applies the In predicate on the "client_harness_version" field.
+func ClientHarnessVersionIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarnessVersion, vs...))
+}
+
+// ClientHarnessVersionNotIn applies the NotIn predicate on the "client_harness_version" field.
+func ClientHarnessVersionNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarnessVersion, vs...))
+}
+
+// ClientHarnessVersionGT applies the GT predicate on the "client_harness_version" field.
+func ClientHarnessVersionGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionGTE applies the GTE predicate on the "client_harness_version" field.
+func ClientHarnessVersionGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionLT applies the LT predicate on the "client_harness_version" field.
+func ClientHarnessVersionLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionLTE applies the LTE predicate on the "client_harness_version" field.
+func ClientHarnessVersionLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionContains applies the Contains predicate on the "client_harness_version" field.
+func ClientHarnessVersionContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionHasPrefix applies the HasPrefix predicate on the "client_harness_version" field.
+func ClientHarnessVersionHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionHasSuffix applies the HasSuffix predicate on the "client_harness_version" field.
+func ClientHarnessVersionHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionEqualFold applies the EqualFold predicate on the "client_harness_version" field.
+func ClientHarnessVersionEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessVersionContainsFold applies the ContainsFold predicate on the "client_harness_version" field.
+func ClientHarnessVersionContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarnessVersion, v))
+}
+
+// ClientHarnessKindEQ applies the EQ predicate on the "client_harness_kind" field.
+func ClientHarnessKindEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindNEQ applies the NEQ predicate on the "client_harness_kind" field.
+func ClientHarnessKindNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindIn applies the In predicate on the "client_harness_kind" field.
+func ClientHarnessKindIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarnessKind, vs...))
+}
+
+// ClientHarnessKindNotIn applies the NotIn predicate on the "client_harness_kind" field.
+func ClientHarnessKindNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarnessKind, vs...))
+}
+
+// ClientHarnessKindGT applies the GT predicate on the "client_harness_kind" field.
+func ClientHarnessKindGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindGTE applies the GTE predicate on the "client_harness_kind" field.
+func ClientHarnessKindGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindLT applies the LT predicate on the "client_harness_kind" field.
+func ClientHarnessKindLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindLTE applies the LTE predicate on the "client_harness_kind" field.
+func ClientHarnessKindLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindContains applies the Contains predicate on the "client_harness_kind" field.
+func ClientHarnessKindContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindHasPrefix applies the HasPrefix predicate on the "client_harness_kind" field.
+func ClientHarnessKindHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindHasSuffix applies the HasSuffix predicate on the "client_harness_kind" field.
+func ClientHarnessKindHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindEqualFold applies the EqualFold predicate on the "client_harness_kind" field.
+func ClientHarnessKindEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessKindContainsFold applies the ContainsFold predicate on the "client_harness_kind" field.
+func ClientHarnessKindContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarnessKind, v))
+}
+
+// ClientHarnessConfidenceEQ applies the EQ predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceNEQ applies the NEQ predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceIn applies the In predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarnessConfidence, vs...))
+}
+
+// ClientHarnessConfidenceNotIn applies the NotIn predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarnessConfidence, vs...))
+}
+
+// ClientHarnessConfidenceGT applies the GT predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceGTE applies the GTE predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceLT applies the LT predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceLTE applies the LTE predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceContains applies the Contains predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceHasPrefix applies the HasPrefix predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceHasSuffix applies the HasSuffix predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceEqualFold applies the EqualFold predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessConfidenceContainsFold applies the ContainsFold predicate on the "client_harness_confidence" field.
+func ClientHarnessConfidenceContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarnessConfidence, v))
+}
+
+// ClientHarnessTagsJSONEQ applies the EQ predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEQ(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONNEQ applies the NEQ predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONNEQ(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNEQ(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONIn applies the In predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldIn(FieldClientHarnessTagsJSON, vs...))
+}
+
+// ClientHarnessTagsJSONNotIn applies the NotIn predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONNotIn(vs ...string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldNotIn(FieldClientHarnessTagsJSON, vs...))
+}
+
+// ClientHarnessTagsJSONGT applies the GT predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONGT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGT(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONGTE applies the GTE predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONGTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldGTE(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONLT applies the LT predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONLT(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLT(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONLTE applies the LTE predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONLTE(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldLTE(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONContains applies the Contains predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONContains(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContains(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONHasPrefix applies the HasPrefix predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONHasPrefix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasPrefix(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONHasSuffix applies the HasSuffix predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONHasSuffix(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldHasSuffix(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONEqualFold applies the EqualFold predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONEqualFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldEqualFold(FieldClientHarnessTagsJSON, v))
+}
+
+// ClientHarnessTagsJSONContainsFold applies the ContainsFold predicate on the "client_harness_tags_json" field.
+func ClientHarnessTagsJSONContainsFold(v string) predicate.TraceLog {
+	return predicate.TraceLog(sql.FieldContainsFold(FieldClientHarnessTagsJSON, v))
 }
 
 // And groups predicates with the AND operator between them.

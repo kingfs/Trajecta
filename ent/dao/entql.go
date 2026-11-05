@@ -647,6 +647,12 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldCredentialID:                   {Type: field.TypeString, Column: tracelog.FieldCredentialID},
 			tracelog.FieldStickyStatus:                   {Type: field.TypeString, Column: tracelog.FieldStickyStatus},
 			tracelog.FieldStickyPreviousUpstreamID:       {Type: field.TypeString, Column: tracelog.FieldStickyPreviousUpstreamID},
+			tracelog.FieldClientHarness:                  {Type: field.TypeString, Column: tracelog.FieldClientHarness},
+			tracelog.FieldClientHarnessName:              {Type: field.TypeString, Column: tracelog.FieldClientHarnessName},
+			tracelog.FieldClientHarnessVersion:           {Type: field.TypeString, Column: tracelog.FieldClientHarnessVersion},
+			tracelog.FieldClientHarnessKind:              {Type: field.TypeString, Column: tracelog.FieldClientHarnessKind},
+			tracelog.FieldClientHarnessConfidence:        {Type: field.TypeString, Column: tracelog.FieldClientHarnessConfidence},
+			tracelog.FieldClientHarnessTagsJSON:          {Type: field.TypeString, Column: tracelog.FieldClientHarnessTagsJSON},
 		},
 	}
 	graph.Nodes[23] = &sqlgraph.Node{
@@ -3275,6 +3281,36 @@ func (f *TraceLogFilter) WhereStickyStatus(p entql.StringP) {
 // WhereStickyPreviousUpstreamID applies the entql string predicate on the sticky_previous_upstream_id field.
 func (f *TraceLogFilter) WhereStickyPreviousUpstreamID(p entql.StringP) {
 	f.Where(p.Field(tracelog.FieldStickyPreviousUpstreamID))
+}
+
+// WhereClientHarness applies the entql string predicate on the client_harness field.
+func (f *TraceLogFilter) WhereClientHarness(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarness))
+}
+
+// WhereClientHarnessName applies the entql string predicate on the client_harness_name field.
+func (f *TraceLogFilter) WhereClientHarnessName(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarnessName))
+}
+
+// WhereClientHarnessVersion applies the entql string predicate on the client_harness_version field.
+func (f *TraceLogFilter) WhereClientHarnessVersion(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarnessVersion))
+}
+
+// WhereClientHarnessKind applies the entql string predicate on the client_harness_kind field.
+func (f *TraceLogFilter) WhereClientHarnessKind(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarnessKind))
+}
+
+// WhereClientHarnessConfidence applies the entql string predicate on the client_harness_confidence field.
+func (f *TraceLogFilter) WhereClientHarnessConfidence(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarnessConfidence))
+}
+
+// WhereClientHarnessTagsJSON applies the entql string predicate on the client_harness_tags_json field.
+func (f *TraceLogFilter) WhereClientHarnessTagsJSON(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientHarnessTagsJSON))
 }
 
 // addPredicate implements the predicateAdder interface.

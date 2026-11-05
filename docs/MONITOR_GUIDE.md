@@ -76,8 +76,10 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 请求与会话两个标签页。
 
 **请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。1100px 以上五列弹性网格按 `1.9fr / 72px / 1.3fr / 1.45fr / 118px` 分配宽度，模型名不再在 1280px 被压到 100px，表头 sticky 在页头下方；1100px 以下每行变成一张紧凑卡（状态与操作在右轨、延迟一行），600px 以下只保留输入/输出/总量 token 与总耗时/TTFT 两条延迟读数，50 条 trace 不再把手机页面推到一万多像素。失败行不再整行染色，状态码仍是红色。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引；分页器带页码输入（314k traces / 50 条一页时可直接跳到第 6,000 页），不再是只能前后翻。
+- 识别到客户端 harness 的行在 endpoint / 上游 / stream 标签前显示一枚可点击的 harness 标签（显示名 + 版本，如 `Claude Code 2.0.14`；上游 child exchange 不显示）。点击标签把当前流量页按该 harness 过滤（写入 `harness` 查询参数并回到第 1 页）；悬停给出 canonical id、类型、置信度与能力/SDK 标签。列表字段与过滤语义见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - 每行在 endpoint / 上游 / stream 标签之后还有一枚审计标签：数值是该 trace 已落库的审计事件总数（`credential_mask_audits` 的替换事件加 `trace_findings` 的发现项）。含身份证、手机号或敏感 Key 时标签为红色，只有拒答、工具错误等其它发现项时为黄色，没有任何审计事件时整枚标签不显示；悬停给出身份证/手机号、敏感 Key、其它发现、脱敏事件与发现项的分项。计数来自 `GET /api/traces` 的 `audit` 字段，每个来源对整个列表页各做一次分组查询，不逐条读 cassette。
 - 时间与会话那行下面显示该 trace 的第一条 user 消息（前 80 个字符，超出以 `…` 截断；system 提示不参与），由服务端从 cassette 的请求段读出后随列表的 `request_preview` 返回。请求体超过 4 MiB、读不到用户消息或 cassette 不可读时，该行不显示预览。
+- harness 过滤项 `harness` 按 canonical id 精确匹配且大小写不敏感（例如 `claude-code`、`codex-cli`），空值表示不过滤。它与 `model`/`endpoint`/`upstream` 的「子串匹配」语义不同，因为 harness 是一组有限枚举而不是用户输入的自由文本；输入框只接受 canonical id。
 - 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
 - `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
 
@@ -316,6 +318,8 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 会话工具栏的搜索框是**查找器**，不是筛选器：输入后在所有已渲染的消息、工具参数与输出里做大小写不敏感的子串匹配，`N / M` 显示当前第几处/共几处，按钮或 `Enter` 跳到下一处、`Shift+Enter` 上一处、`Esc` 清空；`Ctrl/⌘+F` 在会话标签页内聚焦查找框（弹模态框时不接管，留给浏览器原生查找）。命中所处的长步骤会自动展开；右侧竖轨在输入轮次刻度之外叠一层命中圆点，位置按命中在会话中的真实偏移计算，点击圆点直接跳到该处，当前命中用描边标出。滚动条刻度本身无法画在浏览器原生滚动条上，这条竖轨就是等价物。查找命中用 `content-find` 标出，与定位高亮的 `content-hit` 分开：定位仍是精确值 + 独立边界，查找是普通子串匹配；`hl`/定位值存在时先不显示定位高亮，清空查找后恢复。
 
 会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。锚点落在步骤内部（消息里的调用、并进调用块的结果）时同样定位到承载它的那段步骤。带 `hl`（资源定位）或命中值（finding 定位）时只高亮匹配的字节，不再给整个步骤描边，避免读成「整条消息都命中」；没有可高亮的值时才保留整段定位提示。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
+
+详情页头部在 endpoint / provider 标签旁显示同一枚 harness 标签，并列出该请求的能力/SDK 标签（`capability:tool-use`、`prompt-cache` 等，已本地化；冗余的 `harness:`/`kind:` 标签不重复显示）。这些字段来自 cassette prelude 的 `header.meta`。
 
 可执行动作：
 

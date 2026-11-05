@@ -16,6 +16,7 @@ import { describeConversationNode, formatEvidenceTarget } from "../lib/conversat
 import { locateFindingInConversation } from "../lib/findingLocate";
 import { locateMaskInConversation } from "../lib/maskLocate";
 import { locateResourceConversation } from "../lib/resourceLocate";
+import { harnessBadgeLabel, harnessTagLabel, harnessTooltip, visibleHarnessTags } from "../lib/harness";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { Input } from "../components/ui/input";
@@ -95,6 +96,10 @@ export function TraceDetailPage() {
   const performance = useJSON(traceExists ? apiPaths.tracePerformance(traceID) : null, [traceID]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
+  // The harness badge and the capability chips that accompany it. The backend
+  // stores the classification inside header.meta, next to the routing facts.
+  const harnessLabel = harnessBadgeLabel(header);
+  const harnessTags = visibleHarnessTags(header?.client_harness_tags);
   const session = detail.data?.session;
   const failureSummary = summarizeTraceFailure(detail.data);
   const selectedUpstreamID = header?.selected_upstream_id || "";
@@ -332,6 +337,14 @@ export function TraceDetailPage() {
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone="accent">{formatEndpointTag(header?.endpoint || header?.operation)}</InlineTag>
               <InlineTag>{formatProviderTag(header?.provider)}</InlineTag>
+              {harnessLabel ? (
+                <span title={`${t("traceDetail.harness")} · ${harnessTooltip(header, t)}`}>
+                  <InlineTag tone="accent">{harnessLabel}</InlineTag>
+                </span>
+              ) : null}
+              {harnessTags.map((tag) => (
+                <InlineTag key={tag}>{harnessTagLabel(tag, t)}</InlineTag>
+              ))}
               {selectedUpstreamID ? (
                 <span title={selectedUpstreamID}>
                   <InlineTag tone="green">{selectedUpstreamProviderPreset || compactUpstreamID(selectedUpstreamID)}</InlineTag>

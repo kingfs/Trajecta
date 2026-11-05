@@ -21,9 +21,10 @@ export function RequestsPanel() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
+  const harness = searchParams.get("harness") || "";
   const observation = searchParams.get("observation") || "";
   const windowValue = normalizeListWindow(searchParams.get("window"));
-  const [filters, setFilters] = useState({ query, provider, model, observation });
+  const [filters, setFilters] = useState({ query, provider, model, harness, observation });
   const requestParams = new URLSearchParams({
     page: String(page),
     page_size: String(PAGE_SIZE),
@@ -37,15 +38,18 @@ export function RequestsPanel() {
   if (model) {
     requestParams.set("model", model);
   }
+  if (harness) {
+    requestParams.set("harness", harness);
+  }
   if (observation) {
     requestParams.set("observation", observation);
   }
   requestParams.set("window", windowValue);
-  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation, windowValue]);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, harness, observation, windowValue]);
 
   useEffect(() => {
-    setFilters({ query, provider, model, observation });
-  }, [query, provider, model, observation]);
+    setFilters({ query, provider, model, harness, observation });
+  }, [query, provider, model, harness, observation]);
 
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
@@ -61,16 +65,18 @@ export function RequestsPanel() {
     setOrDeleteParam(next, "q", filters.query);
     setOrDeleteParam(next, "provider", filters.provider);
     setOrDeleteParam(next, "model", filters.model);
+    setOrDeleteParam(next, "harness", filters.harness);
     setOrDeleteParam(next, "observation", filters.observation);
     setSearchParams(next);
   };
   const resetFilters = () => {
-    setFilters({ query: "", provider: "", model: "", observation: "" });
+    setFilters({ query: "", provider: "", model: "", harness: "", observation: "" });
     const next = new URLSearchParams(searchParams);
     next.set("page", "1");
     next.delete("q");
     next.delete("provider");
     next.delete("model");
+    next.delete("harness");
     next.delete("observation");
     setSearchParams(next);
   };
@@ -114,6 +120,14 @@ export function RequestsPanel() {
             placeholder={t("sessions.model")}
             value={filters.model}
             onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
+          />
+          <Input
+            className="min-w-[180px]"
+            type="text"
+            placeholder={t("requests.harnessPlaceholder")}
+            aria-label={t("requests.harness")}
+            value={filters.harness}
+            onChange={(event) => setFilters((current) => ({ ...current, harness: event.target.value }))}
           />
           <select
             className="filter-input filter-select"

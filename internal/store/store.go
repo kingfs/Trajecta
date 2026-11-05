@@ -366,11 +366,16 @@ type ListPageResult struct {
 }
 
 type ListFilter struct {
-	Query             string
-	Provider          string
-	Model             string
-	Endpoint          string
-	SelectedUpstream  string
+	Query            string
+	Provider         string
+	Model            string
+	Endpoint         string
+	SelectedUpstream string
+	// Harness is the canonical client-harness id (for example `claude-code`)
+	// recorded by internal/harness. The filter is an exact, case-insensitive
+	// match because the id is a controlled vocabulary, not free text: the UI
+	// sends one value from its harness facet.
+	Harness           string
 	Status            string
 	ObservationStatus string
 	MissingUsage      bool
@@ -2486,8 +2491,10 @@ func (s *Store) upsertLogWithGroupingTraceID(path string, header recordfile.Reco
 			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason,
-			route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id,
+			client_harness, client_harness_name, client_harness_version, client_harness_kind,
+			client_harness_confidence, client_harness_tags_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -2538,7 +2545,13 @@ func (s *Store) upsertLogWithGroupingTraceID(path string, header recordfile.Reco
 			channel_id=excluded.channel_id,
 			credential_id=excluded.credential_id,
 			sticky_status=excluded.sticky_status,
-			sticky_previous_upstream_id=excluded.sticky_previous_upstream_id
+			sticky_previous_upstream_id=excluded.sticky_previous_upstream_id,
+			client_harness=excluded.client_harness,
+			client_harness_name=excluded.client_harness_name,
+			client_harness_version=excluded.client_harness_version,
+			client_harness_kind=excluded.client_harness_kind,
+			client_harness_confidence=excluded.client_harness_confidence,
+			client_harness_tags_json=excluded.client_harness_tags_json
 	`,
 		sanitizeDBText(path),
 		sanitizeDBText(traceID),
@@ -2591,6 +2604,12 @@ func (s *Store) upsertLogWithGroupingTraceID(path string, header recordfile.Reco
 		sanitizeDBText(header.Meta.CredentialID),
 		sanitizeDBText(header.Meta.StickyStatus),
 		sanitizeDBText(header.Meta.StickyPreviousUpstreamID),
+		sanitizeDBText(header.Meta.ClientHarness),
+		sanitizeDBText(header.Meta.ClientHarnessName),
+		sanitizeDBText(header.Meta.ClientHarnessVersion),
+		sanitizeDBText(header.Meta.ClientHarnessKind),
+		sanitizeDBText(header.Meta.ClientHarnessConfidence),
+		harnessTagsJSON(header.Meta.ClientHarnessTags),
 	)
 
 	if err != nil {
@@ -3786,6 +3805,18 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Meta.RoutingScore = row.RoutingScore
 	entry.Header.Meta.RoutingCandidateCount = row.RoutingCandidateCount
 	entry.Header.Meta.RoutingFailureReason = row.RoutingFailureReason
+	entry.Header.Meta.ClientHarness = row.ClientHarness
+	entry.Header.Meta.ClientHarnessName = row.ClientHarnessName
+	entry.Header.Meta.ClientHarnessVersion = row.ClientHarnessVersion
+	entry.Header.Meta.ClientHarnessKind = row.ClientHarnessKind
+	entry.Header.Meta.ClientHarnessConfidence = row.ClientHarnessConfidence
+	// Invalid JSON is left as "no tags" rather than failing the read: the column
+	// is a derived mirror, and a list view must not go down because one row's
+	// derived value cannot be decoded.
+	var harnessTags []string
+	if err := json.Unmarshal([]byte(row.ClientHarnessTagsJSON), &harnessTags); err == nil && len(harnessTags) > 0 {
+		entry.Header.Meta.ClientHarnessTags = harnessTags
+	}
 	entry.Header.Usage.PromptTokens = row.PromptTokens
 	entry.Header.Usage.CompletionTokens = row.CompletionTokens
 	entry.Header.Usage.TotalTokens = row.TotalTokens
@@ -4122,6 +4153,22 @@ func sanitizeDBText(value string) string {
 	return strings.ToValidUTF8(strings.ReplaceAll(value, "\x00", ""), "")
 }
 
+// harnessTagsJSON renders the detected client-harness tags for storage. A trace
+// with no classification stores "[]" rather than an empty string, so the column
+// is always decodable as a JSON list and a nil and an empty list are one fact.
+// json.Marshal cannot fail for a []string; the fallback keeps the write path
+// total rather than losing the whole trace over a metadata detail.
+func harnessTagsJSON(tags []string) string {
+	if len(tags) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(tags)
+	if err != nil {
+		return "[]"
+	}
+	return sanitizeDBText(string(data))
+}
+
 // extractGroupingInfoFromRequest sanitizes the grouping identifiers it derives
 // from request headers: they are stored as text and are used as grouping keys.
 func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
@@ -4240,6 +4287,13 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	}
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
+	}
+	// The canonical harness id is a controlled vocabulary, so this is an exact
+	// match rather than a substring search; EqualFold lower-cases the argument
+	// and compares both sides case-insensitively, which matches the raw SQL path
+	// below so the list and its counters select the same rows.
+	if harness := strings.TrimSpace(filter.Harness); harness != "" {
+		predicates = append(predicates, tracelog.ClientHarnessEqualFold(harness))
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
 	case "parsed", "failed", "queued", "running", "unsupported":
@@ -4484,6 +4538,13 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?) ESCAPE '\'`)
 		args = append(args, "%"+escapeLike(upstream)+"%")
+	}
+	// Exact, case-insensitive match, mirroring the ent predicate above: this raw
+	// path feeds the counters above the list and the session fallback, which must
+	// select the same rows the ent-backed page does.
+	if harness := strings.TrimSpace(filter.Harness); harness != "" {
+		clauses = append(clauses, `LOWER(`+column("client_harness")+`) = LOWER(?)`)
+		args = append(args, harness)
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
 	case "parsed", "failed", "queued", "running", "unsupported":

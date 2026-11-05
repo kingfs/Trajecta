@@ -22428,6 +22428,12 @@ type TraceLogMutation struct {
 	credential_id                     *string
 	sticky_status                     *string
 	sticky_previous_upstream_id       *string
+	client_harness                    *string
+	client_harness_name               *string
+	client_harness_version            *string
+	client_harness_kind               *string
+	client_harness_confidence         *string
+	client_harness_tags_json          *string
 	clearedFields                     map[string]struct{}
 	done                              bool
 	oldValue                          func(context.Context) (*TraceLog, error)
@@ -24678,6 +24684,222 @@ func (m *TraceLogMutation) ResetStickyPreviousUpstreamID() {
 	m.sticky_previous_upstream_id = nil
 }
 
+// SetClientHarness sets the "client_harness" field.
+func (m *TraceLogMutation) SetClientHarness(s string) {
+	m.client_harness = &s
+}
+
+// ClientHarness returns the value of the "client_harness" field in the mutation.
+func (m *TraceLogMutation) ClientHarness() (r string, exists bool) {
+	v := m.client_harness
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarness returns the old "client_harness" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarness(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarness is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarness requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarness: %w", err)
+	}
+	return oldValue.ClientHarness, nil
+}
+
+// ResetClientHarness resets all changes to the "client_harness" field.
+func (m *TraceLogMutation) ResetClientHarness() {
+	m.client_harness = nil
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (m *TraceLogMutation) SetClientHarnessName(s string) {
+	m.client_harness_name = &s
+}
+
+// ClientHarnessName returns the value of the "client_harness_name" field in the mutation.
+func (m *TraceLogMutation) ClientHarnessName() (r string, exists bool) {
+	v := m.client_harness_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarnessName returns the old "client_harness_name" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarnessName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarnessName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarnessName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarnessName: %w", err)
+	}
+	return oldValue.ClientHarnessName, nil
+}
+
+// ResetClientHarnessName resets all changes to the "client_harness_name" field.
+func (m *TraceLogMutation) ResetClientHarnessName() {
+	m.client_harness_name = nil
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (m *TraceLogMutation) SetClientHarnessVersion(s string) {
+	m.client_harness_version = &s
+}
+
+// ClientHarnessVersion returns the value of the "client_harness_version" field in the mutation.
+func (m *TraceLogMutation) ClientHarnessVersion() (r string, exists bool) {
+	v := m.client_harness_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarnessVersion returns the old "client_harness_version" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarnessVersion(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarnessVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarnessVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarnessVersion: %w", err)
+	}
+	return oldValue.ClientHarnessVersion, nil
+}
+
+// ResetClientHarnessVersion resets all changes to the "client_harness_version" field.
+func (m *TraceLogMutation) ResetClientHarnessVersion() {
+	m.client_harness_version = nil
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (m *TraceLogMutation) SetClientHarnessKind(s string) {
+	m.client_harness_kind = &s
+}
+
+// ClientHarnessKind returns the value of the "client_harness_kind" field in the mutation.
+func (m *TraceLogMutation) ClientHarnessKind() (r string, exists bool) {
+	v := m.client_harness_kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarnessKind returns the old "client_harness_kind" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarnessKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarnessKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarnessKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarnessKind: %w", err)
+	}
+	return oldValue.ClientHarnessKind, nil
+}
+
+// ResetClientHarnessKind resets all changes to the "client_harness_kind" field.
+func (m *TraceLogMutation) ResetClientHarnessKind() {
+	m.client_harness_kind = nil
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (m *TraceLogMutation) SetClientHarnessConfidence(s string) {
+	m.client_harness_confidence = &s
+}
+
+// ClientHarnessConfidence returns the value of the "client_harness_confidence" field in the mutation.
+func (m *TraceLogMutation) ClientHarnessConfidence() (r string, exists bool) {
+	v := m.client_harness_confidence
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarnessConfidence returns the old "client_harness_confidence" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarnessConfidence(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarnessConfidence is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarnessConfidence requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarnessConfidence: %w", err)
+	}
+	return oldValue.ClientHarnessConfidence, nil
+}
+
+// ResetClientHarnessConfidence resets all changes to the "client_harness_confidence" field.
+func (m *TraceLogMutation) ResetClientHarnessConfidence() {
+	m.client_harness_confidence = nil
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (m *TraceLogMutation) SetClientHarnessTagsJSON(s string) {
+	m.client_harness_tags_json = &s
+}
+
+// ClientHarnessTagsJSON returns the value of the "client_harness_tags_json" field in the mutation.
+func (m *TraceLogMutation) ClientHarnessTagsJSON() (r string, exists bool) {
+	v := m.client_harness_tags_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientHarnessTagsJSON returns the old "client_harness_tags_json" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldClientHarnessTagsJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientHarnessTagsJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientHarnessTagsJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientHarnessTagsJSON: %w", err)
+	}
+	return oldValue.ClientHarnessTagsJSON, nil
+}
+
+// ResetClientHarnessTagsJSON resets all changes to the "client_harness_tags_json" field.
+func (m *TraceLogMutation) ResetClientHarnessTagsJSON() {
+	m.client_harness_tags_json = nil
+}
+
 // Where appends a list predicates to the TraceLogMutation builder.
 func (m *TraceLogMutation) Where(ps ...predicate.TraceLog) {
 	m.predicates = append(m.predicates, ps...)
@@ -24712,7 +24934,7 @@ func (m *TraceLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TraceLogMutation) Fields() []string {
-	fields := make([]string, 0, 50)
+	fields := make([]string, 0, 56)
 	if m.trace_id != nil {
 		fields = append(fields, tracelog.FieldTraceID)
 	}
@@ -24863,6 +25085,24 @@ func (m *TraceLogMutation) Fields() []string {
 	if m.sticky_previous_upstream_id != nil {
 		fields = append(fields, tracelog.FieldStickyPreviousUpstreamID)
 	}
+	if m.client_harness != nil {
+		fields = append(fields, tracelog.FieldClientHarness)
+	}
+	if m.client_harness_name != nil {
+		fields = append(fields, tracelog.FieldClientHarnessName)
+	}
+	if m.client_harness_version != nil {
+		fields = append(fields, tracelog.FieldClientHarnessVersion)
+	}
+	if m.client_harness_kind != nil {
+		fields = append(fields, tracelog.FieldClientHarnessKind)
+	}
+	if m.client_harness_confidence != nil {
+		fields = append(fields, tracelog.FieldClientHarnessConfidence)
+	}
+	if m.client_harness_tags_json != nil {
+		fields = append(fields, tracelog.FieldClientHarnessTagsJSON)
+	}
 	return fields
 }
 
@@ -24971,6 +25211,18 @@ func (m *TraceLogMutation) Field(name string) (ent.Value, bool) {
 		return m.StickyStatus()
 	case tracelog.FieldStickyPreviousUpstreamID:
 		return m.StickyPreviousUpstreamID()
+	case tracelog.FieldClientHarness:
+		return m.ClientHarness()
+	case tracelog.FieldClientHarnessName:
+		return m.ClientHarnessName()
+	case tracelog.FieldClientHarnessVersion:
+		return m.ClientHarnessVersion()
+	case tracelog.FieldClientHarnessKind:
+		return m.ClientHarnessKind()
+	case tracelog.FieldClientHarnessConfidence:
+		return m.ClientHarnessConfidence()
+	case tracelog.FieldClientHarnessTagsJSON:
+		return m.ClientHarnessTagsJSON()
 	}
 	return nil, false
 }
@@ -25080,6 +25332,18 @@ func (m *TraceLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStickyStatus(ctx)
 	case tracelog.FieldStickyPreviousUpstreamID:
 		return m.OldStickyPreviousUpstreamID(ctx)
+	case tracelog.FieldClientHarness:
+		return m.OldClientHarness(ctx)
+	case tracelog.FieldClientHarnessName:
+		return m.OldClientHarnessName(ctx)
+	case tracelog.FieldClientHarnessVersion:
+		return m.OldClientHarnessVersion(ctx)
+	case tracelog.FieldClientHarnessKind:
+		return m.OldClientHarnessKind(ctx)
+	case tracelog.FieldClientHarnessConfidence:
+		return m.OldClientHarnessConfidence(ctx)
+	case tracelog.FieldClientHarnessTagsJSON:
+		return m.OldClientHarnessTagsJSON(ctx)
 	}
 	return nil, fmt.Errorf("unknown TraceLog field %s", name)
 }
@@ -25438,6 +25702,48 @@ func (m *TraceLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStickyPreviousUpstreamID(v)
+		return nil
+	case tracelog.FieldClientHarness:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarness(v)
+		return nil
+	case tracelog.FieldClientHarnessName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarnessName(v)
+		return nil
+	case tracelog.FieldClientHarnessVersion:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarnessVersion(v)
+		return nil
+	case tracelog.FieldClientHarnessKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarnessKind(v)
+		return nil
+	case tracelog.FieldClientHarnessConfidence:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarnessConfidence(v)
+		return nil
+	case tracelog.FieldClientHarnessTagsJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientHarnessTagsJSON(v)
 		return nil
 	}
 	return fmt.Errorf("unknown TraceLog field %s", name)
@@ -25844,6 +26150,24 @@ func (m *TraceLogMutation) ResetField(name string) error {
 		return nil
 	case tracelog.FieldStickyPreviousUpstreamID:
 		m.ResetStickyPreviousUpstreamID()
+		return nil
+	case tracelog.FieldClientHarness:
+		m.ResetClientHarness()
+		return nil
+	case tracelog.FieldClientHarnessName:
+		m.ResetClientHarnessName()
+		return nil
+	case tracelog.FieldClientHarnessVersion:
+		m.ResetClientHarnessVersion()
+		return nil
+	case tracelog.FieldClientHarnessKind:
+		m.ResetClientHarnessKind()
+		return nil
+	case tracelog.FieldClientHarnessConfidence:
+		m.ResetClientHarnessConfidence()
+		return nil
+	case tracelog.FieldClientHarnessTagsJSON:
+		m.ResetClientHarnessTagsJSON()
 		return nil
 	}
 	return fmt.Errorf("unknown TraceLog field %s", name)

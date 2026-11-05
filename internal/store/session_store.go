@@ -190,8 +190,11 @@ func (s *Store) insertSessionSummaryFromLogsSQL(whereSQL string) string {
 // log path answers for *any* request of the session - cannot be expressed from it: a session that
 // used the filtered model first and another model last would be missing from the summary answer.
 // Those filters stay on the log path so the canary read switch never changes what is listed.
+// The harness classification is per request as well - one session can mix clients - so it
+// joins that group.
 func sessionSummaryFilterSupported(filter ListFilter) bool {
-	return strings.TrimSpace(filter.Model) == "" &&
+	return strings.TrimSpace(filter.Harness) == "" &&
+		strings.TrimSpace(filter.Model) == "" &&
 		strings.TrimSpace(filter.Query) == "" &&
 		strings.TrimSpace(filter.Endpoint) == "" &&
 		strings.TrimSpace(filter.SelectedUpstream) == "" &&

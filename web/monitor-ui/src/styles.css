@@ -1915,6 +1915,23 @@ a:focus-visible {
   background: var(--danger-soft);
 }
 
+/* The harness badge is the only request-row tag that navigates: it turns the
+   row's client classification into a list filter. The pill keeps its InlineTag
+   drawing and the anchor around it supplies the pointer, focus ring and the
+   open-in-a-new-tab behaviour a real link gets. */
+.harness-tag-link {
+  display: inline-flex;
+  border-radius: 999px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.harness-tag-link:hover .inline-tag,
+.harness-tag-link:focus-visible .inline-tag {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .accent-gold {
   border-color: var(--warning-border);
 }

@@ -1,4 +1,4 @@
-h1:BamFSPQrR4z5TtO9uYVKTddlei1UQuUGfM5vjepaRiM=
+h1:FASWbyVabtiLvv0hpKtXcEs9zlaKAip6znWd9LMyOqg=
 20260622122251_init_postgres_schema.up.sql h1:7lbLKcBmjAOx39ZaBSxhO1vStgVir8vtGkw0J8OFbaU=
 20260622130545_add_runtime_store_tables.up.sql h1:KMW/0oh0mGqxIeNgomZLBMusEM2GyIx4HGj+pI/Ni0w=
 20260622163432_add_channel_api_surface.up.sql h1:NLf8JWve8TTnzlswQtHlbyuRWeTnS/Wrg7STSN2hYFM=
@@ -23,3 +23,4 @@ h1:BamFSPQrR4z5TtO9uYVKTddlei1UQuUGfM5vjepaRiM=
 20261015120000_add_credential_mask_audits.up.sql h1:u03iTRAKSCs7N6oX8GOHteT3MtXGS9kEq80tKLSqHkg=
 20261027120000_add_resources.up.sql h1:r7tSSArmJs9MKEd4Saq1MtQsz+8No4p7hAQeWh+S12U=
 20261028190000_add_credential_mask_event_states.up.sql h1:BCBfWmtq7d7eXZtnQJP/e2JnJkTH3A6mtW9raRGmqJ4=
+20261105120000_add_log_client_harness.up.sql h1:AiYsz8Y/Bm9yhPJfisJZJtZxvMfMPDh/6ON8qGW5YS4=

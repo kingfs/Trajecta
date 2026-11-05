@@ -849,6 +849,90 @@ func (_u *TraceLogUpdate) SetNillableStickyPreviousUpstreamID(v *string) *TraceL
 	return _u
 }
 
+// SetClientHarness sets the "client_harness" field.
+func (_u *TraceLogUpdate) SetClientHarness(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarness(v)
+	return _u
+}
+
+// SetNillableClientHarness sets the "client_harness" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarness(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarness(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (_u *TraceLogUpdate) SetClientHarnessName(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarnessName(v)
+	return _u
+}
+
+// SetNillableClientHarnessName sets the "client_harness_name" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarnessName(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarnessName(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (_u *TraceLogUpdate) SetClientHarnessVersion(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarnessVersion(v)
+	return _u
+}
+
+// SetNillableClientHarnessVersion sets the "client_harness_version" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarnessVersion(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarnessVersion(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (_u *TraceLogUpdate) SetClientHarnessKind(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarnessKind(v)
+	return _u
+}
+
+// SetNillableClientHarnessKind sets the "client_harness_kind" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarnessKind(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarnessKind(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (_u *TraceLogUpdate) SetClientHarnessConfidence(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarnessConfidence(v)
+	return _u
+}
+
+// SetNillableClientHarnessConfidence sets the "client_harness_confidence" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarnessConfidence(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarnessConfidence(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (_u *TraceLogUpdate) SetClientHarnessTagsJSON(v string) *TraceLogUpdate {
+	_u.mutation.SetClientHarnessTagsJSON(v)
+	return _u
+}
+
+// SetNillableClientHarnessTagsJSON sets the "client_harness_tags_json" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableClientHarnessTagsJSON(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetClientHarnessTagsJSON(*v)
+	}
+	return _u
+}
+
 // Mutation returns the TraceLogMutation object of the builder.
 func (_u *TraceLogUpdate) Mutation() *TraceLogMutation {
 	return _u.mutation
@@ -1114,6 +1198,24 @@ func (_u *TraceLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.StickyPreviousUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarness(); ok {
+		_spec.SetField(tracelog.FieldClientHarness, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessName(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessVersion(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessVersion, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessKind(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessConfidence(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessConfidence, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessTagsJSON(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessTagsJSON, field.TypeString, value)
 	}
 	_spec.Node.Schema = _u.schemaConfig.TraceLog
 	ctx = internal.NewSchemaConfigContext(ctx, _u.schemaConfig)
@@ -1958,6 +2060,90 @@ func (_u *TraceLogUpdateOne) SetNillableStickyPreviousUpstreamID(v *string) *Tra
 	return _u
 }
 
+// SetClientHarness sets the "client_harness" field.
+func (_u *TraceLogUpdateOne) SetClientHarness(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarness(v)
+	return _u
+}
+
+// SetNillableClientHarness sets the "client_harness" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarness(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarness(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessName sets the "client_harness_name" field.
+func (_u *TraceLogUpdateOne) SetClientHarnessName(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarnessName(v)
+	return _u
+}
+
+// SetNillableClientHarnessName sets the "client_harness_name" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarnessName(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarnessName(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessVersion sets the "client_harness_version" field.
+func (_u *TraceLogUpdateOne) SetClientHarnessVersion(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarnessVersion(v)
+	return _u
+}
+
+// SetNillableClientHarnessVersion sets the "client_harness_version" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarnessVersion(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarnessVersion(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessKind sets the "client_harness_kind" field.
+func (_u *TraceLogUpdateOne) SetClientHarnessKind(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarnessKind(v)
+	return _u
+}
+
+// SetNillableClientHarnessKind sets the "client_harness_kind" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarnessKind(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarnessKind(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessConfidence sets the "client_harness_confidence" field.
+func (_u *TraceLogUpdateOne) SetClientHarnessConfidence(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarnessConfidence(v)
+	return _u
+}
+
+// SetNillableClientHarnessConfidence sets the "client_harness_confidence" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarnessConfidence(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarnessConfidence(*v)
+	}
+	return _u
+}
+
+// SetClientHarnessTagsJSON sets the "client_harness_tags_json" field.
+func (_u *TraceLogUpdateOne) SetClientHarnessTagsJSON(v string) *TraceLogUpdateOne {
+	_u.mutation.SetClientHarnessTagsJSON(v)
+	return _u
+}
+
+// SetNillableClientHarnessTagsJSON sets the "client_harness_tags_json" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableClientHarnessTagsJSON(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetClientHarnessTagsJSON(*v)
+	}
+	return _u
+}
+
 // Mutation returns the TraceLogMutation object of the builder.
 func (_u *TraceLogUpdateOne) Mutation() *TraceLogMutation {
 	return _u.mutation
@@ -2253,6 +2439,24 @@ func (_u *TraceLogUpdateOne) sqlSave(ctx context.Context) (_node *TraceLog, err 
 	}
 	if value, ok := _u.mutation.StickyPreviousUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldStickyPreviousUpstreamID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarness(); ok {
+		_spec.SetField(tracelog.FieldClientHarness, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessName(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessVersion(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessVersion, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessKind(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessConfidence(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessConfidence, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ClientHarnessTagsJSON(); ok {
+		_spec.SetField(tracelog.FieldClientHarnessTagsJSON, field.TypeString, value)
 	}
 	_spec.Node.Schema = _u.schemaConfig.TraceLog
 	ctx = internal.NewSchemaConfigContext(ctx, _u.schemaConfig)

@@ -20,6 +20,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - `internal/appdb`: the config-driven application-database entry points shared by serve startup and the trajecta `db`/`auth`/`audit`/`analyze` commands - driver normalization, migration mode, `MigrateUp`/`OptimizeIndexes`, `Open`/`Initialize` and the auth store opener
 - Reverse proxy: `internal/proxy`
 - Recording pipeline: `internal/recorder`
+- Client harness classification from the request itself (headers, URL path, body windows) with trace tags: `internal/harness`; it is a read-only classification of the traffic and never rewrites the request or the upstream bytes. See `docs/HARNESS_DETECTION.md`.
 - Application store and metadata index: `internal/store`
 - Upstream resolution and capability/protocol-family rules: `internal/upstream`
 - Channel (provider) config and probe services: `internal/channel`

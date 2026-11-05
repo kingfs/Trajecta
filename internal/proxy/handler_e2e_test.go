@@ -5818,3 +5818,92 @@ func routePlanAttrsFromPrelude(t *testing.T, parsed *recordfile.ParsedPrelude) m
 func isModelDiscoveryRequest(r *http.Request) bool {
 	return strings.Contains(r.URL.Path, "/models")
 }
+
+// TestHandlerRecordsClientHarnessClassification pins the end-to-end label:
+// a client-shaped request is recorded through the normal pass-through path, the
+// cassette carries the classification and its event, and the index row is
+// selectable by the harness filter.
+func TestHandlerRecordsClientHarnessClassification(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL
+	cfg.Upstream.ProviderPreset = "anthropic"
+	cfg.Upstream.ApiKey = "anth-secret"
+	cfg.Debug.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	body := `{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true,"system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"tools":[{"name":"Bash","description":"run"}]}`
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/messages", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+	req.Header.Set("x-app", "cli")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("x-stainless-lang", "js")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+
+	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/messages", 2*time.Second)
+	parsed, err := waitForRecordedPrelude(recordPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.ClientHarness != "claude-code" || parsed.Header.Meta.ClientHarnessVersion != "2.0.14" {
+		t.Fatalf("cassette harness = %q/%q, want claude-code/2.0.14", parsed.Header.Meta.ClientHarness, parsed.Header.Meta.ClientHarnessVersion)
+	}
+	eventFound := false
+	for _, event := range parsed.Events {
+		if event.Type == "harness.detected" {
+			eventFound = true
+			if event.Attributes["harness"] != "claude-code" {
+				t.Fatalf("event harness = %#v, want claude-code", event.Attributes["harness"])
+			}
+		}
+	}
+	if !eventFound {
+		t.Fatalf("cassette prelude has no harness.detected event: %+v", parsed.Events)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		page, err := st.ListPage(1, 10, store.ListFilter{Harness: "claude-code"})
+		if err == nil && len(page.Items) == 1 {
+			if page.Items[0].Header.Meta.ClientHarnessTags == nil {
+				t.Fatalf("indexed trace has no harness tags")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("harness-filtered index row did not appear: err=%v page=%+v", err, page)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

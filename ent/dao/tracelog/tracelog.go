@@ -113,6 +113,18 @@ const (
 	FieldStickyStatus = "sticky_status"
 	// FieldStickyPreviousUpstreamID holds the string denoting the sticky_previous_upstream_id field in the database.
 	FieldStickyPreviousUpstreamID = "sticky_previous_upstream_id"
+	// FieldClientHarness holds the string denoting the client_harness field in the database.
+	FieldClientHarness = "client_harness"
+	// FieldClientHarnessName holds the string denoting the client_harness_name field in the database.
+	FieldClientHarnessName = "client_harness_name"
+	// FieldClientHarnessVersion holds the string denoting the client_harness_version field in the database.
+	FieldClientHarnessVersion = "client_harness_version"
+	// FieldClientHarnessKind holds the string denoting the client_harness_kind field in the database.
+	FieldClientHarnessKind = "client_harness_kind"
+	// FieldClientHarnessConfidence holds the string denoting the client_harness_confidence field in the database.
+	FieldClientHarnessConfidence = "client_harness_confidence"
+	// FieldClientHarnessTagsJSON holds the string denoting the client_harness_tags_json field in the database.
+	FieldClientHarnessTagsJSON = "client_harness_tags_json"
 	// Table holds the table name of the tracelog in the database.
 	Table = "logs"
 )
@@ -170,6 +182,12 @@ var Columns = []string{
 	FieldCredentialID,
 	FieldStickyStatus,
 	FieldStickyPreviousUpstreamID,
+	FieldClientHarness,
+	FieldClientHarnessName,
+	FieldClientHarnessVersion,
+	FieldClientHarnessKind,
+	FieldClientHarnessConfidence,
+	FieldClientHarnessTagsJSON,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -279,6 +297,18 @@ var (
 	DefaultStickyStatus string
 	// DefaultStickyPreviousUpstreamID holds the default value on creation for the "sticky_previous_upstream_id" field.
 	DefaultStickyPreviousUpstreamID string
+	// DefaultClientHarness holds the default value on creation for the "client_harness" field.
+	DefaultClientHarness string
+	// DefaultClientHarnessName holds the default value on creation for the "client_harness_name" field.
+	DefaultClientHarnessName string
+	// DefaultClientHarnessVersion holds the default value on creation for the "client_harness_version" field.
+	DefaultClientHarnessVersion string
+	// DefaultClientHarnessKind holds the default value on creation for the "client_harness_kind" field.
+	DefaultClientHarnessKind string
+	// DefaultClientHarnessConfidence holds the default value on creation for the "client_harness_confidence" field.
+	DefaultClientHarnessConfidence string
+	// DefaultClientHarnessTagsJSON holds the default value on creation for the "client_harness_tags_json" field.
+	DefaultClientHarnessTagsJSON string
 	// IDValidator is a validator for the "id" field. It is called by the builders before save.
 	IDValidator func(string) error
 )
@@ -539,4 +569,34 @@ func ByStickyStatus(opts ...sql.OrderTermOption) OrderOption {
 // ByStickyPreviousUpstreamID orders the results by the sticky_previous_upstream_id field.
 func ByStickyPreviousUpstreamID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStickyPreviousUpstreamID, opts...).ToFunc()
+}
+
+// ByClientHarness orders the results by the client_harness field.
+func ByClientHarness(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarness, opts...).ToFunc()
+}
+
+// ByClientHarnessName orders the results by the client_harness_name field.
+func ByClientHarnessName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarnessName, opts...).ToFunc()
+}
+
+// ByClientHarnessVersion orders the results by the client_harness_version field.
+func ByClientHarnessVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarnessVersion, opts...).ToFunc()
+}
+
+// ByClientHarnessKind orders the results by the client_harness_kind field.
+func ByClientHarnessKind(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarnessKind, opts...).ToFunc()
+}
+
+// ByClientHarnessConfidence orders the results by the client_harness_confidence field.
+func ByClientHarnessConfidence(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarnessConfidence, opts...).ToFunc()
+}
+
+// ByClientHarnessTagsJSON orders the results by the client_harness_tags_json field.
+func ByClientHarnessTagsJSON(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientHarnessTagsJSON, opts...).ToFunc()
 }

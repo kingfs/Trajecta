@@ -959,6 +959,9 @@ type fixtureSpec struct {
 	RouteTargetID                  string
 	ChannelID                      string
 	CredentialID                   string
+	// Harness mirrors the client-harness classification the recorder writes into
+	// the prelude; the indexer copies it into the row the filter reads.
+	Harness string
 }
 
 type stickyFixtureEvent struct {
@@ -1012,6 +1015,7 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 			RoutingPolicy:                  "p2c",
 			RoutingCandidateCount:          1,
 			RoutingFailureReason:           spec.HeaderRoutingFailureReason,
+			ClientHarness:                  spec.Harness,
 		},
 		Layout: recordfile.LayoutInfo{
 			ReqHeaderLen: int64(len(strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n")),
@@ -1188,5 +1192,63 @@ func TestClassifyFailureReasonSeparatesRetryQueueSaturation(t *testing.T) {
 	got := classifyFailureReason(http.StatusServiceUnavailable, "Proxy overloaded: upstream retry wait queue saturated")
 	if got != "retry_queue_saturated" {
 		t.Fatalf("classifyFailureReason() = %q, want retry_queue_saturated", got)
+	}
+}
+
+// list_traces forwards the harness filter to the Monitor list endpoint, which is
+// the only place the filter is implemented; a tool that accepted the argument
+// and dropped it would look like it worked while returning every trace.
+func TestListTracesToolPassesHarnessFilter(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	for _, spec := range []fixtureSpec{
+		{URL: "/v1/responses", Status: "200 OK", RequestID: "req-harness-claude", RequestBody: `{"input":"hi"}`, ResponseBody: `{"output_text":"ok"}`, Harness: "claude-code"},
+		{URL: "/v1/responses", Status: "200 OK", RequestID: "req-harness-codex", RequestBody: `{"input":"hi"}`, ResponseBody: `{"output_text":"ok"}`, Harness: "codex-cli"},
+	} {
+		path := filepath.Join(outputDir, spec.RequestID+".http")
+		if err := os.WriteFile(path, buildRecordFixture(t, spec), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", spec.RequestID, err)
+		}
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	server := New(st, Options{})
+	session, err := connectClient(context.Background(), server)
+	if err != nil {
+		t.Fatalf("connectClient() error = %v", err)
+	}
+	defer session.Close()
+
+	list := func(args map[string]any) []any {
+		t.Helper()
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_traces", Arguments: args})
+		if err != nil {
+			t.Fatalf("CallTool(list_traces %v) error = %v", args, err)
+		}
+		if result.IsError {
+			t.Fatalf("list_traces %v returned IsError", args)
+		}
+		return result.StructuredContent.(map[string]any)["items"].([]any)
+	}
+
+	if all := list(map[string]any{"page_size": 10}); len(all) != 2 {
+		t.Fatalf("len(list_traces.items) = %d, want 2", len(all))
+	}
+	filtered := list(map[string]any{"page_size": 10, "harness": "CLAUDE-CODE"})
+	if len(filtered) != 1 {
+		t.Fatalf("len(list_traces harness=CLAUDE-CODE items) = %d, want 1", len(filtered))
+	}
+	item := filtered[0].(map[string]any)
+	if item["client_harness"] != "claude-code" {
+		t.Errorf("list_traces item client_harness = %v, want claude-code", item["client_harness"])
 	}
 }

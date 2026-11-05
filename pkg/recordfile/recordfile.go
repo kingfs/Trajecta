@@ -117,6 +117,27 @@ type MetaData struct {
 	CredentialID             string `json:"credential_id,omitempty"`
 	StickyStatus             string `json:"sticky_status,omitempty"`
 	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
+	// The client-side harness that produced this request, derived from the
+	// request headers and body by internal/harness. This is a classification of
+	// the traffic, never a rewrite of it: the recorded request and the request
+	// sent upstream are untouched. The canonical id (`claude-code`, `codex-cli`,
+	// ...) is what the Monitor filters on; Name is its display label, Version
+	// the client version the traffic carried, Kind the product class
+	// (`agent-cli`, `ide-extension`, `agent-app`, `gateway`, `sdk`) and Tags the
+	// stable capability/SDK labels. Confidence is `high` for a product token,
+	// `medium` for body-only evidence and `low` for an SDK fallback.
+	//
+	// The same facts are also written as one `harness.detected` prelude event,
+	// which is the durable record; these fields mirror it into the indexed row
+	// (and into the cassette prelude) so the Monitor list does not have to open
+	// every cassette. A legacy cassette recorded before this field existed simply
+	// has no classification.
+	ClientHarness           string   `json:"client_harness,omitempty"`
+	ClientHarnessName       string   `json:"client_harness_name,omitempty"`
+	ClientHarnessVersion    string   `json:"client_harness_version,omitempty"`
+	ClientHarnessKind       string   `json:"client_harness_kind,omitempty"`
+	ClientHarnessConfidence string   `json:"client_harness_confidence,omitempty"`
+	ClientHarnessTags       []string `json:"client_harness_tags,omitempty"`
 }
 
 type RecordHeader struct {

@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kingfs/Trajecta/internal/harness"
 	"github.com/kingfs/Trajecta/internal/redaction"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -332,11 +333,73 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		},
 	}
 
+	// Classify the client harness from the request bytes exactly once, here,
+	// while the original headers and body are still in hand. The classification
+	// is metadata only: neither the recorded request nor the bytes sent upstream
+	// are touched. The same facts are mirrored into the `harness.detected`
+	// prelude event below, so a human reading the cassette can see why the row
+	// was labelled without opening the index.
+	events := []RecordEvent(nil)
+	if detection := detectClientHarness(req, bodyBytes, opts.ExchangeKind); !detection.Empty() {
+		header.Meta.ClientHarness = detection.ID
+		header.Meta.ClientHarnessName = detection.Name
+		header.Meta.ClientHarnessVersion = detection.Version
+		header.Meta.ClientHarnessKind = detection.Kind
+		header.Meta.ClientHarnessConfidence = detection.Confidence
+		header.Meta.ClientHarnessTags = detection.Tags
+		events = append(events, harnessDetectedEvent(detection, now))
+	} else if len(detection.Tags) > 0 {
+		// The SDK/capability labels survive even when no product signature
+		// matched, so a plain SDK trace still says what shape of request it was.
+		header.Meta.ClientHarnessTags = detection.Tags
+	}
+
 	return &LogInfo{
 		File:   f,
 		Path:   logPath,
 		Header: header,
+		Events: events,
 	}, nil
+}
+
+// detectClientHarness classifies the client behind one recorded exchange.
+//
+// Child exchanges of the local Responses runtime (`ExchangeKind == "model"`)
+// are upstream calls minted by this process: their headers carry no client
+// product and their body is a conversion of the client request, so classifying
+// them would attribute the child to the client. Only client-visible traffic -
+// pass-through requests and the local entry exchange - is classified.
+func detectClientHarness(req *http.Request, body []byte, exchangeKind string) harness.Detection {
+	if req == nil || exchangeKind == "model" {
+		return harness.Detection{}
+	}
+	return harness.Detect(req, body)
+}
+
+// harnessDetectedEvent is the durable record of a classification. Evidence is a
+// list of signal names, never their values: the event ends up in the cassette
+// prelude and must not become a second copy of a prompt or a header.
+func harnessDetectedEvent(detection harness.Detection, at time.Time) RecordEvent {
+	attributes := map[string]interface{}{"harness": detection.ID}
+	if detection.Name != "" {
+		attributes["name"] = detection.Name
+	}
+	if detection.Version != "" {
+		attributes["version"] = detection.Version
+	}
+	if detection.Kind != "" {
+		attributes["kind"] = detection.Kind
+	}
+	if detection.Confidence != "" {
+		attributes["confidence"] = detection.Confidence
+	}
+	if len(detection.Tags) > 0 {
+		attributes["tags"] = detection.Tags
+	}
+	if len(detection.Evidence) > 0 {
+		attributes["evidence"] = detection.Evidence
+	}
+	return RecordEvent{Type: "harness.detected", Time: at, Attributes: attributes}
 }
 
 func requestAuditIDFromRequest(req *http.Request) string {
