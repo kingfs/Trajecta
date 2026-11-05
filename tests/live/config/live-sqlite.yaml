@@ -46,8 +46,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-  fallback:
-    on_missing_model: "reject"
 
 upstreams:
   - id: "baizhi-openai"

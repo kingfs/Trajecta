@@ -113,19 +113,18 @@ func run() error {
 
 func seedStore(outputDir string, st *store.Store, upstreamURL string) error {
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
-		ID:                 "openai-primary",
-		Name:               "OpenAI Primary",
-		BaseURL:            upstreamURL + "/v1",
-		ProviderPreset:     "openai",
-		APIKeyCiphertext:   []byte("sk-e2e-secret"),
-		APIKeyHint:         "sk-...cret",
-		HeadersJSON:        `{"Authorization":"Bearer hidden","X-Test":"visible"}`,
-		Enabled:            true,
-		Priority:           100,
-		Weight:             1,
-		CapacityHint:       1,
-		ModelDiscovery:     "list_models",
-		AllowUnknownModels: true,
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          upstreamURL + "/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-e2e-secret"),
+		APIKeyHint:       "sk-...cret",
+		HeadersJSON:      `{"Authorization":"Bearer hidden","X-Test":"visible"}`,
+		Enabled:          true,
+		Priority:         100,
+		Weight:           1,
+		CapacityHint:     1,
+		ModelDiscovery:   "list_models",
 	}); err != nil {
 		return err
 	}

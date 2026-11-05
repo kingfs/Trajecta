@@ -127,7 +127,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 归档前会对每个库跑一次 `--verify-only`：只有每张表的源主键都能在 Postgres 中找到才执行重命名。`--force` 可跳过该校验（不推荐）。`--suffix` 默认 `.migrated`；目标名已存在时追加 UTC 时间戳，不会覆盖。`-wal` / `-shm` / `-journal` 会跟着一起改名。
 
-**运行时快照表的漂移**：`upstream_targets` 与 `upstream_models` 不是权威记录，而是运行中的服务按当前 provider 配置与探测结果重写的运行时快照与兼容投影（见 `docs/ROUTING_AND_CREDENTIALS.md`）。因此服务运行期间，旧库里这两张表的行可能已被当前状态替换而不在 Postgres 中——这属于设计行为，不是丢数据。这类缺失默认仍会让闸门拒绝归档；确认过「缺失全部落在快照表内」后，可用 `--tolerate-snapshot-drift`：
+**运行时快照表的漂移**：`upstream_targets` 与 `upstream_models` 不是权威记录，而是旧版运行时快照与兼容投影（见 `docs/ROUTING_AND_CREDENTIALS.md`）。当前 router 不再写入它们，但探测与旧版本仍可能让旧库里的行与当前状态不同——这属于设计行为，不是丢数据。这类缺失默认仍会让闸门拒绝归档；确认过「缺失全部落在快照表内」后，可用 `--tolerate-snapshot-drift`：
 
 ```bash
 ./trajecta upgrade sqlite archive --tolerate-snapshot-drift          # 先看计划与 tolerated 计数
@@ -190,7 +190,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | 某表 `blocked`，打印 `missing required columns` | Postgres 侧 `NOT NULL` 且无默认值的列在旧表里不存在 | 先确认该列语义；可接受占位值时加 `--fill-missing-required`；否则先手动补齐再迁移 |
 | 某表 `failed > 0` | 单行数据无法转换（类型、超长、非法 JSON 等） | 查看打印的失败样本；修正源库行或先手动导入，再重跑（幂等） |
 | `missing keys > 0` | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
-| `missing keys > 0` 且**只在** `upstream_targets` / `upstream_models` | 服务已按当前配置/探测结果重写了这两张运行时快照表，旧行被替换而非丢失 | 确认缺失键都在这两张表内后，用 `--tolerate-snapshot-drift` 归档；报告会打印 `tolerated` 计数 |
+| `missing keys > 0` 且**只在** `upstream_targets` / `upstream_models` | 这两张运行时快照表与旧库不同（旧版本运行期重写，或探测结果不同），旧行被替换而非丢失 | 确认缺失键都在这两张表内后，用 `--tolerate-snapshot-drift` 归档；报告会打印 `tolerated` 计数 |
 | `missing keys > 0` 出现在 `logs` / `parse_jobs` / `trace_observations` / `semantic_nodes`（仍存在时）等权威表 | 有行没写进 Postgres（转换失败或被跳过） | 不要归档；先解决失败行 |
 | `unable to open database file (14)` | 文件系统不允许只读打开 | 使用默认 `auto`（会回退 `immutable`）或显式 `--sqlite-open immutable` |
 | `prelude_unterminated` / `layout_mismatch` | 录制被中断，前言没有空行或长度不自洽 | 用 `--tolerate-partial` 降级为 warning，或删除该录制后重建索引 |

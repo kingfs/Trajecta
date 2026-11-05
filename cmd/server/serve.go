@@ -186,7 +186,7 @@ func runServeWithConfig(configPath string) int {
 		slog.Warn("Local Responses server has no eligible chat completions upstream; starting anyway", "error", err)
 	}
 
-	rtr, err := router.New(routerCfg, traceStore)
+	rtr, err := router.New(routerCfg)
 	if err != nil {
 		slog.Error("Invalid upstream config", "error", err)
 		return 1
@@ -198,6 +198,9 @@ func runServeWithConfig(configPath string) int {
 	defer rtr.Close()
 	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
+	if rtr.LegacyPassthrough() {
+		slog.Warn("Legacy single upstream forwards undeclared model names; migrate to upstreams[].static_models or the Monitor for strict model authorization")
+	}
 
 	functionExecutorManager, err := buildResponsesFunctionExecutorManager(context.Background(), cfg, traceStore)
 	if err != nil {

@@ -109,12 +109,17 @@ type ProbeResult struct {
 	Models          []string
 	DiscoveredCount int
 	EnabledCount    int
-	Endpoint        string
-	ErrorText       string
-	ProviderReport  providerprobe.Report
-	StartedAt       time.Time
-	CompletedAt     time.Time
-	DurationMs      int64
+	// AddedCount/RemovedCount describe what one sync changed relative to the
+	// stored rows: models the provider now lists, and non-manual models it no
+	// longer lists. A failed sync reports 0/0 and keeps the previous snapshot.
+	AddedCount     int
+	RemovedCount   int
+	Endpoint       string
+	ErrorText      string
+	ProviderReport providerprobe.Report
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	DurationMs     int64
 }
 
 type ProbeOptions struct {
@@ -172,10 +177,6 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		if target.Enabled != nil {
 			enabled = *target.Enabled
 		}
-		allowUnknown := false
-		if target.AllowUnknownModels != nil {
-			allowUnknown = *target.AllowUnknownModels
-		}
 		headersJSON := "{}"
 		if len(target.Upstream.Headers) > 0 {
 			data, err := json.Marshal(target.Upstream.Headers)
@@ -189,30 +190,29 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 			return imported, err
 		}
 		_, err = s.store.UpsertChannelConfig(store.ChannelConfigRecord{
-			ID:                 channelID,
-			Name:               defaultChannelName(channelID, target.Upstream.ProviderPreset),
-			Source:             "bootstrap",
-			BaseURL:            target.Upstream.BaseURL,
-			ProviderPreset:     target.Upstream.ProviderPreset,
-			APIType:            target.Upstream.APIType,
-			Mode:               target.Upstream.Mode,
-			CapabilitiesJSON:   capabilitiesJSON,
-			ProtocolFamily:     target.Upstream.ProtocolFamily,
-			RoutingProfile:     target.Upstream.RoutingProfile,
-			APIVersion:         target.Upstream.APIVersion,
-			Deployment:         target.Upstream.Deployment,
-			Project:            target.Upstream.Project,
-			Location:           target.Upstream.Location,
-			ModelResource:      target.Upstream.ModelResource,
-			APIKeyCiphertext:   []byte(target.Upstream.ApiKey),
-			APIKeyHint:         secretHint(target.Upstream.ApiKey),
-			HeadersJSON:        headersJSON,
-			Enabled:            enabled,
-			Priority:           target.Priority,
-			Weight:             target.Weight,
-			CapacityHint:       target.CapacityHint,
-			ModelDiscovery:     target.ModelDiscovery,
-			AllowUnknownModels: allowUnknown,
+			ID:               channelID,
+			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
+			Source:           "bootstrap",
+			BaseURL:          target.Upstream.BaseURL,
+			ProviderPreset:   target.Upstream.ProviderPreset,
+			APIType:          target.Upstream.APIType,
+			Mode:             target.Upstream.Mode,
+			CapabilitiesJSON: capabilitiesJSON,
+			ProtocolFamily:   target.Upstream.ProtocolFamily,
+			RoutingProfile:   target.Upstream.RoutingProfile,
+			APIVersion:       target.Upstream.APIVersion,
+			Deployment:       target.Upstream.Deployment,
+			Project:          target.Upstream.Project,
+			Location:         target.Upstream.Location,
+			ModelResource:    target.Upstream.ModelResource,
+			APIKeyCiphertext: []byte(target.Upstream.ApiKey),
+			APIKeyHint:       secretHint(target.Upstream.ApiKey),
+			HeadersJSON:      headersJSON,
+			Enabled:          enabled,
+			Priority:         target.Priority,
+			Weight:           target.Weight,
+			CapacityHint:     target.CapacityHint,
+			ModelDiscovery:   target.ModelDiscovery,
 		})
 		if err != nil {
 			return imported, err
@@ -295,11 +295,19 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		models := modelsByChannel[channel.ID]
 		var enabledModels []store.ChannelModelRecord
 		var disabledModels []string
+		upstreamModelNames := make([]string, 0, len(models))
 		for _, model := range models {
-			if model.Enabled {
+			upstreamModel := strings.TrimSpace(model.UpstreamModel)
+			if modelRoutable(channel, model) {
 				enabledModels = append(enabledModels, model)
+				if upstreamModel != "" {
+					upstreamModelNames = append(upstreamModelNames, upstreamModel)
+				}
 			} else {
 				disabledModels = append(disabledModels, model.Model)
+				if upstreamModel != "" {
+					disabledModels = append(disabledModels, upstreamModel)
+				}
 			}
 		}
 		models = enabledModels
@@ -316,6 +324,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		enabled := true
 		target := config.UpstreamTargetConfig{
 			ID:                   channel.ID,
+			Name:                 channel.Name,
 			Enabled:              &enabled,
 			Priority:             channel.Priority,
 			Weight:               channel.Weight,
@@ -325,7 +334,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
 			ConfiguredModelsOnly: true,
 			DisabledModels:       disabledModels,
-			AllowUnknownModels:   &channel.AllowUnknownModels,
+			UpstreamModelNames:   upstreamModelNames,
 			Upstream: config.UpstreamConfig{
 				BaseURL:           channel.BaseURL,
 				ApiKey:            string(channel.APIKeyCiphertext),
@@ -575,10 +584,12 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		}
 	}
 	if probeErr == nil {
-		merged, err := s.mergeDiscoveredChannelModels(result.ChannelID, channelModels, enableDiscoveredByDefault(options))
+		merged, added, removed, err := s.mergeDiscoveredChannelModels(result.ChannelID, channelModels, enableDiscoveredByDefault(options))
 		if err != nil {
 			return result, err
 		}
+		result.AddedCount = added
+		result.RemovedCount = removed
 		result.EnabledCount = countEnabledModels(merged)
 		if err := s.store.ReplaceUpstreamModels(result.ChannelID, upstreamModels); err != nil {
 			return result, err
@@ -604,21 +615,75 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 	return result, probeErr
 }
 
-func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []store.ChannelModelRecord, enableNew bool) ([]store.ChannelModelRecord, error) {
+// ModelState classifies a channel model against the provider's latest
+// successful sync.
+type ModelState string
+
+const (
+	// ModelStateEnabled is a model the operator enabled and the latest sync saw.
+	ModelStateEnabled ModelState = "enabled"
+	// ModelStateDisabled is a model the operator has switched off.
+	ModelStateDisabled ModelState = "disabled"
+	// ModelStateRemoved is a model the latest successful sync no longer lists.
+	// The operator's switch is kept, but routing excludes it.
+	ModelStateRemoved ModelState = "removed"
+	// ModelStateUnverified is a manually added model, or any model on a channel
+	// that has never synced successfully. It is routable but flagged.
+	ModelStateUnverified ModelState = "unverified"
+)
+
+// ModelAvailability classifies one channel model. A model the latest sync did
+// not return is "removed" and is not routed; a model with no successful sync,
+// or one added by hand, is "unverified" and stays routable. A failed sync never
+// removes models, because the previous snapshot stays authoritative.
+func ModelAvailability(channel store.ChannelConfigRecord, model store.ChannelModelRecord) ModelState {
+	if !model.Enabled {
+		return ModelStateDisabled
+	}
+	if strings.EqualFold(strings.TrimSpace(model.Source), "manual") {
+		return ModelStateUnverified
+	}
+	if !strings.EqualFold(strings.TrimSpace(channel.LastProbeStatus), "success") || channel.LastProbeAt.IsZero() {
+		return ModelStateUnverified
+	}
+	if model.LastProbeAt.IsZero() || model.LastProbeAt.Before(channel.LastProbeAt) {
+		return ModelStateRemoved
+	}
+	return ModelStateEnabled
+}
+
+// ModelRoutable reports whether the model may be selected for a request.
+func ModelRoutable(channel store.ChannelConfigRecord, model store.ChannelModelRecord) bool {
+	switch ModelAvailability(channel, model) {
+	case ModelStateEnabled, ModelStateUnverified:
+		return true
+	default:
+		return false
+	}
+}
+
+func modelRoutable(channel store.ChannelConfigRecord, model store.ChannelModelRecord) bool {
+	return ModelRoutable(channel, model)
+}
+
+func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []store.ChannelModelRecord, enableNew bool) ([]store.ChannelModelRecord, int, int, error) {
 	existing, err := s.store.ListChannelModels(channelID, false)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	existingByModel := make(map[string]store.ChannelModelRecord, len(existing))
 	for _, record := range existing {
 		existingByModel[record.Model] = record
 	}
+	discoveredSet := make(map[string]struct{}, len(discovered))
+	added := 0
 	records := make([]store.ChannelModelRecord, 0, len(discovered))
 	for _, record := range discovered {
 		model := strings.ToLower(strings.TrimSpace(record.Model))
 		if model == "" {
 			continue
 		}
+		discoveredSet[model] = struct{}{}
 		record.Enabled = enableNew
 		if previous, ok := existingByModel[model]; ok {
 			// Re-discovery updates observation timestamps, not operator choices
@@ -627,12 +692,32 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 			record = previous
 			record.LastSeenAt = lastSeen
 			record.LastProbeAt = lastProbe
+		} else {
+			added++
 		}
 		records = append(records, record)
 	}
+	removed := 0
+	for model, record := range existingByModel {
+		if _, ok := discoveredSet[model]; ok {
+			continue
+		}
+		// A provider no longer listing a manually added model does not remove
+		// it: the operator declared it on purpose. Any other row stays in the
+		// table (so its switch survives) and is marked removed by the sync
+		// timestamp.
+		if strings.EqualFold(strings.TrimSpace(record.Source), "manual") {
+			continue
+		}
+		removed++
+	}
 	// One grouped upsert for the whole discovery replaces the upsert, catalog
 	// write and read back the loop used to run per model.
-	return s.store.UpsertChannelModels(channelID, records)
+	merged, err := s.store.UpsertChannelModels(channelID, records)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return merged, added, removed, nil
 }
 
 func enableDiscoveredByDefault(options ProbeOptions) bool {

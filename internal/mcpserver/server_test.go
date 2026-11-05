@@ -1117,10 +1117,9 @@ func routingFixtureEvents(header recordfile.RecordHeader, spec fixtureSpec) []re
 			Type: "routing.classified",
 			Time: eventTime,
 			Attributes: map[string]interface{}{
-				"model":           header.Meta.Model,
-				"endpoint":        header.Meta.Endpoint,
-				"routing_policy":  header.Meta.RoutingPolicy,
-				"fallback_policy": "reject",
+				"model":          header.Meta.Model,
+				"endpoint":       header.Meta.Endpoint,
+				"routing_policy": header.Meta.RoutingPolicy,
 			},
 		},
 		{

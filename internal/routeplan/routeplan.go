@@ -46,6 +46,7 @@ const (
 	ReasonUnsupportedEntrypoint            = "unsupported_entrypoint"
 	ReasonUnsupportedStrategy              = "unsupported_responses_strategy"
 	ReasonModelNotMatched                  = "model_not_matched"
+	ReasonModelNotEnabled                  = "model_not_enabled"
 	ReasonChannelNotEnabled                = "channel_not_enabled"
 	ReasonRequiresChatCompletions          = "requires_chat_completions"
 	ReasonRequiresResponses                = "requires_responses"
@@ -87,11 +88,10 @@ type UpstreamCandidate struct {
 	Priority      int
 	Weight        float64
 	Models        []string
-	// AllowUnknownModels mirrors the upstream's allow_unknown_models setting: the target serves
-	// models it does not declare. The forwarding path decides this in Target.supportsModelLocked
-	// and otherwise rejects a model that is not in the target's model set, so the planner needs the
-	// same fact to describe the same decision.
-	AllowUnknownModels        bool
+	// DisabledModels are names the channel declares but has switched off. They
+	// are not routable; the planner reports them separately from a name no
+	// channel declares at all.
+	DisabledModels            []string
 	SupportsChatCompletions   bool
 	SupportsResponses         bool
 	SupportsAnthropicMessages bool
@@ -290,7 +290,7 @@ func planForEndpoint(req Request, upstreams []UpstreamCandidate, mode ExecutionM
 		if !upstream.Enabled {
 			plan.Reason = ReasonChannelNotEnabled
 		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
-			plan.Reason = ReasonModelNotMatched
+			plan.Reason = modelMismatchReason(req, upstream)
 		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
 			plan.Reason = capabilityReason
 		} else if req.HasTools && !upstream.supportsToolCalling(matchedModel) {
@@ -339,7 +339,7 @@ func responsesPlans(req Request, upstreams []UpstreamCandidate, mode ExecutionMo
 		} else if req.RequiresLocalResponsesRuntime && mode != ExecutionModeResponsesServer {
 			plan.Reason = ReasonRequiresLocalResponsesRuntime
 		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
-			plan.Reason = ReasonModelNotMatched
+			plan.Reason = modelMismatchReason(req, upstream)
 		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
 			if endpoint == UpstreamEndpointResponses {
 				plan.Reason = ReasonRequiresResponses
@@ -419,12 +419,10 @@ func basePlanCandidate(upstream UpstreamCandidate, mode ExecutionMode, endpoint 
 // matched model name so per-model capabilities can be resolved. When the request carries no
 // resolved model candidates every model is considered a match and the matched model is empty.
 //
-// A model the upstream does not declare matches only when UpstreamCandidate.AllowUnknownModels is
-// set, which is the rule Target.supportsModelLocked applies on the forwarding path. The previous
-// fallback - "an upstream that declares no models serves every model" - described neither setting:
-// a database channel always sends an explicit allow_unknown_models value, and the strict default is
-// to reject an undeclared model even when the model set happens to be empty because discovery has
-// not run yet. That made the inspector disagree with the proxy in both directions.
+// A model the upstream does not declare never matches. This is the same rule
+// Target.supportsModelLocked applies on the forwarding path: a provider serves
+// exactly the models the operator enabled, and an undeclared name is rejected
+// before any upstream request is made.
 func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) (string, bool) {
 	if len(req.ResolvedModelCandidates) == 0 {
 		return "", true
@@ -447,11 +445,31 @@ func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) 
 		if _, ok := models[model]; ok {
 			return matchedUpstreamModel(candidate, plan), true
 		}
-		if upstream.AllowUnknownModels {
-			return matchedUpstreamModel(candidate, plan), true
-		}
 	}
 	return "", false
+}
+
+// modelMismatchReason distinguishes "this channel switched the model off" from
+// "no channel declares the model", so the inspector and the proxy agree on what
+// the operator should fix.
+func modelMismatchReason(req Request, upstream UpstreamCandidate) string {
+	disabled := map[string]struct{}{}
+	for _, model := range upstream.DisabledModels {
+		disabled[strings.ToLower(strings.TrimSpace(model))] = struct{}{}
+	}
+	for _, candidate := range req.ResolvedModelCandidates {
+		if candidate.ChannelID != "" && candidate.ChannelID != upstream.ChannelID {
+			continue
+		}
+		model := strings.ToLower(strings.TrimSpace(candidate.Model))
+		if model == "" {
+			continue
+		}
+		if _, ok := disabled[model]; ok {
+			return ReasonModelNotEnabled
+		}
+	}
+	return ReasonModelNotMatched
 }
 
 func matchedUpstreamModel(candidate ResolvedModelCandidate, plan *PlanCandidate) string {

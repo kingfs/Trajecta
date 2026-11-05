@@ -1559,7 +1559,6 @@ function channelDetailPayload() {
     weight: 1,
     capacity_hint: 1,
     model_discovery: "list_models",
-    allow_unknown_models: false,
     model_count: 2,
     enabled_model_count: 2,
     created_at: new Date().toISOString(),
@@ -2335,7 +2334,6 @@ function providerSetupValidatePayload(body) {
       weight: body.weight ?? 1,
       capacity_hint: body.capacity_hint ?? 1,
       model_discovery: body.model_discovery || "list_models",
-      allow_unknown_models: Boolean(body.allow_unknown_models),
     },
     probe: providerProbePreviewPayload(),
     secret: {

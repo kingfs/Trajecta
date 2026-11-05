@@ -30,7 +30,7 @@ func concurrentSelectRouter(t *testing.T) *Router {
 			},
 		})
 	}
-	rtr, err := New(&config.Config{Upstreams: upstreams}, nil)
+	rtr, err := New(&config.Config{Upstreams: upstreams})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRebuildCatalogDoesNotRaceWithModelRefresh(t *testing.T) {
 		},
 	}}
 
-	rtr, err := New(&config.Config{Upstreams: upstreams}, nil)
+	rtr, err := New(&config.Config{Upstreams: upstreams})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSelectIsConcurrencySafeWithModelRefresh(t *testing.T) {
 		})
 	}
 
-	rtr, err := New(&config.Config{Upstreams: upstreams}, nil)
+	rtr, err := New(&config.Config{Upstreams: upstreams})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

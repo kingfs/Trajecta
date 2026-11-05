@@ -161,6 +161,9 @@ func TestSystemHostSamplerReusesRatesWithinTheMinimumInterval(t *testing.T) {
 // with each sample, stay bounded, and be a copy: a caller that sorts or trims
 // what it was handed must not be able to reach into the next answer.
 func TestSystemHostHistoryGrowsAndStaysBounded(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("host counters, and therefore the trend, are only read on Linux")
+	}
 	sampler := &systemHostSampler{}
 	base := time.Unix(1_800_000_000, 0).UTC()
 

@@ -305,7 +305,7 @@ func tokenizeCounterTestConfig(baseURL string, enabled *bool) *config.Config {
 
 func newTokenizeCounterTestRouter(t *testing.T, cfg *config.Config) *router.Router {
 	t.Helper()
-	rtr, err := router.New(cfg, nil)
+	rtr, err := router.New(cfg)
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}

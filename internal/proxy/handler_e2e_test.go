@@ -565,12 +565,11 @@ func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
-				ID:                 "anthropic-primary",
-				Enabled:            boolPtr(true),
-				Priority:           100,
-				ModelDiscovery:     router.ModelDiscoveryStaticOnly,
-				StaticModels:       []string{"glm-5.1"},
-				AllowUnknownModels: boolPtr(true),
+				ID:             "anthropic-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1"},
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL,
 					ProviderPreset: "anthropic",
@@ -769,92 +768,6 @@ func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *test
 	}
 	if len(payload.Data) != 1 || payload.Data[0].ID != "gpt-enabled" {
 		t.Fatalf("model list = %+v, want only gpt-enabled; body=%s", payload.Data, rec.Body.String())
-	}
-}
-
-func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
-	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	var gotPath string
-	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"resp_static","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
-	}))
-	defer upstreamServer.Close()
-
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID:             "openai-primary",
-				Enabled:        boolPtr(true),
-				Priority:       100,
-				ModelDiscovery: router.ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-5"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        upstreamServer.URL + "/v1",
-					ProviderPreset: "openai",
-					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
-				},
-			},
-		},
-	}
-	cfg.Router.Fallback.OnMissingModel = "allow_static"
-	cfg.Debug.OutputDir = outputDir
-	cfg.Debug.MaskKey = true
-
-	handler, err := NewHandler(cfg, st)
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-
-	proxyServer := httptest.NewServer(handler)
-	defer proxyServer.Close()
-
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"unknown-future-model","input":"hello"}`))
-	if err != nil {
-		t.Fatalf("http.NewRequest() error = %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := proxyServer.Client().Do(req)
-	if err != nil {
-		t.Fatalf("client.Do() error = %v", err)
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
-	}
-	if gotPath != "/v1/responses" {
-		t.Fatalf("upstream path = %q, want /v1/responses", gotPath)
-	}
-
-	recordPath := findRecordedHTTP(t, outputDir)
-	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
-	if err != nil {
-		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
-	}
-	if parsed.Header.Meta.SelectedUpstreamID != "openai-primary" {
-		t.Fatalf("SelectedUpstreamID = %q, want openai-primary", parsed.Header.Meta.SelectedUpstreamID)
-	}
-	if parsed.Header.Meta.RoutingFailureReason != "" {
-		t.Fatalf("RoutingFailureReason = %q, want empty", parsed.Header.Meta.RoutingFailureReason)
-	}
-	seenEvents := map[string]bool{}
-	for _, event := range parsed.Events {
-		seenEvents[event.Type] = true
-	}
-	for _, eventType := range []string{"routing.classified", "routing.candidates", "routing.selected", "routing.outcome"} {
-		if !seenEvents[eventType] {
-			t.Fatalf("recorded events missing %s: %+v", eventType, parsed.Events)
-		}
 	}
 }
 
@@ -2738,6 +2651,9 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 				Priority:       100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5"},
+				// The adopted profile rewrites the wire model; a router built
+				// from the same channel projection carries that name.
+				UpstreamModelNames: []string{"provider/private-gpt-5"},
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ApiKey:         "upstream-secret",

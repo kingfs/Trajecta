@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
-	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/llm"
 )
@@ -28,8 +27,6 @@ const (
 	ModelDiscoveryListModels = "list_models"
 	ModelDiscoveryStaticOnly = "static_only"
 	ModelDiscoveryDisabled   = "disabled"
-
-	FallbackReject = "reject"
 )
 
 const (
@@ -98,11 +95,9 @@ type Router struct {
 	policy           string
 	openWindow       time.Duration
 	failureThreshold int64
-	fallbackPolicy   string
 	refreshInterval  time.Duration
 	discoveryEnabled bool
 	costs            costConfig
-	store            *store.Store
 	sticky           *StickyBindingStore
 	stopCh           chan struct{}
 	stopOnce         sync.Once
@@ -129,23 +124,30 @@ func (r *Router) HealthThresholds() HealthThresholds {
 }
 
 type Target struct {
-	ID                   string
-	RouteTargetID        string
-	ChannelID            string
-	CredentialID         string
-	CredentialHint       string
-	Enabled              bool
-	Priority             int
-	Weight               float64
-	CapacityHint         float64
-	ModelDiscovery       string
-	StaticModels         []string
+	ID             string
+	Name           string
+	RouteTargetID  string
+	ChannelID      string
+	CredentialID   string
+	CredentialHint string
+	Enabled        bool
+	Priority       int
+	Weight         float64
+	CapacityHint   float64
+	ModelDiscovery string
+	StaticModels   []string
+	// UpstreamModelNames are wire names mapped by a channel model. They are
+	// routable but not listed by /v1/models.
+	UpstreamModelNames   []string
 	ModelAliases         map[string]string
 	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
 	Upstream             upstream.ResolvedUpstream
 
-	allowUnknownModels bool
+	// legacyPassthrough keeps the pre-`upstreams` single-upstream YAML form
+	// working: that form had no way to declare a model list, so an undeclared
+	// name is forwarded. Database-managed channels never set this.
+	legacyPassthrough bool
 
 	mu                  sync.Mutex
 	inflight            int64
@@ -177,6 +179,7 @@ type modelHealthState struct {
 
 type Snapshot struct {
 	ID                string    `json:"id"`
+	Name              string    `json:"name,omitempty"`
 	RouteTargetID     string    `json:"route_target_id,omitempty"`
 	ChannelID         string    `json:"channel_id,omitempty"`
 	CredentialID      string    `json:"credential_id,omitempty"`
@@ -251,6 +254,8 @@ func (e *SelectionError) Error() string {
 const (
 	SelectionFailureNilRequest         = "nil_request"
 	SelectionFailureNoSupportingTarget = "no_supporting_target"
+	SelectionFailureModelNotEnabled    = "model_not_enabled"
+	SelectionFailureModelUnknown       = "model_unknown"
 	SelectionFailureAllTargetsOpen     = "all_targets_open"
 	SelectionFailureAllTargetsExcluded = "all_targets_excluded"
 	SelectionFailureUnknown            = "unknown"
@@ -292,7 +297,6 @@ type DecisionTrace struct {
 	ModelName              string              `json:"model_name,omitempty"`
 	Endpoint               string              `json:"endpoint,omitempty"`
 	Policy                 string              `json:"policy,omitempty"`
-	FallbackPolicy         string              `json:"fallback_policy,omitempty"`
 	ExcludedIDs            []string            `json:"excluded_ids,omitempty"`
 	Candidates             []CandidateDecision `json:"candidates,omitempty"`
 	AvailableCount         int                 `json:"available_count"`
@@ -367,7 +371,7 @@ type Outcome struct {
 	Stream         bool
 }
 
-func New(cfg *config.Config, st *store.Store) (*Router, error) {
+func New(cfg *config.Config) (*Router, error) {
 	targetCfgs := cfg.EffectiveUpstreams()
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		return nil, errors.New("config cannot define both upstream and upstreams")
@@ -378,11 +382,9 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		policy:           normalizePolicy(cfg.Router.Selection.Policy),
 		openWindow:       cfg.Router.Selection.OpenWindow,
 		failureThreshold: cfg.Router.Selection.FailureThreshold,
-		fallbackPolicy:   normalizeFallback(cfg.Router.Fallback.OnMissingModel),
 		refreshInterval:  cfg.Router.ModelDiscovery.RefreshInterval,
 		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
 		costs:            defaultCostConfig(),
-		store:            st,
 		sticky:           NewStickyBindingStore(defaultStickyBindingTTL),
 		stopCh:           make(chan struct{}),
 	}
@@ -406,6 +408,11 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	targets, err := buildTargets(targetCfgs)
 	if err != nil {
 		return nil, err
+	}
+	if r.legacySingleUpstream(cfg) {
+		for _, target := range targets {
+			target.legacyPassthrough = true
+		}
 	}
 	r.targets = targets
 	return r, nil
@@ -434,7 +441,7 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 		channelID := targetID(targetCfg, idx)
 		credentials := explicitCredentials(targetCfg.Credentials)
 		if len(credentials) == 0 {
-			target := newTargetFromConfig(targetCfg, resolved, channelID, routeTargetID(channelID, "default"), channelID, "default", credentialHintFromUpstream(resolved), len(targetCfgs) == 1)
+			target := newTargetFromConfig(targetCfg, resolved, channelID, routeTargetID(channelID, "default"), channelID, "default", credentialHintFromUpstream(resolved))
 			if err := appendTarget(&targets, seenIDs, target); err != nil {
 				return nil, err
 			}
@@ -458,7 +465,7 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 				resolvedForCredential.APIKey = credential.ApiKey
 			}
 			routeTargetID := routeTargetID(channelID, credentialID)
-			target := newTargetFromConfig(targetCfg, resolvedForCredential, routeTargetID, routeTargetID, channelID, credentialID, credentialHint(credential, resolvedForCredential), len(targetCfgs) == 1)
+			target := newTargetFromConfig(targetCfg, resolvedForCredential, routeTargetID, routeTargetID, channelID, credentialID, credentialHint(credential, resolvedForCredential))
 			if err := appendTarget(&targets, seenIDs, target); err != nil {
 				return nil, err
 			}
@@ -471,9 +478,10 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 	return targets, nil
 }
 
-func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstream.ResolvedUpstream, id string, routeTargetID string, channelID string, credentialID string, credentialHint string, singleConfiguredTarget bool) *Target {
+func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstream.ResolvedUpstream, id string, routeTargetID string, channelID string, credentialID string, credentialHint string) *Target {
 	return &Target{
 		ID:                   id,
+		Name:                 targetCfg.Name,
 		RouteTargetID:        routeTargetID,
 		ChannelID:            channelID,
 		CredentialID:         credentialID,
@@ -488,15 +496,30 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
 		disabledModels:       modelSet(targetCfg.DisabledModels),
 		Upstream:             resolved,
-		allowUnknownModels:   allowUnknownModels(targetCfg, singleConfiguredTarget),
-		models:               map[string]struct{}{},
-		ttftFastMs:           500,
-		ttftSlowMs:           500,
-		reqLatencyFastMs:     800,
-		reqLatencySlowMs:     800,
-		healthState:          HealthHealthy,
-		modelHealth:          map[string]*modelHealthState{},
+		UpstreamModelNames:   normalizeModels(targetCfg.UpstreamModelNames),
+		// The declared set is known at build time; a refresh replaces it with the
+		// discovered/authorized set. Without this, a router that has not been
+		// initialized yet would authorize nothing (New alone, not production).
+		models:           modelSet(append(append([]string(nil), targetCfg.StaticModels...), targetCfg.UpstreamModelNames...)),
+		ttftFastMs:       500,
+		ttftSlowMs:       500,
+		reqLatencyFastMs: 800,
+		reqLatencySlowMs: 800,
+		healthState:      HealthHealthy,
+		modelHealth:      map[string]*modelHealthState{},
 	}
+}
+
+// DisplayName is what an operator reads in an error or a snapshot: the channel
+// name when the target was projected from one, and the target id otherwise.
+func (t *Target) DisplayName() string {
+	if t == nil {
+		return ""
+	}
+	if strings.TrimSpace(t.Name) != "" {
+		return t.Name
+	}
+	return t.ID
 }
 
 func (t *Target) ResolveModelAlias(model string) string {
@@ -568,6 +591,12 @@ func blockedByNativeResponsesRequirement(target *Target, model string, requireNa
 	return !target.Upstream.SupportsResponsesAPIForModel(model)
 }
 
+// Initialize runs the first discovery pass.
+//
+// A target whose discovery failed is not a reason to refuse startup: the
+// operator needs the Monitor to fix the provider, and a request that names an
+// unknown or disabled model is answered with a clear 404 instead of a process
+// that never listened. Invalid configuration still fails in buildTargets.
 func (r *Router) Initialize() error {
 	if r == nil {
 		return nil
@@ -575,12 +604,8 @@ func (r *Router) Initialize() error {
 	if len(r.Targets()) == 0 {
 		return nil
 	}
-	usable, err := r.refreshAll()
-	if err != nil {
+	if _, err := r.refreshAll(); err != nil {
 		return err
-	}
-	if usable == 0 {
-		return errors.New("no usable upstream targets after startup discovery")
 	}
 	r.mu.Lock()
 	r.rebuildCatalog()
@@ -592,25 +617,20 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	if r == nil {
 		return errors.New("router is nil")
 	}
-	return r.ReloadWithCommit(targetCfgs, r.store, nil)
+	return r.ReloadWithCommit(targetCfgs, nil)
 }
 
 // ReloadWithCommit prepares the next snapshot before committing configuration.
 // A failed preparation or commit leaves the running snapshot unchanged.
 //
-// The upstream write lock is taken before reloadMu so the lock order stays
-// configMu -> upstreamMu -> reloadMu -> r.mu: a configuration request that
-// already owns the upstream lock must never wait for a reload that waits for it.
-func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *store.Store, commit func() error) error {
+// The router never writes the application database: the configuration
+// transaction owns every configuration row, and the routing snapshot is a
+// projection of those rows that lives in memory. The commit callback is still
+// invoked before publication so a request can never be routed by a snapshot
+// whose configuration the database rejected.
+func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, commit func() error) error {
 	if r == nil {
 		return errors.New("router is nil")
-	}
-	if st != nil && !st.TransactionScoped() {
-		release, err := st.LockUpstreamWrites()
-		if err != nil {
-			return err
-		}
-		defer release()
 	}
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
@@ -631,11 +651,7 @@ func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *
 		}
 	}
 
-	// The caller holds the upstream write lock, so persisting here cannot
-	// interleave with a background refresh.
-	if _, err := r.refreshTargetsWithStore(nextTargets, st); err != nil {
-		return err
-	}
+	r.refreshTargetsInMemory(nextTargets)
 
 	// Commit before publishing: the running snapshot must never describe
 	// configuration the database rejected, while a failed commit has to leave
@@ -999,10 +1015,15 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	decision := r.buildDecisionTrace(rawPath, model, excludeIDs, features, requireNativeResponses)
 	candidates := r.candidatesForRequest(rawPath, model, features, requireNativeResponses)
 	if len(candidates) == 0 {
+		reason := SelectionFailureNoSupportingTarget
+		message := fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(rawPath))
+		if model != "" && len(r.targets) > 0 {
+			reason, message = r.noCandidateFailure(model, llm.NormalizeEndpoint(rawPath))
+		}
 		return nil, &SelectionError{
-			Reason:   SelectionFailureNoSupportingTarget,
-			Message:  fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(rawPath)),
-			Decision: decision.withFailure(SelectionFailureNoSupportingTarget),
+			Reason:   reason,
+			Message:  message,
+			Decision: decision.withFailure(reason),
 		}
 	}
 
@@ -1097,12 +1118,11 @@ func targetAlias(target *Target, fallback string) string {
 
 func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string, features RequestFeatures, requireNativeResponses bool) *DecisionTrace {
 	decision := &DecisionTrace{
-		ModelName:      model,
-		Endpoint:       llm.NormalizeEndpoint(rawPath),
-		Policy:         r.policy,
-		FallbackPolicy: r.fallbackPolicy,
-		ExcludedIDs:    append([]string(nil), excludeIDs...),
-		Candidates:     make([]CandidateDecision, 0, len(r.targets)),
+		ModelName:   model,
+		Endpoint:    llm.NormalizeEndpoint(rawPath),
+		Policy:      r.policy,
+		ExcludedIDs: append([]string(nil), excludeIDs...),
+		Candidates:  make([]CandidateDecision, 0, len(r.targets)),
 	}
 	excludeSet := make(map[string]struct{}, len(excludeIDs))
 	for _, id := range excludeIDs {
@@ -1294,26 +1314,87 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 
 	var fallback []*Target
 	for _, target := range r.targets {
-		if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
+		// A database-managed channel only serves the models the operator
+		// enabled. It is either declared and enabled, declared and disabled, or
+		// not configured at all; none of those may borrow another target.
+		if target.configuredModelsOnly && model != "" {
 			continue
 		}
-		if target.configuredModelsOnly && model != "" && !target.allowUnknownModels {
+		// The legacy single-upstream YAML form keeps its historical passthrough:
+		// it has no model list to declare, and turning it strict would break an
+		// existing deployment silently. New configuration uses `upstreams[]`,
+		// which is strict.
+		if model != "" && !target.legacyPassthrough {
 			continue
 		}
-		if !supportsPath(target, rawPath, features) {
-			continue
-		}
-		if !supportsRequestFeatures(target, features) {
+		if !supportsPath(target, rawPath, features) || !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 			continue
 		}
-		if target.allowUnknownModels || model == "" || r.fallbackPolicy != FallbackReject {
-			fallback = append(fallback, target)
-		}
+		fallback = append(fallback, target)
 	}
 	return fallback
+}
+
+// legacySingleUpstream reports whether the configuration uses the pre-`upstreams`
+// single `upstream:` block, which has no per-target model list.
+func (r *Router) legacySingleUpstream(cfg *config.Config) bool {
+	return cfg != nil && len(cfg.Upstreams) == 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != ""
+}
+
+// LegacyPassthrough reports whether at least one target accepts undeclared model
+// names because the deployment still uses the legacy single-upstream form.
+func (r *Router) LegacyPassthrough() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, target := range r.targets {
+		if target.legacyPassthrough {
+			return true
+		}
+	}
+	return false
+}
+
+// noCandidateFailure explains why no target can serve a named model without
+// contacting an upstream. The order matters: a model that at least one target
+// serves but no target can serve *this request* is a support problem, while a
+// model that only appears in disabled lists is an authorization problem the
+// operator can fix, and a model that appears nowhere is usually a client typo.
+func (r *Router) noCandidateFailure(model, endpoint string) (string, string) {
+	key := strings.ToLower(strings.TrimSpace(model))
+	var enabledOn, disabledOn []string
+	for _, target := range r.targets {
+		if _, disabled := target.disabledModels[key]; disabled {
+			disabledOn = append(disabledOn, target.ChannelID)
+			continue
+		}
+		target.mu.Lock()
+		_, enabled := target.models[key]
+		target.mu.Unlock()
+		if enabled {
+			enabledOn = append(enabledOn, target.ChannelID)
+		}
+	}
+	if len(enabledOn) > 0 {
+		slices.Sort(enabledOn)
+		return SelectionFailureNoSupportingTarget, fmt.Sprintf(
+			"no upstream target supports model %q for endpoint %q (enabled on %s, but no provider supports this endpoint or request shape)",
+			model, endpoint, strings.Join(enabledOn, ", "))
+	}
+	if len(disabledOn) > 0 {
+		slices.Sort(disabledOn)
+		return SelectionFailureModelNotEnabled, fmt.Sprintf(
+			"model %q is not enabled on any provider (declared but disabled on %s); enable it under that provider's models in Monitor",
+			model, strings.Join(disabledOn, ", "))
+	}
+	return SelectionFailureModelUnknown, fmt.Sprintf(
+		"model %q is not configured on any provider; sync the provider's model list and enable it in Monitor",
+		model)
 }
 
 func modelSet(models []string) map[string]struct{} {
@@ -1327,8 +1408,11 @@ func modelSet(models []string) map[string]struct{} {
 func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 	// Discovery is inventory, never authorization, for database-managed targets.
 	if target.configuredModelsOnly {
-		models := make([]string, 0, len(target.StaticModels))
-		for _, model := range target.StaticModels {
+		candidates := make([]string, 0, len(target.StaticModels)+len(target.UpstreamModelNames))
+		candidates = append(candidates, target.StaticModels...)
+		candidates = append(candidates, target.UpstreamModelNames...)
+		models := make([]string, 0, len(candidates))
+		for _, model := range candidates {
 			if _, disabled := target.disabledModels[model]; !disabled {
 				models = append(models, model)
 			}
@@ -1341,6 +1425,9 @@ func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 	}
 	modelSet := map[string]struct{}{}
 	for _, model := range target.StaticModels {
+		modelSet[strings.ToLower(model)] = struct{}{}
+	}
+	for _, model := range target.UpstreamModelNames {
 		modelSet[strings.ToLower(model)] = struct{}{}
 	}
 	if inferred := inferConfiguredModel(target.Upstream); inferred != "" {
@@ -1382,127 +1469,26 @@ func (r *Router) refreshAll() (int, error) {
 	return r.refreshTargets(targets)
 }
 
-// refreshTargets is the background and proxy entry point. Persistence is best
-// effort there: when a configuration change owns the upstream write lock the
-// refreshed state still lands in memory, and the next refresh stores it.
+// refreshTargets is the background and proxy entry point. The router only
+// updates its in-memory snapshot: upstream discovery results are not
+// configuration, and the legacy upstream_targets/upstream_models tables are no
+// longer written by the router.
 func (r *Router) refreshTargets(targets []*Target) (int, error) {
-	usable, writes := r.refreshTargetsInMemory(targets)
-	st := r.store
-	if st == nil || len(writes) == 0 {
-		return usable, nil
-	}
-	release, locked, err := st.TryLockUpstreamWrites()
-	if err != nil {
-		return usable, err
-	}
-	if !locked {
-		return usable, nil
-	}
-	defer release()
-	// The configuration change may have removed targets after this snapshot was
-	// taken; never resurrect rows for targets that are no longer live.
-	writes = r.liveRefreshWrites(writes)
-	if len(writes) == 0 {
-		return usable, nil
-	}
-	if err := r.persistRefreshWrites(st, writes); err != nil {
-		return usable, err
-	}
-	return usable, nil
-}
-
-// liveRefreshWrites drops refresh results whose target left the running
-// snapshot. Callers must hold the upstream write lock so a concurrent reload
-// cannot change the live set between this filter and the write.
-func (r *Router) liveRefreshWrites(writes []refreshWrite) []refreshWrite {
-	r.mu.RLock()
-	live := make(map[string]struct{}, len(r.targets))
-	for _, target := range r.targets {
-		live[target.ID] = struct{}{}
-	}
-	r.mu.RUnlock()
-	kept := writes[:0]
-	for _, write := range writes {
-		if _, ok := live[write.record.ID]; ok {
-			kept = append(kept, write)
-		}
-	}
-	return kept
-}
-
-// refreshTargetsWithStore refreshes targets and stores what it learned through
-// st. The caller must hold the upstream write lock for st unless st is nil;
-// ReloadWithCommit and refreshTargets both do.
-func (r *Router) refreshTargetsWithStore(targets []*Target, st *store.Store) (int, error) {
-	usable, writes := r.refreshTargetsInMemory(targets)
-	if st == nil || len(writes) == 0 {
-		return usable, nil
-	}
-	if err := r.persistRefreshWrites(st, writes); err != nil {
-		return usable, err
-	}
-	return usable, nil
-}
-
-type refreshWrite struct {
-	record store.UpstreamTargetRecord
-	models []store.UpstreamModelRecord
+	return r.refreshTargetsInMemory(targets), nil
 }
 
 // refreshTargetsInMemory refreshes targets over the network and applies the
-// result to the running targets. It never touches the database.
-func (r *Router) refreshTargetsInMemory(targets []*Target) (int, []refreshWrite) {
+// result to the running targets.
+func (r *Router) refreshTargetsInMemory(targets []*Target) int {
 	var usable int
-	writes := make([]refreshWrite, 0, len(targets))
 	for _, target := range targets {
 		models, status, refreshErr := r.refreshTarget(target)
-		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
+		if refreshErr == nil || len(models) > 0 {
 			usable++
 		}
 		target.setRefreshResult(models, status, refreshErr, r.failureThreshold, r.openWindow, r.costs)
-		record := store.UpstreamTargetRecord{
-			ID:                target.ID,
-			BaseURL:           target.Upstream.BaseURL,
-			ProviderPreset:    target.Upstream.ProviderPreset,
-			ProtocolFamily:    target.Upstream.ProtocolFamily,
-			RoutingProfile:    target.Upstream.RoutingProfile,
-			Enabled:           target.Enabled,
-			Priority:          target.Priority,
-			Weight:            target.Weight,
-			CapacityHint:      target.CapacityHint,
-			LastRefreshAt:     target.snapshot().LastRefreshAt,
-			LastRefreshStatus: status,
-		}
-		if refreshErr != nil {
-			record.LastRefreshError = refreshErr.Error()
-		}
-		modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
-		seenAt := time.Now().UTC()
-		for _, model := range models {
-			modelRecords = append(modelRecords, store.UpstreamModelRecord{
-				UpstreamID: target.ID,
-				Model:      model,
-				Source:     "catalog",
-				SeenAt:     seenAt,
-			})
-		}
-		writes = append(writes, refreshWrite{record: record, models: modelRecords})
 	}
-	return usable, writes
-}
-
-// persistRefreshWrites stores refresh results. The caller must hold the
-// upstream write lock.
-func (r *Router) persistRefreshWrites(st *store.Store, writes []refreshWrite) error {
-	for _, write := range writes {
-		if err := st.UpsertUpstreamTarget(write.record); err != nil {
-			return err
-		}
-		if err := st.ReplaceUpstreamModels(write.record.ID, write.models); err != nil {
-			return err
-		}
-	}
-	return nil
+	return usable
 }
 
 func (r *Router) rebuildCatalog() {
@@ -1663,6 +1649,7 @@ func (t *Target) snapshot() Snapshot {
 	}
 	return Snapshot{
 		ID:                t.ID,
+		Name:              t.DisplayName(),
 		RouteTargetID:     t.RouteTargetID,
 		ChannelID:         t.ChannelID,
 		CredentialID:      t.CredentialID,
@@ -1872,7 +1859,7 @@ func (t *Target) supportsModelLocked(model string) bool {
 	if _, ok := t.models[modelKey]; ok {
 		return true
 	}
-	return t.allowUnknownModels
+	return t.legacyPassthrough
 }
 
 func (t *Target) onStart(req RequestFeatures) {
@@ -2380,15 +2367,6 @@ func normalizePolicy(policy string) string {
 	}
 }
 
-func normalizeFallback(policy string) string {
-	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case "", FallbackReject:
-		return FallbackReject
-	default:
-		return strings.ToLower(strings.TrimSpace(policy))
-	}
-}
-
 func normalizeDiscoveryMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", ModelDiscoveryListModels:
@@ -2400,13 +2378,6 @@ func normalizeDiscoveryMode(mode string) string {
 	default:
 		return ModelDiscoveryListModels
 	}
-}
-
-func allowUnknownModels(cfg config.UpstreamTargetConfig, fallback bool) bool {
-	if cfg.AllowUnknownModels != nil {
-		return *cfg.AllowUnknownModels
-	}
-	return fallback
 }
 
 // defaultFloat applies the configuration convention that a non-positive number means "unset, use

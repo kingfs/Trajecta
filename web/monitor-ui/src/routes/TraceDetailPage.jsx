@@ -1552,7 +1552,6 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock, showCandidates =
         </div>
         <div className="trace-tag-group">
           {decision.policy ? <InlineTag>{decision.policy}</InlineTag> : null}
-          {decision.fallbackPolicy ? <InlineTag>{decision.fallbackPolicy}</InlineTag> : null}
           {decision.selectedChannelID ? <InlineTag tone="accent">{decision.selectedChannelID}</InlineTag> : null}
           {decision.selectedCredentialID ? <InlineTag tone="gold">{decision.selectedCredentialID}</InlineTag> : null}
           {decision.outcome?.attributes?.status_code ? <InlineTag tone={Number(decision.outcome.attributes.status_code) >= 400 ? "danger" : "green"}>{decision.outcome.attributes.status_code}</InlineTag> : null}
@@ -1619,7 +1618,6 @@ function buildRoutingDecision(events = []) {
     model: classified.model || outcome?.attributes?.model || "",
     endpoint: classified.endpoint || "",
     policy: classified.routing_policy || "",
-    fallbackPolicy: classified.fallback_policy || "",
     selectedID: selected.upstream_id || outcome?.attributes?.upstream_id || "",
     selectedRouteTargetID,
     selectedChannelID,

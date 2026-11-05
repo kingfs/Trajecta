@@ -142,6 +142,7 @@ var sqliteSchemaStatements = []string{
 			weight REAL NOT NULL DEFAULT 1,
 			capacity_hint REAL NOT NULL DEFAULT 1,
 			model_discovery TEXT NOT NULL DEFAULT 'list_models',
+			-- deprecated: the unknown-model switch was removed; kept for compatibility
 			allow_unknown_models bool NOT NULL DEFAULT false,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,

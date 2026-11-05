@@ -56,8 +56,6 @@ router:
     epsilon: 0.02
     open_window: 15s
     failure_threshold: 3
-  fallback:
-    on_missing_model: "reject"
 
 # Three logical breakpoints over two base URLs. The OpenAI-compatible base
 # serves both chat completions and native responses; the Anthropic base serves

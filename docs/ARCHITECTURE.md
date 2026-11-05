@@ -148,7 +148,7 @@ Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个
 - 只有 commit 成功后才发布新路由快照，运行中的快照绝不描述数据库拒绝的配置。
 - 事务内不得再开事务（会返回 `store.ErrNestedTransaction`），也不得新增 `reloadMu` -> `upstreamMu` 的反向获取。
 
-`ConfigurationTransaction` 串行化 `upstream_targets`/`upstream_models` 的管理写入，这类写入全程持有进程级配置锁、upstream 写锁与单个 SQL 事务；后台 upstream refresh 与代理侧 `RefreshNow` 也会写入这两张表，但以 best-effort 方式通过同一 upstream 写锁落库：配置变更持锁时跳过落库但仍更新内存，并在获锁后按当前 live target 集合过滤，避免为已删除的 target 复活行。
+`ConfigurationTransaction` 串行化管理配置写入：全程持有进程级配置锁、upstream 写锁与单个 SQL 事务，提交成功后才发布路由快照。router 不再写 `upstream_targets` / `upstream_models`（它们只是旧运行时快照与兼容投影），刷新结果只更新内存快照，因此一次配置提交之后不会再被后台刷新用旧数据覆盖。
 
 渠道配置的 DB 优先规则：YAML `upstream`/`upstreams` 只是首次 bootstrap 输入；首次数据库写入记录 `app_settings` 键 `channels.initialized`，此后 DB 是路由配置来源，即使全部渠道停用或删除也不回退 YAML。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 仅清除标记（只有在 DB 中确实没有渠道时，下次启动才会重新导入）。带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，并拒绝 Monitor 的渠道/模型/别名写入（返回 409）。
 

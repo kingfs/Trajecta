@@ -204,7 +204,6 @@ type routingDecisionOutput struct {
 	Model                 string           `json:"model,omitempty"`
 	Endpoint              string           `json:"endpoint,omitempty"`
 	RoutingPolicy         string           `json:"routing_policy,omitempty"`
-	FallbackPolicy        string           `json:"fallback_policy,omitempty"`
 	SelectedUpstreamID    string           `json:"selected_upstream_id,omitempty"`
 	SelectedRouteTargetID string           `json:"selected_route_target_id,omitempty"`
 	SelectedChannelID     string           `json:"selected_channel_id,omitempty"`
@@ -554,7 +553,6 @@ func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallTool
 			if out.RoutingPolicy == "" {
 				out.RoutingPolicy, _ = event.Attributes["routing_policy"].(string)
 			}
-			out.FallbackPolicy, _ = event.Attributes["fallback_policy"].(string)
 		case "routing.candidates":
 			out.AvailableCount = intFromAny(event.Attributes["available_count"])
 			out.Candidates = mapsFromAny(event.Attributes["candidates"])

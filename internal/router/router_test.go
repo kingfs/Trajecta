@@ -34,7 +34,7 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 				Enabled:        boolPtr(true),
 				Priority:       90,
 				ModelDiscovery: ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-4.1"},
+				StaticModels:   []string{"gpt-4.1", "claude-3-7-sonnet"},
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://openrouter.ai/api/v1",
 					ProviderPreset: "openrouter",
@@ -43,7 +43,7 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -67,7 +67,7 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 }
 
 func TestRouterAllowsEmptyStartupConfig(t *testing.T) {
-	rtr, err := New(&config.Config{}, nil)
+	rtr, err := New(&config.Config{})
 	if err != nil {
 		t.Fatalf("New(empty) error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRouterAllowsEmptyStartupConfig(t *testing.T) {
 // `model "" for endpoint "/v1/embeddings"` for a request that plainly said
 // which model it wanted.
 func TestRouterSelectionFailureNamesTheRequestedModelForUncoveredEndpoint(t *testing.T) {
-	rtr, err := New(&config.Config{}, nil)
+	rtr, err := New(&config.Config{})
 	if err != nil {
 		t.Fatalf("New(empty) error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
 			},
 		},
 	}
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -210,14 +210,39 @@ func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
 	}
 }
 
-func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
+// The pre-`upstreams` single `upstream:` block has no model list, so it keeps
+// the historical passthrough. Database-managed channels never do.
+func TestRouterLegacySingleUpstreamStillForwardsUndeclaredModel(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = "https://api.openai.com/v1"
+	cfg.Upstream.ProviderPreset = "openai"
+
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if !rtr.LegacyPassthrough() {
+		t.Fatal("LegacyPassthrough() = false, want true for the single-upstream form")
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"legacy-model"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if _, err := rtr.Select(req); err != nil {
+		t.Fatalf("Select() error = %v, want the legacy passthrough to forward it", err)
+	}
+}
+
+func TestRouterSingleTargetDoesNotWidenModelAuthorization(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
-				ID:             "default",
-				Enabled:        boolPtr(true),
-				Priority:       100,
-				ModelDiscovery: ModelDiscoveryStaticOnly,
+				ID:                   "default",
+				Enabled:              boolPtr(true),
+				Priority:             100,
+				ModelDiscovery:       ModelDiscoveryStaticOnly,
+				ConfiguredModelsOnly: true,
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
 					ProviderPreset: "openai",
@@ -226,7 +251,7 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -234,18 +259,15 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"unknown-future-model","input":"hello"}`))
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"unknown-future-model"}`))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-
-	selection, err := rtr.Select(req)
-	if err != nil {
-		t.Fatalf("Select() error = %v", err)
-	}
-	if selection.Target.ID != "default" {
-		t.Fatalf("selected target = %q, want default", selection.Target.ID)
+	if _, err := rtr.Select(req); err == nil {
+		t.Fatal("Select() succeeded, want a strict authorization failure for an undeclared model")
+	} else if got := SelectionFailureReason(err); got != SelectionFailureModelUnknown {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", got, SelectionFailureModelUnknown)
 	}
 }
 
@@ -283,7 +305,7 @@ func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -364,7 +386,7 @@ func TestRouterResponsesEndpointAllowsNativeResponsesTarget(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -470,7 +492,7 @@ func TestRouterSelectFiltersTargetsWithoutToolCallingCapability(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -514,7 +536,7 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 				Enabled:        boolPtr(true),
 				Priority:       100,
 				ModelDiscovery: ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-5"},
+				StaticModels:   []string{"gpt-5", "claude-3-7-sonnet"},
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
 					ProviderPreset: "openai",
@@ -534,7 +556,7 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -542,7 +564,10 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"claude-3-7-sonnet","input":"hello"}`))
+	// /v1/embeddings is classified and recorded but never routed: no adapter
+	// covers it. The model is declared, so this exercises the "supported model,
+	// unsupported endpoint" path rather than model authorization.
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/embeddings", strings.NewReader(`{"model":"claude-3-7-sonnet","input":"hello"}`))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
@@ -572,8 +597,8 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 		if candidate.Selectable {
 			t.Fatalf("candidate %q selectable = true, want false", candidate.ID)
 		}
-		if candidate.FilterReason != "unsupported_model" {
-			t.Fatalf("candidate %q FilterReason = %q, want unsupported_model", candidate.ID, candidate.FilterReason)
+		if candidate.FilterReason != "unsupported_path" {
+			t.Fatalf("candidate %q FilterReason = %q, want unsupported_path", candidate.ID, candidate.FilterReason)
 		}
 	}
 }
@@ -607,7 +632,7 @@ func TestRouterSelectionCarriesDecisionTrace(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -668,7 +693,7 @@ func TestRouterStickySessionReusesBoundTarget(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -733,7 +758,7 @@ func TestRouterStickySessionBreaksWhenTargetExcluded(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -800,7 +825,7 @@ func TestRouterSelectWithoutStickyKeyUnchanged(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -844,7 +869,7 @@ func TestRouterImplicitDefaultRouteTargetPreservesTargetID(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -903,7 +928,7 @@ func TestRouterExpandsExplicitCredentialsIntoRouteTargets(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -971,7 +996,7 @@ func TestRouterStickyBindsConcreteCredentialRouteTarget(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1090,7 +1115,7 @@ func TestRouterSelectAllowsModelListRequestsWithoutCatalogMatch(t *testing.T) {
 
 	// This test checks model-list eligibility, not randomized P2C exploration.
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1129,7 +1154,7 @@ func TestRouterSelectAllowsAnthropicModelListEndpoint(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1179,7 +1204,7 @@ func TestRouterDoesNotRouteAnthropicMessagesToOpenAICompatibleTarget(t *testing.
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1230,7 +1255,7 @@ func TestRouterExtractsModelAndRoutesAnthropicCountTokens(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1284,7 +1309,7 @@ func TestRouterExtractsModelAndRoutesOpenAITokenize(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1338,7 +1363,7 @@ func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1384,7 +1409,7 @@ func TestRouterAggregatedModelsPreferConfiguredModelsOverDiscoveredCatalog(t *te
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1424,7 +1449,7 @@ func TestRouterAggregatedModelsHidesDiscoveredCatalogForConfiguredModelsOnlyTarg
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1434,59 +1459,6 @@ func TestRouterAggregatedModelsHidesDiscoveredCatalogForConfiguredModelsOnlyTarg
 
 	if models := rtr.AggregatedModels(); len(models) != 0 {
 		t.Fatalf("AggregatedModels() = %#v, want empty configured model list", models)
-	}
-}
-
-func TestRouterAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID:             "primary",
-				Enabled:        boolPtr(true),
-				Priority:       100,
-				ModelDiscovery: ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-5"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        "https://api.openai.com/v1",
-					ProviderPreset: "openai",
-				},
-			},
-			{
-				ID:             "static-fallback",
-				Enabled:        boolPtr(true),
-				Priority:       90,
-				ModelDiscovery: ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-4.1"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        "https://openrouter.ai/api/v1",
-					ProviderPreset: "openrouter",
-				},
-			},
-		},
-	}
-	cfg.Router.Fallback.OnMissingModel = "allow_static"
-	cfg.Router.Selection.Policy = PolicyFirstAvailable
-
-	rtr, err := New(cfg, nil)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if err := rtr.Initialize(); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"unknown-future-model","input":"hello"}`))
-	if err != nil {
-		t.Fatalf("http.NewRequest() error = %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	selection, err := rtr.Select(req)
-	if err != nil {
-		t.Fatalf("Select() error = %v", err)
-	}
-	if selection.Target.ID != "primary" {
-		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
 	}
 }
 
@@ -1510,7 +1482,7 @@ func TestRouterSnapshotsExposeHealthAndModels(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = 50 * time.Millisecond
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1563,7 +1535,7 @@ func TestRouterClientCancelDoesNotOpenTarget(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Minute
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1616,7 +1588,7 @@ func TestRouterClientRequestErrorDoesNotOpenTarget(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Minute
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1670,7 +1642,7 @@ func TestRouterCostAwareSelectionPrefersLowerObservedCost(t *testing.T) {
 	}
 	cfg.Router.Selection.Epsilon = 0
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1739,7 +1711,7 @@ func TestRouterCostAwareSelectionAvoidsDegradedTarget(t *testing.T) {
 	}
 	cfg.Router.Selection.Epsilon = 0
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1822,7 +1794,7 @@ func TestRouterSelectReturnsStructuredAllTargetsOpenError(t *testing.T) {
 	cfg.Router.Selection.OpenWindow = time.Minute
 	cfg.Router.Selection.Epsilon = 0
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1891,7 +1863,7 @@ func TestRouterSelectWithExclusion(t *testing.T) {
 	// Use first_available so priority ordering is deterministic.
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -1972,7 +1944,7 @@ func TestRouterRefreshNowRebuildsCatalog(t *testing.T) {
 		},
 	}
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2021,7 +1993,7 @@ func TestRouterRefreshNowRecoversOpenTargetToProbation(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Hour
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2074,7 +2046,7 @@ func TestRouterProbationTargetAllowsOnlyOneProbe(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Hour
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2135,7 +2107,7 @@ func TestRouterModelScopedFailureDoesNotOpenWholeTarget(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Hour
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2230,7 +2202,7 @@ func TestRouterPerModelCapabilitiesDriveEndpointEligibility(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -2326,7 +2298,7 @@ func TestRouterEarliestAvailabilityCoversTheModelBreaker(t *testing.T) {
 	cfg.Router.Selection.FailureThreshold = 3
 	cfg.Router.Selection.OpenWindow = 30 * time.Second
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

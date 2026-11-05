@@ -84,7 +84,7 @@ export function UpstreamDetailPage() {
       <header className="topbar detail-topbar">
         <div className="detail-title-block">
           <div className="detail-heading-row">
-            <h1>{target?.id || upstreamID || t("upstreamDetail.upstreamFallback")}</h1>
+            <h1>{target?.name || target?.id || upstreamID || t("upstreamDetail.upstreamFallback")}</h1>
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
               <InlineTag tone="accent">{target?.provider_preset || "custom"}</InlineTag>
@@ -92,6 +92,7 @@ export function UpstreamDetailPage() {
             </div>
           </div>
           <div className="detail-meta-strip">
+            <DetailMetaPill label={t("upstreamDetail.id")} value={target?.id || upstreamID} mono />
             <DetailMetaPill label={t("upstreamDetail.baseUrl")} value={target?.base_url || "-"} mono />
             <DetailMetaPill label={t("upstreamDetail.lastSeen")} value={formatDateTime(target?.last_seen)} />
             <DetailMetaPill label={t("common.requests")} value={target?.request_count ?? 0} />

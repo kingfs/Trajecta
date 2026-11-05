@@ -2023,7 +2023,7 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 			},
 		},
 	}
-	rtr, err := router.New(cfg, nil)
+	rtr, err := router.New(cfg)
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -2095,8 +2095,7 @@ func TestChannelManagementAPI(t *testing.T) {
 		"priority":100,
 		"weight":1,
 		"capacity_hint":1,
-		"model_discovery":"list_models",
-		"allow_unknown_models":true
+		"model_discovery":"list_models"
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channels", createBody)
 	rr := httptest.NewRecorder()
@@ -2116,9 +2115,6 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if created.SecretStorageMode != "encrypted-local" {
 		t.Fatalf("created.SecretStorageMode = %q, want encrypted-local", created.SecretStorageMode)
-	}
-	if !created.AllowUnknownModels {
-		t.Fatalf("created.AllowUnknownModels = false, want true")
 	}
 	if created.APIType != "chat_completions" || created.Mode != "responses_server" {
 		t.Fatalf("created api surface = %q/%q", created.APIType, created.Mode)
@@ -2264,10 +2260,6 @@ func TestChannelManagementAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChannelConfig() error = %v", err)
 	}
-	if patched.AllowUnknownModels != true {
-		t.Fatalf("patched.AllowUnknownModels = false, want preserved true")
-	}
-
 	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"headers":{"Authorization":{"keep":true},"X-Test":"updated","X-New":"value"}}`))
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
@@ -2680,8 +2672,7 @@ func TestProviderSetupApplyAllowsVLLMWithoutAPIKeyWhenExplicit(t *testing.T) {
 		"protocol_family":"openai_compatible",
 		"routing_profile":"vllm_openai",
 		"enabled":true,
-		"model_discovery":"disabled",
-		"allow_unknown_models":true
+		"model_discovery":"disabled"
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
 	rr := httptest.NewRecorder()
@@ -2705,9 +2696,6 @@ func TestProviderSetupApplyAllowsVLLMWithoutAPIKeyWhenExplicit(t *testing.T) {
 	}
 	if len(record.APIKeyCiphertext) != 0 || record.APIKeyHint != "" {
 		t.Fatalf("record api key state = %q/%q", string(record.APIKeyCiphertext), record.APIKeyHint)
-	}
-	if !record.AllowUnknownModels {
-		t.Fatalf("record AllowUnknownModels = false, want true")
 	}
 }
 
@@ -3263,7 +3251,7 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 		t.Fatalf("RuntimeTargets() error = %v", err)
 	}
 	cfg := &config.Config{Upstreams: targets}
-	rtr, err := router.New(cfg, st)
+	rtr, err := router.New(cfg)
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -3321,7 +3309,7 @@ func TestChannelModelCapabilityExplicitNullClearsToInherit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeTargets() error = %v", err)
 	}
-	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	rtr, err := router.New(&config.Config{Upstreams: targets})
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -3416,7 +3404,7 @@ func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeTargets() error = %v", err)
 	}
-	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	rtr, err := router.New(&config.Config{Upstreams: targets})
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -3478,7 +3466,7 @@ func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeTargets() error = %v", err)
 	}
-	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	rtr, err := router.New(&config.Config{Upstreams: targets})
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -4590,7 +4578,7 @@ func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
 			},
 		},
 	}
-	rtr, err := router.New(cfg, nil)
+	rtr, err := router.New(cfg)
 	if err != nil {
 		t.Fatalf("router.New() error = %v", err)
 	}
@@ -5761,7 +5749,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 		t.Fatalf("default settings = %+v", got)
 	}
 
-	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available","missing_model_policy":"fallback"}`))
+	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available"}`))
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -5771,7 +5759,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode PATCH response: %v", err)
 	}
-	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable || got.MissingModelPolicy != "fallback" {
+	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable {
 		t.Fatalf("patched settings = %+v", got)
 	}
 }

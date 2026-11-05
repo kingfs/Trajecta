@@ -20,7 +20,7 @@ func configurationFixture(t *testing.T) (*store.Store, *router.Router, *channel.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	_, err = st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1", ProviderPreset: "openai", ModelDiscovery: "list_models", AllowUnknownModels: true})
+	_, err = st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1", ProviderPreset: "openai", ModelDiscovery: "list_models"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func configurationFixture(t *testing.T) (*store.Store, *router.Router, *channel.
 		}
 	}
 	svc := channel.NewService(st)
-	rtr, err := router.New(&config.Config{}, st)
+	rtr, err := router.New(&config.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

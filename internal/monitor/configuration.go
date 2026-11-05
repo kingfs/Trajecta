@@ -51,13 +51,13 @@ func configurationAPIHandler(st *store.Store, rtr *router.Router, svc *channel.S
 				return err
 			}
 			if rtr == nil {
-				prepared, err := router.New(&config.Config{}, nil)
+				prepared, err := router.New(&config.Config{})
 				if err != nil {
 					return err
 				}
-				return prepared.ReloadWithCommit(targets, tx, commit)
+				return prepared.ReloadWithCommit(targets, commit)
 			}
-			return rtr.ReloadWithCommit(targets, tx, commit)
+			return rtr.ReloadWithCommit(targets, commit)
 		})
 		if err != nil && !errors.Is(err, rejected) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "configuration not applied: " + err.Error()})

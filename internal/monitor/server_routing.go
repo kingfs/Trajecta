@@ -69,11 +69,10 @@ type routingFailureBucketItem struct {
 }
 
 type routingSettingsView struct {
-	ResponsesStrategy  string    `json:"responses_strategy"`
-	SelectionPolicy    string    `json:"selection_policy"`
-	MissingModelPolicy string    `json:"missing_model_policy"`
-	RoutePlanLogLevel  string    `json:"route_plan_log_level,omitempty"`
-	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+	ResponsesStrategy string    `json:"responses_strategy"`
+	SelectionPolicy   string    `json:"selection_policy"`
+	RoutePlanLogLevel string    `json:"route_plan_log_level,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
 type routingInspectRequest struct {
@@ -205,10 +204,9 @@ func defaultRoutingSettings() routingSettingsView {
 		// model: a model served by a Responses-capable channel is proxied
 		// as-is, while one served only by Chat Completions goes through the
 		// local server. See docs/RESPONSES_RUNTIME.md.
-		ResponsesStrategy:  "auto",
-		SelectionPolicy:    router.PolicyP2C,
-		MissingModelPolicy: router.FallbackReject,
-		RoutePlanLogLevel:  "normal",
+		ResponsesStrategy: "auto",
+		SelectionPolicy:   router.PolicyP2C,
+		RoutePlanLogLevel: "normal",
 	}
 }
 
@@ -238,9 +236,6 @@ func mergeRoutingSettings(base routingSettingsView, patch routingSettingsView) r
 	if strings.TrimSpace(patch.SelectionPolicy) != "" {
 		base.SelectionPolicy = strings.TrimSpace(patch.SelectionPolicy)
 	}
-	if strings.TrimSpace(patch.MissingModelPolicy) != "" {
-		base.MissingModelPolicy = strings.TrimSpace(patch.MissingModelPolicy)
-	}
 	if strings.TrimSpace(patch.RoutePlanLogLevel) != "" {
 		base.RoutePlanLogLevel = strings.TrimSpace(patch.RoutePlanLogLevel)
 	}
@@ -260,11 +255,6 @@ func validateRoutingSettings(settings routingSettingsView) error {
 	case router.PolicyP2C, router.PolicyFirstAvailable:
 	default:
 		return fmt.Errorf("unsupported selection_policy %q", settings.SelectionPolicy)
-	}
-	switch settings.MissingModelPolicy {
-	case router.FallbackReject, "fallback":
-	default:
-		return fmt.Errorf("unsupported missing_model_policy %q", settings.MissingModelPolicy)
 	}
 	switch settings.RoutePlanLogLevel {
 	case "", "normal", "verbose":

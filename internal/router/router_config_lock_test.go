@@ -25,7 +25,7 @@ func staticRefreshTarget(id string, models ...string) config.UpstreamTargetConfi
 // Committing configuration can take a database round trip. Routing must keep
 // working while it settles: the router lock has to be released before commit.
 func TestReloadWithCommitReleasesRouterLockWhileCommitting(t *testing.T) {
-	rtr, err := New(&config.Config{}, nil)
+	rtr, err := New(&config.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestReloadWithCommitReleasesRouterLockWhileCommitting(t *testing.T) {
 	allowCommit := make(chan struct{})
 	reloaded := make(chan error, 1)
 	go func() {
-		reloaded <- rtr.ReloadWithCommit([]config.UpstreamTargetConfig{staticRefreshTarget("next", "gpt-5")}, nil, func() error {
+		reloaded <- rtr.ReloadWithCommit([]config.UpstreamTargetConfig{staticRefreshTarget("next", "gpt-5")}, func() error {
 			close(committing)
 			<-allowCommit
 			return nil
@@ -66,67 +66,33 @@ func TestReloadWithCommitReleasesRouterLockWhileCommitting(t *testing.T) {
 	}
 }
 
-// A refresh snapshot taken before a configuration change must not resurrect rows
-// for targets that change removed.
-func TestLiveRefreshWritesDropsTargetsThatLeftTheSnapshot(t *testing.T) {
-	rtr, err := New(&config.Config{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rtr.Reload([]config.UpstreamTargetConfig{staticRefreshTarget("primary", "gpt-5")}); err != nil {
-		t.Fatal(err)
-	}
-	writes := []refreshWrite{
-		{record: store.UpstreamTargetRecord{ID: "primary"}},
-		{record: store.UpstreamTargetRecord{ID: "deleted"}},
-	}
-	kept := rtr.liveRefreshWrites(writes)
-	if len(kept) != 1 || kept[0].record.ID != "primary" {
-		t.Fatalf("liveRefreshWrites() = %+v, want only primary", kept)
-	}
-}
-
-func TestRefreshTargetsSkipsPersistenceWhileTheUpstreamLockIsHeld(t *testing.T) {
+// The router is a projection of channel configuration, not its owner: a reload
+// and a background refresh must leave the legacy snapshot tables untouched.
+func TestRouterNeverWritesTheApplicationDatabase(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	rtr, err := New(&config.Config{}, st)
+	rtr, err := New(&config.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rtr.ReloadWithCommit([]config.UpstreamTargetConfig{staticRefreshTarget("primary", "gpt-5")}, nil, nil); err != nil {
+	if err := rtr.ReloadWithCommit([]config.UpstreamTargetConfig{staticRefreshTarget("primary", "gpt-5")}, nil); err != nil {
 		t.Fatal(err)
 	}
-
-	release, err := st.LockUpstreamWrites()
-	if err != nil {
-		t.Fatal(err)
-	}
-	usable, err := rtr.refreshTargets(rtr.Targets())
-	if err != nil {
+	if _, err := rtr.refreshTargets(rtr.Targets()); err != nil {
 		t.Fatalf("refreshTargets() error = %v", err)
-	}
-	if usable != 1 {
-		t.Fatalf("usable targets = %d, want 1", usable)
 	}
 	if rows, err := st.ListUpstreamTargets(); err != nil {
 		t.Fatal(err)
 	} else if len(rows) != 0 {
-		t.Fatalf("refresh persisted %d rows while a configuration change held the lock", len(rows))
+		t.Fatalf("router wrote %d upstream_targets rows", len(rows))
 	}
-
-	release()
-	if _, err := rtr.refreshTargets(rtr.Targets()); err != nil {
-		t.Fatalf("refreshTargets() after release error = %v", err)
-	}
-	rows, err := st.ListUpstreamTargets()
-	if err != nil {
+	if rows, err := st.ListUpstreamModels(); err != nil {
 		t.Fatal(err)
-	}
-	if len(rows) != 1 || rows[0].ID != "primary" {
-		t.Fatalf("refresh rows after release = %+v, want primary", rows)
+	} else if len(rows) != 0 {
+		t.Fatalf("router wrote %d upstream_models rows", len(rows))
 	}
 }

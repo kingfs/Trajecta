@@ -38,7 +38,7 @@ func TestDisabledCredentialIsLeftOutOfRouting(t *testing.T) {
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestTargetWithOnlyDisabledCredentialsContributesNoRouteTarget(t *testing.T)
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	_, err := New(cfg, nil)
+	_, err := New(cfg)
 	if err == nil {
 		t.Fatalf("New() accepted a channel whose only credential is disabled; want no route target rather than a fallback to the channel key")
 	}

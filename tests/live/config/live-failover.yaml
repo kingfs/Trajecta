@@ -50,8 +50,6 @@ router:
     policy: "first_available"
     failure_threshold: 1
     open_window: 60s
-  fallback:
-    on_missing_model: "reject"
 
 upstreams:
   - id: "baizhi-openai"

@@ -201,19 +201,26 @@ type UpstreamCapabilitiesConfig struct {
 }
 
 type UpstreamTargetConfig struct {
-	ID                   string             `yaml:"id"`
-	Enabled              *bool              `yaml:"enabled"`
-	Priority             int                `yaml:"priority"`
-	Weight               float64            `yaml:"weight"`
-	CapacityHint         float64            `yaml:"capacity_hint"`
-	ModelDiscovery       string             `yaml:"model_discovery"`
-	StaticModels         []string           `yaml:"static_models"`
-	ModelAliases         map[string]string  `yaml:"-"`
-	ConfiguredModelsOnly bool               `yaml:"-"`
-	DisabledModels       []string           `yaml:"-"`
-	AllowUnknownModels   *bool              `yaml:"allow_unknown_models"`
-	Upstream             UpstreamConfig     `yaml:"upstream"`
-	Credentials          []CredentialConfig `yaml:"credentials"`
+	ID string `yaml:"id"`
+	// Name is the human display name of the channel this target was projected
+	// from (empty for YAML targets). It is never read from YAML.
+	Name                 string            `yaml:"-"`
+	Enabled              *bool             `yaml:"enabled"`
+	Priority             int               `yaml:"priority"`
+	Weight               float64           `yaml:"weight"`
+	CapacityHint         float64           `yaml:"capacity_hint"`
+	ModelDiscovery       string            `yaml:"model_discovery"`
+	StaticModels         []string          `yaml:"static_models"`
+	ModelAliases         map[string]string `yaml:"-"`
+	ConfiguredModelsOnly bool              `yaml:"-"`
+	DisabledModels       []string          `yaml:"-"`
+	// UpstreamModelNames are the wire names a channel model maps to
+	// (`channel_models.upstream_model`). They are routable in addition to the
+	// client-facing names, because the local Responses runtime rewrites the
+	// request to this name before it selects a target.
+	UpstreamModelNames []string           `yaml:"-"`
+	Upstream           UpstreamConfig     `yaml:"upstream"`
+	Credentials        []CredentialConfig `yaml:"credentials"`
 }
 
 type ProviderProbeConfig struct {
@@ -241,9 +248,6 @@ type RouterConfig struct {
 		OpenWindow       time.Duration `yaml:"open_window"`
 		FailureThreshold int64         `yaml:"failure_threshold"`
 	} `yaml:"selection"`
-	Fallback struct {
-		OnMissingModel string `yaml:"on_missing_model"`
-	} `yaml:"fallback"`
 }
 
 type LimitConfig struct {
@@ -699,15 +703,6 @@ var validSelectionPolicies = map[string]struct{}{
 	"first_available": {},
 }
 
-// validMissingModelPolicies lists the values internal/router honours for
-// router.fallback.on_missing_model. `reject` is the strict value and every other string
-// takes the permissive branch, so a misspelled `reject` silently allows a model no upstream
-// declares instead of failing the request.
-var validMissingModelPolicies = map[string]struct{}{
-	"reject":   {},
-	"fallback": {},
-}
-
 // validModelDiscoveryModes lists the values internal/router honours for a target's
 // model_discovery. An unknown value is normalized to list_models, so a typo can switch the
 // upstream model discovery back on for an operator who meant to turn it off.
@@ -719,7 +714,7 @@ var validModelDiscoveryModes = map[string]struct{}{
 
 // validateRouterEnums rejects routing values that no consumer recognises.
 //
-// The router reads these through normalizing helpers (normalizePolicy, normalizeFallback,
+// The router reads these through normalizing helpers (normalizePolicy,
 // normalizeDiscoveryMode) that answer an unrecognised value with a default rather than an
 // error, because a request-time normalization has no way to report a configuration mistake.
 // At load time the mistake is still visible, and all three defaults differ from what the
@@ -729,11 +724,6 @@ func validateRouterEnums(cfg *Config) error {
 	if value := strings.TrimSpace(cfg.Router.Selection.Policy); value != "" {
 		if _, ok := validSelectionPolicies[strings.ToLower(value)]; !ok {
 			return fmt.Errorf("router.selection.policy %q is not supported; use one of p2c, first_available", value)
-		}
-	}
-	if value := strings.TrimSpace(cfg.Router.Fallback.OnMissingModel); value != "" {
-		if _, ok := validMissingModelPolicies[strings.ToLower(value)]; !ok {
-			return fmt.Errorf("router.fallback.on_missing_model %q is not supported; use one of reject, fallback", value)
 		}
 	}
 	for i, target := range cfg.Upstreams {

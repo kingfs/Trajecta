@@ -17,7 +17,7 @@ func nativeResponsesRequirementRouter(t *testing.T, upstreams ...config.Upstream
 	cfg := &config.Config{Upstreams: upstreams}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

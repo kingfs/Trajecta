@@ -454,7 +454,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	}
 	var err error
 	if rtr == nil {
-		rtr, err = router.New(cfg, st)
+		rtr, err = router.New(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("build router: %w", err)
 		}
@@ -994,8 +994,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, nil, selErr, retryEvents)
 					return
 				}
-				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes, retryEvents)
-				writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selErr), selErr.Error())
+				status := selectionFailureStatus(selErr)
+				h.recordSelectionFailureWithBody(r, start, status, selErr, bodyBytes, retryEvents)
+				writeProxyError(w, r, status, router.SelectionFailureReason(selErr), selErr.Error())
 				return
 			}
 			lastErr = selErr
@@ -1130,6 +1131,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if isRetryableStatus(resp.StatusCode) {
+			failure := newUpstreamFailure(resp, selection.Target, selection.Request.ModelName)
 			resp.Body.Close()
 			if h.shouldSynthesizeAnthropicCountTokens(r, nil, resp.StatusCode) {
 				logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d; synthetic count_tokens fallback", resp.StatusCode)
@@ -1144,20 +1146,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, selection, nil, retryEvents)
 				return
 			}
-			logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d", resp.StatusCode)
+			logInfo.Header.Meta.Error = failure.summary
 			slog.Warn("Upstream returned retryable status, will retry with next candidate",
 				"upstream_id", selection.Target.ID,
+				"upstream_name", selection.Target.DisplayName(),
+				"upstream_path", failure.path,
 				"model", selection.Request.ModelName,
 				"status", resp.StatusCode,
+				"upstream_body", failure.snippet,
 			)
-			lastErr = fmt.Errorf("upstream %s returned status %d for model %q", selection.Target.ID, resp.StatusCode, selection.Request.ModelName)
+			lastErr = errors.New(failure.summary)
 			h.router.Complete(selection, router.Outcome{
 				Success:    false,
 				StatusCode: resp.StatusCode,
 				DurationMs: float64(time.Since(start).Milliseconds()),
 				Stream:     selection.Request.Stream,
 			})
-			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, false))
+			event := retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, failure.summary, false)
+			failure.decorate(event.Attributes)
+			retryEvents = append(retryEvents, event)
 			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 			h.closeLogFile(logInfo)
 			if len(triedIDs) >= roundCandidateCount {
@@ -1226,8 +1233,9 @@ func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Req
 		Reason:  router.SelectionFailureNoSupportingTarget,
 		Message: "no upstream targets are configured; add a provider in Monitor",
 	}
-	h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
-	writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+	status := selectionFailureStatus(selectErr)
+	h.recordSelectionFailureWithBody(r, start, status, selectErr, nil, nil)
+	writeProxyError(w, r, status, router.SelectionFailureReason(selectErr), selectErr.Error())
 	return true
 }
 
@@ -1263,10 +1271,11 @@ func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.R
 			Message: decision.rejectReason,
 		}
 		applyTransientAvailabilityHeaders(w, decision.retryAfter, decision.blockedByHealth)
-		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
+		status := selectionFailureStatus(selectErr)
+		h.recordSelectionFailureWithBody(r, start, status, selectErr, bodyBytes, []recorder.RecordEvent{
 			routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
 		})
-		writeProxyError(w, r, http.StatusBadGateway, router.SelectionFailureReason(selectErr), selectErr.Error())
+		writeProxyError(w, r, status, router.SelectionFailureReason(selectErr), selectErr.Error())
 		return r, true
 	}
 	// The decision landed on native pass-through, so this request is forwarded unchanged
@@ -1319,10 +1328,34 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 	// closed by closeLogFile in the retry loop).
 	retryAfter, blockedByHealth := h.transientAvailability(r, bodyBytes)
 	applyTransientAvailabilityHeaders(w, retryAfter, blockedByHealth)
-	if h.recorder != nil {
-		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes, retryEvents)
+	status := selectionFailureStatus(lastErr)
+	if status == http.StatusNotFound {
+		// Re-selection after a failed attempt found no target for the model (for
+		// example the operator disabled it while the request was in flight). That
+		// is an authorization answer, not an upstream failure.
+		if h.recorder != nil {
+			h.recordSelectionFailureWithBody(r, start, status, lastErr, bodyBytes, retryEvents)
+		}
+		writeProxyError(w, r, status, router.SelectionFailureReason(lastErr), lastErr.Error())
+		return
 	}
-	writeProxyError(w, r, http.StatusBadGateway, "upstream_error", "Proxy Error: "+lastErr.Error())
+	if h.recorder != nil {
+		h.recordSelectionFailureWithBody(r, start, status, lastErr, bodyBytes, retryEvents)
+	}
+	writeProxyError(w, r, status, "upstream_error", "Proxy Error: "+lastErr.Error())
+}
+
+// selectionFailureStatus maps a selection failure to the HTTP status an
+// OpenAI-compatible client understands. A model that is not enabled or not
+// configured is a 404 (the same answer an OpenAI provider gives), while a
+// routing/health failure stays 502.
+func selectionFailureStatus(err error) int {
+	switch router.SelectionFailureReason(err) {
+	case router.SelectionFailureModelNotEnabled, router.SelectionFailureModelUnknown:
+		return http.StatusNotFound
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) responsesRouteDecision {
@@ -1541,6 +1574,106 @@ func retryEvent(eventType string, attempt int, delay time.Duration, upstreamID s
 	}
 }
 
+// upstreamFailure is what the proxy keeps from a failed upstream attempt. The
+// provider's own words are the only way to tell a retired model id from a wrong
+// base_url, and the old code threw them away (the body was closed unread and
+// the attempt cassette was deleted).
+type upstreamFailure struct {
+	summary string
+	path    string
+	name    string
+	snippet string
+	hint    string
+}
+
+const (
+	upstreamErrorSnippetBytes = 8 << 10
+	upstreamErrorDisplayRunes = 400
+)
+
+func newUpstreamFailure(resp *http.Response, target *router.Target, model string) upstreamFailure {
+	path := ""
+	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
+		path = redaction.DisplayURL(resp.Request.URL.Path)
+	}
+	snippet := ""
+	if resp != nil && resp.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, upstreamErrorSnippetBytes))
+		snippet = upstreamErrorSnippet(string(body))
+	}
+	name := ""
+	id := ""
+	if target != nil {
+		name = target.DisplayName()
+		id = target.ID
+	}
+	hint := upstreamFailureHint(resp, snippet)
+	summary := fmt.Sprintf("upstream %q (%s) returned status %d for model %q", name, id, resp.StatusCode, model)
+	if path != "" {
+		summary += " at " + path
+	}
+	if snippet != "" {
+		summary += ": " + snippet
+	}
+	if hint != "" {
+		summary += " — " + hint
+	}
+	return upstreamFailure{summary: summary, path: path, name: name, snippet: snippet, hint: hint}
+}
+
+// decorate adds the captured detail to a retry event so the cassette explains
+// the same failure the client received.
+func (f upstreamFailure) decorate(attrs map[string]interface{}) {
+	if attrs == nil {
+		return
+	}
+	if f.name != "" {
+		attrs["upstream_name"] = f.name
+	}
+	if f.path != "" {
+		attrs["upstream_path"] = f.path
+	}
+	if f.snippet != "" {
+		attrs["upstream_body"] = f.snippet
+	}
+	if f.hint != "" {
+		attrs["upstream_hint"] = f.hint
+	}
+}
+
+func upstreamErrorSnippet(raw string) string {
+	text := redaction.MetadataText(strings.TrimSpace(raw))
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) > upstreamErrorDisplayRunes {
+		return string(runes[:upstreamErrorDisplayRunes]) + "…"
+	}
+	return text
+}
+
+// upstreamFailureHint turns the provider's own answer into the next action,
+// which is the difference between "404" and "the model id is wrong" or "the
+// base URL points at the wrong path".
+func upstreamFailureHint(resp *http.Response, snippet string) string {
+	if resp == nil || resp.StatusCode != http.StatusNotFound {
+		return ""
+	}
+	lower := strings.ToLower(snippet)
+	modelWords := []string{"model", "does not exist", "unknown", "not found", "not_found", "no such"}
+	for _, word := range modelWords {
+		if strings.Contains(lower, word) {
+			return "the provider does not serve this model id; re-sync the provider's model list or set the model's upstream name"
+		}
+	}
+	if lower == "" {
+		return "the provider returned 404 with no body; check base_url and api_type"
+	}
+	return "the request path may not exist on this provider; check base_url and api_type"
+}
+
 func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) []recorder.RecordEvent {
 	if decision == nil {
 		return nil
@@ -1550,11 +1683,10 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 			Type: "routing.classified",
 			Time: eventTime,
 			Attributes: map[string]interface{}{
-				"model":           decision.ModelName,
-				"endpoint":        decision.Endpoint,
-				"routing_policy":  decision.Policy,
-				"fallback_policy": decision.FallbackPolicy,
-				"excluded_ids":    decision.ExcludedIDs,
+				"model":          decision.ModelName,
+				"endpoint":       decision.Endpoint,
+				"routing_policy": decision.Policy,
+				"excluded_ids":   decision.ExcludedIDs,
 			},
 		},
 		{

@@ -177,6 +177,8 @@ Trajecta 自身的事件收件箱：
 
 还可以启停模型服务商、启停单个模型、探测模型、查看用量/Token/失败与 probe 结果。
 
+**模型清单是唯一授权来源。** 详情页的「同步模型」按钮执行一次探测，返回新增/移除数量，并保持每个模型原有的开启状态；新模型默认关闭。每行带一个状态：`enabled`（已开启且最近一次成功同步仍返回它）、`disabled`（已关闭）、`removed`（最近一次成功同步不再返回它，开关保留但不参与路由，重新同步后恢复）、`unverified`（手动添加，或渠道从未成功同步过，可路由但标记未验证）。`upstream_model`（发往上游的模型名）在行内显示；需要别名改写时在模型详情页设置。开启/关闭立即发布到路由，不需要重启；不支持「允许未知模型」——未开启的模型由代理直接返回 404 `model_not_enabled`（声明过但不可路由）或 `model_unknown`（没有渠道声明过），不会发往任何上游。
+
 配置归属：模型服务商、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 
 #### 接入 `/connect`
@@ -196,9 +198,9 @@ Trajecta 自身的事件收件箱：
 页面级标签条包含四个标签页（和其它合并页一样是标题下的一行下划线 tab，绑定在 `?tab=` 上；这里曾经是「工作区」卡片里的分段控件，同一件事在两个页面长得不一样，还多花了一张只装这一行的卡片）：
 
 - Decisions：最近选中的路由（数据来自 `GET /api/routing/exchanges`），可按模型、通道/上游、状态、耗时、TTFT、Token 过滤。摘要仍基于最近 200 条，列表按 50 条/页显示，页码输入可跳转。
-- Settings：编辑路由设置（`PATCH /api/settings/routing`），包括 `responses_strategy`、`selection_policy`、`missing_model_policy`。
+- Settings：编辑路由设置（`PATCH /api/settings/routing`），包括 `responses_strategy`、`selection_policy`、`route_plan_log_level`。缺失模型没有回退开关：未开启的模型统一由代理回答 404。
 - Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
-- Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未声明模型的可路由性也按同一条规则判断：只有渠道的 `allow_unknown_models` 为真时才会规划出路由，否则候选会以 `model_not_matched` 被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
+- Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未开启模型的可路由性也按同一条规则判断：候选会以 `model_not_enabled`（渠道声明过但已关闭/已被上游移除）或 `model_not_matched`（没有任何渠道声明）被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
 
 摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。该端点不解析任何文件，所以响应里没有解析失败计数，页面也不再显示这一项。
 

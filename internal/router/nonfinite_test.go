@@ -31,7 +31,7 @@ func TestNonFiniteWeightFallsBackToTheDefault(t *testing.T) {
 			Upstream: config.UpstreamConfig{BaseURL: "https://b.example/v1", ApiKey: "k", ProviderPreset: "openai"},
 		},
 	}}
-	rtr, err := New(cfg, nil)
+	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

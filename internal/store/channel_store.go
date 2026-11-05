@@ -23,36 +23,35 @@ import (
 )
 
 type ChannelConfigRecord struct {
-	ID                 string
-	Name               string
-	Description        string
-	Source             string
-	BaseURL            string
-	ProviderPreset     string
-	APIType            string
-	Mode               string
-	CapabilitiesJSON   string
-	ProtocolFamily     string
-	RoutingProfile     string
-	APIVersion         string
-	Deployment         string
-	Project            string
-	Location           string
-	ModelResource      string
-	APIKeyCiphertext   []byte
-	APIKeyHint         string
-	HeadersJSON        string
-	Enabled            bool
-	Priority           int
-	Weight             float64
-	CapacityHint       float64
-	ModelDiscovery     string
-	AllowUnknownModels bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	LastProbeAt        time.Time
-	LastProbeStatus    string
-	LastProbeError     string
+	ID               string
+	Name             string
+	Description      string
+	Source           string
+	BaseURL          string
+	ProviderPreset   string
+	APIType          string
+	Mode             string
+	CapabilitiesJSON string
+	ProtocolFamily   string
+	RoutingProfile   string
+	APIVersion       string
+	Deployment       string
+	Project          string
+	Location         string
+	ModelResource    string
+	APIKeyCiphertext []byte
+	APIKeyHint       string
+	HeadersJSON      string
+	Enabled          bool
+	Priority         int
+	Weight           float64
+	CapacityHint     float64
+	ModelDiscovery   string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	LastProbeAt      time.Time
+	LastProbeStatus  string
+	LastProbeError   string
 }
 
 type ChannelModelRecord struct {
@@ -244,7 +243,6 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetWeight(record.Weight).
 		SetCapacityHint(record.CapacityHint).
 		SetModelDiscovery(record.ModelDiscovery).
-		SetAllowUnknownModels(record.AllowUnknownModels).
 		SetCreatedAt(record.CreatedAt).
 		SetUpdatedAt(record.UpdatedAt).
 		SetLastProbeStatus(strings.TrimSpace(record.LastProbeStatus)).
@@ -869,11 +867,13 @@ func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]Chann
 			return nil, err
 		}
 		out = append(out, ChannelModelAnalyticsRecord{
-			ChannelID: channelID,
-			Model:     model,
-			Enabled:   channelModel.Enabled,
-			Source:    channelModel.Source,
-			Summary:   summary,
+			ChannelID:     channelID,
+			Model:         model,
+			Enabled:       channelModel.Enabled,
+			Source:        channelModel.Source,
+			UpstreamModel: channelModel.UpstreamModel,
+			LastProbeAt:   channelModel.LastProbeAt,
+			Summary:       summary,
 		})
 	}
 
@@ -1176,34 +1176,33 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 
 func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 	record := ChannelConfigRecord{
-		ID:                 row.ID,
-		Name:               row.Name,
-		Description:        row.Description,
-		Source:             row.Source,
-		BaseURL:            row.BaseURL,
-		ProviderPreset:     row.ProviderPreset,
-		APIType:            row.APIType,
-		Mode:               row.Mode,
-		CapabilitiesJSON:   row.CapabilitiesJSON,
-		ProtocolFamily:     row.ProtocolFamily,
-		RoutingProfile:     row.RoutingProfile,
-		APIVersion:         row.APIVersion,
-		Deployment:         row.Deployment,
-		Project:            row.Project,
-		Location:           row.Location,
-		ModelResource:      row.ModelResource,
-		APIKeyHint:         row.APIKeyHint,
-		HeadersJSON:        row.HeadersJSON,
-		Enabled:            row.Enabled,
-		Priority:           row.Priority,
-		Weight:             row.Weight,
-		CapacityHint:       row.CapacityHint,
-		ModelDiscovery:     row.ModelDiscovery,
-		AllowUnknownModels: row.AllowUnknownModels,
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
-		LastProbeStatus:    row.LastProbeStatus,
-		LastProbeError:     row.LastProbeError,
+		ID:               row.ID,
+		Name:             row.Name,
+		Description:      row.Description,
+		Source:           row.Source,
+		BaseURL:          row.BaseURL,
+		ProviderPreset:   row.ProviderPreset,
+		APIType:          row.APIType,
+		Mode:             row.Mode,
+		CapabilitiesJSON: row.CapabilitiesJSON,
+		ProtocolFamily:   row.ProtocolFamily,
+		RoutingProfile:   row.RoutingProfile,
+		APIVersion:       row.APIVersion,
+		Deployment:       row.Deployment,
+		Project:          row.Project,
+		Location:         row.Location,
+		ModelResource:    row.ModelResource,
+		APIKeyHint:       row.APIKeyHint,
+		HeadersJSON:      row.HeadersJSON,
+		Enabled:          row.Enabled,
+		Priority:         row.Priority,
+		Weight:           row.Weight,
+		CapacityHint:     row.CapacityHint,
+		ModelDiscovery:   row.ModelDiscovery,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
+		LastProbeStatus:  row.LastProbeStatus,
+		LastProbeError:   row.LastProbeError,
 	}
 	if row.APIKeyCiphertext != nil {
 		record.APIKeyCiphertext = append([]byte(nil), (*row.APIKeyCiphertext)...)

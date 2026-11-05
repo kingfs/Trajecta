@@ -45,10 +45,10 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(models, channelID))
+		item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, channelID))
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
-		enrichChannelItemAnalytics(st, &item, channelID, since, bucketSize, bucketCount, true)
+		enrichChannelItemAnalytics(st, &item, record, since, bucketSize, bucketCount, true)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodPatch:
 		existing, err := st.GetChannelConfig(channelID)
@@ -76,7 +76,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			return
 		}
 		models, _ := st.ListChannelModels(channelID, false)
-		writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, len(models), enabledChannelModelCount(models, channelID)))
+		writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, channelID)))
 	case http.MethodDelete:
 		if err := st.DeleteChannelConfig(channelID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -99,6 +99,15 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {
 	switch r.Method {
 	case http.MethodGet:
+		channelRecord, err := st.GetChannelConfig(channelID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		models, err := st.ListChannelModels(channelID, false)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -106,7 +115,7 @@ func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store
 		}
 		items := make([]channelModelItem, 0, len(models))
 		for _, model := range models {
-			items = append(items, channelModelItemFromRecord(model))
+			items = append(items, channelModelItemFromRecord(channelRecord, model))
 		}
 		writeJSON(w, http.StatusOK, channelModelsResponse{Items: items, RefreshedAt: time.Now().UTC()})
 	case http.MethodPost:
@@ -133,7 +142,7 @@ func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
+		writeJSON(w, http.StatusOK, channelModelItemFor(st, channelID, record))
 	default:
 		http.NotFound(w, r)
 	}
@@ -234,7 +243,17 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
+	writeJSON(w, http.StatusOK, channelModelItemFor(st, channelID, record))
+}
+
+// channelModelItemFor answers with the state of one model after a write, so the
+// UI never has to guess whether the switch just took effect.
+func channelModelItemFor(st *store.Store, channelID string, record store.ChannelModelRecord) channelModelItem {
+	channelRecord, err := st.GetChannelConfig(channelID)
+	if err != nil {
+		channelRecord = store.ChannelConfigRecord{ID: channelID}
+	}
+	return channelModelItemFromRecord(channelRecord, record)
 }
 
 func reloadRouterFromChannels(rtr *router.Router, channelService *channel.Service) error {
@@ -281,10 +300,11 @@ func enrichModelChannelItemFromRecord(item *modelChannelItem, record store.Chann
 	item.OutputModalities = decodeStringList(record.OutputModalitiesJSON)
 }
 
-func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID string, since time.Time, bucketSize time.Duration, bucketCount int, includeDetail bool) {
+func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelRecord store.ChannelConfigRecord, since time.Time, bucketSize time.Duration, bucketCount int, includeDetail bool) {
 	if st == nil || item == nil {
 		return
 	}
+	channelID := channelRecord.ID
 	if summary, err := st.GetChannelUsageSummary(channelID, since); err == nil {
 		item.Summary = usageSummaryViewFromRecord(summary)
 	}
@@ -295,15 +315,33 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 		return
 	}
 	if models, err := st.GetChannelModelUsage(channelID, since); err == nil {
+		byModel := map[string]store.ChannelModelRecord{}
+		if channelModels, err := st.ListChannelModels(channelID, false); err == nil {
+			for _, record := range channelModels {
+				byModel[record.Model] = record
+			}
+		}
 		item.ModelsUsage = make([]modelChannelItem, 0, len(models))
 		for _, model := range models {
-			item.ModelsUsage = append(item.ModelsUsage, modelChannelItem{
-				ChannelID: model.ChannelID,
-				Model:     model.Model,
-				Enabled:   model.Enabled,
-				Source:    model.Source,
-				Summary:   usageSummaryViewFromRecord(model.Summary),
-			})
+			row := modelChannelItem{
+				ChannelID:     model.ChannelID,
+				Model:         model.Model,
+				Enabled:       model.Enabled,
+				Source:        model.Source,
+				UpstreamModel: model.UpstreamModel,
+				Summary:       usageSummaryViewFromRecord(model.Summary),
+			}
+			if record, ok := byModel[model.Model]; ok {
+				state := channel.ModelAvailability(channelRecord, record)
+				row.State = string(state)
+				row.Routable = channel.ModelRoutable(channelRecord, record)
+			} else {
+				// A model that only appears in traffic has no channel row yet;
+				// enabling it creates a manual row, which is unverified.
+				row.State = string(channel.ModelStateUnverified)
+				row.Routable = false
+			}
+			item.ModelsUsage = append(item.ModelsUsage, row)
 		}
 	}
 	if failures, err := st.GetChannelRecentFailures(channelID, since, 10); err == nil {
@@ -314,10 +352,13 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 	}
 }
 
-func enabledChannelModelCount(models []store.ChannelModelRecord, channelID string) int {
+// enabledChannelModelCount is the number of models that actually route: enabled
+// and not removed from the provider's latest sync. Counting the raw switch made a
+// provider card say "3 / 4 enabled" while one of the three was not routable.
+func enabledChannelModelCount(channelRecord store.ChannelConfigRecord, models []store.ChannelModelRecord, channelID string) int {
 	count := 0
 	for _, model := range models {
-		if model.ChannelID == channelID && model.Enabled {
+		if model.ChannelID == channelID && channel.ModelRoutable(channelRecord, model) {
 			count++
 		}
 	}

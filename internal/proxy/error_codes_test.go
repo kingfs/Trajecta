@@ -502,6 +502,7 @@ func emittedProxyErrorStatuses(t *testing.T) (map[string][]int, map[string]bool,
 						}
 						return true
 					})
+					resolved.callee = callee
 					localStatus[ident.Name] = resolved
 				}
 				return true
@@ -559,6 +560,12 @@ func emittedProxyErrorStatuses(t *testing.T) (map[string][]int, map[string]bool,
 				}
 				if name, ok := statusArg.(*ast.Ident); ok {
 					if resolved, ok := localStatus[name.Name]; ok && (len(resolved.values) > 0 || resolved.dynamic) {
+						if resolved.callee == "selectionFailureStatus" {
+							for _, code := range codes {
+								addStatic(code, selectionFailureStatusFor(code))
+							}
+							return true
+						}
 						for _, code := range codes {
 							if resolved.dynamic {
 								dynamic[code] = true
@@ -588,6 +595,25 @@ func emittedProxyErrorStatuses(t *testing.T) (map[string][]int, map[string]bool,
 type resolvedStatus struct {
 	values  []int
 	dynamic bool
+	callee  string
+}
+
+// selectionFailureStatusOverrides is the one intentional per-reason status
+// split: a model the operator has not enabled, or never configured, is a 404
+// answered by the proxy itself, while every other selection failure stays 502.
+// The forwarding path computes the status in selectionFailureStatus; the gate
+// cannot read a switch inside a producer, so the split is declared here and the
+// table below is checked against it.
+var selectionFailureStatusOverrides = map[string]int{
+	"model_not_enabled": http.StatusNotFound,
+	"model_unknown":     http.StatusNotFound,
+}
+
+func selectionFailureStatusFor(reason string) int {
+	if status, ok := selectionFailureStatusOverrides[reason]; ok {
+		return status
+	}
+	return http.StatusBadGateway
 }
 
 // selectionFailureCodeList returns the router selection failure reasons in a stable order.

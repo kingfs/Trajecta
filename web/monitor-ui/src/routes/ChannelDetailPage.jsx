@@ -38,7 +38,7 @@ export function ProviderDetailPage() {
   const provider = detail.data || {};
   const summary = provider.summary || {};
   const modelsUsage = sortProviderModels(provider.models_usage || []);
-  const discoveredDisabledModels = modelsUsage.filter((model) => model.source === "discovered" && !model.enabled).map((model) => model.model);
+  const discoveredDisabledModels = modelsUsage.filter((model) => model.source === "discovered" && !model.enabled && model.state !== "removed").map((model) => model.model);
   const failures = provider.recent_failures || [];
   const probeRuns = provider.recent_probe_runs || [];
   const trends = provider.trends || [];
@@ -286,7 +286,11 @@ export function ProviderDetailPage() {
                 <Input className="min-w-[260px]" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder={t("channelDetail.addModelPlaceholder")} />
                 <Button variant="primary" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? t("channelDetail.adding") : t("channelDetail.addModel")}</Button>
                 <Button variant="ghost" type="button" onClick={() => toggleModels(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? t("channelDetail.enabling") : t("channelDetail.enableDiscovered", { count: formatCount(discoveredDisabledModels.length) })}</Button>
+                <Button variant="ghost" type="button" onClick={() => probe.mutate()} disabled={busy === "probe"}>{busy === "probe" ? t("channelDetail.syncing") : t("channelDetail.syncModels")}</Button>
               </form>
+              {lastProbe?.status === "success" ? (
+                <p className="trace-subline">{t("channelDetail.syncSummary", { added: formatCount(lastProbe.added_count || 0), removed: formatCount(lastProbe.removed_count || 0), total: formatCount(lastProbe.discovered_count || 0) })}</p>
+              ) : null}
               <div className="provider-model-card-grid">
                 {modelsUsage.length ? modelsUsage.map((model) => (
                   <ProviderModelRow
@@ -384,7 +388,6 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
-          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
         <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
         {advancedOpen ? (
@@ -458,14 +461,21 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
 function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onDelete }) {
   const { t } = useI18n();
   const summary = item.summary || {};
-  const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
+  const state = item.state || (item.enabled ? "enabled" : "disabled");
   const canDelete = item.source !== "trace";
+  const stateLabel = {
+    enabled: t("channelDetail.stateEnabled"),
+    disabled: t("channelDetail.stateDisabled"),
+    removed: t("channelDetail.stateRemoved"),
+    unverified: t("channelDetail.stateUnverified"),
+  }[state] || state;
+  const stateTone = state === "removed" ? "danger" : state === "unverified" ? "gold" : item.enabled ? "green" : "default";
   return (
     <div className="provider-model-card">
       <div className="provider-model-card-head">
         <div>
           <strong>{item.model}</strong>
-          <span>{isDiscoveredDisabled ? t("channelDetail.discoveredDisabled") : modelSourceLabel(item.source)}</span>
+          <span>{modelSourceLabel(item.source)}</span>
         </div>
         <div className="action-group">
           {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={t("channelDetail.modelEnabled", { model: item.model })} /> : <span>{t("channelDetail.historyOnly")}</span>}
@@ -477,7 +487,10 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
         </div>
       </div>
       <div className="trace-tag-group">
-        <InlineTag tone={item.enabled ? "green" : "default"}>{item.source === "trace" ? t("channelDetail.historyOnlyTag") : item.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>
+        <InlineTag tone={item.source === "trace" ? "default" : stateTone}>{item.source === "trace" ? t("channelDetail.historyOnlyTag") : stateLabel}</InlineTag>
+        {item.upstream_model ? <InlineTag title={t("channelDetail.upstreamNameHint")}>{`→ ${item.upstream_model}`}</InlineTag> : null}
+        {state === "removed" ? <InlineTag tone="danger">{t("channelDetail.removedHint")}</InlineTag> : null}
+        {state === "unverified" ? <InlineTag tone="gold">{t("channelDetail.upstreamNameHint")}</InlineTag> : null}
         {item.enabled && !providerEnabled ? <InlineTag tone="gold">{t("channelDetail.blockedProviderDisabled")}</InlineTag> : null}
       </div>
       <div className="model-market-metrics model-market-metrics-compact">
@@ -581,7 +594,6 @@ function emptyEditForm() {
     weight: 1,
     capacity_hint: 1,
     model_discovery: "list_models",
-    allow_unknown_models: false,
     headers_text: "",
   };
 }
@@ -607,7 +619,6 @@ function editFormFromProvider(provider = {}) {
     weight: provider.weight ?? 1,
     capacity_hint: provider.capacity_hint ?? 1,
     model_discovery: provider.model_discovery || "list_models",
-    allow_unknown_models: Boolean(provider.allow_unknown_models),
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
   };
 }
@@ -631,7 +642,6 @@ function providerPayloadFromForm(form) {
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
     model_discovery: form.model_discovery,
-    allow_unknown_models: Boolean(form.allow_unknown_models),
     headers: parseHeadersText(form.headers_text),
   };
   if (form.api_key.trim()) {

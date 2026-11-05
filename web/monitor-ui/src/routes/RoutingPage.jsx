@@ -179,7 +179,7 @@ function RouteDecisionsPanel({ windowValue }) {
 
 function RoutingSettingsPanel() {
   const { t } = useI18n();
-  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", missing_model_policy: "reject" });
+  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c" });
   // The loading flag and its error belong to the read that fills the form; the
   // save reports itself through a toast like every other write here.
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -246,16 +246,6 @@ function RoutingSettingsPanel() {
             <SelectContent>
               <SelectItem value="p2c">p2c</SelectItem>
               <SelectItem value="first_available">first_available</SelectItem>
-            </SelectContent>
-          </Select>
-        </label>
-        <label className="filter-label">
-          {t("routing.missingModel")}
-          <Select value={settings.missing_model_policy || "reject"} onValueChange={(next) => update("missing_model_policy", next)}>
-            <SelectTrigger aria-label={t("routing.missingModel")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="reject">reject</SelectItem>
-              <SelectItem value="fallback">fallback</SelectItem>
             </SelectContent>
           </Select>
         </label>

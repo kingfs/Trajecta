@@ -44,6 +44,8 @@ func (ChannelConfig) Fields() []ent.Field {
 		field.Float("weight").Default(1),
 		field.Float("capacity_hint").Default(1),
 		field.String("model_discovery").Default("list_models"),
+		// Deprecated: the unknown-model switch was removed. The column is kept so
+		// existing databases keep their schema; nothing reads or writes it.
 		field.Bool("allow_unknown_models").Default(false),
 		field.Time("created_at").Default(time.Now),
 		field.Time("updated_at").Default(time.Now),

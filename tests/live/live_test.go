@@ -468,7 +468,7 @@ func TestLiveEmbeddingsIsNotRoutable(t *testing.T) {
 }
 
 // TestLiveUnknownModelRejected covers the fallback policy
-// router.fallback.on_missing_model=reject.
+// model authorization is strict (no unknown-model fallback).
 func TestLiveUnknownModelRejected(t *testing.T) {
 	requireLive(t)
 

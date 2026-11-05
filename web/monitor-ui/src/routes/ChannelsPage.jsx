@@ -40,7 +40,6 @@ const DEFAULT_FORM = {
   weight: 1,
   capacity_hint: 1,
   model_discovery: "list_models",
-  allow_unknown_models: false,
 };
 
 export function ProvidersPage() {
@@ -293,7 +292,6 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
-          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> {t("providers.allowUnknown")}</label>
         </div>
         <div className="provider-form-actions">
           <Button variant="ghost" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</Button>
@@ -379,7 +377,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         <Metric label={t("overview.requests")} value={formatCount(summary.request_count)} />
         <Metric label={t("overview.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
       </div>
-      <p className="trace-subline">{!item.enabled ? t("providers.routingDisabled") : !item.enabled_model_count && !item.allow_unknown_models ? t("providers.chooseModels") : t("providers.routingEnabled")}</p>
+      <p className="trace-subline">{!item.enabled ? t("providers.routingDisabled") : !item.enabled_model_count ? t("providers.chooseModels") : t("providers.routingEnabled")}</p>
       <div className="upstream-card-footer">
         <span className="mono">{item.base_url}</span>
         <span>{formatDateTime(item.last_probe_at || item.updated_at)}</span>
@@ -693,7 +691,6 @@ const SETUP_VALIDATION_FIELDS = new Set([
   "weight",
   "capacity_hint",
   "model_discovery",
-  "allow_unknown_models",
 ]);
 
 export function buildPresetState(presetData, providerPreset, routingProfile) {
@@ -854,7 +851,6 @@ function providerConfigFormPatch(config = {}) {
     "weight",
     "capacity_hint",
     "model_discovery",
-    "allow_unknown_models",
   ]) {
     if (config[key] !== undefined && config[key] !== null) {
       patch[key] = config[key];

@@ -30,8 +30,6 @@ router:
     epsilon: 0.02
     open_window: 15s
     failure_threshold: 3
-  fallback:
-    on_missing_model: "reject"
 
 upstreams:
   - id: "openai"

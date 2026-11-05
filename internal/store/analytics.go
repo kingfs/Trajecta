@@ -55,11 +55,13 @@ type ModelDetailAnalyticsRecord struct {
 }
 
 type ChannelModelAnalyticsRecord struct {
-	ChannelID string
-	Model     string
-	Enabled   bool
-	Source    string
-	Summary   UsageSummaryRecord
+	ChannelID     string
+	Model         string
+	Enabled       bool
+	Source        string
+	UpstreamModel string
+	LastProbeAt   time.Time
+	Summary       UsageSummaryRecord
 }
 
 func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time) ([]ModelCatalogAnalyticsRecord, error) {

@@ -161,6 +161,8 @@ Trajecta 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求�
 | `invalid_request_body` | 400 | 读取请求体失败，或请求体不是合法 JSON |
 | `missing_model` | 400 | 请求没有给出模型名 |
 | `model_not_found` | 404 | `GET /v1/models/{id}` 的 id 既不可路由、也不在模型 registry 里（详情视图不再为任意 id 合成模型对象） |
+| `model_not_enabled` | 404 | 模型已在某个供应商同步到，但在所有供应商上都未开启；启用后即可路由（不会发往上游） |
+| `model_unknown` | 404 | 没有任何供应商声明该模型；先在供应商页同步模型并开启，或检查模型名 |
 | `invalid_api_key` | 401 | 代理入口的 `Authorization: Bearer <token>` 缺失或不匹配 |
 | `rate_limited` | 429 / 503 | 本地并发 limit 拒绝（429 事件 `limit.concurrency_rejected`；等待队列饱和时 503 事件 `limit.queue_saturated`） |
 | `retry_queue_saturated` | 503 | 上游重试等待队列饱和，放弃本次请求 |

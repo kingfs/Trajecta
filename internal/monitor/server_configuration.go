@@ -65,6 +65,7 @@ type upstreamListResponse struct {
 
 type upstreamItem struct {
 	ID                string                `json:"id"`
+	Name              string                `json:"name,omitempty"`
 	Enabled           bool                  `json:"enabled"`
 	Priority          int                   `json:"priority"`
 	Weight            float64               `json:"weight"`
@@ -137,43 +138,42 @@ type channelListResponse struct {
 }
 
 type channelItem struct {
-	ID                 string                `json:"id"`
-	Name               string                `json:"name"`
-	Description        string                `json:"description,omitempty"`
-	Source             string                `json:"source"`
-	BaseURL            string                `json:"base_url"`
-	ProviderPreset     string                `json:"provider_preset"`
-	APIType            string                `json:"api_type"`
-	Mode               string                `json:"mode"`
-	Capabilities       upstreamCapabilities  `json:"capabilities,omitempty"`
-	ProtocolFamily     string                `json:"protocol_family"`
-	RoutingProfile     string                `json:"routing_profile"`
-	APIVersion         string                `json:"api_version,omitempty"`
-	Deployment         string                `json:"deployment,omitempty"`
-	Project            string                `json:"project,omitempty"`
-	Location           string                `json:"location,omitempty"`
-	ModelResource      string                `json:"model_resource,omitempty"`
-	APIKeyHint         string                `json:"api_key_hint,omitempty"`
-	SecretStorageMode  string                `json:"secret_storage_mode"`
-	Headers            map[string]string     `json:"headers,omitempty"`
-	Enabled            bool                  `json:"enabled"`
-	Priority           int                   `json:"priority"`
-	Weight             float64               `json:"weight"`
-	CapacityHint       float64               `json:"capacity_hint"`
-	ModelDiscovery     string                `json:"model_discovery"`
-	AllowUnknownModels bool                  `json:"allow_unknown_models"`
-	ModelCount         int                   `json:"model_count"`
-	EnabledModelCount  int                   `json:"enabled_model_count"`
-	CreatedAt          time.Time             `json:"created_at"`
-	UpdatedAt          time.Time             `json:"updated_at"`
-	LastProbeAt        time.Time             `json:"last_probe_at,omitempty"`
-	LastProbeStatus    string                `json:"last_probe_status,omitempty"`
-	LastProbeError     string                `json:"last_probe_error,omitempty"`
-	Summary            usageSummaryView      `json:"summary,omitempty"`
-	Trends             []usageTrendView      `json:"trends,omitempty"`
-	ModelsUsage        []modelChannelItem    `json:"models_usage,omitempty"`
-	RecentFailures     []upstreamFailureItem `json:"recent_failures,omitempty"`
-	RecentProbeRuns    []channelProbeRunItem `json:"recent_probe_runs,omitempty"`
+	ID                string                `json:"id"`
+	Name              string                `json:"name"`
+	Description       string                `json:"description,omitempty"`
+	Source            string                `json:"source"`
+	BaseURL           string                `json:"base_url"`
+	ProviderPreset    string                `json:"provider_preset"`
+	APIType           string                `json:"api_type"`
+	Mode              string                `json:"mode"`
+	Capabilities      upstreamCapabilities  `json:"capabilities,omitempty"`
+	ProtocolFamily    string                `json:"protocol_family"`
+	RoutingProfile    string                `json:"routing_profile"`
+	APIVersion        string                `json:"api_version,omitempty"`
+	Deployment        string                `json:"deployment,omitempty"`
+	Project           string                `json:"project,omitempty"`
+	Location          string                `json:"location,omitempty"`
+	ModelResource     string                `json:"model_resource,omitempty"`
+	APIKeyHint        string                `json:"api_key_hint,omitempty"`
+	SecretStorageMode string                `json:"secret_storage_mode"`
+	Headers           map[string]string     `json:"headers,omitempty"`
+	Enabled           bool                  `json:"enabled"`
+	Priority          int                   `json:"priority"`
+	Weight            float64               `json:"weight"`
+	CapacityHint      float64               `json:"capacity_hint"`
+	ModelDiscovery    string                `json:"model_discovery"`
+	ModelCount        int                   `json:"model_count"`
+	EnabledModelCount int                   `json:"enabled_model_count"`
+	CreatedAt         time.Time             `json:"created_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	LastProbeAt       time.Time             `json:"last_probe_at,omitempty"`
+	LastProbeStatus   string                `json:"last_probe_status,omitempty"`
+	LastProbeError    string                `json:"last_probe_error,omitempty"`
+	Summary           usageSummaryView      `json:"summary,omitempty"`
+	Trends            []usageTrendView      `json:"trends,omitempty"`
+	ModelsUsage       []modelChannelItem    `json:"models_usage,omitempty"`
+	RecentFailures    []upstreamFailureItem `json:"recent_failures,omitempty"`
+	RecentProbeRuns   []channelProbeRunItem `json:"recent_probe_runs,omitempty"`
 }
 
 type channelProbeRunItem struct {
@@ -197,10 +197,14 @@ type channelModelsResponse struct {
 }
 
 type channelModelItem struct {
-	Model                       string    `json:"model"`
-	DisplayName                 string    `json:"display_name,omitempty"`
-	Source                      string    `json:"source"`
-	Enabled                     bool      `json:"enabled"`
+	Model       string `json:"model"`
+	DisplayName string `json:"display_name,omitempty"`
+	Source      string `json:"source"`
+	Enabled     bool   `json:"enabled"`
+	// State is enabled | disabled | removed | unverified. A removed model is
+	// no longer listed by the provider's latest sync and is not routed.
+	State                       string    `json:"state"`
+	Routable                    bool      `json:"routable"`
 	SupportsResponses           *bool     `json:"supports_responses,omitempty"`
 	SupportsChatCompletions     *bool     `json:"supports_chat_completions,omitempty"`
 	SupportsEmbeddings          *bool     `json:"supports_embeddings,omitempty"`
@@ -255,6 +259,8 @@ type channelProbeResponse struct {
 	Models          []string              `json:"models"`
 	DiscoveredCount int                   `json:"discovered_count"`
 	EnabledCount    int                   `json:"enabled_count"`
+	AddedCount      int                   `json:"added_count"`
+	RemovedCount    int                   `json:"removed_count"`
 	Endpoint        string                `json:"endpoint,omitempty"`
 	ErrorText       string                `json:"error_text,omitempty"`
 	ProviderProbe   *providerprobe.Report `json:"provider_probe,omitempty"`
@@ -303,29 +309,28 @@ type providerProbeReportRequest struct {
 }
 
 type channelUpsertRequest struct {
-	ID                 string                             `json:"id"`
-	Name               string                             `json:"name"`
-	Description        string                             `json:"description"`
-	BaseURL            string                             `json:"base_url"`
-	ProviderPreset     string                             `json:"provider_preset"`
-	APIType            string                             `json:"api_type"`
-	Mode               string                             `json:"mode"`
-	Capabilities       *config.UpstreamCapabilitiesConfig `json:"capabilities"`
-	ProtocolFamily     string                             `json:"protocol_family"`
-	RoutingProfile     string                             `json:"routing_profile"`
-	APIVersion         string                             `json:"api_version"`
-	Deployment         string                             `json:"deployment"`
-	Project            string                             `json:"project"`
-	Location           string                             `json:"location"`
-	ModelResource      string                             `json:"model_resource"`
-	APIKey             string                             `json:"api_key"`
-	Headers            map[string]channelHeaderUpdate     `json:"headers"`
-	Enabled            *bool                              `json:"enabled"`
-	Priority           *int                               `json:"priority"`
-	Weight             *float64                           `json:"weight"`
-	CapacityHint       *float64                           `json:"capacity_hint"`
-	ModelDiscovery     string                             `json:"model_discovery"`
-	AllowUnknownModels *bool                              `json:"allow_unknown_models"`
+	ID             string                             `json:"id"`
+	Name           string                             `json:"name"`
+	Description    string                             `json:"description"`
+	BaseURL        string                             `json:"base_url"`
+	ProviderPreset string                             `json:"provider_preset"`
+	APIType        string                             `json:"api_type"`
+	Mode           string                             `json:"mode"`
+	Capabilities   *config.UpstreamCapabilitiesConfig `json:"capabilities"`
+	ProtocolFamily string                             `json:"protocol_family"`
+	RoutingProfile string                             `json:"routing_profile"`
+	APIVersion     string                             `json:"api_version"`
+	Deployment     string                             `json:"deployment"`
+	Project        string                             `json:"project"`
+	Location       string                             `json:"location"`
+	ModelResource  string                             `json:"model_resource"`
+	APIKey         string                             `json:"api_key"`
+	Headers        map[string]channelHeaderUpdate     `json:"headers"`
+	Enabled        *bool                              `json:"enabled"`
+	Priority       *int                               `json:"priority"`
+	Weight         *float64                           `json:"weight"`
+	CapacityHint   *float64                           `json:"capacity_hint"`
+	ModelDiscovery string                             `json:"model_discovery"`
 }
 
 type channelHeaderUpdate struct {
@@ -437,6 +442,8 @@ type modelChannelItem struct {
 	Model                       string           `json:"model"`
 	DisplayName                 string           `json:"display_name,omitempty"`
 	Enabled                     bool             `json:"enabled"`
+	State                       string           `json:"state"`
+	Routable                    bool             `json:"routable"`
 	Source                      string           `json:"source"`
 	SupportsResponses           *bool            `json:"supports_responses,omitempty"`
 	SupportsChatCompletions     *bool            `json:"supports_chat_completions,omitempty"`
@@ -753,59 +760,57 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
 	}
 	return channelItem{
-		ID:                 record.ID,
-		Name:               record.Name,
-		Description:        record.Description,
-		Source:             record.Source,
-		BaseURL:            record.BaseURL,
-		ProviderPreset:     record.ProviderPreset,
-		APIType:            record.APIType,
-		Mode:               record.Mode,
-		Capabilities:       capabilities,
-		ProtocolFamily:     record.ProtocolFamily,
-		RoutingProfile:     record.RoutingProfile,
-		APIVersion:         record.APIVersion,
-		Deployment:         record.Deployment,
-		Project:            record.Project,
-		Location:           record.Location,
-		ModelResource:      record.ModelResource,
-		APIKeyHint:         secretHint(req.APIKey),
-		SecretStorageMode:  secretStorageMode(st),
-		Headers:            redactHeaders(headers),
-		Enabled:            record.Enabled,
-		Priority:           record.Priority,
-		Weight:             record.Weight,
-		CapacityHint:       record.CapacityHint,
-		ModelDiscovery:     record.ModelDiscovery,
-		AllowUnknownModels: record.AllowUnknownModels,
+		ID:                record.ID,
+		Name:              record.Name,
+		Description:       record.Description,
+		Source:            record.Source,
+		BaseURL:           record.BaseURL,
+		ProviderPreset:    record.ProviderPreset,
+		APIType:           record.APIType,
+		Mode:              record.Mode,
+		Capabilities:      capabilities,
+		ProtocolFamily:    record.ProtocolFamily,
+		RoutingProfile:    record.RoutingProfile,
+		APIVersion:        record.APIVersion,
+		Deployment:        record.Deployment,
+		Project:           record.Project,
+		Location:          record.Location,
+		ModelResource:     record.ModelResource,
+		APIKeyHint:        secretHint(req.APIKey),
+		SecretStorageMode: secretStorageMode(st),
+		Headers:           redactHeaders(headers),
+		Enabled:           record.Enabled,
+		Priority:          record.Priority,
+		Weight:            record.Weight,
+		CapacityHint:      record.CapacityHint,
+		ModelDiscovery:    record.ModelDiscovery,
 	}
 }
 
 func providerSetupUpsertRequest(normalized channelItem, original channelUpsertRequest) channelUpsertRequest {
 	return channelUpsertRequest{
-		ID:                 normalized.ID,
-		Name:               normalized.Name,
-		Description:        normalized.Description,
-		BaseURL:            normalized.BaseURL,
-		ProviderPreset:     normalized.ProviderPreset,
-		APIType:            normalized.APIType,
-		Mode:               normalized.Mode,
-		Capabilities:       &normalized.Capabilities,
-		ProtocolFamily:     normalized.ProtocolFamily,
-		RoutingProfile:     normalized.RoutingProfile,
-		APIVersion:         normalized.APIVersion,
-		Deployment:         normalized.Deployment,
-		Project:            normalized.Project,
-		Location:           normalized.Location,
-		ModelResource:      normalized.ModelResource,
-		APIKey:             original.APIKey,
-		Headers:            original.Headers,
-		Enabled:            &normalized.Enabled,
-		Priority:           &normalized.Priority,
-		Weight:             &normalized.Weight,
-		CapacityHint:       &normalized.CapacityHint,
-		ModelDiscovery:     normalized.ModelDiscovery,
-		AllowUnknownModels: &normalized.AllowUnknownModels,
+		ID:             normalized.ID,
+		Name:           normalized.Name,
+		Description:    normalized.Description,
+		BaseURL:        normalized.BaseURL,
+		ProviderPreset: normalized.ProviderPreset,
+		APIType:        normalized.APIType,
+		Mode:           normalized.Mode,
+		Capabilities:   &normalized.Capabilities,
+		ProtocolFamily: normalized.ProtocolFamily,
+		RoutingProfile: normalized.RoutingProfile,
+		APIVersion:     normalized.APIVersion,
+		Deployment:     normalized.Deployment,
+		Project:        normalized.Project,
+		Location:       normalized.Location,
+		ModelResource:  normalized.ModelResource,
+		APIKey:         original.APIKey,
+		Headers:        original.Headers,
+		Enabled:        &normalized.Enabled,
+		Priority:       &normalized.Priority,
+		Weight:         &normalized.Weight,
+		CapacityHint:   &normalized.CapacityHint,
+		ModelDiscovery: normalized.ModelDiscovery,
 	}
 }
 
@@ -925,7 +930,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 			}
 			items := make([]channelItem, 0, len(channels))
 			for _, record := range channels {
-				item := channelItemFromRecord(st, record, counts[record.ID], enabledChannelModelCount(models, record.ID))
+				item := channelItemFromRecord(st, record, counts[record.ID], enabledChannelModelCount(record, models, record.ID))
 				item.Summary = usageSummaryViewFromRecord(channelSummary(record.ID))
 				item.Trends = usageTrendViews(channelTrends(record.ID))
 				items = append(items, item)
@@ -1350,7 +1355,7 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 	if err != nil {
 		return nil, err
 	}
-	models, err := st.ListChannelModels("", true)
+	allModels, err := st.ListChannelModels("", false)
 	if err != nil {
 		return nil, err
 	}
@@ -1360,26 +1365,33 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 	}
 	modelsByChannel := map[string][]string{}
 	recordsByChannel := map[string][]store.ChannelModelRecord{}
-	for _, model := range models {
+	disabledByChannel := map[string][]string{}
+	for _, model := range allModels {
+		if !model.Enabled {
+			disabledByChannel[model.ChannelID] = append(disabledByChannel[model.ChannelID], model.Model)
+			if wire := strings.TrimSpace(model.UpstreamModel); wire != "" {
+				disabledByChannel[model.ChannelID] = append(disabledByChannel[model.ChannelID], wire)
+			}
+			continue
+		}
 		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
+		if wire := strings.TrimSpace(model.UpstreamModel); wire != "" {
+			modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], wire)
+		}
 		recordsByChannel[model.ChannelID] = append(recordsByChannel[model.ChannelID], model)
 	}
 	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
 	for _, channel := range channels {
 		caps := upstreamCapabilitiesFromChannel(channel)
 		out = append(out, routeplan.UpstreamCandidate{
-			ID:            channel.ID,
-			RouteTargetID: channel.ID,
-			ChannelID:     channel.ID,
-			Enabled:       channel.Enabled,
-			Priority:      channel.Priority,
-			Weight:        channel.Weight,
-			Models:        modelsByChannel[channel.ID],
-			// Pass the row verbatim: the channel projection always sends an explicit
-			// allow_unknown_models pointer, so the router's "single configured target" fallback
-			// (allowUnknownModels in internal/router) never applies to a database-managed target and
-			// the inspector must not invent it either.
-			AllowUnknownModels:        channel.AllowUnknownModels,
+			ID:                        channel.ID,
+			RouteTargetID:             channel.ID,
+			ChannelID:                 channel.ID,
+			Enabled:                   channel.Enabled,
+			Priority:                  channel.Priority,
+			Weight:                    channel.Weight,
+			Models:                    modelsByChannel[channel.ID],
+			DisabledModels:            disabledByChannel[channel.ID],
 			SupportsChatCompletions:   caps.chatCompletions,
 			SupportsResponses:         caps.responses,
 			SupportsAnthropicMessages: caps.anthropicMessages,
@@ -1532,9 +1544,6 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ModelDiscovery) != "" {
 		record.ModelDiscovery = strings.TrimSpace(req.ModelDiscovery)
 	}
-	if req.AllowUnknownModels != nil {
-		record.AllowUnknownModels = *req.AllowUnknownModels
-	}
 	return record
 }
 
@@ -1548,47 +1557,49 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
 	}
 	return channelItem{
-		ID:                 record.ID,
-		Name:               record.Name,
-		Description:        record.Description,
-		Source:             record.Source,
-		BaseURL:            record.BaseURL,
-		ProviderPreset:     record.ProviderPreset,
-		APIType:            record.APIType,
-		Mode:               record.Mode,
-		Capabilities:       capabilities,
-		ProtocolFamily:     record.ProtocolFamily,
-		RoutingProfile:     record.RoutingProfile,
-		APIVersion:         record.APIVersion,
-		Deployment:         record.Deployment,
-		Project:            record.Project,
-		Location:           record.Location,
-		ModelResource:      record.ModelResource,
-		APIKeyHint:         record.APIKeyHint,
-		SecretStorageMode:  st.SecretStorageMode(),
-		Headers:            redactHeaders(headers),
-		Enabled:            record.Enabled,
-		Priority:           record.Priority,
-		Weight:             record.Weight,
-		CapacityHint:       record.CapacityHint,
-		ModelDiscovery:     record.ModelDiscovery,
-		AllowUnknownModels: record.AllowUnknownModels,
-		ModelCount:         modelCount,
-		EnabledModelCount:  enabledModelCount,
-		CreatedAt:          record.CreatedAt,
-		UpdatedAt:          record.UpdatedAt,
-		LastProbeAt:        record.LastProbeAt,
-		LastProbeStatus:    record.LastProbeStatus,
-		LastProbeError:     record.LastProbeError,
+		ID:                record.ID,
+		Name:              record.Name,
+		Description:       record.Description,
+		Source:            record.Source,
+		BaseURL:           record.BaseURL,
+		ProviderPreset:    record.ProviderPreset,
+		APIType:           record.APIType,
+		Mode:              record.Mode,
+		Capabilities:      capabilities,
+		ProtocolFamily:    record.ProtocolFamily,
+		RoutingProfile:    record.RoutingProfile,
+		APIVersion:        record.APIVersion,
+		Deployment:        record.Deployment,
+		Project:           record.Project,
+		Location:          record.Location,
+		ModelResource:     record.ModelResource,
+		APIKeyHint:        record.APIKeyHint,
+		SecretStorageMode: st.SecretStorageMode(),
+		Headers:           redactHeaders(headers),
+		Enabled:           record.Enabled,
+		Priority:          record.Priority,
+		Weight:            record.Weight,
+		CapacityHint:      record.CapacityHint,
+		ModelDiscovery:    record.ModelDiscovery,
+		ModelCount:        modelCount,
+		EnabledModelCount: enabledModelCount,
+		CreatedAt:         record.CreatedAt,
+		UpdatedAt:         record.UpdatedAt,
+		LastProbeAt:       record.LastProbeAt,
+		LastProbeStatus:   record.LastProbeStatus,
+		LastProbeError:    record.LastProbeError,
 	}
 }
 
-func channelModelItemFromRecord(record store.ChannelModelRecord) channelModelItem {
+func channelModelItemFromRecord(channelRecord store.ChannelConfigRecord, record store.ChannelModelRecord) channelModelItem {
+	state := channel.ModelAvailability(channelRecord, record)
 	return channelModelItem{
 		Model:                       record.Model,
 		DisplayName:                 record.DisplayName,
 		Source:                      record.Source,
 		Enabled:                     record.Enabled,
+		State:                       string(state),
+		Routable:                    channel.ModelRoutable(channelRecord, record),
 		SupportsResponses:           capabilityBool(record.SupportsResponses),
 		SupportsChatCompletions:     capabilityBool(record.SupportsChatCompletions),
 		SupportsEmbeddings:          capabilityBool(record.SupportsEmbeddings),
@@ -1615,6 +1626,8 @@ func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResp
 		Models:          result.Models,
 		DiscoveredCount: result.DiscoveredCount,
 		EnabledCount:    result.EnabledCount,
+		AddedCount:      result.AddedCount,
+		RemovedCount:    result.RemovedCount,
 		Endpoint:        result.Endpoint,
 		ErrorText:       result.ErrorText,
 		StartedAt:       result.StartedAt,

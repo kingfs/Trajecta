@@ -976,6 +976,8 @@ func outputModalitiesFromCapabilities(features llmspecs.Capability) []string {
 }
 
 func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, st *store.Store) (providerSetupResponse, error) {
+	baseURL, normalizationWarnings := normalizeSetupBaseURL(ctx, req)
+	req.BaseURL = baseURL
 	report, probeErr := providerprobe.Probe(ctx, providerprobe.ProbeTarget{
 		ProviderID:              strings.TrimSpace(valueOrExisting(req.ID, req.Name)),
 		BaseURL:                 strings.TrimSpace(req.BaseURL),
@@ -997,12 +999,68 @@ func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, s
 			RedactionGuarantee: "api_key is never echoed; secret headers are redacted",
 		},
 		Probe:    &report,
-		Warnings: append([]string(nil), report.Warnings...),
+		Warnings: append(append([]string(nil), report.Warnings...), normalizationWarnings...),
 	}
 	if resp.Status == "" {
 		resp.Status = "unknown"
 	}
 	return resp, probeErr
+}
+
+// providerBaseURLCandidates returns the typed URL and the /v1 sibling of the
+// same host. Operators routinely paste either form, and the two disagree on
+// where /chat/completions lives; the probe picks the one that answers.
+func providerBaseURLCandidates(raw string) []string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if base == "" {
+		return nil
+	}
+	out := []string{base}
+	if strings.HasSuffix(base, "/v1") {
+		out = append(out, strings.TrimSuffix(base, "/v1"))
+	} else {
+		out = append(out, base+"/v1")
+	}
+	return out
+}
+
+// normalizeSetupBaseURL keeps the typed base URL when its model listing answers,
+// otherwise returns the /v1 variant that does. A provider without /models keeps
+// the typed value: discovery is optional, and a failed listing is not proof the
+// chat path is wrong.
+func normalizeSetupBaseURL(ctx context.Context, req providerSetupRequest) (string, []string) {
+	candidates := providerBaseURLCandidates(req.BaseURL)
+	if len(candidates) == 0 {
+		return strings.TrimSpace(req.BaseURL), nil
+	}
+	for i, candidate := range candidates {
+		if setupModelsReachable(ctx, req, candidate) != nil {
+			continue
+		}
+		if i == 0 {
+			return candidate, nil
+		}
+		return candidate, []string{
+			fmt.Sprintf("base_url normalized to %s: the typed value did not answer the model listing", candidate),
+		}
+	}
+	return candidates[0], nil
+}
+
+func setupModelsReachable(ctx context.Context, req providerSetupRequest, baseURL string) error {
+	resolved, err := upstream.Resolve(config.UpstreamConfig{
+		BaseURL:        baseURL,
+		ApiKey:         strings.TrimSpace(req.APIKey),
+		Headers:        setupPlainHeaders(req.Headers),
+		ProviderPreset: strings.TrimSpace(req.ProviderPreset),
+		ProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+		APIType:        strings.TrimSpace(req.APIType),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = upstream.DiscoverModelsResolved(resolved, nil)
+	return err
 }
 
 func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprobe.Report) channelUpsertRequest {
@@ -1485,6 +1543,7 @@ func buildUpstreamItems(st *store.Store, rtr *router.Router, since time.Time, mo
 func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.UpstreamAnalyticsRecord) upstreamItem {
 	return upstreamItem{
 		ID:                snapshot.ID,
+		Name:              snapshot.Name,
 		Enabled:           snapshot.Enabled,
 		Priority:          snapshot.Priority,
 		Weight:            snapshot.Weight,
