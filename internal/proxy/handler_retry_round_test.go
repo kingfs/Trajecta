@@ -76,7 +76,10 @@ func TestHandlerRetryRoundAttemptsEveryCandidate(t *testing.T) {
 			Upstream: config.UpstreamConfig{
 				BaseURL:        baseURL + "/v1",
 				ProviderPreset: "openai",
-				Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
+				// The request is a raw Responses pass-through, so every candidate
+				// declares the native API instead of only a channel-level capability.
+				APIType:      "responses",
+				Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 			},
 		}
 	}

@@ -1340,7 +1340,10 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if h.recorder != nil {
-		h.recordSelectionFailureWithBody(r, start, status, lastErr, bodyBytes, retryEvents)
+		// The failure came from an answered upstream attempt (its per-attempt
+		// cassette was deleted by closeLogFile), so record the attempted target on
+		// the failure row instead of losing which channel returned the error.
+		h.recordSelectionFailureWithSelection(r, start, status, lastErr, bodyBytes, retryEvents, selection)
 	}
 	writeProxyError(w, r, status, "upstream_error", "Proxy Error: "+lastErr.Error())
 }
@@ -1591,15 +1594,31 @@ const (
 	upstreamErrorDisplayRunes = 400
 )
 
+// The 404 hints split the two failures a bare status cannot tell apart: the
+// provider does not serve the path (a router miss, or a protocol the channel
+// does not implement for that model) versus the provider reached its handler
+// and rejected the model id. Saying "unknown model id" for a path miss sends
+// the operator to re-sync a model list that was never the problem.
+const (
+	upstreamHint404PathNotServed = "the provider does not serve this path for this model; check base_url, api_type and this model's protocol support (Responses vs Chat Completions)"
+	upstreamHint404UnknownModel  = "the provider does not serve this model id; re-sync the provider's model list or set the model's upstream name"
+	upstreamHint404NoBody        = "the provider returned 404 with no body; check base_url and api_type"
+)
+
 func newUpstreamFailure(resp *http.Response, target *router.Target, model string) upstreamFailure {
 	path := ""
 	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
 		path = redaction.DisplayURL(resp.Request.URL.Path)
 	}
 	snippet := ""
+	// rawBody keeps the untruncated provider answer for classification. The
+	// displayed snippet is capped at upstreamErrorDisplayRunes, so a long JSON
+	// error envelope would otherwise lose the model words that identify it.
+	rawBody := ""
 	if resp != nil && resp.Body != nil {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, upstreamErrorSnippetBytes))
-		snippet = upstreamErrorSnippet(string(body))
+		rawBody = string(body)
+		snippet = upstreamErrorSnippet(rawBody)
 	}
 	name := ""
 	id := ""
@@ -1607,7 +1626,7 @@ func newUpstreamFailure(resp *http.Response, target *router.Target, model string
 		name = target.DisplayName()
 		id = target.ID
 	}
-	hint := upstreamFailureHint(resp, snippet)
+	hint := upstreamFailureHintForBody(resp, rawBody)
 	summary := fmt.Sprintf("upstream %q (%s) returned status %d for model %q", name, id, resp.StatusCode, model)
 	if path != "" {
 		summary += " at " + path
@@ -1657,21 +1676,103 @@ func upstreamErrorSnippet(raw string) string {
 // upstreamFailureHint turns the provider's own answer into the next action,
 // which is the difference between "404" and "the model id is wrong" or "the
 // base URL points at the wrong path".
+//
+// The signature is kept for callers that only have the displayed snippet; the
+// hot path passes the untruncated body to upstreamFailureHintForBody so a long
+// JSON envelope is classified before upstreamErrorSnippet shortens it.
 func upstreamFailureHint(resp *http.Response, snippet string) string {
+	return upstreamFailureHintForBody(resp, snippet)
+}
+
+func upstreamFailureHintForBody(resp *http.Response, body string) string {
 	if resp == nil || resp.StatusCode != http.StatusNotFound {
 		return ""
 	}
-	lower := strings.ToLower(snippet)
-	modelWords := []string{"model", "does not exist", "unknown", "not found", "not_found", "no such"}
-	for _, word := range modelWords {
-		if strings.Contains(lower, word) {
-			return "the provider does not serve this model id; re-sync the provider's model list or set the model's upstream name"
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return upstreamHint404NoBody
+	}
+	if upstream404LooksLikeRouteMiss(resp, body) {
+		return upstreamHint404PathNotServed
+	}
+	if upstream404LooksLikeModelMiss(body) {
+		return upstreamHint404UnknownModel
+	}
+	// A JSON error envelope that names neither the path nor the model is still a
+	// path-level answer: the provider reached its error handler, so the request
+	// never matched a route for this endpoint.
+	return upstreamHint404PathNotServed
+}
+
+// upstream404LooksLikeRouteMiss separates a path-level miss - the provider's
+// router never reached a handler, as with Go's mux `404 page not found` - from a
+// handler-level 404 whose JSON body names the model. Content-Type is part of the
+// signal because a text/plain or HTML body is an error page, not an API error.
+func upstream404LooksLikeRouteMiss(resp *http.Response, body string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	if strings.HasPrefix(normalized, "404 page not found") || strings.HasPrefix(normalized, "page not found") {
+		return true
+	}
+	if strings.HasPrefix(normalized, "<!doctype html") || strings.HasPrefix(normalized, "<html") {
+		return true
+	}
+	if resp != nil {
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		if strings.Contains(contentType, "text/plain") ||
+			strings.Contains(contentType, "text/html") ||
+			strings.Contains(contentType, "application/xhtml") {
+			return true
 		}
 	}
-	if lower == "" {
-		return "the provider returned 404 with no body; check base_url and api_type"
+	if !strings.HasPrefix(normalized, "{") && !strings.HasPrefix(normalized, "[") {
+		// Everything that is not a JSON error envelope is a text error page.
+		return true
 	}
-	return "the request path may not exist on this provider; check base_url and api_type"
+	return !looksLikeJSONErrorEnvelope(body)
+}
+
+// looksLikeJSONErrorEnvelope reports whether the body is a provider error
+// object. Some providers wrap it in `error`, others answer with a flat
+// code/message/detail object; a plain data object is not an error envelope.
+// Because a long envelope may be truncated before it reaches this check, a
+// truncated object that starts with an error key is still accepted.
+func looksLikeJSONErrorEnvelope(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
+		if _, ok := payload["error"]; ok {
+			return true
+		}
+		_, hasCode := payload["code"]
+		_, hasMessage := payload["message"]
+		_, hasDetail := payload["detail"]
+		return hasCode || hasMessage || hasDetail
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, `"error"`) || strings.Contains(lower, `"message"`) || strings.Contains(lower, `"code"`)
+}
+
+// upstream404LooksLikeModelMiss reports a JSON 404 that blames the model id. The
+// provider has to mention the model and one of the not-found expressions; a
+// message such as "model gpt-5 is not available on this key" counts, while
+// "404 page not found" has no model word and is a route miss.
+func upstream404LooksLikeModelMiss(body string) bool {
+	lower := strings.ToLower(body)
+	if !strings.Contains(lower, "model") {
+		return false
+	}
+	for _, phrase := range []string{
+		"does not exist", "doesn't exist", "not exist", "not found", "not_found",
+		"unknown", "unavailable", "not available", "no such",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) []recorder.RecordEvent {
@@ -2007,6 +2108,32 @@ func addCredentialAttrs(attrs map[string]interface{}, info router.CredentialDeci
 	if hint := redaction.SafeCredentialHint(info.CredentialHint); hint != "" {
 		attrs["credential_hint"] = hint
 	}
+}
+
+// addAttemptedTargetAttrs names the upstream target a failed request was
+// dispatched to, plus the channel/route-target/credential it belongs to. It is
+// the failure-side counterpart of the routing.selected event attributes, so a
+// routing.failure event still says "this is the channel that returned 404".
+func addAttemptedTargetAttrs(attrs map[string]interface{}, selection *router.Selection) {
+	if attrs == nil || selection == nil {
+		return
+	}
+	info := selection.Credential
+	if target := selection.Target; target != nil {
+		if target.ID != "" {
+			attrs["upstream_id"] = target.ID
+		}
+		if info.RouteTargetID == "" {
+			info.RouteTargetID = target.RouteTargetID
+		}
+		if info.ChannelID == "" {
+			info.ChannelID = target.ChannelID
+		}
+		if info.CredentialID == "" {
+			info.CredentialID = target.CredentialID
+		}
+	}
+	addCredentialAttrs(attrs, info)
 }
 
 func selectableCandidateIDs(candidates []router.CandidateDecision) []string {
@@ -2688,14 +2815,41 @@ func routerPolicy(rtr *router.Router) string {
 }
 
 func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent) {
+	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, nil)
+}
+
+// recordSelectionFailureWithSelection is the attribution-carrying form: the
+// request did reach an upstream target, and that attempt has to survive into the
+// failure log even though its own attempt cassette was deleted. Without it the
+// failure row is written by recordSelectionFailureWithBody and names an empty
+// selected_upstream_id/base_url/preset while the error message names a channel.
+func (h *Handler) recordSelectionFailureWithSelection(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection) {
+	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, selection)
+}
+
+func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
 	reason := router.SelectionFailureReason(selectErr)
-	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+	options := recorder.PrepareOptions{
 		RoutingPolicy:        h.routerPolicy(),
 		RoutingFailureReason: reason,
-	}, bodyBytes)
+	}
+	var attempted *router.Target
+	if selection != nil {
+		attempted = selection.Target
+		options.RoutingScore = selection.Score
+		options.RoutingCandidateCount = selection.CandidateCount
+	}
+	if attempted != nil {
+		// SiteURL is stored as the redacted/display base URL by the recorder, so the
+		// failure row keeps the same upstream identity a successful trace would.
+		options.SiteURL = attempted.Upstream.BaseURL
+		options.SelectedUpstreamID = attempted.ID
+		options.SelectedUpstreamProviderPreset = attempted.Upstream.ProviderPreset
+	}
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, options, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare selection-failure log file", "err", err)
 		return
@@ -2734,7 +2888,16 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Events = append(logInfo.Events, retryEvents...)
-	if decision := router.SelectionDecision(selectErr); decision != nil {
+	// Prefer the re-selection failure's decision; when the failure is an upstream
+	// answer rather than a selection answer (an exhausted target), fall back to
+	// the attempted selection's decision. Its routing.selected event is what
+	// fills route_target_id/channel_id/credential_id in the cassette meta, so the
+	// failure row keeps the channel it names in its message.
+	decision := router.SelectionDecision(selectErr)
+	if decision == nil && selection != nil {
+		decision = selection.Decision
+	}
+	if decision != nil {
 		if !hasRoutePlanEvent(logInfo.Events) {
 			logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, decision, start, h.routerPolicy(), reason))
 		}
@@ -2742,15 +2905,17 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	} else if !hasRoutePlanEvent(logInfo.Events) {
 		logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, nil, start, h.routerPolicy(), reason))
 	}
+	failureAttrs := map[string]interface{}{
+		"routing_policy":         h.routerPolicy(),
+		"routing_failure_reason": reason,
+		"http_status":            statusCode,
+	}
+	addAttemptedTargetAttrs(failureAttrs, selection)
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
-		Type:    "routing.failure",
-		Time:    time.Now().UTC(),
-		Message: redaction.MetadataText(selectErr.Error()),
-		Attributes: map[string]interface{}{
-			"routing_policy":         h.routerPolicy(),
-			"routing_failure_reason": reason,
-			"http_status":            statusCode,
-		},
+		Type:       "routing.failure",
+		Time:       time.Now().UTC(),
+		Message:    redaction.MetadataText(selectErr.Error()),
+		Attributes: failureAttrs,
 	})
 
 	if err := h.recorder.SubmitLogFile(logInfo); err != nil {

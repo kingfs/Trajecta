@@ -3627,6 +3627,162 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+/* The inline result of the per-model quick connectivity test. It sits between
+   the card's tag group and its usage metrics, so it reads as part of the model
+   rather than as a page-level notice. The tests run against `--surface-inset`
+   both themes resolve, and every colour is a token, not a literal. */
+.provider-model-test-result {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.provider-model-test-result-pending {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.provider-model-test-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.provider-model-test-title {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.provider-model-test-duration {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.provider-model-test-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* One chip per protocol. The tone fill is additive only: the ✓/✗/– marker and
+   the status words inside carry the outcome, so the chip is still readable
+   without colour or in a monochrome screenshot. */
+.provider-model-test-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.provider-model-test-chip-green {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+}
+
+.provider-model-test-chip-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.provider-model-test-chip-gold {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.provider-model-test-mark {
+  font-weight: 700;
+}
+
+.provider-model-test-chip-green .provider-model-test-mark {
+  color: var(--green);
+}
+
+.provider-model-test-chip-danger .provider-model-test-mark {
+  color: var(--danger);
+}
+
+.provider-model-test-chip-gold .provider-model-test-mark {
+  color: var(--gold);
+}
+
+.provider-model-test-suggestion {
+  display: grid;
+  gap: 6px;
+}
+
+.provider-model-test-suggest {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.provider-model-test-suggest-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.provider-model-test-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-model-test-applied {
+  display: flex;
+}
+
+.provider-model-test-warnings {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+/* Same treatment as the page-loading pill: the ring says "in flight" without
+   the fast rotation reduced motion asks us not to show. */
+.provider-model-test-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in oklab, var(--text-tertiary) 30%, transparent);
+  border-top-color: var(--accent-solid);
+  border-radius: 50%;
+  animation: page-loading-spin 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-model-test-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
 .provider-probe-list {
   display: grid;
   gap: 10px;

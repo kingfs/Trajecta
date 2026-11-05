@@ -488,6 +488,35 @@ func (u ResolvedUpstream) SupportsChatCompletionsAPI() bool {
 	return configured && enabled
 }
 
+// SupportsResponsesAPI reports whether the target serves the Responses API
+// natively (its own `/v1/responses`), without the local Responses runtime's Chat
+// Completions translation.
+//
+// Native support has to be declared explicitly. Three declarations count:
+//
+//  1. `capabilities.responses: false` always wins: the operator has said the
+//     channel does not serve Responses at all.
+//  2. an `api_type` of `responses` / `responses_native` names the Responses API
+//     as the channel's own surface.
+//  3. `capabilities.responses: true` on a channel that cannot serve Chat
+//     Completions at all. Such a channel has no Chat Completions backend, so the
+//     local Responses runtime cannot translate for it; the declared Responses
+//     capability is the only way it can answer `/v1/responses`, so it must mean
+//     the native API.
+//
+// A bare channel-level `capabilities.responses: true` on a channel that still
+// serves Chat Completions is NOT proof of native support. Chat Completions
+// channels commonly advertise both flags so that the Responses entrypoint can be
+// answered through the local runtime, and treating that flag as native made the
+// proxy forward a raw Responses request to an upstream whose `/v1/responses` is
+// either absent or not mounted for the requested model (the NVIDIA NIM
+// incident). Such a channel serves `/v1/responses` only through the local
+// runtime, unless the operator opts in per model with the tri-state
+// `channel_models.supports_responses` override - which
+// SupportsResponsesAPIForModel honours - or the channel's api_type is
+// responses/responses_native. Raw pass-through eligibility uses
+// SupportsNativeResponsesPath, so this predicate is what keeps a chat-completions
+// channel from being selected for a pass-through it cannot honour.
 func (u ResolvedUpstream) SupportsResponsesAPI() bool {
 	enabled, configured := u.Capability(CapabilityResponses)
 	if configured && !enabled {
@@ -496,7 +525,7 @@ func (u ResolvedUpstream) SupportsResponsesAPI() bool {
 	if isResponsesAPIType(u.APIType) {
 		return true
 	}
-	return configured && enabled
+	return configured && enabled && !u.SupportsChatCompletionsAPI()
 }
 
 func (u ResolvedUpstream) SupportsToolCalling() bool {
@@ -536,8 +565,15 @@ func (u ResolvedUpstream) ModelCapability(model string, name string) (bool, bool
 	}
 }
 
-// SupportsResponsesAPIForModel resolves Responses support for one model,
+// SupportsResponsesAPIForModel resolves native Responses support for one model,
 // preferring the per-model override over the target-level capability.
+//
+// The tri-state `channel_models.supports_responses` value is the operator's
+// explicit per-model declaration: true opts a model into native pass-through even
+// on a Chat Completions channel, false keeps it on the local runtime even on a
+// Responses channel. A model with no declared value falls back to
+// SupportsResponsesAPI, which never infers native support from a channel-level
+// capability alone.
 func (u ResolvedUpstream) SupportsResponsesAPIForModel(model string) bool {
 	if enabled, configured := u.ModelCapability(model, CapabilityResponses); configured {
 		return enabled

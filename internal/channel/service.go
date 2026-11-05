@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/modelprobe"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
@@ -488,7 +489,19 @@ func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report pro
 	if err != nil {
 		return store.ChannelConfigRecord{}, nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
 	}
+	// The provider probe only checks routes: it POSTs an empty body and treats a 400
+	// "missing model" as proof that the endpoint exists. That is not enough to grant the
+	// channel-level Responses capability - a Chat Completions channel would then be offered
+	// a native `/v1/responses` pass-through it cannot honour (NVIDIA NIM lists the model but
+	// answers plain-text `404 page not found` on `/v1/responses`). Only apply Responses when
+	// the channel is Responses-typed, or when it explicitly has no Chat Completions backend
+	// (so Responses can only mean the native surface). The HTTP client's per-model probe is
+	// what is allowed to grant Responses after it actually reached the endpoint.
+	responsesAllowed := responsesCapabilityAllowed(updated.APIType, capabilities)
 	for _, capability := range report.Capabilities {
+		if isResponsesCapability(capability) && !responsesAllowed {
+			continue
+		}
 		if upstream.SetCapabilityIfUnset(&capabilities, capability, true) {
 			if field := upstream.CapabilityFieldName(capability); field != "" {
 				fields = append(fields, field)
@@ -1062,4 +1075,153 @@ func channelModelAliases(models []store.ChannelModelRecord, aliases []store.Mode
 		return nil
 	}
 	return out
+}
+
+// responsesCapabilityAllowed reports whether a route-only provider probe may grant the
+// channel-level Responses capability.
+//
+// It may when the channel is already Responses-typed, or when Chat Completions is explicitly
+// disabled (without a local Chat Completions backend the only possible Responses surface is
+// native). Everywhere else the probe saw a route, not a working model.
+func responsesCapabilityAllowed(apiType string, capabilities config.UpstreamCapabilitiesConfig) bool {
+	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(apiType)), "-", "_")
+	if normalized == upstream.APITypeResponses || normalized == upstream.APITypeResponsesNative {
+		return true
+	}
+	return capabilities.ChatCompletions != nil && !*capabilities.ChatCompletions
+}
+
+func isResponsesCapability(capability string) bool {
+	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(capability)), "-", "_")
+	return normalized == upstream.CapabilityResponses
+}
+
+// ErrChannelModelNotFound is returned by ModelProbeTarget when the requested model is not one
+// of the channel's channel_models rows. The Monitor API answers it with 404 rather than a
+// logical probe failure, because there is nothing to probe.
+var ErrChannelModelNotFound = errors.New("channel model not found")
+
+// ErrChannelConfigInvalid is returned when a stored channel cannot be resolved into a usable
+// upstream (for example a missing base_url). It lets the HTTP layer answer 400 for a
+// configuration problem instead of 500 for a store failure.
+var ErrChannelConfigInvalid = errors.New("channel configuration cannot be resolved")
+
+// HTTPClient returns the HTTP client the service probes with, if one was overridden. The
+// Monitor per-model probe passes it to modelprobe.Run so it uses the same client as the
+// channel probe instead of silently creating a second one.
+func (s *Service) HTTPClient() *http.Client {
+	if s == nil {
+		return nil
+	}
+	return s.httpClient
+}
+
+// ModelProbeTarget resolves one channel model into the minimal target the per-model probe
+// needs: the decrypted upstream (base URL, credentials and routing profile), the wire model
+// name and the protocol surfaces the forwarding path would actually use.
+//
+// It only reads. No probe run, model timestamp or configuration row is written. The returned
+// error is sql.ErrNoRows when the channel does not exist, ErrChannelModelNotFound when the
+// model is not a channel_models row, and ErrChannelConfigInvalid when the channel resolves to
+// an unusable upstream.
+func (s *Service) ModelProbeTarget(channelID, model string) (modelprobe.Target, error) {
+	if s == nil || s.store == nil {
+		return modelprobe.Target{}, errors.New("channel service store is required")
+	}
+	channelID = strings.TrimSpace(channelID)
+	model = strings.TrimSpace(model)
+	if channelID == "" {
+		return modelprobe.Target{}, errors.New("channel id is required")
+	}
+	if model == "" {
+		return modelprobe.Target{}, errors.New("model is required")
+	}
+	channel, err := s.store.GetChannelConfig(channelID)
+	if err != nil {
+		return modelprobe.Target{}, err
+	}
+	models, err := s.store.ListChannelModels(channelID, false)
+	if err != nil {
+		return modelprobe.Target{}, err
+	}
+	record, ok := findChannelModel(models, model)
+	if !ok {
+		return modelprobe.Target{}, fmt.Errorf("%w: %q on channel %q", ErrChannelModelNotFound, model, channelID)
+	}
+	aliases, err := s.store.ListModelAliases("", true)
+	if err != nil {
+		return modelprobe.Target{}, err
+	}
+	cfg := UpstreamConfigFromChannel(channel)
+	// The forwarding path reads per-model overrides, so the probe has to resolve the target
+	// with the same projection: a model that declares its own protocol surface must be probed
+	// over that surface, not over the channel-level one.
+	cfg.ModelCapabilities = ChannelModelCapabilities(models, aliases, channelID)
+	resolved, err := upstream.Resolve(cfg)
+	if err != nil {
+		return modelprobe.Target{}, fmt.Errorf("%w: %v", ErrChannelConfigInvalid, err)
+	}
+	wireModel := strings.TrimSpace(record.UpstreamModel)
+	if wireModel == "" {
+		wireModel = record.Model
+	}
+	declared := map[modelprobe.Protocol]bool{
+		modelprobe.ProtocolChatCompletions: resolved.SupportsChatCompletionsAPIForModel(record.Model),
+		// "Declared" is deliberately broader than native pass-through eligibility: the
+		// operator needs the test to tell them that a declared Responses surface is not
+		// actually served for this model, which is exactly the NVIDIA NIM incident.
+		modelprobe.ProtocolResponses:       responsesDeclared(resolved, record.Model),
+		modelprobe.ProtocolMessages:        false,
+		modelprobe.ProtocolGenerateContent: false,
+	}
+	switch resolved.ProtocolFamily {
+	case upstream.ProtocolFamilyAnthropicMessages:
+		declared[modelprobe.ProtocolMessages] = true
+	case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
+		declared[modelprobe.ProtocolGenerateContent] = true
+	}
+	return modelprobe.Target{
+		ChannelID:       channel.ID,
+		Model:           record.Model,
+		WireModel:       wireModel,
+		ProtocolFamily:  resolved.ProtocolFamily,
+		ChannelEnabled:  channel.Enabled,
+		ModelEnabled:    record.Enabled,
+		ModelState:      string(ModelAvailability(channel, record)),
+		Routable:        ModelRoutable(channel, record),
+		Declared:        declared,
+		NativeResponses: resolved.SupportsNativeResponsesPath(record.Model),
+		Resolved:        resolved,
+	}, nil
+}
+
+// responsesDeclared reports Responses support as declared by the stored channel and model
+// configuration, independent of whether the upstream can serve `/v1/responses` natively.
+//
+// The order is the operator's declaration order: a per-model `supports_responses` value wins
+// (true or false); otherwise a channel-level `capabilities.responses: true` or a Responses
+// `api_type` counts. This is what the per-model probe must test, because a channel can declare
+// Responses while its upstream only serves it through a route that is missing for one model.
+func responsesDeclared(resolved upstream.ResolvedUpstream, model string) bool {
+	if enabled, configured := resolved.ModelCapability(model, upstream.CapabilityResponses); configured {
+		return enabled
+	}
+	if resolved.Capabilities.Responses != nil && *resolved.Capabilities.Responses {
+		return true
+	}
+	switch resolved.APIType {
+	case upstream.APITypeResponses, upstream.APITypeResponsesNative:
+		return true
+	}
+	return false
+}
+
+func findChannelModel(models []store.ChannelModelRecord, model string) (store.ChannelModelRecord, bool) {
+	needle := strings.ToLower(strings.TrimSpace(model))
+	for _, record := range models {
+		if strings.ToLower(strings.TrimSpace(record.Model)) == needle {
+			return record, true
+		}
+	}
+	return store.ChannelModelRecord{}, false
 }

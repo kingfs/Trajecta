@@ -73,6 +73,9 @@ export const apiPaths = {
   providerModels: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models`,
   providerModelsBatch: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models/batch`,
   providerModel: (providerID, model) => `/api/channels/${encodeURIComponent(providerID)}/models/${encodeURIComponent(model)}`,
+  // The per-model quick connectivity test: one POST probes every protocol the
+  // channel declares for the given model and returns the per-protocol outcome.
+  providerModelTest: "/api/provider-model-test",
   providerProbePreview: "/api/provider-probe",
   providerProbeReport: "/api/provider-probe/report",
   providerProbeApply: "/api/provider-probe/report/apply",

@@ -925,3 +925,208 @@ func TestBootstrapUpstreamFromConfigResolves(t *testing.T) {
 		t.Fatalf("routing_profile = %q, want %q", resolved.RoutingProfile, RoutingProfileOpenAIDefault)
 	}
 }
+
+// TestResponsesNativeRequiresExplicitDeclaration pins the routing contract for
+// `/v1/responses`: a channel-level `capabilities.responses: true` is not on its
+// own a declaration of the native Responses API. This is the NVIDIA NIM incident
+// regression - channel `nvidia-nim` had api_type=chat_completions,
+// capabilities.responses=true and a model with supports_responses NULL, and the
+// proxy forwarded the raw Responses request to an upstream whose
+// /v1/responses 404s.
+func TestResponsesNativeRequiresExplicitDeclaration(t *testing.T) {
+	incidentModel := "deepseek-ai/deepseek-v4.1-flash"
+
+	tests := []struct {
+		name                  string
+		cfg                   config.UpstreamConfig
+		model                 string
+		wantChannelNative     bool
+		wantNative            bool
+		wantNativePath        bool
+		wantResponsesEndpoint bool
+	}{
+		{
+			// The incident combination: chat-completions channel advertising the
+			// responses capability, no per-model override. It must stay a local
+			// runtime backend and must never be a native pass-through candidate.
+			name: "incident chat channel with responses capability is not native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://integrate.api.nvidia.com/v1",
+				ProviderPreset: "nvidia_nim",
+				APIType:        APITypeChatCompletions,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses:       perModelBoolPtr(true),
+					ChatCompletions: perModelBoolPtr(true),
+				},
+			},
+			model:                 incidentModel,
+			wantChannelNative:     false,
+			wantNative:            false,
+			wantNativePath:        false,
+			wantResponsesEndpoint: true,
+		},
+		{
+			// The same channel without an explicit chat_completions capability is
+			// still chat-capable through api_type, so it must not become native
+			// either (the "bare flag" case).
+			name: "chat api_type with responses flag and no chat capability is not native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://integrate.api.nvidia.com/v1",
+				ProviderPreset: "nvidia_nim",
+				APIType:        APITypeChatCompletions,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses: perModelBoolPtr(true),
+				},
+			},
+			model:                 incidentModel,
+			wantChannelNative:     false,
+			wantNative:            false,
+			wantNativePath:        false,
+			wantResponsesEndpoint: true,
+		},
+		{
+			// The tri-state model override is the operator's explicit opt-in for a
+			// model that really does serve the native Responses API on this channel.
+			name: "model override opts a chat channel model into native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://integrate.api.nvidia.com/v1",
+				ProviderPreset: "nvidia_nim",
+				APIType:        APITypeChatCompletions,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses:       perModelBoolPtr(true),
+					ChatCompletions: perModelBoolPtr(true),
+				},
+				ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+					incidentModel: {Responses: perModelBoolPtr(true)},
+				},
+			},
+			model:                 incidentModel,
+			wantChannelNative:     false,
+			wantNative:            true,
+			wantNativePath:        true,
+			wantResponsesEndpoint: true,
+		},
+		{
+			// api_type=responses names the native surface and keeps working.
+			name: "api_type responses is native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.example.com/v1",
+				ProviderPreset: "openai",
+				APIType:        APITypeResponses,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses:       perModelBoolPtr(true),
+					ChatCompletions: perModelBoolPtr(false),
+				},
+			},
+			model:                 "gpt-native",
+			wantChannelNative:     true,
+			wantNative:            true,
+			wantNativePath:        true,
+			wantResponsesEndpoint: true,
+		},
+		{
+			// responses_native is the other explicit native api_type.
+			name: "api_type responses_native is native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.example.com/v1",
+				ProviderPreset: "openai",
+				APIType:        APITypeResponsesNative,
+			},
+			model:                 "gpt-native",
+			wantChannelNative:     true,
+			wantNative:            true,
+			wantNativePath:        true,
+			wantResponsesEndpoint: true,
+		},
+		{
+			// An explicit false is the operator saying "no Responses API here",
+			// and it overrides the api_type.
+			name: "explicit responses false wins over responses api_type",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.example.com/v1",
+				ProviderPreset: "openai",
+				APIType:        APITypeResponses,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses: perModelBoolPtr(false),
+				},
+			},
+			model:                 "gpt-native",
+			wantChannelNative:     false,
+			wantNative:            false,
+			wantNativePath:        false,
+			wantResponsesEndpoint: false,
+		},
+		{
+			// A Responses-only channel that cannot serve Chat Completions keeps
+			// its native routing: the local runtime has no backend here, so the
+			// declared responses capability has to mean the native API.
+			name: "responses-only chat-typed channel is native",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.example.com/v1",
+				ProviderPreset: "openai",
+				APIType:        APITypeChatCompletions,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses:       perModelBoolPtr(true),
+					ChatCompletions: perModelBoolPtr(false),
+				},
+			},
+			model:                 "responses-only",
+			wantChannelNative:     true,
+			wantNative:            true,
+			wantNativePath:        true,
+			wantResponsesEndpoint: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(tt.cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if got := resolved.SupportsResponsesAPI(); got != tt.wantChannelNative {
+				t.Fatalf("SupportsResponsesAPI() = %v, want %v", got, tt.wantChannelNative)
+			}
+			if got := resolved.SupportsResponsesAPIForModel(tt.model); got != tt.wantNative {
+				t.Fatalf("SupportsResponsesAPIForModel(%q) = %v, want %v", tt.model, got, tt.wantNative)
+			}
+			if got := resolved.SupportsNativeResponsesPath(tt.model); got != tt.wantNativePath {
+				t.Fatalf("SupportsNativeResponsesPath(%q) = %v, want %v", tt.model, got, tt.wantNativePath)
+			}
+			// The endpoint predicate stays "can serve responses somehow": native
+			// or the local runtime's Chat Completions translation.
+			if got := resolved.SupportsEndpointForModel("/v1/responses", tt.model); got != tt.wantResponsesEndpoint {
+				t.Fatalf("SupportsEndpointForModel(/v1/responses, %q) = %v, want %v", tt.model, got, tt.wantResponsesEndpoint)
+			}
+		})
+	}
+}
+
+// A per-model supports_responses=false keeps a Responses-channel model on the
+// local runtime even though the channel declares the native surface.
+func TestResponsesModelOverrideFalseBeatsNativeChannel(t *testing.T) {
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        APITypeResponses,
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       perModelBoolPtr(true),
+			ChatCompletions: perModelBoolPtr(true),
+		},
+		ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+			"local-only": {Responses: perModelBoolPtr(false), ChatCompletions: perModelBoolPtr(true)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if !resolved.SupportsResponsesAPI() {
+		t.Fatalf("SupportsResponsesAPI() = false, want the responses api_type channel to be native")
+	}
+	if resolved.SupportsResponsesAPIForModel("local-only") {
+		t.Fatalf("SupportsResponsesAPIForModel(local-only) = true, want false from the model override")
+	}
+	if got := resolved.SupportsEndpointForModel("/v1/responses", "local-only"); !got {
+		t.Fatalf("SupportsEndpointForModel(/v1/responses, local-only) = false, want the local fallback to stay available")
+	}
+}

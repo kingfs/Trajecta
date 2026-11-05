@@ -52,7 +52,11 @@ upstreams:
       base_url: "https://api.openai.com/v1"
       api_key: "$env:OPENAI_API_KEY"
       provider_preset: "openai"
-      api_type: "chat_completions"
+      # api_type declares how this channel serves Responses: "chat_completions"
+      # means /v1/responses goes through the local Responses runtime unless a
+      # model opts in with a per-model responses override; "responses" declares
+      # the native Responses API (this example keeps OpenAI's native surface).
+      api_type: "responses"
       mode: "proxy"
       capabilities:
         chat_completions: true

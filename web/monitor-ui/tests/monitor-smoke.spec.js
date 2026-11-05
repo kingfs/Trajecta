@@ -150,6 +150,18 @@ test.beforeEach(async ({ page }) => {
         },
       });
     }
+    if (path === "/api/provider-model-test" && method === "POST") {
+      const body = route.request().postDataJSON();
+      // The quick test only names what to probe; the channel already holds the
+      // credential, so the payload must not carry one.
+      expect(body.channel_id).toBe("openai-primary");
+      expect(body.model).toBe("gpt-5");
+      expect(body.protocol).toBe("auto");
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain("sk-test-secret");
+      expect(raw).not.toMatch(/api[_-]?key|authorization/i);
+      return route.fulfill({ json: providerModelTestPayload(body) });
+    }
     if (path === "/api/provider-setup/validate" && method === "POST") {
       const body = route.request().postDataJSON();
       expect(body.base_url).toBe("https://api.openai.example/v1");
@@ -422,7 +434,13 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByText("responses_server").first()).toBeVisible();
   await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
-  await expect(page.getByText("discovered, disabled")).toBeVisible();
+  // A discovered-but-disabled model has to stay visibly marked as both. The card
+  // used to print one combined "discovered, disabled" span; it now names the
+  // source beside the model name and carries the state as its own tag, so the
+  // assertion moved into the row the same way.
+  const discoveredCard = page.locator(".provider-model-card").filter({ hasText: "gpt-new" });
+  await expect(discoveredCard.getByText("probe discovered")).toBeVisible();
+  await expect(discoveredCard.getByText("Disabled")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit provider" }).click();
   await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
@@ -2318,6 +2336,65 @@ function providerProbeBatchReportPayload() {
   };
 }
 
+// The incident the quick test exists for: the model answers Chat Completions but
+// the endpoint never served `/v1/responses`, while the channel still declares
+// Responses support for it. Both protocols are reported, one works and one does
+// not, and the only actionable suggestion is the per-model disable.
+function providerModelTestPayload(body) {
+  const now = new Date().toISOString();
+  return {
+    channel_id: body.channel_id,
+    model: body.model,
+    wire_model: body.model,
+    protocol_family: "openai_compatible",
+    channel_enabled: true,
+    model_enabled: true,
+    model_state: "enabled",
+    routable: true,
+    declared: { chat_completions: true, responses: true, models: true },
+    native_responses: false,
+    status: "partial",
+    started_at: now,
+    completed_at: now,
+    duration_ms: 402,
+    results: [
+      {
+        protocol: "chat_completions",
+        declared: true,
+        method: "POST",
+        path: "/v1/chat/completions",
+        url: "https://api.openai.example/v1/chat/completions",
+        status: "ok",
+        http_status: 200,
+        latency_ms: 314,
+        error: "",
+        hint: "",
+      },
+      {
+        protocol: "responses",
+        declared: true,
+        method: "POST",
+        path: "/v1/responses",
+        url: "https://api.openai.example/v1/responses",
+        status: "endpoint_not_supported",
+        http_status: 404,
+        latency_ms: 88,
+        error: "404 page not found",
+        hint: "The channel declares Responses support but the endpoint is not served.",
+      },
+    ],
+    suggestions: [
+      {
+        kind: "disable_capability",
+        capability: "responses",
+        scope: "model",
+        message: "Responses is not served for this model.",
+      },
+    ],
+    warnings: [],
+  };
+}
+
 function providerSetupValidatePayload(body) {
   return {
     normalized_config: {
@@ -2388,6 +2465,41 @@ test("disabled provider preserves model choices without claiming availability", 
   await expect(page.getByLabel("historical-model enabled", { exact: true })).toHaveCount(0);
   await expect(page.getByText("History only — add model to configure routing")).toBeVisible();
   await expect(page.locator(".provider-model-card").getByText("new", { exact: true })).toHaveCount(0);
+});
+
+// The per-model connectivity test. The result is inline on the card, one chip
+// per protocol, and the "Responses 404s" case offers the one-click fix. The
+// assertion is on the marker + words, not on colour: the chip has to read
+// without it. The PATCH is captured to prove the button edits the model, not the
+// channel, and carries only the capability switch.
+test("model-card connectivity test shows per-protocol results and disables Responses", async ({ page }) => {
+  await page.goto("/providers/openai-primary");
+  const card = page.locator(".provider-model-card").filter({ hasText: "gpt-5" }).first();
+  await card.getByRole("button", { name: "Test connectivity for gpt-5" }).click();
+
+  const status = card.getByRole("status");
+  await expect(status).toBeVisible();
+  await expect(status).toContainText("Connectivity test");
+  await expect(status).toContainText("partially working");
+  // A working protocol: marker, name and latency.
+  await expect(status).toContainText("✓ Chat Completions · 314 ms");
+  // The failing one: marker, name, latency, HTTP status and the human reason.
+  await expect(status).toContainText("✗ Responses · 88 ms · 404 endpoint not supported");
+  await expect(status).toContainText("Chat works but this provider does not serve /v1/responses for this model.");
+  await expect(status).toContainText("Responses is not served for this model.");
+
+  const patchRequest = page.waitForRequest(
+    (request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/channels/openai-primary/models/gpt-5",
+  );
+  await status.getByRole("button", { name: "Disable Responses for this model" }).click();
+  expect((await patchRequest).postDataJSON()).toEqual({ supports_responses: false });
+
+  const notifications = page.getByRole("region", { name: /Notifications/ });
+  await expect(notifications).toContainText("Responses support disabled for this model.");
+  // The result stays on the card, now marked as applied, and the action is gone
+  // so it cannot be fired twice.
+  await expect(status.getByText("Responses support disabled for this model")).toBeVisible();
+  await expect(status.getByRole("button", { name: "Disable Responses for this model" })).toHaveCount(0);
 });
 
 test("provider toggle failure is visible and preserves the displayed choice", async ({ page }) => {

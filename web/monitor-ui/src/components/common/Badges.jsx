@@ -14,6 +14,7 @@ import {
   Menu,
   Pencil,
   Percent,
+  PlugZap,
   Plus,
   Radar,
   Sigma,
@@ -154,6 +155,17 @@ export function ProbeIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
       <Radar size={size} aria-hidden="true" />
+    </IconFrame>
+  );
+}
+
+// The per-model connectivity test. Distinct from ProbeIcon on purpose: a probe
+// discovers the channel's models and capabilities, while this sends one minimal
+// request to one model's endpoints.
+export function TestIcon({ size = 16 } = {}) {
+  return (
+    <IconFrame>
+      <PlugZap size={size} aria-hidden="true" />
     </IconFrame>
   );
 }

@@ -168,7 +168,7 @@ Trajecta 自身的事件收件箱：
 
 #### 模型服务商 `/providers`
 
-管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability。模型级的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 覆盖不在这里编辑，见上面的模型页。
+管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability。模型级的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 覆盖不在这里编辑，见上面的模型页。需要注意：渠道级 `capabilities.responses=true` 只表示 `/v1/responses` 可由本地 Responses runtime 翻译；要让某个模型走原生 Responses 直通，必须把该模型的 `supports_responses` 显式设为支持，或把渠道 `api_type` 设为 `responses` / `responses_native`。Chat Completions 渠道如果也需要原生直通，请在模型级或模型连通性测试里确认后再开启。
 
 创建前可以先做探测：
 
@@ -176,8 +176,9 @@ Trajecta 自身的事件收件箱：
 - `POST /api/provider-setup/validate` 组合 base URL、API key、preset、模型发现与 capability 字段做一次探测，并把归一化配置写回表单，但不落库；响应不回显 API key，只返回 `api_key_hint`、secret storage mode 和脱敏 header 状态。表单字段变化会清空旧验证结果。
 - `POST /api/provider-setup/apply` 才真正把配置写入 store。
 - 列表页的 Batch probe and apply 先跑 `POST /api/provider-probe/report` 预览，再用 `POST /api/provider-probe/report/apply` 对 detected 且存在可补字段的 provider 批量应用；批量应用只补缺失的 `api_type`、`protocol_family` 和未设置的 capability，不覆盖显式配置，也不覆盖显式 `false`。
+- provider probe 只检查路由是否存在：它给 `/v1/responses` 发空 body，`400 missing model` 也会被算作 endpoint 存在，所以不能证明某个模型在该协议上可用。因此 Chat Completions 渠道的 `capabilities.responses` 不再由 route-only probe 自动写入；模型级支持用模型卡上的「连通性测试」实测确认。
 
-还可以启停模型服务商、启停单个模型、探测模型、查看用量/Token/失败与 probe 结果。
+还可以启停模型服务商、启停单个模型、探测模型、查看用量/Token/失败与 probe 结果。每个模型卡上有一个「连通性测试」按钮：用该渠道已解密的 key 和该模型的线上名，按自动探测声明协议发送最小请求（chat 16 token、responses 16 output token），并在卡片内就地显示每个协议的 HTTP 状态、延迟与结论。测试会区分 `endpoint_not_supported`（如 provider 对 `/v1/responses` 返回纯文本 404）、`model_not_found`、`auth_failed`、超时等；当 chat 可用而 `/v1/responses` 不可用时，会给出「关闭该模型的 Responses 支持」的一键操作（只写模型级 `supports_responses=false`，立即 reload 路由，不需要重启）。该测试不写 `channel_probe_runs`/`last_probe_at`、不产生 cassette/logs、不进入用量统计，也不经过 router。
 
 **模型清单是唯一授权来源。** 详情页的「同步模型」按钮执行一次探测，返回新增/移除数量，并保持每个模型原有的开启状态；新模型默认关闭。每行带一个状态：`enabled`（已开启且最近一次成功同步仍返回它）、`disabled`（已关闭）、`removed`（最近一次成功同步不再返回它，开关保留但不参与路由，重新同步后恢复）、`unverified`（手动添加，或渠道从未成功同步过，可路由但标记未验证）。`upstream_model`（发往上游的模型名）在行内显示；需要别名改写时在模型详情页设置。开启/关闭立即发布到路由，不需要重启；不支持「允许未知模型」——未开启的模型由代理直接返回 404 `model_not_enabled`（声明过但不可路由）或 `model_unknown`（没有渠道声明过），不会发往任何上游。
 

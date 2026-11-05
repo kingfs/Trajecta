@@ -3513,8 +3513,13 @@ func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
 	if len(result.Applied) != 1 || !result.Applied[0].Applied {
 		t.Fatalf("result.Applied = %#v", result.Applied)
 	}
-	if !slices.Contains(result.Applied[0].AppliedFields, "capabilities.responses") {
-		t.Fatalf("AppliedFields = %#v, want capabilities.responses", result.Applied[0].AppliedFields)
+	// A route-only provider probe must not grant the Responses capability to a
+	// Chat Completions channel: the probe saw a route, not a working model.
+	if slices.Contains(result.Applied[0].AppliedFields, "capabilities.responses") {
+		t.Fatalf("AppliedFields = %#v, a chat-typed channel must not gain responses from a route-only probe", result.Applied[0].AppliedFields)
+	}
+	if !slices.Contains(result.Applied[0].AppliedFields, "capabilities.models") {
+		t.Fatalf("AppliedFields = %#v, want capabilities.models", result.Applied[0].AppliedFields)
 	}
 	record, err := st.GetChannelConfig("openai-primary")
 	if err != nil {
@@ -3530,8 +3535,8 @@ func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
 	if selection.Target.Upstream.APIType != "chat_completions" {
 		t.Fatalf("selected APIType after apply = %q, want preserved chat_completions", selection.Target.Upstream.APIType)
 	}
-	if enabled, configured := selection.Target.Upstream.Capability(upstream.CapabilityResponses); !configured || !enabled {
-		t.Fatalf("responses capability after apply = enabled %v configured %v, want true/true", enabled, configured)
+	if enabled, configured := selection.Target.Upstream.Capability(upstream.CapabilityResponses); configured {
+		t.Fatalf("responses capability after apply = enabled %v configured %v, want unconfigured on a chat-typed channel", enabled, configured)
 	}
 }
 

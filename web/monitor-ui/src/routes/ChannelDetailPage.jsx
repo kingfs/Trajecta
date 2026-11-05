@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
-import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
+import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon, TestIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
@@ -18,6 +18,14 @@ import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
+import {
+  applyResponsesDisabled,
+  buildModelTestPayload,
+  disableResponsesPayload,
+  disableResponsesSuggestion,
+  summarizeModelTest,
+  testLatencyText,
+} from "../lib/modelTest";
 
 export function ProviderDetailPage() {
   const refresh = useRefresh();
@@ -28,6 +36,11 @@ export function ProviderDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [modelDraft, setModelDraft] = useState("");
+  // The quick connectivity test is per model, and so is its state: a test in
+  // flight on one card must not disable the toolbar or another card's button.
+  // The result map keeps the last outcome after the page refetches.
+  const [testResults, setTestResults] = useState({});
+  const [testingModels, setTestingModels] = useState({});
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(() => emptyEditForm());
   const [lastProbe, setLastProbe] = useState(null);
@@ -119,6 +132,44 @@ export function ProviderDetailPage() {
     onSuccess: reload,
   });
 
+  // The quick connectivity test reports inline rather than through the page's
+  // shared `busy` string, so its pending state is tracked per model. The request
+  // body carries no credential: the channel already stores the API key.
+  const testModel = useWriteMutation({
+    mutationFn: ({ model }) => postJSON(apiPaths.providerModelTest, buildModelTestPayload({ channelID: effectiveProviderID, model })),
+    error: "channelDetail.testError",
+    onSuccess: (result, variables) => {
+      const model = variables?.model;
+      if (!model) {
+        return;
+      }
+      setTestResults((current) => ({ ...current, [model]: result }));
+      setTestingModels((current) => removingKey(current, model));
+    },
+    onError: (_err, variables) => {
+      const model = variables?.model;
+      if (model) {
+        setTestingModels((current) => removingKey(current, model));
+      }
+    },
+  });
+
+  // The one-click fix for "chat works, /v1/responses does not": turn Responses
+  // off for this model. The result keeps its observation but loses the action,
+  // so a second click cannot be offered against an already-applied suggestion.
+  const disableResponses = useWriteMutation({
+    mutationFn: ({ model }) => patchJSON(apiPaths.providerModel(effectiveProviderID, model), disableResponsesPayload()),
+    success: "channelDetail.testSaved",
+    error: "channelDetail.updateModelError",
+    onSuccess: (_payload, variables) => {
+      const model = variables?.model;
+      if (model) {
+        setTestResults((current) => (current[model] ? { ...current, [model]: applyResponsesDisabled(current[model]) } : current));
+      }
+      reload();
+    },
+  });
+
   const addModel = useWriteMutation({
     mutationFn: ({ model }) => postJSON(apiPaths.providerModels(effectiveProviderID), { model, display_name: model, enabled: true }),
     error: "channelDetail.addModelError",
@@ -155,6 +206,20 @@ export function ProviderDetailPage() {
   const confirmDeleteModel = (model) => {
     if (window.confirm(t("channelDetail.deleteModelConfirm", { model }))) {
       deleteModel.mutate({ model });
+    }
+  };
+
+  const runModelTest = (model) => {
+    if (!model || testingModels[model]) {
+      return;
+    }
+    setTestingModels((current) => ({ ...current, [model]: true }));
+    testModel.mutate({ model });
+  };
+
+  const runDisableResponses = (model) => {
+    if (model) {
+      disableResponses.mutate({ model });
     }
   };
 
@@ -299,7 +364,12 @@ export function ProviderDetailPage() {
                     providerEnabled={Boolean(provider.enabled)}
                     busy={busy === model.model}
                     deleting={busy === `delete:${model.model}`}
+                    testing={Boolean(testingModels[model.model])}
+                    testResult={testResults[model.model] || null}
+                    disablingResponses={Boolean(disableResponses.isPending && disableResponses.variables?.model === model.model)}
                     onToggle={() => setModelEnabled.mutate({ model: model.model, enabled: !model.enabled })}
+                    onTest={() => runModelTest(model.model)}
+                    onDisableResponses={() => runDisableResponses(model.model)}
                     onDelete={() => confirmDeleteModel(model.model)}
                   />
                 )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
@@ -458,11 +528,27 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
   );
 }
 
-function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onDelete }) {
+function ProviderModelRow({
+  item,
+  providerEnabled,
+  busy,
+  deleting,
+  testing,
+  testResult,
+  disablingResponses,
+  onToggle,
+  onTest,
+  onDisableResponses,
+  onDelete,
+}) {
   const { t } = useI18n();
   const summary = item.summary || {};
   const state = item.state || (item.enabled ? "enabled" : "disabled");
-  const canDelete = item.source !== "trace";
+  // A trace-discovered model is a history row, not a configured route: there is
+  // nothing to test until it has been added, and no card action is offered.
+  const testable = item.source !== "trace";
+  const canDelete = testable;
+  const testLabel = testing ? t("channelDetail.testing") : t("channelDetail.testModel");
   const stateLabel = {
     enabled: t("channelDetail.stateEnabled"),
     disabled: t("channelDetail.stateDisabled"),
@@ -479,6 +565,11 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
         </div>
         <div className="action-group">
           {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={t("channelDetail.modelEnabled", { model: item.model })} /> : <span>{t("channelDetail.historyOnly")}</span>}
+          {testable ? (
+            <Button variant="default" size="icon" type="button" onClick={onTest} disabled={testing} title={testLabel} aria-label={t("channelDetail.testModelAria", { model: item.model })}>
+              {testing ? <span className="provider-model-test-spinner" aria-hidden="true" /> : <TestIcon />}
+            </Button>
+          ) : null}
           {canDelete ? (
             <Button variant="default" size="icon" type="button" onClick={onDelete} disabled={deleting} title={t("channelDetail.deleteModel")} aria-label={t("channelDetail.deleteModelAria", { model: item.model })}>
               <DeleteIcon />
@@ -493,6 +584,9 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
         {state === "unverified" ? <InlineTag tone="gold">{t("channelDetail.upstreamNameHint")}</InlineTag> : null}
         {item.enabled && !providerEnabled ? <InlineTag tone="gold">{t("channelDetail.blockedProviderDisabled")}</InlineTag> : null}
       </div>
+      {testing ? <ModelTestPending /> : testResult ? (
+        <ModelTestResult result={testResult} disabling={disablingResponses} onDisableResponses={onDisableResponses} />
+      ) : null}
       <div className="model-market-metrics model-market-metrics-compact">
         <Metric label="req" value={formatCount(summary.request_count)} />
         <Metric label="err" value={formatCount(summary.failed_request)} danger={Number(summary.failed_request || 0) > 0} />
@@ -500,6 +594,100 @@ function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onD
       </div>
     </div>
   );
+}
+
+function ModelTestPending() {
+  const { t } = useI18n();
+  return (
+    <div className="provider-model-test-result provider-model-test-result-pending" role="status" aria-live="polite">
+      <span className="provider-model-test-spinner" aria-hidden="true" />
+      <span>{t("channelDetail.testing")}</span>
+    </div>
+  );
+}
+
+// Markers are characters, not colours: the chip's tone only reinforces what
+// the glyph and the words already say. That is also why the failing chips print
+// the HTTP status next to the status label.
+const TEST_MARKERS = {
+  check: "✓",
+  cross: "✗",
+  skip: "–",
+};
+
+function ModelTestResult({ result, disabling, onDisableResponses }) {
+  const { t } = useI18n();
+  const summary = summarizeModelTest(result);
+  const suggestion = disableResponsesSuggestion(result);
+  const warnings = (Array.isArray(result.warnings) ? result.warnings : []).filter((warning) => typeof warning === "string" && warning.trim());
+  const summaryLabel = summary.summaryLabelKey ? t(summary.summaryLabelKey) : summary.status;
+  return (
+    <div className="provider-model-test-result" role="status" aria-live="polite">
+      <div className="provider-model-test-head">
+        <span className="provider-model-test-title">{t("channelDetail.testResultTitle")}</span>
+        {summaryLabel ? <InlineTag tone={summary.tone}>{summaryLabel}</InlineTag> : null}
+        {testLatencyText(t, summary.durationMs) ? <span className="provider-model-test-duration">{testLatencyText(t, summary.durationMs)}</span> : null}
+      </div>
+      {summary.chips.length ? (
+        <div className="provider-model-test-chips">
+          {summary.chips.map((chip) => {
+            const parts = [chip.label || chip.protocol];
+            const latencyText = testLatencyText(t, chip.latencyMs);
+            if (latencyText) {
+              parts.push(latencyText);
+            }
+            // The success chip is the bare protocol and its latency, as in
+            // "✓ Chat Completions · 314 ms": repeating "ok" adds no information.
+            // A failing or skipped one names the outcome after the status code.
+            if (chip.marker !== "check") {
+              const statusText = chip.labelKey ? t(chip.labelKey) : chip.status;
+              parts.push(chip.httpStatus ? `${chip.httpStatus} ${statusText}` : statusText);
+            }
+            return (
+              <span
+                key={chip.protocol}
+                className={`provider-model-test-chip provider-model-test-chip-${chip.tone}`}
+                title={chip.title || undefined}
+              >
+                {/* The marker is decorative here because the text beside it
+                    already states the outcome; the trailing space keeps the
+                    chip's text content readable as one string. */}
+                <span className="provider-model-test-mark" aria-hidden="true">{`${TEST_MARKERS[chip.marker] || "–"} `}</span>
+                <span>{parts.join(" · ")}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {suggestion && !result.responses_disabled ? (
+        <div className="provider-model-test-suggestion">
+          <p className="provider-model-test-suggest">{t("channelDetail.testResponsesSuggest")}</p>
+          {suggestion.message ? <p className="provider-model-test-suggest-detail">{suggestion.message}</p> : null}
+          <div className="provider-model-test-actions">
+            <Button variant="primary" size="sm" type="button" onClick={onDisableResponses} disabled={disabling}>
+              {disabling ? t("common.saving") : t("channelDetail.testDisableResponses")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {result.responses_disabled ? (
+        <div className="provider-model-test-applied">
+          <InlineTag tone="green">{t("channelDetail.testResponsesDisabled")}</InlineTag>
+        </div>
+      ) : null}
+      {warnings.length ? (
+        <ul className="provider-model-test-warnings">
+          {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function removingKey(record, key) {
+  const next = { ...record };
+  delete next[key];
+  return next;
 }
 
 function sortProviderModels(items) {

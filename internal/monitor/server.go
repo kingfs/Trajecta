@@ -761,6 +761,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/provider-model-test", monitorAuthRequired(providerModelTestAPIHandler(st, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
@@ -1088,10 +1089,45 @@ func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprob
 	if out.Capabilities == nil {
 		out.Capabilities = &config.UpstreamCapabilitiesConfig{}
 	}
+	// The provider probe checks routes with an empty body; a 400 "missing model"
+	// counts as "the path exists". That is not evidence that the channel serves a
+	// native Responses API, and granting `capabilities.responses` here made a
+	// Chat Completions channel look like a native Responses upstream (the NVIDIA
+	// NIM incident: the model is listed and works on /v1/chat/completions, but
+	// /v1/responses answers plain-text `404 page not found`). Only a
+	// Responses-typed channel, or a probe that found no Chat Completions surface
+	// at all, may take the channel-level Responses capability. Per-model support
+	// is declared from the model card / connectivity test instead.
+	allowResponsesCapability := providerSetupAllowsResponsesCapability(out.APIType, report)
 	for _, capability := range report.Capabilities {
+		if isResponsesCapability(capability) && !allowResponsesCapability {
+			continue
+		}
 		upstream.SetCapabilityIfUnset(out.Capabilities, capability, true)
 	}
 	return out
+}
+
+// providerSetupAllowsResponsesCapability reports whether a provider-setup probe
+// may grant the channel-level Responses capability. A Responses api_type is the
+// explicit native declaration. Otherwise the probe must have found no Chat
+// Completions surface, because only such a channel has no local-runtime backend
+// and therefore needs the Responses capability to mean the native surface.
+func providerSetupAllowsResponsesCapability(apiType string, report providerprobe.Report) bool {
+	switch strings.TrimSpace(apiType) {
+	case upstream.APITypeResponses, upstream.APITypeResponsesNative:
+		return true
+	}
+	for _, capability := range report.Capabilities {
+		if strings.EqualFold(strings.TrimSpace(capability), upstream.CapabilityChatCompletions) {
+			return false
+		}
+	}
+	return true
+}
+
+func isResponsesCapability(capability string) bool {
+	return strings.EqualFold(strings.TrimSpace(capability), upstream.CapabilityResponses)
 }
 
 func secretStorageMode(st *store.Store) string {

@@ -47,6 +47,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/sessionanalysis`：session 级聚合分析。
 - `internal/trajectory`：从客户端可见的 Responses cassette 重建 ATIF-v1.8 会话轨迹（不调用模型、不修改 cassette）；`scripts/validate_atif.py` 与 `scripts/atif_tests` 用固定版本官方模型做离线格式校验。
 - `internal/providerprobe`：provider 能力探测。
+- `internal/modelprobe`：按模型、按协议的最小请求连通性测试（chat/responses/messages/generateContent），把结果分类成 `ok`/`auth_failed`/`model_not_found`/`endpoint_not_supported` 等并给出可执行建议；只读，不写 store、不写 cassette、不经过 router。Monitor 的 `POST /api/provider-model-test` 与模型卡按钮使用它。
 - `internal/evals`：基于 replay 的确定性 eval 基线执行（HTTP 状态、TTFT/token 预算、tool-call 校验等）。
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
 - `internal/auth`：认证 user/token 与 JWT。

@@ -64,7 +64,11 @@ func TestHandlerCancelsUpstreamWhenClientGivesUp(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstream.URL + "/v1",
 					ProviderPreset: "openai",
-					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
+					// Native pass-through: the request is forwarded unchanged, so the
+					// channel must declare the Responses API rather than only a
+					// channel-level capability.
+					APIType:      "responses",
+					Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},

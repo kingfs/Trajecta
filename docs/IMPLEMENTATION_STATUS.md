@@ -110,7 +110,8 @@ YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Mon
 
 - 渠道的创建/更新、启停，模型的探测、启停，本地加密存储 API key 和敏感 header。
 - `POST /api/provider-setup/validate` 组合 base URL、API key、provider preset、model discovery 和 capability 字段，返回 provider probe、归一化配置和脱敏 secret state，不落库、不回显 API key；create dialog 采用 validate → review → create 流程，字段变更清空旧验证结果；只有 probe 检测成功，或用户显式提供 `api_type` 与 `protocol_family` 时才写入 channel store。
-- `POST /api/provider-probe/report` 与 `POST /api/provider-probe/report/apply` 提供只读批量 report 与显式批量写入；不接收或返回 API key，只填补缺失的 `api_type`、`protocol_family` 和未声明 capability。Monitor 写入成功后会 reload router。
+- `POST /api/provider-probe/report` 与 `POST /api/provider-probe/report/apply` 提供只读批量 report 与显式批量写入；不接收或返回 API key，只填补缺失的 `api_type`、`protocol_family` 和未声明 capability。Monitor 写入成功后会 reload router。route-only probe 只判断路由是否存在，因此 Chat Completions 渠道不会再由它自动获得 `capabilities.responses`；该 capability 只适用于 `api_type` 为 `responses`/`responses_native` 或没有 Chat Completions backend 的渠道。
+- `POST /api/provider-model-test` 按渠道 + 模型做只读连通性测试：用解密后的 key 和模型线上名，按声明协议发最小 chat/responses/messages/generateContent 请求，返回每协议状态、HTTP 状态、延迟与建议；不写 probe 记录或 `last_probe_at`、不录制、不经过 router，逻辑失败也是 HTTP 200。Monitor 模型卡上的「连通性测试」按钮使用它。
 - `provider probe-apply` 复用同一 channel service 用例。
 - `config inspect` 输出脱敏 effective config，并用 `sources` 摘要标注字段来自 config file、default、effective、empty、derived 或 not_configured。
 - `provider_probe.startup_fill=true` 时 serve 启动只在内存中填补 YAML upstream 缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置、不覆盖显式配置。

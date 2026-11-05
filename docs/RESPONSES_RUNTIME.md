@@ -34,7 +34,7 @@
 | `local_server_only` | 只用本地 runtime；没有 Chat Completions backend 时拒绝 native 直通。 |
 
 - 策略来源是应用库 `routing.settings`；代理侧读不到或值不在合法集合内时回落为 `auto`，Monitor 的 `PATCH /api/settings/routing` 会直接拒绝非法值（`unsupported responses_strategy %q`）。
-- native-vs-local **按模型**解析，不按渠道：显式 `channel_models.supports_responses` / `supports_chat_completions`（YAML 等价项 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`；未声明的模型回退到渠道级行为。该覆盖的完整规则见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。
+- native-vs-local **按模型**解析，不按渠道：显式 `channel_models.supports_responses` / `supports_chat_completions`（YAML 等价项 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`；未声明的模型回退到渠道级行为。该覆盖的完整规则见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。**native 直通必须显式声明**：模型的 `supports_responses` 为 true，或渠道 `api_type` 为 `responses` / `responses_native`；渠道级 `capabilities.responses=true` 本身不构成原生证据，chat 渠道默认按本地 runtime 处理（只有渠道没有 Chat Completions backend 时才把该 capability 解释为原生）。
 - 渠道 `mode`（`proxy` / `record_only` / `server` / `responses_server`）只被解析、校验和记录日志，**不参与路由**。
 - 本地 runtime 通过内部 `/v1/chat/completions` 调用上游，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 可以服务 native 直通，但不会被本地 runtime 选中。
 - 请求体带 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，候选会标记 `requires_tool_calling`；该过滤属于通用路由规则，详见 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。

@@ -116,7 +116,7 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 ## 能力声明与 protocol_family 映射
 
 - 能力字段为 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`，对应 YAML `upstream.capabilities`（数据库为 channel 的 capabilities JSON）。每个字段都是可选布尔，未声明表示未知。
-- 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target（`tools` 与非空 `functions` 同等看待：后者是 OpenAI 已废弃但仍被客户端与上游接受的同义字段），`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。
+- 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target（`tools` 与非空 `functions` 同等看待：后者是 OpenAI 已废弃但仍被客户端与上游接受的同义字段），`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。需要特别注意 `/v1/responses`：`capabilities.responses=true` 只表示该渠道的 Responses 入口可由本地 Responses runtime 用 Chat Completions 翻译来服务；**原生 Responses 直通必须显式声明**——模型的 `supports_responses=true`，或渠道 `api_type` 为 `responses`/`responses_native`（或渠道显式没有 Chat Completions backend，此时 responses 只能解释为原生）。
 - `api_type` 的全局合法值为 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`；协议族另有约束：`anthropic_messages` 只接受 `messages`，`google_genai` 与 `vertex_native` 只接受 `gemini_generate_content`，`openai_compatible` 没有额外的 `api_type` 约束。`api_type` 缺失时按协议族取默认值：`anthropic_messages` → `messages`，`google_genai`、`vertex_native` → `gemini_generate_content`，其余 → `chat_completions`。
 - `mode` 的合法值为 `proxy`、`record_only`、`server`、`responses_server`。
 - 按模型覆盖：数据库 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 可编辑，YAML 对应 `upstream.model_capabilities`）对该模型覆盖 channel 级 `api_type`/capabilities；没有声明覆盖的模型回退到 channel 级行为。这使一个 channel 能对部分模型走原生 surface，对另一些模型走其他 surface。
@@ -133,7 +133,7 @@ server --config config.yaml provider probe --id openai-local --format json
 
 探测的 endpoint 固定为：OpenAI 兼容 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`；Anthropic `POST /v1/messages`、`GET /v1/models`；Gemini `GET /v1beta/models`。鉴权按 endpoint 选择：OpenAI 风格用 `Authorization: Bearer`，Anthropic 用 `x-api-key` 加 `anthropic-version: 2023-06-01`，Gemini 用 `x-goog-api-key`。
 
-- 只要返回 2xx 或 400、401、403、405、415、422、429 之一，就认为 endpoint 存在。
+- 只要返回 2xx 或 400、401、403、405、415、422、429 之一，就认为 endpoint 存在。这个判断只看路由是否存在：`POST /v1/responses` 的空 body 会得到 `400 missing model`，它不能证明某个模型在该 endpoint 上可用（多个 provider 对未挂载模型返回纯文本 404）。因此 route-only probe 不再为 Chat Completions 渠道自动写入 `capabilities.responses`，该 capability 只会在 `api_type` 为 `responses`/`responses_native` 或 probe 未发现 Chat Completions surface 时应用；模型级可用性用 Monitor 的按模型连通性测试确认。
 - 每个 endpoint 带权重：`POST /v1/responses`、`POST /v1/messages` 与 `GET /v1beta/models` 为 4，`POST /v1/chat/completions` 为 3，OpenAI 与 Anthropic 的 `GET /v1/models` 为 1。按协议族累计得分后取最高者作为建议，并汇总命中的 capability。
 - 输出包含建议的 `protocol_family`、`api_type`、capabilities、confidence 与 warnings。confidence 按得分给出：≥5 为 0.9，≥4 为 0.8，≥3 为 0.7，≥1 为 0.45，否则 0。
 - 当显式配置的 `api_type` 或 `protocol_family` 与探测建议不一致时，报告写入 warning，但不改写配置。

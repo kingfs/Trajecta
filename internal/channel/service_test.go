@@ -2,7 +2,9 @@ package channel
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -10,7 +12,10 @@ import (
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/modelprobe"
+	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
 )
 
 func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
@@ -1060,5 +1065,256 @@ func TestBootstrapFromConfigReimportsYAMLAfterReset(t *testing.T) {
 	}
 	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 1 {
 		t.Fatalf("BootstrapFromConfig() after reset = %d, %v; want 1, nil", imported, err)
+	}
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
+func intPointer(value int) *int {
+	return &value
+}
+
+func TestApplyProviderProbeSuggestionsGatesResponsesCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		apiType      string
+		capabilities config.UpstreamCapabilitiesConfig
+		wantApplied  bool
+	}{
+		{
+			name:        "chat typed channel",
+			apiType:     upstream.APITypeChatCompletions,
+			wantApplied: false,
+		},
+		{
+			name:        "responses typed channel",
+			apiType:     upstream.APITypeResponses,
+			wantApplied: true,
+		},
+		{
+			name:        "responses native typed channel",
+			apiType:     upstream.APITypeResponsesNative,
+			wantApplied: true,
+		},
+		{
+			name:         "chat explicitly disabled",
+			apiType:      upstream.APITypeChatCompletions,
+			capabilities: config.UpstreamCapabilitiesConfig{ChatCompletions: boolPointer(false)},
+			wantApplied:  true,
+		},
+		{
+			name:         "chat explicitly enabled",
+			apiType:      upstream.APITypeChatCompletions,
+			capabilities: config.UpstreamCapabilitiesConfig{ChatCompletions: boolPointer(true)},
+			wantApplied:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capabilitiesJSON, err := json.Marshal(tc.capabilities)
+			if err != nil {
+				t.Fatalf("json.Marshal(capabilities) error = %v", err)
+			}
+			channel := store.ChannelConfigRecord{
+				ID:               "probe-channel",
+				Name:             "Probe Channel",
+				BaseURL:          "https://example.invalid/v1",
+				APIType:          tc.apiType,
+				CapabilitiesJSON: string(capabilitiesJSON),
+			}
+			updated, fields, err := applyProviderProbeSuggestions(channel, providerprobe.Report{
+				CapabilitySuggestion: providerprobe.CapabilitySuggestion{
+					Capabilities: []string{"responses", "chat_completions", "models"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("applyProviderProbeSuggestions() error = %v", err)
+			}
+			var capabilities config.UpstreamCapabilitiesConfig
+			if err := json.Unmarshal([]byte(updated.CapabilitiesJSON), &capabilities); err != nil {
+				t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+			}
+			applied := capabilities.Responses != nil && *capabilities.Responses
+			if applied != tc.wantApplied {
+				t.Fatalf("responses applied = %v, want %v (fields = %#v)", applied, tc.wantApplied, fields)
+			}
+			if slices.Contains(fields, "capabilities.responses") != tc.wantApplied {
+				t.Fatalf("fields = %#v, responses field mismatch", fields)
+			}
+			// The gate only affects the Responses capability; the rest of the report is applied.
+			// An explicit value is never overwritten (SetCapabilityIfUnset semantics).
+			switch {
+			case tc.capabilities.ChatCompletions == nil:
+				if capabilities.ChatCompletions == nil || !*capabilities.ChatCompletions {
+					t.Fatalf("chat_completions capability was not applied: %#v", capabilities.ChatCompletions)
+				}
+			case capabilities.ChatCompletions == nil || *capabilities.ChatCompletions != *tc.capabilities.ChatCompletions:
+				t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+			}
+			if capabilities.Models == nil || !*capabilities.Models {
+				t.Fatalf("models capability was not applied: %#v", capabilities.Models)
+			}
+		})
+	}
+}
+
+func TestModelProbeTargetResolvesModelAndDeclaredProtocols(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "nvidia-nim",
+		Name:             "NVIDIA NIM",
+		BaseURL:          "https://integrate.api.nvidia.com/v1",
+		ProviderPreset:   "nvidia_nim",
+		APIType:          upstream.APITypeChatCompletions,
+		ProtocolFamily:   upstream.ProtocolFamilyOpenAICompatible,
+		APIKeyCiphertext: []byte("sk-live-secret"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("nvidia-nim", []store.ChannelModelRecord{
+		{
+			Model:             "deepseek-v4.1-flash",
+			UpstreamModel:     "deepseek-ai/deepseek-v4.1-flash",
+			Source:            "manual",
+			Enabled:           true,
+			SupportsResponses: intPointer(1),
+		},
+		{
+			Model:   "off-model",
+			Source:  "manual",
+			Enabled: false,
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	target, err := NewService(st).ModelProbeTarget("nvidia-nim", "  DEEPSEEK-V4.1-FLASH ")
+	if err != nil {
+		t.Fatalf("ModelProbeTarget() error = %v", err)
+	}
+	if target.ChannelID != "nvidia-nim" || target.Model != "deepseek-v4.1-flash" {
+		t.Fatalf("identity = %q/%q", target.ChannelID, target.Model)
+	}
+	if target.WireModel != "deepseek-ai/deepseek-v4.1-flash" {
+		t.Fatalf("wire model = %q", target.WireModel)
+	}
+	if target.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
+		t.Fatalf("protocol family = %q", target.ProtocolFamily)
+	}
+	if target.Resolved.APIKey != "sk-live-secret" {
+		t.Fatalf("resolved API key = %q, want the decrypted key", target.Resolved.APIKey)
+	}
+	if !target.Resolved.SupportsChatCompletionsAPIForModel(target.Model) {
+		t.Fatalf("chat completions not supported by the resolved upstream")
+	}
+	if !target.Declared[modelprobe.ProtocolChatCompletions] || !target.Declared[modelprobe.ProtocolResponses] {
+		t.Fatalf("declared = %#v", target.Declared)
+	}
+	if !target.NativeResponses {
+		t.Fatalf("native responses = false, want true for a model that declares Responses")
+	}
+	if !target.ChannelEnabled || !target.ModelEnabled {
+		t.Fatalf("enabled flags = %v/%v", target.ChannelEnabled, target.ModelEnabled)
+	}
+	if target.ModelState != string(ModelStateUnverified) || !target.Routable {
+		t.Fatalf("state = %q routable = %v", target.ModelState, target.Routable)
+	}
+
+	if _, err := NewService(st).ModelProbeTarget("nvidia-nim", "not-a-model"); !errors.Is(err, ErrChannelModelNotFound) {
+		t.Fatalf("ModelProbeTarget(unknown model) error = %v, want ErrChannelModelNotFound", err)
+	}
+	if _, err := NewService(st).ModelProbeTarget("missing-channel", "deepseek-v4.1-flash"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("ModelProbeTarget(unknown channel) error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := NewService(st).ModelProbeTarget("nvidia-nim", ""); err == nil {
+		t.Fatalf("ModelProbeTarget(empty model) error = nil")
+	}
+}
+
+func TestModelProbeTargetDeclaresChannelResponsesWithoutNativeSupport(t *testing.T) {
+	// The NVIDIA NIM incident shape: the channel advertises both Responses and Chat
+	// Completions but its api_type is chat_completions and the model has no override.
+	// Responses is still *declared* (that is what the operator needs tested) even though
+	// the gateway will not use the native path.
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{
+		Responses:       boolPointer(true),
+		ChatCompletions: boolPointer(true),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "nvidia-nim",
+		Name:             "NVIDIA NIM",
+		BaseURL:          "https://integrate.api.nvidia.com/v1",
+		ProviderPreset:   "nvidia_nim",
+		APIType:          upstream.APITypeChatCompletions,
+		ProtocolFamily:   upstream.ProtocolFamilyOpenAICompatible,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		APIKeyCiphertext: []byte("sk-live-secret"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("nvidia-nim", []store.ChannelModelRecord{
+		// No SupportsResponses override: the declaration comes from the channel.
+		{Model: "deepseek-v4.1-flash", UpstreamModel: "deepseek-ai/deepseek-v4.1-flash", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	target, err := NewService(st).ModelProbeTarget("nvidia-nim", "deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatalf("ModelProbeTarget() error = %v", err)
+	}
+	if !target.Declared[modelprobe.ProtocolResponses] {
+		t.Fatalf("declared = %#v, want the channel-level Responses capability declared", target.Declared)
+	}
+	if !target.Declared[modelprobe.ProtocolChatCompletions] {
+		t.Fatalf("declared = %#v, want chat completions declared", target.Declared)
+	}
+	if target.NativeResponses {
+		t.Fatalf("native_responses = true, want false for a chat-typed channel without a model override")
+	}
+}
+
+func TestModelProbeTargetMapsUnresolvableChannelConfig(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "broken",
+		Name:           "Broken",
+		BaseURL:        "https://example.invalid/v1",
+		APIType:        upstream.APITypeChatCompletions,
+		ProtocolFamily: "not-a-protocol-family",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("broken", []store.ChannelModelRecord{{Model: "m", Source: "manual", Enabled: true}}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	if _, err := NewService(st).ModelProbeTarget("broken", "m"); !errors.Is(err, ErrChannelConfigInvalid) {
+		t.Fatalf("ModelProbeTarget() error = %v, want ErrChannelConfigInvalid", err)
 	}
 }
