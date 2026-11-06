@@ -851,6 +851,156 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 	}
 }
 
+// TestHandlerSkipsOpaqueEncryptedContent is the regression for the reported
+// false xAI key: a Responses reasoning item's encrypted_content is base64url and
+// happened to contain `xai-` followed by enough token characters to match
+// xai.api_key. The masker replaced a byte inside the ciphertext, the provider
+// rejected the modified reasoning state, and the request failed. The blob must
+// reach the upstream exactly as it arrived, while a real key in the same body is
+// still masked, recorded and audited.
+func TestHandlerSkipsOpaqueEncryptedContent(t *testing.T) {
+	const (
+		encryptedContent = "orsr1_wooEp4YZRn73XhBnGQVNFetZXg9dt6ofKlIiTVNvVqRRbWE81orIoDsL5y1nCLGT5sS_0mDm1zY1a68j8pT8QIEm2AaJda8KX-0sV-wIQAFVCV_hxV9zI-vFe6EY3ELzjZFEG9vYqjQBF-W9VqD34P_fRSBZP4mU40u4YfqABH_ombQebY_I6BQiy9JbvgSstbXaMs-71P46yNsVwlQdL9KJ2Gsz2wiYH5NBU96eRmeNLW0gxai-3xZ4uADr20ElWRZWhOTPcVeV332eFnjgj6IlK9PEDoti5TmEpJXSb086boDFpIRi-"
+		realKey          = "xai-3xZ4uADr20ElWRZWhOTPcVeV332eFnjgj6IlK9PEDoti5TmEpJXSb086boDFpIRi"
+		requestBody      = `{"model":"gpt-5","include":["reasoning.encrypted_content"],` +
+			`"input":[` +
+			`{"type":"reasoning","encrypted_content":"` + encryptedContent + `","summary":[]},` +
+			`{"type":"message","role":"user","content":"my key is ` + realKey + `"}` +
+			`]}`
+	)
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","status":"completed","model":"gpt-5","output":[]}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	// Native Responses pass-through, so the request body reaches the upstream
+	// unchanged except for the masker's stand-ins.
+	cfg.Upstream.APIType = "responses"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/responses", "application/json",
+		strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+	}
+
+	if upstreamBody == "" {
+		t.Fatal("the upstream never received the request")
+	}
+	if !strings.Contains(upstreamBody, encryptedContent) {
+		t.Fatalf("the upstream received modified encrypted_content: %s", upstreamBody)
+	}
+	keyStart := strings.LastIndex(requestBody, realKey)
+	if keyStart < 0 {
+		t.Fatal("fixture is wrong: the real key is not in the request body")
+	}
+	if got := upstreamBody[keyStart : keyStart+len(realKey)]; got == realKey {
+		t.Errorf("the upstream received the real key: %s", got)
+	}
+	if len(upstreamBody) != len(requestBody) {
+		t.Errorf("body length changed: got %d, want %d; content-length would desynchronise",
+			len(upstreamBody), len(requestBody))
+	}
+
+	// The cassette keeps the original request, so replay and inspection see the
+	// ciphertext and the real key.
+	path := findRecordedHTTP(t, outputDir)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cassette %q: %v", path, err)
+	}
+	parsed, err := waitForRecordedPrelude(path, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	if parsed.Header.Meta.URL != "/v1/responses" {
+		t.Fatalf("recorded URL = %q, want /v1/responses", parsed.Header.Meta.URL)
+	}
+	_, recordedBody, _, _ := recordfile.ExtractSections(raw, parsed)
+	if !strings.Contains(string(recordedBody), encryptedContent) || !strings.Contains(string(recordedBody), realKey) {
+		t.Errorf("the cassette did not record the original body: %s", recordedBody)
+	}
+
+	var maskedEvents int
+	for _, event := range parsed.Events {
+		if event.Type != "secret.masked" {
+			continue
+		}
+		maskedEvents++
+		if rule, _ := event.Attributes["rule"].(string); rule != "xai.api_key" {
+			t.Errorf("secret.masked rule = %q, want xai.api_key", rule)
+		}
+		for _, value := range []string{realKey, encryptedContent} {
+			if strings.Contains(recordfileEventText(event), value) {
+				t.Errorf("secret.masked event carries a value")
+			}
+		}
+	}
+	if maskedEvents != 1 {
+		t.Errorf("recorded %d secret.masked events, want 1 (the message key; not the ciphertext)", maskedEvents)
+	}
+
+	// The audit table carries exactly one pair, for the message key.
+	deadline := time.Now().Add(2 * time.Second)
+	var audits store.CredentialMaskAuditPage
+	for {
+		audits, err = st.ListCredentialMaskAudits(store.CredentialMaskAuditFilter{PageSize: 10})
+		if err != nil {
+			t.Fatalf("ListCredentialMaskAudits() error = %v", err)
+		}
+		if len(audits.Items) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(audits.Items) != 1 {
+		t.Fatalf("audit rows = %d, want 1 (only the message key): %+v", len(audits.Items), audits)
+	}
+	row := audits.Items[0]
+	if row.Rule != "xai.api_key" || row.Original != realKey {
+		t.Errorf("audit rule/original = %q/%q, want xai.api_key and the message key", row.Rule, row.Original)
+	}
+	if row.Start != keyStart || row.End != keyStart+len(realKey) {
+		t.Errorf("audit offsets = [%d,%d), want the message occurrence at [%d,%d)",
+			row.Start, row.End, keyStart, keyStart+len(realKey))
+	}
+	if len(row.StandIn) != len(realKey) || row.StandIn == realKey {
+		t.Errorf("audit stand-in is not a same-length replacement: %q", row.StandIn)
+	}
+}
+
 // proxyTestSSHBlock builds a realistic OpenSSH private key: the binary blob
 // starts with the format's magic, and the armor is wrapped at 64 characters.
 func proxyTestSSHBlock() string {
