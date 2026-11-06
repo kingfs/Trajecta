@@ -96,6 +96,9 @@ type upstreamItem struct {
 	TotalTokens       int                   `json:"total_tokens"`
 	AvgTTFT           int                   `json:"avg_ttft"`
 	LastSeen          time.Time             `json:"last_seen"`
+	CurrentRPM        int                   `json:"current_rpm"`
+	CurrentTPM        int                   `json:"current_tpm"`
+	RatesSampledAt    time.Time             `json:"rates_sampled_at,omitempty"`
 	RecentModels      []string              `json:"recent_models"`
 	LastModel         string                `json:"last_model"`
 	RecentErrors      []string              `json:"recent_errors"`

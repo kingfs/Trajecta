@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
+import { Switch } from "../components/common/Controls";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
@@ -217,35 +218,112 @@ function RoutingSettingsPanel() {
   });
 
   return (
+    <>
+      <Card as="section">
+        <div className="panel-head">
+          <div>
+            <h2>{t("routing.settings")}</h2>
+          </div>
+          {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
+        </div>
+        {loadError ? <EmptyState title={t("routing.settingsUnavailable")} detail={loadError} compact /> : null}
+        <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
+          <label className="filter-label">
+            {t("routing.responsesStrategy")}
+            <Select value={settings.responses_strategy || "auto"} onValueChange={(next) => update("responses_strategy", next)}>
+              <SelectTrigger aria-label={t("routing.responsesStrategy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("routing.strategyAuto")}</SelectItem>
+                <SelectItem value="prefer_native">{t("routing.strategyPreferNative")}</SelectItem>
+                <SelectItem value="prefer_local_server">{t("routing.strategyPreferLocalServer")}</SelectItem>
+                <SelectItem value="native_only">{t("routing.strategyNativeOnly")}</SelectItem>
+                <SelectItem value="local_server_only">{t("routing.strategyLocalServerOnly")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="filter-label">
+            {t("routing.selectionPolicy")}
+            <Select value={settings.selection_policy || "p2c"} onValueChange={(next) => update("selection_policy", next)}>
+              <SelectTrigger aria-label={t("routing.selectionPolicy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="p2c">p2c</SelectItem>
+                <SelectItem value="first_available">first_available</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <Button variant="ghost" type="submit">{t("common.save")}</Button>
+        </form>
+      </Card>
+      <RatesAlertsCard />
+    </>
+  );
+}
+
+function RatesAlertsCard() {
+  const { t } = useI18n();
+  const [settings, setSettings] = useState({ enabled: false, max_rpm: 0, max_tpm: 0, severity: "warning" });
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    requestJSON(apiPaths.ratesAlertsSettings)
+      .then((payload) => {
+        if (!cancelled) {
+          setSettings({ ...settings, ...payload });
+          setLoadError("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const save = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.ratesAlertsSettings, {
+      enabled: Boolean(settings.enabled),
+      max_rpm: Number(settings.max_rpm || 0),
+      max_tpm: Number(settings.max_tpm || 0),
+      severity: settings.severity,
+    }),
+    success: "routing.saved",
+    error: "routing.ratesUnavailable",
+    onSuccess: (payload) => setSettings((current) => ({ ...current, ...payload })),
+  });
+
+  return (
     <Card as="section">
       <div className="panel-head">
         <div>
-          <h2>{t("routing.settings")}</h2>
+          <h2>{t("routing.ratesAlerts")}</h2>
+          <span className="system-note">{t("routing.ratesAlertsDetail")}</span>
         </div>
         {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
       </div>
-      {loadError ? <EmptyState title={t("routing.settingsUnavailable")} detail={loadError} compact /> : null}
+      {loadError ? <EmptyState title={t("routing.ratesUnavailable")} detail={loadError} compact /> : null}
       <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
+        <Switch checked={Boolean(settings.enabled)} onChange={(enabled) => update("enabled", enabled)} label={t("routing.ratesEnabled")} />
         <label className="filter-label">
-          {t("routing.responsesStrategy")}
-          <Select value={settings.responses_strategy || "auto"} onValueChange={(next) => update("responses_strategy", next)}>
-            <SelectTrigger aria-label={t("routing.responsesStrategy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">{t("routing.strategyAuto")}</SelectItem>
-              <SelectItem value="prefer_native">{t("routing.strategyPreferNative")}</SelectItem>
-              <SelectItem value="prefer_local_server">{t("routing.strategyPreferLocalServer")}</SelectItem>
-              <SelectItem value="native_only">{t("routing.strategyNativeOnly")}</SelectItem>
-              <SelectItem value="local_server_only">{t("routing.strategyLocalServerOnly")}</SelectItem>
-            </SelectContent>
-          </Select>
+          {t("routing.ratesMaxRpm")}
+          <Input className="min-w-[120px]" type="number" min="0" value={settings.max_rpm} disabled={!settings.enabled} onChange={(event) => update("max_rpm", event.target.value)} />
         </label>
         <label className="filter-label">
-          {t("routing.selectionPolicy")}
-          <Select value={settings.selection_policy || "p2c"} onValueChange={(next) => update("selection_policy", next)}>
-            <SelectTrigger aria-label={t("routing.selectionPolicy")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+          {t("routing.ratesMaxTpm")}
+          <Input className="min-w-[120px]" type="number" min="0" value={settings.max_tpm} disabled={!settings.enabled} onChange={(event) => update("max_tpm", event.target.value)} />
+        </label>
+        <label className="filter-label">
+          {t("routing.ratesSeverity")}
+          <Select value={settings.severity || "warning"} onValueChange={(next) => update("severity", next)} disabled={!settings.enabled}>
+            <SelectTrigger aria-label={t("routing.ratesSeverity")} className="min-w-[120px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="p2c">p2c</SelectItem>
-              <SelectItem value="first_available">first_available</SelectItem>
+              <SelectItem value="warning">warning</SelectItem>
+              <SelectItem value="error">error</SelectItem>
+              <SelectItem value="critical">critical</SelectItem>
             </SelectContent>
           </Select>
         </label>

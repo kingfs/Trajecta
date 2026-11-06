@@ -68,6 +68,13 @@ type Stats struct {
 	SuccessRequest int
 	FailedRequest  int
 	SuccessRate    float64
+	// Current* counts the trailing 60s over the same filtered rows; Avg*
+	// divides the filtered totals by the filter window span (0 when unwindowed).
+	CurrentRPM     int
+	CurrentTPM     int
+	AvgRPM         float64
+	AvgTPM         float64
+	RatesSampledAt time.Time
 }
 
 type Store struct {
@@ -513,6 +520,13 @@ type UsageSummaryRecord struct {
 	AvgTTFT          int
 	AvgDurationMs    int64
 	LastSeen         time.Time
+	// Current* is the trailing-60s rate; Avg* is the window totals divided by
+	// the window span in minutes (0 when unwindowed).
+	CurrentRPM     int
+	CurrentTPM     int
+	AvgRPM         float64
+	AvgTPM         float64
+	RatesSampledAt time.Time
 }
 
 type UsageTrendRecord struct {
@@ -522,6 +536,9 @@ type UsageTrendRecord struct {
 	MissingUsage  int
 	TotalTokens   int
 	ModelCount    int
+	// RPM/TPM are the bucket totals normalized by the bucket span in minutes.
+	RPM float64
+	TPM float64
 }
 
 type DatasetRecord struct {
@@ -3700,6 +3717,35 @@ func (s *Store) Stats(filter ListFilter) (Stats, error) {
 	if successCount > 0 {
 		stats.AvgTTFT = int(math.Round(avgTTFT))
 		stats.TotalTokens = totalTokens
+	}
+	currentRPM, currentTPM, err := s.currentRatesSuccessTokens(whereSQL, whereArgs)
+	if err != nil {
+		return Stats{}, err
+	}
+	stats.CurrentRPM = currentRPM
+	stats.CurrentTPM = currentTPM
+	sampledAt := time.Now().UTC()
+	// No rows is the zero summary: keep RatesSampledAt at the zero value so
+	// an empty store still compares equal to (Stats{}).
+	if total > 0 {
+		stats.RatesSampledAt = sampledAt
+	}
+	if !filter.Since.IsZero() {
+		// Same data-derived span end as Overview/Usage (latest row, not
+		// wall-clock): a window whose traffic ended hours ago still reports
+		// the rate the traffic actually sustained.
+		var latestRecordedAt any
+		if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+			return Stats{}, err
+		}
+		referenceTime := sampledAt
+		if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+			return Stats{}, err
+		} else if !latestTime.IsZero() {
+			referenceTime = latestTime
+		}
+		windowMinutes := rateWindowMinutes(filter.Since, referenceTime)
+		stats.AvgRPM, stats.AvgTPM = rateAvg(total, totalTokens, windowMinutes)
 	}
 	s.storeCachedStats(cacheKey, stats)
 	return stats, nil

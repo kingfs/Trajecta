@@ -16,7 +16,7 @@ import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildTraceLink, formatCount, formatDateTime, formatDuration, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatRateAvg, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 import {
   applyResponsesDisabled,
@@ -299,6 +299,8 @@ export function ProviderDetailPage() {
             <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
             <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
             <StatCard label={t("common.success")} value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
+            <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+            <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
           </div>
         </Card>
 
@@ -591,6 +593,8 @@ function ProviderModelRow({
         <Metric label="req" value={formatCount(summary.request_count)} />
         <Metric label="err" value={formatCount(summary.failed_request)} danger={Number(summary.failed_request || 0) > 0} />
         <Metric label="tok" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+        <Metric label="rpm" value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+        <Metric label="tpm" value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
       </div>
     </div>
   );

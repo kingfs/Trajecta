@@ -1154,12 +1154,17 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 		return nil, err
 	}
 
+	bucketMinutes := 0.0
+	if bucketSize > 0 {
+		bucketMinutes = bucketSize.Minutes()
+	}
 	out := make(map[string][]UsageTrendRecord, len(references))
 	for channelID, slots := range slotsByChannel {
 		buckets := bucketsByChannel[channelID]
 		series := make([]UsageTrendRecord, 0, len(slots))
 		for _, slot := range slots {
 			item := buckets[slot]
+			rpm, tpm := rateAvg(item.requests, item.tokens, bucketMinutes)
 			series = append(series, UsageTrendRecord{
 				Time:          slot,
 				RequestCount:  item.requests,
@@ -1167,6 +1172,8 @@ func (s *Store) GetChannelUsageTrendsBatch(since time.Time, bucketSize time.Dura
 				MissingUsage:  item.missing,
 				TotalTokens:   item.tokens,
 				ModelCount:    len(item.models),
+				RPM:           rpm,
+				TPM:           tpm,
 			})
 		}
 		out[channelID] = series
