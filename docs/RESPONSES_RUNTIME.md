@@ -179,7 +179,7 @@ Tool Matrix（仅当前为真的部分）：
 - native Responses 只做直通代理，不做 semantic interposition；本地 runtime 也不会被用作 native target 的 Chat Completions backend。
 - 没有独立的 compact read model schema 与 HTTP/CLI 查询 surface：provenance 目前内嵌在 response metadata 并由 execution events 派生。
 - 没有 semantic execution replay：replay 仍只针对 `.http` cassette，不依赖 execution events 或 semantic DB。
-- Provider auto-detect 未完成：capability 需显式配置或由渠道/模型数据表达，`provider probe` 只是诊断与保守补全。
+- Provider 全自动 onboarding 未完成：手动 `provider probe` / `probe-report` / `probe-apply` 与按模型接口自动识别（`POST /api/provider-model-detect`，写回三态 `supports_*`）已可用，但没有完整的批量 onboarding 与自动修复策略；channel 级 capability 仍来自显式配置或探测建议。
 - `external_command` 只有轻量 process policy（`working_dir`、`require_absolute_command`、`allowed_command_dirs`、`reject_root`），没有 root/container 级沙箱。
 - SQLite 应用 schema 走启动期 store init 而非版本化迁移；`auth` 在 SQLite 上使用独立的 `schema_migrations` namespace，在 Postgres 上则与 application schema 共享同一 namespace。Postgres 独立 auth namespace 未实现。
 - 本地 `/v1/responses` 入站请求**会**录制为 `exchange_kind=entry` / `exchange_role=client_request` 的 V3 cassette，但它不是 external upstream exchange：`upstream_exchanges` 只关联内部上游 Chat Completions 调用（其 `parent_exchange_id=entry:<response_id>` 指回该入站 cassette）。

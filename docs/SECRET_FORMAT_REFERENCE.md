@@ -232,7 +232,7 @@ credential_finding = {
 | 通用形态 | `\bey[A-Za-z0-9_-]{12,}\.ey[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{10,}={0,2}` | A |
 | header 开头 | base64url 的 `{"` 恒为 `ey`（所以规则以 `ey` 起头是**结构必然**，不是启发式） | A |
 | 解码校验 | base64url 解码 header/payload **必须**是合法 JSON 对象；失败即否决 | A |
-| `alg` 与签名长度对应（JWS 规范） | 解码后字节数：`HS256/384/512` → 32/48/64 字节（base64url 43/64/86 字符）；`RS256/384/512`（及 PS 同）→ 256/384/512 字节（base64url 342/512/683 字符）；`ES256/384/512` → 64/96/132 字节；`EdDSA` → 64 字节；`none` → 空（末尾点号）。注：当前 `pkg/secretmask/validators.go` 的 `jwtSignatureBytes` 校验表把 RS/PS 按 HS 的 32/48/64 字节处理（与规范不同），见 §9.3 | A |
+| `alg` 与签名长度对应（JWS 规范） | 解码后字节数：`HS256/384/512` → 32/48/64 字节（base64url 43/64/86 字符）；`RS256/384/512`（及 PS 同）→ 256/384/512 字节（base64url 342/512/683 字符）；`ES256/384/512` → 64/96/132 字节；`EdDSA` → 64 字节；`none` → 空（末尾点号） | A |
 | JWE | **5 段**（header.encrypted_key.iv.ciphertext.tag），不要误判为 JWT | A |
 | 未签名 JWT | `eyJ...eyJ....`（第三段为空）——常见于测试或误配置 | A |
 
@@ -1300,8 +1300,9 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 | 文件 | 作用 |
 | --- | --- |
 | `rules.rl` | Ragel 源，词法模式（字符类、前缀、结构形状）的唯一事实源 |
-| `rule.go` | 规则元数据表，每条规则一项：`Kind`、`Grade`、`Strength`、`MinLen`、`MaxLen`、`Validator`、`CandidateCheck`、`Keywords`、`Prefixes`、`PrefixSkip`、`Literals` |
-| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，33425 行 / 371351 字节（约 363 KiB）的状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
+| `rule.go` | 规则元数据表，每条规则一项：`Kind`、`Grade`、`Strength`、`MinLen`、`MaxLen`、`Validator`、`CandidateCheck`、`Keywords`、`Prefixes`、`PrefixSkip`、`Literals`；含两条不经过 DFA 的 `env.*` 名称锚定规则 |
+| `assignment.go` | 原生名称锚定赋值扫描：识别 `NAME=value` / `NAME: value` / JSON 成员 / 转义 JSON（深度 1–3）/ 转义 `.env` 行，产出 `env.secret_assignment`（整个 value）与 `env.url_credential`（仅 URL userinfo password），并与 DFA findings 做不重叠合并 |
+| `rules_ragel.go` | 由 `rules.rl` 生成的 Go DFA，35140 行 / 387519 字节（约 378 KiB）的状态表，已提交；不读、不手改，一切改动回到 `rules.rl` 与 `rule.go` |
 | `validators.go` | 离线结构校验，按字符串 `jwt`、`anthropic_key`、`github_pat`、`jwe`、`bech32`、`chinese_id` 命名 |
 | `mobile.go` | 手机号号段表的候选检查（`cn_mobile_prefix`）与渲染辅助；不构成校验器 |
 | `context.go` | 全局凭据词表与 96 字节上下文窗口 |
@@ -1321,11 +1322,11 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 
 长度上下界**不写进状态机**，而是在 `scan.go` 的 `collector.emit` 里用原生代码判断。固定重复 `{n}` 交给状态机在宽字符类上展开，状态表会按组合数膨胀：实测把一条 `b64u{24} '.' b62u{6} '.' b62u+` 形态的候选规则加进去，生成代码从 25238 行涨到 144434 行（5.7 倍），生成时间同步变长；同一形态改用「`+` 加原生长度检查」后回到 25238 行量级。原生长度检查是承重设计，不是风格偏好。
 
-数字类形状（身份证号、手机号、银行卡）走**粗筛 + 原生分类**，而不是每条一段 `[0-9]{n}`：状态机里只有一条 `digit_run = [0-9]+ [Xx]?;`，命中后由 `scan.go` 的 `emitDigits` 按 `digitClasses` 逐类比较长度、跑校验器或候选检查，第一类通过即采用。这样新增一类数字只改 `digitClasses` 与该规则元数据，不增加状态、不需要重新生成，也不会产生第二遍扫描。手机号即按此加入：`rules.rl` 未改、生成表仍是 33425 行，改动只有规则元数据、`mobile.go` 与渲染器。
+数字类形状（身份证号、手机号、银行卡）走**粗筛 + 原生分类**，而不是每条一段 `[0-9]{n}`：状态机里只有一条 `digit_run = [0-9]+ [Xx]?;`，命中后由 `scan.go` 的 `emitDigits` 按 `digitClasses` 逐类比较长度、跑校验器或候选检查，第一类通过即采用。这样新增一类数字只改 `digitClasses` 与该规则元数据，不增加状态、不需要重新生成，也不会产生第二遍扫描。手机号即按此加入：`rules.rl` 未改、生成表未因该规则变化，改动只有规则元数据、`mobile.go` 与渲染器。
 
 ### 9.3 检测分层、置信度与覆盖边界
 
-`Detector.AppendFindings` 依次走四层，越往后越贵，只有前一层放行的候选才进入下一层：
+`Detector.AppendFindings` 依次走四层，越往后越贵，只有前一层放行的候选才进入下一层；DFA 扫描返回后再跑一遍原生的名称锚定赋值扫描（`assignment.go`），产出 `env.secret_assignment` / `env.url_credential` 两条 Strong 规则，并由 `mergeFindings` 与 DFA findings 合并成不重叠、按 start 排序的集合（名称锚定 span 严格包含 DFA span 时取代它，等长时优先保留可改写的 DFA finding，其它重叠保留 DFA）。
 
 1. **L1 词法**：编译好的 DFA 单遍扫描，最长匹配，不回溯。
 2. **L2 结构校验**：`validators.go`。`jwt` 要求三段 base64url 全部解码成功、头部是命名了算法的 JSON 对象、载荷是 JSON 对象、签名解码长度与该算法一致（`HS256` 32 字节、`ES512` 132 字节等）；`anthropic_key` 要求结尾是已发布 Anthropic 各 key 家族共有的 `AA`；`github_pat` 重算 30 位 body 的 CRC32-IEEE 并比对末 6 位 base62；`jwe` 要求五段式头部解码为含 `enc` 的 JSON 对象；`bech32` 验证 age 私钥的 BIP-173 校验和；`chinese_id` 验证 GB/T 2260 省级前缀、历法生日（含闰年，年份 1800–2099）与 ISO 7064 MOD 11-2 校验位。带校验器的规则只上报通过校验的匹配，且通过本身就足以认定。手机号的 `cn_mobile_prefix` 则只是**候选检查**：检查 11 位数字与 `1[3-9]x` 号段是否已分配，通过不提分，因此手机号能否改写由 L3 决定。
@@ -1336,13 +1337,13 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 
 打分权重（`finding.go`）：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；窗口内出现凭据词汇加 40 分；校验器通过则分数抬到不低于 70 分。总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。`Finding.Maskable()` 只放行 Medium 及以上自动改写；Low 仍然上报，让审计能看到看见了什么、以及故意没动什么。
 
-可改写规则集共 78 条：Strong 36、Anchored 24、Generic 18（规则元数据表另有 2 条 ReportOnly 访问指示符，不计入此数）。范围是结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`，以及**个人数据**里的中国居民身份证号与手机号。身份证号按 Generic 计分（18 位数字本身不证明什么），校验器通过即认定；手机号同样按 Generic 计分，靠号段收窄候选、靠上下文进入 Medium；15 位旧号没有校验位，不覆盖。
+可改写规则集共 80 条：Strong 38、Anchored 24、Generic 18（另有 2 条 ReportOnly 访问指示符，规则元数据表共 82 条）。范围是结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池（`sk-` 池 body 字符类是 `b62d`，含 `_` 与 `-`；具体 `sk-ant`/`sk-proj`/`sk-or` 规则按等长先声明者优先拿标签），再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`，以及**个人数据**里的中国居民身份证号与手机号。此外还有两条不经过 DFA 的名称锚定规则 `env.secret_assignment` / `env.url_credential`（见 [敏感凭据遮蔽](./SECRET_MASKING.md)）：变量名是证据，覆盖工具输出/.env 里的 `NAME=value`、JSON 成员与转义 JSON，URL 类只改 userinfo password。身份证号按 Generic 计分（18 位数字本身不证明什么），校验器通过即认定；手机号同样按 Generic 计分，靠号段收窄候选、靠上下文进入 Medium；15 位旧号没有校验位，不覆盖。
 
-**刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64 是哈希、对象 ID 与密钥共用的形状，而通过校验器会把分数抬到可改写档，所以这类规则一旦加入就会改写转录里每一个同形块。它们要成为可改写的，需要先有「上下文必需」这一档语义——当前打法是上下文加分而非必需。手机号是唯一进入规则集的弱形态：它有公开号段可把候选空间收窄，而 `手机号`/`phone` 这类词不像 `token` 那样遍布代码，因此 Generic+定长 20 分加 40 分上下文刚好越过 Medium，裸数字仍只上报。**DSN 与 Cookie 也暂不覆盖**：只有一部分是秘密，而 vault 的替换粒度是整个命中跨度，整段改写会改变连接目标、破坏结构，需要子跨度机制。`internal/analyzer` 保留这些正则用于事后上报，那里可以有误报，自动改写不能。
+**刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64 是哈希、对象 ID 与密钥共用的形状，而通过校验器会把分数抬到可改写档，所以这类规则一旦加入就会改写转录里每一个同形块。它们要成为可改写的，需要先有「上下文必需」这一档语义——当前打法是上下文加分而非必需。手机号是唯一进入规则集的弱形态：它有公开号段可把候选空间收窄，而 `手机号`/`phone` 这类词不像 `token` 那样遍布代码，因此 Generic+定长 20 分加 40 分上下文刚好越过 Medium，裸数字仍只上报。**DSN 与 Cookie 的边界。** DSN 只有 password 是秘密；名称锚定通道（`env.url_credential`）在 URL 类名字（`*_URL` / `*_DSN` / `*_URI` / `*_CONNECTION_STRING`）下只改写 `scheme://user:password@host` 的 userinfo password，host 与用户名保持不变，没有 password 的 DSN 不改写；ADO.NET 形态（`Server=…;Password=…`）不是 URL，`CONNECTION_STRING` 值本身不做子跨度解析，但其中的 `Password=…` 会作为独立赋值命中 `env.secret_assignment`。Cookie 没有这样的名字锚点，仍不自动改写，由 `internal/analyzer` 保留正则用于事后上报，那里可以有误报、自动改写不能。
 
 引擎不做的事同样属于当前事实：不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分。被编码、派生、截断、改大小写或重新格式化过的凭据识别不到；需要真值才能完成的操作（HMAC 签名、AWS SigV4、签发 JWT）在只看到假值的地方无法进行；客户端工具与本地 Responses runtime 拿到的是还原后的真值，只有上游托管的工具直接看到假值（§9.4）。
 
-实测（`-count=3` 稳定值）：约 73 KB 载荷的词法扫描约 1.4–1.5 ms，约 51–53 MB/s（加入身份证规则前为 1.32 ms / 57 MB/s；生成表未因手机号规则变化）。身份证规则每 64 KB 命中一条时约 231 MB/s、命中约 3500 条时约 151 MB/s（`SkipContext`）；手机号命中一条时约 211 MB/s，密集时约 21 MB/s（`BenchmarkScanDenseMobileNumbers`，24 字节窗口），因为上下文扫描是它唯一的判据、不能跳过。精度用仓库自身度量：`git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）共 83 处命中、25 个文件——除 2 处真实 key 外全部是测试夹具、文档示例与已知的 Low 误报（`ek_` 标识符、`go.sum` 的 `LTAI` 形态、`17179869184` 常量、HTML 快照里的 11 位数字），Low 不改写；身份证 15 处（全 High），手机号 29 处（12 处 Medium 全在两个测试文件的样例里，其余 Low）。PEM 私钥块规则本身没有命中；新增的 SSH 测试夹具带来 2 处 PEM 头命中。
+实测（`-count=3` 稳定值）：约 73 KB 载荷的词法扫描约 1.4–1.5 ms，约 51–53 MB/s（加入身份证规则前为 1.32 ms / 57 MB/s；生成表未因手机号规则变化，`sk-` 字符类扩宽后为 35140 行）。名称锚定的赋值遍历与 DFA 扫同一份字节，基准显示请求扫描成本再增加约 5–9%（取决于 `=`/`:` 的密度），命中路径零分配。身份证规则每 64 KB 命中一条时约 231 MB/s、命中约 3500 条时约 151 MB/s（`SkipContext`）；手机号命中一条时约 211 MB/s，密集时约 21 MB/s（`BenchmarkScanDenseMobileNumbers`，24 字节窗口），因为上下文扫描是它唯一的判据、不能跳过。精度用仓库自身度量：`git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）共 83 处命中、25 个文件——除 2 处真实 key 外全部是测试夹具、文档示例与已知的 Low 误报（`ek_` 标识符、`go.sum` 的 `LTAI` 形态、`17179869184` 常量、HTML 快照里的 11 位数字），Low 不改写；身份证 15 处（全 High），手机号 29 处（12 处 Medium 全在两个测试文件的样例里，其余 Low）。PEM 私钥块规则本身没有命中；新增的 SSH 测试夹具带来 2 处 PEM 头命中。
 
 ### 9.4 遮蔽与还原
 
@@ -1411,7 +1412,7 @@ PEM 私钥分两条规则：`structural.pem_private_key` 只匹配 `-----BEGIN .
 
 | 输入规模 | 现状 |
 | --- | --- |
-| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描。DFA 无回溯，耗时与输入长度近似线性，78 条规则下约 51–53 MB/s |
+| 1 KB ~ 1 MB 请求/响应体 | 每次请求全量扫描（DFA + 原生名称锚定遍历）。DFA 无回溯，耗时与输入长度近似线性，78 条 DFA 规则下约 51–53 MB/s；原生遍历在同一份字节上再增加约 5–9% |
 | 10 MB 以上 | **没有**关键词预筛或分段跳过：`Detector` 会扫描整个缓冲区。这是有意为之的取舍——先保证语义正确，规模优化留到出现真实需求时再做 |
 | 规则数 | 规则越多，DFA 状态数与生成代码越大，而扫描循环仍是按输入字节推进，与规则数无关。这也是长度上下界放在原生代码里判断的原因（§9.2 的状态数对比） |
 
@@ -1422,6 +1423,8 @@ PEM 私钥分两条规则：`structural.pem_private_key` 只匹配 `-----BEGIN .
 3. 跑 `task generate:secretmask` 重新生成 `rules_ragel.go`，并把 `rules.rl`、`rule.go` 与生成文件一起提交；
 4. 跑 `go test ./pkg/secretmask/`，其中 `TestFakeKeepsShapeAndLength` 会验证新规则的假值仍然等长、保留前缀与标点；
 5. 在 `CHANGELOG.md` 记录规则增删（便于追溯漏报来源）。
+
+名称锚定的 `env.secret_assignment` / `env.url_credential` 是例外：模式在 `assignment.go` 的原生遍历里，元数据仍在 `rule.go`，不经过 `rules.rl`，因此不需要重新生成 DFA；改它们时同步 `assignment_test.go` 的用例即可。
 
 ---
 

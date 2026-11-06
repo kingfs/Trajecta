@@ -9,7 +9,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 识别**只读请求头和 URL，绝不读 body**。harness 身份是客户端建连时冻结的事实，写在它自己发出的头里；读 body 既慢（要猜提示词在哪个位置）、又容易被用户对话里粘贴的提示词冒充，所以这条路不走。三个输入位置：
 
 1. **User-Agent 的产品 token 与版本**（`parseUserAgent` 解析）：`/` 前的第一段是产品（如 `deepseek-harness`、`codex_exec`），版本是紧随其后的数字段（唯一用到正则的地方，见下）。无 `/` 的空格形式（`codex-cli 0.153.4`）与裸 token（`pi`）同样解析。
-2. **产品私有 header**：`originator`、`x-app`、`anthropic-beta`、`x-codex-*`、`x-opencode-*`、`Copilot-Integration-Id`、`Editor-Plugin-Version`、`X-Msh-*`、`x-cursor-client-version` 等具名头、`x-continue-session-id`、`HTTP-Referer`、`X-Title` 等——每个产品只认它自己写的头；只有 `x-codex-*`、`x-opencode-*` 用整段前缀扫描（`X-Msh-*` 先精确匹配 `x-msh-platform`，再前缀扫描兜底），其余都是具名头精确匹配。
+2. **产品私有 header**：`originator`、`x-app`、`anthropic-beta`、`x-codex-*`、`x-opencode-*`、`Copilot-Integration-Id`、`Editor-Plugin-Version`、`X-Msh-*`、`x-cursor-client-version` 等具名头、`x-continue-session-id`、`HTTP-Referer`、`X-Title` 等——每个产品只认它自己写的头；只有 `x-codex-*`、`x-opencode-*` 用整段前缀扫描（`X-Msh-*` 先精确匹配 `x-msh-platform`，再前缀扫描兜底），其余都是具名头：按头名精确查找，值按大小写不敏感的相等或包含比较（`x-app` 相等、`anthropic-beta` / `editor-plugin-version` / `http-referer` 包含）。
 3. **URL path/query**：如 Gemini 的 `:generateContent` / `:streamGenerateContent`、Responses 的 `/responses`。
 
 匹配是**纯字符串运算，不是正则**：产品 token 要求精确相等或以 `-`/`_` / `.` 分隔续接（`codex-tui_rs` 认 `codex-tui`，但 `continuedev` 不认 `continue`）；header 值用大小写不敏感的相等/包含；私有头命名空间用前缀扫描（`x-codex-*`、`x-msh-*`）。唯一的正则在 `signals.go` 的 `versionRe`（`^v?[0-9]+(\.[0-9]+)+([-+.][0-9A-Za-z.-]+)?$`），只用来判断 UA 里的版本段长什么样、值是什么。
@@ -32,17 +32,17 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 | `client_harness` | 显示名 | 类型 | 主要信号 |
 | --- | --- | --- | --- |
-| `claude-code` | Claude Code | `agent-cli` | UA `claude-cli/` 或 `claude-code/`；`x-app: cli` + `anthropic-beta` 含 `claude-code`，或 `anthropic-beta` 单独含 `claude-code` |
-| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui` / `codex_exec`（非交互 `codex exec` 模式）；UA `codex_cli_rs/` / `codex_exec/` / `codex-tui`；任意 `x-codex-*` header |
+| `claude-code` | Claude Code | `agent-cli` | UA `claude-cli/` 或 `claude-code/`；`anthropic-beta` 含 `claude-code`（同时带 `x-app: cli` 时额外记一条证据，不单独定类） |
+| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui` / `codex-tui_rs` / `codex_exec`（非交互 `codex exec` 模式）；UA `codex_cli_rs/` / `codex-cli/` / `codex-tui/` / `codex_exec/`；任意 `x-codex-*` header |
 | `codex-vscode` | Codex (VS Code) | `ide-extension` | `originator: codex_vscode` |
 | `codex-app` | Codex App | `agent-app` | `originator: codex_atlas` / `codex_chatgpt_desktop` |
-| `qwen-code` | Qwen Code | `agent-cli` | UA `QwenCode/`（优先于 Claude Code，见「已知误判」） |
-| `gemini-cli` | Gemini CLI | `agent-cli` | UA `GeminiCLI/`（含 `GeminiCLI-<client>/`） |
+| `qwen-code` | Qwen Code | `agent-cli` | UA `QwenCode/` 或 `qwen-code/`（优先于 Claude Code，见「已知误判」） |
+| `gemini-cli` | Gemini CLI | `agent-cli` | UA `GeminiCLI/`（含 `GeminiCLI-<client>/`）或 `gemini-cli/` |
 | `gemini-code-assist` | Gemini Code Assist | `ide-extension` | UA `CloudCodeVSCode/` 或 `proxy_client=geminicli` |
 | `opencode` | OpenCode | `agent-cli` | UA `opencode/`；任意 `x-opencode-*` header |
 | `deepseek-harness` | DeepSeek Harness | `agent-cli` | UA `deepseek-harness/<version> (+https://github.com/deepseek-ai/deepseek-harness)`（dsh 的 attribution 只发这一条 UA，不发私有 header） |
 | `factory-droid` | Factory Droid | `agent-cli` | UA `factory-cli/<version>` |
-| `kimi-code` | Kimi Code | `agent-cli` | UA `KimiCLI/<version>`（旧 Python kimi-cli）或 `kimi-code-cli/<version>`；`X-Msh-Platform`（`kimi_cli` / `kimi_code_cli`）或任意 `X-Msh-*` 设备指纹头 |
+| `kimi-code` | Kimi Code | `agent-cli` | UA `KimiCLI/<version>`（旧 Python kimi-cli）、`kimi-cli/<version>` 或 `kimi-code-cli/<version>`；`X-Msh-Platform`（任意非空值，旧 `kimi_cli` 与新 `kimi_code_cli` 都发）或任意 `X-Msh-*` 设备指纹头 |
 | `pi` | Pi | `agent-cli` | UA 产品 token 精确等于 `pi`：详细形态 `pi/<version> (<platform>; <runtime>/<ver>; <arch>)`，或短形态裸 `pi` |
 | `cursor` | Cursor | `ide-extension` | `x-cursor-client-version` / `x-cursor-checksum` / `x-cursor-config-version` header 或 UA `cursor/` |
 | `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-request-id` / `x-codeium-client-version` |
@@ -52,7 +52,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `roo-code` | Roo Code | `ide-extension` | UA `RooCode/`；`HTTP-Referer: .../RooVetGit/Roo-Cline`；`X-Title: Roo Code` + `X-CLIENT-TYPE` |
 | `kilo-code` | Kilo Code | `ide-extension` | UA `Kilo-Code/` / `kilo-code/`（少数发产品 UA 的构建） |
 | `aider` | Aider | `agent-cli` | UA `aider/`；实际流量通常经 LiteLLM，因此更常见的是 `litellm` 标签 |
-| `crush` | Crush | `agent-cli` | UA `Charm-Crush/` |
+| `crush` | Crush | `agent-cli` | UA `Charm-Crush/` 或 `crush/` |
 | `goose` | Goose | `agent-cli` | UA `goose/` |
 | `amp` | Amp | `agent-cli` | UA `amp/`（精确匹配）或 `amp-cli/` |
 | `openhands` | OpenHands | `agent-app` | UA `OpenHands/` |
@@ -61,7 +61,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `portkey` | Portkey | `gateway` | `x-portkey-trace-id` / `x-portkey-config` |
 | `openrouter` | OpenRouter | `gateway` | `x-openrouter-title` / `x-openrouter-categories` / `x-openrouter-app-visibility` |
 
-普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：SDK 家族完全由 UA product（如 `OpenAI/Python`、`Anthropic/JS`）决定，语言再由 UA 后缀或 `x-stainless-lang` 决定，`x-stainless-*` 不是必需条件，得到 `sdk:openai-python` / `sdk:anthropic-typescript`；经 Google 生成客户端（`x-goog-api-client: gl-python/...`）得到 `sdk:google-genai-python`，Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
+普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：SDK 家族先由 UA product（如 `OpenAI/Python`、`Anthropic/JS`）决定；UA 没有厂商 token、但带有 `x-stainless-*` 或已识别出语言时，再按协议头与路径兜底（`anthropic-version` 或 `/messages` → Anthropic，`/chat/completions`、`/responses`、`/embeddings` → OpenAI）。语言取 UA 后缀、`x-stainless-lang` 或 `x-goog-api-client`（`gl-python/...` 等），`x-stainless-*` 不是必需条件，因此 `OpenAI/Python` 得到 `sdk:openai-python`、`Anthropic/JS` 得到 `sdk:anthropic-typescript`；经 Google 生成客户端得到 `sdk:google-genai-python`，UA 含 `ai-sdk-provider-utils/` 的 Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
 
 ## 标签（tags）
 

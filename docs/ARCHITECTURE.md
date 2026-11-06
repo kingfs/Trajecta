@@ -135,7 +135,7 @@ application DB 是结构化查询源：
 
 会话汇总（`session_summaries`）是唯一仍由写入路径增量维护的派生表。录制路径只把待重建的 session 记进进程内队列，不自己做整会话聚合；`serve` 通过 `Store.StartDerivedRefresh()` 让后台 goroutine 成为唯一消费者（写入直接唤醒，2 秒 ticker 兜底），因此派生重建不再由读取请求买单，读取端最多观察到亚秒级滞后。未启动 flusher 的调用方保持同步语义（读取端先 flush）。
 
-派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表仍由 Postgres 历史迁移创建（SQLite 启动 schema 不再创建），代码不读取也不写入它们，回收空间是运维的手工决定（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
+派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表里，`overview_metric_buckets` / `overview_metric_bucket_members` 已由 Postgres 迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP（SQLite 启动 schema 同样不再创建）；`semantic_nodes` 仍由 Postgres 历史迁移创建（没有 drop 迁移），代码不读取也不写入它，回收空间是运维的手工决定（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
 
 Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个有界磁盘缓存：键为 `(session_id, last_trace_id, trace_count, limit)`，条目以临时文件加 rename 原子写入，最多保留 512 条 / 512 MiB。它是纯派生数据，任何时候都可以删除并按下述 cassette 重建；`?full=1` 与 `?stream=1` 不读写该缓存。
 

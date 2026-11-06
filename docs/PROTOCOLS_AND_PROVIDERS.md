@@ -6,13 +6,13 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 ## 术语
 
-- **Provider**：面向用户（Monitor UI 与文档）的上游服务配置，可以是官方模型厂商、公司网关或本地/自托管代理。
+- **Provider**：上游公司、公司网关或本地/自托管代理，即 provider preset 描述的对象；「一个上游连接 + 凭据」的正式称呼是渠道（channel），见下。
 - **协议族（`protocol_family`）**：上游 API 请求/响应 schema、认证方式与 endpoint 形态的归类。当前有 4 个：`openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native`。
 - **路由 profile（`routing_profile`）**：同一协议族内的 URL 构造与鉴权差异，例如 Azure、vLLM、Vertex express 与 project/location。
 - **客户端入口（entrypoint）**：Trajecta 暴露给客户端的 URL 形态，只选择客户端 API 形态，不跨协议族翻译。
 - **能力（capability）**：`capabilities.*` 布尔声明，用于按 endpoint 判断某个上游或模型能否服务某类请求。
 
-内部实现与数据库仍沿用 `channel_*` 命名：`channel_configs`、`channel_models`、`/api/channels`。这些是实现细节；除讨论存储与迁移外一律称 Provider。Monitor UI 已把 Channels 改名为 Providers，旧前端路由 `/channels` 会重定向到 `/providers`。存储细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
+内部实现与数据库仍沿用 `channel_*` 命名：`channel_configs`、`channel_models`、`/api/channels`。这些是实现细节。Monitor UI 的正式页面是「渠道」`/channels`（API 为 `/api/channels`），`/providers`、`/providers/:id` 只保留到 `/channels` 的旧地址重定向；`provider` 只指上游公司或 provider preset。存储细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
 
 ## 协议族与请求入口
 
