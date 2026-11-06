@@ -134,7 +134,8 @@ func bounded(src []byte, start, end int) bool {
 	return true
 }
 
-// Detector scans buffers with the compiled credential DFA.
+// Detector scans buffers with the compiled credential DFA and the native
+// name-anchored assignment scanner.
 //
 // A Detector is an empty value that holds no state, so it is safe for
 // concurrent use; callers should keep one for the process rather than build
@@ -147,12 +148,21 @@ type Detector struct{}
 // Every lexical candidate that survives the length bounds is returned, scored.
 // Filtering is the caller's decision: Finding.Maskable reports whether a value
 // is safe to rewrite, and an audit wants the rest as well.
+//
+// The DFA pass runs first. The name-anchored pass in assignment.go then adds
+// the env-style assignments the DFA cannot see - a `POSTGRES_PASSWORD=` value
+// has no lexical shape of its own - and mergeFindings keeps the two sets
+// disjoint by giving a strictly contained DFA span up to the wider name-anchored
+// one and keeping the DFA span on any other overlap.
 func (Detector) AppendFindings(dst []Finding, src []byte) []Finding {
 	if len(src) == 0 {
 		return dst
 	}
 	c := collector{src: src, findings: dst}
 	scanDFA(src, &c)
+	if extra := appendAssignmentFindings(nil, src, c.findings); len(extra) > 0 {
+		c.findings = mergeFindings(c.findings, extra)
+	}
 	return c.findings
 }
 

@@ -336,6 +336,14 @@ const (
 	RuleURL
 	RuleLocalPath
 
+	// Name-anchored environment assignments. These are not matched by the
+	// Ragel machine: the evidence is the variable name before '=' or ':', and
+	// the value after it may have no lexical credential shape at all. They are
+	// found by the native walk in assignment.go and appended here for the same
+	// reason as every rule above: the ids already assigned never move.
+	RuleEnvSecretAssignment
+	RuleEnvURLCredential
+
 	ruleIDCount
 )
 
@@ -499,6 +507,22 @@ var ruleTable = [ruleIDCount]Rule{
 	// punctuation that is legally part of a URL.
 	RuleURL:       {Name: "access.url", Kind: KindURL, Strength: StrengthGeneric, MinLen: 10, ReportOnly: true, WordBounded: true, SkipContext: true, CandidateCheck: candidateURLShape, TrimRight: accessTrimRight},
 	RuleLocalPath: {Name: "access.local_path", Kind: KindLocalPath, Strength: StrengthGeneric, MinLen: 3, ReportOnly: true, WordBounded: true, SkipContext: true, CandidateCheck: candidateLocalPathShape, TrimRight: accessTrimRight},
+
+	// Name-anchored environment assignments, matched by assignment.go rather
+	// than by rules.rl. The anchor is the variable name; the value is whatever
+	// follows '=' or ':' and has no shape of its own to match. Strength is
+	// Strong because the name is the evidence: an X_PASSWORD=/X_TOKEN=
+	// assignment is how env dumps, .env files and docker-compose config spell a
+	// secret, and ordinary prose does not produce one. MinLen is the shortest
+	// value the native walk accepts for the rule's weakest name class; the walk
+	// applies the class-specific gate itself (password-ish >= 6, key/token
+	// >= 16, URL userinfo password >= 3).
+	RuleEnvSecretAssignment: {Name: "env.secret_assignment", Kind: KindGenericKey, Strength: StrengthStrong, MinLen: 6},
+	// env.url_credential masks only the userinfo password of a URL-class
+	// assignment (DATABASE_URL, DSN, *URI). The DSN as a whole is the address of
+	// a service, not a credential, and masking it would hide the host an
+	// operator needs to see; the password inside it is the secret.
+	RuleEnvURLCredential: {Name: "env.url_credential", Kind: KindGenericKey, Strength: StrengthStrong, MinLen: 3},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

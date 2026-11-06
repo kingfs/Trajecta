@@ -115,6 +115,12 @@ var positiveSamples = []struct {
 	// TestPositiveSamplesDetectAsIndicators checks the machine against them.
 	{RuleURL, "https://example.com/repos/example/project"},
 	{RuleLocalPath, "/home/alice/project/main.go"},
+
+	// Name-anchored assignments. They are not matched by the DFA; assignment.go
+	// walks the bytes for the name before '=' or ':'. The samples are shaped
+	// like the values a tool result carries.
+	{RuleEnvSecretAssignment, "DB_PASSWORD=q7Lm2xR8hT4vW9pZ"},
+	{RuleEnvURLCredential, "DATABASE_DSN=postgres://app_user:q7Lm2xR8hT4vW9pZ@postgres:5432/appdb?sslmode=disable"},
 }
 
 // noiseSamples are benign strings that must never produce a span. Trajecta
@@ -309,5 +315,101 @@ func BenchmarkScanNoSecrets(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = Scan(payload)
+	}
+}
+
+// skDashSeparatorSample builds a 46-byte sk- value whose body has exactly one
+// '-' or '_'. It mirrors the shape of the value from the incident without
+// carrying the real bytes: the generic pool used to accept only [0-9A-Za-z],
+// so a match stopped at the separator, the remainder was never seen, and the
+// truncated 22-byte run then failed the 35-byte floor.
+func skDashSeparatorSample(sep byte) string {
+	return "sk-" + rep("Ab1", 7) + string(sep) + rep("Cd2", 7)
+}
+
+// TestSkDashGenericAcceptsSeparatorBody is PART A of the masking coverage fix:
+// the generic sk- pool must consume '-' and '_' inside the body, and the JSON
+// context around the value is what makes the finding maskable.
+func TestSkDashGenericAcceptsSeparatorBody(t *testing.T) {
+	for _, sep := range []byte{'_', '-'} {
+		key := skDashSeparatorSample(sep)
+		if len(key) != 46 {
+			t.Fatalf("sample length = %d, want 46", len(key))
+		}
+		body := `{"token":"` + key + `","prefix":"sk-Ab1Ab1Ab1Ab"}`
+
+		fs := Scan([]byte(body))
+		got, ok := find(fs, RuleSkDashGeneric)
+		if !ok {
+			t.Fatalf("separator %q: sk_dash did not match %q (findings %+v)", sep, key, fs)
+		}
+		if got.Len() != 46 {
+			t.Errorf("separator %q: matched %d bytes, want the whole 46-byte value", sep, got.Len())
+		}
+		if !got.Maskable() {
+			t.Errorf("separator %q: finding is not maskable next to \"token\" (score %d, reasons %s)", sep, got.Score, got.Reasons)
+		}
+
+		v := testVault()
+		masked, events := v.Mask([]byte(body))
+		if len(events) != 1 || events[0].Rule != RuleSkDashGeneric {
+			t.Fatalf("separator %q: events = %+v, want one generic.sk_dash", sep, events)
+		}
+		if len(masked) != len(body) {
+			t.Fatalf("separator %q: masking changed the body length %d -> %d", sep, len(body), len(masked))
+		}
+		if bytes.Contains(masked, []byte(key)) {
+			t.Errorf("separator %q: the real key survived masking", sep)
+		}
+		if !bytes.Contains(masked, []byte(`"prefix":"sk-Ab1Ab1Ab1Ab"`)) {
+			t.Errorf("separator %q: masking touched a neighbouring field: %q", sep, masked)
+		}
+	}
+
+	// Without credential vocabulary around it the same shape is reported only:
+	// a generic match still proves too little to rewrite on its own.
+	bare := []byte(skDashSeparatorSample('_'))
+	fs := Scan(bare)
+	if len(fs) != 1 || fs[0].ID != RuleSkDashGeneric {
+		t.Fatalf("bare findings = %+v, want one generic.sk_dash", fs)
+	}
+	if fs[0].Maskable() {
+		t.Error("a bare separator-body sk- value must be reported but not rewritten")
+	}
+	if _, events := testVault().Mask(bare); len(events) != 0 {
+		t.Errorf("bare separator-body sk- value was masked: %+v", events)
+	}
+
+	// A 22-byte sk- token is below the 35-byte floor and must not be a finding.
+	short := "sk-" + rep("A", 19)
+	if fs := Scan([]byte(short)); len(fs) != 0 {
+		t.Fatalf("22-byte sk- token produced findings: %+v", fs)
+	}
+}
+
+// TestSkDashSpecificRulesStillWinTheLongestMatch pins the ordering that the
+// widened generic pool must not change: a concrete sk- family matches the same
+// span as the generic pool, so the earlier declaration has to win.
+func TestSkDashSpecificRulesStillWinTheLongestMatch(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want RuleID
+	}{
+		{"anthropic", sampleFor(RuleAnthropicAPIKey), RuleAnthropicAPIKey},
+		{"openai project", sampleFor(RuleOpenAIProject), RuleOpenAIProject},
+		{"openrouter", sampleFor(RuleOpenRouterAPIKey), RuleOpenRouterAPIKey},
+		{"openai legacy", sampleFor(RuleOpenAILegacy), RuleOpenAILegacy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := Scan([]byte(tc.text))
+			if _, ok := find(fs, tc.want); !ok {
+				t.Fatalf("%q did not match %s; findings %+v", tc.text, ruleTable[tc.want].Name, fs)
+			}
+			if _, ok := find(fs, RuleSkDashGeneric); ok {
+				t.Errorf("%q was also attributed to the generic pool", tc.text)
+			}
+		})
 	}
 }

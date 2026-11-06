@@ -144,7 +144,14 @@ age_key        = 'AGE-SECRET-KEY-1' [0-9A-Z]+;
 powershell_ss  = '01000000d08c9ddf0115d1118c7a00c04fc297eb' hexl+;
 # Generic pools. Every concrete rule above outranks these on longest match;
 # sk_dash and sk_under are declared last on purpose.
-sk_dash  = 'sk-' b62+;
+#
+# The sk- body is b62d, not b62: a real key can carry '-' or '_' inside its
+# body (a provider that hands out its own opaque sk- tokens, or a wrapped
+# secret), and b62 would stop the match at that byte. The collision with the
+# concrete sk- families above is resolved by declaration order, which is why
+# they stay first: on an equal-length match the earlier pattern wins, so
+# sk-ant-/sk-proj-/sk-or-v1- keep their rule.
+sk_dash  = 'sk-' b62d+;
 sk_under = 'sk_' b62+;
 
 # Scanner entry order is semantically significant: on an equal-length match

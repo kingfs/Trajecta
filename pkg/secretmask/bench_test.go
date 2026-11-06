@@ -269,3 +269,68 @@ func TestBenchmarkFixtures(t *testing.T) {
 		t.Fatal("restore did not recover the fixture")
 	}
 }
+
+// BenchmarkAssignmentScanNoHit isolates the name-anchored walk on the shape
+// that costs it the most without producing a finding: a compact JSON body with
+// many `"member":` pairs, none of which is credential vocabulary. The walk must
+// stay a single early-outing byte pass; the DFA is measured separately above.
+func BenchmarkAssignmentScanNoHit(b *testing.B) {
+	payload := []byte(`{"model":"gpt-5","stream":false,"messages":[`)
+	for i := 0; i < 2000; i++ {
+		payload = append(payload, `{"role":"user","temperature":0.2,"top_p":1,"seed":42,"content":"`...)
+		payload = append(payload, benchNoiseBlock...)
+		payload = append(payload, `"},`...)
+	}
+	payload = append(payload, ']', '}')
+	if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 0 {
+		b.Fatalf("no-hit fixture produced %d findings", len(fs))
+	}
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 0 {
+			b.Fatal("unexpected finding")
+		}
+	}
+}
+
+// BenchmarkAssignmentScanEnvDump measures the hit path: a tool result carrying
+// a .env dump, which is four findings in a few hundred bytes.
+func BenchmarkAssignmentScanEnvDump(b *testing.B) {
+	payload := escapedBenchToolOutput(`POSTGRES_PASSWORD=q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K
+PGPASSWORD=n4Bd6Fh8Jk2L
+AUTH_PASSWORD=aQ7vLm2xR8hT4wY6pZ9cB3dF5gH1jK+2
+DATABASE_DSN=postgres://app_user:q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K@postgres:5432/appdb?sslmode=disable`)
+	if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 4 {
+		b.Fatalf("fixture produced %d findings, want 4", len(fs))
+	}
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 4 {
+			b.Fatal("lost findings")
+		}
+	}
+}
+
+// escapedBenchToolOutput renders text the way a recorded tool_result carries it.
+func escapedBenchToolOutput(text string) []byte {
+	var b strings.Builder
+	b.WriteString(`{"messages":[{"role":"user","content":[{"type":"tool_result","content":"`)
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		default:
+			b.WriteByte(text[i])
+		}
+	}
+	b.WriteString(`"}]}]}`)
+	return []byte(b.String())
+}
