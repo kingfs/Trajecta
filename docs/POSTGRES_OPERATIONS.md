@@ -221,7 +221,7 @@ SELECT
   (SELECT MIN(updated_at) FROM session_summaries) AS summary_min_updated_at;
 ```
 
-旧的 Overview 小时桶（`overview_metric_buckets` / `overview_metric_bucket_members`）代码已不再写入，Overview 改为直接聚合 `logs`（Postgres 历史迁移仍会创建这两张空表，除非运维手工 `DROP`）。脚本只在它们仍存在时才读取；下面就是脚本用的 `\gset` + `\if` 写法，表不存在时打印一行 `skipped`：
+旧的 Overview 小时桶（`overview_metric_buckets` / `overview_metric_bucket_members`）代码已不再写入，Overview 改为直接聚合 `logs`；Postgres 已由迁移 `20261009120000_drop_overview_metric_tables` DROP 这两张表，新库不会建表，脚本的 `to_regclass` 判断对新库必走 `skipped` 分支。脚本只在它们仍存在时才读取；下面就是脚本用的 `\gset` + `\if` 写法，表不存在时打印一行 `skipped`：
 
 ```sql
 SELECT to_regclass('overview_metric_buckets') IS NOT NULL AS has_overview_buckets \gset
@@ -970,7 +970,7 @@ session_summaries
 
 索引为 `session_summaries_last_seen (last_seen DESC, session_id DESC)` 与 `session_summaries_last_model (last_model)`。
 
-重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。这是当前唯一的派生汇总重建命令：`overview_metric_buckets` / `overview_metric_bucket_members` 已随 Overview 改为直接聚合 `logs` 一并停止维护，`Store.RebuildOverviewMetricBuckets` 与 `db summary rebuild overview` 都不存在了；这两张表不会被代码读取或写入（新建 Postgres 库经 `db migrate up` 仍会由历史迁移创建为空表，SQLite 启动 schema 不再创建），是否 `DROP` 由运维决定。
+重建入口是 `db summary rebuild sessions`（`--session-id` 局部回填、`--dry-run` 只读统计不写库、不带 `--session-id` 时全量删除并重建），命令语义见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。这是当前唯一的派生汇总重建命令：`overview_metric_buckets` / `overview_metric_bucket_members` 已随 Overview 改为直接聚合 `logs` 一并停止维护，`Store.RebuildOverviewMetricBuckets` 与 `db summary rebuild overview` 都不存在了；这两张表不会被代码读取或写入（新建 Postgres 库经 `db migrate up` 不会建表：迁移 `20261009120000_drop_overview_metric_tables` 已 DROP；SQLite 启动 schema 不再创建）。
 
 这条队列只服务于 `session_summaries`：写入路径只把受影响的 trace 与 session 记进一个进程内队列（`Store.markSessionSummariesRefresh` / `markDerivedRefreshForTrace`），队列达到上限（256 条）或调用 `Store.FlushDerivedRefresh()` 时才真正落库。**谁消费这个队列取决于是否调用了 `Store.StartDerivedRefresh()`**：`serve` 会调用，此后后台 goroutine 是唯一消费者，写入直接唤醒它（通常毫秒级），2 秒的 ticker（`store.DerivedRefreshInterval`）只是漏唤醒与失败重试的兜底；此时读 `session_summaries` 的两个入口（`ListSessionPage`、`GetSession`）**不再**自己冲刷，因此一次页面渲染不会为整会话重建买单，代价是读取端最多看到亚秒级的滞后。没有启动 flusher 的调用方（测试与无服务器的 CLI 命令）保持同步语义：这两个入口在查询之前先冲刷队列，读与它之前的写立即一致。`db summary rebuild sessions --dry-run` 用的 `SessionSummaryRebuildStats` 在两种模式下都故意不冲刷，它要报告表里现存的漂移而不是先把漂移修好。冲刷按 session 去重重建一次 `session_summaries`。`Sync`/`Rebuild` 在遍历结束后冲刷一次，所以 N 个同 session 的 cassette 只汇总一次而不是 N 次；遍历中途失败时索引行已经提交，派生刷新照常执行，失败只打印到 stderr。
 

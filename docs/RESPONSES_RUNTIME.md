@@ -48,7 +48,7 @@ HTTP 面（`internal/responses/httpapi/handler.go`）：
 - `GET /v1/responses/{id}/input_items`：读取已存 response 的 input items。
 - 请求体上限由 `responses_server.max_request_body_bytes` 控制，先做 JSON 单对象校验再进入 runtime。
 
-错误形状：`ResponseNotFoundError` → 404；`UnsupportedHostedToolError` → 400，`code` 为 `unsupported_tool`；`context.Canceled` → 499，`code` 为 `cancelled`；其余 → 500 `server_error`。
+错误形状：非法 JSON → 400 `invalid_json`；`ResponseNotFoundError` → 404；`UnsupportedHostedToolError` → 400，`code` 为 `unsupported_tool`；`context.Canceled` → 499，`code` 为 `cancelled`；上游 4xx/5xx 透传，上游超时 → 504 `upstream_timeout`，传输失败 → 502 `bad_gateway`；只有未识别的内部错误才 → 500 `server_error`。
 
 create 流程：
 

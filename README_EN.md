@@ -42,7 +42,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 | Client detection | Classifies the client harness behind a request (Claude Code, Codex, Gemini CLI, Cline, Cursor, ...) from headers and URL only (never the body), tags the trace and supports `?harness=` filtering; the classification never rewrites traffic |
 | Trajectory parsing | Cassettes are parsed into an Observation IR that yields findings such as dangerous tool calls and sensitive data |
 | Session export | Export a session's cumulative history as ATIF v1.8 JSONL |
-| Agent interface | An MCP server exposes 21 query and reanalysis tools so agents read trajectories instead of scraping HTML |
+| Agent interface | An MCP server exposes 22 query and reanalysis tools so agents read trajectories instead of scraping HTML |
 | Multi-upstream routing | Channel, weight, p2c and sticky routing, with model aliases and per-model capability overrides |
 | Storage tiers | Postgres in production (with checked-in SQL migrations), SQLite locally, cassettes always authoritative |
 
@@ -56,7 +56,7 @@ Requires Docker and Docker Compose.
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
 cp .env.example .env          # change POSTGRES_PASSWORD
 docker compose up -d
-docker compose exec trajecta /app/bin/server \
+docker compose exec trajecta /app/bin/trajecta \
   -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
@@ -262,7 +262,7 @@ Trace detail splits one exchange into Routing & Conversation, Protocol, Audit, P
 
 ## Project Status and Scope
 
-Current release `v2.1.1`, MIT licensed. Deliberately out of scope:
+Current release `v3.3.6` (see [CHANGELOG](./CHANGELOG.md)), MIT licensed. Deliberately out of scope:
 
 - public multi-tenant relay, billing, top-up or subscription distribution
 - cross-protocol translation in the forwarding hot path (the local `/v1/responses` runtime is the only exception)

@@ -33,7 +33,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `<model>` 与 site host 都先经 `tracePathSegment` 规范化再拼路径（`internal/recorder/recorder.go`）：`/` 保留（模型 slug 需要分层），空段、`.` 与 `..` 段被丢弃，控制字符被删除，`\` 改为 `_`，每段长度有上限。model 名来自请求体，是客户端可控输入；不做这一步时含 `..` 的 model 会经 `filepath.Join` 的清理逃出 `trace.output_dir`，含 NUL 的 model 会让 `os.MkdirAll` 以 `invalid argument` 失败并整条丢失 trace（只在日志里留一行 ERROR）。规范化只作用于路径，cassette 元数据与索引里的 model 名保持客户端原值。
 - 解析不到 upstream 时（配置缺失、`all upstream targets failed`、模型探测这类请求）没有 site 段，历史库里因此存在 `<model>/<YYYY>/<MM>/<DD>/...` 形态，且文件内的 `# meta: meta.url` 是相对路径（`/v1/responses`），site 无法从文件本身恢复。
 - 文件名用录制进程的时刻（容器镜像通过 `TZ=UTC` 固定为 UTC）与纳秒，不保证与同目录内其它文件单调可比。
-- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。真正把路径写进数据库的列只有 `logs.path`（主键）与 `upstream_exchanges.cassette_path`：移动文件后必须同步这两列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
+- 目录只用于组织、浏览与备份；读取端不依赖它（`pkg/recordfile` 只按文件内容解析），数据库索引不从中解析 model/provider，而是读 cassette 的 `# meta:`。当前仍被读取/维护地写路径的列只有 `logs.path`（主键）与 `upstream_exchanges.cassette_path`（旧库的历史 `overview_metric_bucket_members.path` 已随该表 drop 迁移一同消失）：移动文件后必须同步这两列（`trajecta layout apply` 就是这样做的：每个文件的重命名与索引改写在同一个事务里完成，失败会把文件移回），`logs.trace_id` 必须原样保留（`parse_jobs`、`trace_observations`、`trace_findings`、`analysis_runs`、`system_events` 等按 trace_id 关联；`analysis_jobs` 用 `target_type`/`target_id`、`session_summaries` 用 `session_id` 关联）。不要用 `migrate --rebuild-index` 来“修复路径”：`store.Rebuild()` 会先清空 `logs` 再重新索引，`lookupOrCreateTraceID` 会为每个路径重新生成 trace_id，派生分析数据会全部失联。
 - `upstream_exchanges.trace_id` **不属于** `logs.trace_id` 的命名空间。它是**上游调用自己的 id**（`meta.request_id`，形如 `1789090160442478635` 的 UnixNano 时间戳；cassette 文件名里的数字是同一时刻的纳秒部分，即该时间戳的后 9 位，文件 prelude 里声明的也是同一个完整值），而同一份 cassette 在 `logs` 里是按客户端 trace id（UUID）索引的：两者靠 `upstream_exchanges.cassette_path` 与 `logs.path` 指向同一个文件来关联，没有外键。所以用「客户端 trace id」口径做孤儿检查时，`upstream_exchanges` 整表都不匹配是**正常的**，不能据此判断索引断裂；必须为 0 的是 `parse_jobs`、`trace_observations`、`trace_findings`、`system_events` 这些真正按客户端 trace id 关联的表。
 - 一次 HTTP exchange 一个文件；同一 session 后续产生的内容会写成**新文件**，不会追加进已有文件。
 - `trajecta layout plan` 只读地报告哪些 cassette 不在当前布局里、以及它们的目标路径（判定依据是每个文件 prelude 里的 `meta.model`）。搬迁本身不在 `serve` 里做，也不会由任何命令自动触发。
@@ -57,7 +57,7 @@ Raw cassette (.http, LLM_PROXY_V3)
   生成后必须复核 SQL，并同时提交迁移文件与 `atlas.sum`；已提交或在共享环境应用过的迁移文件不要手改。`task migrate:ent:postgres NAME=... DEV_URL=...` 是同一流程的封装。
 - 未配置 `database.driver` 时驱动为 Postgres：缺 DSN 会直接报错，不会新建本地文件（`config.DatabaseDriver` 与 store/auth 的 `normalize*Driver` 都以 postgres 为默认）。只有显式写 `database.driver: "sqlite"` 才会打开 SQLite，它用于本地、dev、test 与旧库导入，默认文件为 `{{output_dir}}/trajecta.sqlite3`。若新默认文件不存在但改名前的 `llm_tracelab.sqlite3` 存在，则原地沿用旧文件，不会新建空库（`config.ResolveDefaultSQLitePath`）；需要把旧库文件批量改名到新名字时用 [`scripts/migrate-to-trajecta.sh`](../scripts/migrate-to-trajecta.sh)（详见“从 `llm-tracelab` 升级已有部署”）。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
 - SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库（`db migrate status --check-db` 的只读报告语义见[实现状态](./IMPLEMENTATION_STATUS.md)）。
-- `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
+- `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `appdb.MigrateUp` → `Initialize`（即 `store.NewWithDatabase`，`AutoMigrate: true`）来触发启动建表。
 - 读写连接池分离（仅 Postgres；SQLite 始终单池）：`database.read_max_open_conns`（`TRAJECTA_DATABASE_READ_MAX_OPEN_CONNS`，默认 `0`）打开第二个只读池供 Monitor 与 MCP 使用，`0` 表示不分离、全部走写入池；`database.read_max_idle_conns`（`TRAJECTA_DATABASE_READ_MAX_IDLE_CONNS`，默认等于 `read_max_open_conns`）设置该池的空闲连接数；`database.read_statement_timeout`（`TRAJECTA_DATABASE_READ_STATEMENT_TIMEOUT`，默认 `0s`）给只读池的每条语句加 `statement_timeout`，`0` 表示不设上界。录制路径（proxy finalizer、parse worker、reanalysis）始终使用 `database.max_open_conns`。
 
 ## 命令归属（哪个命令负责迁移、哪个负责 serve、auto_migrate 语义）
@@ -199,7 +199,7 @@ trajecta analyze refresh --all
 trajecta db summary rebuild sessions [--session-id <id>]
 ```
 
-`db summary rebuild` 当前只有 `sessions` 一个子命令（从 `logs` 重建 `session_summaries`，支持 `--session-id` 与 `--dry-run`）；`overview` 子命令已移除，`overview_metric_*` 两张表也不再被读写（Postgres 历史迁移仍会建表，除非运维手工 `DROP`）。
+`db summary rebuild` 当前只有 `sessions` 一个子命令（从 `logs` 重建 `session_summaries`，支持 `--session-id` 与 `--dry-run`）；`overview` 子命令已移除，`overview_metric_*` 两张表也不再被读写（Postgres 由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP，新库不会建表；SQLite 启动 schema 早已不再创建）。
 
 `analyze batch` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器；`analyze refresh` 固定执行 reparse + scan（没有 `--reparse` / `--scan` 开关），另支持 `--repair-usage`、`--rewrite-cassette`、`--enqueue`、`--workers`、`--limit` 与同样的过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
 
@@ -207,7 +207,7 @@ trajecta db summary rebuild sessions [--session-id <id>]
 
 - 语义节点树不落库：Protocol/详情视图在打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 实时重解析（见 `internal/monitor/server.go` 的 `handleTraceObservation`），数据库只保留 `trace_observations` 的紧凑摘要；没有独立的 blob 或 sidecar 存储，原始字节只保留在 cassette，多模态数据只索引 metadata。
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
-- 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）以及 `overview_metric_buckets` / `overview_metric_bucket_members` 两张表及其数据仍然留在已有 Postgres/SQLite 库里；Postgres 的历史迁移也仍然创建这三张表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到三张空表。运行时代码、必需表检查与任何命令都不会读取或删除它们。是否回收空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`、`DROP TABLE overview_metric_buckets;`、`DROP TABLE overview_metric_bucket_members;`（先备份；删除不可逆，且代码不会代做）。
+- 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）的数据仍然留在已有 Postgres 库里；Postgres 的历史迁移仍然创建该表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到一张空表。`overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP：新库不会建表，已有旧库升级时数据随表一并删除（down 迁移只重建空表，不可逆）。运行时代码、必需表检查与任何命令都不会读取或删除 `semantic_nodes`；是否回收其空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`（先备份；删除不可逆，且代码不会代做）。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
 - `credential_mask_audits` 是这张规则的一个例外，两点都要知道：它是**按 trace** 保存真值与假值的表，假值由进程内 vault 生成、cassette 只记原始请求体，所以删掉这些行之后**无法重建**；反过来，它每天只随真正被改写的请求增长（每个被替换的值一行），量级远低于 `logs`，因此没有自动保留策略。长期保留真值是一项有意的运维取舍：需要缩短留存时按 `detected_at` 手工删除即可，删行不影响 replay 与 trace 详情。
 - `{{output_dir}}/secret_mask_mappings.db` 是遮蔽映射的 bbolt 文件，保存真值与假值、按真值去重，默认开启（`secret_masking.mapping_store`）。它和 cassette、审计表一样按凭据级别对待：用 `trace_index.secret` 加密（无本地密钥时为明文），`0600`，不能跨机器共享，同一目录只能被一个进程打开（bbolt 排他锁）。备份时与 SQLite DB、`.http` 目录一起备份，但要在进程停止时复制或用文件系统快照——运行中直接 `cp` 一个 bbolt 文件可能拿到不一致的页。删除它不影响已有 cassette 与审计行，只影响重启后能否复用旧假值。
@@ -231,7 +231,7 @@ trajecta db summary rebuild sessions [--session-id <id>]
 - 独立的 Postgres auth 迁移命名空间：未实现；auth 表仍共享应用迁移集，`auth migrate down` 被阻止。
 - SQLite 版本化应用迁移：未实现；SQLite 只在显式选择时作本地启动建表，生产唯一版本化路径是 Postgres。
 - `db migrate down` 与 `auth migrate down` 的回滚：`db migrate down` 非 dry-run 直接拒绝，生产为前向迁移。
-- SQLite → Postgres 的自动数据迁移：没有内置工具，必须由运维显式处理。
+- SQLite → Postgres 的隐式/自动数据迁移：不存在；必须由运维显式运行 `trajecta upgrade db`（dry run 默认，`--apply` 才写入），细节见 [从 llm-tracelab 迁移](./LEGACY_MIGRATION.md)。
 - `file` / `code` / `computer-use` 的真实 hosted tool 执行生命周期：未实现（MCP hosted tool 执行已实现并接入）。
 - `external_command` function executor 的 root/容器级沙箱：未实现；当前只有绝对命令、允许目录、工作目录与 root 拒绝等审计化首版约束。
 - 外部队列：未实现；解析与分析使用进程内 worker + 数据库队列表。

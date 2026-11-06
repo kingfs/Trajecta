@@ -120,8 +120,8 @@ session ID 的抽取顺序为：
 
 Trajecta 自身的事件收件箱：
 
-- 来源：代码当前发出 `parser`、`analyzer`、`router`、`upstream`、`secretmask`；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
-- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`。
+- 来源：代码当前发出 `parser`、`analyzer`、`router`、`upstream`、`secretmask`、`rates`；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽（`rates` 已发出但下拉里暂无选项，见已知缺口）。
+- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`、`rate_breach`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
 
@@ -347,7 +347,7 @@ Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`tools`、`a
 
 ## 前端实现
 
-Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19、`react-router-dom`、Vite 8、TypeScript）。`vite build` 输出到 `internal/monitor/ui/dist`，由 `internal/monitor/server.go` 的 `//go:embed ui/dist/*` 嵌进二进制，再由 `internal/monitor` 用 `http.FileServer` 提供，生产环境不需要额外的 Node 进程。`task ui:test` 依次跑 `bun run typecheck`（`tsc --noEmit`）、`node --test` 单元测试与 Playwright 浏览器测试；只跑类型检查用 `task ui:typecheck`。
+Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19、`react-router-dom`、Vite 8；`.jsx`/`.tsx` 混合栈）。`vite build` 输出到 `internal/monitor/ui/dist`，由 `internal/monitor/server.go` 的 `//go:embed ui/dist/*` 嵌进二进制，再由 `internal/monitor` 用 `http.FileServer` 提供，生产环境不需要额外的 Node 进程。`task ui:test` 依次跑 `bun run typecheck`（`tsc --noEmit`）、`node --test` 单元测试与 Playwright 浏览器测试；只跑类型检查用 `task ui:typecheck`。
 
 样式是 Tailwind CSS v4（`@tailwindcss/vite` 插件）加一份 OKLCH 调色板。`src/styles/tokens.css` 现在把中性色收紧了：画布、表面、描边与三级文字是自定义的暖石墨值，不再直接取 slate 色阶；深色主题的默认面是近黑石墨，浅色主题是暖纸色，卡片的层级靠 1.05:1 以上的明度步进而非阴影。主色是自定义的 signal copper 值，状态色（green、amber、red、cyan、violet）保留 Radix 色阶；主色用于主操作、当前选中、焦点与录制标记，状态色只表达状态，两者不混用。`tests-unit/tokens.test.js` 仍逐条校验正文、弱化文字、状态色与实心填充的对比度，以及每层表面的可见步进，因此 token 被手工改动或色阶升级后会在测试里失败而不是在眼睛里失败。`tokens.css` 留在 cascade layer 之外：它只声明自定义属性，而它使用的主题属性选择器必须继续压过 `:root` 默认值。`getComputedStyle` 对这些 `color-mix()` 属性返回 `oklab(...)` 或 `color(srgb …)` 而不是 `rgb()`，按字符串正则解析颜色的断言必须改成交给浏览器解析（`tests/monitor-smoke.spec.js` 里的 `window.__paint` 就是把颜色画进 1×1 canvas 再读回像素）。字体栈以系统 UI 字体为先（`ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text", …`），数字统一使用等宽数字；自定义样式集中在 `src/styles/console.css`，它在 `pages.css` 之后加载，负责把命令面板、六列指标条、概览里的内层数据区与 trace 失败行压平，避免卡片套卡片；同一层里还放着 trace 列表的弹性列、sticky 表头、1100px 以下的紧凑行、会话步骤的细线分隔、finding/tool/timeline 行的去卡片化，以及 390px 下的 64px 侧栏与 12px 页面留白。其余历史样式表由 `src/styles/tailwind.css` 导入到最低优先级的 `legacy` 层（层序 `legacy < theme < base < components < utilities`），所以迁移期间一个 utility 类总能盖过同名的旧页面规则，不需要考虑特异性或源码顺序。Tailwind 的 preflight 故意不引入：它会重置 `styles.css` 等历史样式表所依赖的元素默认值，引入等于重排每个页面，`base.css` 已经带着 Monitor 实际需要的 reset。
 

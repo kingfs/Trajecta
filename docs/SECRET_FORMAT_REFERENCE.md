@@ -232,7 +232,7 @@ credential_finding = {
 | 通用形态 | `\bey[A-Za-z0-9_-]{12,}\.ey[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{10,}={0,2}` | A |
 | header 开头 | base64url 的 `{"` 恒为 `ey`（所以规则以 `ey` 起头是**结构必然**，不是启发式） | A |
 | 解码校验 | base64url 解码 header/payload **必须**是合法 JSON 对象；失败即否决 | A |
-| `alg` 与签名长度对应 | `HS256/384/512` → 签名 43/64/86 字符；`RS256/384/512` → 342/684/1366 字符；`ES256` → 86；`ES512` → 171；`none` → 空（末尾点号） | A |
+| `alg` 与签名长度对应（JWS 规范） | 解码后字节数：`HS256/384/512` → 32/48/64 字节（base64url 43/64/86 字符）；`RS256/384/512`（及 PS 同）→ 256/384/512 字节（base64url 342/512/683 字符）；`ES256/384/512` → 64/96/132 字节；`EdDSA` → 64 字节；`none` → 空（末尾点号）。注：当前 `pkg/secretmask/validators.go` 的 `jwtSignatureBytes` 校验表把 RS/PS 按 HS 的 32/48/64 字节处理（与规范不同），见 §9.3 | A |
 | JWE | **5 段**（header.encrypted_key.iv.ciphertext.tag），不要误判为 JWT | A |
 | 未签名 JWT | `eyJ...eyJ....`（第三段为空）——常见于测试或误配置 | A |
 
@@ -914,7 +914,7 @@ api_key="<APIKey>", algorithm="hmac-sha256", headers="host date request-line", s
 | OAuth Access Token | `gho_` | 同上 | 40 | 同上 |
 | App 用户/安装令牌 | `ghu_` / `ghs_` | 同上 | 40 | 同上 |
 | Refresh Token | `ghr_` | **来源冲突**：gitleaks 记 36，Nosey Parker 记 76 | 40 / 80 | 待确认 |
-| 细粒度 PAT | `github_pat_` | 22 + `_` + 59 | 86 | 无 CRC32 |
+| 细粒度 PAT | `github_pat_` | 22 + `_` + 59 | 93 | 无 CRC32 |
 | App JWT | `eyJ…` 三段 | RS256，`iss` 为 app_id | 可变 | JWT 解码 |
 | Webhook Secret | 任意 | 与仓库配置中的值比对 | — | 无 |
 
@@ -1336,7 +1336,7 @@ trufflehog 的做法值得借鉴：拿到候选后调用厂商 API 验证有效�
 
 打分权重（`finding.go`）：Strong 70 分、Anchored 35 分、Generic 10 分；规则定长且长度吻合加 10 分；窗口内出现凭据词汇加 40 分；校验器通过则分数抬到不低于 70 分。总分封顶 100。分档为 High ≥ 70、Medium ≥ 45、Low < 45。`Finding.Maskable()` 只放行 Medium 及以上自动改写；Low 仍然上报，让审计能看到看见了什么、以及故意没动什么。
 
-规则集共 78 条：Strong 36、Anchored 24、Generic 18。范围是结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`，以及**个人数据**里的中国居民身份证号与手机号。身份证号按 Generic 计分（18 位数字本身不证明什么），校验器通过即认定；手机号同样按 Generic 计分，靠号段收窄候选、靠上下文进入 Medium；15 位旧号没有校验位，不覆盖。
+可改写规则集共 78 条：Strong 36、Anchored 24、Generic 18（规则元数据表另有 2 条 ReportOnly 访问指示符，不计入此数）。范围是结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与本文档第 3、4 章记录的 LLM 厂商前缀，外加 `sk-` / `sk_` 两个通用池，再加 **§8.1 里锚点足够窄的那几条**：AWS AccessKeyId、GitHub 经典 PAT（CRC32）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`，以及**个人数据**里的中国居民身份证号与手机号。身份证号按 Generic 计分（18 位数字本身不证明什么），校验器通过即认定；手机号同样按 Generic 计分，靠号段收窄候选、靠上下文进入 Medium；15 位旧号没有校验位，不覆盖。
 
 **刻意不覆盖 §8.4 的弱形态。** 32/40/64 位 hex、UUID、无锚点的 44/88 位 base64 是哈希、对象 ID 与密钥共用的形状，而通过校验器会把分数抬到可改写档，所以这类规则一旦加入就会改写转录里每一个同形块。它们要成为可改写的，需要先有「上下文必需」这一档语义——当前打法是上下文加分而非必需。手机号是唯一进入规则集的弱形态：它有公开号段可把候选空间收窄，而 `手机号`/`phone` 这类词不像 `token` 那样遍布代码，因此 Generic+定长 20 分加 40 分上下文刚好越过 Medium，裸数字仍只上报。**DSN 与 Cookie 也暂不覆盖**：只有一部分是秘密，而 vault 的替换粒度是整个命中跨度，整段改写会改变连接目标、破坏结构，需要子跨度机制。`internal/analyzer` 保留这些正则用于事后上报，那里可以有误报，自动改写不能。
 

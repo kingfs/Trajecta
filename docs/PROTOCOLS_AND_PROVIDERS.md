@@ -33,7 +33,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 | 协议族 | provider 标签 | 路由 profile | 当前 endpoint 覆盖 | parser 覆盖 |
 | --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Tokenization 只被分类、路由与录制；Embeddings 只被分类与追踪，没有 adapter 因此不可路由 |
+| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models、Tokenization（Observation IR parser）；Embeddings 只被分类与追踪，没有 adapter 因此不可路由 |
 | `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`、`/v1/messages/count_tokens`；连通性与模型发现使用 `/v1/models` | Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`、`/v1beta/models` | GenerateContent、streamGenerateContent |
 | `vertex_native` | `vertex_native` | `vertex_express`、`vertex_project_location` | Vertex Gemini `generateContent`、`streamGenerateContent`、模型列表路径 | GenerateContent、streamGenerateContent |
@@ -128,7 +128,7 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 `provider probe` 是手动诊断命令，用于检查配置中的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
 
 ```bash
-server --config config.yaml provider probe --id openai-local --format json
+trajecta --config config.yaml provider probe --id openai-local --format json
 ```
 
 探测的 endpoint 固定为：OpenAI 兼容 `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`；Anthropic `POST /v1/messages`、`GET /v1/models`；Gemini `GET /v1beta/models`。鉴权按 endpoint 选择：OpenAI 风格用 `Authorization: Bearer`，Anthropic 用 `x-api-key` 加 `anthropic-version: 2023-06-01`，Gemini 用 `x-goog-api-key`。
@@ -141,7 +141,7 @@ server --config config.yaml provider probe --id openai-local --format json
 `provider probe-report` 是面向 YAML upstream 的只读批量报告；`provider probe-apply` 是面向 managed channel 的写入口，会打开 application store，对已有 channel 运行同类 probe 并只填补缺失字段：
 
 ```bash
-server --config config.yaml provider probe-apply --id openai-local --format json
+trajecta --config config.yaml provider probe-apply --id openai-local --format json
 ```
 
 `provider probe-apply` 只填补空白的 `api_type`、`protocol_family` 和未设置的能力布尔；不写入 API key 或 header secret，也不覆盖显式 `api_type`、`protocol_family` 或显式 `false` 能力。省略 `--id` 时处理所有启用且有 `base_url` 的 channel。

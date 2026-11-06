@@ -31,7 +31,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Monitor UI: `internal/monitor`; MCP tool surface: `internal/mcpserver`
 - Semantic parsing and findings: Observation IR types and protocol parsers in `pkg/observe`, the cassette-backed parse worker in `internal/observeworker`, deterministic detectors in `internal/analyzer`
 - Reanalysis and session aggregation: `internal/reanalysis`, `internal/sessionanalysis`
-- Session trajectory rebuild (ATIF-v1.8) from client-visible Responses cassettes, plus the offline official-model validator under `scripts/atif_*`: `internal/trajectory`
+- Session trajectory rebuild (ATIF-v1.8) from client-visible Responses cassettes, plus the offline official-model validator under `scripts/atif_tests/`, `scripts/atif_vendor/` and `scripts/validate_atif.py`: `internal/trajectory`
 - Auth (users, tokens, JWT): `internal/auth`; YAML/env configuration loading: `internal/config`; secret redaction: `internal/redaction`; fault injection: `internal/chaos`; replay-based deterministic eval harness: `internal/evals`
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
@@ -50,7 +50,7 @@ Structured state (trace index, sessions, channel/provider config, upstream targe
 - YAML channel configuration is a first-bootstrap input only. The first database write stores the application-database `app_settings` key `channels.initialized`; afterwards the database owns routing configuration even when every channel was disabled or deleted, and `GET /api/settings/channels` reports `channel.Service.HasConfiguration()` — the marker or any stored channel row. A YAML config with an explicit `credentials` list stays YAML-managed and rejects Monitor channel/model/alias writes with 409.
 - Management writes (channels, models, aliases, provider setup, probe apply) must go through one `store.ConfigurationTransaction`; runtime routing is published only after the commit succeeds, and background upstream refresh persists best-effort through the same upstream write lock.
 
-Lock ordering, transaction scope, and marker reset semantics are owned by `docs/ARCHITECTURE.md:108-137` (sections `## 存储边界`, `## 并发与一致性`).
+Lock ordering, transaction scope, and marker reset semantics are owned by `docs/ARCHITECTURE.md:118-156` (sections `## 存储边界`, `## 并发与一致性`).
 
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing; it does not currently translate requests between OpenAI, Anthropic, Gemini, and Vertex protocol families in the forwarding hot path.
@@ -58,7 +58,7 @@ The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions
 
 ## Record File Format
 
-The byte layout is owned by `docs/ARCHITECTURE.md:96-106` (section `## 录制格式`). Binding invariants:
+The byte layout is owned by `docs/ARCHITECTURE.md:102-117` (section `## 录制格式`). Binding invariants:
 
 - writers emit V3 only, unless a migration task explicitly says otherwise
 - readers must continue to support legacy `LLM_PROXY_V2` files with a fixed 2KB JSON header block

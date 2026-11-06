@@ -42,7 +42,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 | 客户端识别 | 只从请求头与 URL 识别 Claude Code、Codex、Gemini CLI、Cline、Cursor 等客户端 harness（不读 body），给 trace 打标签并支持 `?harness=` 过滤；识别不会改写流量 |
 | 轨迹解析 | 把 cassette 解析成 Observation IR，产出危险工具调用、敏感数据等 findings |
 | 会话轨迹导出 | 把一次 session 的累积历史导出为 ATIF v1.8 JSONL |
-| Agent 接口 | MCP server 暴露 21 个查询 / 重分析工具，让 agent 直接读轨迹而不是抓 HTML |
+| Agent 接口 | MCP server 暴露 22 个查询 / 重分析工具，让 agent 直接读轨迹而不是抓 HTML |
 | 多上游路由 | 按渠道、权重、p2c 策略与粘性路由选上游，支持模型别名与 per-model 能力覆盖 |
 | 存储分层 | 生产用 Postgres（含 checked-in SQL 迁移），本地用 SQLite，cassette 始终是事实源 |
 
@@ -56,7 +56,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
 cp .env.example .env          # 修改 POSTGRES_PASSWORD
 docker compose up -d
-docker compose exec trajecta /app/bin/server \
+docker compose exec trajecta /app/bin/trajecta \
   -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
@@ -262,7 +262,7 @@ trace 详情把一次交换拆成 Routing & Conversation、Protocol、Audit、Pe
 
 ## 项目状态与边界
 
-当前版本 `v2.1.1`，MIT 许可。明确不做的事：
+当前版本 `v3.3.6`，MIT 许可（以 [CHANGELOG](./CHANGELOG.md) 为准）。明确不做的事：
 
 - 公网多租户中转、计费 / 充值 / 订阅分发
 - 转发热路径上的跨协议转换（`/v1/responses` 的本地 runtime 是唯一例外）

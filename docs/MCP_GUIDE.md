@@ -63,7 +63,7 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 
 ## 工具概览
 
-`internal/mcpserver/server.go` 当前通过 `mcp.AddTool` 注册 **21** 个工具，本文档是这份工具面的权威清单。按用途分组如下。
+`internal/mcpserver/server.go` 当前通过 `mcp.AddTool` 注册 **22** 个工具，本文档是这份工具面的权威清单。按用途分组如下。
 
 ### Trace、Session 与 Upstream
 

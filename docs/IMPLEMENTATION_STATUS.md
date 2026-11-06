@@ -134,7 +134,7 @@ About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关
 
 ## MCP
 
-MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障与分析辅助，工具复用 Monitor/store 查询，不另起事实源，也不替代 replay、Monitor 或应用数据库。当前工具共 21 个：
+MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障与分析辅助，工具复用 Monitor/store 查询，不另起事实源，也不替代 replay、Monitor 或应用数据库。当前工具共 22 个：
 
 - trace/session/upstream：`list_traces`、`get_trace`、`list_sessions`、`list_upstreams`。
 - 路由与失败：`query_routing_decisions`、`query_sticky_routing`、`query_failures`、`summarize_failure_clusters`。

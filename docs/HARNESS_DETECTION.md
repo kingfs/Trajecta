@@ -9,7 +9,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 识别**只读请求头和 URL，绝不读 body**。harness 身份是客户端建连时冻结的事实，写在它自己发出的头里；读 body 既慢（要猜提示词在哪个位置）、又容易被用户对话里粘贴的提示词冒充，所以这条路不走。三个输入位置：
 
 1. **User-Agent 的产品 token 与版本**（`parseUserAgent` 解析）：`/` 前的第一段是产品（如 `deepseek-harness`、`codex_exec`），版本是紧随其后的数字段（唯一用到正则的地方，见下）。无 `/` 的空格形式（`codex-cli 0.153.4`）与裸 token（`pi`）同样解析。
-2. **产品私有 header**：`originator`、`x-app`、`anthropic-beta`、`x-codex-*`、`x-opencode-*`、`Copilot-Integration-Id`、`Editor-Plugin-Version`、`X-Msh-*`、`x-cursor-*`、`x-codeium-*`、`x-continue-session-id`、`HTTP-Referer`、`X-Title` 等——每个产品只认它自己写的头。
+2. **产品私有 header**：`originator`、`x-app`、`anthropic-beta`、`x-codex-*`、`x-opencode-*`、`Copilot-Integration-Id`、`Editor-Plugin-Version`、`X-Msh-*`、`x-cursor-client-version` 等具名头、`x-continue-session-id`、`HTTP-Referer`、`X-Title` 等——每个产品只认它自己写的头；只有 `x-codex-*`、`x-opencode-*` 用整段前缀扫描（`X-Msh-*` 先精确匹配 `x-msh-platform`，再前缀扫描兜底），其余都是具名头精确匹配。
 3. **URL path/query**：如 Gemini 的 `:generateContent` / `:streamGenerateContent`、Responses 的 `/responses`。
 
 匹配是**纯字符串运算，不是正则**：产品 token 要求精确相等或以 `-`/`_` / `.` 分隔续接（`codex-tui_rs` 认 `codex-tui`，但 `continuedev` 不认 `continue`）；header 值用大小写不敏感的相等/包含；私有头命名空间用前缀扫描（`x-codex-*`、`x-msh-*`）。唯一的正则在 `signals.go` 的 `versionRe`（`^v?[0-9]+(\.[0-9]+)+([-+.][0-9A-Za-z.-]+)?$`），只用来判断 UA 里的版本段长什么样、值是什么。
@@ -44,8 +44,8 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `factory-droid` | Factory Droid | `agent-cli` | UA `factory-cli/<version>` |
 | `kimi-code` | Kimi Code | `agent-cli` | UA `KimiCLI/<version>`（旧 Python kimi-cli）或 `kimi-code-cli/<version>`；`X-Msh-Platform`（`kimi_cli` / `kimi_code_cli`）或任意 `X-Msh-*` 设备指纹头 |
 | `pi` | Pi | `agent-cli` | UA 产品 token 精确等于 `pi`：详细形态 `pi/<version> (<platform>; <runtime>/<ver>; <arch>)`，或短形态裸 `pi` |
-| `cursor` | Cursor | `ide-extension` | `x-cursor-*` header 或 UA `cursor/` |
-| `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-*` |
+| `cursor` | Cursor | `ide-extension` | `x-cursor-client-version` / `x-cursor-checksum` / `x-cursor-config-version` header 或 UA `cursor/` |
+| `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-request-id` / `x-codeium-client-version` |
 | `github-copilot` | GitHub Copilot Chat | `ide-extension` | `Copilot-Integration-Id`、`Editor-Plugin-Version: copilot-chat/...`；`VScode-SessionId` + `Editor-Version` |
 | `continue` | Continue | `ide-extension` | UA `Continue/`；`x-continue-session-id` |
 | `cline` | Cline | `ide-extension` | UA `Cline/`；`HTTP-Referer: https://cline.bot`；`X-Title: Cline` + `X-CLIENT-TYPE`；`originator: cline` + `session_id`（Codex 账号透传） |
@@ -56,12 +56,12 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `goose` | Goose | `agent-cli` | UA `goose/` |
 | `amp` | Amp | `agent-cli` | UA `amp/`（精确匹配）或 `amp-cli/` |
 | `openhands` | OpenHands | `agent-app` | UA `OpenHands/` |
-| `zed` | Zed | `ide-extension` | UA `Zed/`；`x-zed-*` |
-| `litellm` | LiteLLM | `gateway` | UA `litellm/`；`x-litellm-*` |
-| `portkey` | Portkey | `gateway` | `x-portkey-*` |
-| `openrouter` | OpenRouter | `gateway` | `x-openrouter-title` / `x-openrouter-categories` |
+| `zed` | Zed | `ide-extension` | UA `Zed/`；`x-zed-version` / `x-zed-client` |
+| `litellm` | LiteLLM | `gateway` | UA `litellm/`；`x-litellm-call-id` / `x-litellm-model-id` |
+| `portkey` | Portkey | `gateway` | `x-portkey-trace-id` / `x-portkey-config` |
+| `openrouter` | OpenRouter | `gateway` | `x-openrouter-title` / `x-openrouter-categories` / `x-openrouter-app-visibility` |
 
-普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：UA `OpenAI/Python`、`Anthropic/JS` 等结合 `x-stainless-*` 得到 `sdk:openai-python` / `sdk:anthropic-typescript`，经 Google 生成客户端（`x-goog-api-client: gl-python/...`）得到 `sdk:google-genai-python`，Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
+普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：SDK 家族完全由 UA product（如 `OpenAI/Python`、`Anthropic/JS`）决定，语言再由 UA 后缀或 `x-stainless-lang` 决定，`x-stainless-*` 不是必需条件，得到 `sdk:openai-python` / `sdk:anthropic-typescript`；经 Google 生成客户端（`x-goog-api-client: gl-python/...`）得到 `sdk:google-genai-python`，Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
 
 ## 标签（tags）
 
