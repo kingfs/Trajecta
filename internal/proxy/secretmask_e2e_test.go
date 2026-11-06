@@ -1172,3 +1172,157 @@ func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
 		t.Errorf("audit row lost its trace or offsets: %+v", row)
 	}
 }
+
+// TestHandlerLeavesOpaqueProtocolValuesOnTheWire walks the real forwarding path
+// for the three protocol families the proxy serves. For each body, every opaque
+// value must reach the upstream byte for byte while the one ordinary credential
+// in the same body is masked; comparing the whole upstream body against the
+// original with just the masked region substituted pins both halves at once.
+func TestHandlerLeavesOpaqueProtocolValuesOnTheWire(t *testing.T) {
+	const (
+		// The exact false-positive run from the reported request.
+		opaqueKey = "xai-3xZ4uADr20ElWRZWhOTPcVeV332eFnjgj6IlK9PEDoti5TmEpJXSb086boDFpIRi"
+		// A different, ordinary xAI key in message text: this one must be masked.
+		normalKey = "xai-vNeighbourKey0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH"
+	)
+
+	cases := []struct {
+		name       string
+		path       string
+		baseSuffix string
+		configure  func(*config.Config)
+		body       string
+		response   string
+	}{
+		{
+			name: "Anthropic thinking, redacted thinking and base64 image",
+			path: "/v1/messages",
+			configure: func(cfg *config.Config) {
+				cfg.Upstream.ProviderPreset = "anthropic"
+				cfg.Upstream.ApiKey = "anth-test-key"
+			},
+			body: `{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[` +
+				`{"role":"assistant","content":[` +
+				`{"type":"thinking","thinking":"the key is ` + opaqueKey + `","signature":"` + opaqueKey + `"},` +
+				`{"type":"redacted_thinking","data":"` + opaqueKey + `"},` +
+				`{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + opaqueKey + `"}}]},` +
+				`{"role":"user","content":"the normal key is ` + normalKey + `"}]}`,
+			response: `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`,
+		},
+		{
+			name:       "Gemini thought signature and inline data",
+			path:       "/v1beta/models/gemini-2.5-flash:generateContent",
+			baseSuffix: "",
+			configure: func(cfg *config.Config) {
+				cfg.Upstream.ProviderPreset = "google_genai"
+				cfg.Upstream.ApiKey = "goog-test-key"
+			},
+			body: `{"contents":[` +
+				`{"role":"model","parts":[` +
+				`{"functionCall":{"name":"lookup","args":{"q":"x"}},"thoughtSignature":"` + opaqueKey + `"},` +
+				`{"inlineData":{"mimeType":"image/png","data":"` + opaqueKey + `"}}]},` +
+				`{"role":"user","parts":[{"text":"the normal key is ` + normalKey + `"}]}]}`,
+			response: `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`,
+		},
+		{
+			name:       "OpenAI chat data URI and input audio",
+			path:       "/v1/chat/completions",
+			baseSuffix: "/v1",
+			body: `{"model":"gpt-5","messages":[{"role":"user","content":[` +
+				`{"type":"image_url","image_url":{"url":"data:image/png;base64,` + opaqueKey + `"}},` +
+				`{"type":"input_audio","input_audio":{"data":"` + opaqueKey + `","format":"wav"}},` +
+				`{"type":"text","text":"the normal key is ` + normalKey + `"}]}]}`,
+			response: `{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			var upstreamBody string
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstreamBody = string(body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{}
+			cfg.Upstream.BaseURL = upstreamServer.URL + tc.baseSuffix
+			cfg.Debug.OutputDir = outputDir
+			cfg.SecretMasking.Enabled = true
+			if tc.configure != nil {
+				tc.configure(cfg)
+			}
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			resp, err := proxyServer.Client().Post(proxyServer.URL+tc.path, "application/json", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("client.Post() error = %v", err)
+			}
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+			}
+
+			if upstreamBody == "" {
+				t.Fatal("the upstream never received the request")
+			}
+			if len(upstreamBody) != len(tc.body) {
+				t.Fatalf("body length changed: got %d, want %d", len(upstreamBody), len(tc.body))
+			}
+			normalStart := strings.LastIndex(tc.body, normalKey)
+			if normalStart < 0 {
+				t.Fatal("fixture is wrong: the normal key is not in the body")
+			}
+			standIn := upstreamBody[normalStart : normalStart+len(normalKey)]
+			if standIn == normalKey {
+				t.Fatalf("the upstream received the normal key: %q", standIn)
+			}
+			want := tc.body[:normalStart] + standIn + tc.body[normalStart+len(normalKey):]
+			if upstreamBody != want {
+				t.Fatalf("only the normal key may change; opaque bytes were touched\n got %q\nwant %q", upstreamBody, want)
+			}
+
+			path := findRecordedHTTP(t, outputDir)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read cassette %q: %v", path, err)
+			}
+			parsed, err := waitForRecordedPrelude(path, time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude() error = %v", err)
+			}
+			_, recordedBody, _, _ := recordfile.ExtractSections(raw, parsed)
+			if !strings.Contains(string(recordedBody), opaqueKey) || !strings.Contains(string(recordedBody), normalKey) {
+				t.Errorf("the cassette did not record the original body: %s", recordedBody)
+			}
+			var maskedEvents int
+			for _, event := range parsed.Events {
+				if event.Type != "secret.masked" {
+					continue
+				}
+				maskedEvents++
+				if rule, _ := event.Attributes["rule"].(string); rule != "xai.api_key" {
+					t.Errorf("secret.masked rule = %q, want xai.api_key", rule)
+				}
+			}
+			if maskedEvents != 1 {
+				t.Errorf("recorded %d secret.masked events, want 1 (the normal key only)", maskedEvents)
+			}
+		})
+	}
+}
