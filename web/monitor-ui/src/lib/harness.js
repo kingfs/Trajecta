@@ -18,6 +18,42 @@
 // again as chips would make the detail header say the same thing three times.
 const REDUNDANT_TAG_PREFIXES = new Set(["harness", "kind"]);
 
+// The canonical harness ids the backend can emit, mirrored from
+// `internal/harness/catalog.go`. The traffic filter is an exact match on this
+// vocabulary, so the input offers it as suggestions; a free-typed value still
+// works when the backend learns a new id first. Keep this list in sync when
+// a rule is added or renamed.
+export const KNOWN_HARNESS_IDS = [
+  "qwen-code",
+  "claude-code",
+  "codex-vscode",
+  "codex-app",
+  "codex-cli",
+  "gemini-code-assist",
+  "gemini-cli",
+  "opencode",
+  "deepseek-harness",
+  "factory-droid",
+  "kimi-code",
+  "pi",
+  "cursor",
+  "windsurf",
+  "github-copilot",
+  "continue",
+  "cline",
+  "roo-code",
+  "kilo-code",
+  "aider",
+  "crush",
+  "goose",
+  "amp",
+  "openhands",
+  "zed",
+  "litellm",
+  "portkey",
+  "openrouter",
+];
+
 // Product names are brands: an all-lowercase fallback such as "Openai Python"
 // reads as a typo, while these words have a spelling people already know.
 const WORD_LABELS = new Map([

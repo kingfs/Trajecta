@@ -34,8 +34,22 @@ func parseUserAgent(raw string) userAgent {
 	if agent.raw == "" {
 		return agent
 	}
-	first, rest, _ := strings.Cut(agent.raw, "/")
+	first, rest, found := strings.Cut(agent.raw, "/")
 	agent.product = strings.ToLower(strings.TrimSpace(first))
+	if !found {
+		// Space-separated form without a slash (`codex-cli 0.153.4`, or the
+		// bare token `pi`): the first field is the product and a version-like
+		// second field is the version. Without this, the whole string becomes
+		// the product and both the match and the version silently fail.
+		fields := strings.Fields(agent.raw)
+		if len(fields) > 0 {
+			agent.product = strings.ToLower(fields[0])
+		}
+		if len(fields) > 1 && versionRe.MatchString(fields[1]) {
+			agent.version = strings.TrimPrefix(fields[1], "v")
+		}
+		return agent
+	}
 	fields := strings.Fields(rest)
 	if len(fields) > 0 {
 		agent.tail = strings.TrimRight(fields[0], ";,)")
@@ -52,11 +66,26 @@ func parseUserAgent(raw string) userAgent {
 	return agent
 }
 
-// productPrefix reports whether the UA product starts with prefix, case
-// insensitively. A prefix is safer than a substring because a product token is
-// exactly the first token.
+// productPrefix reports whether the UA product is prefix or continues it with
+// a separator (`-`, `_`, `.`), case insensitively. A bare HasPrefix would let
+// a short token such as `continue` or `zed` claim unrelated products like
+// `continuedev` or `zed_protocol`; requiring the exact token or a separator
+// boundary keeps the match on the product that actually sent the UA, while
+// still covering variant tokens such as `codex-tui_rs` for `codex-tui` or
+// `continue-dev` for `continue`.
 func (agent userAgent) productPrefix(prefix string) bool {
-	return strings.HasPrefix(agent.product, strings.ToLower(prefix))
+	prefix = strings.ToLower(prefix)
+	if agent.product == prefix {
+		return true
+	}
+	if !strings.HasPrefix(agent.product, prefix) {
+		return false
+	}
+	switch agent.product[len(prefix)] {
+	case '-', '_', '.':
+		return true
+	}
+	return false
 }
 
 // versionOrEmpty returns the parsed version, never a guess.

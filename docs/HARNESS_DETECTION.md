@@ -6,21 +6,21 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 输入与判定顺序
 
-识别只读取三样东西：
+识别分两阶段，头优先、body 兜底：
 
-1. 请求头：`User-Agent` 的产品 token 与版本，以及少数产品私有 header（`originator`、`x-app`、`x-codex-*`、`x-opencode-*`、`copilot-integration-id`、`x-portkey-*`、`x-openrouter-*` 等）。
-2. URL path/query：例如 Gemini 的 `:generateContent` / `:streamGenerateContent`。
-3. 请求体中的固定标记：系统提示词原句、工具名、协议字段。body 只扫描**头部 512 KiB + 尾部 256 KiB**（`bodyPrefixScan` / `bodySuffixScan`），系统提示词落在这两个窗口内，多 MB 的对话历史不会让识别成本随请求体线性增长；标记匹配直接在字节窗口上做，不复制 body。
+**阶段一（快速路径）**：只读请求头与 URL，不碰 body。`User-Agent` 的产品 token 与版本，以及少数产品私有 header（`originator`、`x-app`、`x-codex-*`、`x-opencode-*`、`copilot-integration-id`、`x-msh-*`、`x-portkey-*`、`x-openrouter-*` 等），加上 URL path/query（例如 Gemini 的 `:generateContent` / `:streamGenerateContent`）。命中第一条 **high confidence** 规则即返回，body 字节一次都不读——绝大多数 harness 都发产品级 UA 或私有 header，所以这条路径覆盖了几乎全部流量。唯一的例外是 Claude Code：Qwen Code 会伪装 `claude-cli` UA，阶段一命中的 `claude-code` 一律再经过阶段二的 Qwen 提示词核对才接受。
 
-规则按「具体 → 泛化」排序，命中第一条 high confidence 规则即停止；否则取已匹配规则中 confidence 最高者。任何一条证据只记录**信号名字**（如 `prompt:you-are-claude-code`），不记录命中的原文、header 值或 prompt 内容。
+**阶段二（兜底）**：阶段一没有 high 命中时才扫描 body：系统提示词原句、工具名、协议字段。body 只扫描**头部 512 KiB + 尾部 256 KiB**（`bodyPrefixScan` / `bodySuffixScan`），标记匹配直接在字节窗口上做，不复制 body；其中提示词原句只搜**头部窗口**（系统提示词/`instructions`/`systemInstruction` 都在 body 开头，尾部是工具数组与最近对话——用户粘贴的 “You are Codex” 不在头部，就不能认领这段流量）。阶段二按「具体 → 泛化」排序跑完整规则表，取置信度最高者。
+
+任何一条证据只记录**信号名字**（如 `prompt:you-are-claude-code`），不记录命中的原文、header 值或 prompt 内容。
 
 ## 置信度
 
 | 置信度 | 含义 |
 | --- | --- |
-| `high` | 产品级 UA token、只有该产品写的 header，或独有系统提示词原句 |
+| `high` | 产品级 UA token、只有该产品写的 header，或独有系统提示词原句。网关规则（LiteLLM/Portkey/OpenRouter）也是 high：网关背后的 agent 不可见，但网关自己的 UA token/私有头唯一指向网关 |
 | `medium` | 工具名组合、上游家族共享的提示词，或需要多条弱信号互相印证 |
-| `low` | 网关/框架类，仅用于给 trace 一个来源说明，不用来断言具体 harness |
+| `low` | 预留：无产品信号的 SDK fallback 目前不返回 ID，所以还没有规则产生 low |
 
 识别结果为空也是正常答案：手写 curl、内部合成请求（如 `/v1/models` 聚合响应）或 header 被网关剥离的请求没有可识别客户端。
 
@@ -31,13 +31,17 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `client_harness` | 显示名 | 类型 | 主要信号 |
 | --- | --- | --- | --- |
 | `claude-code` | Claude Code | `agent-cli` | UA `claude-cli/` 或 `claude-code/`；`x-app: cli` + `anthropic-beta` 含 `claude-code`；提示词 `You are Claude Code` |
-| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui`；UA `codex_cli_rs/`；任意 `x-codex-*` header；提示词 `You are a coding agent running in the Codex CLI` |
+| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui` / `codex_exec`（非交互 `codex exec` 模式）；UA `codex_cli_rs/` / `codex_exec/`；任意 `x-codex-*` header；提示词 `You are a coding agent running in the Codex CLI` |
 | `codex-vscode` | Codex (VS Code) | `ide-extension` | `originator: codex_vscode` |
 | `codex-app` | Codex App | `agent-app` | `originator: codex_atlas` / `codex_chatgpt_desktop` |
 | `qwen-code` | Qwen Code | `agent-cli` | UA `QwenCode/`；提示词 `You are Qwen Code`（优先于 Claude Code，见「已知误判」） |
 | `gemini-cli` | Gemini CLI | `agent-cli` | UA `GeminiCLI/`（含 `GeminiCLI-<client>/`）；提示词 `You are Gemini CLI`；Gemini 工具集 |
 | `gemini-code-assist` | Gemini Code Assist | `ide-extension` | UA `CloudCodeVSCode/` 或 `proxy_client=geminicli` |
 | `opencode` | OpenCode | `agent-cli` | UA `opencode/`；任意 `x-opencode-*` header；提示词 `You are opencode` |
+| `deepseek-harness` | DeepSeek Harness | `agent-cli` | UA `deepseek-harness/<version> (+https://github.com/deepseek-ai/deepseek-harness)`（dsh 的 attribution 只发这一条 UA，不发私有 header） |
+| `factory-droid` | Factory Droid | `agent-cli` | UA `factory-cli/<version>` |
+| `kimi-code` | Kimi Code | `agent-cli` | UA `KimiCLI/<version>`（旧 Python kimi-cli）或 `kimi-code-cli/<version>`；`X-Msh-Platform`（`kimi_cli` / `kimi_code_cli`）或任意 `X-Msh-*` 设备指纹头 |
+| `pi` | Pi | `agent-cli` | UA 产品 token 精确等于 `pi`：详细形态 `pi/<version> (<platform>; <runtime>/<ver>; <arch>)`，或短形态裸 `pi` |
 | `cursor` | Cursor | `ide-extension` | `x-cursor-*` header 或 UA `cursor/`；提示词 `You are Cursor`；Cursor 工具名组合 |
 | `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-*` |
 | `github-copilot` | GitHub Copilot Chat | `ide-extension` | `Copilot-Integration-Id`、`Editor-Plugin-Version: copilot-chat/...`；`VScode-SessionId` + `Editor-Version` |
@@ -89,6 +93,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 - **只识别客户端可见的交换。** 本地 Responses runtime 的内部上游 `/v1/chat/completions`（`exchange_kind=model`）不参与识别：它的 header 由本进程生成、body 是客户端请求的转换结果，识别它会把内部调用误标成客户端。列表里的 child exchange 因此没有 harness 标签。
 - **Qwen Code 会冒充 Claude Code。** Qwen Code 在非 `*.anthropic.com` base URL 上发送 `claude-cli/<version>` + `x-app: cli`；规则表把 Qwen Code 放在 Claude Code 之前，并用其自身系统提示词兜底。若网关同时剥离了 body 中的系统提示词，这类流量会被标成 `claude-code`——这是已知的、无法从剩余字节区分的边界。
+- **pi 会借用 Kimi 的身份。** pi（以及 omp 等 fork）在 `kimi-coding` provider 上把 UA 伪装成 `KimiCLI/<version>` 以通过 Kimi 的用量策略，这类流量会被标成 `kimi-code`，而不是 `pi`——外观即标签，伪装本身就是流量写明的事实。
 - **body 只读取首尾窗口。** 标记不在窗口内的超大请求可能识别不到；系统提示词与工具声明实际都落在窗口内。
 - **历史 cassette 不回填。** 本次改动之前录制的 trace 没有分类字段；它们不会因为重新索引而获得标签（prelude 里没有这些字段）。如需识别历史流量，需要重新录制。
 - **网关会改写 UA。** LiteLLM 等网关会把 UA 改写成自己的产品 token；此类 trace 会得到 `litellm` 网关标签，客户端 harness 不可见。
@@ -100,6 +105,6 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 测试
 
-- `internal/harness/detect_test.go`：各产品 header/body/path 指纹、Qwen 冒充、SDK-only 标签、未知请求、大 body 窗口、证据不含原文。
+- `internal/harness/detect_test.go`：各产品 header/body/path 指纹、Qwen 冒充（快速路径下仍正确）、SDK-only 标签、未知请求、大 body 窗口、尾部提示词不认领、产品 token 边界（`continuedev` 不是 `continue`）、空格形式 UA（`codex-cli 0.153.4`）、规则顺序契约、证据不含原文。
 - `internal/recorder/recorder_test.go`：meta 字段与 `harness.detected` 事件写入、model child 跳过、SDK-only 不写事件。
 - `internal/store` / `internal/monitor`：字段 round-trip、`?harness=` 过滤、列表 JSON 暴露。

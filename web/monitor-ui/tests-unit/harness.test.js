@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  KNOWN_HARNESS_IDS,
   harnessBadgeLabel,
   harnessConfidenceLabel,
   harnessDisplayName,
@@ -188,5 +189,21 @@ describe("harnessFilterSearch / harnessFilterHref", () => {
   it("builds an absolute path for the traffic page", () => {
     assert.match(harnessFilterHref("/traces", "?window=30d", "claude-code"), /^\/traces\?/);
     assert.match(harnessFilterHref("", "", "claude-code"), /^\/traces\?/);
+  });
+});
+
+describe("KNOWN_HARNESS_IDS", () => {
+  it("is the filter vocabulary: unique, non-empty canonical ids", () => {
+    assert.ok(KNOWN_HARNESS_IDS.length >= 20);
+    assert.equal(new Set(KNOWN_HARNESS_IDS).size, KNOWN_HARNESS_IDS.length);
+    for (const id of KNOWN_HARNESS_IDS) {
+      assert.match(id, /^[a-z0-9-]+$/);
+    }
+  });
+
+  it("covers the agent CLIs a reader filters by most", () => {
+    for (const id of ["claude-code", "codex-cli", "deepseek-harness", "factory-droid", "kimi-code", "pi", "cursor"]) {
+      assert.ok(KNOWN_HARNESS_IDS.includes(id), `missing ${id}`);
+    }
   });
 });

@@ -78,11 +78,29 @@ func (d Detection) Empty() bool {
 
 // Detect classifies req, optionally using body (which may be nil for a request
 // without one, such as a model listing). It does not mutate req.
+//
+// Identification is header-first and body-last. Phase one runs the catalogue
+// over the headers and URL only (a view with no body windows) and returns the
+// first high-confidence match without ever touching the body bytes, so the
+// common case - a harness that sends a product User-Agent or a private header
+// - costs a handful of header lookups. Only when no header signal names a
+// product does phase two run the full catalogue with the body windows, which
+// is where the prompt/tool fallbacks for header-less clients (Kilo Code,
+// Goose) and the Qwen Code impersonation check live. The one short-circuit
+// exception is Claude Code: Qwen Code spoofs its `claude-cli` User-Agent, so
+// a phase-one claude-code claim is always re-checked against the Qwen prompt
+// in phase two before it is accepted.
 func Detect(req *http.Request, body []byte) Detection {
 	if req == nil {
 		return Detection{}
 	}
 	view := newRequestView(req, body)
+
+	if detection, ok := firstHeaderHigh(newRequestView(req, nil)); ok && detection.ID != "claude-code" {
+		detection.Tags = buildTags(detection, view)
+		detection.Evidence = dedupeStrings(detection.Evidence)
+		return detection
+	}
 
 	var best Detection
 	for _, rule := range catalog {
@@ -122,6 +140,30 @@ func Detect(req *http.Request, body []byte) Detection {
 	best.Tags = buildTags(best, view)
 	best.Evidence = dedupeStrings(best.Evidence)
 	return best
+}
+
+// firstHeaderHigh runs the catalogue over a header-only view and returns the
+// first high-confidence match in catalogue order, which is the specificity
+// order. A view without body windows makes every body marker miss, so only
+// header- and path-based rules can match here; medium/low header matches are
+// deliberately not returned, because a body signal may still claim the trace
+// with higher confidence in phase two.
+func firstHeaderHigh(view requestView) (Detection, bool) {
+	for _, rule := range catalog {
+		match, ok := rule.match(view)
+		if !ok || match.confidence != ConfidenceHigh {
+			continue
+		}
+		return Detection{
+			ID:         rule.id,
+			Name:       rule.name,
+			Kind:       rule.kind,
+			Version:    match.version,
+			Confidence: match.confidence,
+			Evidence:   match.evidence,
+		}, true
+	}
+	return Detection{}, false
 }
 
 func confidenceRank(confidence string) int {
@@ -313,6 +355,25 @@ func (view requestView) bodyContains(marker string) bool {
 	needle := []byte(marker)
 	for _, window := range view.bodyWindows {
 		if bytes.Contains(window, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyHeadContainsAny reports whether any marker occurs in the head body
+// window only. System prompts and instruction fields sit at the start of the
+// body on every protocol, while the tail window holds tool arrays and the
+// most recent conversation - exactly where a user quoting `"You are Codex"`
+// would live. Searching prompt phrases in the head only keeps a pasted prompt
+// from claiming the trace, which a whole-body scan cannot avoid.
+func (view requestView) bodyHeadContainsAny(markers ...string) bool {
+	if len(view.bodyWindows) == 0 {
+		return false
+	}
+	head := view.bodyWindows[0]
+	for _, marker := range markers {
+		if marker != "" && bytes.Contains(head, []byte(marker)) {
 			return true
 		}
 	}

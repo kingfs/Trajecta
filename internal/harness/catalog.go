@@ -14,9 +14,12 @@ import "strings"
 //     product sets, or a system-prompt sentence that exists in no other tool.
 //   - medium - a combination of tool names or a generic prompt phrase that the
 //     product inherits from its upstream family.
-//   - low    - a gateway or client family that many products share; kept so a
-//     trace is labelled rather than silently bare, never used to claim a
-//     specific harness.
+//   - low    - reserved for a future fallback class that many products
+//     share; no catalogue rule returns it today. Gateway rules (LiteLLM,
+//     Portkey, OpenRouter) return high, because the agent behind them is
+//     invisible but the gateway's own UA token or private header names the
+//     gateway unambiguously - the low-confidence SDK fallback is the one
+//     that stays unlabelled (no ID) instead.
 //
 // Evidence always names the signal (`user-agent:claude-cli`,
 // `prompt:you-are-claude-code`), never its value, so detection cannot copy
@@ -47,7 +50,7 @@ var catalog = []rule{
 			if agent.productPrefix("qwencode") || agent.productPrefix("qwen-code") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:qwencode")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Qwen Code, an interactive CLI tool",
 				"You are Qwen Code",
 				"Qwen Code is an open-source AI agent",
@@ -76,7 +79,7 @@ var catalog = []rule{
 			if view.headerContains("anthropic-beta", "claude-code") {
 				return detected(ConfidenceHigh, "", "header:anthropic-beta=claude-code")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Claude Code, Anthropic's official CLI for Claude",
 				"You are Claude Code, Anthropic's official CLI",
 				"You are Claude Code",
@@ -130,7 +133,12 @@ var catalog = []rule{
 		// codex-rs/core/src/default_client.rs: DEFAULT_ORIGINATOR is
 		// codex_cli_rs, the UA is
 		// `{originator}/{version} ({os} {os_version}; {arch}) {terminal_token}`,
-		// and the client owns the private `x-codex-*` header namespace.
+		// and the client owns the private `x-codex-*` header namespace. The
+		// non-interactive `codex exec` entry point switches the originator to
+		// codex_exec before anything else reads it (set_default_originator),
+		// so exec traffic arrives as `codex_exec/<version> (...) unknown
+		// (codex_exec; <version>)` with `originator: codex_exec` - a mode of
+		// the same CLI, not a different product.
 		id:   "codex-cli",
 		name: "Codex CLI",
 		kind: KindAgentCLI,
@@ -143,21 +151,23 @@ var catalog = []rule{
 			if originator == "cline" || agent.productPrefix("cline") {
 				return matchResult{}, false
 			}
-			if agent.productPrefix("codex_cli_rs") || agent.productPrefix("codex-cli") || agent.productPrefix("codex-tui") {
-				evidence := []string{"user-agent:codex_cli_rs"}
+			if agent.productPrefix("codex_cli_rs") || agent.productPrefix("codex-cli") || agent.productPrefix("codex-tui") || agent.productPrefix("codex_exec") {
+				// The evidence names the token that actually arrived, so
+				// codex-tui and codex_exec traffic does not read as codex_cli_rs.
+				evidence := []string{"user-agent:" + agent.product}
 				if originator != "" {
 					evidence = append(evidence, "header:originator:"+originator)
 				}
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), evidence...)
 			}
 			switch originator {
-			case "codex_cli_rs", "codex-tui", "codex-tui_rs":
+			case "codex_cli_rs", "codex-tui", "codex-tui_rs", "codex_exec":
 				return detected(ConfidenceHigh, "", "header:originator:"+originator)
 			}
 			if name := view.headerNameWithPrefix("x-codex-"); name != "" {
 				return detected(ConfidenceHigh, "", "header:"+name)
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are a coding agent running in the Codex CLI",
 				"You are Codex, a coding agent",
 				"You are Codex",
@@ -203,7 +213,7 @@ var catalog = []rule{
 			if agent.productPrefix("geminicli") || agent.productPrefix("gemini-cli") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:geminicli")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Gemini CLI, an interactive CLI agent",
 				"You are Gemini CLI",
 				"Gemini CLI is an open-source AI agent",
@@ -235,12 +245,90 @@ var catalog = []rule{
 			if name := view.headerNameWithPrefix("x-opencode-"); name != "" {
 				return detected(ConfidenceHigh, "", "header:"+name)
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are opencode, an AI coding agent",
 				"You are OpenCode, an AI coding agent",
 				"You are opencode",
 			) {
 				return detected(ConfidenceHigh, "", promptEvidence("you-are-opencode"))
+			}
+			return matchResult{}, false
+		},
+	},
+	{
+		// deepseek-ai/deepseek-harness packages/llm/llm/src/attribution.ts:
+		// every provider request carries the static APP_IDENTITY as
+		// `deepseek-harness/<version> (+https://github.com/deepseek-ai/deepseek-harness)`,
+		// and attributionHeaders sends that one header and nothing else, so
+		// the UA product token is the whole fingerprint. The version comes
+		// from the package manifest, so it tracks releases on its own.
+		id:   "deepseek-harness",
+		name: "DeepSeek Harness",
+		kind: KindAgentCLI,
+		match: func(view requestView) (matchResult, bool) {
+			agent := parseUserAgent(view.headerValue("User-Agent"))
+			if agent.productPrefix("deepseek-harness") {
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:deepseek-harness")
+			}
+			return matchResult{}, false
+		},
+	},
+	{
+		// Factory Droid (the `droid` binary) sends
+		// `factory-cli/<version>` as its User-Agent; droid2api's User-Agent
+		// Updater tracks that exact version string, and Factory's own release
+		// downloads live under `factory-cli/releases/`.
+		id:   "factory-droid",
+		name: "Factory Droid",
+		kind: KindAgentCLI,
+		match: func(view requestView) (matchResult, bool) {
+			agent := parseUserAgent(view.headerValue("User-Agent"))
+			if agent.productPrefix("factory-cli") {
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:factory-cli")
+			}
+			return matchResult{}, false
+		},
+	},
+	{
+		// Moonshot's Kimi family has two generations that share the X-Msh-*
+		// device-fingerprint header namespace. The archived Python kimi-cli
+		// sends `KimiCLI/<version>` (kimi_cli/constant.py: get_user_agent)
+		// with `X-Msh-Platform: kimi_cli`; the current Kimi Code CLI sends
+		// `kimi-code-cli/<version>` with `X-Msh-Platform: kimi_code_cli`
+		// (moonshotai/kimi-code packages/oauth corrects the platform value
+		// and sends the product User-Agent). Note that pi and other agents
+		// spoof `KimiCLI/...` against api.kimi.com - appearance-based
+		// labelling cannot tell a spoof from the product, by design.
+		id:   "kimi-code",
+		name: "Kimi Code",
+		kind: KindAgentCLI,
+		match: func(view requestView) (matchResult, bool) {
+			agent := parseUserAgent(view.headerValue("User-Agent"))
+			if agent.productPrefix("kimicli") || agent.productPrefix("kimi-code-cli") || agent.productPrefix("kimi-cli") {
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:"+agent.product)
+			}
+			if view.headerValue("x-msh-platform") != "" {
+				return detected(ConfidenceHigh, "", "header:x-msh-platform")
+			}
+			if name := view.headerNameWithPrefix("x-msh-"); name != "" {
+				return detected(ConfidenceHigh, "", "header:"+name)
+			}
+			return matchResult{}, false
+		},
+	},
+	{
+		// earendil-works/pi packages/ai/src/utils/identity.ts: the detailed
+		// mode sends `pi/<version> (<platform>; <runtime>/<ver>; <arch>)` and
+		// the short mode sends the bare token `pi`. The token is two letters,
+		// so it is matched exactly - a prefix match would let any `pi*`
+		// product claim the label.
+		id:   "pi",
+		name: "Pi",
+		kind: KindAgentCLI,
+		match: func(view requestView) (matchResult, bool) {
+			agent := parseUserAgent(view.headerValue("User-Agent"))
+			if agent.product == "pi" {
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:pi")
 			}
 			return matchResult{}, false
 		},
@@ -259,7 +347,7 @@ var catalog = []rule{
 					return detected(ConfidenceHigh, "", "header:"+header)
 				}
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Cursor, a coding agent",
 				"You are Cursor",
 			) {
@@ -330,7 +418,7 @@ var catalog = []rule{
 			if view.headerValue("x-continue-session-id") != "" {
 				return detected(ConfidenceHigh, "", "header:x-continue-session-id")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Continue, an AI coding assistant",
 				"You are Continue",
 			) {
@@ -356,7 +444,7 @@ var catalog = []rule{
 				(strings.EqualFold(view.headerFirst("originator"), "cline") && view.headerValue("session_id") != "") {
 				return detected(ConfidenceHigh, "", "header:http-referer=cline.bot")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Cline, a highly skilled software engineer",
 				"You are Cline",
 			) {
@@ -386,7 +474,7 @@ var catalog = []rule{
 				(strings.EqualFold(view.headerFirst("x-title"), "roo code") && view.headerValue("x-client-type") != "") {
 				return detected(ConfidenceHigh, "", "header:http-referer=RooVetGit")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Roo, a highly skilled software engineer",
 				"You are Roo",
 			) {
@@ -409,7 +497,7 @@ var catalog = []rule{
 			if agent.productPrefix("kilo-code") || agent.productPrefix("kilocode") || agent.productPrefix("kilo code") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:kilo-code")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Kilo Code, a highly skilled software engineer",
 				"You are Kilo Code",
 			) {
@@ -445,7 +533,7 @@ var catalog = []rule{
 			if agent.productPrefix("charm-crush") || agent.productPrefix("crush") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:charm-crush")
 			}
-			if view.bodyContainsAny("You are Crush, a coding agent", "You are Crush") {
+			if view.bodyHeadContainsAny("You are Crush, a coding agent", "You are Crush") {
 				return detected(ConfidenceHigh, "", promptEvidence("you-are-crush"))
 			}
 			return matchResult{}, false
@@ -462,7 +550,7 @@ var catalog = []rule{
 			if agent.productPrefix("goose") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:goose")
 			}
-			if view.bodyContainsAny("You are Goose, an AI agent", "You are Goose") {
+			if view.bodyHeadContainsAny("You are Goose, an AI agent", "You are Goose") {
 				return detected(ConfidenceMedium, "", promptEvidence("you-are-goose"))
 			}
 			return matchResult{}, false
@@ -477,7 +565,7 @@ var catalog = []rule{
 			if agent.product == "amp" || agent.productPrefix("amp-cli") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:amp")
 			}
-			if view.bodyContainsAny(
+			if view.bodyHeadContainsAny(
 				"You are Amp, an AI coding agent",
 				"You are Amp, a coding agent",
 				"You are Amp, an interactive coding agent",
@@ -496,7 +584,7 @@ var catalog = []rule{
 			if agent.productPrefix("openhands") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:openhands")
 			}
-			if view.bodyContainsAny("You are OpenHands", "You are an OpenHands agent") {
+			if view.bodyHeadContainsAny("You are OpenHands", "You are an OpenHands agent") {
 				return detected(ConfidenceMedium, "", promptEvidence("you-are-openhands"))
 			}
 			return matchResult{}, false

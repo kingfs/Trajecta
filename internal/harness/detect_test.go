@@ -70,6 +70,174 @@ func TestDetectCodexCLI(t *testing.T) {
 	assertTagsContain(t, got.Tags, "harness:codex-cli", "kind:agent-cli", "capability:tool-use", "capability:prompt-cache", "capability:streaming", "capability:responses-api")
 }
 
+func TestDetectCodexExec(t *testing.T) {
+	// `codex exec` (non-interactive) switches the originator to codex_exec, so
+	// both the UA product and the originator header carry that token instead
+	// of codex_cli_rs. The body deliberately carries no Codex system prompt,
+	// so only the header signals can classify it.
+	headers := map[string]string{
+		"User-Agent": "codex_exec/0.165.0 (Mac OS 26.5.2; arm64) unknown (codex_exec; 0.165.0)",
+		"originator": "codex_exec",
+	}
+	body := `{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`
+	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", headers, body)
+
+	got := Detect(req, []byte(body))
+	if got.ID != "codex-cli" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
+		t.Fatalf("detection = %+v, want codex-cli agent-cli high", got)
+	}
+	if got.Version != "0.165.0" {
+		t.Fatalf("version = %q, want 0.165.0", got.Version)
+	}
+	assertTagsContain(t, got.Tags, "harness:codex-cli", "kind:agent-cli", "capability:streaming", "capability:responses-api")
+}
+
+func TestDetectDeepSeekHarness(t *testing.T) {
+	// dsh's attribution sends exactly one identifying header: the UA product
+	// token deepseek-harness with the release version. No originator, no
+	// product prompt, so the UA rule is the whole classification.
+	headers := map[string]string{
+		"User-Agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
+	}
+	body := `{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"stream":true,"tools":[{"type":"function","function":{"name":"shell"}}]}`
+	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", headers, body)
+
+	got := Detect(req, []byte(body))
+	if got.ID != "deepseek-harness" || got.Name != "DeepSeek Harness" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
+		t.Fatalf("detection = %+v, want deepseek-harness/DeepSeek Harness agent-cli high", got)
+	}
+	if got.Version != "0.2.2-rc.1" {
+		t.Fatalf("version = %q, want 0.2.2-rc.1", got.Version)
+	}
+	assertTagsContain(t, got.Tags, "harness:deepseek-harness", "kind:agent-cli", "capability:tool-use", "capability:streaming")
+}
+
+func TestDetectFactoryDroid(t *testing.T) {
+	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "factory-cli/1.2.3"}, `{"model":"gpt-5","messages":[]}`)
+	got := Detect(req, []byte(`{"model":"gpt-5","messages":[]}`))
+	if got.ID != "factory-droid" || got.Name != "Factory Droid" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh || got.Version != "1.2.3" {
+		t.Fatalf("detection = %+v, want factory-droid/Factory Droid agent-cli high 1.2.3", got)
+	}
+}
+
+func TestDetectKimiCode(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]string
+		version string
+	}{
+		{"legacy KimiCLI UA", map[string]string{"User-Agent": "KimiCLI/1.37.0"}, "1.37.0"},
+		{"new kimi-code-cli UA", map[string]string{"User-Agent": "kimi-code-cli/1.0.0"}, "1.0.0"},
+		{"platform header only", map[string]string{"X-Msh-Platform": "kimi_code_cli"}, ""},
+		{"device header only", map[string]string{"X-Msh-Device-Id": "dev-1"}, ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", test.headers, `{"model":"kimi-k2","messages":[]}`)
+			got := Detect(req, []byte(`{"model":"kimi-k2","messages":[]}`))
+			if got.ID != "kimi-code" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
+				t.Fatalf("detection = %+v, want kimi-code agent-cli high", got)
+			}
+			if got.Version != test.version {
+				t.Fatalf("version = %q, want %q", got.Version, test.version)
+			}
+		})
+	}
+}
+
+func TestDetectPi(t *testing.T) {
+	detailed := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "pi/0.84.0 (darwin; node/v24.0.0; arm64)"}, `{"model":"gpt-5","messages":[]}`)
+	got := Detect(detailed, []byte(`{"model":"gpt-5","messages":[]}`))
+	if got.ID != "pi" || got.Kind != KindAgentCLI || got.Version != "0.84.0" {
+		t.Fatalf("detailed detection = %+v, want pi agent-cli 0.84.0", got)
+	}
+	short := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "pi"}, `{"model":"gpt-5","messages":[]}`)
+	got = Detect(short, []byte(`{"model":"gpt-5","messages":[]}`))
+	if got.ID != "pi" || got.Version != "" {
+		t.Fatalf("short detection = %+v, want pi with no version", got)
+	}
+	// The two-letter token is matched exactly: an unrelated product whose
+	// name merely starts with "pi" must not claim the label.
+	lookalike := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "pijamas/1.0.0"}, `{"model":"gpt-5","messages":[]}`)
+	if got := Detect(lookalike, []byte(`{"model":"gpt-5","messages":[]}`)); !got.Empty() {
+		t.Fatalf("lookalike detection = %+v, want empty", got)
+	}
+}
+
+// TestCatalogPrecedence pins the order contract Detect relies on: a product
+// rule must precede any rule that would also claim its traffic. Inserting a
+// rule in the wrong slot changes classifications silently, and only a test
+// like this notices.
+func TestCatalogPrecedence(t *testing.T) {
+	index := make(map[string]int, len(catalog))
+	for i, rule := range catalog {
+		index[rule.id] = i
+	}
+	before := func(earlier, later string) {
+		t.Helper()
+		ei, eok := index[earlier]
+		li, lok := index[later]
+		if !eok || !lok {
+			t.Fatalf("catalog order check %s before %s: missing %v/%v", earlier, later, eok, lok)
+		}
+		if ei >= li {
+			t.Fatalf("catalog order: %s (%d) must come before %s (%d)", earlier, ei, later, li)
+		}
+	}
+	before("qwen-code", "claude-code")  // Qwen impersonates Claude Code headers.
+	before("codex-vscode", "codex-cli") // Same agent, different surface.
+	before("codex-app", "codex-cli")    // Same agent, different surface.
+	before("kimi-code", "pi")           // Pi spoofs KimiCLI UA on kimi-coding; either order labels it kimi, pinned for stability.
+	before("claude-code", "litellm")    // Every product before every gateway.
+	before("deepseek-harness", "litellm")
+	before("factory-droid", "litellm")
+	before("kimi-code", "litellm")
+	before("pi", "litellm")
+	before("openhands", "portkey")
+	before("zed", "openrouter")
+}
+
+// TestDetectPromptInTailDoesNotClaim pins the head-only prompt search: a
+// prompt phrase that only appears in the tail window (a pasted conversation,
+// not a system prompt) must not claim the trace.
+func TestDetectPromptInTailDoesNotClaim(t *testing.T) {
+	head := `{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}`
+	filler := `,"padding":"` + strings.Repeat("x", bodyPrefixScan+bodySuffixScan+1024) + `"`
+	tail := `,"instructions":"You are a coding agent running in the Codex CLI."}`
+	body := head + filler + tail
+	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", nil, body)
+	got := Detect(req, []byte(body))
+	if !got.Empty() {
+		t.Fatalf("detection = %+v, want empty for a tail-only prompt phrase", got)
+	}
+}
+
+// TestDetectProductTokenBoundary pins the separator-aware product match: a
+// product token that merely starts with a known token's letters (without a
+// separator) is a different product.
+func TestDetectProductTokenBoundary(t *testing.T) {
+	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "continuedev/1.0.0"}, `{"model":"gpt-5","messages":[]}`)
+	if got := Detect(req, []byte(`{"model":"gpt-5","messages":[]}`)); !got.Empty() {
+		t.Fatalf("detection = %+v, want empty for continuedev", got)
+	}
+}
+
+// TestDetectSpaceSeparatedUserAgent pins the no-slash UA form: the product
+// and version are separate fields, as some app-server clients send them.
+func TestDetectSpaceSeparatedUserAgent(t *testing.T) {
+	req := request(t, http.MethodPost, "http://proxy.local/v1/responses",
+		map[string]string{"User-Agent": "codex-cli 0.153.4"}, `{"model":"gpt-5","input":[]}`)
+	got := Detect(req, []byte(`{"model":"gpt-5","input":[]}`))
+	if got.ID != "codex-cli" || got.Version != "0.153.4" {
+		t.Fatalf("detection = %+v, want codex-cli 0.153.4", got)
+	}
+}
+
 func TestDetectCodexVSCode(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", map[string]string{"originator": "codex_vscode"}, `{"model":"gpt-5","instructions":"You are Codex.","input":[]}`)
 	got := Detect(req, []byte(`{"model":"gpt-5","instructions":"You are Codex.","input":[]}`))
