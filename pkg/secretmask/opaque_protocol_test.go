@@ -2,6 +2,7 @@ package secretmask
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,50 @@ func TestMaskSkipsKnownOpaqueProtocolValues(t *testing.T) {
 			name: "generic url member with data URI",
 			body: `{"metadata":{"url":"data:application/octet-stream;base64,` + reportedXAIKey + `"}}`,
 		},
+		{
+			name: "data URI with media-type parameters",
+			body: `{"url":"data:image/svg+xml;charset=utf-8;base64,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "text/plain base64 data URI is still a payload",
+			body: `{"url":"data:text/plain;base64,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "OpenRouter reasoning item keeps content, summary and signature",
+			body: `{"input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"t"}],` +
+				`"signature":"` + reportedXAIKey + `","encrypted_content":"` + reportedXAIKey + `"}]}`,
+		},
+		{
+			name: "OpenRouter reasoning_details keeps signature and encrypted data",
+			body: `{"messages":[{"role":"assistant","reasoning_details":[` +
+				`{"type":"reasoning.text","text":"t","signature":"` + reportedXAIKey + `"},` +
+				`{"type":"reasoning.encrypted","data":"` + reportedXAIKey + `"},` +
+				`{"type":"reasoning.summary","summary":"` + reportedXAIKey + `"}]}]}`,
+		},
+		{
+			name: "thinking block with type last",
+			body: `{"messages":[{"content":[{"thinking":"` + reportedXAIKey + `","signature":"` + reportedXAIKey + `","type":"thinking"}]}]}`,
+		},
+		{
+			name: "duplicate type last wins: thinking",
+			body: `{"messages":[{"content":[{"type":"message","type":"thinking","thinking":"` + reportedXAIKey + `"}]}]}`,
+		},
+		{
+			name: "escaped type is decoded when the walk runs",
+			body: `{"a":{"encrypted_content":"opaque"},"b":{"type":"\u0074hinking","thinking":"` + reportedXAIKey + `","signature":"` + reportedXAIKey + `"}}`,
+		},
+		{
+			name: "container behind a scoped member name is still walked",
+			body: `{"outer":{"data":{"encrypted_content":"` + reportedXAIKey + `"}}}`,
+		},
+		{
+			name: "standalone reasoningText member",
+			body: `{"reasoningText":{"text":"` + reportedXAIKey + `","signature":"` + reportedXAIKey + `"}}`,
+		},
+		{
+			name: "standalone redactedContent member",
+			body: `{"redactedContent":"` + reportedXAIKey + `"}`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -130,6 +175,38 @@ func TestMaskStillScansGenericNamesOutsideOpaqueContainers(t *testing.T) {
 		{
 			name: "text data URI is not a base64 payload",
 			body: `{"url":"data:text/plain,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "uppercase data scheme is not a data URI",
+			body: `{"url":"DATA:image/png;base64,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "uppercase base64 marker is not recognised",
+			body: `{"url":"data:image/png;BASE64,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "over-long media type before the marker",
+			body: `{"url":"data:` + strings.Repeat("a", 140) + `;base64,` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "non-string type does not make the object opaque",
+			body: `{"type":["base64"],"data":"` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "duplicate type last wins: message keeps the data scanned",
+			body: `{"type":"base64","type":"message","data":"` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "only the scoped data member is skipped in a base64 source",
+			body: `{"type":"base64","data":"opaque","token":"` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "escaped type without a literal trigger stays unparsed",
+			body: `{"type":"\u0074hinking","text":"` + reportedXAIKey + `"}`,
+		},
+		{
+			name: "reasoning lookalike type",
+			body: `{"type":"reasoningx","signature":"` + reportedXAIKey + `"}`,
 		},
 		{
 			name: "ordinary message content",
@@ -186,4 +263,62 @@ func TestMaskSkipsThinkingBlockAndMasksItsNeighbour(t *testing.T) {
 	if got := v.Restore(masked); !bytes.Equal(got, []byte(body)) {
 		t.Fatalf("restore did not round-trip\n got %q\nwant %q", got, body)
 	}
+}
+
+// TestOpaqueJSONValueSpansWholeObjects pins the byte range itself, not just the
+// mask/no-mask outcome: the whole-object rule must cover exactly `{...}` and the
+// scoped base64 rule must cover exactly its `data` value.
+func TestOpaqueJSONValueSpansWholeObjects(t *testing.T) {
+	t.Run("type last thinking block", func(t *testing.T) {
+		src := []byte(`{"content":[{"thinking":"a b","signature":"c","type":"thinking"},{"type":"message","content":"x"}]}`)
+		want := `{"thinking":"a b","signature":"c","type":"thinking"}`
+		spans := opaqueJSONValueSpans(src)
+		if len(spans) != 1 {
+			t.Fatalf("spans = %+v, want one whole-object span", spans)
+		}
+		if got := string(src[spans[0].start:spans[0].end]); got != want {
+			t.Fatalf("span = %q, want %q", got, want)
+		}
+	})
+	t.Run("type first thinking block", func(t *testing.T) {
+		src := []byte(`{"content":[{"type":"thinking","thinking":"a b","signature":"c"}]}`)
+		want := `{"type":"thinking","thinking":"a b","signature":"c"}`
+		spans := opaqueJSONValueSpans(src)
+		if len(spans) != 1 || string(src[spans[0].start:spans[0].end]) != want {
+			t.Fatalf("spans = %+v, want exactly %q", spans, want)
+		}
+	})
+	t.Run("scoped base64 data", func(t *testing.T) {
+		src := []byte(`{"type":"base64","media_type":"image/png","data":"raw"}`)
+		spans := opaqueJSONValueSpans(src)
+		if len(spans) != 1 || string(src[spans[0].start:spans[0].end]) != `"raw"` {
+			t.Fatalf("spans = %+v, want exactly the data value", spans)
+		}
+	})
+	t.Run("duplicate type last wins", func(t *testing.T) {
+		src := []byte(`{"type":"base64","type":"message","data":"raw"}`)
+		if spans := opaqueJSONValueSpans(src); len(spans) != 0 {
+			t.Fatalf("spans = %+v, want none", spans)
+		}
+	})
+	t.Run("escaped type is decoded once the walk runs", func(t *testing.T) {
+		src := []byte(`{"a":{"encrypted_content":"opaque"},"b":{"type":"\u0074hinking","thinking":"a b"}}`)
+		want := `{"type":"\u0074hinking","thinking":"a b"}`
+		spans := opaqueJSONValueSpans(src)
+		found := false
+		for _, span := range spans {
+			if got := string(src[span.start:span.end]); got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("spans = %+v, want whole object %q", spans, want)
+		}
+	})
+	t.Run("non-string type", func(t *testing.T) {
+		src := []byte(`{"type":["base64"],"data":"raw"}`)
+		if spans := opaqueJSONValueSpans(src); len(spans) != 0 {
+			t.Fatalf("spans = %+v, want none", spans)
+		}
+	})
 }

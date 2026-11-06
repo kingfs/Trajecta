@@ -79,13 +79,60 @@ var opaqueJSONFields = [...]opaqueJSONField{
 //     so masking one byte of `thinking` is as fatal as masking `signature`.
 //   - redacted_thinking: the encrypted-reasoning block
 //     (`{"type":"redacted_thinking","data":"…"}`); `data` is base64 ciphertext.
-//   - base64: an Anthropic image/document `source` object
-//     (`{"type":"base64","media_type":"image/png","data":"…"}`); `data` is the
-//     binary payload.
+//   - reasoning and the OpenRouter reasoning-detail types: a provider reasoning
+//     item (`{"type":"reasoning","summary":…,"signature":…,"encrypted_content":…}`)
+//     and its Chat Completions form in `reasoning_details`
+//     (`reasoning.text`, `reasoning.encrypted`, `reasoning.summary`). OpenRouter
+//     documents that the reasoning item's content, summary, signature and
+//     encrypted_content must be echoed back unchanged, and that consecutive
+//     reasoning blocks must match what the model produced.
+//
+// The match is structural, not provider-scoped: any JSON object using one of
+// these type values is skipped. The generic names inside them are exactly why
+// the rule is written this way; see the known-boundary note in
+// docs/SECRET_MASKING.md.
 var opaqueJSONObjectTypes = [...]string{
 	"thinking",
 	"redacted_thinking",
-	"base64",
+	"reasoning",
+	"reasoning.text",
+	"reasoning.encrypted",
+	"reasoning.summary",
+}
+
+// opaqueJSONScopedField marks a member that is opaque only inside an object of
+// one type. The member name is generic (data), so it must not be skipped on its
+// own, and the object may hold other members that still have to be scanned.
+type opaqueJSONScopedField struct {
+	objectType string
+	member     string
+}
+
+// opaqueJSONScopedFields cover the payload of an Anthropic image/document
+// `source` object (`{"type":"base64","media_type":"image/png","data":"…"}`).
+// Only `data` is the binary payload; siblings keep their normal scanning.
+var opaqueJSONScopedFields = [...]opaqueJSONScopedField{
+	{objectType: "base64", member: "data"},
+}
+
+// opaqueJSONScopedMembers indexes the scoped member names for the walker.
+var opaqueJSONScopedMembers = func() map[string]struct{} {
+	members := make(map[string]struct{}, len(opaqueJSONScopedFields))
+	for _, scoped := range opaqueJSONScopedFields {
+		members[scoped.member] = struct{}{}
+	}
+	return members
+}()
+
+// isOpaqueJSONScopedField reports whether member is opaque inside an object of
+// objectType.
+func isOpaqueJSONScopedField(objectType, member string) bool {
+	for _, scoped := range opaqueJSONScopedFields {
+		if scoped.objectType == objectType && scoped.member == member {
+			return true
+		}
+	}
+	return false
 }
 
 // opaqueJSONFieldFor returns the specification for a member name.
@@ -117,7 +164,7 @@ const base64DataURIMarker = ";base64,"
 // searches for: the non-data-URI member names and the whole-object type values.
 // They are built once so the per-request prefilter does not allocate.
 var opaqueJSONPrefilterTokens = func() [][]byte {
-	tokens := make([][]byte, 0, len(opaqueJSONFields)+len(opaqueJSONObjectTypes))
+	tokens := make([][]byte, 0, len(opaqueJSONFields)+len(opaqueJSONObjectTypes)+len(opaqueJSONScopedFields))
 	for _, field := range opaqueJSONFields {
 		if field.dataURIOnly {
 			continue
@@ -126,6 +173,9 @@ var opaqueJSONPrefilterTokens = func() [][]byte {
 	}
 	for _, objectType := range opaqueJSONObjectTypes {
 		tokens = append(tokens, quotedJSONString(objectType))
+	}
+	for _, scoped := range opaqueJSONScopedFields {
+		tokens = append(tokens, quotedJSONString(scoped.objectType))
 	}
 	return tokens
 }()
@@ -161,6 +211,13 @@ func quotedJSONString(name string) []byte {
 type opaqueValueSpan struct {
 	start int
 	end   int
+}
+
+// scopedOpaqueValue is a member value whose opacity still depends on the
+// containing object's type, which may be declared after it.
+type scopedOpaqueValue struct {
+	member string
+	span   opaqueValueSpan
 }
 
 // opaqueJSONValueSpans locates every opaque JSON value in src.
@@ -239,6 +296,7 @@ func walkJSONToken(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, toke
 func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, start int) error {
 	var objectType string
 	var pending []opaqueValueSpan
+	var scoped []scopedOpaqueValue
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
@@ -259,6 +317,24 @@ func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, sta
 			if decoded, ok := decodeJSONString(src[span.start:span.end]); ok {
 				objectType = decoded
 			}
+			continue
+		}
+		if _, ok := opaqueJSONScopedMembers[key]; ok {
+			// A scoped payload is a scalar (the base64 string), but a member
+			// with the same generic name elsewhere may hold a container. Walk
+			// the container so opaque fields inside it are still found instead
+			// of being consumed unread.
+			if !nextJSONValueIsString(src, dec) {
+				if err := walkJSONValue(dec, src, spans); err != nil {
+					return err
+				}
+				continue
+			}
+			span, err := opaqueValueSpanFor(dec, src)
+			if err != nil {
+				return err
+			}
+			scoped = append(scoped, scopedOpaqueValue{member: key, span: span})
 			continue
 		}
 		field, opaque := opaqueJSONFieldFor(key)
@@ -306,6 +382,11 @@ func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, sta
 		return nil
 	}
 	*spans = append(*spans, pending...)
+	for _, value := range scoped {
+		if isOpaqueJSONScopedField(objectType, value.member) {
+			*spans = append(*spans, value.span)
+		}
+	}
 	return nil
 }
 
@@ -342,8 +423,9 @@ func nextJSONValueIsString(src []byte, dec *json.Decoder) bool {
 }
 
 // jsonValueStart returns the first byte of the value following an object key.
-// After a key token, InputOffset is at the colon; tolerate an implementation
-// that has already consumed it.
+// In the current decoder InputOffset is at the colon; a decoder version that
+// consumes the colon leaves it on the value, so the no-colon path still returns
+// the position after any whitespace rather than failing the peek.
 func jsonValueStart(src []byte, offset int) int {
 	if offset < 0 || offset > len(src) {
 		return -1
@@ -357,9 +439,8 @@ func jsonValueStart(src []byte, offset int) int {
 		for i < len(src) && isJSONSpaceByte(src[i]) {
 			i++
 		}
-		return i
 	}
-	return -1
+	return i
 }
 
 // decodeJSONString decodes a raw JSON string literal.
