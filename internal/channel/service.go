@@ -112,8 +112,9 @@ type ProbeResult struct {
 	DiscoveredCount int
 	EnabledCount    int
 	// AddedCount/RemovedCount describe what one sync changed relative to the
-	// stored rows: models the provider now lists, and non-manual models it no
-	// longer lists. A failed sync reports 0/0 and keeps the previous snapshot.
+	// stored rows: models the provider now lists, and discovered models it no
+	// longer lists. Operator-declared (manual or static) rows are never counted
+	// as removed, and a failed sync reports 0/0 and keeps the previous snapshot.
 	AddedCount     int
 	RemovedCount   int
 	Endpoint       string
@@ -609,7 +610,17 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 			return result, err
 		}
 	}
-	if err := s.store.UpdateChannelProbeStatus(result.ChannelID, completedAt, result.Status, result.ErrorText); err != nil {
+	// The channel's last_probe_at is the availability anchor: ModelAvailability
+	// compares channel_models.last_probe_at against it. A failed probe records
+	// its status and error but must not move the anchor, so the latest
+	// successful probe stays authoritative and a failure never widens or
+	// narrows routability. The zero time makes the store leave last_probe_at
+	// untouched; the attempt itself is still recorded in channel_probe_runs.
+	probeAnchor := completedAt
+	if probeErr != nil {
+		probeAnchor = time.Time{}
+	}
+	if err := s.store.UpdateChannelProbeStatus(result.ChannelID, probeAnchor, result.Status, result.ErrorText); err != nil {
 		return result, err
 	}
 	if _, err := s.store.CreateChannelProbeRun(store.ChannelProbeRunRecord{
@@ -641,23 +652,43 @@ const (
 	// ModelStateRemoved is a model the latest successful sync no longer lists.
 	// The operator's switch is kept, but routing excludes it.
 	ModelStateRemoved ModelState = "removed"
-	// ModelStateUnverified is a manually added model, or any model on a channel
-	// that has never synced successfully. It is routable but flagged.
+	// ModelStateUnverified is an operator-declared model, or any model on a
+	// channel that has never synced successfully. It is routable but flagged.
 	ModelStateUnverified ModelState = "unverified"
 )
 
-// ModelAvailability classifies one channel model. A model the latest sync did
-// not return is "removed" and is not routed; a model with no successful sync,
-// or one added by hand, is "unverified" and stays routable. A failed sync never
-// removes models, because the previous snapshot stays authoritative.
+// isOperatorDeclaredModel reports whether a channel_models row was declared by
+// the operator rather than discovered from the provider's listing: a manually
+// added model, or one imported from YAML static_models during bootstrap.
+//
+// A discovery that does not return such a row is not evidence that the provider
+// dropped it, so availability never classifies it removed.
+func isOperatorDeclaredModel(model store.ChannelModelRecord) bool {
+	switch source := strings.TrimSpace(model.Source); {
+	case strings.EqualFold(source, "manual"), strings.EqualFold(source, "static"):
+		return true
+	default:
+		return false
+	}
+}
+
+// ModelAvailability classifies one channel model against the latest successful
+// sync. A model the latest successful sync did not return is "removed" and is
+// not routed; a model without a successful sync to classify it - the channel
+// never synced successfully, or the operator declared the row - is "unverified"
+// and stays routable.
+//
+// channel.LastProbeAt is the anchor and only advances on a successful probe, so
+// a failed probe changes neither direction of the classification: the previous
+// successful snapshot stays authoritative until the next success.
 func ModelAvailability(channel store.ChannelConfigRecord, model store.ChannelModelRecord) ModelState {
 	if !model.Enabled {
 		return ModelStateDisabled
 	}
-	if strings.EqualFold(strings.TrimSpace(model.Source), "manual") {
+	if isOperatorDeclaredModel(model) {
 		return ModelStateUnverified
 	}
-	if !strings.EqualFold(strings.TrimSpace(channel.LastProbeStatus), "success") || channel.LastProbeAt.IsZero() {
+	if channel.LastProbeAt.IsZero() {
 		return ModelStateUnverified
 	}
 	if model.LastProbeAt.IsZero() || model.LastProbeAt.Before(channel.LastProbeAt) {
@@ -716,11 +747,11 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 		if _, ok := discoveredSet[model]; ok {
 			continue
 		}
-		// A provider no longer listing a manually added model does not remove
-		// it: the operator declared it on purpose. Any other row stays in the
-		// table (so its switch survives) and is marked removed by the sync
-		// timestamp.
-		if strings.EqualFold(strings.TrimSpace(record.Source), "manual") {
+		// A provider no longer listing an operator-declared model (manual or
+		// YAML static) does not remove it: the operator declared it on purpose.
+		// Any other row stays in the table (so its switch survives) and is
+		// marked removed by the sync timestamp.
+		if isOperatorDeclaredModel(record) {
 			continue
 		}
 		removed++
