@@ -246,16 +246,20 @@ func validateJWT(tok []byte) bool {
 // jwtSignatureBytes maps a JWS algorithm to its signature length. The map is
 // only consulted as a consistency oracle: an algorithm absent from it still
 // passes, it just gets no extra confirmation.
+//
+// RS*/PS* signatures are the RSA modulus size, not the HMAC digest size: RS256
+// signs with a 2048-bit key and therefore carries 256 raw bytes (342 base64url
+// characters), and likewise 384/512 for RS384/PS384 and RS512/PS512.
 var jwtSignatureBytes = map[string]int{
 	"HS256": 32,
 	"HS384": 48,
 	"HS512": 64,
-	"RS256": 32,
-	"RS384": 48,
-	"RS512": 64,
-	"PS256": 32,
-	"PS384": 48,
-	"PS512": 64,
+	"RS256": 256,
+	"RS384": 384,
+	"RS512": 512,
+	"PS256": 256,
+	"PS384": 384,
+	"PS512": 512,
 	"ES256": 64,
 	"ES384": 96,
 	"ES512": 132,
