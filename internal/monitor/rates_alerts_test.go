@@ -88,7 +88,8 @@ func TestRatesAlertsSettingsAPI(t *testing.T) {
 }
 
 func TestMaybeEvaluateRatesAlertsWritesAndResolves(t *testing.T) {
-	t.Parallel()
+	// This test swaps the package-global evaluator; keeping it serial avoids racing
+	// the other evaluator test over the same variable.
 
 	st, err := store.New(t.TempDir())
 	if err != nil {
@@ -179,7 +180,8 @@ func TestMaybeEvaluateRatesAlertsWritesAndResolves(t *testing.T) {
 // A scope that went silent (no traffic in the last minute) is resolved even
 // though it was not evaluated this round; read/ignored states survive.
 func TestMaybeEvaluateRatesAlertsSilentScope(t *testing.T) {
-	t.Parallel()
+	// This test swaps the package-global evaluator; keeping it serial avoids racing
+	// the other evaluator test over the same variable.
 
 	st, err := store.New(t.TempDir())
 	if err != nil {

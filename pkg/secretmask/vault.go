@@ -289,6 +289,13 @@ func (e MaskEvent) Kind() string {
 // replacement. src is never modified; when there is nothing to rewrite the
 // original slice is returned unchanged.
 //
+// Values of opaque JSON protocol members (opaque.go) are neither rewritten nor
+// reported: a provider's encrypted reasoning state is not a user secret, it has
+// to reach the provider byte for byte, and the detector can find a token-shaped
+// run inside that ciphertext by chance. The body is scanned first; only once a
+// maskable candidate exists is it parsed as JSON to locate those values, so a
+// body without such a member pays nothing extra.
+//
 // Masking is idempotent: a value the vault already knows as a fake is left
 // alone, so masking a body twice is the same as masking it once.
 func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
@@ -300,6 +307,8 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 	v.mu.RUnlock()
 
 	var usable []Finding
+	var opaqueSpans []opaqueValueSpan
+	opaqueSpansKnown := false
 	for _, f := range v.det.Scan(src) {
 		if !f.Maskable() {
 			continue
@@ -308,6 +317,13 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 			continue
 		}
 		if alreadyFake && v.isFake(src[f.Start:f.End]) {
+			continue
+		}
+		if !opaqueSpansKnown {
+			opaqueSpans = opaqueJSONValueSpans(src)
+			opaqueSpansKnown = true
+		}
+		if findingInOpaqueValue(f, opaqueSpans) {
 			continue
 		}
 		usable = append(usable, f)
