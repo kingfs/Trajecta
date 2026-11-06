@@ -114,7 +114,27 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 	); err != nil {
 		return UsageSummaryRecord{}, err
 	}
-	return usageSummaryRecordFromAggregate(record, successRate, avgTTFT, avgDuration, lastSeenValue)
+	record, err := usageSummaryRecordFromAggregate(record, successRate, avgTTFT, avgDuration, lastSeenValue)
+	if err != nil {
+		return UsageSummaryRecord{}, err
+	}
+	currentRPM, currentTPM, err := s.currentRatesAll(where, args)
+	if err != nil {
+		return UsageSummaryRecord{}, err
+	}
+	record.CurrentRPM = currentRPM
+	record.CurrentTPM = currentTPM
+	sampledAt := time.Now().UTC()
+	if record.RequestCount > 0 {
+		record.RatesSampledAt = sampledAt
+	}
+	if !since.IsZero() {
+		// The span ends at the latest row, not at "now": a data-derived
+		// endpoint keeps the single-key and grouped forms bit-identical.
+		windowMinutes := rateWindowMinutes(since, record.LastSeen)
+		record.AvgRPM, record.AvgTPM = rateAvg(record.RequestCount, record.TotalTokens, windowMinutes)
+	}
+	return record, nil
 }
 
 // usageSummaryGroupKeys is the closed set of columns a grouped usage summary may
@@ -184,7 +204,25 @@ func (s *Store) usageSummariesByGroupKey(groupKey string, since time.Time) (map[
 		}
 		summaries[group] = converted
 	}
-	return summaries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	current, err := s.currentRatesAllByGroup(groupKey, where, args)
+	if err != nil {
+		return nil, err
+	}
+	for group, record := range summaries {
+		rates := current[group]
+		record.CurrentRPM = rates.rpm
+		record.CurrentTPM = rates.tpm
+		record.RatesSampledAt = now
+		// Same data-derived span end as the single-key form (see above).
+		windowMinutes := rateWindowMinutes(since, record.LastSeen)
+		record.AvgRPM, record.AvgTPM = rateAvg(record.RequestCount, record.TotalTokens, windowMinutes)
+		summaries[group] = record
+	}
+	return summaries, nil
 }
 
 func (s *Store) usageSummariesByModel(since time.Time) (map[string]UsageSummaryRecord, error) {
@@ -282,10 +320,15 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	bucketMinutes := 0.0
+	if bucketSize > 0 {
+		bucketMinutes = bucketSize.Minutes()
+	}
 	out := make([]UsageTrendRecord, 0, bucketCount)
 	for index := 0; index < bucketCount; index++ {
 		slot := bucketStart.Add(time.Duration(index) * bucketSize)
 		item := buckets[slot]
+		rpm, tpm := rateAvg(item.requests, item.tokens, bucketMinutes)
 		out = append(out, UsageTrendRecord{
 			Time:          slot,
 			RequestCount:  item.requests,
@@ -293,6 +336,8 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 			MissingUsage:  item.missing,
 			TotalTokens:   item.tokens,
 			ModelCount:    len(item.models),
+			RPM:           rpm,
+			TPM:           tpm,
 		})
 	}
 	return out, nil

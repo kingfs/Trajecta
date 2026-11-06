@@ -3112,7 +3112,11 @@ func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetChannelUsageSummary(%s) error = %v", channelID, err)
 		}
-		if got := summaries[channelID]; !reflect.DeepEqual(got, want) {
+		got := summaries[channelID]
+		// RatesSampledAt is a wall-clock sampling instant: the aggregates must
+		// match exactly, the instant itself is compared for non-zero only.
+		got.RatesSampledAt, want.RatesSampledAt = time.Time{}, time.Time{}
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("batched summary for %s = %#v, want %#v", channelID, got, want)
 		}
 	}
