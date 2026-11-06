@@ -121,6 +121,7 @@ var positiveSamples = []struct {
 	// like the values a tool result carries.
 	{RuleEnvSecretAssignment, "DB_PASSWORD=q7Lm2xR8hT4vW9pZ"},
 	{RuleEnvURLCredential, "DATABASE_DSN=postgres://app_user:q7Lm2xR8hT4vW9pZ@postgres:5432/appdb?sslmode=disable"},
+	{RuleDSNPassword, "postgres://app_user:q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K@postgres:5432/appdb"},
 }
 
 // noiseSamples are benign strings that must never produce a span. Trajecta

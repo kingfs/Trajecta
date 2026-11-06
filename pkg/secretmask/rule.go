@@ -343,6 +343,12 @@ const (
 	// reason as every rule above: the ids already assigned never move.
 	RuleEnvSecretAssignment
 	RuleEnvURLCredential
+	// RuleDSNPassword is a connection-string password found from the scheme
+	// alone (dsn.go), with no variable name involved. It is the format-specific
+	// half of the native pass: `postgres://user:password@host` is a DSN in
+	// prose, in a tool result and in a .env value alike. Appended after the
+	// env rules for the same reason as every rule above.
+	RuleDSNPassword
 
 	ruleIDCount
 )
@@ -509,20 +515,33 @@ var ruleTable = [ruleIDCount]Rule{
 	RuleLocalPath: {Name: "access.local_path", Kind: KindLocalPath, Strength: StrengthGeneric, MinLen: 3, ReportOnly: true, WordBounded: true, SkipContext: true, CandidateCheck: candidateLocalPathShape, TrimRight: accessTrimRight},
 
 	// Name-anchored environment assignments, matched by assignment.go rather
-	// than by rules.rl. The anchor is the variable name; the value is whatever
-	// follows '=' or ':' and has no shape of its own to match. Strength is
-	// Strong because the name is the evidence: an X_PASSWORD=/X_TOKEN=
-	// assignment is how env dumps, .env files and docker-compose config spell a
-	// secret, and ordinary prose does not produce one. MinLen is the shortest
-	// value the native walk accepts for the rule's weakest name class; the walk
-	// applies the class-specific gate itself (password-ish >= 6, key/token
-	// >= 16, URL userinfo password >= 3).
+	// than by rules.rl. The anchor is the variable name, and only the
+	// env-variable spelling is accepted: UPPERCASE, with a non-empty prefix
+	// before `_KEY` or `_PASSWORD` (OPENAI_API_KEY, POSTGRES_PASSWORD,
+	// AWS_SECRET_ACCESS_KEY). The value is whatever follows '=' or ':' and has
+	// no shape of its own to match. Strength is Strong because the name is the
+	// evidence: an OPENAI_API_KEY=... assignment is how env dumps, .env files
+	// and docker-compose config spell a secret, and a source fragment that
+	// happens to contain a `clientSecret:` or `token:` member is not one - which
+	// is why the lowercase/camelCase/token/secret vocabulary is deliberately
+	// rejected. MinLen is the shortest value the native walk accepts for the
+	// rule's weaker name class; the walk applies the class-specific gate itself
+	// (password >= 6, key >= 16, URL userinfo password >= 3).
 	RuleEnvSecretAssignment: {Name: "env.secret_assignment", Kind: KindGenericKey, Strength: StrengthStrong, MinLen: 6},
 	// env.url_credential masks only the userinfo password of a URL-class
-	// assignment (DATABASE_URL, DSN, *URI). The DSN as a whole is the address of
-	// a service, not a credential, and masking it would hide the host an
-	// operator needs to see; the password inside it is the secret.
+	// assignment (uppercase *_URL, *_URI, *_DSN, *_CONNECTION_STRING). The DSN as
+	// a whole is the address of a service, not a credential, and masking it
+	// would hide the host an operator needs to see; the password inside it is
+	// the secret. A DSN that is not attached to such a name is found by
+	// dsn.password instead.
 	RuleEnvURLCredential: {Name: "env.url_credential", Kind: KindGenericKey, Strength: StrengthStrong, MinLen: 3},
+	// dsn.password is the userinfo password of a connection string whose scheme
+	// is one of the services in dsn.go (PostgreSQL, Redis, MySQL, MongoDB,
+	// RabbitMQ, SQL Server, ClickHouse, ...). The scheme is the evidence that the
+	// middle field is a password, so the rule needs no surrounding name and no
+	// context; it is Strong for that reason. The rule never matches the whole
+	// DSN: user, host, port and database stay readable.
+	RuleDSNPassword: {Name: "dsn.password", Kind: KindGenericKey, Strength: StrengthStrong, MinLen: 3},
 }
 
 // RuleFor returns the metadata for id. It reports false for RuleUnknown and

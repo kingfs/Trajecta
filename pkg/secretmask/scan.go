@@ -149,18 +149,19 @@ type Detector struct{}
 // Filtering is the caller's decision: Finding.Maskable reports whether a value
 // is safe to rewrite, and an audit wants the rest as well.
 //
-// The DFA pass runs first. The name-anchored pass in assignment.go then adds
-// the env-style assignments the DFA cannot see - a `POSTGRES_PASSWORD=` value
-// has no lexical shape of its own - and mergeFindings keeps the two sets
-// disjoint by giving a strictly contained DFA span up to the wider name-anchored
-// one and keeping the DFA span on any other overlap.
+// The DFA pass runs first. The native pass in assignment.go then adds what the
+// DFA cannot see: an env-style assignment whose value has no lexical shape
+// (`POSTGRES_PASSWORD=...`, `OPENAI_API_KEY=...`) and a DSN userinfo password
+// (`postgres://user:password@host`). mergeFindings keeps the two sets disjoint
+// by giving a strictly contained DFA span up to the wider native one and
+// keeping the DFA span on any other overlap.
 func (Detector) AppendFindings(dst []Finding, src []byte) []Finding {
 	if len(src) == 0 {
 		return dst
 	}
 	c := collector{src: src, findings: dst}
 	scanDFA(src, &c)
-	if extra := appendAssignmentFindings(nil, src, c.findings); len(extra) > 0 {
+	if extra := appendNativeFindings(nil, src, c.findings); len(extra) > 0 {
 		c.findings = mergeFindings(c.findings, extra)
 	}
 	return c.findings

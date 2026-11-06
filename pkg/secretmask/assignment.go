@@ -1,13 +1,27 @@
 package secretmask
 
-// Name-anchored assignment detection.
+// Name-anchored assignment detection and DSN userinfo-password detection.
 //
 // The DFA in rules.rl matches a credential by its lexical shape: a vendor
-// prefix, a checksum, an exact length. A secret that only appears as the value
-// half of an assignment - `POSTGRES_PASSWORD=...`, `DATABASE_DSN=...`, a
-// docker-compose `auth_password: ...`, a JSON member `\"TOKEN\": \"...\"` - has
-// no shape of its own when the value is an opaque database password. The anchor
-// is the variable name, and that is what this file scans for.
+// prefix, a checksum, an exact length. Two classes of secret have no shape of
+// their own:
+//
+//   - The env-style assignment: `POSTGRES_PASSWORD=...`, `OPENAI_API_KEY=...`,
+//     a docker-compose `..._password: ...`, a JSON member
+//     `\"OPENAI_API_KEY\": \"...\"`. The anchor is the variable name, and the
+//     name has to be spelled the way an environment variable is: UPPERCASE and
+//     ending in `_KEY` or `_PASSWORD`. The earlier, broader rule - any name
+//     whose last camelCase or separated token was KEY/TOKEN/SECRET/PASSWORD -
+//     also fired on source code, whose `=` and `:` separators are everywhere:
+//     `clientSecret: string(target.ClientSecret)` masked the value expression,
+//     and `bodyKey: strings.TrimSpace(key)` masked Go code. A code fragment is
+//     not a secret, and rewriting one is worse than missing a shapeless value,
+//     so the accepted names are now only the env-variable spelling.
+//   - The DSN: `postgres://user:password@host/db`. Its only secret part is the
+//     userinfo password, and the scheme itself is enough evidence that the
+//     middle field is a password. It is therefore found without a variable
+//     name, by dsn.go, so a DSN pasted into prose or a tool result is masked
+//     while its user, host and database stay readable.
 //
 // The walk is deliberately native and not a Ragel pattern:
 //
@@ -51,6 +65,12 @@ const (
 	// a private key longer than this is still found by the PEM rule inside the
 	// value, which keeps the armor and its label correct.
 	assignmentMaxQuotedValueLen = 1024
+
+	// assignmentKeyMinLen and assignmentPasswordMinLen are the value floors for
+	// the two accepted name classes. A key is longer in practice than a password,
+	// and the floor is what keeps `API_KEY=none` or `PASSWORD=abc` out.
+	assignmentKeyMinLen      = 16
+	assignmentPasswordMinLen = 6
 )
 
 // assignmentNameClass is what the name before the separator says about the
@@ -63,25 +83,25 @@ type assignmentNameClass struct {
 
 func (c assignmentNameClass) ok() bool { return c.minLen > 0 }
 
-// appendAssignmentFindings appends every name-anchored assignment finding in
-// src to dst. dfa is the DFA finding set for the same buffer, sorted by start;
-// a candidate whose span is already a maskable DFA finding exactly is skipped
-// here rather than in mergeFindings, because that is the common case on a body
-// that labels every credential, and dropping it early keeps the slice out of
-// the allocation path.
+// appendNativeFindings appends every name-anchored assignment and DSN userinfo
+// password in src to dst. dfa is the DFA finding set for the same buffer, sorted
+// by start; a candidate whose span is already a maskable DFA finding exactly is
+// skipped here rather than in mergeFindings, because that is the common case on
+// a body that labels every credential, and dropping it early keeps the slice out
+// of the allocation path.
 //
-// The walk advances by separator, not by byte: bytes.IndexByte is the
-// vectorized byte search in the standard library, and keeping the next position
-// of each of the two trigger bytes means every byte of the body is scanned at
-// most twice no matter how dense the separators are. That matters because this
-// runs on every proxied request body; a naive byte-at-a-time loop measured
-// ~2 ns/byte and dominated the added cost.
-func appendAssignmentFindings(dst []Finding, src []byte, dfa []Finding) []Finding {
+// The walk advances by separator, not by byte: bytes.IndexByte is the vectorized
+// byte search in the standard library, and keeping the next position of each of
+// the two trigger bytes means every byte of the body is scanned at most twice no
+// matter how dense the separators are. That matters because this runs on every
+// proxied request body; a naive byte-at-a-time loop measured ~2 ns/byte and
+// dominated the added cost.
+func appendNativeFindings(dst []Finding, src []byte, dfa []Finding) []Finding {
 	if len(src) < assignmentMinBuffer {
 		return dst
 	}
-	nextEq := bytes.IndexByte(src, '=')
-	nextCol := bytes.IndexByte(src, ':')
+	nextEq := nextSeparator(src, 0, '=')
+	nextCol := nextSeparator(src, 0, ':')
 	for {
 		at := -1
 		switch {
@@ -96,41 +116,49 @@ func appendAssignmentFindings(dst []Finding, src []byte, dfa []Finding) []Findin
 		default:
 			at = nextCol
 		}
-		if assignmentDfaCoversValueStart(dfa, src, at) {
-			// The DFA already matched the value and would win the merge (the
-			// candidate can only equal or be contained in that span), so the
-			// name adds nothing and the value does not have to be parsed. This
-			// is the labeled-credential body case, and it is why the pass costs
-			// almost nothing on a body that names every key.
-		} else if f, valueEnd, ok := assignmentAt(src, at); ok {
-			if !assignmentAlreadyMasked(dfa, f) {
-				dst = append(dst, f)
+		// A DSN is found by its scheme rather than by a variable name, so it is
+		// checked before the assignment path: the ':' in `postgres://` is a
+		// separator, and a password that follows it is a secret even in prose.
+		if src[at] == ':' && dsnLeadIn(src, at) {
+			if f, end, ok := dsnAt(src, at); ok {
+				if !assignmentAlreadyMasked(dfa, f) {
+					dst = append(dst, f)
+				}
+				// The authority was parsed as a unit; a separator inside its
+				// userinfo or host must not produce a second, overlapping finding.
+				nextEq, nextCol = nextSeparator(src, end, '='), nextSeparator(src, end, ':')
+				continue
 			}
-			// Skip the value: a separator inside it must not produce a second,
-			// overlapping finding for bytes the first span already covers.
-			nextEq = -1
-			if i := bytes.IndexByte(src[valueEnd:], '='); i >= 0 {
-				nextEq = valueEnd + i
+		}
+		if !assignmentDfaCoversValueStart(dfa, src, at) {
+			if f, valueEnd, ok := assignmentAt(src, at); ok {
+				if !assignmentAlreadyMasked(dfa, f) {
+					dst = append(dst, f)
+				}
+				// Skip the value: a separator inside it must not produce a second,
+				// overlapping finding for bytes the first span already covers.
+				nextEq, nextCol = nextSeparator(src, valueEnd, '='), nextSeparator(src, valueEnd, ':')
+				continue
 			}
-			nextCol = -1
-			if i := bytes.IndexByte(src[valueEnd:], ':'); i >= 0 {
-				nextCol = valueEnd + i
-			}
-			continue
 		}
 		from := at + 1
 		if at == nextEq {
-			nextEq = -1
-			if i := bytes.IndexByte(src[from:], '='); i >= 0 {
-				nextEq = from + i
-			}
+			nextEq = nextSeparator(src, from, '=')
 		} else {
-			nextCol = -1
-			if i := bytes.IndexByte(src[from:], ':'); i >= 0 {
-				nextCol = from + i
-			}
+			nextCol = nextSeparator(src, from, ':')
 		}
 	}
+}
+
+// nextSeparator returns the index of the first b at or after from, or -1.
+func nextSeparator(src []byte, from int, b byte) int {
+	if from < 0 || from >= len(src) {
+		return -1
+	}
+	if i := bytes.IndexByte(src[from:], b); i >= 0 {
+		return from + i
+	}
+	return -1
 }
 
 // assignmentDfaCoversValueStart reports whether a maskable DFA finding starts at
@@ -199,9 +227,9 @@ func assignmentAt(src []byte, sep int) (Finding, int, bool) {
 		return Finding{}, 0, false
 	}
 	// The second rejection is the hot-path filter: a name is only a credential
-	// name if it ends with one of the vocabulary words, so a body full of JSON
-	// members ("content", "model", "temperature") is rejected on three bytes
-	// without tokenizing or allocating.
+	// name if it ends with one of the accepted uppercase suffixes, so a body full
+	// of JSON members ("content", "model", "temperature") is rejected on a few
+	// bytes without tokenizing or allocating.
 	if !assignmentLikelyName(src[nameStart:nameEnd]) {
 		return Finding{}, 0, false
 	}
@@ -225,6 +253,20 @@ func assignmentAt(src []byte, sep int) (Finding, int, bool) {
 		return Finding{}, valueEnd, false
 	}
 	value := src[valueStart:valueEnd]
+	if assignmentValueLooksLikeDottedName(value) {
+		// `LANGUAGE_KEY = "trajecta.monitor.language"`, `CACHE_KEY = users.byId`:
+		// a dotted name is configuration vocabulary, not a credential. Source
+		// code is full of upper-case `*_KEY` constants whose values are exactly
+		// this shape, and masking one would rewrite a tool result that carried
+		// code.
+		return Finding{}, valueEnd, false
+	}
+	if !quoted && assignmentValueLooksLikeExpression(value) {
+		// `API_KEY = os.Getenv(...)`, `PASSWORD = config["x"]`, `KEY = m{}`: the
+		// value is a code expression, not a literal. A source fragment that
+		// happens to name a credential must not be rewritten.
+		return Finding{}, valueEnd, false
+	}
 	if len(value) < class.minLen || assignmentValueIsSkipped(value, quoted) {
 		return Finding{}, valueEnd, false
 	}
@@ -234,7 +276,7 @@ func assignmentAt(src []byte, sep int) (Finding, int, bool) {
 			return Finding{}, valueEnd, false
 		}
 		password := src[pwStart:pwEnd]
-		if len(password) < assignmentURLPasswordMin || assignmentValueIsSkipped(password, false) {
+		if len(password) < assignmentURLPasswordMin || assignmentPasswordValueIsSkipped(password) {
 			return Finding{}, valueEnd, false
 		}
 		return newAssignmentFinding(RuleEnvURLCredential, pwStart, pwEnd), valueEnd, true
@@ -274,7 +316,9 @@ func assignmentNameBounds(src []byte, sep int) (int, int) {
 
 // assignmentNameByte is a byte that may appear in a variable name, including
 // the quote and backslash an escaped JSON member name carries and the
-// separators the tokenizer splits on.
+// separators the tokenizer splits on. It is a loose bound: the name still has
+// to be accepted by classifyAssignmentName, which keeps only the uppercase env
+// spelling.
 func assignmentNameByte(c byte) bool {
 	switch {
 	case c >= '0' && c <= '9', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
@@ -300,89 +344,36 @@ func assignmentFollowsDollar(src []byte, nameStart int) bool {
 // classifyAssignmentName maps a variable name to the assignment class it
 // selects, or the zero class when the name is not credential vocabulary.
 //
-// The comparison is case-insensitive and allocation-free. Names are tokenized
-// by the caller-visible separators and by camelCase boundaries, and the
-// no-separator env spellings (PGPASSWORD, AUTHTOKEN, CLIENT_SECRET written as a
-// single run) are recognised by a raw suffix rule. KEY is the exception: it is
-// only a key name as the exact bare name, after a separator, or inside APIKEY,
-// so MONKEY and TURKEY do not match.
+// Only the env-variable spelling counts: the name must be UPPERCASE (letters,
+// digits and '_'), and it must carry a non-empty prefix before `_KEY`,
+// `_PASSWORD`, or one of the URL-class suffixes (`_URL`, `_URI`, `_DSN`,
+// `_CONNECTION_STRING`). Anything else - `clientSecret`, `dbPassword`, bare
+// `PASSWORD`, `PGPASSWORD`, `GITHUB_TOKEN`, `CLIENT_SECRET` - is deliberately
+// left alone. The narrower vocabulary is the fix for the reported false
+// positives: ordinary code spells `clientSecret:`, `token:`, `password:`, and
+// treating those as env assignments masked the value expression next to them.
 func classifyAssignmentName(raw []byte) assignmentNameClass {
 	name := trimAssignmentName(raw)
-	if len(name) == 0 {
+	if !assignmentEnvName(name) {
 		return assignmentNameClass{}
 	}
 	if assignmentNameExcluded(name) {
 		return assignmentNameClass{}
 	}
-	tok, separated := assignmentLastToken(name)
 	// URL-class names describe a whole connection string. The class is decided
-	// before the secret names so `DATABASE_URL` cannot fall into a plain-name
-	// rule and get the whole address masked.
-	switch {
-	case assignmentFoldEqual(tok, "DSN"),
-		assignmentFoldEqual(tok, "URI"),
-		assignmentFoldEqual(tok, "URL"),
-		assignmentSuffixEqual(name, "CONNECTION_STRING"):
+	// before the secret names so a name that ends in both is not mistaken for a
+	// whole-value secret; in practice the suffixes do not overlap.
+	if assignmentSuffixEqual(name, "_CONNECTION_STRING") ||
+		assignmentSuffixEqual(name, "_URL") ||
+		assignmentSuffixEqual(name, "_URI") ||
+		assignmentSuffixEqual(name, "_DSN") {
 		return assignmentNameClass{urlClass: true, minLen: assignmentURLPasswordMin}
 	}
-	// Compound names whose last token (KEY, TOKEN, SECRET) is too weak on its
-	// own but whose pair is conventional. They are matched on the raw name so a
-	// separator is required; `MONKEY` never reaches this branch.
 	switch {
-	case assignmentSuffixEqual(name, "PRIVATE_KEY"),
-		assignmentSuffixEqual(name, "ACCESS_KEY"),
-		assignmentSuffixEqual(name, "AUTH_TOKEN"):
-		return assignmentNameClass{minLen: 16}
-	case assignmentSuffixEqual(name, "CLIENT_SECRET"),
-		assignmentSuffixEqual(name, "JWT_SECRET"):
-		return assignmentNameClass{minLen: 6}
-	}
-	// Exact bare names. TOKEN/PASSWORD/SECRET also arrive through the token
-	// case below; they are listed here so the rule is readable on its own.
-	switch {
-	case assignmentFoldEqual(name, "KEY"):
-		return assignmentNameClass{minLen: 16}
-	case assignmentFoldEqual(name, "TOKEN"):
-		return assignmentNameClass{minLen: 16}
-	case assignmentFoldEqual(name, "PASSWORD"), assignmentFoldEqual(name, "SECRET"):
-		return assignmentNameClass{minLen: 6}
-	}
-	// No-separator env spellings such as PGPASSWORD and AUTHSECRET. The longer
-	// suffixes are checked first so SECRETS is not left in SECRET's shadow.
-	switch {
-	case assignmentSuffixEqual(name, "PASSPHRASE"),
-		assignmentSuffixEqual(name, "CREDENTIALS"),
-		assignmentSuffixEqual(name, "CREDENTIAL"),
-		assignmentSuffixEqual(name, "PASSWORDS"),
-		assignmentSuffixEqual(name, "PASSWORD"),
-		assignmentSuffixEqual(name, "PASSWD"),
-		assignmentSuffixEqual(name, "SECRETS"),
-		assignmentSuffixEqual(name, "SECRET"):
-		return assignmentNameClass{minLen: 6}
-	case assignmentSuffixEqual(name, "APIKEY"),
-		assignmentSuffixEqual(name, "TOKEN"):
-		return assignmentNameClass{minLen: 16}
-	}
-	// Last token of a tokenized name. PWD and PASS are only trusted as their own
-	// token (`DB_PASS`, `MYSQL_PWD`), never as a raw suffix.
-	switch {
-	case assignmentFoldEqual(tok, "PASSWORD"),
-		assignmentFoldEqual(tok, "PASSWD"),
-		assignmentFoldEqual(tok, "PASSPHRASE"),
-		assignmentFoldEqual(tok, "SECRET"),
-		assignmentFoldEqual(tok, "SECRETS"),
-		assignmentFoldEqual(tok, "CREDENTIAL"),
-		assignmentFoldEqual(tok, "CREDENTIALS"):
-		return assignmentNameClass{minLen: 6}
-	case assignmentFoldEqual(tok, "TOKEN"),
-		assignmentFoldEqual(tok, "APIKEY"):
-		return assignmentNameClass{minLen: 16}
-	case assignmentFoldEqual(tok, "KEY") && separated:
-		return assignmentNameClass{minLen: 16}
-	case (assignmentFoldEqual(tok, "PASS") || assignmentFoldEqual(tok, "PWD")) && separated:
-		// Only as a token of a longer name (`DB_PASS`, `MYSQL_PWD`): the bare
-		// word "pass" is ordinary prose ("all tests pass: ...").
-		return assignmentNameClass{minLen: 6}
+	case assignmentSuffixEqual(name, "_PASSWORD"):
+		return assignmentNameClass{minLen: assignmentPasswordMinLen}
+	case assignmentSuffixEqual(name, "_KEY"):
+		return assignmentNameClass{minLen: assignmentKeyMinLen}
 	}
 	return assignmentNameClass{}
 }
@@ -390,11 +381,16 @@ func classifyAssignmentName(raw []byte) assignmentNameClass {
 // assignmentExcludedNames are whole names whose last token happens to be
 // credential vocabulary but whose value is protocol or configuration
 // vocabulary. Masking one of these rewrites a value the protocol depends on:
-// `prompt_cache_key` is OpenAI Responses' routing/cache parameter, and
+// `PROMPT_CACHE_KEY` is OpenAI Responses' routing/cache parameter, and
 // rewriting it changes prompt-cache keying; token counters and sort/partition
 // keys are numbers and identifiers, not secrets. The comparison is over the
 // name with '_', '-' and '.' removed and lowercased, so every spelling of a
 // listed name matches while a genuine `PROXY_KEY` or `OPENAI_API_KEY` does not.
+//
+// The list matters less than it used to - the accepted names are uppercase
+// `_KEY`/`_PASSWORD` only, so `next_token` cannot match - but the uppercase
+// spellings of the same protocol names can, and they are exactly the ones this
+// list exists for.
 var assignmentExcludedNames = [...]string{
 	"promptcachekey",
 	"nexttoken", "pagetoken", "continuationtoken",
@@ -430,47 +426,48 @@ func assignmentNameExcluded(name []byte) bool {
 	return false
 }
 
-// assignmentLikelyName reports whether a name can end in a vocabulary word. It
-// is a necessary condition, not a decision: a passing name still goes through
-// classifyAssignmentName, which may reject it (a bare MONKEY still does not
-// match). The trigram set below is the tail of every accepted spelling -
-// PASSWORD/ORD, PASSWD/SWD, PWD, PASS/ASS, PASSPHRASE/ASE, SECRET/RET,
-// SECRETS/ETS, TOKEN/KEN, CREDENTIAL/IAL, CREDENTIALS/LLS, APIKEY/KEY, DSN,
-// URI, URL, CONNECTION_STRING/ING.
+// assignmentEnvName reports whether name is the uppercase env spelling:
+// letters, digits and '_', starting with an uppercase letter or '_'.
+func assignmentEnvName(name []byte) bool {
+	if len(name) == 0 {
+		return false
+	}
+	first := name[0]
+	if !isUpperLetter(first) && first != '_' {
+		return false
+	}
+	for _, c := range name {
+		switch {
+		case isUpperLetter(c), isDigitByte(c), c == '_':
+		default:
+			return false
+		}
+	}
+	// A name that is only underscores and digits cannot carry the suffix, but
+	// the suffix check below is the real gate; this condition only keeps the
+	// function usable as a segment test for the member-reference guard.
+	return true
+}
+
+// assignmentLikelyName reports whether a name can end in one of the accepted
+// suffixes. It is a cheap necessary condition, not the decision: the caller
+// still runs classifyAssignmentName, which checks the uppercase spelling and
+// the exclusions.
 func assignmentLikelyName(name []byte) bool {
 	end := len(name)
 	for end > 0 && (name[end-1] == '"' || name[end-1] == '\\') {
 		end--
 	}
 	name = name[:end]
-	if len(name) < 3 {
+	if len(name) < len("_KEY")+1 {
 		return false
 	}
-	switch lowerASCII(name[len(name)-1]) {
-	case 'd':
-		return assignmentEnds3(name, "ord") || assignmentEnds3(name, "swd") || assignmentEnds3(name, "pwd") || assignmentEnds3(name, "rds")
-	case 's':
-		return assignmentEnds3(name, "ass") || assignmentEnds3(name, "ets") || assignmentEnds3(name, "lls")
-	case 'e':
-		return assignmentEnds3(name, "ase")
-	case 't':
-		return assignmentEnds3(name, "ret")
-	case 'n':
-		return assignmentEnds3(name, "ken") || assignmentEnds3(name, "dsn")
-	case 'l':
-		return assignmentEnds3(name, "ial") || assignmentEnds3(name, "url")
-	case 'y':
-		return assignmentEnds3(name, "key")
-	case 'i':
-		return assignmentEnds3(name, "uri")
-	case 'g':
-		return assignmentEnds3(name, "ing")
+	for _, suffix := range [...]string{"_PASSWORD", "_CONNECTION_STRING", "_KEY", "_URL", "_URI", "_DSN"} {
+		if len(name) > len(suffix) && string(name[len(name)-len(suffix):]) == suffix {
+			return true
+		}
 	}
 	return false
-}
-
-func assignmentEnds3(name []byte, word string) bool {
-	return len(name) >= 3 && equalFoldAt(name[len(name)-3:], word)
 }
 
 // trimAssignmentName removes the quote and backslash bytes that belong to the
@@ -488,50 +485,15 @@ func trimAssignmentName(name []byte) []byte {
 	return name[start:end]
 }
 
-// assignmentLastToken returns the last identifier token of name and whether a
-// separator byte preceded it. CamelCase boundaries also start a token; an
-// acronym run followed by a lowercase word (`HTTPServer`) starts one at the
-// first lowercase letter.
-func assignmentLastToken(name []byte) ([]byte, bool) {
-	start := 0
-	separated := false
-	for i := 0; i < len(name); i++ {
-		if assignmentTokenSeparator(name[i]) {
-			start = i + 1
-			separated = true
-			continue
-		}
-		if i == 0 {
-			continue
-		}
-		prev := name[i-1]
-		if isLowerLetter(prev) && isUpperLetter(name[i]) {
-			start = i
-			separated = false
-			continue
-		}
-		if i > 1 && isUpperLetter(name[i-2]) && isUpperLetter(prev) && isLowerLetter(name[i]) {
-			start = i - 1
-			separated = false
-		}
-	}
-	return name[start:], separated
-}
-
-func assignmentTokenSeparator(c byte) bool {
-	switch c {
-	case '_', '.', '-', '/', '\\', '"':
-		return true
-	}
-	return false
+// assignmentSuffixEqual reports whether a ends with suffix, comparing ASCII
+// case-insensitively. The accepted names are uppercase, so callers pass the
+// uppercase suffix; the fold only keeps a lowercase escaped spelling usable.
+func assignmentSuffixEqual(a []byte, suffix string) bool {
+	return len(a) >= len(suffix) && equalFoldAt(a[len(a)-len(suffix):], suffix)
 }
 
 func assignmentFoldEqual(a []byte, b string) bool {
 	return len(a) == len(b) && equalFoldAt(a, b)
-}
-
-func assignmentSuffixEqual(a []byte, suffix string) bool {
-	return len(a) >= len(suffix) && equalFoldAt(a[len(a)-len(suffix):], suffix)
 }
 
 func isUpperLetter(c byte) bool { return c >= 'A' && c <= 'Z' }
@@ -604,6 +566,95 @@ func assignmentUnquotedTerminator(c byte) bool {
 	return false
 }
 
+// assignmentValueLooksLikeExpression reports whether an unquoted value is a
+// code expression rather than a literal. `.env` values and JSON strings do not
+// carry parentheses, brackets or braces; a source fragment such as
+// `PASSWORD = os.Getenv(...)` or `API_KEY = config["key"]` does, and masking it
+// would rewrite code that was never a credential.
+func assignmentValueLooksLikeExpression(value []byte) bool {
+	for _, c := range value {
+		switch c {
+		case '(', '[', '{', '<':
+			return true
+		}
+	}
+	return false
+}
+
+// assignmentValueLooksLikeDottedName reports whether a quoted or unquoted value
+// is a dotted name: two or more dot-separated ASCII identifiers whose first
+// segment starts with a lowercase letter or '_'. That is how code spells a
+// configuration path (`trajecta.monitor.language`), a namespace, a package
+// member (`process.env.OPENAI_API_KEY`, `config.API_KEY`) or a hostname
+// (`db.example.com`), and it is also the shape of an upper-case `*_KEY`
+// constant's value in a frontend source file:
+//
+//	export const LANGUAGE_KEY = "trajecta.monitor.language";
+//
+// Such a source fragment can reach the proxy inside a tool result, and masking
+// it would rewrite code rather than a credential. A dotted password whose first
+// segment is an upper-case word or contains a digit (`Correct.Horse.2024`,
+// `hunter2.pass`) stays a candidate; a value built only of lowercase words and
+// dots is missed, which is the accepted side of the false-positive trade.
+func assignmentValueLooksLikeDottedName(value []byte) bool {
+	segments := bytes.Count(value, []byte{'.'}) + 1
+	if segments < 2 {
+		return false
+	}
+	start := 0
+	for i := 0; i <= len(value); i++ {
+		if i == len(value) || value[i] == '.' {
+			if i == start {
+				return false
+			}
+			seg := value[start:i]
+			if start == 0 {
+				if !assignmentLowerIdentifier(seg) {
+					return false
+				}
+			} else if !assignmentAnyIdentifier(seg) {
+				return false
+			}
+			start = i + 1
+		}
+	}
+	return true
+}
+
+// assignmentAnyIdentifier reports whether b is an ASCII identifier: a letter or
+// '_' followed by letters, digits or '_'.
+func assignmentAnyIdentifier(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	if !isAlphaLetter(b[0]) && b[0] != '_' {
+		return false
+	}
+	for _, c := range b {
+		if !isAlphaLetter(c) && !isDigitByte(c) && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// assignmentLowerIdentifier reports whether b is an ASCII identifier beginning
+// with a lowercase letter or '_': a variable, package, field or receiver name.
+func assignmentLowerIdentifier(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	if !isLowerLetter(b[0]) && b[0] != '_' {
+		return false
+	}
+	for _, c := range b {
+		if !isLowerLetter(c) && !isDigitByte(c) && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 // assignmentQuotedValue scans a raw double-quoted string that starts at start.
 // A backslash escape is skipped whole so an escaped quote does not close the
 // value; an escaped line break ends it, which is the .env line inside a JSON
@@ -671,8 +722,9 @@ func assignmentSingleQuotedValue(src []byte, start int) (int, int, bool, bool) {
 	return 0, 0, false, false
 }
 
-// assignmentValueIsSkipped reports whether a value must not be masked: empty,
-// a variable/template reference, a JSON literal, or a placeholder.
+// assignmentValueIsSkipped reports whether a whole-value assignment must not be
+// masked: empty, a variable/template reference, a JSON literal, a code
+// expression or a placeholder.
 func assignmentValueIsSkipped(value []byte, quoted bool) bool {
 	if len(value) == 0 {
 		return true
@@ -694,8 +746,23 @@ func assignmentValueIsSkipped(value []byte, quoted bool) bool {
 	return assignmentValueIsPlaceholder(value)
 }
 
+// assignmentPasswordValueIsSkipped reports whether a password sub-span (the
+// userinfo password of a URL, or the password of a DSN) must be left alone.
+// Unlike a whole-value assignment, a numeric password can be real, so only
+// references and placeholders are skipped here.
+func assignmentPasswordValueIsSkipped(value []byte) bool {
+	if len(value) == 0 {
+		return true
+	}
+	switch value[0] {
+	case '$', '%', '<', '{':
+		return true
+	}
+	return assignmentValueIsPlaceholder(value)
+}
+
 // assignmentValueIsJSONLiteral reports whether an unquoted value is a JSON
-// scalar: a number, true, false or null. `MAX_TOKEN=4096` is a limit, not a
+// scalar: a number, true, false or null. `MAX_TOKENS=4096` is a limit, not a
 // token, and an unquoted numeric value is never a credential in practice.
 func assignmentValueIsJSONLiteral(value []byte) bool {
 	switch {
@@ -738,7 +805,7 @@ func assignmentValueIsJSONLiteral(value []byte) bool {
 // rather than a value. The list is intentionally broad: a placeholder is the
 // one kind of value where masking is pure noise in the audit table.
 var assignmentPlaceholderWords = []string{
-	"password", "passwd", "secret", "token", "key",
+	"password", "passwd", "pass", "secret", "token", "key",
 	"dummy", "example", "sample", "test",
 	// JSON-schema type names sit right after a password/token member name in a
 	// tool's function schema (`"password": "string"`).
@@ -837,15 +904,16 @@ func assignmentURLPassword(src []byte, start, end int) (int, int, bool) {
 	if at < 0 {
 		return 0, 0, false
 	}
-	colon := -1
-	for j := authorityStart; j < at; j++ {
-		if src[j] == ':' {
-			colon = j
-		}
-	}
+	// Split the userinfo at the FIRST ':' so a password that itself contains a
+	// colon is masked whole: net/url (and RFC 3986's user ":" password form)
+	// treats everything after the first colon as the password. Taking the last
+	// colon would mask only the tail of `user:pass:word` and leave `pass:` in
+	// the clear on the wire.
+	colon := bytes.IndexByte(src[authorityStart:at], ':')
 	if colon < 0 {
 		return 0, 0, false
 	}
+	colon += authorityStart
 	return colon + 1, at, at > colon+1
 }
 
@@ -864,22 +932,22 @@ func newAssignmentFinding(id RuleID, start, end int) Finding {
 	}
 }
 
-// mergeFindings folds the name-anchored findings into the DFA findings so that
-// the result stays ordered by start and no two spans overlap.
+// mergeFindings folds the native findings into the DFA findings so that the
+// result stays ordered by start and no two spans overlap.
 //
 // Precedence:
 //
-//   - A name-anchored span that strictly contains one or more DFA findings
-//     replaces them. The name says the whole value is one secret, and the DFA
-//     may have matched only the shape-looking part of it.
+//   - A native span that strictly contains one or more DFA findings replaces
+//     them. The name says the whole value is one secret, and the DFA may have
+//     matched only the shape-looking part of it.
 //   - An exactly equal span resolves by actionability, then by specificity: if
-//     the DFA finding is already maskable it wins (a vendor rule names the
-//     value better in the audit), but a reported-only DFA finding gives way to
-//     a maskable name-anchored one. That is the `KEY="sk-..."` case: the weak
-//     generic shape alone cannot be rewritten, the name is what proves it.
+//     the DFA finding is already maskable it wins (a vendor rule names the value
+//     better in the audit), but a reported-only DFA finding gives way to a
+//     maskable native one. That is the `KEY="sk-..."` case: the weak generic
+//     shape alone cannot be rewritten, the name is what proves it.
 //   - Any other overlap (the candidate is contained, or crosses an edge) keeps
-//     the DFA finding and drops the name-anchored one: the DFA is the more
-//     specific evidence and must never be widened by a name.
+//     the DFA finding and drops the native one: the DFA is the more specific
+//     evidence and must never be widened by a name.
 func mergeFindings(dfa, extra []Finding) []Finding {
 	if len(extra) == 0 {
 		return dfa

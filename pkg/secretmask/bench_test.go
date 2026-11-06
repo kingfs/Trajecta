@@ -282,14 +282,14 @@ func BenchmarkAssignmentScanNoHit(b *testing.B) {
 		payload = append(payload, `"},`...)
 	}
 	payload = append(payload, ']', '}')
-	if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 0 {
+	if fs := appendNativeFindings(nil, payload, nil); len(fs) != 0 {
 		b.Fatalf("no-hit fixture produced %d findings", len(fs))
 	}
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 0 {
+		if fs := appendNativeFindings(nil, payload, nil); len(fs) != 0 {
 			b.Fatal("unexpected finding")
 		}
 	}
@@ -299,17 +299,17 @@ func BenchmarkAssignmentScanNoHit(b *testing.B) {
 // a .env dump, which is four findings in a few hundred bytes.
 func BenchmarkAssignmentScanEnvDump(b *testing.B) {
 	payload := escapedBenchToolOutput(`POSTGRES_PASSWORD=q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K
-PGPASSWORD=n4Bd6Fh8Jk2L
-AUTH_PASSWORD=aQ7vLm2xR8hT4wY6pZ9cB3dF5gH1jK+2
+OPENAI_API_KEY=q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K
+REDIS_URL=redis://:r3d1sP4ss@10.0.0.5:6379/0
 DATABASE_DSN=postgres://app_user:q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K@postgres:5432/appdb?sslmode=disable`)
-	if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 4 {
+	if fs := appendNativeFindings(nil, payload, nil); len(fs) != 4 {
 		b.Fatalf("fixture produced %d findings, want 4", len(fs))
 	}
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if fs := appendAssignmentFindings(nil, payload, nil); len(fs) != 4 {
+		if fs := appendNativeFindings(nil, payload, nil); len(fs) != 4 {
 			b.Fatal("lost findings")
 		}
 	}

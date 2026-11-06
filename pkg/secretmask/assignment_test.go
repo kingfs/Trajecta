@@ -11,12 +11,11 @@ import (
 // report. None of them is a real credential: the tests must never carry the
 // cassette bytes.
 const (
-	assignPass32   = "q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K"  // 32 alphanumerics
-	assignPass12   = "n4Bd6Fh8Jk2L"                     // 12 alphanumerics
-	assignAuth32   = "aQ7vLm2xR8hT4wY6pZ9cB3dF5gH1jK+2" // 32 with '+', as an auth password had
-	assignKey32    = "Z8yW6uS4qO2mK0iG8eC6aA4yW2uS0qO8"
-	assignSecret40 = "V5rT8wQ2nM6kL0jH4gF8dS2aP6oI0uY4cX8zB"
-	assignToken32  = "hK7mN2pQ5rS8tU1vW4xY9zA3bC6dE0fG"
+	assignPass32  = "q7Lm2xR8hT4vW9pZa3Bc5De6Fg7Hj8K"  // 32 alphanumerics
+	assignPass12  = "n4Bd6Fh8Jk2L"                     // 12 alphanumerics
+	assignAuth32  = "aQ7vLm2xR8hT4wY6pZ9cB3dF5gH1jK+2" // 32 with '+', as an auth password had
+	assignKey32   = "Z8yW6uS4qO2mK0iG8eC6aA4yW2uS0qO8"
+	assignToken32 = "hK7mN2pQ5rS8tU1vW4xY9zA3bC6dE0fG"
 )
 
 // escapedToolOutput wraps text the way the recorded bodies carry a tool result:
@@ -41,9 +40,9 @@ func escapedToolOutput(t *testing.T, depth int, text string) []byte {
 func assignmentEnvText() string {
 	return strings.Join([]string{
 		"POSTGRES_PASSWORD=" + assignPass32,
-		"PGPASSWORD=" + assignPass12,
-		"AUTH_PASSWORD=" + assignAuth32,
-		"DATABASE_DSN=postgres://app_user:" + assignPass32 + "@postgres:5432/appdb?sslmode=disable",
+		"OPENAI_API_KEY=" + assignToken32,
+		"AUTH_PASSWORD=" + assignPass12,
+		"DATABASE_DSN=postgres://app_user:" + assignAuth32 + "@postgres:5432/appdb?sslmode=disable",
 		"APP_ENV=production",
 	}, "\n")
 }
@@ -88,44 +87,27 @@ func assertMaskedOutsideSpans(t *testing.T, real, masked []byte, events []MaskEv
 	}
 }
 
-// TestAssignmentMasksReportedToolResult is the exact shape of the reported
-// tool result: {"token":"sk-...","prefix":"sk-..."} inside a tool_result.
-func TestAssignmentMasksReportedToolResult(t *testing.T) {
-	key := skDashSeparatorSample('_')
-	inner := `{"token":"` + key + `","prefix":"sk-Ab1Ab1Ab1Ab"}`
+// TestAssignmentMasksShapelessToolResult is the shape the env rule exists for:
+// an opaque value whose only evidence is the uppercase variable name, carried
+// in a tool result that is itself a JSON document.
+func TestAssignmentMasksShapelessToolResult(t *testing.T) {
+	inner := `{"OPENAI_API_KEY":"` + assignToken32 + `","note":"plain text"}`
 	body := escapedToolOutput(t, 2, inner)
 
-	if !bytes.Contains(body, []byte(key)) {
+	if !bytes.Contains(body, []byte(assignToken32)) {
 		t.Fatal("fixture does not carry the token")
 	}
 	v := testVault()
 	masked, events := v.Mask(body)
-	if len(events) != 1 {
-		t.Fatalf("events = %+v, want one", events)
-	}
-	// The DFA sees the lexical shape, the name-anchored pass sees the same
-	// span under "token"; the tie goes to the DFA.
-	if events[0].Rule != RuleSkDashGeneric {
-		t.Errorf("event rule = %s, want %s", events[0].RuleName(), ruleTable[RuleSkDashGeneric].Name)
+	if len(events) != 1 || events[0].Rule != RuleEnvSecretAssignment {
+		t.Fatalf("events = %+v, want one env.secret_assignment", events)
 	}
 	assertMaskedOutsideSpans(t, body, masked, events)
-	if bytes.Contains(masked, []byte(key)) {
-		t.Error("the reported token survived masking")
-	}
-	// The neighbouring "prefix" member is not credential vocabulary and its
-	// value is below the 35-byte floor, so it is left exactly as it was.
-	if !bytes.Contains(masked, []byte("prefix")) || !bytes.Contains(masked, []byte("sk-Ab1Ab1Ab1Ab")) {
-		t.Errorf("the prefix member was touched: %q", masked)
-	}
-
-	// A token that has no lexical shape at all is masked by the name alone.
-	shapeless := `{"token":"` + assignToken32 + `"}`
-	masked, events = v.Mask([]byte(shapeless))
-	if len(events) != 1 || events[0].Rule != RuleEnvSecretAssignment {
-		t.Fatalf("shapeless token events = %+v, want one env.secret_assignment", events)
-	}
 	if bytes.Contains(masked, []byte(assignToken32)) {
-		t.Error("the shapeless token survived masking")
+		t.Error("the env key value survived masking")
+	}
+	if !bytes.Contains(masked, []byte("plain text")) {
+		t.Errorf("an unrelated member was rewritten: %q", masked)
 	}
 }
 
@@ -149,7 +131,7 @@ func TestAssignmentMasksEnvDump(t *testing.T) {
 		t.Errorf("events by rule = %v, want 3 env.secret_assignment + 1 env.url_credential", got)
 	}
 	assertMaskedOutsideSpans(t, body, masked, events)
-	for _, secret := range []string{assignPass32, assignPass12, assignAuth32} {
+	for _, secret := range []string{assignPass32, assignToken32, assignPass12} {
 		if bytes.Contains(masked, []byte(secret)) {
 			t.Errorf("the value %q survived masking", secret)
 		}
@@ -179,7 +161,8 @@ func TestAssignmentMasksEnvDump(t *testing.T) {
 }
 
 // TestAssignmentForms covers the surrounding spellings: env lines, YAML, JSON
-// members, escaped JSON strings, quotes, export/set and camelCase names.
+// members, escaped JSON strings, quotes and export/set. Only the uppercase env
+// spelling of the name is accepted.
 func TestAssignmentForms(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -198,6 +181,13 @@ func TestAssignmentForms(t *testing.T) {
 			present:  []string{"POSTGRES_PASSWORD="},
 		},
 		{
+			name:     "env key line",
+			body:     "OPENAI_API_KEY=" + assignKey32,
+			wantRule: RuleEnvSecretAssignment,
+			wantN:    1,
+			absent:   []string{assignKey32},
+		},
+		{
 			name:     "env line with spaces around the separator",
 			body:     "POSTGRES_PASSWORD = " + assignPass32,
 			wantRule: RuleEnvSecretAssignment,
@@ -207,7 +197,7 @@ func TestAssignmentForms(t *testing.T) {
 		},
 		{
 			name:     "export",
-			body:     "export PGPASSWORD=" + assignPass12,
+			body:     "export POSTGRES_PASSWORD=" + assignPass12,
 			wantRule: RuleEnvSecretAssignment,
 			wantN:    1,
 			absent:   []string{assignPass12},
@@ -222,34 +212,27 @@ func TestAssignmentForms(t *testing.T) {
 		},
 		{
 			name:     "yaml member",
-			body:     "postgres_password: " + assignPass32,
+			body:     "POSTGRES_PASSWORD: " + assignPass32,
 			wantRule: RuleEnvSecretAssignment,
 			wantN:    1,
 			absent:   []string{assignPass32},
-			present:  []string{"postgres_password: "},
+			present:  []string{"POSTGRES_PASSWORD: "},
 		},
 		{
 			name:     "json member",
-			body:     `{"POSTGRES_PASSWORD": "` + assignPass32 + `"}`,
+			body:     `{"OPENAI_API_KEY": "` + assignKey32 + `"}`,
 			wantRule: RuleEnvSecretAssignment,
 			wantN:    1,
-			absent:   []string{assignPass32},
-			present:  []string{`{"POSTGRES_PASSWORD": "`},
+			absent:   []string{assignKey32},
+			present:  []string{`{"OPENAI_API_KEY": "`},
 		},
 		{
 			name:     "single quoted value keeps its quotes",
-			body:     "POSTGRES_PASSWORD='" + assignPass32 + "'",
+			body:     "POSTGRES_PASSWORD='" + assignToken32 + "'",
 			wantRule: RuleEnvSecretAssignment,
 			wantN:    1,
-			absent:   []string{assignPass32},
+			absent:   []string{assignPass12},
 			present:  []string{"POSTGRES_PASSWORD='"},
-		},
-		{
-			name:     "camelCase name",
-			body:     "dbPassword=" + assignPass32,
-			wantRule: RuleEnvSecretAssignment,
-			wantN:    1,
-			absent:   []string{assignPass32},
 		},
 		{
 			name:     "SSH private key spec",
@@ -260,24 +243,10 @@ func TestAssignmentForms(t *testing.T) {
 		},
 		{
 			name:     "AWS secret access key",
-			body:     "AWS_SECRET_ACCESS_KEY=" + assignSecret40,
+			body:     "AWS_SECRET_ACCESS_KEY=" + assignKey32,
 			wantRule: RuleEnvSecretAssignment,
 			wantN:    1,
-			absent:   []string{assignSecret40},
-		},
-		{
-			name:     "auth token",
-			body:     "AUTH_TOKEN=" + assignToken32,
-			wantRule: RuleEnvSecretAssignment,
-			wantN:    1,
-			absent:   []string{assignToken32},
-		},
-		{
-			name:     "no-separator PGPASSWORD spelling",
-			body:     "PGPASSWORD=" + assignPass12,
-			wantRule: RuleEnvSecretAssignment,
-			wantN:    1,
-			absent:   []string{assignPass12},
+			absent:   []string{assignKey32},
 		},
 		{
 			name:     "mongodb uri masks only the password",
@@ -328,13 +297,76 @@ func TestAssignmentForms(t *testing.T) {
 	}
 }
 
+// TestAssignmentCodeFragmentsAreNotMasked is the regression test for the live
+// report: a tool result carries source code, and the old name-anchored pass
+// treated `clientSecret:` / `token:` / `password:` members as env assignments
+// and masked the expression after the separator. Code is not a secret; these
+// payloads must produce no finding and no byte change.
+func TestAssignmentCodeFragmentsAreNotMasked(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		// The three reported values, in the shape the audit tab showed them:
+		// the masked "value" was a fragment of the surrounding expression.
+		{"client secret expression", `string(target.ClientSecret`},
+		{"rstrip fragment", `):].rstrip(b`},
+		{"partial client secret", `string(target.Client`},
+		{"TypeScript member", `const clientSecret: string = string(target.ClientSecret)`},
+		{"TypeScript type only", `clientSecret: string`},
+		{"Go member struct literal", `bodyKey: strings.TrimSpace(key)`},
+		{"Go fmt call", `return fmt.Sprintf("%s:%s", c.Token, c.Secret)`},
+		{"Go env reference", "API_KEY = os.Getenv(\"OPENAI_API_KEY\")"},
+		{"JS env reference", `const API_KEY = process.env.OPENAI_API_KEY`},
+		{"Go config member", `DB_PASSWORD = config.DBPassword`},
+		{"Python dict access", `password = data["password"]`},
+		{"Python method call", `api_key = client.api_keys.create()`},
+		{"JSON object value", `{"clientSecret": {"type": "string"}}`},
+		{"lowercase env name", `dbPassword=` + assignPass32},
+		{"lowercase yaml name", `postgres_password: ` + assignPass32},
+		{"lowercase json member", `{"client_secret": "` + assignKey32 + `"}`},
+		{"lowercase token member", `{"token": "` + assignToken32 + `"}`},
+		{"bare token env name", `GITHUB_TOKEN=` + assignToken32},
+		{"bare KEY env name", `KEY=` + assignKey32},
+		{"bare PASSWORD env name", `PASSWORD=` + assignPass32},
+		{"no-separator PGPASSWORD name", `PGPASSWORD=` + assignPass12},
+		{"secret suffix only", `CLIENT_SECRET=` + assignToken32},
+		{"token suffix only", `AUTH_TOKEN=` + assignToken32},
+		{"camelCase password", `dbPassword=` + assignPass32},
+		{"lowercase key names in prose", "The token: " + assignToken32 + " is not a secret."},
+		// Frontend constants whose value is configuration vocabulary, not a
+		// credential: masking one would rewrite the source a tool read.
+		{"js language key constant", `export const LANGUAGE_KEY = "trajecta.monitor.language";`},
+		{"js theme key constant", `export const THEME_KEY = "trajecta.monitor.theme";`},
+		{"json dotted config key", `{"CACHE_KEY": "users.byId"}`},
+		{"json namespace key", `{"STORAGE_KEY": "app.settings.v2"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := Scan([]byte(tc.body))
+			if len(fs) != 0 {
+				var got []string
+				for _, f := range fs {
+					got = append(got, ruleTable[f.ID].Name+"="+string(f.Bytes([]byte(tc.body))))
+				}
+				t.Fatalf("code fragment produced findings on %q: %v", tc.body, got)
+			}
+			masked, events := testVault().Mask([]byte(tc.body))
+			if len(events) != 0 {
+				t.Fatalf("code fragment was masked %d time(s): %+v", len(events), events)
+			}
+			if !bytes.Equal(masked, []byte(tc.body)) {
+				t.Fatalf("Mask changed a body it must leave alone: %q -> %q", tc.body, masked)
+			}
+		})
+	}
+}
+
 // TestAssignmentAfterEscapedNewline covers a .env line that follows an escaped
 // line break in the recorded body: the look-back starts at the separator, so it
-// sees `\nKEY`, and the escape letter must not stop a bare KEY from being
-// recognised.
+// sees `\nNAME`, and only the name is used.
 func TestAssignmentAfterEscapedNewline(t *testing.T) {
-	key := skDashSeparatorSample('_')
-	body := escapedToolOutput(t, 1, "APP_ENV=production\nKEY="+key)
+	body := escapedToolOutput(t, 1, "APP_ENV=production\nOPENAI_API_KEY="+assignKey32)
 	fs := Scan(body)
 	if len(fs) != 1 || fs[0].ID != RuleEnvSecretAssignment {
 		t.Fatalf("findings = %+v, want one env.secret_assignment", fs)
@@ -344,7 +376,7 @@ func TestAssignmentAfterEscapedNewline(t *testing.T) {
 		t.Fatalf("events = %+v, want one env.secret_assignment", events)
 	}
 	assertMaskedOutsideSpans(t, body, masked, events)
-	if bytes.Contains(masked, []byte(key)) {
+	if bytes.Contains(masked, []byte(assignKey32)) {
 		t.Error("the key survived masking")
 	}
 }
@@ -353,7 +385,7 @@ func TestAssignmentAfterEscapedNewline(t *testing.T) {
 // documents inside a tool result, which is how a nested protocol value appears
 // in the recorded body.
 func TestAssignmentEscapedJSONDepth(t *testing.T) {
-	inner := `{"POSTGRES_PASSWORD": "` + assignPass32 + `"}`
+	inner := `{"OPENAI_API_KEY": "` + assignKey32 + `"}`
 	for depth := 1; depth <= 2; depth++ {
 		body := escapedToolOutput(t, depth, inner)
 		fs := Scan(body)
@@ -365,7 +397,7 @@ func TestAssignmentEscapedJSONDepth(t *testing.T) {
 			t.Fatalf("depth %d events = %+v, want one env.secret_assignment", depth, events)
 		}
 		assertMaskedOutsideSpans(t, body, masked, events)
-		if bytes.Contains(masked, []byte(assignPass32)) {
+		if bytes.Contains(masked, []byte(assignKey32)) {
 			t.Errorf("depth %d: value survived masking", depth)
 		}
 	}
@@ -381,7 +413,7 @@ func TestAssignmentNeverMasks(t *testing.T) {
 		body string
 	}{
 		{"variable default reference", `${POSTGRES_PASSWORD:-` + assignPass32 + `}`},
-		{"braced variable reference with equals", `${PGPASSWORD=` + assignPass12 + `}`},
+		{"braced variable reference with equals", `${POSTGRES_PASSWORD=` + assignPass12 + `}`},
 		{"dollar value", "POSTGRES_PASSWORD=$PGPASSWORD"},
 		{"percent value", "POSTGRES_PASSWORD=%PGPASSWORD%"},
 		{"angle value", "POSTGRES_PASSWORD=<set-me>"},
@@ -399,14 +431,7 @@ func TestAssignmentNeverMasks(t *testing.T) {
 		{"too short password", "POSTGRES_PASSWORD=q7Lm"},
 		{"too short key", "API_KEY=abcdefghijkl"},
 		{"numeric literal without quotes", "POSTGRES_PASSWORD=123456"},
-		{"boolean literal without quotes", "AUTH_TOKEN=true"},
-		{"schema type", `"password": "string"`},
-		{"short token value", `"token":"the"`},
-		{"limit not a token", "MAX_TOKEN=4096"},
-		{"max_tokens is plural", `"max_tokens": 4096`},
-		{"password length setting", "PASSWORD_LENGTH=12"},
-		{"monkey is not a key", "MONKEY=abcdefghijklmnopqrst"},
-		{"turkey is not a key", "TURKEY=abcdefghijklmnopqrst"},
+		{"boolean literal without quotes", "OPENAI_API_KEY=true"},
 		{"url without userinfo", "DATABASE_DSN=postgres://app_user@db:5432/appdb"},
 		{"url with user but no password", "DATABASE_URL=postgres://app_user@db:5432/appdb"},
 		{"url class name but adonet connection string", "SQL_CONNECTION_STRING=Server=db;Database=app;Uid=sa"},
@@ -415,38 +440,25 @@ func TestAssignmentNeverMasks(t *testing.T) {
 		// after '=' is the closing quote of the pattern, not the opening quote of
 		// a value, and the single-quoted span that follows is command text.
 		{"grep pattern closing quote", `$(grep '^POSTGRES_PASSWORD=' /home/dev/app/docker-compose.yml | sed -n '1p')`},
-		// The bare word "pass" is ordinary prose; only DB_PASS/MYSQL_PWD (a token
-		// of a longer name) is a password name.
-		{"prose pass label", "all 12 tests pass: 0.83s"},
 		// A quoted document is not a credential value; the 1024-byte bound keeps
 		// a tool output from being masked wholesale.
-		{"quoted document is not a value", `POSTGRES_PASSWORD="` + rep("q7Lm", 600) + `"`},
+		{"quoted document is not a value", `POSTGRES_PASSWORD="` + strings.Repeat("q7Lm", 600) + `"`},
 		// Protocol and configuration names that end in credential vocabulary but
 		// whose values are routing, cache, counter or join-key data. Masking one
 		// rewrites a value the protocol depends on.
 		{"prompt cache key json member", `"prompt_cache_key":"` + assignToken32 + `"`},
 		{"prompt cache key env spelling", "PROMPT_CACHE_KEY=" + assignToken32},
-		{"next token", "next_token=" + assignToken32},
-		{"page token", "page_token=" + assignToken32},
-		{"continuation token", "continuation_token=" + assignToken32},
-		{"cache key", "cache_key=" + assignToken32},
-		{"idempotency key", `"idempotency_key": "` + assignToken32 + `"`},
-		{"sort key", "sort_key=" + assignToken32},
-		{"partition key", "partition_key=" + assignToken32},
-		{"routing key", "routing_key=" + assignToken32},
-		{"group key", "group_key=" + assignToken32},
-		{"primary key", "primary_key=" + assignToken32},
-		{"foreign key", "foreign_key=" + assignToken32},
-		{"object key", "object_key=" + assignToken32},
-		{"storage key", "storage_key=" + assignToken32},
-		{"s3 key", "s3_key=" + assignToken32},
-		{"token type", "token_type=" + assignToken32},
-		{"token count", "token_count=" + assignToken32},
-		{"max tokens", "MAX_TOKENS=" + assignToken32},
-		{"prompt tokens", "prompt_tokens=" + assignToken32},
-		{"completion tokens", "completion_tokens=" + assignToken32},
-		{"total tokens", "total_tokens=" + assignToken32},
-		{"reasoning tokens", "reasoning_tokens=" + assignToken32},
+		{"cache key", "CACHE_KEY=" + assignToken32},
+		{"idempotency key", `"IDEMPOTENCY_KEY": "` + assignToken32 + `"`},
+		{"sort key", "SORT_KEY=" + assignToken32},
+		{"partition key", "PARTITION_KEY=" + assignToken32},
+		{"routing key", "ROUTING_KEY=" + assignToken32},
+		{"group key", "GROUP_KEY=" + assignToken32},
+		{"primary key", "PRIMARY_KEY=" + assignToken32},
+		{"foreign key", "FOREIGN_KEY=" + assignToken32},
+		{"object key", "OBJECT_KEY=" + assignToken32},
+		{"storage key", "STORAGE_KEY=" + assignToken32},
+		{"s3 key", "S3_KEY=" + assignToken32},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -475,7 +487,7 @@ func TestAssignmentExcludedNamesKeepRealKeys(t *testing.T) {
 	v := testVault()
 	// The protocol name is left alone; the real key in the same object is not.
 	legacy := sampleFor(RuleOpenAILegacy)
-	body := `"prompt_cache_key":"` + assignToken32 + `","openai_api_key":"` + legacy + `"`
+	body := `"PROMPT_CACHE_KEY":"` + assignToken32 + `","OPENAI_API_KEY":"` + legacy + `"`
 	fs := Scan([]byte(body))
 	if len(fs) != 1 || fs[0].ID != RuleOpenAILegacy {
 		t.Fatalf("findings = %+v, want only the openai legacy key", fs)
@@ -485,7 +497,7 @@ func TestAssignmentExcludedNamesKeepRealKeys(t *testing.T) {
 		t.Fatalf("events = %+v, want only the openai legacy key", events)
 	}
 	if !bytes.Contains(masked, []byte(assignToken32)) {
-		t.Error("the prompt_cache_key value was masked")
+		t.Error("the PROMPT_CACHE_KEY value was masked")
 	}
 	if bytes.Contains(masked, []byte(legacy)) {
 		t.Error("the openai key value survived")
@@ -532,20 +544,33 @@ func TestAssignmentURLMasksOnlyUserinfoPassword(t *testing.T) {
 		}
 	}
 
-	// The same value under a non-URL name is masked as a whole.
-	plain := "DB_PASSWORD=" + assignPass32
+	// A password that itself contains ':' is split at the FIRST colon, so the
+	// whole password is masked; taking the last colon would leave the leading
+	// part in the clear on the wire.
+	colonBody := "DATABASE_URL=postgres://app_user:pa:ss:w0rd@postgres:5432/appdb"
+	colonMasked, colonEvents := testVault().Mask([]byte(colonBody))
+	if len(colonEvents) != 1 || colonEvents[0].Rule != RuleEnvURLCredential {
+		t.Fatalf("colon-password events = %+v, want one env.url_credential", colonEvents)
+	}
+	if got := string(colonEvents[0].Original); got != "pa:ss:w0rd" {
+		t.Fatalf("masked value = %q, want the whole colon-containing password", got)
+	}
+	assertMaskedOutsideSpans(t, []byte(colonBody), colonMasked, colonEvents)
+
+	// The same value under a whole-value name is masked as a whole.
+	plain := "POSTGRES_PASSWORD=" + assignPass32
 	if _, events := v.Mask([]byte(plain)); len(events) != 1 || string(events[0].Original) != assignPass32 {
 		t.Fatalf("plain password events = %+v, want the whole value", events)
 	}
 }
 
-// TestAssignmentPromotesAWeakLexicalMatch is the `KEY="sk-..."` case: the
+// TestAssignmentPromotesAWeakLexicalMatch is the `PROXY_KEY="sk-..."` case: the
 // generic pool matches the value but has no context, so it is reported only;
 // the name anchor is what makes the same span maskable, and the merge tie must
 // give way to the actionable finding.
 func TestAssignmentPromotesAWeakLexicalMatch(t *testing.T) {
 	key := skDashSeparatorSample('_')
-	body := `KEY="` + key + `"`
+	body := `PROXY_KEY="` + key + `"`
 	fs := Scan([]byte(body))
 	if len(fs) != 1 || fs[0].ID != RuleEnvSecretAssignment {
 		t.Fatalf("findings = %+v, want one env.secret_assignment", fs)
@@ -563,8 +588,8 @@ func TestAssignmentPromotesAWeakLexicalMatch(t *testing.T) {
 	}
 }
 
-// TestAssignmentUsesOptionalValidators guards the merge rule that makes the DFA
-// win a tie: a name-anchored span of exactly the DFA span must not mask twice.
+// TestMergeFindingsPrecedence guards the merge rule that makes the DFA win a
+// tie: a name-anchored span of exactly the DFA span must not mask twice.
 func TestMergeFindingsPrecedence(t *testing.T) {
 	f := func(id RuleID, start, end int) Finding {
 		return Finding{Span: Span{Start: start, End: end, ID: id}, Score: 70, Confidence: ConfidenceHigh}
@@ -649,7 +674,7 @@ func TestMergeFindingsPrecedence(t *testing.T) {
 // containment precedence: a name-anchored value that contains a lexical match
 // is masked as one span, because the whole value is the secret.
 func TestAssignmentWidensAValueAroundALexicalMatch(t *testing.T) {
-	body := "DB_PASSWORD=x" + sampleFor(RuleGoogleAPIKey) + "y"
+	body := "POSTGRES_PASSWORD=x" + sampleFor(RuleGoogleAPIKey) + "y"
 	fs := Scan([]byte(body))
 	if len(fs) != 1 || fs[0].ID != RuleEnvSecretAssignment {
 		t.Fatalf("findings = %+v, want one env.secret_assignment", fs)
@@ -667,7 +692,7 @@ func TestAssignmentWidensAValueAroundALexicalMatch(t *testing.T) {
 // TestAssignmentNonOverlapKeepsOtherFields: a same-length plaintext value in
 // another field is not part of any span and must come back untouched.
 func TestAssignmentNonOverlapKeepsOtherFields(t *testing.T) {
-	body := `{"db_password":"` + assignPass32 + `","note":"` + assignPass32 + `"}`
+	body := `{"OPENAI_API_KEY":"` + assignKey32 + `","note":"` + assignPass32 + `"}`
 	masked, events := testVault().Mask([]byte(body))
 	if len(events) != 1 || events[0].Rule != RuleEnvSecretAssignment {
 		t.Fatalf("events = %+v, want one env.secret_assignment", events)
@@ -676,8 +701,8 @@ func TestAssignmentNonOverlapKeepsOtherFields(t *testing.T) {
 	if !bytes.Contains(masked, []byte(`"note":"`+assignPass32+`"`)) {
 		t.Errorf("the note field was rewritten: %q", masked)
 	}
-	if bytes.Contains(masked, []byte(`"db_password":"`+assignPass32+`"`)) {
-		t.Error("the db_password field was not masked")
+	if bytes.Contains(masked, []byte(assignKey32)) {
+		t.Error("the OPENAI_API_KEY field was not masked")
 	}
 }
 

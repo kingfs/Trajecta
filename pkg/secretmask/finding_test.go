@@ -249,9 +249,10 @@ func TestStrengthCoverage(t *testing.T) {
 	// conclusive a shape is, is how a rule starts masking something it should
 	// only have reported.
 	//
-	// The two env.* name-anchored rules (assignment.go) are Strong: the variable
-	// name is the evidence, exactly as a vendor watermark is for a lexical rule.
-	const wantStrong, wantAnchored, wantGeneric = 38, 24, 18
+	// The native assignment/DSN rules (assignment.go, dsn.go) are Strong: the
+	// variable name or the connection-string scheme is the evidence, exactly as
+	// a vendor watermark is for a lexical rule.
+	const wantStrong, wantAnchored, wantGeneric = 39, 24, 18
 	if counts[StrengthStrong] != wantStrong || counts[StrengthAnchored] != wantAnchored || counts[StrengthGeneric] != wantGeneric {
 		t.Errorf("strength distribution: strong=%d anchored=%d generic=%d, want %d/%d/%d",
 			counts[StrengthStrong], counts[StrengthAnchored], counts[StrengthGeneric],
