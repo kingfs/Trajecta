@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -149,11 +150,11 @@ func (r *Router) explainResponsesRejection(features RequestFeatures, model strin
 		requireNative = false
 	}
 	trace := r.dryRunDecisionTrace(tracePath, model, features, requireNative)
-	candidates := r.planCandidates(trace, mode, endpoint, model)
+	candidates := r.planCandidates(trace, mode, endpoint, model, nil)
 	plan := routeplan.RoutePlan{
 		ClientEntrypoint:        routeplan.EntrypointResponses,
 		RequestedModel:          model,
-		ResolvedModelCandidates: explainResolvedModelCandidates(model),
+		ResolvedModelCandidates: r.explainResolvedModelCandidates(model),
 		ExecutionMode:           mode,
 		UpstreamEndpoint:        endpoint,
 		Strategy:                strategy,
@@ -197,12 +198,13 @@ func (r *Router) explainResultForSelection(entrypoint routeplan.ClientEntrypoint
 	} else if selErr != nil {
 		decision = SelectionDecision(selErr)
 	}
-	candidates := r.planCandidates(decision, mode, endpoint, model)
+	ranks := r.candidateRanks(selection)
+	candidates := r.planCandidates(decision, mode, endpoint, model, ranks)
 
 	plan := routeplan.RoutePlan{
 		ClientEntrypoint:        entrypoint,
 		RequestedModel:          model,
-		ResolvedModelCandidates: explainResolvedModelCandidates(model),
+		ResolvedModelCandidates: r.explainResolvedModelCandidates(model),
 		ExecutionMode:           mode,
 		UpstreamEndpoint:        endpoint,
 		Strategy:                strategy,
@@ -227,12 +229,90 @@ func (r *Router) explainResultForSelection(entrypoint routeplan.ClientEntrypoint
 	return ExplainResult{Result: routeplan.Result{Plan: plan, Candidates: candidates}, Error: errorText}
 }
 
-func explainResolvedModelCandidates(model string) []routeplan.ResolvedModelCandidate {
+// explainResolvedModelCandidates reports the model names this request actually
+// resolves to on the live router: the requested name plus every alias the
+// router resolves it to. Aliases are part of each target's model set and alias
+// map (see channel.RuntimeTargets), so the dry run reads the same expansion the
+// forwarding path applies when it resolves the upstream wire name; the inspector
+// needs no store lookup and no second planner.
+func (r *Router) explainResolvedModelCandidates(model string) []routeplan.ResolvedModelCandidate {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil
 	}
-	return []routeplan.ResolvedModelCandidate{{Model: model, Source: "request"}}
+	out := []routeplan.ResolvedModelCandidate{{Model: model, Source: "request"}}
+	r.mu.RLock()
+	targets := append([]*Target(nil), r.targets...)
+	r.mu.RUnlock()
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		wireModel := target.ResolveModelAlias(model)
+		if wireModel == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(target.ChannelID)) + "\x00" + strings.ToLower(wireModel)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, routeplan.ResolvedModelCandidate{
+			Model:     wireModel,
+			Alias:     model,
+			ChannelID: target.ChannelID,
+			Source:    "alias",
+		})
+	}
+	return out
+}
+
+// candidateRanks returns the 1-based position of every available candidate in
+// the order the selection core would consider it for this request: lowest
+// expected cost first, then the compareScore tie-break (priority, then candidate
+// id). It is the same cost function the forwarding path uses when it picks a
+// target, so under the deterministic first_available policy the chosen target is
+// rank 1. Only candidates that survived filtering get a rank; a filtered
+// candidate keeps 0 because it never entered the selection order.
+func (r *Router) candidateRanks(selection *Selection) map[string]int {
+	if selection == nil || len(selection.Candidates) == 0 {
+		return nil
+	}
+	selected := make(map[string]*Target, len(selection.Candidates))
+	for _, id := range selection.Candidates {
+		selected[id] = nil
+	}
+	r.mu.RLock()
+	for _, target := range r.targets {
+		if target == nil {
+			continue
+		}
+		if _, wanted := selected[target.ID]; wanted {
+			selected[target.ID] = target
+		}
+	}
+	r.mu.RUnlock()
+
+	type rankedCandidate struct {
+		target *Target
+		score  float64
+	}
+	ranked := make([]rankedCandidate, 0, len(selected))
+	for _, target := range selected {
+		if target == nil {
+			continue
+		}
+		ranked = append(ranked, rankedCandidate{target: target, score: r.expectedCost(target, selection.Request)})
+	}
+	slices.SortFunc(ranked, func(a, b rankedCandidate) int {
+		return compareScore(a.target, a.score, b.target, b.score)
+	})
+	ranks := make(map[string]int, len(ranked))
+	for index, candidate := range ranked {
+		ranks[candidate.target.ID] = index + 1
+	}
+	return ranks
 }
 
 // explainFailureReason maps a selection failure to the inspect reason vocabulary.
@@ -294,8 +374,10 @@ func anyHealthReason(candidates []routeplan.PlanCandidate) bool {
 // planCandidates maps the router's live candidate decisions onto the inspector's
 // candidate DTO. The shapes are different on purpose - the router carries
 // protocol/credential internals, the inspector carries an operator-facing reason -
-// but both are computed from the same decision trace.
-func (r *Router) planCandidates(decision *DecisionTrace, mode routeplan.ExecutionMode, endpoint routeplan.UpstreamEndpoint, model string) []routeplan.PlanCandidate {
+// but both are computed from the same decision trace. ranks is the candidate-id
+// to selection-position map from candidateRanks; a candidate missing from it was
+// filtered out before selection and keeps rank 0.
+func (r *Router) planCandidates(decision *DecisionTrace, mode routeplan.ExecutionMode, endpoint routeplan.UpstreamEndpoint, model string, ranks map[string]int) []routeplan.PlanCandidate {
 	if decision == nil {
 		return nil
 	}
@@ -311,7 +393,7 @@ func (r *Router) planCandidates(decision *DecisionTrace, mode routeplan.Executio
 			UpstreamModel:    model,
 			Selectable:       candidate.Selectable,
 			Reason:           candidatePlanReason(candidate, endpoint, model, r),
-			Rank:             0,
+			Rank:             ranks[candidate.ID],
 			HealthState:      candidate.HealthState,
 			ModelHealthState: candidate.ModelHealthState,
 			CircuitOpen:      candidate.FilterReason == "target_open" || candidate.FilterReason == "model_open",

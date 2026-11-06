@@ -283,6 +283,125 @@ func TestExplainUsesPerModelCapabilities(t *testing.T) {
 	}
 }
 
+// TestExplainRanksCandidatesInSelectionOrder pins the inspector's rank: it is
+// the 1-based position of the candidate in the same cost order the selection
+// core uses, so the candidate the deterministic policy picks is rank 1, the
+// ranks are distinct and a repeated inspection is stable.
+func TestExplainRanksCandidatesInSelectionOrder(t *testing.T) {
+	enabled := true
+	makeTarget := func(id string, weight float64) config.UpstreamTargetConfig {
+		return config.UpstreamTargetConfig{
+			ID:             id,
+			Enabled:        &enabled,
+			Priority:       100,
+			Weight:         weight,
+			ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels:   []string{"gpt-5"},
+			Upstream: config.UpstreamConfig{
+				BaseURL:        "https://" + id + ".example/v1",
+				ProviderPreset: "openai",
+				APIType:        "chat_completions",
+			},
+		}
+	}
+	// Same model, same priority: the weight alone changes the expected cost, so
+	// the order is c (cheapest) then b then a.
+	rtr := explainTestRouter(t, makeTarget("a", 1), makeTarget("b", 2), makeTarget("c", 4))
+	explain := func() ExplainResult {
+		return rtr.Explain(ExplainRequest{
+			RawPath: "/v1/chat/completions",
+			Body:    []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"max_tokens":256}`),
+		})
+	}
+
+	first := explain()
+	if first.Error != "" {
+		t.Fatalf("Explain() error = %q", first.Error)
+	}
+	if first.Result.Plan.SelectedCandidateID != "c" {
+		t.Fatalf("selected candidate = %q, want the cheapest target c", first.Result.Plan.SelectedCandidateID)
+	}
+	ranks := map[string]int{}
+	for _, candidate := range first.Result.Candidates {
+		ranks[candidate.CandidateID] = candidate.Rank
+	}
+	wantRanks := map[string]int{"c": 1, "b": 2, "a": 3}
+	for id, want := range wantRanks {
+		if ranks[id] != want {
+			t.Fatalf("candidate %q rank = %d, want %d (all ranks: %v)", id, ranks[id], want, ranks)
+		}
+	}
+
+	second := explain()
+	if second.Result.Plan.SelectedCandidateID != first.Result.Plan.SelectedCandidateID {
+		t.Fatalf("selection is not stable across dry runs: %q vs %q", first.Result.Plan.SelectedCandidateID, second.Result.Plan.SelectedCandidateID)
+	}
+	for _, candidate := range second.Result.Candidates {
+		if candidate.Rank != ranks[candidate.CandidateID] {
+			t.Fatalf("candidate %q rank changed between dry runs: %d then %d", candidate.CandidateID, ranks[candidate.CandidateID], candidate.Rank)
+		}
+	}
+}
+
+// TestExplainExpandsModelAliases pins resolved_model_candidates: the router
+// expands a requested alias to every upstream wire model a target resolves it
+// to, and the inspector reports that set instead of the single request model.
+func TestExplainExpandsModelAliases(t *testing.T) {
+	enabled := true
+	makeTarget := func(id, baseURL, wireModel string) config.UpstreamTargetConfig {
+		return config.UpstreamTargetConfig{
+			ID:             id,
+			Enabled:        &enabled,
+			Priority:       100,
+			ModelDiscovery: ModelDiscoveryStaticOnly,
+			// RuntimeTargets folds alias names into static models; the router
+			// routes the alias and resolves it through ModelAliases.
+			StaticModels: []string{"fast", wireModel},
+			ModelAliases: map[string]string{"fast": wireModel},
+			Upstream: config.UpstreamConfig{
+				BaseURL:        baseURL,
+				ProviderPreset: "openai",
+				APIType:        "chat_completions",
+			},
+		}
+	}
+	rtr := explainTestRouter(t,
+		makeTarget("chan-a", "https://a.example/v1", "gpt-5"),
+		makeTarget("chan-b", "https://b.example/v1", "gpt-4o"),
+	)
+	explained := rtr.Explain(ExplainRequest{
+		RawPath: "/v1/chat/completions",
+		Body:    []byte(`{"model":"fast","messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if explained.Error != "" {
+		t.Fatalf("Explain() error = %q", explained.Error)
+	}
+	plan := explained.Result.Plan
+	if plan.UpstreamModel != "gpt-5" {
+		t.Fatalf("plan.UpstreamModel = %q, want the alias-resolved gpt-5", plan.UpstreamModel)
+	}
+	got := map[string]routeplan.ResolvedModelCandidate{}
+	for _, candidate := range plan.ResolvedModelCandidates {
+		got[candidate.ChannelID+"\x00"+candidate.Model] = candidate
+	}
+	if len(plan.ResolvedModelCandidates) != 3 {
+		t.Fatalf("resolved_model_candidates = %+v, want the request plus both alias expansions", plan.ResolvedModelCandidates)
+	}
+	request := plan.ResolvedModelCandidates[0]
+	if request.Model != "fast" || request.Alias != "" || request.Source != "request" {
+		t.Fatalf("first resolved candidate = %+v, want the requested model with source request", request)
+	}
+	for _, want := range []routeplan.ResolvedModelCandidate{
+		{Model: "gpt-5", Alias: "fast", ChannelID: "chan-a", Source: "alias"},
+		{Model: "gpt-4o", Alias: "fast", ChannelID: "chan-b", Source: "alias"},
+	} {
+		key := want.ChannelID + "\x00" + want.Model
+		if got[key] != want {
+			t.Fatalf("resolved candidate %q = %+v, want %+v (all: %+v)", key, got[key], want, plan.ResolvedModelCandidates)
+		}
+	}
+}
+
 // TestExplainNoRouteDiagnostics pins the failure vocabulary: a tool-requiring
 // request on a channel without tool calling reports requires_tool_calling.
 func TestExplainNoRouteDiagnostics(t *testing.T) {
