@@ -45,24 +45,28 @@ const (
 
 // Reason values reported per route-plan candidate. The Monitor UI renders these
 // strings; they are part of the public inspect response shape.
+//
+// The router is the only planner now, so this is exactly the vocabulary
+// internal/router.Explain can emit. The six values the deleted routeplan planner
+// used to declare - unsupported_entrypoint, unsupported_responses_strategy,
+// channel_not_enabled, requires_local_responses_runtime,
+// strategy_disallows_native_responses and strategy_disallows_chat_fallback -
+// were removed: no code has emitted them since the merge, and the live router
+// filters disabled channels out before it builds a candidate list. Add a
+// constant only together with the code that reports it; the package test fails
+// when a declared reason has no producer.
 const (
-	ReasonSelected                         = "selected"
-	ReasonUnsupportedEntrypoint            = "unsupported_entrypoint"
-	ReasonUnsupportedStrategy              = "unsupported_responses_strategy"
-	ReasonModelNotMatched                  = "model_not_matched"
-	ReasonModelNotEnabled                  = "model_not_enabled"
-	ReasonChannelNotEnabled                = "channel_not_enabled"
-	ReasonRequiresChatCompletions          = "requires_chat_completions"
-	ReasonRequiresResponses                = "requires_responses"
-	ReasonRequiresAnthropicMessages        = "requires_anthropic_messages"
-	ReasonRequiresLocalResponsesRuntime    = "requires_local_responses_runtime"
-	ReasonStrategyDisallowsNativeResponses = "strategy_disallows_native_responses"
-	ReasonStrategyDisallowsChatFallback    = "strategy_disallows_chat_fallback"
-	ReasonNoCandidate                      = "no_route_candidate"
-	ReasonTargetUnhealthy                  = "target_unhealthy"
-	ReasonTargetCircuitOpen                = "target_circuit_open"
-	ReasonModelCircuitOpen                 = "model_circuit_open"
-	ReasonAllTargetsOpen                   = "all_targets_open"
+	ReasonSelected                  = "selected"
+	ReasonModelNotMatched           = "model_not_matched"
+	ReasonModelNotEnabled           = "model_not_enabled"
+	ReasonRequiresChatCompletions   = "requires_chat_completions"
+	ReasonRequiresResponses         = "requires_responses"
+	ReasonRequiresAnthropicMessages = "requires_anthropic_messages"
+	ReasonNoCandidate               = "no_route_candidate"
+	ReasonTargetUnhealthy           = "target_unhealthy"
+	ReasonTargetCircuitOpen         = "target_circuit_open"
+	ReasonModelCircuitOpen          = "model_circuit_open"
+	ReasonAllTargetsOpen            = "all_targets_open"
 )
 
 type ResolvedModelCandidate struct {
