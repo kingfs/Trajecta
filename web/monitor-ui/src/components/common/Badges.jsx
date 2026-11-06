@@ -17,6 +17,7 @@ import {
   PlugZap,
   Plus,
   Radar,
+  ScanSearch,
   Sigma,
   Sparkles,
   Timer,
@@ -166,6 +167,16 @@ export function TestIcon({ size = 16 } = {}) {
   return (
     <IconFrame>
       <PlugZap size={size} aria-hidden="true" />
+    </IconFrame>
+  );
+}
+
+// Interface auto-detection: the scanner reads the model's protocol surfaces,
+// unlike ProbeIcon which reads the channel's model list and capabilities.
+export function DetectIcon({ size = 16 } = {}) {
+  return (
+    <IconFrame>
+      <ScanSearch size={size} aria-hidden="true" />
     </IconFrame>
   );
 }

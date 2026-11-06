@@ -210,6 +210,62 @@ func Run(ctx context.Context, target Target, protocol Protocol, client *http.Cli
 	return report
 }
 
+// RunForced probes each protocol in protocols regardless of Target.Declared, as
+// long as the protocol belongs to the target's protocol family. It exists for
+// interface detection: the current declaration is exactly what must not
+// constrain the probe, because it may be wrong or unset.
+//
+// ProtocolAuto entries are ignored, duplicates are collapsed and the order is
+// kept. A protocol the target's family cannot serve becomes an
+// unsupported_protocol result with no HTTP call, exactly as in Run.
+func RunForced(ctx context.Context, target Target, protocols []Protocol, client *http.Client) Report {
+	started := time.Now().UTC()
+	report := Report{
+		ChannelID:       target.ChannelID,
+		Model:           target.Model,
+		WireModel:       target.WireModel,
+		ProtocolFamily:  target.ProtocolFamily,
+		ChannelEnabled:  target.ChannelEnabled,
+		ModelEnabled:    target.ModelEnabled,
+		ModelState:      target.ModelState,
+		Routable:        target.Routable,
+		Declared:        copyDeclared(target.Declared),
+		NativeResponses: target.NativeResponses,
+		Status:          ReportStatusUnsupported,
+		StartedAt:       started,
+		Results:         []Result{},
+		Suggestions:     []Suggestion{},
+		Warnings:        []string{},
+	}
+	if client == nil {
+		client = defaultHTTPClient()
+	}
+	seen := make(map[Protocol]bool, len(protocols))
+	for _, protocol := range protocols {
+		if protocol == ProtocolAuto || seen[protocol] {
+			continue
+		}
+		seen[protocol] = true
+		if !structurallyServable(protocol, target.ProtocolFamily) {
+			report.Results = append(report.Results, Result{
+				Protocol: protocol,
+				Declared: target.Declared[protocol],
+				Method:   http.MethodPost,
+				Path:     probePath(protocol, target),
+				Status:   StatusUnsupportedProtocol,
+				Hint:     fmt.Sprintf("protocol %s is not part of protocol family %s", protocol, displayFamily(target.ProtocolFamily)),
+			})
+			continue
+		}
+		report.Results = append(report.Results, runOne(ctx, target, protocol, client))
+	}
+	report.CompletedAt = time.Now().UTC()
+	report.DurationMS = report.CompletedAt.Sub(report.StartedAt).Milliseconds()
+	report.Status = overallStatus(report.Results)
+	report.Suggestions = buildSuggestions(report)
+	return report
+}
+
 func defaultHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 15 * time.Second,
@@ -451,6 +507,32 @@ var modelNotFoundKeywords = []string{
 	"not supported",
 }
 
+// bodyBlamesModel reports whether a 400/422 body clearly blames the model rather
+// than the request shape. The "model" token is required, so a generic provider
+// complaint such as "unknown field messages" stays invalid_request.
+func bodyBlamesModel(lowerBody string) bool {
+	if !strings.Contains(lowerBody, "model") {
+		return false
+	}
+	for _, needle := range []string{
+		"not supported",
+		"unsupported",
+		"unknown",
+		"not found",
+		"not_found",
+		"does not exist",
+		"not exist",
+		"no such",
+		"invalid model",
+		"model is invalid",
+	} {
+		if strings.Contains(lowerBody, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 var authFailedKeywords = []string{
 	"api key",
 	"api_key",
@@ -477,6 +559,15 @@ func classify(protocol Protocol, statusCode int, contentType, body, apiKey strin
 	case statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity:
 		if bodyMentionsSecret(trimmed, apiKey) || containsAny(lower, authFailedKeywords...) {
 			return StatusAuthFailed, trimmed
+		}
+		// Some providers answer an unknown or unsupported model with 400/422 instead
+		// of 404. Detection has to read that as "the model does not work here" rather
+		// than as a malformed probe request.
+		if code, _ := errorCode(trimmed); isModelNotFoundCode(code) {
+			return StatusModelNotFound, trimmed
+		}
+		if bodyBlamesModel(lower) {
+			return StatusModelNotFound, trimmed
 		}
 		return StatusInvalidRequest, trimmed
 	case statusCode == http.StatusNotFound:

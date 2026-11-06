@@ -2,7 +2,9 @@ package router
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -13,16 +15,23 @@ import (
 const (
 	defaultStickyBindingTTL = time.Hour
 
+	// stickyKeySeparator joins the session value and the model name in one
+	// binding key. It is a control character no client id or model name
+	// contains, so the composed key cannot collide with a bare session value.
+	stickyKeySeparator = "\x1f"
+
 	// maxStickyBindings caps the live binding map.
 	//
-	// The keys are client-supplied: a `Session_id`, an
-	// `X-Claude-Code-Session-Id`, an `X-Codex-Window-Id` prefix, an
-	// `X-Codex-Turn-Metadata` session id, or a body `previous_response_id`. An
-	// entry previously disappeared only when the client happened to reuse that
-	// exact key (Lookup deletes it once expired), so a client that varies its
-	// session id grew the map without bound for the life of the process. The cap
-	// makes the allocation finite; 100k bindings is roughly a few megabytes and
-	// is far above the number of sessions a single proxy serves concurrently.
+	// The keys are client-supplied: a `Session_id`, an `X-Session-Id`, a
+	// `Session-Id`, an `X-Conversation-Id`, an `X-Claude-Code-Session-Id`, an
+	// `X-Codex-Window-Id` prefix, an `X-Codex-Turn-Metadata` session id, or a
+	// body `previous_response_id` / `prompt_cache_key` / `metadata.session_id` /
+	// `conversation_id` / `session_id`. An entry previously disappeared only
+	// when the client happened to reuse that exact key (Lookup deletes it once
+	// expired), so a client that varies its session id grew the map without
+	// bound for the life of the process. The cap makes the allocation finite;
+	// 100k bindings is roughly a few megabytes and is far above the number of
+	// sessions a single proxy serves concurrently.
 	maxStickyBindings = 100_000
 
 	// stickyEvictionBatch is how far below the cap a capacity sweep goes. The
@@ -142,23 +151,74 @@ func (s *StickyBindingStore) Bind(key string, targetID string) {
 	}
 }
 
+// stickyHeaderSources are the request headers consulted for a session id, in
+// priority order. Each one is a real client convention: OpenAI/Codex SDKs and
+// Claude Code disagree on the name, and a proxy that only read `Session_id`
+// silently gave no affinity to every other client.
+var stickyHeaderSources = []string{
+	"Session_id",
+	"X-Session-Id",
+	"Session-Id",
+	"X-Conversation-Id",
+	"X-Claude-Code-Session-Id",
+}
+
+// extractStickyKey resolves the client's session identifier from the request.
+//
+// It reads a small, ordered set of headers first and falls back to the body.
+// The value is client-supplied and identifies a conversation, so it must never
+// be written to a log line, a cassette, or the application database: diagnostics
+// use stickyKeyFingerprint instead.
 func extractStickyKey(req *http.Request, body []byte) string {
 	if req == nil {
 		return extractStickyKeyFromBody(body)
 	}
-	if key := strings.TrimSpace(req.Header.Get("Session_id")); key != "" {
-		return key
-	}
-	if key := strings.TrimSpace(req.Header.Get("X-Claude-Code-Session-Id")); key != "" {
-		return key
+	for _, header := range stickyHeaderSources {
+		if key := strings.TrimSpace(req.Header.Get(header)); key != "" {
+			return key
+		}
 	}
 	if key := stickyWindowPrefix(req.Header.Get("X-Codex-Window-Id")); key != "" {
 		return key
 	}
-	if key := stickySessionFromMetadata(req.Header.Get("X-Codex-Turn-Metadata")); key != "" {
+	if key := stickySessionIDFromJSON([]byte(req.Header.Get("X-Codex-Turn-Metadata"))); key != "" {
 		return key
 	}
 	return extractStickyKeyFromBody(body)
+}
+
+// composeStickyKey binds one session per model: `session + "\x1f" + model`.
+//
+// The model has to be part of the key because the binding chooses the route
+// target - and therefore the provider-side prompt cache - for one model only.
+// A request for a second model on the same session must not rewrite the first
+// model's binding (which would break its cache locality) and must get its own
+// binding so it can keep that model's cache warm on its own provider.
+//
+// A session without a model keeps the historical session-only key; no session
+// means no binding at all.
+func composeStickyKey(session string, model string) string {
+	session = strings.TrimSpace(session)
+	if session == "" {
+		return ""
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return session
+	}
+	return session + stickyKeySeparator + model
+}
+
+// stickyKeyFingerprint renders a sticky key for diagnostics without exposing the
+// client's session value. Every recorded routing event and every persisted
+// routing summary stores this fingerprint, never the key itself.
+func stickyKeyFingerprint(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("sha256:%x", sum[:8])
 }
 
 func stickyWindowPrefix(raw string) string {
@@ -173,30 +233,54 @@ func stickyWindowPrefix(raw string) string {
 	return strings.TrimSpace(prefix)
 }
 
-func stickySessionFromMetadata(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+// stickySessionIDFromJSON reads `{"session_id": ...}` from a header value or a
+// raw body field. It returns "" for empty or malformed input instead of failing
+// the request: a session hint is an optimisation, never a requirement.
+func stickySessionIDFromJSON(raw []byte) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
 		return ""
 	}
 	var payload struct {
 		SessionID string `json:"session_id"`
 	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return ""
 	}
 	return strings.TrimSpace(payload.SessionID)
 }
 
+// extractStickyKeyFromBody decodes the request body once and returns the first
+// session-ish field it carries. The order matches how the client protocols
+// chain a conversation: the Responses API's previous response, then the Chat
+// Completions prompt-cache key, then the common metadata/conversation/session
+// fields. metadata is kept raw so a non-object metadata field cannot make the
+// whole body unreadable and lose the other fallbacks.
 func extractStickyKeyFromBody(body []byte) string {
 	body = bytes.TrimSpace(body)
-	if len(body) == 0 || !json.Valid(body) {
+	if len(body) == 0 {
 		return ""
 	}
 	var payload struct {
-		PreviousResponseID string `json:"previous_response_id"`
+		PreviousResponseID string          `json:"previous_response_id"`
+		PromptCacheKey     string          `json:"prompt_cache_key"`
+		Metadata           json.RawMessage `json:"metadata"`
+		ConversationID     string          `json:"conversation_id"`
+		SessionID          string          `json:"session_id"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return ""
 	}
-	return strings.TrimSpace(payload.PreviousResponseID)
+	for _, candidate := range []string{
+		payload.PreviousResponseID,
+		payload.PromptCacheKey,
+		stickySessionIDFromJSON(payload.Metadata),
+		payload.ConversationID,
+		payload.SessionID,
+	} {
+		if key := strings.TrimSpace(candidate); key != "" {
+			return key
+		}
+	}
+	return ""
 }

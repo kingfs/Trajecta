@@ -278,9 +278,9 @@ function buildOverviewBreakdownLink(kind, value, windowValue) {
     case "endpoints":
       return `/traces?q=${encodeURIComponent(label)}`;
     case "upstreams":
-      return buildRoutingLink(normalizeUpstreamWindow(windowValue), label);
+      return `/traces?provider=${encodeURIComponent(label)}${windowValue && windowValue !== "today" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
     case "routing_failures":
-      return `/routing?status=error${windowValue && windowValue !== "today" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
+      return `/events?category=routing_failure${windowValue && windowValue !== "today" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
     case "finding_categories":
       return `/audit?category=${encodeURIComponent(label)}`;
     default:

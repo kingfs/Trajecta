@@ -1823,8 +1823,9 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		attrs := map[string]interface{}{
 			"sticky_status": sticky.Status,
 		}
-		if sticky.Key != "" {
-			attrs["sticky_key_fingerprint"] = stickyKeyFingerprint(sticky.Key)
+		// The router hands over a fingerprint, not the client's session value.
+		if sticky.KeyFingerprint != "" {
+			attrs["sticky_key_fingerprint"] = sticky.KeyFingerprint
 		}
 		if sticky.TargetID != "" {
 			attrs["upstream_id"] = sticky.TargetID

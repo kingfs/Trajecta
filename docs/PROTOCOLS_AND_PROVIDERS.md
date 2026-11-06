@@ -118,10 +118,19 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 - 能力字段为 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`，对应 YAML `upstream.capabilities`（数据库为 channel 的 capabilities JSON）。每个字段都是可选布尔，未声明表示未知。
 - 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target（`tools` 与非空 `functions` 同等看待：后者是 OpenAI 已废弃但仍被客户端与上游接受的同义字段），`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。需要特别注意 `/v1/responses`：`capabilities.responses=true` 只表示该渠道的 Responses 入口可由本地 Responses runtime 用 Chat Completions 翻译来服务；**原生 Responses 直通必须显式声明**——模型的 `supports_responses=true`，或渠道 `api_type` 为 `responses`/`responses_native`（或渠道显式没有 Chat Completions backend，此时 responses 只能解释为原生）。
 - `api_type` 的全局合法值为 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`；协议族另有约束：`anthropic_messages` 只接受 `messages`，`google_genai` 与 `vertex_native` 只接受 `gemini_generate_content`，`openai_compatible` 没有额外的 `api_type` 约束。`api_type` 缺失时按协议族取默认值：`anthropic_messages` → `messages`，`google_genai`、`vertex_native` → `gemini_generate_content`，其余 → `chat_completions`。
-- `mode` 的合法值为 `proxy`、`record_only`、`server`、`responses_server`。
+- `mode` 的合法值为 `proxy`、`record_only`、`server`、`responses_server`；它只被解析、校验和记录日志，不参与路由，也不再作为渠道表单字段暴露。
 - 按模型覆盖：数据库 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 可编辑，YAML 对应 `upstream.model_capabilities`）对该模型覆盖 channel 级 `api_type`/capabilities；没有声明覆盖的模型回退到 channel 级行为。这使一个 channel 能对部分模型走原生 surface，对另一些模型走其他 surface。
 - endpoint 级判定：`/v1/chat/completions` 要求该模型的 Chat Completions 支持；`/v1/responses` 要求原生 Responses 支持或 Chat Completions 支持（后者走本地 Responses runtime）；`/tokenize` 与 `/v1/detokenize` 要求该模型的 tokenize 能力没有显式关闭（`capabilities.tokenize: false` 或 `model_capabilities.<model>.tokenize: false` 时该 target 不参与选择，返回 `no_supporting_target`；客户端可见错误码的完整表见 [代理使用示例](./PROXY_USAGE_EXAMPLES.md#客户端可见的错误码)）。
 - `internal/upstream` 的 capability registry 被 probe endpoint、provider setup/apply 写入与 routing API surface 判断共用，各控制面不维护各自事实源；probe 未探测到的能力不会被自动补出。registry 里没有 tokenize 的 probe spec，因此该能力只来自显式声明。
+
+## 接口自动识别
+
+渠道页面不再要求操作者手工勾选 Responses/Chat/Tool/Models 等能力。每个模型行有一个由配置投影出来的 `interfaces`（`chat_completions`、`native_responses`、`responses_via_chat`、`messages`、`generate_content`），并可通过 `POST /api/provider-model-detect` 用真实最小请求重新探测：
+
+- OpenAI-compatible 渠道探测 `chat_completions` 与 `responses`；Anthropic 渠道探测 `messages`；Google/Vertex 探测 `generate_content`。探测强制忽略当前声明，避免“用旧能力证明旧能力”。
+- 结论只写回 OpenAI-compatible 的两个模型级三态列：`ok` 写支持，`endpoint_not_supported`/`model_not_found` 写不支持，鉴权/超时/网络错误等不确定结果不写；`messages`/`generate_content` 是协议族级接口，只报告。
+- 识别在配置锁外完成网络探测，再在一个配置事务里写能力并 reload 路由；它不写 `last_probe_at`、`channel_probe_runs`、cassette 或 logs，也不经过 router，因此不会污染流量与用量。
+- 启用模型时前端会自动补全尚未声明的接口；模型卡的「识别接口」可以覆盖重新识别；渠道工具栏可以批量识别所有已启用模型。
 
 ## Provider Probe
 

@@ -63,7 +63,7 @@ docker compose exec trajecta /app/bin/server \
 - Monitor: <http://localhost:8081> — log in with the credentials above
 - Proxy: <http://localhost:8080/v1> — point your SDK's `base_url` here
 
-After signing in, configure upstream URLs and API keys on the `Providers` page, then create a personal token on the `Access -> API tokens` tab: use it as the SDK's `api_key` and your requests will be proxied and recorded. Host ports come from `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` in `.env`.
+After signing in, configure upstream URLs and API keys on the `Channels` page, then create a personal token on the `Access -> API tokens` tab: use it as the SDK's `api_key` and your requests will be proxied and recorded. Host ports come from `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` in `.env`.
 
 ### Option 2: From source
 

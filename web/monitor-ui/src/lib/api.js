@@ -76,6 +76,10 @@ export const apiPaths = {
   // The per-model quick connectivity test: one POST probes every protocol the
   // channel declares for the given model and returns the per-protocol outcome.
   providerModelTest: "/api/provider-model-test",
+  // Interface auto-detection: probes the model's protocol surfaces and writes
+  // the ``channel_models`` supports_* columns. With only ``channel_id`` it
+  // detects every enabled model of that channel.
+  providerModelDetect: "/api/provider-model-detect",
   providerProbePreview: "/api/provider-probe",
   providerProbeReport: "/api/provider-probe/report",
   providerProbeApply: "/api/provider-probe/report/apply",

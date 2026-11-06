@@ -307,11 +307,14 @@ type DecisionTrace struct {
 	SelectedCredentialHint string              `json:"credential_hint,omitempty"`
 	SelectedScore          float64             `json:"selected_score,omitempty"`
 	FailureReason          string              `json:"failure_reason,omitempty"`
-	StickyKey              string              `json:"sticky_key,omitempty"`
-	StickyStatus           string              `json:"sticky_status,omitempty"`
-	StickyTargetID         string              `json:"sticky_target_id,omitempty"`
-	StickyBreakID          string              `json:"sticky_break_id,omitempty"`
-	StickyEvents           []StickyDecision    `json:"sticky_events,omitempty"`
+	// StickyKeyFingerprint identifies the composed session+model binding key
+	// without carrying the client's session value, which must never appear in
+	// a trace, a cassette, or the database.
+	StickyKeyFingerprint string           `json:"sticky_key_fingerprint,omitempty"`
+	StickyStatus         string           `json:"sticky_status,omitempty"`
+	StickyTargetID       string           `json:"sticky_target_id,omitempty"`
+	StickyBreakID        string           `json:"sticky_break_id,omitempty"`
+	StickyEvents         []StickyDecision `json:"sticky_events,omitempty"`
 }
 
 type CandidateDecision struct {
@@ -345,8 +348,10 @@ type CandidateDecision struct {
 }
 
 type StickyDecision struct {
-	Status         string `json:"status,omitempty"`
-	Key            string `json:"key,omitempty"`
+	Status string `json:"status,omitempty"`
+	// KeyFingerprint is the fingerprint of the session+model binding key, never
+	// the client-supplied session value itself.
+	KeyFingerprint string `json:"key_fingerprint,omitempty"`
 	TargetID       string `json:"target_id,omitempty"`
 	BreakID        string `json:"break_id,omitempty"`
 	RouteTargetID  string `json:"route_target_id,omitempty"`
@@ -1005,7 +1010,12 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
-	stickyKey := extractStickyKey(req, body)
+	// Bind per (session, model): the binding chooses the upstream that keeps a
+	// model's prompt cache warm, so two models on one session must not overwrite
+	// each other's target. The raw session value never leaves this function; the
+	// decision trace only carries its fingerprint.
+	stickyKey := composeStickyKey(extractStickyKey(req, body), model)
+	stickyFingerprint := stickyKeyFingerprint(stickyKey)
 	stickyTargetID, hasStickyBinding := r.sticky.Lookup(stickyKey)
 
 	r.mu.RLock()
@@ -1063,13 +1073,13 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 		if stickyTarget := findTargetByRouteTargetID(available, stickyTargetID); stickyTarget != nil {
 			selected = stickyTarget
 			score = r.expectedCost(selected, features)
-			decision.withStickyTarget("hit", stickyKey, stickyTarget, stickyTarget.ID, "")
+			decision.withStickyTarget("hit", stickyFingerprint, stickyTarget, stickyTarget.ID, "")
 		} else {
 			stickyTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
-			decision.withStickyTarget("break", stickyKey, stickyTarget, targetAlias(stickyTarget, stickyTargetID), targetAlias(stickyTarget, stickyTargetID))
+			decision.withStickyTarget("break", stickyFingerprint, stickyTarget, targetAlias(stickyTarget, stickyTargetID), targetAlias(stickyTarget, stickyTargetID))
 		}
 	} else if stickyKey != "" {
-		decision.withSticky("miss", stickyKey, "", "")
+		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
 		selected, score = r.pick(available, features)
@@ -1077,9 +1087,9 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
 				previousTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
-				decision.withStickyTarget("bind", stickyKey, selected, selected.ID, targetAlias(previousTarget, stickyTargetID))
+				decision.withStickyTarget("bind", stickyFingerprint, selected, selected.ID, targetAlias(previousTarget, stickyTargetID))
 			} else {
-				decision.withStickyTarget("bind", stickyKey, selected, selected.ID, "")
+				decision.withStickyTarget("bind", stickyFingerprint, selected, selected.ID, "")
 			}
 		}
 	}
@@ -1194,26 +1204,26 @@ func (d *DecisionTrace) withFailure(reason string) *DecisionTrace {
 	return d
 }
 
-func (d *DecisionTrace) withSticky(status string, key string, targetID string, breakID string) *DecisionTrace {
+func (d *DecisionTrace) withSticky(status string, keyFingerprint string, targetID string, breakID string) *DecisionTrace {
 	if d == nil {
 		return nil
 	}
-	return d.withStickyTarget(status, key, nil, targetID, breakID)
+	return d.withStickyTarget(status, keyFingerprint, nil, targetID, breakID)
 }
 
-func (d *DecisionTrace) withStickyTarget(status string, key string, target *Target, targetID string, breakID string) *DecisionTrace {
+func (d *DecisionTrace) withStickyTarget(status string, keyFingerprint string, target *Target, targetID string, breakID string) *DecisionTrace {
 	if d == nil {
 		return nil
 	}
 	d.StickyStatus = status
-	d.StickyKey = key
+	d.StickyKeyFingerprint = keyFingerprint
 	d.StickyTargetID = targetID
 	d.StickyBreakID = breakID
 	event := StickyDecision{
-		Status:   status,
-		Key:      key,
-		TargetID: targetID,
-		BreakID:  breakID,
+		Status:         status,
+		KeyFingerprint: keyFingerprint,
+		TargetID:       targetID,
+		BreakID:        breakID,
 	}
 	if target != nil {
 		event.RouteTargetID = target.RouteTargetID

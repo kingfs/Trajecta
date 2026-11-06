@@ -3640,6 +3640,63 @@ a:focus-visible {
   background: var(--surface-inset);
 }
 
+/* The interface chips are the visible half of interface auto-detection: the
+   channel header shows the union over its enabled models, each model card shows
+   that model's own surfaces, and the unknown chip stands in for "not detected
+   yet". They reuse the InlineTag tone classes so the palette stays one system. */
+.channel-interface-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Inside the model/channel table row a chip row would disturb the fixed grid
+   columns, so there the interfaces print as one muted line. */
+.channel-interface-chips-compact {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.channel-interface-label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* One detect result, rendered in place of the buttons that produced it. */
+.provider-model-detect-result {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.channel-detect-mode {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.channel-detect-skipped {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* The tri-state overrides are a disclosure, not a primary form section. */
+.channel-advanced-toggle {
+  justify-self: start;
+}
+
 .provider-model-test-result-pending {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;

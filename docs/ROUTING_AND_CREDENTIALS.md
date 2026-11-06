@@ -60,7 +60,7 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 `GET /api/channels/{id}` 返回配置摘要、模型数量、用量摘要、趋势、模型用量、最近失败与最近探测记录。
 渠道启停通过 `PATCH /api/channels/{id}` 的 `enabled` 字段完成；`PATCH /api/channels/{id}/models/{model}` 支持 `display_name`、`enabled`、三态能力覆盖（显式 `null` 表示清除回继承）、`context_window`、`max_output_tokens`、`upstream_model` 等。
 
-Provider 与探测：
+渠道（Channel）与探测：
 
 - `GET /api/provider-presets`
 - `POST /api/provider-probe`
@@ -84,6 +84,7 @@ Provider 与探测：
 - `GET /api/settings/channels`、`DELETE /api/settings/channels`
 - `POST /api/routing/inspect`
 - `POST /api/provider-model-test`（按模型、按协议的最小请求连通性测试，只读，不写库、不录制）
+- `POST /api/provider-model-detect`（按模型自动识别接口：chat/responses/messages/generateContent，写入该模型的 `supports_*`；不带 model 时识别所有已启用模型）
 - `GET /api/routing/exchanges`、`GET /api/routing/summary`
 - `GET /api/secrets/local-key`（`?export=1` 下载备份）、`POST /api/secrets/local-key?rotate=1`
 - 旧运行时诊断：`GET /api/upstreams`、`GET /api/upstreams/{id}`
@@ -91,7 +92,7 @@ Provider 与探测：
 `PATCH /api/settings/routing` 的字段、校验与持久化位置（应用库 `app_settings` 键 `routing.settings`）见 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md) 与 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)。
 `POST /api/routing/inspect` 接受 `endpoint`、`model`、`stream`、`tools`，返回 route plan 与候选排除原因。
 
-## Provider 探测与模型写回
+## 渠道探测与模型写回
 
 探测入口是 `channel.Service.ProbeWithOptions(channelID, options)`，`options` 对应 `POST /api/channels/{id}/probe` 的 `enable_discovered` 与 `detect_provider`：
 
@@ -110,6 +111,7 @@ Provider 与探测：
 - `POST /api/provider-probe/report/apply` 只对 `detected` 的结果生效，且只填补缺失字段（`no missing fields to apply`）；应用了字段才触发 router reload。
 - provider probe 只判断「路由是否存在」：它给 `/v1/responses` 发的是空 body，很多 provider 会回 `400 missing model`，这个 400 被算作 endpoint 存在，却**不能证明某个模型在该 endpoint 上可用**。因此 route-only probe 不再自动把 `capabilities.responses` 写给 Chat Completions 渠道：只有渠道 `api_type` 为 `responses` / `responses_native`，或 probe 根本没有发现 `chat_completions` surface（此时 responses 只能表示原生 API）时才应用该 capability；其余情况由模型级 `supports_responses` 覆盖或按模型连通性测试实测决定。
 - `POST /api/provider-model-test` 是无写入的按模型连通性测试。请求为 `{"channel_id","model","protocol"}`（`protocol` 省略或 `auto` 时按声明探测）；它用渠道已解密的 key 和该模型的线上名，按 `BuildURL` + `ApplyAuthHeaders` 与转发热路径相同的规则发送最小请求（chat 16 token / responses 16 output token / messages / generateContent），返回每个协议的 `status`（`ok`、`auth_failed`、`model_not_found`、`endpoint_not_supported`、`invalid_request`、`rate_limited`、`timeout`、`network_error`、`upstream_5xx` …）、HTTP 状态、延迟与可执行建议。逻辑失败也是 HTTP 200，只有「测试没有跑起来」才是 4xx/5xx。它不写 `channel_models.last_probe_at`、不写 `channel_probe_runs`、不产生 cassette/logs，也不经过 router。当 chat 成功而 `/v1/responses` 返回 `endpoint_not_supported` 时，建议为模型级 `supports_responses=false`，使 `/v1/responses` 入口改走本地 Responses runtime。
+- `POST /api/provider-model-detect` 是接口自动识别的写入入口。请求为 `{"channel_id","model":"可选","overwrite":false}`：带 model 时只识别该模型，不带 model 时识别该渠道所有已启用模型（上限 100）。它在**配置锁外**先并行探测（每协议 8s、最多 4 个模型并发、不重试），再在**一个** `ConfigurationTransaction` 里写入该模型的三态 `supports_chat_completions` / `supports_responses`（`overwrite=false` 只填 NULL，`overwrite=true` 覆盖已有值），提交成功后才 reload 路由。结论规则：`ok` → 支持；`endpoint_not_supported` / `model_not_found` → 不支持；鉴权、超时、网络错误等不确定结果不写。Anthropic 的 messages 和 Gemini 的 generateContent 是协议族级接口，只报告、不写列。它不写 `last_probe_at`/`channel_probe_runs`，不产生 cassette/logs。Monitor 的模型卡「识别接口」、启用模型后的自动补全、渠道工具栏「识别已启用模型的接口」都调用它。
 - `POST /api/provider-probe` 是无渠道的临时探测（`provider_id`、`base_url`、`api_key`、`headers`、`api_type`、`protocol_family`），不需要已有渠道。
 
 ## 路由选择与 responses_strategy
@@ -134,10 +136,10 @@ Provider 与探测：
 ## Sticky Route Target
 
 - route target 身份是 `<channel_id>:<credential_id>`，没有显式凭据时为 `<channel_id>:default`。
-- sticky key 依次从请求头 `Session_id`、`X-Claude-Code-Session-Id`、`X-Codex-Window-Id`（取 `:` 前前缀）、`X-Codex-Turn-Metadata` 的 `session_id` 提取；都没有时回退到请求体的 `previous_response_id`。
-- binding TTL 固定为 1 小时（当前没有配置项），记录在进程内的 `StickyBindingStore`。
-- sticky 命中且该 target 仍可用时复用同一 route target；命中但 target 不可用时记录一次 `sticky break` 并重新绑定到新的可用 target；未命中则正常选择后绑定。
-- Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`，不暴露原始 sticky key。
+- sticky key 依次从请求头 `Session_id`、`X-Session-Id`、`Session-Id`、`X-Conversation-Id`、`X-Claude-Code-Session-Id`、`X-Codex-Window-Id`（取 `:` 前前缀）、`X-Codex-Turn-Metadata` 的 `session_id` 提取；都没有时回退到请求体的 `previous_response_id`、`prompt_cache_key`、`metadata.session_id`、`conversation_id`、`session_id`。body 只解析一次；格式错误的 body 视为没有会话键。
+- binding key 是 **`session + 模型名`** 的组合（模型名小写）：粘住的不是“这个会话”，而是“这个会话里的这个模型”。这样同一会话切到另一个模型时不会覆盖前一个模型的绑定，两个模型各自的供应商 prompt cache 都能继续命中。没有模型名时保持历史上的 session-only key；没有 session key 时不绑定。
+- binding TTL 固定为 1 小时（当前没有配置项），记录在进程内的 `StickyBindingStore`。命中且 target 仍可用时复用同一 route target（因此也复用了上游的 prompt cache）；命中但 target 不可用时记录一次 `sticky break` 并重新绑定；未命中则正常选择后绑定。
+- Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`（sha256 前缀），不暴露原始 session 值。
 
 ## 凭据与隐式 default credential
 
@@ -179,7 +181,7 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 
 ## Monitor 与 MCP 的管理入口
 
-Monitor 侧是渠道/模型/别名配置的主入口：导航中的 `Providers` 页面（API 仍为 `/api/channels`）负责渠道创建、编辑、启停、探测与 headers/能力配置，`Models` 页面负责模型广场、模型详情、模型启停与别名相关操作，`Routing` 页面展示 selected route 记录，`Connect` 页面（客户端接入 tab）展示协议入口。
+Monitor 侧是渠道/模型/别名配置的主入口：导航中的「渠道」页（canonical `/channels`，API 仍为 `/api/channels`；`/providers` 只保留重定向）负责渠道创建、编辑、启停、探测、模型同步与接口自动识别；「模型」页负责模型广场、模型详情、模型启停、接口覆盖与别名管理；原来的「路由」页已折叠：路由设置与 dry-run 检查进入渠道页底部的高级卡片，`/routing` 只保留重定向；「接入」页（客户端接入 tab）展示协议入口。selected route 记录仍可在流量页与 trace 详情里查，不再单独成页。
 
 MCP 侧提供查询工具与受控重分析动作工具，但没有渠道/模型/别名写入口：
 

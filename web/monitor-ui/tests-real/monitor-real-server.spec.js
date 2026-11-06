@@ -16,54 +16,55 @@ test("real monitor server renders seeded model and channel data", async ({ page 
 
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
-  await expect(page.getByText("Provider coverage")).toBeVisible();
+  await expect(page.getByText("Channel coverage")).toBeVisible();
   await expect(page.getByRole("link", { name: /openai-primary manual enabled/i })).toBeVisible();
 
-  await page.goto("/providers/openai-primary");
+  await page.goto("/channels/openai-primary");
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("rate limited")).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit provider" }).click();
-  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit channel" }).click();
+  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
   // The preset is a listbox now, so it shows the option's label rather than a
   // DOM value.
-  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
+  await expect(page.getByLabel("Channel preset")).toHaveText("openai");
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await expect(page.locator("textarea")).toContainText("X-Test: visible");
 });
 
 test("real monitor server supports probe and manual model mutation", async ({ page }) => {
-  await page.goto("/providers/openai-primary");
+  await page.goto("/channels/openai-primary");
 
   await page.getByPlaceholder("Add model manually").fill("gpt-manual-real");
   await page.getByRole("button", { name: "Add model" }).click();
   await expect(page.getByText("gpt-manual-real")).toBeVisible();
 
-  await page.getByRole("button", { name: "Probe provider" }).click();
+  await page.getByRole("button", { name: "Probe" }).click();
   await expect(page.getByText("success").first()).toBeVisible();
-  await expect(page.getByText("discovered, disabled").first()).toBeVisible();
+  const discoveredCard = page.locator(".provider-model-card").filter({ hasText: "gpt-new-real" });
+  await expect(discoveredCard.getByText("probe discovered")).toBeVisible();
+  await expect(discoveredCard.getByText("Disabled")).toBeVisible();
   await page.getByRole("button", { name: "Enable discovered (1)" }).click();
   await expect(page.getByText("gpt-new-real")).toBeVisible();
 });
 
 test("real monitor server shows probe failure guidance", async ({ page }) => {
-  await page.goto("/providers/broken-auth");
+  await page.goto("/channels/broken-auth");
   await expect(page.getByRole("heading", { name: "Broken Auth" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Probe provider" }).click();
+  await page.getByRole("button", { name: "Probe" }).click();
   await expect(page.getByText("not_found").first()).toBeVisible();
   await expect(page.getByText(/Check the base URL/i).first()).toBeVisible();
 });
 
-test("real monitor server renders routing decision records", async ({ page }) => {
+test("real monitor server folds routing settings into the channel page", async ({ page }) => {
   await page.goto("/routing");
-  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
-  await expect(page.getByText("Recent selected routes")).toBeVisible();
-  await expect(page.getByText("Routed requests")).toBeVisible();
-  await expect(page.getByText("gpt-5").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "View trace" }).first()).toBeVisible();
+  await expect(page).toHaveURL(/\/channels$/);
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+  await expect(page.getByText("Routing settings")).toBeVisible();
+  await expect(page.getByText("Route inspector")).toBeVisible();
 });
 
 test("real monitor server serves trace routing links", async ({ page }) => {
@@ -72,7 +73,7 @@ test("real monitor server serves trace routing links", async ({ page }) => {
   // tab now that the first tab is the conversation alone.
   await page.goto(`/traces/${fixture.routed_trace_id}?tab=request`);
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/providers/openai-primary");
+  await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
 
   // The conversation reads the trace whether or not its observation has been

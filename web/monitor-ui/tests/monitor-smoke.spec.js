@@ -104,9 +104,6 @@ test.beforeEach(async ({ page }) => {
       expect(url.searchParams.get("status")).toBe("unread");
       return route.fulfill({ json: eventListPayload() });
     }
-    if (path === "/api/routing/summary") {
-      return route.fulfill({ json: {} });
-    }
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
     }
@@ -202,19 +199,26 @@ test.beforeEach(async ({ page }) => {
       expect(body).toEqual({ models: ["gpt-new"], enabled: true });
       return route.fulfill({ json: { updated: 1, models: ["gpt-new"], enabled: true } });
     }
-    if (path === "/api/routing/exchanges") {
-      return route.fulfill({ json: traceListPayload() });
+    // The routing settings and the dry-run inspector moved from the standalone
+    // /routing page into collapsed cards on the channel page, and the alias
+    // table moved to the model page. Each panel only mounts when its card is
+    // opened, so these mocks are what an expanded card reads.
+    if (path === "/api/settings/routing" && method === "GET") {
+      return route.fulfill({ json: routingSettingsPayload() });
     }
-    if (path === "/api/routing/summary") {
-      return route.fulfill({ json: routingSummaryPayload() });
+    if (path === "/api/settings/routing" && method === "PATCH") {
+      return route.fulfill({ json: route.request().postDataJSON() });
+    }
+    if (path === "/api/routing/inspect" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.endpoint).toBe("responses");
+      expect(body.model).toBe("gpt-5");
+      return route.fulfill({ json: routeInspectPayload(body) });
+    }
+    if (path === "/api/model-aliases" && method === "GET") {
+      return route.fulfill({ json: { items: modelAliasPayload() } });
     }
     if (path === "/api/traces") {
-      if (url.searchParams.get("status") === "error") {
-        expect(url.searchParams.get("model")).toBe("gpt-5");
-        expect(url.searchParams.get("upstream")).toBe("openai-primary");
-        expect(url.searchParams.get("min_ttft_ms")).toBe("100");
-        expect(url.searchParams.get("max_tokens")).toBe("500");
-      }
       return route.fulfill({ json: traceListPayload() });
     }
     if (path === "/api/traces/trace-routed") {
@@ -386,52 +390,52 @@ test("models marketplace and detail render", async ({ page }) => {
 
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
-  await expect(page.getByText("Provider coverage")).toBeVisible();
+  await expect(page.getByText("Channel coverage")).toBeVisible();
   await expect(page.getByText("openai-primary").first()).toBeVisible();
 });
 
-test("provider management renders and supports core actions", async ({ page }) => {
+test("channel management renders and supports core actions", async ({ page }) => {
   await page.goto("/providers");
-  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
-  await page.getByRole("button", { name: "New provider" }).click();
-  await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
-  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
+  await page.getByRole("button", { name: "New channel" }).click();
+  await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
+  await expect(page.getByLabel("Channel preset")).toHaveText("openai");
   // The form starts from an explicit API type + protocol family surface, which
   // is allowed to be created without a validation round-trip.
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
   await page.getByLabel("API key").fill("sk-test-secret");
-  await page.getByRole("button", { name: "Detect provider" }).click();
+  await page.getByRole("button", { name: "Detect channel" }).click();
   await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
   await page.getByRole("button", { name: "Apply suggestions" }).click();
-  // These four are listboxes now, so what they show is the option's label
-  // rather than the DOM value a native select carried.
+  // These three are listboxes now, so what they show is the option's label
+  // rather than the DOM value a native select carried. The raw API mode control
+  // is gone: the console derives the execution mode from the API surface.
   await expect(page.getByLabel("API type")).toHaveText("Chat Completions");
-  await expect(page.getByLabel("API mode")).toHaveText("Proxy");
   await expect(page.getByLabel("protocol")).toHaveText("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveText("openai_default");
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
   await page.getByRole("button", { name: "Validate setup" }).click();
   await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
   await expect(page.getByText("stored as sk-...cret")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
   // Editing a validation-relevant field drops the previous validation result.
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1/");
-  await expect(page.getByText("Validate setup before creating the provider.")).toBeVisible();
+  await expect(page.getByText("Validate setup before creating the channel.")).toBeVisible();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
   await page.getByRole("button", { name: "Validate setup" }).click();
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
-  await page.getByRole("button", { name: "Create provider" }).click();
-  await expect(page.getByRole("heading", { name: "Create provider" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
+  await page.getByRole("button", { name: "Create channel" }).click();
+  await expect(page.getByRole("heading", { name: "Create channel" })).toBeHidden();
 
-  await expect(page).toHaveURL(/providers\/openai-primary/);
+  // The console names the canonical channel address; /providers only redirects.
+  await expect(page).toHaveURL(/channels\/openai-primary/);
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("chat_completions").first()).toBeVisible();
-  await expect(page.getByText("responses_server").first()).toBeVisible();
   await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   // A discovered-but-disabled model has to stay visibly marked as both. The card
@@ -442,14 +446,12 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(discoveredCard.getByText("probe discovered")).toBeVisible();
   await expect(discoveredCard.getByText("Disabled")).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit provider" }).click();
-  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
-  await expect(page.getByLabel("Provider preset")).toHaveText("openai");
-  await expect(page.getByLabel("Provider enabled")).toBeVisible();
+  await page.getByRole("button", { name: "Edit channel" }).click();
+  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
+  await expect(page.getByLabel("Channel preset")).toHaveText("openai");
   await expect(page.locator(".provider-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.getByLabel("API type")).toHaveText("Chat Completions");
-  await expect(page.getByLabel("API mode")).toHaveText("Responses server");
   await expect(page.getByLabel("protocol")).toHaveText("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveText("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
@@ -459,7 +461,7 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Add model" }).click();
   await expect(page.getByRole("button", { name: "Adding" })).toBeHidden();
 
-  await page.getByRole("button", { name: "Probe provider" }).click();
+  await page.getByRole("button", { name: "Probe channel" }).click();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
@@ -472,11 +474,11 @@ test("provider management renders and supports core actions", async ({ page }) =
 // The edit dialog used to call the mutation object as if it were the function
 // (`await onSave()`), so "Save changes" threw before any request was made and a
 // corrected base URL could never be persisted. It now submits through `.mutate()`.
-test("editing a provider persists a corrected base URL", async ({ page }) => {
+test("editing a channel persists a corrected base URL", async ({ page }) => {
   await page.goto("/providers/openai-primary");
 
-  await page.getByRole("button", { name: "Edit provider" }).click();
-  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit channel" }).click();
+  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v2");
 
   const patched = page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/channels/openai-primary");
@@ -484,7 +486,7 @@ test("editing a provider persists a corrected base URL", async ({ page }) => {
 
   const body = (await patched).postDataJSON();
   expect(body.base_url).toBe("https://api.openai.example/v2");
-  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeHidden();
 });
 
 // Creating a token is a rare, deliberate act, so its form lives behind a button
@@ -537,23 +539,94 @@ test("a token with no expiry sends no ttl", async ({ page }) => {
   await expect(page.locator(".token-secret-value")).toBeVisible();
 });
 
-test("routing page renders selected route records", async ({ page }) => {
+// /channels is the canonical address now. /providers and /routing are old
+// bookmarks: they redirect to the page that absorbed them and keep the query
+// string, so a link that names a window still lands on that window.
+test("the old provider and routing addresses redirect to the channel page", async ({ page }) => {
+  await page.goto("/routing?window=7d");
+  await expect(page).toHaveURL(/\/channels\?window=7d$/);
+
+  await page.goto("/providers");
+  await expect(page).toHaveURL(/\/channels$/);
+
+  await page.goto("/providers/openai-primary?window=7d");
+  await expect(page).toHaveURL(/\/channels\/openai-primary\?window=7d$/);
+});
+
+// The rail no longer draws a routing entry: the page it named is gone, and the
+// two controls worth keeping are advanced cards on the channel page. The entry
+// also has to light up for the old redirect paths while they are in flight.
+test("the rail has no routing entry and channels is the surviving destination", async ({ page }) => {
+  await page.goto("/overview");
+  const nav = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(nav.locator('a[href="/channels"]')).toBeVisible();
+  await expect(nav.locator('a[href="/routing"]')).toHaveCount(0);
+  await expect(nav.locator('a[href="/providers"]')).toHaveCount(0);
+
+  // The old path is still in the address bar for one render before the redirect
+  // lands, and the channel entry must be the active one for that render.
   await page.goto("/routing");
-  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
-  await expect(page.getByText("Recent selected routes")).toBeVisible();
-  await expect(page.getByText("openai-primary").first()).toBeVisible();
-  await expect(page.getByText("gpt-5").first()).toBeVisible();
-  await expect(page.getByText("1 missing usage").first()).toBeVisible();
+  await expect(nav.locator('a[href="/channels"]')).toHaveClass(/nav-item-active/);
+});
+
+// The standalone /routing page is gone; its two surviving controls are
+// collapsed advanced cards at the bottom of the channel page. They are closed
+// by default, so the panels - and the reads they perform - do not mount until a
+// reader opens one.
+test("the channel page keeps the routing settings and the dry-run inspector", async ({ page }) => {
+  await page.goto("/channels");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+  const settings = page.getByRole("button", { name: /Routing settings/ });
+  await expect(settings).toBeVisible();
+  await expect(settings).toHaveAttribute("aria-expanded", "false");
+  // The settings form is not in the document while its card is closed, which is
+  // what keeps the read off the page load.
+  await expect(page.getByLabel("Responses strategy")).toHaveCount(0);
+
+  await settings.click();
+  await expect(settings).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Responses strategy")).toHaveText(/auto/);
+  await expect(page.getByLabel("Selection policy")).toHaveText("p2c");
+
+  const inspector = page.getByRole("button", { name: /Route inspector/ });
+  await expect(inspector).toHaveAttribute("aria-expanded", "false");
+  await inspector.click();
+  await expect(inspector).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("No dry run yet")).toBeVisible();
+
   await page.getByPlaceholder("Model").fill("gpt-5");
-  await page.getByPlaceholder("Channel / upstream").fill("openai-primary");
-  await page.getByLabel("Routing status").selectOption("error");
-  await page.getByPlaceholder("Min TTFT").fill("100");
-  await page.getByPlaceholder("Max tokens").fill("500");
-  await page.getByRole("button", { name: "Apply" }).click();
-  await expect(page).toHaveURL(/status=error/);
-  await expect(page).toHaveURL(/min_ttft_ms=100/);
-  await page.getByRole("button", { name: "Reset" }).click();
-  await expect(page).not.toHaveURL(/status=error/);
+  // `{ exact: true }` keeps the submit button apart from the disclosure trigger,
+  // whose accessible name contains the word "inspector".
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  // Exact text keeps each assertion on the summary card rather than on the raw
+  // inspector JSON that repeats the same values further down.
+  await expect(page.getByText("Execution", { exact: true })).toBeVisible();
+  await expect(page.getByText("proxy_pass", { exact: true })).toBeVisible();
+  await expect(page.getByText("/v1/responses", { exact: true })).toBeVisible();
+});
+
+// The alias table moved to the page whose subject it is: an alias resolves a
+// model name, so it now sits under the model catalogue, in the same kind of
+// collapsed card.
+test("the model page keeps the alias table", async ({ page }) => {
+  await page.goto("/models");
+  const aliases = page.getByRole("button", { name: /Model aliases/ });
+  await expect(aliases).toBeVisible();
+  await expect(aliases).toHaveAttribute("aria-expanded", "false");
+  await aliases.click();
+  await expect(aliases).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("fast to gpt-5")).toBeVisible();
+  await expect(page.getByPlaceholder("Alias, e.g. abc")).toBeVisible();
+});
+
+test("the alias table says so when there is none", async ({ page }) => {
+  // Registered after the suite-wide mock, so it wins for this read: the panel
+  // has to render the empty state instead of a blank section.
+  await page.route("**/api/model-aliases", (route) => route.fulfill({ json: { items: [] } }));
+  await page.goto("/models");
+  await page.getByRole("button", { name: /Model aliases/ }).click();
+  await expect(page.getByText("No aliases configured")).toBeVisible();
 });
 
 test("events page opens the all-window unread inbox", async ({ page }) => {
@@ -728,7 +801,7 @@ test("switching trace tabs reuses the panel already loaded", async ({ page }) =>
 test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.goto("/traces/trace-routed?tab=request");
   await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/providers/openai-primary");
+  await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
   await expect(page.getByRole("link", { name: "Responses audit" })).toHaveAttribute("href", "/audit?response_id=resp+123%2Fencoded");
   await page.getByRole("button", { name: "Reanalyze" }).click();
@@ -1995,19 +2068,42 @@ function longSystemPrompt() {
   ].join("\n");
 }
 
-function routingSummaryPayload() {
+function routingSettingsPayload() {
+  return { responses_strategy: "auto", selection_policy: "p2c" };
+}
+
+function routeInspectPayload(request) {
   return {
-    eventful_traces: 1,
-    legacy_or_missing_events: 0,
-    parse_errors: 0,
-    selected_route_targets: [{ label: "openai-primary", count: 1 }],
-    selected_channels: [{ label: "openai-primary", count: 1 }],
-    selected_credentials: [],
-    selected_upstreams: [{ label: "openai-primary", count: 1 }],
-    failure_reasons: [],
-    sticky_statuses: [],
-    sticky_breaks: { total: 0 },
+    request,
+    result: {
+      plan: {
+        execution_mode: "proxy_pass",
+        reason: "selected",
+        upstream_endpoint: "/v1/responses",
+        upstream_model: request.model,
+        selected_candidate_id: "openai-primary:default",
+        selected_route_target_id: "openai-primary:default",
+        selected_channel_id: "openai-primary",
+        requested_model: request.model,
+        resolved_model_candidates: [{ model: request.model, channel_id: "openai-primary", source: "channel" }],
+      },
+      candidates: [],
+    },
   };
+}
+
+function modelAliasPayload() {
+  return [
+    {
+      id: "alias-1",
+      alias: "fast",
+      target_model: "gpt-5",
+      channel_id: "openai-primary",
+      enabled: true,
+      source: "manual",
+      description: "",
+    },
+  ];
 }
 
 function traceListPayload() {
@@ -2451,7 +2547,7 @@ function usageSummary(overrides = {}) {
 }
 
 
-test("disabled provider preserves model choices without claiming availability", async ({ page }) => {
+test("disabled channel preserves model choices without claiming availability", async ({ page }) => {
   await page.route("**/api/channels/openai-primary?*", (route) => {
     const payload = channelDetailPayload();
     payload.enabled = false;
@@ -2459,9 +2555,9 @@ test("disabled provider preserves model choices without claiming availability", 
     return route.fulfill({ json: payload });
   });
   await page.goto("/providers/openai-primary");
-  await expect(page.getByText("Provider disabled: all model routes are blocked. Model selections are preserved.")).toBeVisible();
+  await expect(page.getByText("Channel disabled: all model routes are blocked. Model selections are preserved.")).toBeVisible();
   await expect(page.getByLabel("gpt-5 enabled", { exact: true })).toBeChecked();
-  await expect(page.getByText("blocked: provider disabled").first()).toBeVisible();
+  await expect(page.getByText("blocked: channel disabled").first()).toBeVisible();
   await expect(page.getByLabel("historical-model enabled", { exact: true })).toHaveCount(0);
   await expect(page.getByText("History only — add model to configure routing")).toBeVisible();
   await expect(page.locator(".provider-model-card").getByText("new", { exact: true })).toHaveCount(0);
@@ -2485,7 +2581,7 @@ test("model-card connectivity test shows per-protocol results and disables Respo
   await expect(status).toContainText("✓ Chat Completions · 314 ms");
   // The failing one: marker, name, latency, HTTP status and the human reason.
   await expect(status).toContainText("✗ Responses · 88 ms · 404 endpoint not supported");
-  await expect(status).toContainText("Chat works but this provider does not serve /v1/responses for this model.");
+  await expect(status).toContainText("Chat works but this channel does not serve /v1/responses for this model.");
   await expect(status).toContainText("Responses is not served for this model.");
 
   const patchRequest = page.waitForRequest(
@@ -2553,12 +2649,17 @@ test("quick navigation opens from the rail and the keyboard", async ({ page }) =
   await expect(dialog).toBeVisible();
 
   const search = page.getByRole("combobox");
+  // The palette is built from the same declaration the rail draws, so the
+  // removed routing destination must not be offered at all.
   await search.fill("routing");
-  await expect(page.getByRole("option", { name: /Routing/ })).toBeVisible();
+  await expect(page.getByRole("option", { name: /Routing/ })).toHaveCount(0);
+
+  await search.fill("models");
+  await expect(page.getByRole("option", { name: /Models/ })).toBeVisible();
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/routing$/);
-  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
+  await expect(page).toHaveURL(/\/models$/);
+  await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
 
   // The shortcut is the part that works from any route, so it gets its own
   // open/close round trip rather than relying on the rail button.
@@ -2912,10 +3013,10 @@ test("the chart library is a lazy chunk fetched only where a chart is drawn", as
   await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible();
   expect(charts).toEqual([]);
 
-  // The providers page draws two of them, and the placeholder is replaced by the
+  // The channels page draws two of them, and the placeholder is replaced by the
   // real thing once the chunk resolves.
   await page.goto("/providers");
-  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await expect(page.locator(".recharts-surface").first()).toBeVisible();
   expect(charts.length).toBe(1);
 });
@@ -2980,7 +3081,7 @@ test("page tabs are reachable and operable from the keyboard", async ({ page }) 
 // icons sit slightly differently from the text buttons beside them.
 test("the migrated icon buttons keep the icon-button box", async ({ page }) => {
   await page.goto("/providers/openai-primary");
-  const icon = page.getByRole("button", { name: "Edit provider" });
+  const icon = page.getByRole("button", { name: "Edit channel" });
   await expect(icon).toBeVisible();
 
   const box = await icon.evaluate((element) => {
@@ -3016,7 +3117,7 @@ test("the migrated icon buttons keep the icon-button box", async ({ page }) => {
 // pattern an edit could quietly drop.
 test("the window strips are radio groups with a checked option", async ({ page }) => {
   await page.goto("/providers");
-  const strip = page.getByRole("radiogroup", { name: "Provider analytics window" });
+  const strip = page.getByRole("radiogroup", { name: "Channel analytics window" });
   await expect(strip).toBeVisible();
   const today = strip.getByRole("radio", { name: "Today", exact: true });
   await expect(today).toHaveAttribute("aria-checked", "true");
@@ -3074,12 +3175,12 @@ test("dialogs trap focus, close on Escape and restore focus to the trigger", asy
 // written by hand - a `createPortal` into `.nav-modal-backdrop` with no focus
 // trap and no focus restore - so it is the one that a future edit could quietly
 // leave behind when the shared primitive changes.
-test("the provider edit dialog is the shared dialog primitive", async ({ page }) => {
+test("the channel edit dialog is the shared dialog primitive", async ({ page }) => {
   await page.goto("/providers/openai-primary");
-  const trigger = page.getByRole("button", { name: "Edit provider" }).first();
+  const trigger = page.getByRole("button", { name: "Edit channel" }).first();
   await trigger.click();
 
-  const dialog = page.getByRole("dialog", { name: "Edit provider" });
+  const dialog = page.getByRole("dialog", { name: "Edit channel" });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(":focus")).toHaveCount(1);
   // It keeps its own width rather than the default card's 560px. Below 720px the
@@ -3132,7 +3233,7 @@ async function darkSurfaces(page, selectors) {
 // the panels, cards, tables, filters, buttons and tags are all near-white.
 test("no light-mode surface resolves dark on any route", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
-  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/providers", "/routing", "/connect", "/system", "/about"];
+  const ROUTES = ["/overview", "/traces", "/events", "/audit", "/models", "/channels", "/connect", "/system", "/about"];
   // Elements with no intentional dark state. `.ghost-button.active`, `.badge-live`
   // and the accent fills are deliberately inverted or coloured and are excluded.
   const SURFACES = [
@@ -3266,9 +3367,9 @@ test("the tab strip shares a single indicator, under the active tab", async ({ p
 test("reduced motion turns the dialog animation off", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/providers");
-  // The provider form rather than the account panel: the reduced-motion rule is
+  // The channel form rather than the account panel: the reduced-motion rule is
   // about the dialog keyframes, and the account surface is a popover with none.
-  await page.getByRole("button", { name: "New provider" }).click();
+  await page.getByRole("button", { name: "New channel" }).click();
   const content = page.locator(".nav-modal");
   await expect(content).toBeVisible();
   expect(await content.evaluate((e) => getComputedStyle(e).animationName)).toBe("none");
@@ -3318,7 +3419,7 @@ test("the migrated inputs keep the form-control box", async ({ page }) => {
   expect(box.border).toBe(tokens.border);
   // `.filter-input-wide` was a 260px floor and `.filter-input` a 180px one.
   expect(box.minWidth).toBe("260px");
-  await expect(page.getByPlaceholder("Provider").first()).toHaveCSS("min-width", "180px");
+  await expect(page.getByPlaceholder("Channel").first()).toHaveCSS("min-width", "180px");
 });
 
 // A native select can carry an empty-string option and show its label; Radix
@@ -3331,6 +3432,9 @@ test("the migrated selects keep the empty option and its label", async ({ page }
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
 
+  // The tri-state overrides are advanced material now: auto-detection writes
+  // them, so the manual selects live behind a disclosure that starts closed.
+  await page.getByRole("button", { name: /Advanced overrides/ }).click();
   const responses = page.getByRole("combobox", { name: "Responses" });
   await expect(responses).toBeVisible();
   await responses.click();
@@ -3347,14 +3451,18 @@ test("the migrated selects keep the empty option and its label", async ({ page }
  * Every route, and every tab of every route, rendered for real.
  *
  * The routing inspector shipped with a bare `error` identifier in a JSX
- * condition. Opening /routing?tab=inspect threw a ReferenceError on the first
- * render, the error boundary caught it, and the reader got "Unable to render this
- * page" instead of a form. Nothing here noticed: the suite visited /routing,
- * which defaults to the decisions tab, and no test ever asked for a tab.
+ * condition. Opening the inspector threw a ReferenceError on the first render,
+ * the error boundary caught it, and the reader got "Unable to render this page"
+ * instead of a form. Nothing here noticed: the suite visited the page that owned
+ * the inspector, which defaulted to a different tab, and no test ever asked for
+ * the one that crashed. The inspector is a collapsed card on the channel page
+ * now, so the sweep below cannot reach it; the dedicated channel-page test opens
+ * both cards and renders them.
  *
- * So this walks the tabs the app declares and asserts the two things a crashed
- * page fails at - it has no page title, and it complains on the console. It is
- * deliberately cheap: a page that renders is the whole assertion.
+ * So this walks the routes and the tabs the app declares and asserts the two
+ * things a crashed page fails at - it has no page title, and it complains on
+ * the console. It is deliberately cheap: a page that renders is the whole
+ * assertion.
  */
 test("every route and every tab renders without reaching the error boundary", async ({ page }) => {
   const PAGES = [
@@ -3362,9 +3470,8 @@ test("every route and every tab renders without reaching the error boundary", as
     ["/traces", ["requests", "sessions"]],
     ["/events", []],
     ["/audit", ["findings", "lineage", "analysis", "health"]],
-    ["/providers", []],
+    ["/channels", []],
     ["/models", []],
-    ["/routing", ["decisions", "settings", "aliases", "inspect"]],
     ["/connect", ["clients", "tokens"]],
     ["/system", ["runtime", "server", "network", "database", "slow", "tools"]],
     ["/about", []],
@@ -3430,7 +3537,7 @@ test("the card sections keep the panel box", async ({ page }) => {
 // pushed the content down; the range control that used to sit in whichever
 // panel happened to own it now sits at the right of the title.
 test("every page has one heading layer and its range control in the header", async ({ page }) => {
-  const WINDOWED = ["/overview", "/events", "/traces", "/providers", "/models", "/routing"];
+  const WINDOWED = ["/overview", "/events", "/traces", "/channels", "/models"];
   // Data health reports the parse pipeline over every indexed trace, not a
   // window of traffic, so it deliberately has no range control.
   const PLAIN = ["/audit?tab=health", "/system", "/connect"];

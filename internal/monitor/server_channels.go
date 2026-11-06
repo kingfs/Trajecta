@@ -46,6 +46,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			return
 		}
 		item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, channelID))
+		item.Interfaces = channelInterfaceNames(record, models)
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
 		enrichChannelItemAnalytics(st, &item, record, since, bucketSize, bucketCount, true)
@@ -280,7 +281,7 @@ func effectiveChannelService(st *store.Store, channelService *channel.Service) *
 	return channel.NewService(st)
 }
 
-func enrichModelChannelItemFromRecord(item *modelChannelItem, record store.ChannelModelRecord) {
+func enrichModelChannelItemFromRecord(item *modelChannelItem, channelRecord store.ChannelConfigRecord, record store.ChannelModelRecord) {
 	if item == nil {
 		return
 	}
@@ -290,6 +291,7 @@ func enrichModelChannelItemFromRecord(item *modelChannelItem, record store.Chann
 	item.SupportsResponses = capabilityBool(record.SupportsResponses)
 	item.SupportsChatCompletions = capabilityBool(record.SupportsChatCompletions)
 	item.SupportsEmbeddings = capabilityBool(record.SupportsEmbeddings)
+	item.Interfaces = channel.EffectiveModelInterfaces(channelRecord, record)
 	item.ContextWindow = record.ContextWindow
 	item.MaxOutputTokens = record.MaxOutputTokens
 	item.CompactHistoryItemThreshold = record.CompactHistoryItemThreshold
@@ -332,6 +334,7 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelRecor
 				Summary:       usageSummaryViewFromRecord(model.Summary),
 			}
 			if record, ok := byModel[model.Model]; ok {
+				row.Interfaces = channel.EffectiveModelInterfaces(channelRecord, record)
 				state := channel.ModelAvailability(channelRecord, record)
 				row.State = string(state)
 				row.Routable = channel.ModelRoutable(channelRecord, record)
@@ -350,6 +353,38 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelRecor
 	if probeRuns, err := st.ListChannelProbeRuns(channelID, 8); err == nil {
 		item.RecentProbeRuns = channelProbeRunItems(probeRuns)
 	}
+}
+
+// channelInterfaceNames is the union of the effective interfaces of the enabled
+// models on a channel, in a stable order the UI can render as badges.
+func channelInterfaceNames(channelRecord store.ChannelConfigRecord, models []store.ChannelModelRecord) []string {
+	order := []string{"chat_completions", "native_responses", "responses_via_chat", "messages", "generate_content"}
+	present := map[string]bool{}
+	for _, model := range models {
+		if !model.Enabled {
+			continue
+		}
+		interfaces := channel.EffectiveModelInterfaces(channelRecord, model)
+		values := map[string]bool{
+			"chat_completions":   interfaces.ChatCompletions,
+			"native_responses":   interfaces.NativeResponses,
+			"responses_via_chat": interfaces.ResponsesViaChat,
+			"messages":           interfaces.Messages,
+			"generate_content":   interfaces.GenerateContent,
+		}
+		for _, name := range order {
+			if values[name] {
+				present[name] = true
+			}
+		}
+	}
+	var out []string
+	for _, name := range order {
+		if present[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // enabledChannelModelCount is the number of models that actually route: enabled

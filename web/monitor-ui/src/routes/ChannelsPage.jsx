@@ -11,6 +11,7 @@ import { WindowToggle } from "../components/common/Tabs";
 import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
+import { ChannelRoutingPanels } from "../components/monitor/ChannelRoutingPanels";
 import { Switch } from "../components/common/Controls";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { useJSON } from "../hooks/useJSON";
@@ -20,13 +21,14 @@ import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { buildProviderLink, formatCount, formatDateTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
+// The create form asks only for what a channel actually needs. Interface
+// capabilities are detected per model now, so the legacy channel-level
+// capability, mode and discovery fields are not part of the form or the write.
 const DEFAULT_FORM = {
   name: "",
   base_url: "",
   provider_preset: "openai",
   api_type: "chat_completions",
-  mode: "proxy",
-  capabilities: {},
   protocol_family: "openai_compatible",
   routing_profile: "openai_default",
   api_version: "",
@@ -39,7 +41,6 @@ const DEFAULT_FORM = {
   priority: 100,
   weight: 1,
   capacity_hint: 1,
-  model_discovery: "list_models",
 };
 
 export function ProvidersPage() {
@@ -127,6 +128,9 @@ export function ProvidersPage() {
           }}
         />
       ) : null}
+      {/* Routing settings and the routing inspector live on the channel page
+          now; the standalone /routing route only redirects here. */}
+      <ChannelRoutingPanels />
     </div>
   );
 }
@@ -292,7 +296,9 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
+          <label className="provider-form-check">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
         </div>
+        <p className="trace-subline"><strong>{t("channels.autoDetect")}</strong> · {t("channels.autoDetectHint")}</p>
         <div className="provider-form-actions">
           <Button variant="ghost" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</Button>
           <Button variant="primary" type="button" onClick={() => validateSetup.mutate()} disabled={validateSetup.isPending || !form.base_url.trim()}>{validateSetup.isPending ? t("providers.validating") : t("providers.validate")}</Button>
@@ -318,7 +324,6 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
 function ProviderCard({ item, windowValue, onRefresh }) {
   const { t } = useI18n();
   const summary = item.summary || {};
-  const modeTag = providerModeTag(item.mode);
   const [probeOpen, setProbeOpen] = useState(false);
   // Called with the next value only. Bubble suppression lives in the Switch,
   // which is the only place that knows it is nested in a clickable card.
@@ -366,7 +371,6 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           >
             {t("providers.probe")}
           </Button>
-          <InlineTag tone={modeTag.tone}>{modeTag.label(t)}</InlineTag>
           <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
           {item.last_probe_status ? <InlineTag tone={item.last_probe_status === "success" ? "green" : "danger"}>{item.last_probe_status}</InlineTag> : null}
@@ -424,7 +428,7 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
       <DialogContent className="provider-probe-modal" aria-labelledby="provider-probe-title">
         <DialogHeader>
           <div>
-            <p className="eyebrow">{provider.provider_preset || "provider"}</p>
+            <p className="eyebrow">{provider.provider_preset || "channel"}</p>
             <DialogTitle id="provider-probe-title">{t("providers.probeTitle")}</DialogTitle>
           </div>
           <DialogClose asChild>
@@ -462,21 +466,6 @@ function providerSourceLabel(source) {
   }
 }
 
-function providerModeTag(mode = "") {
-  switch (mode) {
-    case "responses_server":
-      return { tone: "accent", label: (t) => t("providers.modeResponsesServer") };
-    case "proxy":
-      return { tone: "green", label: (t) => t("providers.modePureProxy") };
-    case "record_only":
-      return { tone: "gold", label: (t) => t("providers.modeRecordOnly") };
-    case "server":
-      return { tone: "accent", label: (t) => t("providers.modeServer") };
-    default:
-      return { tone: "default", label: () => mode || "mode unknown" };
-  }
-}
-
 function buildProviderTrendItems(items) {
   const times = [];
   const byTime = new Map();
@@ -506,7 +495,6 @@ function Metric({ label, value, detail = "" }) {
 
 export function ProviderAdvancedFields({ form, presetState, onChange, includeHeaders = false }) {
   const { t } = useI18n();
-  const discoveryOptions = presetState.modelDiscoveryOptions.length ? presetState.modelDiscoveryOptions : ["list_models", "disabled"];
   return (
     <>
       <label>{t("providers.apiType")}
@@ -514,14 +502,6 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
           <SelectTrigger aria-label={t("providers.apiType")} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             {API_TYPE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </label>
-      <label>{t("providers.apiMode")}
-        <Select value={form.mode || "proxy"} onValueChange={(next) => onChange("mode", next)}>
-          <SelectTrigger aria-label={t("providers.apiMode")} className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {API_MODE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
           </SelectContent>
         </Select>
       </label>
@@ -546,21 +526,9 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
       {presetState.needsProject ? <label>{t("providers.project")}<Input value={form.project || ""} onChange={(event) => onChange("project", event.target.value)} placeholder="my-gcp-project" /></label> : null}
       {presetState.needsLocation ? <label>{t("providers.location")}<Input value={form.location || ""} onChange={(event) => onChange("location", event.target.value)} placeholder="us-central1" /></label> : null}
       {presetState.needsModelResource ? <label className="provider-form-wide">{t("providers.modelResource")}<Input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
-      <label>{t("providers.modelDiscovery")}
-        <Select value={form.model_discovery || "list_models"} onValueChange={(next) => onChange("model_discovery", next)}>
-          <SelectTrigger aria-label={t("providers.modelDiscovery")} className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {discoveryOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </label>
       <label>{t("providers.priority")}<Input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>{t("providers.weight")}<Input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>{t("providers.capacity")}<Input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
-      <CapabilitySelect form={form} name="responses" label={t("providers.responsesAPI")} onChange={onChange} />
-      <CapabilitySelect form={form} name="chat_completions" label={t("providers.chatCompletions")} onChange={onChange} />
-      <CapabilitySelect form={form} name="tool_calling" label={t("providers.toolCalling")} onChange={onChange} />
-      <CapabilitySelect form={form} name="models" label={t("providers.modelsAPI")} onChange={onChange} />
       {includeHeaders ? <label className="provider-form-wide">{t("providers.headers")}<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
     </>
   );
@@ -632,52 +600,11 @@ const API_TYPE_OPTIONS = [
   { value: "gemini_generate_content", label: "Gemini generateContent" },
 ];
 
-const API_MODE_OPTIONS = [
-  { value: "proxy", label: "Proxy" },
-  { value: "record_only", label: "Record only" },
-  { value: "server", label: "Server" },
-  { value: "responses_server", label: "Responses server" },
-];
-
-function CapabilitySelect({ form, name, label, onChange }) {
-  const { t } = useI18n();
-  const capabilities = form.capabilities || {};
-  const current = capabilities[name];
-  const value = current === true ? "true" : current === false ? "false" : "";
-  const setValue = (nextValue) => {
-    const next = { ...capabilities };
-    if (nextValue === "") {
-      delete next[name];
-    } else {
-      next[name] = nextValue === "true";
-    }
-    onChange("capabilities", next);
-  };
-  return (
-    <label>{label}
-      <Select value={value} onValueChange={setValue}>
-        <SelectTrigger aria-label={label} className="w-full"><SelectValue placeholder={t("providers.autoInherit")} /></SelectTrigger>
-        <SelectContent>
-          {CAPABILITY_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{t(item.labelKey)}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </label>
-  );
-}
-
-const CAPABILITY_OPTIONS = [
-  { value: "", labelKey: "providers.autoInherit" },
-  { value: "true", labelKey: "providers.supported" },
-  { value: "false", labelKey: "providers.unsupported" },
-];
-
 const SETUP_VALIDATION_FIELDS = new Set([
   "name",
   "base_url",
   "provider_preset",
   "api_type",
-  "mode",
-  "capabilities",
   "protocol_family",
   "routing_profile",
   "api_version",
@@ -690,7 +617,6 @@ const SETUP_VALIDATION_FIELDS = new Set([
   "priority",
   "weight",
   "capacity_hint",
-  "model_discovery",
 ]);
 
 export function buildPresetState(presetData, providerPreset, routingProfile) {
@@ -710,7 +636,6 @@ export function buildPresetState(presetData, providerPreset, routingProfile) {
     spec,
     protocolOptions,
     routingOptions,
-    modelDiscoveryOptions: presetData?.defaults?.model_discovery || ["list_models", "disabled"],
     needsAPIVersion: effectiveProfile.startsWith("azure_openai") || spec.protocol_family === "anthropic_messages",
     needsDeployment: effectiveProfile === "azure_openai_deployment",
     needsProject: effectiveProfile === "vertex_project_location",
@@ -752,14 +677,28 @@ function uniqueSorted(values) {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
 
+// The write payload names its fields instead of spreading the form: a payload
+// that spread the form would keep re-sending the retired channel-level fields.
 function normalizeProviderPayload(form) {
-  return {
-    ...form,
+  const payload = {
+    name: form.name,
+    base_url: form.base_url,
+    provider_preset: form.provider_preset,
+    api_type: form.api_type,
+    protocol_family: form.protocol_family,
+    routing_profile: form.routing_profile,
+    api_version: form.api_version,
+    deployment: form.deployment,
+    project: form.project,
+    location: form.location,
+    model_resource: form.model_resource,
+    api_key: form.api_key,
+    enabled: form.enabled,
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
-    capabilities: normalizeCapabilities(form.capabilities),
   };
+  return payload;
 }
 
 function setupValidationSignature(form) {
@@ -837,8 +776,6 @@ function providerConfigFormPatch(config = {}) {
     "base_url",
     "provider_preset",
     "api_type",
-    "mode",
-    "capabilities",
     "protocol_family",
     "routing_profile",
     "api_version",
@@ -850,7 +787,6 @@ function providerConfigFormPatch(config = {}) {
     "priority",
     "weight",
     "capacity_hint",
-    "model_discovery",
   ]) {
     if (config[key] !== undefined && config[key] !== null) {
       patch[key] = config[key];
@@ -861,7 +797,7 @@ function providerConfigFormPatch(config = {}) {
 
 function providerProbePreviewPayload(form) {
   return {
-    provider_id: form.name || form.provider_preset || "new-provider",
+    provider_id: form.name || form.provider_preset || "new-channel",
     base_url: form.base_url,
     api_key: form.api_key,
     api_type: form.api_type,
@@ -869,7 +805,9 @@ function providerProbePreviewPayload(form) {
   };
 }
 
-function providerProbeSuggestionPayload(form = {}, report = {}) {
+function providerProbeSuggestionPayload(_form = {}, report = {}) {
+  // Only the channel-level API surface is a suggestion now: interface support is
+  // detected per model and written to the model rows, not to the channel.
   const payload = {};
   if (report.suggested_api_type) {
     payload.api_type = report.suggested_api_type;
@@ -877,32 +815,6 @@ function providerProbeSuggestionPayload(form = {}, report = {}) {
   if (report.suggested_protocol_family) {
     payload.protocol_family = report.suggested_protocol_family;
   }
-  const capabilities = { ...(form.capabilities || {}) };
-  for (const capability of report.capabilities || []) {
-    switch (capability) {
-      case "responses":
-        if (capabilities.responses === undefined) capabilities.responses = true;
-        break;
-      case "chat_completions":
-        if (capabilities.chat_completions === undefined) capabilities.chat_completions = true;
-        break;
-      case "tool_calling":
-        if (capabilities.tool_calling === undefined) capabilities.tool_calling = true;
-        break;
-      case "models":
-        if (capabilities.models === undefined) capabilities.models = true;
-        break;
-      case "embeddings":
-        if (capabilities.embeddings === undefined) capabilities.embeddings = true;
-        break;
-      case "tokenize":
-        if (capabilities.tokenize === undefined) capabilities.tokenize = true;
-        break;
-      default:
-        break;
-    }
-  }
-  payload.capabilities = normalizeCapabilities(capabilities);
   return payload;
 }
 

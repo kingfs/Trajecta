@@ -7,13 +7,20 @@ import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
-import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
+import { DetailMetaPill, DetectIcon, HomeIcon, InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, patchJSON } from "../lib/api";
+import { useRefresh } from "../hooks/useRefresh";
+import { apiPaths, apiURL, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
+import {
+  buildModelDetectPayload,
+  detectAppliedLabels,
+  interfaceChipsOrUnknown,
+  summarizeDetectResult,
+} from "../lib/interfaces";
 import {
   buildProviderLink,
   formatCount,
@@ -141,6 +148,9 @@ function ModelChannelRow({ item, windowValue, t }) {
         <span>{item.source || "unknown"}</span>
       </div>
       <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? t("overview.enabled") : t("overview.disabled")}</InlineTag>
+      <span className="channel-interface-chips-compact">
+        {interfaceChipsOrUnknown(item.interfaces).map((chip) => t(chip.labelKey)).join(" · ")}
+      </span>
       <span>{t("models.reqShort", { count: formatCount(summary.request_count) })}</span>
       <span>{t("models.errShort", { count: formatCount(summary.failed_request) })}</span>
       <span>{t("models.tokShort", { count: formatCount(summary.total_tokens) })}{summary.missing_usage_request ? ` · ${usageCoverageDetail(summary.missing_usage_request, t)}` : ""}</span>
@@ -149,7 +159,10 @@ function ModelChannelRow({ item, windowValue, t }) {
 }
 
 function ModelConfigCard({ item, model, suggestion, language, t }) {
+  const refresh = useRefresh();
   const [form, setForm] = useState(() => modelConfigFormFromItem(item));
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [detectResult, setDetectResult] = useState(null);
 
   useEffect(() => {
     setForm(modelConfigFormFromItem(item));
@@ -186,6 +199,23 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
     onSuccess: (updated) => setForm(modelConfigFormFromItem({ ...item, ...updated })),
   });
 
+  // Re-detect this model's interfaces on this channel. The response also updates
+  // the row's interfaces, which the detail read refetches.
+  const detect = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerModelDetect, buildModelDetectPayload({ channelID: item.channel_id, model, overwrite: true })),
+    success: (result) => t("channels.detectApplied", { count: formatCount(summarizeDetectResult(result).appliedCount) }),
+    error: "channels.detectFailed",
+    onSuccess: (result) => {
+      setDetectResult(result);
+      refresh();
+    },
+  });
+
+  const detected = detectResult ? summarizeDetectResult(detectResult) : null;
+  const detectedItem = detected?.items[0] || {};
+  const detectedLabels = detectAppliedLabels(detectedItem);
+  const skippedReason = typeof detectedItem.skipped_reason === "string" ? detectedItem.skipped_reason.trim() : "";
+
   return (
     <form className="model-config-card" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
       <div className="model-config-card-head">
@@ -194,10 +224,45 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
           <span>{item.source || t("providers.providerFallback")}</span>
         </div>
         <div className="action-group">
+          <Button
+            variant="default"
+            size="icon"
+            type="button"
+            onClick={() => detect.mutate()}
+            disabled={detect.isPending}
+            title={detect.isPending ? t("channels.autoDetecting") : t("channels.detectReDetect")}
+            aria-label={`${t("channels.detectReDetect")} ${item.channel_id}`}
+          >
+            {detect.isPending ? <span className="provider-model-test-spinner" aria-hidden="true" /> : <DetectIcon />}
+          </Button>
           <Button variant="ghost" type="button" onClick={applySuggestion} disabled={!suggestion}>{t("models.applySpec")}</Button>
           <Button variant="primary" type="submit" disabled={save.isPending}>{save.isPending ? t("common.saving") : t("common.save")}</Button>
         </div>
       </div>
+      <div className="channel-interface-chips">
+        {interfaceChipsOrUnknown(item.interfaces).map((chip) => (
+          <InlineTag key={chip.key} tone={chip.tone}>{t(chip.labelKey)}</InlineTag>
+        ))}
+      </div>
+      {detected ? (
+        <div className="provider-model-detect-result" role="status" aria-live="polite">
+          <div className="provider-model-test-head">
+            <span className="provider-model-test-title">{t("channels.detectResultTitle")}</span>
+            <InlineTag tone={detectedLabels.length ? "green" : "gold"}>
+              {detectedLabels.length
+                ? t("channels.detectApplied", { count: formatCount(detectedLabels.length) })
+                : t("channels.interfaceUnknown")}
+            </InlineTag>
+            <span className="channel-detect-mode">{t("channels.detectOverwrite")}</span>
+          </div>
+          {detectedLabels.length ? (
+            <div className="channel-interface-chips">
+              {detectedLabels.map((labelKey) => <InlineTag key={labelKey} tone="green">{t(labelKey)}</InlineTag>)}
+            </div>
+          ) : null}
+          {skippedReason ? <p className="channel-detect-skipped">{t("channels.detectSkipped", { reason: skippedReason })}</p> : null}
+        </div>
+      ) : null}
       {suggestion ? (
         <div className="model-spec-summary">
           <strong>{suggestion.name || suggestion.id}</strong>
@@ -238,6 +303,14 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
       </div>
       <div className="model-capability-toggles">
         <label><input type="checkbox" checked={form.enabled} onChange={(event) => update("enabled", event.target.checked)} />{t("overview.enabled")}</label>
+      </div>
+      <Button variant="ghost" type="button" className="channel-advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}>
+        {advancedOpen ? t("providers.hideAdvanced") : t("channels.advancedOverrides")}
+      </Button>
+      {advancedOpen ? (
+        <>
+        <p className="trace-subline">{t("channels.advancedOverridesHint")}</p>
+        <div className="model-capability-toggles">
         <label>
           <span>Responses</span>
           <Select value={form.supports_responses} onValueChange={(next) => update("supports_responses", next)}>
@@ -271,7 +344,9 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
             </SelectContent>
           </Select>
         </label>
-      </div>
+        </div>
+        </>
+      ) : null}
     </form>
   );
 }

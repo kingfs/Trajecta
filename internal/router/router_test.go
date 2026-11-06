@@ -2404,3 +2404,273 @@ func TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen(t *testing.T) {
 		t.Fatalf("live window filter_reason = %q, want target_open", liveDecision.FilterReason)
 	}
 }
+
+// stickyAffinityRouter builds two channels that serve the same two models, so a
+// test can distinguish "which route target" from "which model".
+func stickyAffinityRouter(t *testing.T) *Router {
+	t.Helper()
+	target := func(id string, priority int, baseURL string) config.UpstreamTargetConfig {
+		return config.UpstreamTargetConfig{
+			ID:             id,
+			Enabled:        boolPtr(true),
+			Priority:       priority,
+			ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels:   []string{"gpt-5", "gpt-4o"},
+			Upstream:       config.UpstreamConfig{BaseURL: baseURL, ProviderPreset: "openai"},
+		}
+	}
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			target("primary", 100, "https://api.openai.com/v1"),
+			target("fallback", 90, "https://openrouter.ai/api/v1"),
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	return rtr
+}
+
+func stickyModelRequest(t *testing.T, session string, model string) (*http.Request, []byte) {
+	t.Helper()
+	body := []byte(`{"model":"` + model + `","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if session != "" {
+		req.Header.Set("Session_id", session)
+	}
+	return req, body
+}
+
+// TestRouterStickyBindingIsPerSessionAndModel pins the key composition: one
+// session keeps one target per model. A request for a second model must not
+// rewrite the first model's binding, because that would move the conversation
+// away from the upstream holding its prompt cache.
+func TestRouterStickyBindingIsPerSessionAndModel(t *testing.T) {
+	rtr := stickyAffinityRouter(t)
+
+	req, body := stickyModelRequest(t, "session-a", "gpt-5")
+	first, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(gpt-5 first) error = %v", err)
+	}
+	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("first gpt-5 selection = %q status %q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+	if first.Decision.StickyKeyFingerprint == "" {
+		t.Fatal("the decision trace is missing the sticky key fingerprint")
+	}
+
+	// Make the fallback much more attractive: only the sticky binding can keep
+	// the second request on the primary target now.
+	targets := rtr.Targets()
+	targets[0].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 5000, TTFTMs: 1800}, rtr.costs, 3, time.Minute)
+	targets[1].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, 3, time.Minute)
+
+	req, body = stickyModelRequest(t, "session-a", "gpt-5")
+	second, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(gpt-5 second) error = %v", err)
+	}
+	if second.Target.ID != "primary" || second.Decision.StickyStatus != "hit" {
+		t.Fatalf("second gpt-5 selection = %q status %q, want sticky primary hit", second.Target.ID, second.Decision.StickyStatus)
+	}
+
+	// A different model gets its own binding. Establish it on the fallback by
+	// excluding primary, then prove it survives independently.
+	chatModelReq, chatBody := stickyModelRequest(t, "session-a", "gpt-4o")
+	chatBound, err := rtr.SelectWithExclusion(chatModelReq, chatBody, []string{"primary"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion(gpt-4o) error = %v", err)
+	}
+	if chatBound.Target.ID != "fallback" || chatBound.Decision.StickyStatus != "bind" {
+		t.Fatalf("gpt-4o binding = %q status %q, want fallback bind (a new model must not hit the gpt-5 binding)", chatBound.Target.ID, chatBound.Decision.StickyStatus)
+	}
+	if chatBound.Decision.StickyKeyFingerprint == first.Decision.StickyKeyFingerprint {
+		t.Fatal("gpt-5 and gpt-4o share a sticky key fingerprint, so their bindings collide")
+	}
+
+	chatReq, chatBody := stickyModelRequest(t, "session-a", "gpt-4o")
+	chatHit, err := rtr.SelectWithBody(chatReq, chatBody)
+	if err != nil {
+		t.Fatalf("SelectWithBody(gpt-4o second) error = %v", err)
+	}
+	if chatHit.Target.ID != "fallback" || chatHit.Decision.StickyStatus != "hit" {
+		t.Fatalf("second gpt-4o selection = %q status %q, want sticky fallback hit", chatHit.Target.ID, chatHit.Decision.StickyStatus)
+	}
+
+	// The gpt-4o binding must not have moved the gpt-5 conversation.
+	req, body = stickyModelRequest(t, "session-a", "gpt-5")
+	again, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(gpt-5 third) error = %v", err)
+	}
+	if again.Target.ID != "primary" || again.Decision.StickyStatus != "hit" {
+		t.Fatalf("third gpt-5 selection = %q status %q, want the original primary binding to survive", again.Target.ID, again.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickySessionScopesToOneSessionAndOneTarget pins the conversation
+// half: the same model on two channels keeps one session on one route target,
+// while another session is not bound by it and can still use the other target.
+func TestRouterStickySessionScopesToOneSessionAndOneTarget(t *testing.T) {
+	rtr := stickyAffinityRouter(t)
+
+	sessionAReq, sessionABody := stickyModelRequest(t, "session-a", "gpt-5")
+	first, err := rtr.SelectWithBody(sessionAReq, sessionABody)
+	if err != nil {
+		t.Fatalf("SelectWithBody(session-a first) error = %v", err)
+	}
+	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("session-a first = %q status %q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+
+	// The same session keeps the same target across selections.
+	for i := 0; i < 2; i++ {
+		req, body := stickyModelRequest(t, "session-a", "gpt-5")
+		selection, err := rtr.SelectWithBody(req, body)
+		if err != nil {
+			t.Fatalf("SelectWithBody(session-a repeat %d) error = %v", i, err)
+		}
+		if selection.Target.ID != "primary" || selection.Decision.StickyStatus != "hit" {
+			t.Fatalf("session-a repeat %d = %q status %q, want sticky primary hit", i, selection.Target.ID, selection.Decision.StickyStatus)
+		}
+	}
+
+	// A different session has no binding and is free to land elsewhere.
+	sessionBReq, sessionBBody := stickyModelRequest(t, "session-b", "gpt-5")
+	distributed, err := rtr.SelectWithExclusion(sessionBReq, sessionBBody, []string{"primary"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion(session-b) error = %v", err)
+	}
+	if distributed.Target.ID != "fallback" || distributed.Decision.StickyStatus != "bind" {
+		t.Fatalf("session-b first = %q status %q, want its own fallback bind", distributed.Target.ID, distributed.Decision.StickyStatus)
+	}
+
+	// Each session now hits its own binding, proving the two are independent.
+	sessionBReq, sessionBBody = stickyModelRequest(t, "session-b", "gpt-5")
+	hitB, err := rtr.SelectWithBody(sessionBReq, sessionBBody)
+	if err != nil {
+		t.Fatalf("SelectWithBody(session-b repeat) error = %v", err)
+	}
+	if hitB.Target.ID != "fallback" || hitB.Decision.StickyStatus != "hit" {
+		t.Fatalf("session-b repeat = %q status %q, want sticky fallback hit", hitB.Target.ID, hitB.Decision.StickyStatus)
+	}
+
+	sessionAReq, sessionABody = stickyModelRequest(t, "session-a", "gpt-5")
+	hitA, err := rtr.SelectWithBody(sessionAReq, sessionABody)
+	if err != nil {
+		t.Fatalf("SelectWithBody(session-a after session-b) error = %v", err)
+	}
+	if hitA.Target.ID != "primary" || hitA.Decision.StickyStatus != "hit" {
+		t.Fatalf("session-a after session-b = %q status %q, want its primary binding untouched", hitA.Target.ID, hitA.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickyBodyFallbacksCreateAffinity pins that the body-only session
+// sources actually feed the router's binding, not just the extractor.
+func TestRouterStickyBodyFallbacksCreateAffinity(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "prompt_cache_key", body: `{"model":"gpt-5","prompt_cache_key":"cache-key-1"}`},
+		{name: "metadata session id", body: `{"model":"gpt-5","metadata":{"session_id":"meta-session-1"}}`},
+		{name: "conversation_id", body: `{"model":"gpt-5","conversation_id":"conversation-1"}`},
+		{name: "session_id", body: `{"model":"gpt-5","session_id":"session-body-1"}`},
+		{name: "previous_response_id", body: `{"model":"gpt-5","previous_response_id":"resp-1"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rtr := stickyAffinityRouter(t)
+			body := []byte(tt.body)
+			req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			first, err := rtr.SelectWithBody(req, body)
+			if err != nil {
+				t.Fatalf("SelectWithBody(first) error = %v", err)
+			}
+			if first.Decision.StickyStatus != "bind" {
+				t.Fatalf("first sticky status = %q, want bind from the body session source", first.Decision.StickyStatus)
+			}
+			req, err = http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			second, err := rtr.SelectWithBody(req, body)
+			if err != nil {
+				t.Fatalf("SelectWithBody(second) error = %v", err)
+			}
+			if second.Target.ID != first.Target.ID || second.Decision.StickyStatus != "hit" {
+				t.Fatalf("second = %q status %q, want a sticky hit on the first target %q", second.Target.ID, second.Decision.StickyStatus, first.Target.ID)
+			}
+		})
+	}
+}
+
+// TestRouterStickyXSessionHeaderCreatesAffinity pins the header alias the OpenAI
+// SDKs commonly send.
+func TestRouterStickyXSessionHeaderCreatesAffinity(t *testing.T) {
+	rtr := stickyAffinityRouter(t)
+	request := func() *http.Request {
+		body := []byte(`{"model":"gpt-5","input":"hello"}`)
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		req.Header.Set("X-Session-Id", "x-session-1")
+		return req
+	}
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	first, err := rtr.SelectWithBody(request(), body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(first) error = %v", err)
+	}
+	second, err := rtr.SelectWithBody(request(), body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(second) error = %v", err)
+	}
+	if first.Decision.StickyStatus != "bind" || second.Decision.StickyStatus != "hit" || second.Target.ID != first.Target.ID {
+		t.Fatalf("X-Session-Id affinity = first %q/%q second %q/%q, want bind then hit on the same target",
+			first.Target.ID, first.Decision.StickyStatus, second.Target.ID, second.Decision.StickyStatus)
+	}
+}
+
+// TestRouterSelectWithoutSessionStillHasNoBinding pins that a request without any
+// session source is routed normally and records no sticky event.
+func TestRouterSelectWithoutSessionStillHasNoBinding(t *testing.T) {
+	rtr := stickyAffinityRouter(t)
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	request := func() *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		return req
+	}
+	for i := 0; i < 2; i++ {
+		selection, err := rtr.SelectWithBody(request(), body)
+		if err != nil {
+			t.Fatalf("SelectWithBody(%d) error = %v", i, err)
+		}
+		if selection.Decision.StickyStatus != "" || len(selection.Decision.StickyEvents) != 0 {
+			t.Fatalf("select %d sticky status = %q events %+v, want no binding without a session source", i, selection.Decision.StickyStatus, selection.Decision.StickyEvents)
+		}
+	}
+	rtr.sticky.mu.Lock()
+	size := len(rtr.sticky.bindings)
+	rtr.sticky.mu.Unlock()
+	if size != 0 {
+		t.Fatalf("bindings = %d, want 0 without a session source", size)
+	}
+}

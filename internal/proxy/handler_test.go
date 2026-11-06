@@ -475,8 +475,10 @@ func TestRoutingDecisionEventsIncludeCredentialFields(t *testing.T) {
 			Selectable:           true,
 		}},
 		StickyEvents: []router.StickyDecision{{
-			Status:         "hit",
-			Key:            "sticky-secret",
+			Status: "hit",
+			// The router emits a fingerprint of the client session key, never the
+			// key itself.
+			KeyFingerprint: "sha256:0123456789abcdef",
 			TargetID:       "route-channel-a-cred-1",
 			RouteTargetID:  "channel-a:cred-1",
 			ChannelID:      "channel-a",

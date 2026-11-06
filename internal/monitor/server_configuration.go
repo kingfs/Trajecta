@@ -138,42 +138,45 @@ type channelListResponse struct {
 }
 
 type channelItem struct {
-	ID                string                `json:"id"`
-	Name              string                `json:"name"`
-	Description       string                `json:"description,omitempty"`
-	Source            string                `json:"source"`
-	BaseURL           string                `json:"base_url"`
-	ProviderPreset    string                `json:"provider_preset"`
-	APIType           string                `json:"api_type"`
-	Mode              string                `json:"mode"`
-	Capabilities      upstreamCapabilities  `json:"capabilities,omitempty"`
-	ProtocolFamily    string                `json:"protocol_family"`
-	RoutingProfile    string                `json:"routing_profile"`
-	APIVersion        string                `json:"api_version,omitempty"`
-	Deployment        string                `json:"deployment,omitempty"`
-	Project           string                `json:"project,omitempty"`
-	Location          string                `json:"location,omitempty"`
-	ModelResource     string                `json:"model_resource,omitempty"`
-	APIKeyHint        string                `json:"api_key_hint,omitempty"`
-	SecretStorageMode string                `json:"secret_storage_mode"`
-	Headers           map[string]string     `json:"headers,omitempty"`
-	Enabled           bool                  `json:"enabled"`
-	Priority          int                   `json:"priority"`
-	Weight            float64               `json:"weight"`
-	CapacityHint      float64               `json:"capacity_hint"`
-	ModelDiscovery    string                `json:"model_discovery"`
-	ModelCount        int                   `json:"model_count"`
-	EnabledModelCount int                   `json:"enabled_model_count"`
-	CreatedAt         time.Time             `json:"created_at"`
-	UpdatedAt         time.Time             `json:"updated_at"`
-	LastProbeAt       time.Time             `json:"last_probe_at,omitempty"`
-	LastProbeStatus   string                `json:"last_probe_status,omitempty"`
-	LastProbeError    string                `json:"last_probe_error,omitempty"`
-	Summary           usageSummaryView      `json:"summary,omitempty"`
-	Trends            []usageTrendView      `json:"trends,omitempty"`
-	ModelsUsage       []modelChannelItem    `json:"models_usage,omitempty"`
-	RecentFailures    []upstreamFailureItem `json:"recent_failures,omitempty"`
-	RecentProbeRuns   []channelProbeRunItem `json:"recent_probe_runs,omitempty"`
+	ID                string               `json:"id"`
+	Name              string               `json:"name"`
+	Description       string               `json:"description,omitempty"`
+	Source            string               `json:"source"`
+	BaseURL           string               `json:"base_url"`
+	ProviderPreset    string               `json:"provider_preset"`
+	APIType           string               `json:"api_type"`
+	Mode              string               `json:"mode"`
+	Capabilities      upstreamCapabilities `json:"capabilities,omitempty"`
+	ProtocolFamily    string               `json:"protocol_family"`
+	RoutingProfile    string               `json:"routing_profile"`
+	APIVersion        string               `json:"api_version,omitempty"`
+	Deployment        string               `json:"deployment,omitempty"`
+	Project           string               `json:"project,omitempty"`
+	Location          string               `json:"location,omitempty"`
+	ModelResource     string               `json:"model_resource,omitempty"`
+	APIKeyHint        string               `json:"api_key_hint,omitempty"`
+	SecretStorageMode string               `json:"secret_storage_mode"`
+	Headers           map[string]string    `json:"headers,omitempty"`
+	Enabled           bool                 `json:"enabled"`
+	Priority          int                  `json:"priority"`
+	Weight            float64              `json:"weight"`
+	CapacityHint      float64              `json:"capacity_hint"`
+	ModelDiscovery    string               `json:"model_discovery"`
+	ModelCount        int                  `json:"model_count"`
+	EnabledModelCount int                  `json:"enabled_model_count"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
+	LastProbeAt       time.Time            `json:"last_probe_at,omitempty"`
+	LastProbeStatus   string               `json:"last_probe_status,omitempty"`
+	LastProbeError    string               `json:"last_probe_error,omitempty"`
+	Summary           usageSummaryView     `json:"summary,omitempty"`
+	Trends            []usageTrendView     `json:"trends,omitempty"`
+	ModelsUsage       []modelChannelItem   `json:"models_usage,omitempty"`
+	// Interfaces is the union of the effective protocol surfaces of the enabled
+	// models, computed with the same model-override-precedence rules as routing.
+	Interfaces      []string              `json:"interfaces,omitempty"`
+	RecentFailures  []upstreamFailureItem `json:"recent_failures,omitempty"`
+	RecentProbeRuns []channelProbeRunItem `json:"recent_probe_runs,omitempty"`
 }
 
 type channelProbeRunItem struct {
@@ -203,22 +206,25 @@ type channelModelItem struct {
 	Enabled     bool   `json:"enabled"`
 	// State is enabled | disabled | removed | unverified. A removed model is
 	// no longer listed by the provider's latest sync and is not routed.
-	State                       string    `json:"state"`
-	Routable                    bool      `json:"routable"`
-	SupportsResponses           *bool     `json:"supports_responses,omitempty"`
-	SupportsChatCompletions     *bool     `json:"supports_chat_completions,omitempty"`
-	SupportsEmbeddings          *bool     `json:"supports_embeddings,omitempty"`
-	ContextWindow               *int      `json:"context_window,omitempty"`
-	MaxOutputTokens             *int      `json:"max_output_tokens,omitempty"`
-	CompactHistoryItemThreshold *int      `json:"compact_history_item_threshold,omitempty"`
-	UpstreamModel               string    `json:"upstream_model,omitempty"`
-	ProfileSource               string    `json:"profile_source,omitempty"`
-	ProfileAdoptionStatus       string    `json:"profile_adoption_status,omitempty"`
-	InputModalities             []string  `json:"input_modalities,omitempty"`
-	OutputModalities            []string  `json:"output_modalities,omitempty"`
-	FirstSeenAt                 time.Time `json:"first_seen_at"`
-	LastSeenAt                  time.Time `json:"last_seen_at"`
-	LastProbeAt                 time.Time `json:"last_probe_at,omitempty"`
+	State                   string `json:"state"`
+	Routable                bool   `json:"routable"`
+	SupportsResponses       *bool  `json:"supports_responses,omitempty"`
+	SupportsChatCompletions *bool  `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings      *bool  `json:"supports_embeddings,omitempty"`
+	// Interfaces is the computed effective API surface of this model (model override
+	// wins over channel capability/api_type), not just the raw override columns.
+	Interfaces                  channel.ModelInterfaces `json:"interfaces"`
+	ContextWindow               *int                    `json:"context_window,omitempty"`
+	MaxOutputTokens             *int                    `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int                    `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string                  `json:"upstream_model,omitempty"`
+	ProfileSource               string                  `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string                  `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string                `json:"input_modalities,omitempty"`
+	OutputModalities            []string                `json:"output_modalities,omitempty"`
+	FirstSeenAt                 time.Time               `json:"first_seen_at"`
+	LastSeenAt                  time.Time               `json:"last_seen_at"`
+	LastProbeAt                 time.Time               `json:"last_probe_at,omitempty"`
 }
 
 type modelSpecLookupResponse struct {
@@ -438,25 +444,26 @@ type modelDetailResponse struct {
 }
 
 type modelChannelItem struct {
-	ChannelID                   string           `json:"channel_id"`
-	Model                       string           `json:"model"`
-	DisplayName                 string           `json:"display_name,omitempty"`
-	Enabled                     bool             `json:"enabled"`
-	State                       string           `json:"state"`
-	Routable                    bool             `json:"routable"`
-	Source                      string           `json:"source"`
-	SupportsResponses           *bool            `json:"supports_responses,omitempty"`
-	SupportsChatCompletions     *bool            `json:"supports_chat_completions,omitempty"`
-	SupportsEmbeddings          *bool            `json:"supports_embeddings,omitempty"`
-	ContextWindow               *int             `json:"context_window,omitempty"`
-	MaxOutputTokens             *int             `json:"max_output_tokens,omitempty"`
-	CompactHistoryItemThreshold *int             `json:"compact_history_item_threshold,omitempty"`
-	UpstreamModel               string           `json:"upstream_model,omitempty"`
-	ProfileSource               string           `json:"profile_source,omitempty"`
-	ProfileAdoptionStatus       string           `json:"profile_adoption_status,omitempty"`
-	InputModalities             []string         `json:"input_modalities,omitempty"`
-	OutputModalities            []string         `json:"output_modalities,omitempty"`
-	Summary                     usageSummaryView `json:"summary"`
+	ChannelID                   string                  `json:"channel_id"`
+	Model                       string                  `json:"model"`
+	DisplayName                 string                  `json:"display_name,omitempty"`
+	Enabled                     bool                    `json:"enabled"`
+	State                       string                  `json:"state"`
+	Routable                    bool                    `json:"routable"`
+	Source                      string                  `json:"source"`
+	SupportsResponses           *bool                   `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool                   `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool                   `json:"supports_embeddings,omitempty"`
+	Interfaces                  channel.ModelInterfaces `json:"interfaces"`
+	ContextWindow               *int                    `json:"context_window,omitempty"`
+	MaxOutputTokens             *int                    `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int                    `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string                  `json:"upstream_model,omitempty"`
+	ProfileSource               string                  `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string                  `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string                `json:"input_modalities,omitempty"`
+	OutputModalities            []string                `json:"output_modalities,omitempty"`
+	Summary                     usageSummaryView        `json:"summary"`
 }
 
 func modelListAPIHandler(st *store.Store) http.HandlerFunc {
@@ -554,7 +561,8 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				Summary:   usageSummaryViewFromRecord(channelRecord.Summary),
 			}
 			if record, ok := modelRecords[channelRecord.ChannelID]; ok {
-				enrichModelChannelItemFromRecord(&item, record)
+				channelConfig, _ := st.GetChannelConfig(channelRecord.ChannelID)
+				enrichModelChannelItemFromRecord(&item, channelConfig, record)
 			}
 			resp.Channels = append(resp.Channels, item)
 		}
@@ -1603,6 +1611,7 @@ func channelModelItemFromRecord(channelRecord store.ChannelConfigRecord, record 
 		SupportsResponses:           capabilityBool(record.SupportsResponses),
 		SupportsChatCompletions:     capabilityBool(record.SupportsChatCompletions),
 		SupportsEmbeddings:          capabilityBool(record.SupportsEmbeddings),
+		Interfaces:                  channel.EffectiveModelInterfaces(channelRecord, record),
 		ContextWindow:               record.ContextWindow,
 		MaxOutputTokens:             record.MaxOutputTokens,
 		CompactHistoryItemThreshold: record.CompactHistoryItemThreshold,

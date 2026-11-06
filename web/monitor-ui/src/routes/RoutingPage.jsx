@@ -1,183 +1,35 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Card } from "../components/ui/card";
+import React, { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
-import { useSearchParams } from "react-router-dom";
-import { StatCard } from "../components/common/Display";
-import { TabbedPage } from "../components/TabbedPage";
-import { WindowToggle } from "../components/common/Tabs";
 import { EmptyState } from "../components/common/EmptyState";
-import { Pager } from "../components/common/Pager";
 import { InlineTag } from "../components/common/Badges";
-import { BreakdownList } from "../components/monitor/BreakdownList";
-import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { useRefresh } from "../hooks/useRefresh";
-import { apiPaths, apiURL, patchJSON, postJSON, requestJSON } from "../lib/api";
+import { apiPaths, patchJSON, postJSON, requestJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { formatCount, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
+import { formatCount } from "../lib/monitor";
 
-const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
-const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
-
-
-export function RoutingPage() {
-  const { t } = useI18n();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const windowValue = normalizeRoutingWindow(searchParams.get("window"));
-
-  const setWindow = (nextWindow) => {
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
-    setSearchParams(next);
-  };
-
-  // The same tab strip as every other merged page, through TabbedPage: one row
-  // of underline tabs under the page title, bound to `?tab=`. This page used to
-  // hand-roll a segmented pill inside a "工作区" card, so the identical choice
-  // looked like a different control here than on /traces or /system, and it
-  // cost a card whose only content was that one row.
-  return (
-    <TabbedPage
-      title={t("routing.title")}
-      defaultTab="decisions"
-      tabs={[
-        {
-          id: "decisions",
-          label: t("routing.tabDecisions"),
-          // Only the decisions tab is windowed, so the range control is that
-          // tab's own header action rather than a fixture of the page.
-          actions: <WindowToggle value={windowValue} onChange={setWindow} label={t("routing.window")} />,
-          element: <RouteDecisionsPanel windowValue={windowValue} />,
-        },
-        { id: "settings", label: t("routing.tabSettings"), element: <RoutingSettingsPanel /> },
-        { id: "aliases", label: t("routing.tabAliases"), element: <ModelAliasesPanel /> },
-        { id: "inspect", label: t("routing.tabInspector"), element: <RouteInspectorPanel /> },
-      ]}
-    />
-  );
-}
-
-/**
- * The recent-routing view, filters and all.
+/*
+ * The routing controls that outlived the standalone /routing page.
  *
- * It is its own component because TabbedPage only mounts the tab that is
- * showing: the two routing lists used to be fetched on every tab, so opening
- * the settings form still pulled two hundred exchanges and a credential
- * summary that the form never displayed.
+ * The page itself is gone. Its decision list and credential summary duplicated
+ * what a trace's own request tab already shows, so they were dropped and the
+ * trace remains the source for "which upstream served this call". Three
+ * controls had no other home, so they are exported as panels: the channel page
+ * embeds the settings form and the dry-run inspector, and the model page embeds
+ * the alias table.
+ *
+ * Each panel renders content only. The caller owns the card shell - both pages
+ * put the panel inside a collapsed-by-default collapsible card - so embedding
+ * them does not nest one card inside another, and the panel is mounted only
+ * while the card is open, which is also why a reader who never opens it never
+ * pays for its reads. The APIs behind all three are unchanged.
  */
-const ROUTING_PAGE_SIZE = 50;
 
-function RouteDecisionsPanel({ windowValue }) {
-  const { t } = useI18n();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1);
-  const activeFilters = readRoutingFilters(searchParams);
-  const [filters, setFilters] = useState(activeFilters);
-  const params = new URLSearchParams();
-  params.set("page", "1");
-  params.set("page_size", "200");
-  FILTER_KEYS.forEach((key) => {
-    if (activeFilters[key]) {
-      params.set(key, activeFilters[key]);
-    }
-  });
-  const summaryParams = new URLSearchParams();
-  summaryParams.set("window", routingSummaryWindow(windowValue));
-  if (activeFilters.model) {
-    summaryParams.set("model", activeFilters.model);
-  }
-  const traces = useJSON(apiURL(apiPaths.routingExchanges, params), [windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
-  const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [windowValue, activeFilters.model]);
-  const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
-  const totalPages = Math.max(1, Math.ceil(routedItems.length / ROUTING_PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageItems = routedItems.slice((currentPage - 1) * ROUTING_PAGE_SIZE, currentPage * ROUTING_PAGE_SIZE);
-  const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
-  const credentialSummary = useMemo(() => normalizeCredentialRoutingSummary(routingSummary.data), [routingSummary.data]);
-
-  useEffect(() => {
-    setFilters(activeFilters);
-  }, [searchParams]);
-
-  const applyFilters = (event) => {
-    event.preventDefault();
-    const next = new URLSearchParams(searchParams);
-    FILTER_KEYS.forEach((key) => setOrDeleteParam(next, key, filters[key]));
-    next.delete("page");
-    setSearchParams(next);
-  };
-  const resetFilters = () => {
-    setFilters(emptyRoutingFilters());
-    const next = new URLSearchParams(searchParams);
-    FILTER_KEYS.forEach((key) => next.delete(key));
-    next.delete("page");
-    setSearchParams(next);
-  };
-  const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-  const setPage = (nextPage) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextPage <= 1) {
-      next.delete("page");
-    } else {
-      next.set("page", String(nextPage));
-    }
-    setSearchParams(next);
-  };
-
-  return (
-    <>
-      <Card as="section">
-        <div className="panel-head">
-          <div>
-            <h2>{t("routing.recent")}</h2>
-          </div>
-        </div>
-        <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
-          <Input className="min-w-[180px]" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
-          <Input className="min-w-[180px]" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
-          <select className="filter-input" name="routing_status" aria-label={t("routing.statusLabel")} value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
-            <option value="">{t("routing.anyStatus")}</option>
-            <option value="success">{t("routing.statusSuccess")}</option>
-            <option value="error">{t("routing.statusError")}</option>
-          </select>
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_duration" placeholder={t("routing.minDuration")} value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_duration" placeholder={t("routing.maxDuration")} value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_ttft" placeholder={t("routing.minTTFT")} value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_ttft" placeholder={t("routing.maxTTFT")} value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_min_tokens" placeholder={t("routing.minTokens")} value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
-          <Input className="min-w-[120px]" type="number" min="0" name="routing_max_tokens" placeholder={t("routing.maxTokens")} value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
-          <Button variant="ghost" type="submit">{t("common.apply")}</Button>
-          <Button variant="ghost" type="button" onClick={resetFilters}>{t("common.reset")}</Button>
-        </form>
-        <div className="hero-grid hero-grid-compact">
-          <StatCard label={t("routing.routedRequests")} value={formatCount(summary.requests)} />
-          <StatCard label={t("routing.channels")} value={formatCount(summary.channels)} />
-          <StatCard label={t("common.errors")} value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
-          <StatCard label={t("common.tokens")} value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing, t)} />
-        </div>
-      </Card>
-
-      {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
-      {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
-      {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
-      {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
-      {traces.data ? (
-        <>
-          <div className="routing-pager">
-            <Pager page={currentPage} totalPages={totalPages} onChange={setPage} />
-          </div>
-          <RequestList items={pageItems} fromView="routing" focusFailures />
-        </>
-      ) : null}
-    </>
-  );
-}
-
-function RoutingSettingsPanel() {
+export function RoutingSettingsPanel() {
   const { t } = useI18n();
   const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c" });
   // The loading flag and its error belong to the read that fills the form; the
@@ -217,13 +69,7 @@ function RoutingSettingsPanel() {
   });
 
   return (
-    <Card as="section">
-      <div className="panel-head">
-        <div>
-          <h2>{t("routing.settings")}</h2>
-        </div>
-        {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
-      </div>
+    <>
       {loadError ? <EmptyState title={t("routing.settingsUnavailable")} detail={loadError} compact /> : null}
       <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
         <label className="filter-label">
@@ -249,16 +95,16 @@ function RoutingSettingsPanel() {
             </SelectContent>
           </Select>
         </label>
-        <Button variant="ghost" type="submit">{t("common.save")}</Button>
+        <Button variant="ghost" type="submit" disabled={loadingSettings}>{t("common.save")}</Button>
+        {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
       </form>
-    </Card>
+    </>
   );
 }
 
-function ModelAliasesPanel() {
+export function ModelAliasesPanel() {
   const refresh = useRefresh();
   const { t } = useI18n();
-  const [setRefreshTick] = useState(0);
   const aliases = useJSON(apiPaths.modelAliases, []);
   const [form, setForm] = useState({ alias: "", target_model: "", channel_id: "" });
   const [validation, setValidation] = useState(emptyAliasValidationState());
@@ -395,11 +241,8 @@ function ModelAliasesPanel() {
   const editDisabled = isAliasSaveDisabled(editForm || {}, editValidation);
 
   return (
-    <Card as="section">
-      <div className="panel-head">
-        <div>
-          <h2>{t("routing.modelAliases")}</h2>
-        </div>
+    <>
+      <div className="trace-tag-group">
         <InlineTag>{t("routing.aliasCount", { count: formatCount(items.length) })}</InlineTag>
       </div>
       {aliases.error ? <EmptyState title={t("routing.aliasesUnavailable")} detail={aliases.error} compact /> : null}
@@ -421,7 +264,7 @@ function ModelAliasesPanel() {
                   <Input className="min-w-[180px]" placeholder={t("routing.targetModel")} value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
                   <Input className="min-w-[180px]" placeholder={t("routing.optionalChannel")} value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
                   <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> {t("routing.enabled")}</label>
-                  <AliasValidationMessages state={editValidation} compact />
+                  <AliasValidationMessages state={editValidation} />
                   <div className="trace-tag-group">
                     <Button variant="ghost" type="submit" disabled={editDisabled}>{t("common.save")}</Button>
                     <Button variant="ghost" type="button" onClick={cancelEdit}>{t("providers.cancel")}</Button>
@@ -443,11 +286,11 @@ function ModelAliasesPanel() {
           ))}
         </div>
       ) : !aliases.error ? <EmptyState title={t("routing.noAliases")} detail={t("routing.noAliasesDetail")} compact /> : null}
-    </Card>
+    </>
   );
 }
 
-function RouteInspectorPanel() {
+export function RouteInspectorPanel() {
   const { t } = useI18n();
   const [form, setForm] = useState({ endpoint: "responses", model: "", stream: false, tools: false });
   const [result, setResult] = useState(null);
@@ -464,12 +307,7 @@ function RouteInspectorPanel() {
   };
 
   return (
-    <Card as="section">
-      <div className="panel-head">
-        <div>
-          <h2>{t("routing.routeInspector")}</h2>
-        </div>
-      </div>
+    <>
       <form className="filter-bar routing-filter-bar" onSubmit={runInspect}>
         <Select value={form.endpoint} onValueChange={(next) => update("endpoint", next)}>
           <SelectTrigger aria-label={t("routing.endpoint")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
@@ -482,15 +320,15 @@ function RouteInspectorPanel() {
         <Input className="min-w-[180px]" placeholder={t("routing.model")} value={form.model} onChange={(event) => update("model", event.target.value)} />
         <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> {t("routing.stream")}</label>
         <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> {t("routing.tools")}</label>
-        <Button variant="ghost" type="submit">{t("routing.inspect")}</Button>
+        <Button variant="ghost" type="submit" disabled={inspect.isPending}>{t("routing.inspect")}</Button>
       </form>
       {result ? <RouteInspectorResult result={result} /> : null}
       {/* The failure is reported by the toast the write already raises, so the
           hint stands only while there is nothing else to read. `error` here used
           to be an undefined identifier, which took the whole route down through
-          the error boundary the moment the tab was opened. */}
+          the error boundary the moment the panel was opened. */}
       {!result && !inspect.isError ? <EmptyState title={t("routing.noDryRun")} detail={t("routing.noDryRunDetail")} compact /> : null}
-    </Card>
+    </>
   );
 }
 
@@ -599,7 +437,7 @@ function DetailMeta({ label, value, mono = false }) {
   );
 }
 
-function AliasValidationMessages({ state, compact = false }) {
+function AliasValidationMessages({ state }) {
   const { t } = useI18n();
   const data = state?.data;
   const errors = Array.isArray(data?.errors) ? data.errors : [];
@@ -608,7 +446,7 @@ function AliasValidationMessages({ state, compact = false }) {
     return null;
   }
   return (
-    <div className={compact ? "routing-summary-stack" : "routing-summary-stack"}>
+    <div className="routing-summary-stack">
       {state.loading ? <p className="trace-subline">{t("routing.validatingAlias")}</p> : null}
       {state.error ? <p className="event-message">{t("routing.validationUnavailable", { error: state.error })}</p> : null}
       {errors.map((error) => <p className="event-message" key={error}>{error}</p>)}
@@ -653,174 +491,4 @@ function isAliasSaveDisabled(form = {}, validation = emptyAliasValidationState()
 
 function formatInspectValue(value) {
   return value === undefined || value === null || value === "" ? "-" : String(value);
-}
-
-function normalizeRoutingWindow(value) {
-  return WINDOW_OPTIONS.includes(value) ? value : "today";
-}
-
-function emptyRoutingFilters() {
-  return FILTER_KEYS.reduce((state, key) => ({ ...state, [key]: "" }), {});
-}
-
-function readRoutingFilters(searchParams) {
-  const filters = emptyRoutingFilters();
-  FILTER_KEYS.forEach((key) => {
-    filters[key] = searchParams.get(key) || "";
-  });
-  return filters;
-}
-
-function filterByWindow(items, windowValue) {
-  if (windowValue === "all") {
-    return items;
-  }
-  const now = new Date();
-  const since = windowValue === "today"
-    ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    : Date.now() - (windowValue === "7d" ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000);
-  return items.filter((item) => new Date(item.recorded_at).getTime() >= since);
-}
-
-function summarizeRouting(items) {
-  const channels = new Set();
-  return items.reduce((state, item) => {
-    state.requests += 1;
-    state.tokens += Number(item.total_tokens || 0);
-    if (hasMissingUsage(item)) {
-      state.missing += 1;
-    }
-    if (item.status_code < 200 || item.status_code >= 300) {
-      state.errors += 1;
-    }
-    if (item.selected_upstream_id) {
-      channels.add(item.selected_upstream_id);
-    }
-    state.channels = channels.size;
-    return state;
-  }, { requests: 0, errors: 0, tokens: 0, missing: 0, channels: 0 });
-}
-
-function hasMissingUsage(item) {
-  return item.status_code >= 200 && item.status_code < 300 && Number(item.total_tokens || 0) === 0 && Number(item.prompt_tokens || 0) === 0 && Number(item.completion_tokens || 0) === 0;
-}
-
-function usageCoverageDetail(missing, t = (key, values) => `${values?.count || 0} missing usage`) {
-  const count = Number(missing || 0);
-  return count > 0 ? t("providers.missingUsage", { count: formatCount(count) }) : "";
-}
-
-function routingSummaryWindow(windowValue) {
-  return windowValue === "30d" ? "all" : windowValue;
-}
-
-function normalizeCredentialRoutingSummary(payload) {
-  const routeTargets = arrayItems(payload?.selected_route_targets);
-  const channels = arrayItems(payload?.selected_channels);
-  const credentials = arrayItems(payload?.selected_credentials);
-  const stickyBreaks = payload?.sticky_breaks || {};
-  return {
-    eventfulTraces: Number(payload?.eventful_traces || 0),
-    missingEvents: Number(payload?.legacy_or_missing_events || 0),
-    routeTargets,
-    channels,
-    credentials,
-    selectedUpstreams: arrayItems(payload?.selected_upstreams),
-    failureReasons: arrayItems(payload?.failure_reasons),
-    stickyStatuses: arrayItems(payload?.sticky_statuses),
-    stickyBreakTotal: Number(stickyBreaks.total || 0),
-    stickyBreakRouteTargets: mergeCountItems(stickyBreaks.previous_route_targets, stickyBreaks.next_route_targets),
-    stickyBreakChannels: mergeCountItems(stickyBreaks.previous_channels, stickyBreaks.next_channels),
-    stickyBreakCredentials: mergeCountItems(stickyBreaks.previous_credentials, stickyBreaks.next_credentials),
-    stickyBreakPreviousRouteTargets: arrayItems(stickyBreaks.previous_route_targets),
-    stickyBreakPreviousUpstreams: arrayItems(stickyBreaks.previous_upstreams),
-    stickyBreakNextUpstreams: arrayItems(stickyBreaks.next_upstreams),
-  };
-}
-
-function arrayItems(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function mergeCountItems(...groups) {
-  const counts = new Map();
-  groups.flatMap(arrayItems).forEach((item) => {
-    const label = item?.label || "";
-    if (!label) {
-      return;
-    }
-    counts.set(label, (counts.get(label) || 0) + Number(item.count || 0));
-  });
-  return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.label.localeCompare(b.label)));
-}
-
-function CredentialRoutingSummaryPanel({ summary, windowValue }) {
-  const { t } = useI18n();
-  const hasCredentialData = summary.routeTargets.length || summary.channels.length || summary.credentials.length || summary.stickyBreakTotal > 0;
-  const stickyBreakContext = firstNonEmptyItem(summary.stickyBreakRouteTargets, summary.stickyBreakPreviousRouteTargets, summary.stickyBreakPreviousUpstreams);
-  return (
-    <Card as="section">
-      <div className="panel-head">
-        <div>
-          <h2>{t("routing.credentialSummary")}</h2>
-        </div>
-        <div className="trace-tag-group">
-          <InlineTag>{windowValue}</InlineTag>
-          <InlineTag tone={summary.eventfulTraces ? "green" : "default"}>{t("routing.eventful", { count: formatCount(summary.eventfulTraces) })}</InlineTag>
-          {summary.missingEvents ? <InlineTag tone="gold">{t("routing.legacyMissing", { count: formatCount(summary.missingEvents) })}</InlineTag> : null}
-        </div>
-      </div>
-      <div className="hero-grid hero-grid-compact">
-        <StatCard label={t("routing.routeTargets")} value={formatCount(summary.routeTargets.length)} detail={topCountDetail(summary.routeTargets)} mono />
-        <StatCard label={t("routing.channels")} value={formatCount(summary.channels.length || summary.selectedUpstreams.length)} detail={topCountDetail(summary.channels.length ? summary.channels : summary.selectedUpstreams)} mono />
-        <StatCard label={t("routing.credentials")} value={formatCount(summary.credentials.length)} detail={topCountDetail(summary.credentials)} mono />
-        <StatCard label={t("routing.stickyBreaks")} value={formatCount(summary.stickyBreakTotal)} detail={stickyBreakContext ? stickyBreakContext.label : ""} accent={summary.stickyBreakTotal ? "accent-red" : ""} mono />
-      </div>
-      {hasCredentialData ? (
-        <div className="session-breakdown-grid">
-          <BreakdownList title={t("routing.routeTargets")} items={summary.routeTargets} formatter={(item) => item.label} />
-          <BreakdownList title={t("routing.channels")} items={summary.channels.length ? summary.channels : summary.selectedUpstreams} formatter={(item) => item.label} />
-          <BreakdownList title={t("routing.credentials")} items={summary.credentials} formatter={(item) => item.label} />
-          <BreakdownList title={t("routing.stickyCredentialBreaks")} items={stickyBreakItems(summary)} formatter={(item) => item.label} />
-        </div>
-      ) : (
-        <EmptyState title={t("routing.noCredentialEvents")} detail={t("routing.noCredentialEventsDetail")} compact />
-      )}
-    </Card>
-  );
-}
-
-function topCountDetail(items = []) {
-  const first = items[0];
-  if (!first?.label) {
-    return "";
-  }
-  return `${first.label} · ${formatCount(first.count || 0)}`;
-}
-
-function firstNonEmptyItem(...groups) {
-  for (const group of groups) {
-    if (group?.[0]?.label) {
-      return group[0];
-    }
-  }
-  return null;
-}
-
-function stickyBreakItems(summary) {
-  if (summary.stickyBreakRouteTargets.length) {
-    return summary.stickyBreakRouteTargets;
-  }
-  if (summary.stickyBreakCredentials.length) {
-    return summary.stickyBreakCredentials;
-  }
-  if (summary.stickyBreakChannels.length) {
-    return summary.stickyBreakChannels;
-  }
-  if (summary.stickyBreakPreviousRouteTargets.length) {
-    return summary.stickyBreakPreviousRouteTargets;
-  }
-  return summary.stickyBreakPreviousUpstreams.length ? summary.stickyBreakPreviousUpstreams : summary.stickyBreakNextUpstreams;
 }

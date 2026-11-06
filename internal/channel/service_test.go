@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/modelprobe"
@@ -1316,5 +1317,305 @@ func TestModelProbeTargetMapsUnresolvableChannelConfig(t *testing.T) {
 
 	if _, err := NewService(st).ModelProbeTarget("broken", "m"); !errors.Is(err, ErrChannelConfigInvalid) {
 		t.Fatalf("ModelProbeTarget() error = %v, want ErrChannelConfigInvalid", err)
+	}
+}
+
+func newInterfaceTestStore(t *testing.T, baseURL, apiType, protocolFamily, routingProfile, modelResource string, capabilities config.UpstreamCapabilitiesConfig, models []store.ChannelModelRecord) *store.Store {
+	t.Helper()
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	capabilitiesJSON, err := json.Marshal(capabilities)
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe",
+		Name:             "Probe Channel",
+		BaseURL:          baseURL,
+		APIType:          apiType,
+		ProtocolFamily:   protocolFamily,
+		RoutingProfile:   routingProfile,
+		ModelResource:    modelResource,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		APIKeyCiphertext: []byte("sk-detect"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("probe", models); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	return st
+}
+
+func TestDetectModelInterfacesOpenAI(t *testing.T) {
+	var authHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			authHeader = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[]}`))
+		case "/v1/responses":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("404 page not found\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	st := newInterfaceTestStore(t, server.URL+"/v1", upstream.APITypeChatCompletions, upstream.ProtocolFamilyOpenAICompatible, "", "", config.UpstreamCapabilitiesConfig{}, []store.ChannelModelRecord{
+		{Model: "deepseek-v4.1-flash", UpstreamModel: "deepseek-ai/deepseek-v4.1-flash", Source: "manual", Enabled: true},
+	})
+	detection, err := NewService(st).DetectModelInterfaces(context.Background(), "probe", "deepseek-v4.1-flash", 2*time.Second)
+	if err != nil {
+		t.Fatalf("DetectModelInterfaces() error = %v", err)
+	}
+	if authHeader != "Bearer sk-detect" {
+		t.Fatalf("Authorization = %q, want the decrypted channel key", authHeader)
+	}
+	if detection.WireModel != "deepseek-ai/deepseek-v4.1-flash" || detection.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
+		t.Fatalf("detection identity = %+v", detection)
+	}
+	if len(detection.Protocols) != 2 {
+		t.Fatalf("protocols = %+v", detection.Protocols)
+	}
+	byProtocol := map[string]ModelInterfaceProtocolReport{}
+	for _, protocol := range detection.Protocols {
+		byProtocol[protocol.Protocol] = protocol
+	}
+	if byProtocol["chat_completions"].Status != modelprobe.StatusOK {
+		t.Fatalf("chat report = %+v", byProtocol["chat_completions"])
+	}
+	if byProtocol["chat_completions"].LatencyMS < 0 || byProtocol["chat_completions"].HTTPStatus != http.StatusOK {
+		t.Fatalf("chat report = %+v", byProtocol["chat_completions"])
+	}
+	if byProtocol["responses"].Status != modelprobe.StatusEndpointNotSupported {
+		t.Fatalf("responses report = %+v", byProtocol["responses"])
+	}
+	if detection.SupportsChatCompletions == nil || !*detection.SupportsChatCompletions {
+		t.Fatalf("SupportsChatCompletions = %v, want true", detection.SupportsChatCompletions)
+	}
+	if detection.SupportsResponses == nil || *detection.SupportsResponses {
+		t.Fatalf("SupportsResponses = %v, want false", detection.SupportsResponses)
+	}
+}
+
+func TestDetectModelInterfacesOtherFamilies(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		family         string
+		apiType        string
+		routingProfile string
+		modelResource  string
+		wireModel      string
+		protocol       string
+		wantPathPrefix string
+		responseBody   string
+	}{
+		{
+			name:           "anthropic messages",
+			family:         upstream.ProtocolFamilyAnthropicMessages,
+			apiType:        upstream.APITypeMessages,
+			wireModel:      "claude-test",
+			protocol:       "messages",
+			wantPathPrefix: "/v1/messages",
+			responseBody:   `{"id":"msg-1","content":[{"type":"text","text":"pong"}]}`,
+		},
+		{
+			name:           "google generate content",
+			family:         upstream.ProtocolFamilyGoogleGenAI,
+			apiType:        upstream.APITypeGemini,
+			wireModel:      "gemini-2.5-flash",
+			protocol:       "generate_content",
+			wantPathPrefix: "/v1beta/models/gemini-2.5-flash:generateContent",
+			responseBody:   `{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}`,
+		},
+		{
+			name:           "vertex generate content",
+			family:         upstream.ProtocolFamilyVertexNative,
+			apiType:        upstream.APITypeGemini,
+			routingProfile: upstream.RoutingProfileVertexExpress,
+			modelResource:  "publishers/google/models",
+			wireModel:      "gemini-2.5-pro",
+			protocol:       "generate_content",
+			wantPathPrefix: "/v1/publishers/models/gemini-2.5-pro:generateContent",
+			responseBody:   `{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.responseBody))
+			}))
+			defer server.Close()
+			st := newInterfaceTestStore(t, server.URL, tc.apiType, tc.family, tc.routingProfile, tc.modelResource, config.UpstreamCapabilitiesConfig{}, []store.ChannelModelRecord{
+				{Model: "client-model", UpstreamModel: tc.wireModel, Source: "manual", Enabled: true},
+			})
+			detection, err := NewService(st).DetectModelInterfaces(context.Background(), "probe", "client-model", 2*time.Second)
+			if err != nil {
+				t.Fatalf("DetectModelInterfaces() error = %v", err)
+			}
+			if gotPath != tc.wantPathPrefix {
+				t.Fatalf("path = %q, want %q", gotPath, tc.wantPathPrefix)
+			}
+			if len(detection.Protocols) != 1 || detection.Protocols[0].Protocol != tc.protocol {
+				t.Fatalf("protocols = %+v, want only %s", detection.Protocols, tc.protocol)
+			}
+			if detection.Protocols[0].Status != modelprobe.StatusOK {
+				t.Fatalf("protocol report = %+v", detection.Protocols[0])
+			}
+			if detection.SupportsChatCompletions != nil || detection.SupportsResponses != nil {
+				t.Fatalf("non-openai detection decided capability columns: %+v", detection)
+			}
+		})
+	}
+}
+
+func TestDetectModelInterfacesInconclusive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+	}))
+	defer server.Close()
+	st := newInterfaceTestStore(t, server.URL+"/v1", upstream.APITypeChatCompletions, upstream.ProtocolFamilyOpenAICompatible, "", "", config.UpstreamCapabilitiesConfig{}, []store.ChannelModelRecord{
+		{Model: "m", Source: "manual", Enabled: true},
+	})
+	detection, err := NewService(st).DetectModelInterfaces(context.Background(), "probe", "m", 2*time.Second)
+	if err != nil {
+		t.Fatalf("DetectModelInterfaces() error = %v", err)
+	}
+	if detection.SupportsChatCompletions != nil || detection.SupportsResponses != nil {
+		t.Fatalf("auth failure decided capability columns: %+v", detection)
+	}
+	for _, protocol := range detection.Protocols {
+		if protocol.Status != modelprobe.StatusAuthFailed {
+			t.Fatalf("protocol report = %+v, want auth_failed", protocol)
+		}
+	}
+}
+
+func TestDetectModelInterfacesPerProtocolTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer server.Close()
+	st := newInterfaceTestStore(t, server.URL+"/v1", upstream.APITypeChatCompletions, upstream.ProtocolFamilyOpenAICompatible, "", "", config.UpstreamCapabilitiesConfig{}, []store.ChannelModelRecord{
+		{Model: "m", Source: "manual", Enabled: true},
+	})
+	detection, err := NewService(st).DetectModelInterfaces(context.Background(), "probe", "m", 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("DetectModelInterfaces() error = %v", err)
+	}
+	if detection.SupportsChatCompletions != nil || detection.SupportsResponses != nil {
+		t.Fatalf("timeout decided capability columns: %+v", detection)
+	}
+	for _, protocol := range detection.Protocols {
+		if protocol.Status != modelprobe.StatusTimeout {
+			t.Fatalf("protocol report = %+v, want timeout", protocol)
+		}
+	}
+}
+
+func TestEffectiveModelInterfaces(t *testing.T) {
+	trueInt := 1
+	falseInt := 0
+	for _, tc := range []struct {
+		name    string
+		channel store.ChannelConfigRecord
+		model   store.ChannelModelRecord
+		want    ModelInterfaces
+	}{
+		{
+			name: "incident shape: channel capabilities only, chat capable",
+			channel: store.ChannelConfigRecord{
+				BaseURL:          "https://integrate.api.nvidia.com/v1",
+				APIType:          upstream.APITypeChatCompletions,
+				ProtocolFamily:   upstream.ProtocolFamilyOpenAICompatible,
+				CapabilitiesJSON: `{"responses":true,"chat_completions":true}`,
+			},
+			model: store.ChannelModelRecord{Model: "deepseek-v4.1-flash", Enabled: true},
+			want:  ModelInterfaces{ChatCompletions: true, NativeResponses: false, ResponsesViaChat: true},
+		},
+		{
+			name: "model opts into native responses",
+			channel: store.ChannelConfigRecord{
+				BaseURL:          "https://integrate.api.nvidia.com/v1",
+				APIType:          upstream.APITypeChatCompletions,
+				ProtocolFamily:   upstream.ProtocolFamilyOpenAICompatible,
+				CapabilitiesJSON: `{"responses":true,"chat_completions":true}`,
+			},
+			model: store.ChannelModelRecord{Model: "deepseek-v4.1-flash", Enabled: true, SupportsResponses: &trueInt},
+			want:  ModelInterfaces{ChatCompletions: true, NativeResponses: true, ResponsesViaChat: false},
+		},
+		{
+			name: "model opts out of chat",
+			channel: store.ChannelConfigRecord{
+				BaseURL:        "https://api.openai.com/v1",
+				APIType:        upstream.APITypeChatCompletions,
+				ProtocolFamily: upstream.ProtocolFamilyOpenAICompatible,
+			},
+			model: store.ChannelModelRecord{Model: "gpt-x", Enabled: true, SupportsChatCompletions: &falseInt},
+			want:  ModelInterfaces{},
+		},
+		{
+			name: "responses typed channel is native",
+			channel: store.ChannelConfigRecord{
+				BaseURL:        "https://api.openai.com/v1",
+				APIType:        upstream.APITypeResponses,
+				ProtocolFamily: upstream.ProtocolFamilyOpenAICompatible,
+			},
+			model: store.ChannelModelRecord{Model: "gpt-x", Enabled: true},
+			want:  ModelInterfaces{NativeResponses: true},
+		},
+		{
+			name: "anthropic messages",
+			channel: store.ChannelConfigRecord{
+				BaseURL:        "https://api.anthropic.com",
+				APIType:        upstream.APITypeMessages,
+				ProtocolFamily: upstream.ProtocolFamilyAnthropicMessages,
+			},
+			model: store.ChannelModelRecord{Model: "claude-x", Enabled: true},
+			want:  ModelInterfaces{Messages: true},
+		},
+		{
+			name: "google generate content",
+			channel: store.ChannelConfigRecord{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				APIType:        upstream.APITypeGemini,
+				ProtocolFamily: upstream.ProtocolFamilyGoogleGenAI,
+			},
+			model: store.ChannelModelRecord{Model: "gemini-x", Enabled: true},
+			want:  ModelInterfaces{GenerateContent: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.model.Enabled = true
+			got := EffectiveModelInterfaces(tc.channel, tc.model)
+			if got != tc.want {
+				t.Fatalf("EffectiveModelInterfaces() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveModelInterfacesUnresolvableChannelDegradesToFamily(t *testing.T) {
+	got := EffectiveModelInterfaces(store.ChannelConfigRecord{
+		BaseURL:        "https://example.invalid",
+		ProtocolFamily: "not-a-family",
+	}, store.ChannelModelRecord{Model: "m", Enabled: true})
+	if got != (ModelInterfaces{}) {
+		t.Fatalf("EffectiveModelInterfaces() = %+v, want a zero value", got)
 	}
 }

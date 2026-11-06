@@ -3,7 +3,7 @@ import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Link, useSearchParams } from "react-router-dom";
-import { StatCard } from "../components/common/Display";
+import { CollapsibleCard, StatCard } from "../components/common/Display";
 import { PageHeader } from "../components/common/PageHeader";
 import { WindowToggle } from "../components/common/Tabs";
 import { InlineTag } from "../components/common/Badges";
@@ -12,6 +12,7 @@ import { Pager } from "../components/common/Pager";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { ModelAliasesPanel } from "./RoutingPage";
 import {
   buildModelLink,
   formatCount,
@@ -124,6 +125,14 @@ export function ModelsPage() {
           {pageItems.length ? pageItems.map((item) => <ModelCard key={item.model} item={item} windowValue={windowValue} />) : <EmptyState title={t("models.noModels")} detail={t("models.noModelsDetail")} />}
         </section>
       ) : null}
+
+      {/* The alias table came here from the standalone /routing page: an alias is
+          a model-resolution fact, so the model page is where a reader looks for
+          it. It is collapsed because most visits are about traffic, and the
+          panel only mounts (and reads /api/model-aliases) when it is opened. */}
+      <CollapsibleCard title={t("routing.modelAliases")} subtitle={t("routing.modelResolution")} defaultOpen={false}>
+        <ModelAliasesPanel />
+      </CollapsibleCard>
     </div>
   );
 }

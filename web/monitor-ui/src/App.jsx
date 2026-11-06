@@ -15,7 +15,6 @@ import { ModelDetailPage } from "./routes/ModelDetailPage";
 import { ModelsPage } from "./routes/ModelsPage";
 import { OverviewPage } from "./routes/OverviewPage";
 import { QualityPage } from "./routes/QualityPage";
-import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
 import { SystemPage } from "./routes/SystemPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
@@ -130,11 +129,12 @@ function App() {
           <Route path="/events" element={<EventsPage />} />
           <Route path="/audit" element={<QualityPage />} />
 
-          <Route path="/providers" element={<ProvidersPage />} />
-          <Route path="/providers/:providerID" element={<ProviderDetailPage />} />
+          {/* /channels is canonical. The page component is still named after the
+              stored record (a channel is the provider) and so is its module. */}
+          <Route path="/channels" element={<ProvidersPage />} />
+          <Route path="/channels/:channelID" element={<ProviderDetailPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/models/:model" element={<ModelDetailPage />} />
-          <Route path="/routing" element={<RoutingPage />} />
           <Route path="/connect" element={<AccessPage />} />
 
           <Route path="/system" element={<SystemPage />} />
@@ -148,8 +148,13 @@ function App() {
           <Route path="/sessions" element={<LegacyRedirect to="/traces" tab="sessions" />} />
           <Route path="/analysis" element={<LegacyRedirect to="/audit" tab="analysis" />} />
           <Route path="/tokens" element={<LegacyRedirect to="/connect" tab="tokens" />} />
-          <Route path="/channels" element={<LegacyRedirect to="/providers" />} />
-          <Route path="/channels/:channelID" element={<LegacyRedirect to="/providers/:channelID" />} />
+          {/* The channel page used to be /providers, and the routing settings
+              and inspector it now owns were a standalone /routing page. Both
+              redirect with their query string, so an old bookmark that names a
+              window (or an old tab) still lands somewhere sensible. */}
+          <Route path="/providers" element={<LegacyRedirect to="/channels" />} />
+          <Route path="/providers/:providerID" element={<LegacyRedirect to="/channels/:providerID" />} />
+          <Route path="/routing" element={<LegacyRedirect to="/channels" />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
         </MonitorErrorBoundary>

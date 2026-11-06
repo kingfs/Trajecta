@@ -10,9 +10,12 @@
  * comes from: 监控 answers "what is happening", 配置 answers "what is it pointed
  * at", 系统 answers "is the machine healthy". Pages that used to be separate
  * destinations now live behind the tab strip of one of these entries, which is
- * why the list is ten items instead of twelve. The tenth is 关于: it is drawn in
- * the 系统 group because that is where a reader looks for "which build is this",
- * but unlike 系统 itself it carries nothing an admin has to guard.
+ * why the list is nine items. 路由 was the last standalone page to fold in: its
+ * settings and dry-run inspector are now the channel page's advanced cards, and
+ * the alias table moved to 模型, so the rail has no routing entry left to draw.
+ * The ninth item is 关于: it is drawn in the 系统 group because that is where a
+ * reader looks for "which build is this", but unlike 系统 itself it carries
+ * nothing an admin has to guard.
  */
 export const NAV_GROUPS = [
   {
@@ -29,9 +32,13 @@ export const NAV_GROUPS = [
     id: "configure",
     labelKey: "nav.group.configure",
     items: [
-      { to: "/providers", labelKey: "nav.providers", icon: "plug" },
+      // /channels is the canonical address. /providers is only a redirect kept
+      // for bookmarks, and /routing was the page whose controls now live inside
+      // this one; both are listed as legacy paths so the entry keeps lighting up
+      // while the redirect is in flight and the palette never offers a dead
+      // destination.
+      { to: "/channels", labelKey: "nav.providers", icon: "plug", legacyPaths: ["/providers", "/routing"] },
       { to: "/models", labelKey: "nav.models", icon: "box" },
-      { to: "/routing", labelKey: "nav.routing", icon: "route" },
       { to: "/connect", labelKey: "nav.access", icon: "terminal" },
     ],
   },
@@ -67,42 +74,50 @@ export function navGroups(user) {
 }
 
 /*
- * /requests, /sessions, /analysis and /tokens are the pre-redesign addresses of
- * pages that are now tabs of another entry. They redirect, but a redirect still
- * has to light up the entry it lands on while it is in flight.
+ * The pre-relocation addresses of entries that now live elsewhere: /requests,
+ * /sessions, /analysis and /tokens are old addresses of merged tabs, and
+ * /providers and /routing are the old addresses of the channel page. They
+ * redirect, but a redirect still has to light up the entry it lands on while it
+ * is in flight.
  */
-export function isLegacyActive(path) {
+const LEGACY_ACTIVE_PATHS = {
+  "/traces": ["/requests", "/sessions"],
+  "/audit": ["/analysis"],
+  "/connect": ["/tokens"],
+  "/channels": ["/providers", "/routing"],
+};
+
+function pathMatches(path, prefix) {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+export function isLegacyActive(to) {
   if (typeof window === "undefined") {
     return false;
   }
   const current = window.location.pathname;
-  if (path === "/traces") {
-    return current === "/requests" || current === "/sessions" || current.startsWith("/traces/");
+  // Detail routes hang off a list page (/traces/:id belongs to 流量,
+  // /channels/:id belongs to 渠道) and are matched by the same prefix rule.
+  if (pathMatches(current, to)) {
+    return true;
   }
-  if (path === "/audit") {
-    return current === "/analysis" || current.startsWith("/audit");
-  }
-  if (path === "/connect") {
-    return current === "/tokens";
-  }
-  return false;
+  return (LEGACY_ACTIVE_PATHS[to] || []).some((alias) => pathMatches(current, alias));
 }
 
 /*
- * Which rail entry a URL belongs to, including the pre-redesign aliases and the
- * detail routes that hang off a list page (/traces/:id belongs to 流量,
- * /providers/:id belongs to 模型服务商). The longest matching prefix wins, so
- * /models/foo does not also match /models.
+ * Which rail entry a URL belongs to, including the pre-relocation aliases and
+ * the detail routes that hang off a list page. Every item may name extra
+ * `legacyPaths` that belong to it without being a destination of their own. The
+ * longest matching prefix wins, so /models/foo does not also match /models.
  */
 export function navItemForPath(pathname) {
   const path = String(pathname || "/");
   let match = null;
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
-      if (path === item.to || path.startsWith(`${item.to}/`) || isLegacyActive(item.to)) {
-        if (!match || item.to.length > match.item.to.length) {
-          match = { group, item };
-        }
+      const belongs = pathMatches(path, item.to) || (item.legacyPaths || []).some((legacy) => pathMatches(path, legacy));
+      if (belongs && (!match || item.to.length > match.item.to.length)) {
+        match = { group, item };
       }
     }
   }

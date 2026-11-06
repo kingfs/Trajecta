@@ -409,6 +409,10 @@ func TestRunClassifiesStatusCodeFamilies(t *testing.T) {
 		{"bad request auth keyword", http.StatusBadRequest, `{"error":{"message":"Incorrect API key provided"}}`, "application/json", StatusAuthFailed},
 		{"bad request", http.StatusBadRequest, `{"error":{"message":"unknown field messages"}}`, "application/json", StatusInvalidRequest},
 		{"unprocessable", http.StatusUnprocessableEntity, `{"error":{"message":"unprocessable"}}`, "application/json", StatusInvalidRequest},
+		{"bad request model not supported", http.StatusBadRequest, `{"error":{"message":"The model gpt-x is not supported"}}`, "application/json", StatusModelNotFound},
+		{"bad request unknown model", http.StatusBadRequest, `{"error":{"message":"unknown model: gpt-x"}}`, "application/json", StatusModelNotFound},
+		{"unprocessable model not found", http.StatusUnprocessableEntity, `{"error":{"message":"model foo not found"}}`, "application/json", StatusModelNotFound},
+		{"bad request model code", http.StatusBadRequest, `{"error":{"code":"model_not_found","message":"no such model"}}`, "application/json", StatusModelNotFound},
 		{"model not found code", http.StatusNotFound, `{"error":{"code":"model_not_found","message":"no route"}}`, "application/json", StatusModelNotFound},
 		{"model does not exist", http.StatusNotFound, `{"error":{"message":"The model does not exist"}}`, "application/json", StatusModelNotFound},
 		{"plain page not found", http.StatusNotFound, "404 page not found\n", "text/plain; charset=utf-8", StatusEndpointNotSupported},
@@ -658,4 +662,95 @@ func hasSuggestion(suggestions []Suggestion, kind, scope string) bool {
 		}
 	}
 	return false
+}
+
+func TestRunForcedIgnoresDeclaredProtocols(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[]}`))
+		case "/v1/responses":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("404 page not found\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	target := openAITarget(server.URL)
+	// The declarations are wrong/empty on purpose: forced detection must not care.
+	target.Declared = declaredProtocols()
+	report := RunForced(context.Background(), target, []Protocol{ProtocolChatCompletions, ProtocolResponses}, nil)
+
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("upstream calls = %d, want both protocols probed", got)
+	}
+	if len(report.Results) != 2 {
+		t.Fatalf("results = %+v", report.Results)
+	}
+	byProtocol := map[Protocol]Result{}
+	for _, result := range report.Results {
+		byProtocol[result.Protocol] = result
+	}
+	if byProtocol[ProtocolChatCompletions].Status != StatusOK {
+		t.Fatalf("chat result = %+v", byProtocol[ProtocolChatCompletions])
+	}
+	if byProtocol[ProtocolResponses].Status != StatusEndpointNotSupported {
+		t.Fatalf("responses result = %+v", byProtocol[ProtocolResponses])
+	}
+	if byProtocol[ProtocolChatCompletions].Declared {
+		t.Fatalf("forced probe reported declared = true for an undeclared protocol")
+	}
+	if report.Status != ReportStatusPartial {
+		t.Fatalf("status = %q, want partial (chat ok, responses not served)", report.Status)
+	}
+}
+
+func TestRunForcedCollapsesDuplicatesAndKeepsOrder(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer server.Close()
+
+	target := openAITarget(server.URL)
+	report := RunForced(context.Background(), target, []Protocol{
+		ProtocolChatCompletions, ProtocolAuto, ProtocolChatCompletions,
+	}, nil)
+	if len(report.Results) != 1 || len(paths) != 1 {
+		t.Fatalf("results = %+v, paths = %v", report.Results, paths)
+	}
+}
+
+func TestRunForcedFamilyMismatchIsUnsupportedWithoutCalling(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+	}))
+	defer server.Close()
+
+	target := familyTarget(server.URL, upstream.ProtocolFamilyAnthropicMessages, upstream.APITypeMessages, upstream.RoutingProfileAnthropicDefault, ProtocolMessages)
+	report := RunForced(context.Background(), target, []Protocol{ProtocolChatCompletions, ProtocolResponses}, nil)
+
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("upstream calls = %d, want 0", got)
+	}
+	if len(report.Results) != 2 {
+		t.Fatalf("results = %+v", report.Results)
+	}
+	for _, result := range report.Results {
+		if result.Status != StatusUnsupportedProtocol {
+			t.Fatalf("%s result = %+v", result.Protocol, result)
+		}
+	}
+	if report.Status != ReportStatusUnsupported {
+		t.Fatalf("status = %q, want unsupported", report.Status)
+	}
 }

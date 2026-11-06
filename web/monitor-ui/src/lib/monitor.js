@@ -235,10 +235,16 @@ export function buildProviderLink(providerID, windowValue = "today") {
     params.set("window", windowValue);
   }
   const query = params.toString();
-  return query ? `/providers/${encodeURIComponent(providerID)}?${query}` : `/providers/${encodeURIComponent(providerID)}`;
+  // Channels are the canonical surface now: the console calls a provider a
+  // channel, and `/channels` is the route that survives (the old `/providers`
+  // URL only redirects here).
+  return query ? `/channels/${encodeURIComponent(providerID)}?${query}` : `/channels/${encodeURIComponent(providerID)}`;
 }
 
 export function buildRoutingLink(upstreamWindow = "today", upstreamModel = "") {
+  // The standalone routing page is gone; route diagnostics live on the traffic
+  // page (and the routing settings/inspector on the channel page). Keep the
+  // helper pointing at the observed traffic for the same window/model.
   const params = new URLSearchParams();
   if (upstreamWindow && upstreamWindow !== "today") {
     params.set("window", upstreamWindow);
@@ -247,7 +253,7 @@ export function buildRoutingLink(upstreamWindow = "today", upstreamModel = "") {
     params.set("model", upstreamModel);
   }
   const query = params.toString();
-  return query ? `/routing?${query}` : "/routing";
+  return query ? `/traces?${query}` : "/traces";
 }
 
 // The traffic list takes the same window as every other page, with the same

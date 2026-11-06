@@ -63,7 +63,7 @@ docker compose exec trajecta /app/bin/server \
 - Monitor：<http://localhost:8081>，用上面的用户名密码登录
 - Proxy：<http://localhost:8080/v1>，把 SDK 的 `base_url` 指向它
 
-登录后在 `模型服务商` 页面配置上游地址与 API key，在 `接入 → API 令牌` 标签页生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
+登录后在 `渠道` 页面配置上游地址与 API key，在 `接入 → API 令牌` 标签页生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
 
 ### 方式二：从源码运行
 
@@ -235,7 +235,7 @@ func TestChat(t *testing.T) {
 | 了解现在实现了什么、没实现什么 | [当前实现状态](./docs/IMPLEMENTATION_STATUS.md) |
 | 理解代码组织与数据流 | [架构与代码地图](./docs/ARCHITECTURE.md) |
 | 把 SDK / CLI 接到代理上 | [代理使用示例](./docs/PROXY_USAGE_EXAMPLES.md) |
-| 接入上游 provider、看协议矩阵 | [协议族与上游 Provider](./docs/PROTOCOLS_AND_PROVIDERS.md)、[协议参考](./docs/protocol-reference/README.md) |
+| 接入上游渠道、看协议矩阵 | [协议族与上游 Provider](./docs/PROTOCOLS_AND_PROVIDERS.md)、[协议参考](./docs/protocol-reference/README.md) |
 | 管理渠道、模型、凭据与限流 | [路由、渠道与凭据](./docs/ROUTING_AND_CREDENTIALS.md) |
 | 避免把真实 API key、SSH 私钥、身份证号或手机号发给上游 | [敏感凭据遮蔽](./docs/SECRET_MASKING.md) |
 | 用 Codex 或本地 Responses runtime | [本地 Responses Runtime](./docs/RESPONSES_RUNTIME.md) |

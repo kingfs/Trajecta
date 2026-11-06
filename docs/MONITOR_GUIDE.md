@@ -3,8 +3,8 @@
 Monitor 是 Trajecta 的本地 Web 工作台，由 `internal/monitor` 提供 API 与前端静态资源，和代理运行在同一个进程里（`monitor.port`）。它面向三个场景：
 
 - 查看真实 LLM HTTP 请求与原始协议。
-- 分析 session、模型、模型服务商、路由和失败。
-- 管理模型服务商、模型、路由设置、分析任务与个人 API token。
+- 分析 session、模型、渠道、路由和失败。
+- 管理渠道、模型、路由设置、分析任务与个人 API token。
 
 ## 启动与登录
 
@@ -21,7 +21,7 @@ Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签�
 
 左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 264px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
 
-对话框仍用于真正需要打断的表单：修改密码（从面板进入，`DialogContent` 的 `onCloseAutoFocus` 显式把焦点还给账号按钮，因为这个表单没有自己的触发按钮）、模型服务商列表页的新建弹窗、模型服务商详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗，都走 `web/monitor-ui/src/components/ui/dialog.tsx`（`@radix-ui/react-dialog`）。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定都由这个 primitive 提供，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
+对话框仍用于真正需要打断的表单：修改密码（从面板进入，`DialogContent` 的 `onCloseAutoFocus` 显式把焦点还给账号按钮，因为这个表单没有自己的触发按钮）、渠道列表页的新建弹窗、渠道详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗，都走 `web/monitor-ui/src/components/ui/dialog.tsx`（`@radix-ui/react-dialog`）。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定都由这个 primitive 提供，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
 
 ## 个人 API token
 
@@ -42,14 +42,14 @@ Monitor API 本身只接受登录 JWT，不使用个人 token。
 
 Monitor 同时使用两类数据：
 
-- application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/trajecta.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、模型服务商与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
+- application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/trajecta.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、渠道与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
 - raw `.http` cassette：trace 详情、raw protocol 与 replay-safe 检查的事实来源。路由事实在数据库里是 `logs` 上的派生列，原始 `routing.*` 事件仍记录在 cassette prelude 中。
 
 因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。`GET /api/routing/summary` 也完全走数据库：`buildRoutingSummary` 调 `store.RoutingSummary(since, model)`，对 `logs` 上的路由列做一次 `GROUP BY`，不再打开任何 cassette。计数是**按 trace** 而不是按路由事件：每条 trace 只保留每个事实的最后一个非空值（`internal/recorder/recorder.go` 的 `setLastNonEmpty`），所以同一条 trace 里的多次 sticky 事件折叠成最后一次。只要 `selected_upstream_id`、`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`routing_failure_reason` 任一非空，这条 trace 就算「有事件」；`legacy_or_missing_events = total_traces - eventful_traces`。迁移前的行不一定算 legacy：`selected_upstream_id` 是迁移前就有的列，这类 trace 仍算有事件，只是 `route_target_id` / `channel_id` / `credential_id` 与 sticky 拆分为空，直到一次重索引从 prelude 重新推导这五列。
 
 ## 页面
 
-左侧主导航分三组共 10 项：**监控**（概览、流量、事件、质量）、**配置**（模型服务商、模型、路由、接入）、**系统**（系统、关于）。导航模型只有一份，声明在 `web/monitor-ui/src/lib/nav.js`：侧边栏与快速导航面板都从它生成，新增一个目的页不会出现「侧边栏有、面板没有」的第二份清单。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。导航栏底部、账号按钮上方是**构建、连接状态与仓库**合成的一行：左边显示当前运行的版本号并链到关于页，右边是实时连接状态图标与 GitHub 图标，前两者与仓库地址都来自 `GET /api/about`（连接状态来自本地 socket，见「实时推送」）。三者在展开状态下同处一行，不再为单个图标多占一行；版本号在窄屏与折叠状态的侧边栏里隐藏，三个图标等分那一列（每个 18px）。侧栏在 1180px 以下为 72px 宽，720px 以下收窄到 64px；两种窄栏都保留 56px 内容宽，三个 18px 图标仍能同处一行。
+左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（渠道、模型、接入）、**系统**（系统、关于）。「渠道」是本项目对“一个上游连接 + 凭据”的正式称呼（对应数据库 `channel_configs`）；`provider` 只指上游公司或 provider preset，不再作为页面名。原来的独立「路由」页已经折叠：路由设置与 dry-run 检查进入渠道页底部的高级卡片，模型别名进入模型页，`/routing` 只保留重定向。导航模型只有一份，声明在 `web/monitor-ui/src/lib/nav.js`：侧边栏与快速导航面板都从它生成，新增一个目的页不会出现「侧边栏有、面板没有」的第二份清单。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。导航栏底部、账号按钮上方是**构建、连接状态与仓库**合成的一行：左边显示当前运行的版本号并链到关于页，右边是实时连接状态图标与 GitHub 图标，前两者与仓库地址都来自 `GET /api/about`（连接状态来自本地 socket，见「实时推送」）。三者在展开状态下同处一行，不再为单个图标多占一行；版本号在窄屏与折叠状态的侧边栏里隐藏，三个图标等分那一列（每个 18px）。侧栏在 1180px 以下为 72px 宽，720px 以下收窄到 64px；两种窄栏都保留 56px 内容宽，三个 18px 图标仍能同处一行。
 
 品牌下方的「快速导航」按钮（或任意页面按 `Ctrl K` / `⌘ K`）打开命令面板：输入即过滤十个目的页，也可以执行「刷新数据」「切换明暗主题」「切换语言」三个动作。面板是 Radix Dialog（portal、焦点陷阱、Esc、焦点归还都由 primitive 提供），输入框保持焦点，`↑` / `↓` / `Home` / `End` 移动高亮行、`Enter` 打开；搜索框用 `aria-activedescendant` 指向当前行，读屏器能读出高亮项。目的页列表来自 `navGroups()`，动作只有刷新与两个偏好切换，因此面板不会成为第二套导航。面板与新增的「刷新数据」都不引入新的轮询：刷新只是让 TanStack Query 失效当前读请求，实时主题仍然负责后台更新。
 
@@ -65,9 +65,9 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 
 #### 概览 `/overview`
 
-时间窗口内的请求量、成功/失败数、Token、平均 TTFT、延迟、发现项和系统事件概览。趋势图按请求量、Token、延迟三个面板展示，1200px 以上按 1.25:1:1 分宽，请求/失败图是主图；主要拆分收敛为一个面板，用分段控件在模型、模型服务商、端点、上游、路由失败、发现类别之间切换，而不是六列并排。概览的数据由实时 socket 推送（见「实时推送」一节），并给出两条去向链接：质量页的发现项与事件收件箱。已配置模型服务商的卡片列表与派生数据健康度不再放在这里——前者的完整版本在「模型服务商」页，后者是解析管道的属性而不是最近一小时流量的属性，现已移到「质量 → 数据健康」标签页。概览页只向 `GET /api/overview` 请求 `sections=traffic` 这一半，解析管道的 `sections=health` 由数据健康页单独请求：健康段按设计覆盖全部 trace，两页都不再为对方不需要的聚合扫描整张 `logs` / `trace_findings`。右侧系统事件角标与导航栏共用同一个 `GET /api/events/summary?window=all`，因此一次页面加载只有一次摘要请求，两处数字也必然一致。六列 KPI 读数条在 1440px 一排；所有统计条在 900px 以下折成两列，720px 以下单元格内边距与数值再缩小一档；「需要复查」队列只保留模型、状态、预览和行操作，延迟与 token 读数留在流量列表与详情页，避免同一页重复两次指标。
+时间窗口内的请求量、成功/失败数、Token、平均 TTFT、延迟、发现项和系统事件概览。趋势图按请求量、Token、延迟三个面板展示，1200px 以上按 1.25:1:1 分宽，请求/失败图是主图；主要拆分收敛为一个面板，用分段控件在模型、渠道、端点、上游、路由失败、发现类别之间切换，而不是六列并排。概览的数据由实时 socket 推送（见「实时推送」一节），并给出两条去向链接：质量页的发现项与事件收件箱。已配置渠道的卡片列表与派生数据健康度不再放在这里——前者的完整版本在「渠道」页，后者是解析管道的属性而不是最近一小时流量的属性，现已移到「质量 → 数据健康」标签页。概览页只向 `GET /api/overview` 请求 `sections=traffic` 这一半，解析管道的 `sections=health` 由数据健康页单独请求：健康段按设计覆盖全部 trace，两页都不再为对方不需要的聚合扫描整张 `logs` / `trace_findings`。右侧系统事件角标与导航栏共用同一个 `GET /api/events/summary?window=all`，因此一次页面加载只有一次摘要请求，两处数字也必然一致。六列 KPI 读数条在 1440px 一排；所有统计条在 900px 以下折成两列，720px 以下单元格内边距与数值再缩小一档；「需要复查」队列只保留模型、状态、预览和行操作，延迟与 token 读数留在流量列表与详情页，避免同一页重复两次指标。
 
-所有统计组共用同一条读数条（`src/styles/console.css` 的 `.hero-grid`）：4/5/6 个数值等分一排、1px 分隔线、12px 外圆角，每个单元格不再有自己的边框和阴影；独立于 Card 的组（概览、事件、流量、模型服务商、模型）带外框，Card 内的组（路由、质量→数据健康、系统、详情页、请求信息）只保留分隔线，由所在 Card 提供外框，避免卡片套卡片。单元格内边距 12px/16px（Card 内 10px/16px），数值 1.5rem，弱化文字 11px、详情 12px，整条高度约 58–89px；模型服务商与模型的汇总从原 Card 提到页头下方，和概览/事件同处一个位置。
+所有统计组共用同一条读数条（`src/styles/console.css` 的 `.hero-grid`）：4/5/6 个数值等分一排、1px 分隔线、12px 外圆角，每个单元格不再有自己的边框和阴影；独立于 Card 的组（概览、事件、流量、渠道、模型）带外框，Card 内的组（路由、质量→数据健康、系统、详情页、请求信息）只保留分隔线，由所在 Card 提供外框，避免卡片套卡片。单元格内边距 12px/16px（Card 内 10px/16px），数值 1.5rem，弱化文字 11px、详情 12px，整条高度约 58–89px；渠道与模型的汇总从原 Card 提到页头下方，和概览/事件同处一个位置。
 
 #### 流量 `/traces`
 
@@ -75,7 +75,7 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 
 请求与会话两个标签页。
 
-**请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。1100px 以上五列弹性网格按 `1.9fr / 72px / 1.3fr / 1.45fr / 118px` 分配宽度，模型名不再在 1280px 被压到 100px，表头 sticky 在页头下方；1100px 以下每行变成一张紧凑卡（状态与操作在右轨、延迟一行），600px 以下只保留输入/输出/总量 token 与总耗时/TTFT 两条延迟读数，50 条 trace 不再把手机页面推到一万多像素。失败行不再整行染色，状态码仍是红色。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引；分页器带页码输入（314k traces / 50 条一页时可直接跳到第 6,000 页），不再是只能前后翻。
+**请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。1100px 以上五列弹性网格按 `1.9fr / 72px / 1.3fr / 1.45fr / 118px` 分配宽度，模型名不再在 1280px 被压到 100px，表头 sticky 在页头下方；1100px 以下每行变成一张紧凑卡（状态与操作在右轨、延迟一行），600px 以下只保留输入/输出/总量 token 与总耗时/TTFT 两条延迟读数，50 条 trace 不再把手机页面推到一万多像素。失败行不再整行染色，状态码仍是红色。可以进入 trace detail，也可以跳到对应的模型、渠道或路由上下文。列表数据来自应用库索引；分页器带页码输入（314k traces / 50 条一页时可直接跳到第 6,000 页），不再是只能前后翻。
 - 识别到客户端 harness 的行在 endpoint / 上游 / stream 标签前显示一枚可点击的 harness 标签（显示名 + 版本，如 `Claude Code 2.0.14`；上游 child exchange 不显示）。点击标签把当前流量页按该 harness 过滤（写入 `harness` 查询参数并回到第 1 页）；悬停给出 canonical id、类型、置信度与能力/SDK 标签。列表字段与过滤语义见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - 每行在 endpoint / 上游 / stream 标签之后还有一枚审计标签：数值是该 trace 已落库的审计事件总数（`credential_mask_audits` 的替换事件加 `trace_findings` 的发现项）。含身份证、手机号或敏感 Key 时标签为红色，只有拒答、工具错误等其它发现项时为黄色，没有任何审计事件时整枚标签不显示；悬停给出身份证/手机号、敏感 Key、其它发现、脱敏事件与发现项的分项。计数来自 `GET /api/traces` 的 `audit` 字段，每个来源对整个列表页各做一次分组查询，不逐条读 cassette。
 - 时间与会话那行下面显示该 trace 的第一条 user 消息（前 80 个字符，超出以 `…` 截断；system 提示不参与），由服务端从 cassette 的请求段读出后随列表的 `request_preview` 返回。请求体超过 4 MiB、读不到用户消息或 cassette 不可读时，该行不显示预览。
@@ -83,7 +83,7 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 - 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
 - `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
 
-**会话**：按 session 聚合最近 50 个会话，展示健康度、成功率、模型、模型服务商、流式标记与耗时。列表页顶部的时间窗口与统计只覆盖**当前这一页**的 50 条会话（分页器带页码输入，23,960 个会话/ 480 页可直接跳页），页面上的「本页范围」提示即说明这一点；它不是全库聚合。
+**会话**：按 session 聚合最近 50 个会话，展示健康度、成功率、模型、渠道、流式标记与耗时。列表页顶部的时间窗口与统计只覆盖**当前这一页**的 50 条会话（分页器带页码输入，23,960 个会话/ 480 页可直接跳页），页面上的「本页范围」提示即说明这一点；它不是全库聚合。
 
 - 过滤语义：`provider` 匹配会话使用过的任一 provider；`model` 与搜索框 `q` 匹配会话中**任一**请求（因此一个「先 `gpt-alpha`、后 `claude-beta`」的会话按 `gpt-alpha` 也能查到）；`status` 是**会话级**判断——`success` 表示该会话没有任何失败请求（非 2xx），`failed` / `error` 表示至少有一个，与列表展示的 `success_request` / `failed_request` 计数同源。
 - `database.use_session_summary_read`（`TRAJECTA_DATABASE_USE_SESSION_SUMMARY_READ`）打开后，会话列表改由派生读模型 `session_summaries` 提供；该模型只保存会话的最后一个模型、provider 列表与请求计数，因此无法表达「任一请求命中」的 `model` / `q` 过滤，这两类过滤始终走日志路径。两个读路径对同一过滤条件必须给出相同结果，门禁 `TestSessionFiltersAgreeAcrossReadPaths` 会同时跑两条路径并逐项比对。 代码默认关闭，仓库自带 `config/config.yaml` 已显式打开（参考部署已核对两条读路径一致）；未完成 `session_summaries` 回填的部署应先核对再打开，方法见 [PostgreSQL 运维](./POSTGRES_OPERATIONS.md)。
@@ -162,13 +162,13 @@ Trajecta 自身的事件收件箱：
 
 #### 模型 `/models`
 
-按模型查看时间窗口内的流量：模型覆盖哪些模型服务商，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
+按模型查看时间窗口内的流量：模型覆盖哪些渠道，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
 
 模型页把汇总读数条放在页头下方，模型卡按 18 个/页分页；卡片的 head/footer 允许换行，长 channel id 在自己的卡内省略而不是撑宽两列网格。真实数据的 97 个模型现在没有横向溢出。
 
-#### 模型服务商 `/providers`
+#### 渠道 `/channels`
 
-管理上游模型服务商。支持创建与编辑 provider preset、base URL、API key、headers、routing 字段，以及 API surface：`api_type`、`mode`、Responses/Chat Completions/tool calling/models 等 capability。模型级的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 覆盖不在这里编辑，见上面的模型页。需要注意：渠道级 `capabilities.responses=true` 只表示 `/v1/responses` 可由本地 Responses runtime 翻译；要让某个模型走原生 Responses 直通，必须把该模型的 `supports_responses` 显式设为支持，或把渠道 `api_type` 设为 `responses` / `responses_native`。Chat Completions 渠道如果也需要原生直通，请在模型级或模型连通性测试里确认后再开启。
+管理上游渠道（一个渠道 = 一个 `base_url` + 一组凭据 + 一种协议族；`provider preset` 只用来描述上游公司/默认协议）。页面字段已经收敛：主表单只有 name、base URL、API key、preset、enabled；高级里保留 `protocol_family`、`routing_profile`、`api_type`（默认 `chat_completions`）、Azure/Vertex 参数、headers、priority/weight/capacity。**不再手工勾选 Responses/Chat/Tool/Models/Embeddings/Tokenize 能力，也不再暴露 `mode` 与 `model_discovery`**：模型接口由按模型自动探测得到。
 
 创建前可以先做探测：
 
@@ -176,13 +176,15 @@ Trajecta 自身的事件收件箱：
 - `POST /api/provider-setup/validate` 组合 base URL、API key、preset、模型发现与 capability 字段做一次探测，并把归一化配置写回表单，但不落库；响应不回显 API key，只返回 `api_key_hint`、secret storage mode 和脱敏 header 状态。表单字段变化会清空旧验证结果。
 - `POST /api/provider-setup/apply` 才真正把配置写入 store。
 - 列表页的 Batch probe and apply 先跑 `POST /api/provider-probe/report` 预览，再用 `POST /api/provider-probe/report/apply` 对 detected 且存在可补字段的 provider 批量应用；批量应用只补缺失的 `api_type`、`protocol_family` 和未设置的 capability，不覆盖显式配置，也不覆盖显式 `false`。
-- provider probe 只检查路由是否存在：它给 `/v1/responses` 发空 body，`400 missing model` 也会被算作 endpoint 存在，所以不能证明某个模型在该协议上可用。因此 Chat Completions 渠道的 `capabilities.responses` 不再由 route-only probe 自动写入；模型级支持用模型卡上的「连通性测试」实测确认。
+- provider probe 只检查路由是否存在：它给 `/v1/responses` 发空 body，`400 missing model` 也会被算作 endpoint 存在，所以不能证明某个模型在该协议上可用。因此 Chat Completions 渠道的 `capabilities.responses` 不再由 route-only probe 自动写入；模型级支持用按模型自动识别/连通性测试实测确认。
 
-还可以启停模型服务商、启停单个模型、探测模型、查看用量/Token/失败与 probe 结果。每个模型卡上有一个「连通性测试」按钮：用该渠道已解密的 key 和该模型的线上名，按自动探测声明协议发送最小请求（chat 16 token、responses 16 output token），并在卡片内就地显示每个协议的 HTTP 状态、延迟与结论。测试会区分 `endpoint_not_supported`（如 provider 对 `/v1/responses` 返回纯文本 404）、`model_not_found`、`auth_failed`、超时等；当 chat 可用而 `/v1/responses` 不可用时，会给出「关闭该模型的 Responses 支持」的一键操作（只写模型级 `supports_responses=false`，立即 reload 路由，不需要重启）。该测试不写 `channel_probe_runs`/`last_probe_at`、不产生 cassette/logs、不进入用量统计，也不经过 router。
+**模型接口自动识别（推荐路径）。** 每个模型卡带一组接口标签：`Chat Completions`、`Native Responses`、`Responses via local`（`/v1/responses` 由本地 runtime 用 chat 翻译）、`Messages`（Anthropic 协议族）、`GenerateContent`（Gemini/Vertex）。在模型卡点「识别接口」会调用 `POST /api/provider-model-detect`，用该渠道已解密的 key 和模型线上名，对协议族内所有接口并行发一次最小请求（8s/协议），把结论写入该模型的三态 `supports_*`（`overwrite=true` 会覆盖已有值）；启停开关打开某个模型时，前端会自动以 `overwrite=false` 补全尚未声明的接口；渠道工具栏的「识别已启用模型的接口」会批量处理该渠道所有已启用模型。识别只写模型能力，不写 `channel_probe_runs`/`last_probe_at`、不生成 cassette/logs、不经过 router，因此不会污染流量与用量。识别结果会决定 `/v1/responses` 是原生直通还是走本地翻译，接口由此不再需要猜。
+
+每个模型卡还有「连通性测试」按钮：它按当前声明协议发最小请求并给出逐协议结论，当 chat 可用而 `/v1/responses` 不可用时给出「关闭该模型的 Responses 支持」的一键操作（只写模型级 `supports_responses=false`，立即 reload 路由，不需要重启）。测试与识别都不写 probe 记录、不产生 cassette/logs、不进入用量统计。
 
 **模型清单是唯一授权来源。** 详情页的「同步模型」按钮执行一次探测，返回新增/移除数量，并保持每个模型原有的开启状态；新模型默认关闭。每行带一个状态：`enabled`（已开启且最近一次成功同步仍返回它）、`disabled`（已关闭）、`removed`（最近一次成功同步不再返回它，开关保留但不参与路由，重新同步后恢复）、`unverified`（手动添加，或渠道从未成功同步过，可路由但标记未验证）。`upstream_model`（发往上游的模型名）在行内显示；需要别名改写时在模型详情页设置。开启/关闭立即发布到路由，不需要重启；不支持「允许未知模型」——未开启的模型由代理直接返回 404 `model_not_enabled`（声明过但不可路由）或 `model_unknown`（没有渠道声明过），不会发往任何上游。
 
-配置归属：模型服务商、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
+配置归属：渠道、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 
 #### 接入 `/connect`
 
@@ -196,16 +198,14 @@ Trajecta 自身的事件收件箱：
 
 **API 令牌**管理当前用户的个人 API token，见上文「个人 API token」。
 
-#### 路由 `/routing`
+#### 路由设置与检查（渠道页内）
 
-页面级标签条包含四个标签页（和其它合并页一样是标题下的一行下划线 tab，绑定在 `?tab=` 上；这里曾经是「工作区」卡片里的分段控件，同一件事在两个页面长得不一样，还多花了一张只装这一行的卡片）：
+独立的 `/routing` 页已经移除：它把「路由设置、模型命名、排障观测、凭据统计」四类不同关注点混在一个一级页面里，而路由关系本身是渠道/模型/别名配置的派生视图，不需要独立页面。`/routing` 只保留到 `/channels` 的重定向，页面里的能力按归属拆开：
 
-- Decisions：最近选中的路由（数据来自 `GET /api/routing/exchanges`），可按模型、通道/上游、状态、耗时、TTFT、Token 过滤。摘要仍基于最近 200 条，列表按 50 条/页显示，页码输入可跳转。
-- Settings：编辑路由设置（`PATCH /api/settings/routing`），包括 `responses_strategy`、`selection_policy`、`route_plan_log_level`。缺失模型没有回退开关：未开启的模型统一由代理回答 404。
-- Aliases：模型别名的增删改与校验（`/api/model-aliases`、`/api/model-aliases/validate`）。
-- Inspector：`POST /api/routing/inspect` 预演某个请求/模型会如何被路由。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未开启模型的可路由性也按同一条规则判断：候选会以 `model_not_enabled`（渠道声明过但已关闭/已被上游移除）或 `model_not_matched`（没有任何渠道声明）被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
-
-摘要面板来自 `GET /api/routing/summary`，按 failure reason、selected route target、credential 和 sticky 状态聚合，并区分有事件与旧数据/缺失事件的 trace。该端点不解析任何文件，所以响应里没有解析失败计数，页面也不再显示这一项。
+- 路由设置（`PATCH /api/settings/routing`：`responses_strategy`、`selection_policy`、`route_plan_log_level`）作为渠道页底部「路由设置」折叠卡片；缺失模型没有回退开关：未开启的模型统一由代理回答 404。
+- 模型别名（`/api/model-aliases`、`/api/model-aliases/validate`）作为模型页底部的「模型别名」折叠卡片。
+- 路由检查器（`POST /api/routing/inspect`）作为渠道页底部的「路由检查器」折叠卡片。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未开启模型的可路由性也按同一条规则判断：候选会以 `model_not_enabled`（渠道声明过但已关闭/已被上游移除）或 `model_not_matched`（没有任何渠道声明）被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
+- 最近选中的路由记录不再单独成页：它们作为每条 trace 自身的事实留在流量页与 trace 详情；`GET /api/routing/exchanges`、`GET /api/routing/summary` 仍保留给 API/MCP/CLI 使用。
 
 ### 系统
 
@@ -300,8 +300,8 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 
 - `/` 重定向到 `/overview`。
 - 合并掉的旧地址全部保留重定向，并且**保留原有查询参数**：`/requests` → `/traces`，`/sessions` → `/traces?tab=sessions`，`/analysis` → `/audit?tab=analysis`，`/tokens` → `/connect?tab=tokens`。
-- `/channels` 重定向到 `/providers`；`/channels/:channelID` 仍渲染模型服务商详情页。
-- 详情路由：`/traces/:traceID`、`/sessions/:sessionID`、`/models/:model`、`/providers/:providerID`、`/upstreams/:upstreamID`。
+- `/channels`、`/channels/:channelID` 是渠道列表/详情；`/providers`、`/providers/:providerID` 和 `/routing` 都重定向到对应渠道地址（保留查询参数）。
+- 详情路由：`/traces/:traceID`、`/sessions/:sessionID`、`/models/:model`、`/channels/:channelID`、`/upstreams/:upstreamID`。
 - 未匹配的路径重定向到 `/overview`。
 
 ## Trace 详情
@@ -340,9 +340,9 @@ Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`tools`、`a
 请求失败时按顺序查看：
 
 1. trace detail 的 Routing & Conversation 与 Raw。
-2. Routing 页面的 Decisions，或 trace 中的 routing context。
+2. trace 中的 routing context（独立 Routing 页已移除）。
 3. Events 页面是否有 parser / analyzer / router / upstream 事件。
-4. 模型与模型服务商页面确认模型启用状态和模型服务商健康。
+4. 模型与渠道页面确认模型启用状态和渠道健康。
 5. 只有在派生结果明显不对时才运行 `Refresh analysis`；Token 统计异常时运行 `Repair stats`。
 
 ## 前端实现
@@ -376,7 +376,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 - 代理不做协议族之间的转换，唯一例外是 `/v1/responses` 的本地 Responses runtime；边界见 [架构与代码地图](./ARCHITECTURE.md) 与 [实现状态](./IMPLEMENTATION_STATUS.md)。
 - Monitor 没有用户管理界面：用户由 `auth init-user`、`auth reset-password`、`auth create-token` 等 CLI 命令创建和维护，界面只支持修改自己的密码。
 - Monitor API 不接受个人 API token；个人 token 面向 proxy 与 MCP。
-- Monitor 不能修改由 YAML 显式 `credentials` 管理的模型服务商、模型和别名，这类写操作返回 409。
+- Monitor 不能修改由 YAML 显式 `credentials` 管理的渠道、模型和别名，这类写操作返回 409。
 - 写接口不接受 `output`、`command`、`args`、`env` 等敏感可执行字段，Monitor overlay 不能创建新的可执行 command；字段语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 - `external_command` 只有轻量进程约束（工作目录、绝对 command、允许目录、拒绝 root），不等同于容器或 namespace 沙箱。
 - Monitor 不轮询上游、也不做后台外联：版本检查只在读者按下按钮时发生；匿名装机上报已从 Web UI 移除（见「关于 `/about`」）。Monitor 没有管理员界面之外的版本管理能力，也不下载或安装更新。
@@ -385,4 +385,4 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 
 存储与部署 `./STORAGE_AND_DEPLOYMENT.md`、Postgres 运维 `./POSTGRES_OPERATIONS.md`、路由与凭据 `./ROUTING_AND_CREDENTIALS.md`、观测与审计 `./OBSERVATION_AND_AUDIT.md`、Responses runtime `./RESPONSES_RUNTIME.md`、MCP 使用 `./MCP_GUIDE.md`。
 
-架构 `./ARCHITECTURE.md`、实现状态 `./IMPLEMENTATION_STATUS.md`、协议与模型服务商 `./PROTOCOLS_AND_PROVIDERS.md`、协议参考 `./protocol-reference/README.md`、代理接入示例 `./PROXY_USAGE_EXAMPLES.md`、开发命令 `./DEVELOPMENT.md`、文档总入口 `./README.md`。
+架构 `./ARCHITECTURE.md`、实现状态 `./IMPLEMENTATION_STATUS.md`、协议与渠道 `./PROTOCOLS_AND_PROVIDERS.md`、协议参考 `./protocol-reference/README.md`、代理接入示例 `./PROXY_USAGE_EXAMPLES.md`、开发命令 `./DEVELOPMENT.md`、文档总入口 `./README.md`。

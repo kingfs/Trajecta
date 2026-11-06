@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
@@ -1224,4 +1225,172 @@ func findChannelModel(models []store.ChannelModelRecord, model string) (store.Ch
 		}
 	}
 	return store.ChannelModelRecord{}, false
+}
+
+// ModelDetectionProtocolTimeout is the per-protocol budget for interface detection.
+// A detection probes every protocol of a model in parallel, so one dead endpoint
+// cannot stretch a whole channel scan past this bound.
+const ModelDetectionProtocolTimeout = 8 * time.Second
+
+// ModelInterfaceProtocolReport is one forced protocol probe run for interface detection.
+type ModelInterfaceProtocolReport struct {
+	Protocol   string
+	Status     string
+	HTTPStatus int
+	LatencyMS  int64
+	Error      string
+	Hint       string
+}
+
+// ModelInterfaceDetection is the outcome of forced protocol probing for one channel model.
+//
+// SupportsChatCompletions and SupportsResponses carry the value detection is confident
+// enough to persist: true for a working protocol, false when the upstream says the
+// endpoint or model is not served there, and nil when the probe was inconclusive.
+type ModelInterfaceDetection struct {
+	ChannelID               string
+	Model                   string
+	WireModel               string
+	ProtocolFamily          string
+	Protocols               []ModelInterfaceProtocolReport
+	SupportsChatCompletions *bool
+	SupportsResponses       *bool
+}
+
+// ModelInterfaces is the effective API surface of one stored channel model, resolved with
+// the same model-override-over-channel rules as the forwarding path.
+type ModelInterfaces struct {
+	ChatCompletions  bool `json:"chat_completions"`
+	NativeResponses  bool `json:"native_responses"`
+	ResponsesViaChat bool `json:"responses_via_chat"`
+	Messages         bool `json:"messages"`
+	GenerateContent  bool `json:"generate_content"`
+}
+
+// DetectModelInterfaces probes one channel model's real protocol surfaces with forced
+// probes that ignore the currently declared capabilities. It reuses ModelProbeTarget, so
+// the detection uses the same decrypted credential and per-model projection as the
+// forwarding path, and it writes nothing.
+//
+// openai_compatible models are probed for Chat Completions and Responses in parallel;
+// anthropic_messages models for Messages; google_genai/vertex models for generateContent.
+// perProtocolTimeout defaults to ModelDetectionProtocolTimeout when non-positive.
+func (s *Service) DetectModelInterfaces(ctx context.Context, channelID, model string, perProtocolTimeout time.Duration) (ModelInterfaceDetection, error) {
+	target, err := s.ModelProbeTarget(channelID, model)
+	if err != nil {
+		return ModelInterfaceDetection{}, err
+	}
+	if perProtocolTimeout <= 0 {
+		perProtocolTimeout = ModelDetectionProtocolTimeout
+	}
+	protocols := detectionProtocolsForFamily(target.ProtocolFamily)
+	results := make([]modelprobe.Result, len(protocols))
+	var wg sync.WaitGroup
+	for i, protocol := range protocols {
+		wg.Add(1)
+		go func(index int, probeProtocol modelprobe.Protocol) {
+			defer wg.Done()
+			probeCtx, cancel := context.WithTimeout(ctx, perProtocolTimeout)
+			defer cancel()
+			report := modelprobe.RunForced(probeCtx, target, []modelprobe.Protocol{probeProtocol}, s.HTTPClient())
+			if len(report.Results) > 0 {
+				results[index] = report.Results[0]
+			}
+		}(i, protocol)
+	}
+	wg.Wait()
+
+	detection := ModelInterfaceDetection{
+		ChannelID:      target.ChannelID,
+		Model:          target.Model,
+		WireModel:      target.WireModel,
+		ProtocolFamily: target.ProtocolFamily,
+		Protocols:      make([]ModelInterfaceProtocolReport, 0, len(protocols)),
+	}
+	for i, protocol := range protocols {
+		result := results[i]
+		detection.Protocols = append(detection.Protocols, ModelInterfaceProtocolReport{
+			Protocol:   string(protocol),
+			Status:     result.Status,
+			HTTPStatus: result.HTTPStatus,
+			LatencyMS:  result.LatencyMS,
+			Error:      result.Error,
+			Hint:       result.Hint,
+		})
+		switch protocol {
+		case modelprobe.ProtocolChatCompletions:
+			detection.SupportsChatCompletions = decisiveCapability(result.Status)
+		case modelprobe.ProtocolResponses:
+			detection.SupportsResponses = decisiveCapability(result.Status)
+		}
+	}
+	return detection, nil
+}
+
+// EffectiveModelInterfaces resolves the interfaces one stored channel model can actually
+// serve. A model-level supports_* value wins over the channel capability/api_type, which is
+// the same precedence the router uses; responses_via_chat means the Responses entrypoint is
+// answered by the local runtime instead of native pass-through.
+func EffectiveModelInterfaces(channel store.ChannelConfigRecord, model store.ChannelModelRecord) ModelInterfaces {
+	cfg := UpstreamConfigFromChannel(channel)
+	overrides := config.UpstreamCapabilitiesConfig{
+		Responses:       capabilityIntToBool(model.SupportsResponses),
+		ChatCompletions: capabilityIntToBool(model.SupportsChatCompletions),
+	}
+	if overrides.Responses != nil || overrides.ChatCompletions != nil {
+		cfg.ModelCapabilities = map[string]config.UpstreamCapabilitiesConfig{
+			strings.ToLower(strings.TrimSpace(model.Model)): overrides,
+		}
+	}
+	out := ModelInterfaces{}
+	resolved, err := upstream.Resolve(cfg)
+	if err != nil {
+		// An unresolvable channel still has to render in the Monitor; fall back to
+		// the raw family so interface badges degrade instead of breaking the page.
+		switch normalizeProtocolFamily(channel.ProtocolFamily) {
+		case upstream.ProtocolFamilyAnthropicMessages:
+			out.Messages = true
+		case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
+			out.GenerateContent = true
+		}
+		return out
+	}
+	out.ChatCompletions = resolved.SupportsChatCompletionsAPIForModel(model.Model)
+	out.NativeResponses = resolved.SupportsNativeResponsesPath(model.Model)
+	out.ResponsesViaChat = out.ChatCompletions && !out.NativeResponses
+	switch resolved.ProtocolFamily {
+	case upstream.ProtocolFamilyAnthropicMessages:
+		out.Messages = true
+	case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
+		out.GenerateContent = true
+	}
+	return out
+}
+
+func detectionProtocolsForFamily(family string) []modelprobe.Protocol {
+	switch normalizeProtocolFamily(family) {
+	case upstream.ProtocolFamilyAnthropicMessages:
+		return []modelprobe.Protocol{modelprobe.ProtocolMessages}
+	case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
+		return []modelprobe.Protocol{modelprobe.ProtocolGenerateContent}
+	default:
+		return []modelprobe.Protocol{modelprobe.ProtocolChatCompletions, modelprobe.ProtocolResponses}
+	}
+}
+
+func decisiveCapability(status string) *bool {
+	value := false
+	switch status {
+	case modelprobe.StatusOK:
+		value = true
+	case modelprobe.StatusEndpointNotSupported, modelprobe.StatusModelNotFound:
+		value = false
+	default:
+		return nil
+	}
+	return &value
+}
+
+func normalizeProtocolFamily(value string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "-", "_")
 }

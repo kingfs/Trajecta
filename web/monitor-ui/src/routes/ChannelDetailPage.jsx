@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { WindowToggle } from "../components/common/Tabs";
-import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon, TestIcon } from "../components/common/Badges";
+import { DeleteIcon, DetailMetaPill, DetectIcon, EditIcon, HomeIcon, InlineTag, ProbeIcon, TestIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
@@ -26,6 +26,14 @@ import {
   summarizeModelTest,
   testLatencyText,
 } from "../lib/modelTest";
+import {
+  buildModelDetectPayload,
+  channelInterfaceUnion,
+  detectAppliedLabels,
+  detectProtocolChips,
+  interfaceChipsOrUnknown,
+  summarizeDetectResult,
+} from "../lib/interfaces";
 
 export function ProviderDetailPage() {
   const refresh = useRefresh();
@@ -41,6 +49,10 @@ export function ProviderDetailPage() {
   // The result map keeps the last outcome after the page refetches.
   const [testResults, setTestResults] = useState({});
   const [testingModels, setTestingModels] = useState({});
+  // Interface detection has the same per-model shape: one result and one busy
+  // flag per card, because the button is on the card.
+  const [detectResults, setDetectResults] = useState({});
+  const [detectingModels, setDetectingModels] = useState({});
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(() => emptyEditForm());
   const [lastProbe, setLastProbe] = useState(null);
@@ -114,16 +126,64 @@ export function ProviderDetailPage() {
     },
   });
 
+  // Enabling a model now also asks the backend to fill in its unset interfaces
+  // (`overwrite: false`): a model that was just switched on is usually one the
+  // operator has not probed yet. The detection request carries no credential.
+  const detectOnEnable = useWriteMutation({
+    mutationFn: ({ model }) => postJSON(apiPaths.providerModelDetect, buildModelDetectPayload({ channelID: effectiveProviderID, model, overwrite: false })),
+    error: "channels.detectFailed",
+    onSuccess: reload,
+  });
+
   const setModelEnabled = useWriteMutation({
     mutationFn: ({ model, enabled }) => patchJSON(apiPaths.providerModel(effectiveProviderID, model), { enabled }),
     error: "channelDetail.updateModelError",
+    onSuccess: (_data, variables) => {
+      reload();
+      if (variables?.enabled && variables.model) {
+        detectOnEnable.mutate({ model: variables.model });
+      }
+    },
+  });
+
+  // The explicit per-model detect button overwrites the stored interfaces.
+  const detectModel = useWriteMutation({
+    mutationFn: ({ model }) => postJSON(apiPaths.providerModelDetect, buildModelDetectPayload({ channelID: effectiveProviderID, model, overwrite: true })),
+    success: (result) => t("channelDetail.detectApplied", { count: formatCount(summarizeDetectResult(result).appliedCount) }),
+    error: "channels.detectFailed",
+    onSuccess: (result, variables) => {
+      const model = variables?.model;
+      if (!model) {
+        return;
+      }
+      setDetectResults((current) => ({ ...current, [model]: result }));
+      setDetectingModels((current) => removingKey(current, model));
+      reload();
+    },
+    onError: (_err, variables) => {
+      const model = variables?.model;
+      if (model) {
+        setDetectingModels((current) => removingKey(current, model));
+      }
+    },
+  });
+
+  // The toolbar action detects every enabled model at once: the body is only the
+  // channel id, so the backend picks the models.
+  const detectAll = useWriteMutation({
+    mutationFn: () => postJSON(apiPaths.providerModelDetect, buildModelDetectPayload({ channelID: effectiveProviderID })),
+    success: (result) => {
+      const summary = summarizeDetectResult(result);
+      return `${t("channels.detected")} · ${t("channels.detectApplied", { count: formatCount(summary.appliedCount) })}`;
+    },
+    error: "channels.detectFailed",
     onSuccess: reload,
   });
 
   const deleteProvider = useWriteMutation({
     mutationFn: () => deleteJSON(apiPaths.provider(effectiveProviderID)),
     error: "channelDetail.deleteProviderError",
-    onSuccess: () => navigate("/providers"),
+    onSuccess: () => navigate("/channels"),
   });
 
   const deleteModel = useWriteMutation({
@@ -223,6 +283,14 @@ export function ProviderDetailPage() {
     }
   };
 
+  const runModelDetect = (model) => {
+    if (!model || detectingModels[model]) {
+      return;
+    }
+    setDetectingModels((current) => ({ ...current, [model]: true }));
+    detectModel.mutate({ model });
+  };
+
   const submitAddModel = (event) => {
     event.preventDefault();
     const model = modelDraft.trim();
@@ -262,20 +330,23 @@ export function ProviderDetailPage() {
             <div className="detail-meta-strip">
               <DetailMetaPill label={t("channelDetail.configSource")} value={providerSourceLabel(provider.source)} />
               <DetailMetaPill label={t("providers.apiType")} value={provider.api_type || "-"} />
-              <DetailMetaPill label={t("channelDetail.mode")} value={provider.mode || "-"} />
               <DetailMetaPill label={t("channelDetail.baseUrl")} value={provider.base_url || "-"} mono />
               <DetailMetaPill label={t("channelDetail.models")} value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
               <DetailMetaPill label={t("common.requests")} value={formatCount(summary.request_count)} />
               <DetailMetaPill label={t("common.tokens")} value={formatCount(summary.total_tokens)} />
               {summary.missing_usage_request ? <DetailMetaPill label={t("channelDetail.missingUsage")} value={formatCount(summary.missing_usage_request)} /> : null}
             </div>
+            <InterfaceChipRow label={t("channels.interfaceSummary")} chips={channelInterfaceUnion(modelsUsage)} />
           </div>
           <div className="topbar-meta detail-toolbar">
             <div className="detail-toolbar-actions">
               <Button asChild variant="default" size="icon">
-                <Link to="/providers" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
+                <Link to="/channels" title={t("channelDetail.backToProviders")} aria-label={t("channelDetail.backToProviders")}>
                   <HomeIcon />
                 </Link>
+              </Button>
+              <Button variant="default" size="icon" type="button" onClick={() => detectAll.mutate()} disabled={detectAll.isPending || !provider.enabled_model_count} title={detectAll.isPending ? t("channels.detectingAll") : t("channels.detectAll")} aria-label={t("channels.detectAll")}>
+                {detectAll.isPending ? <span className="provider-model-test-spinner" aria-hidden="true" /> : <DetectIcon />}
               </Button>
               <Button variant="default" size="icon" type="button" onClick={() => probe.mutate()} disabled={busy === "probe"} title={t("channelDetail.probeProvider")} aria-label={t("channelDetail.probeProvider")}><ProbeIcon /></Button>
               <DialogTrigger asChild>
@@ -344,6 +415,7 @@ export function ProviderDetailPage() {
                 <div>
                   <h2>{t("channelDetail.modelRoutingUsage")}</h2>
                   <p className="trace-subline">{t("channelDetail.enableHint")}</p>
+                  <p className="trace-subline">{t("channelDetail.autoDetectOnEnable")}</p>
                   {!provider.enabled ? <p className="trace-subline">{t("channelDetail.providerDisabledHint")}</p> : null}
                 </div>
               </div>
@@ -367,8 +439,11 @@ export function ProviderDetailPage() {
                     testing={Boolean(testingModels[model.model])}
                     testResult={testResults[model.model] || null}
                     disablingResponses={Boolean(disableResponses.isPending && disableResponses.variables?.model === model.model)}
+                    detecting={Boolean(detectingModels[model.model])}
+                    detectResult={detectResults[model.model] || null}
                     onToggle={() => setModelEnabled.mutate({ model: model.model, enabled: !model.enabled })}
                     onTest={() => runModelTest(model.model)}
+                    onDetect={() => runModelDetect(model.model)}
                     onDisableResponses={() => runDisableResponses(model.model)}
                     onDelete={() => confirmDeleteModel(model.model)}
                   />
@@ -459,6 +534,7 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
         </div>
+        <p className="trace-subline"><strong>{t("channels.autoDetect")}</strong> · {t("channels.autoDetectHint")}</p>
         <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
@@ -536,8 +612,11 @@ function ProviderModelRow({
   testing,
   testResult,
   disablingResponses,
+  detecting,
+  detectResult,
   onToggle,
   onTest,
+  onDetect,
   onDisableResponses,
   onDelete,
 }) {
@@ -566,6 +645,11 @@ function ProviderModelRow({
         <div className="action-group">
           {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={t("channelDetail.modelEnabled", { model: item.model })} /> : <span>{t("channelDetail.historyOnly")}</span>}
           {testable ? (
+            <Button variant="default" size="icon" type="button" onClick={onDetect} disabled={detecting} title={detecting ? t("channelDetail.detecting") : t("channelDetail.detectInterfaces")} aria-label={t("channelDetail.detectInterfaceAria", { model: item.model })}>
+              {detecting ? <span className="provider-model-test-spinner" aria-hidden="true" /> : <DetectIcon />}
+            </Button>
+          ) : null}
+          {testable ? (
             <Button variant="default" size="icon" type="button" onClick={onTest} disabled={testing} title={testLabel} aria-label={t("channelDetail.testModelAria", { model: item.model })}>
               {testing ? <span className="provider-model-test-spinner" aria-hidden="true" /> : <TestIcon />}
             </Button>
@@ -584,6 +668,8 @@ function ProviderModelRow({
         {state === "unverified" ? <InlineTag tone="gold">{t("channelDetail.upstreamNameHint")}</InlineTag> : null}
         {item.enabled && !providerEnabled ? <InlineTag tone="gold">{t("channelDetail.blockedProviderDisabled")}</InlineTag> : null}
       </div>
+      <InterfaceChipRow chips={interfaceChipsOrUnknown(item.interfaces)} />
+      {detecting ? <ModelTestPending labelKey="channelDetail.detecting" /> : detectResult ? <ModelDetectResult result={detectResult} /> : null}
       {testing ? <ModelTestPending /> : testResult ? (
         <ModelTestResult result={testResult} disabling={disablingResponses} onDisableResponses={onDisableResponses} />
       ) : null}
@@ -596,12 +682,12 @@ function ProviderModelRow({
   );
 }
 
-function ModelTestPending() {
+function ModelTestPending({ labelKey = "channelDetail.testing" }) {
   const { t } = useI18n();
   return (
     <div className="provider-model-test-result provider-model-test-result-pending" role="status" aria-live="polite">
       <span className="provider-model-test-spinner" aria-hidden="true" />
-      <span>{t("channelDetail.testing")}</span>
+      <span>{t(labelKey)}</span>
     </div>
   );
 }
@@ -678,6 +764,86 @@ function ModelTestResult({ result, disabling, onDisableResponses }) {
       {warnings.length ? (
         <ul className="provider-model-test-warnings">
           {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+// The chip row is shared by the channel header (union over enabled models) and
+// each model card (that model's interfaces). The unknown chip keeps an
+// undetected model from looking like a model with no interfaces at all.
+function InterfaceChipRow({ chips, label = "" }) {
+  const { t } = useI18n();
+  if (!chips || !chips.length) {
+    return null;
+  }
+  return (
+    <div className="channel-interface-chips" role="list" aria-label={label || undefined}>
+      {chips.map((chip) => (
+        <span key={chip.key} role="listitem">
+          <InlineTag tone={chip.tone}>{t(chip.labelKey)}</InlineTag>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The inline result of one detect action. It says what was written, which
+// protocols were probed and how they answered, whether the action overwrote the
+// previous flags, and the skip reason when the detector found nothing.
+function ModelDetectResult({ result }) {
+  const { t } = useI18n();
+  const summary = summarizeDetectResult(result);
+  const item = summary.items[0] || {};
+  const appliedLabels = detectAppliedLabels(item);
+  const protocols = detectProtocolChips(item);
+  const skipped = typeof item.skipped_reason === "string" ? item.skipped_reason.trim() : "";
+  const duration = testLatencyText(t, summary.durationMs);
+  return (
+    <div className="provider-model-detect-result" role="status" aria-live="polite">
+      <div className="provider-model-test-head">
+        <span className="provider-model-test-title">{t("channels.detectResultTitle")}</span>
+        <InlineTag tone={appliedLabels.length ? "green" : skipped ? "gold" : "default"}>
+          {appliedLabels.length
+            ? t("channels.detectApplied", { count: formatCount(appliedLabels.length) })
+            : skipped
+              ? t("channels.interfaceUnknown")
+              : t("channels.detectFailed")}
+        </InlineTag>
+        <span className="channel-detect-mode">{summary.overwrite ? t("channels.detectOverwrite") : t("channels.detectFillOnly")}</span>
+        {duration ? <span className="provider-model-test-duration">{duration}</span> : null}
+      </div>
+      {appliedLabels.length ? (
+        <div className="channel-interface-chips">
+          {appliedLabels.map((labelKey) => <InlineTag key={labelKey} tone="green">{t(labelKey)}</InlineTag>)}
+        </div>
+      ) : null}
+      {protocols.length ? (
+        <div className="provider-model-test-chips">
+          {protocols.map((chip) => {
+            const parts = [chip.label || chip.protocol];
+            const latencyText = testLatencyText(t, chip.latencyMs);
+            if (latencyText) {
+              parts.push(latencyText);
+            }
+            if (chip.marker !== "check") {
+              const statusText = chip.labelKey ? t(chip.labelKey) : chip.status;
+              parts.push(chip.httpStatus ? `${chip.httpStatus} ${statusText}` : statusText);
+            }
+            return (
+              <span key={chip.protocol} className={`provider-model-test-chip provider-model-test-chip-${chip.tone}`}>
+                <span className="provider-model-test-mark" aria-hidden="true">{`${TEST_MARKERS[chip.marker] || "–"} `}</span>
+                <span>{parts.join(" · ")}</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {skipped ? <p className="channel-detect-skipped">{t("channels.detectSkipped", { reason: skipped })}</p> : null}
+      {summary.warnings.length ? (
+        <ul className="provider-model-test-warnings">
+          {summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}
         </ul>
       ) : null}
     </div>
@@ -768,8 +934,6 @@ function emptyEditForm() {
     base_url: "",
     provider_preset: "",
     api_type: "chat_completions",
-    mode: "proxy",
-    capabilities: {},
     protocol_family: "",
     routing_profile: "",
     api_version: "",
@@ -781,7 +945,6 @@ function emptyEditForm() {
     priority: 0,
     weight: 1,
     capacity_hint: 1,
-    model_discovery: "list_models",
     headers_text: "",
   };
 }
@@ -793,8 +956,6 @@ function editFormFromProvider(provider = {}) {
     base_url: provider.base_url || "",
     provider_preset: provider.provider_preset || "",
     api_type: provider.api_type || "chat_completions",
-    mode: provider.mode || "proxy",
-    capabilities: provider.capabilities || {},
     protocol_family: provider.protocol_family || "",
     routing_profile: provider.routing_profile || "",
     api_version: provider.api_version || "",
@@ -806,7 +967,6 @@ function editFormFromProvider(provider = {}) {
     priority: provider.priority ?? 0,
     weight: provider.weight ?? 1,
     capacity_hint: provider.capacity_hint ?? 1,
-    model_discovery: provider.model_discovery || "list_models",
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
   };
 }
@@ -817,8 +977,6 @@ function providerPayloadFromForm(form) {
     base_url: form.base_url,
     provider_preset: form.provider_preset,
     api_type: form.api_type,
-    mode: form.mode,
-    capabilities: normalizeCapabilities(form.capabilities),
     protocol_family: form.protocol_family,
     routing_profile: form.routing_profile,
     api_version: form.api_version,
@@ -829,7 +987,6 @@ function providerPayloadFromForm(form) {
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
-    model_discovery: form.model_discovery,
     headers: parseHeadersText(form.headers_text),
   };
   if (form.api_key.trim()) {
@@ -838,7 +995,9 @@ function providerPayloadFromForm(form) {
   return payload;
 }
 
-function providerProbeSuggestionPayload(provider = {}, report = {}) {
+function providerProbeSuggestionPayload(_provider = {}, report = {}) {
+  // Only the channel-level API surface is a suggestion now: interface support is
+  // detected per model and written to the model rows.
   const payload = {};
   if (report.suggested_api_type) {
     payload.api_type = report.suggested_api_type;
@@ -846,43 +1005,7 @@ function providerProbeSuggestionPayload(provider = {}, report = {}) {
   if (report.suggested_protocol_family) {
     payload.protocol_family = report.suggested_protocol_family;
   }
-  const capabilities = { ...(provider.capabilities || {}) };
-  for (const capability of report.capabilities || []) {
-    switch (capability) {
-      case "responses":
-        capabilities.responses = true;
-        break;
-      case "chat_completions":
-        capabilities.chat_completions = true;
-        break;
-      case "tool_calling":
-        capabilities.tool_calling = true;
-        break;
-      case "models":
-        capabilities.models = true;
-        break;
-      case "embeddings":
-        capabilities.embeddings = true;
-        break;
-      case "tokenize":
-        capabilities.tokenize = true;
-        break;
-      default:
-        break;
-    }
-  }
-  payload.capabilities = normalizeCapabilities(capabilities);
   return payload;
-}
-
-function normalizeCapabilities(value) {
-  const capabilities = {};
-  for (const key of ["responses", "chat_completions", "tool_calling", "models", "embeddings", "tokenize"]) {
-    if (typeof value?.[key] === "boolean") {
-      capabilities[key] = value[key];
-    }
-  }
-  return capabilities;
 }
 
 function parseHeadersText(value) {
