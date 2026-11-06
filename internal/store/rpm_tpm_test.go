@@ -125,6 +125,33 @@ func TestOverviewRates(t *testing.T) {
 	}
 }
 
+// Stats average uses the latest row as the span end (same as Overview/Usage),
+// not wall-clock: a window whose traffic ended hours ago still reports the
+// rate the traffic actually sustained.
+func TestStatsAvgUsesLatestRow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	// One row 30 minutes ago, inside a 60-minute window but far from now.
+	seedRateLog(t, st, dir, "stats-old.http", now.Add(-30*time.Minute), 60, "gpt-stats")
+	stats, err := st.Stats(ListFilter{Since: now.Add(-60 * time.Minute)})
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.CurrentRPM != 0 {
+		t.Fatalf("current rpm = %d, want 0 (outside trailing 60s)", stats.CurrentRPM)
+	}
+	// Span is since (-60m) to latest row (-30m) = 30 minutes: 1/30 and 60/30.
+	if math.Abs(stats.AvgRPM-1.0/30.0) > 0.01 || math.Abs(stats.AvgTPM-2.0) > 0.1 {
+		t.Fatalf("stats avg = %v/%v, want ~0.033/2 (data-derived span)", stats.AvgRPM, stats.AvgTPM)
+	}
+}
+
 // Rate helpers are pure arithmetic; pin the edge semantics they share.
 func TestRateWindowMinutes(t *testing.T) {
 	from := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)

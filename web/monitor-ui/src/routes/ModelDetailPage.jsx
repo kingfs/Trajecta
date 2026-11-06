@@ -18,6 +18,7 @@ import {
   buildProviderLink,
   formatCount,
   formatDateTime,
+  formatRateAvg,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -84,8 +85,8 @@ export function ModelDetailPage() {
           <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
           <StatCard label={t("models.today")} value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request, t)} />
-          <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatCount(summary.avg_rpm ?? 0) })} />
-          <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatCount(summary.avg_tpm ?? 0) })} />
+          <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+          <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
         </div>
       </Card>
 

@@ -110,8 +110,8 @@ export function UpstreamDetailPage() {
           <div className="detail-toolbar-tokens">
             <TokenBadge label={t("metric.ttft")} value={target?.avg_ttft ?? 0} icon="duration" format="duration" />
             <TokenBadge label={t("metric.totalTokens")} value={target?.total_tokens ?? 0} icon="total" accent="token-badge-strong" />
-            <TokenBadge label={t("overview.rpm")} value={target?.current_rpm ?? 0} icon="total" />
-            <TokenBadge label={t("overview.tpm")} value={target?.current_tpm ?? 0} icon="total" accent="token-badge-strong" />
+            <TokenBadge label={t("overview.rpm")} value={target?.current_rpm ?? 0} icon="rate" />
+            <TokenBadge label={t("overview.tpm")} value={target?.current_tpm ?? 0} icon="rate" accent="token-badge-strong" />
             <TokenBadge label={t("common.failed")} value={target?.failed_request ?? 0} icon="failed" />
           </div>
           <WindowToggle value={windowValue} onChange={setWindow} label={t("upstreamDetail.windowLabel")} />

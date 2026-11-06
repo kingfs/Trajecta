@@ -23,6 +23,7 @@ import {
   formatEndpointTag,
   formatFailureReason,
   formatProviderTag,
+  formatRateAvg,
   formatTokenCount,
   normalizeAnalyticsWindow,
   normalizeUpstreamWindow,
@@ -88,8 +89,8 @@ export function OverviewPage() {
         <StatCard label={t("common.successRate")} value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={t("overview.successful", { count: formatCount(summary.success_request ?? 0) })} accent="accent-green" />
         <StatCard label={t("overview.failed")} value={formatCount(summary.failed_request ?? 0)} detail={t("overview.recentFailures", { count: attention.recent_failures?.length ?? 0 })} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />
         <StatCard label={t("overview.tokens")} value={formatTokenCount(summary.total_tokens ?? 0)} detail={t("overview.streamingTraces", { count: formatCount(summary.stream_count ?? 0) })} title={String(summary.total_tokens ?? 0)} />
-        <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateDetail", { avg: formatCount(summary.avg_rpm ?? 0), peak: formatCount(summary.peak_rpm ?? 0) })} />
-        <StatCard label={t("overview.tpm")} value={formatTokenCount(summary.current_tpm ?? 0)} detail={t("overview.rateDetail", { avg: formatTokenCount(summary.avg_tpm ?? 0), peak: formatTokenCount(summary.peak_tpm ?? 0) })} />
+        <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0), peak: formatCount(summary.peak_rpm ?? 0) })} />
+        <StatCard label={t("overview.tpm")} value={formatTokenCount(summary.current_tpm ?? 0)} detail={t("overview.rateDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0), peak: formatTokenCount(summary.peak_tpm ?? 0) })} />
         <StatCard label={t("common.avgTtft")} value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
         <StatCard label={t("overview.latency")} value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
       </section>

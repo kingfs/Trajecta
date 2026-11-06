@@ -126,18 +126,20 @@ func maybeEvaluateRatesAlerts(st *store.Store, r *http.Request) {
 	}
 	// Resolve previously breached scopes that have cleared, but only when the
 	// operator never read them: a deliberate read/ignore must survive the
-	// automatic clear. Scopes that went silent (no traffic in the last
-	// minute) are not in evaluated, so their stale event stays for the
-	// operator to see alongside its last_seen_at.
-	for _, fingerprint := range evaluated {
+	// automatic clear. Every unread fingerprint either breached (keep) or
+	// cleared/silent (resolve), including scopes that went silent with no
+	// traffic this round and were not evaluated.
+	_ = evaluated
+	unread, err := st.ListRatesAlertFingerprints(store.SystemEventStatusUnread)
+	if err != nil {
+		return
+	}
+	for _, fingerprint := range unread {
 		if breached[fingerprint] {
 			continue
 		}
 		event, err := st.GetSystemEventByFingerprint(fingerprint)
 		if err != nil {
-			continue
-		}
-		if event.Status != store.SystemEventStatusUnread {
 			continue
 		}
 		_ = st.ResolveSystemEvent(event.ID)

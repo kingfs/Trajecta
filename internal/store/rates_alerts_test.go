@@ -50,6 +50,11 @@ func TestRatesAlertsSettingsValidationAndPersistence(t *testing.T) {
 	if _, err := st.SaveRatesAlertsSettings(context.Background(), RatesAlertsSettings{Enabled: true, MaxRPM: 10, Severity: "bogus"}); err == nil {
 		t.Fatal("bogus severity error = nil, want validation failure")
 	}
+	// A negative threshold must be rejected, not silently clamped to a
+	// disabled dimension.
+	if _, err := st.SaveRatesAlertsSettings(context.Background(), RatesAlertsSettings{Enabled: true, MaxRPM: 10, MaxTPM: -5}); err == nil {
+		t.Fatal("negative max_tpm error = nil, want validation failure")
+	}
 	saved, err := st.SaveRatesAlertsSettings(context.Background(), RatesAlertsSettings{Enabled: true, MaxRPM: 10, MaxTPM: 1000, Severity: " ERROR "})
 	if err != nil {
 		t.Fatalf("SaveRatesAlertsSettings() error = %v", err)

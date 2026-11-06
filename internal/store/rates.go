@@ -196,8 +196,13 @@ func (s RatesAlertsSettings) Normalize() RatesAlertsSettings {
 }
 
 // Validate rejects an enabled configuration that watches nothing, an invalid
-// severity, or negative thresholds.
+// severity, or negative thresholds. The checks run on the raw values, before
+// normalization, so a negative threshold is reported rather than silently
+// clamped to a disabled dimension.
 func (s RatesAlertsSettings) Validate() error {
+	if s.MaxRPM < 0 || s.MaxTPM < 0 {
+		return errors.New("max_rpm and max_tpm must be >= 0")
+	}
 	normalized := s.Normalize()
 	if _, ok := RatesAlertSeverities[normalized.Severity]; !ok {
 		return fmt.Errorf("severity %q is not supported; use warning, error or critical", s.Severity)
@@ -224,9 +229,12 @@ func (s *Store) LoadRatesAlertsSettings(ctx context.Context) (RatesAlertsSetting
 
 // SaveRatesAlertsSettings validates and persists the alert settings.
 func (s *Store) SaveRatesAlertsSettings(ctx context.Context, settings RatesAlertsSettings) (RatesAlertsSettings, error) {
-	normalized := settings.Normalize()
-	if err := normalized.Validate(); err != nil {
+	if err := settings.Validate(); err != nil {
 		return RatesAlertsSettings{}, err
+	}
+	normalized := settings.Normalize()
+	if normalized.MaxRPM < 0 || normalized.MaxTPM < 0 {
+		return RatesAlertsSettings{}, errors.New("max_rpm and max_tpm must be >= 0")
 	}
 	if err := s.SaveAppSettingJSON(ctx, RatesAlertsSettingKey, normalized); err != nil {
 		return RatesAlertsSettings{}, err
@@ -293,7 +301,9 @@ func (s *Store) EvaluateRatesAlerts(settings RatesAlertsSettings) ([]RatesBreach
 			breaches = append(breaches, *breach)
 		}
 	}
-	models, err := s.currentRatesAllByGroup("model", `model <> '' AND LOWER(model) <> 'list_models'`, nil)
+	// Group by the lowercased model, matching listLogModels normalization, so
+	// the fingerprint key is stable across case variants of the same model.
+	models, err := s.currentRatesAllByGroup("LOWER(model)", `model <> '' AND LOWER(model) <> 'list_models'`, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -374,4 +384,37 @@ func RatesAlertSystemEvent(breach RatesBreach, severity string) (SystemEvent, er
 		event.Model = breach.Key
 	}
 	return event, nil
+}
+
+// ListRatesAlertFingerprints returns the fingerprints of rate breach events
+// in the given statuses. The alert evaluator uses it to find scopes that went
+// silent (no traffic in the last minute) so their unread events can be
+// resolved even though they were not evaluated this round.
+func (s *Store) ListRatesAlertFingerprints(statuses ...string) ([]string, error) {
+	whereSQL := `source = 'rates' AND category = 'rate_breach'`
+	var args []any
+	if len(statuses) > 0 {
+		placeholders := make([]string, len(statuses))
+		for i, status := range statuses {
+			placeholders[i] = "?"
+			args = append(args, status)
+		}
+		whereSQL += ` AND status IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	rows, err := s.db.Query(`SELECT fingerprint FROM system_events WHERE `+whereSQL, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var fingerprint string
+		if err := rows.Scan(&fingerprint); err != nil {
+			return nil, err
+		}
+		if fingerprint != "" {
+			out = append(out, fingerprint)
+		}
+	}
+	return out, rows.Err()
 }

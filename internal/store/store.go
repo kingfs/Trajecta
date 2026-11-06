@@ -3731,7 +3731,20 @@ func (s *Store) Stats(filter ListFilter) (Stats, error) {
 		stats.RatesSampledAt = sampledAt
 	}
 	if !filter.Since.IsZero() {
-		windowMinutes := rateWindowMinutes(filter.Since, sampledAt)
+		// Same data-derived span end as Overview/Usage (latest row, not
+		// wall-clock): a window whose traffic ended hours ago still reports
+		// the rate the traffic actually sustained.
+		var latestRecordedAt any
+		if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+			return Stats{}, err
+		}
+		referenceTime := sampledAt
+		if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+			return Stats{}, err
+		} else if !latestTime.IsZero() {
+			referenceTime = latestTime
+		}
+		windowMinutes := rateWindowMinutes(filter.Since, referenceTime)
 		stats.AvgRPM, stats.AvgTPM = rateAvg(total, totalTokens, windowMinutes)
 	}
 	s.storeCachedStats(cacheKey, stats)
