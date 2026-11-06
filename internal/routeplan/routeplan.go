@@ -1,12 +1,14 @@
+// Package routeplan holds the routing vocabulary shared by the forwarding path
+// and the Monitor's routing inspector: the entrypoints and execution modes a
+// request can be planned for, the response-shape DTOs the inspector returns, and
+// the one Responses execution-mode decision both callers make.
+//
+// It deliberately contains no planner. Candidate filtering, health handling and
+// selection live in internal/router (Router.Explain for a dry run), so the
+// inspector and the forwarding path cannot drift apart.
 package routeplan
 
-import (
-	"errors"
-	"fmt"
-	"sort"
-	"strings"
-	"time"
-)
+import "time"
 
 type ClientEntrypoint string
 
@@ -41,6 +43,8 @@ const (
 	ResponsesStrategyLocalServerOnly   ResponsesStrategy = "local_server_only"
 )
 
+// Reason values reported per route-plan candidate. The Monitor UI renders these
+// strings; they are part of the public inspect response shape.
 const (
 	ReasonSelected                         = "selected"
 	ReasonUnsupportedEntrypoint            = "unsupported_entrypoint"
@@ -61,108 +65,11 @@ const (
 	ReasonAllTargetsOpen                   = "all_targets_open"
 )
 
-var ErrNoRoute = errors.New("no route plan")
-
-type Request struct {
-	Entrypoint                    ClientEntrypoint
-	RequestedModel                string
-	ResolvedModelCandidates       []ResolvedModelCandidate
-	ResponsesStrategy             ResponsesStrategy
-	RequiresLocalResponsesRuntime bool
-	HasTools                      bool
-	Stream                        bool
-}
-
 type ResolvedModelCandidate struct {
-	Model     string
-	Alias     string
-	ChannelID string
-	Source    string
-}
-
-type UpstreamCandidate struct {
-	ID            string
-	RouteTargetID string
-	ChannelID     string
-	Enabled       bool
-	Priority      int
-	Weight        float64
-	Models        []string
-	// DisabledModels are names the channel declares but has switched off. They
-	// are not routable; the planner reports them separately from a name no
-	// channel declares at all.
-	DisabledModels            []string
-	SupportsChatCompletions   bool
-	SupportsResponses         bool
-	SupportsAnthropicMessages bool
-	SupportsToolCalling       bool
-	// ModelCapabilities overrides the support flags above for individual
-	// models. A nil field means "not declared", so the channel-level flag
-	// applies; keys are matched case-insensitively.
-	ModelCapabilities map[string]ModelCapabilities
-	// Health is the live runtime health reported by the router. Nil means
-	// "unknown" (a purely structural plan), in which case health is not
-	// applied and the plan stays configuration-only.
-	Health *CandidateHealth
-}
-
-// CandidateHealth is the live availability of one upstream candidate as
-// reported by the router. It is what makes a plan reflect circuit breakers and
-// per-model health instead of only the static capability matrix.
-type CandidateHealth struct {
-	HealthState string     `json:"health_state,omitempty"`
-	Selectable  bool       `json:"selectable"`
-	Reason      string     `json:"reason,omitempty"`
-	OpenUntil   *time.Time `json:"open_until,omitempty"`
-	// ModelHealthState and ModelOpenUntil describe the per-model breaker, which
-	// opens independently of the channel-level HealthState above.
-	ModelHealthState string     `json:"model_health_state,omitempty"`
-	ModelOpenUntil   *time.Time `json:"model_open_until,omitempty"`
-}
-
-// ModelCapabilities declares the protocol surfaces a single model supports on
-// its upstream channel.
-type ModelCapabilities struct {
-	SupportsChatCompletions   *bool `json:"supports_chat_completions,omitempty"`
-	SupportsResponses         *bool `json:"supports_responses,omitempty"`
-	SupportsAnthropicMessages *bool `json:"supports_anthropic_messages,omitempty"`
-	SupportsToolCalling       *bool `json:"supports_tool_calling,omitempty"`
-}
-
-func (u UpstreamCandidate) modelCapabilities(model string) (ModelCapabilities, bool) {
-	if len(u.ModelCapabilities) == 0 || strings.TrimSpace(model) == "" {
-		return ModelCapabilities{}, false
-	}
-	caps, ok := u.ModelCapabilities[strings.ToLower(strings.TrimSpace(model))]
-	return caps, ok
-}
-
-func (u UpstreamCandidate) supportsChatCompletions(model string) bool {
-	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsChatCompletions != nil {
-		return *caps.SupportsChatCompletions
-	}
-	return u.SupportsChatCompletions
-}
-
-func (u UpstreamCandidate) supportsResponses(model string) bool {
-	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsResponses != nil {
-		return *caps.SupportsResponses
-	}
-	return u.SupportsResponses
-}
-
-func (u UpstreamCandidate) supportsAnthropicMessages(model string) bool {
-	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsAnthropicMessages != nil {
-		return *caps.SupportsAnthropicMessages
-	}
-	return u.SupportsAnthropicMessages
-}
-
-func (u UpstreamCandidate) supportsToolCalling(model string) bool {
-	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsToolCalling != nil {
-		return *caps.SupportsToolCalling
-	}
-	return u.SupportsToolCalling
+	Model     string `json:"model,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	ChannelID string `json:"channel_id,omitempty"`
+	Source    string `json:"source,omitempty"`
 }
 
 type RoutePlan struct {
@@ -190,7 +97,7 @@ type PlanCandidate struct {
 	Selectable       bool             `json:"selectable"`
 	Reason           string           `json:"reason,omitempty"`
 	Rank             int              `json:"rank"`
-	// Health mirrors the runtime health used to decide Selectable so a caller
+	// HealthState mirrors the runtime health used to decide Selectable so a caller
 	// can explain why a structurally capable candidate was filtered out.
 	HealthState string     `json:"health_state,omitempty"`
 	CircuitOpen bool       `json:"circuit_open,omitempty"`
@@ -205,326 +112,69 @@ type Result struct {
 	Candidates []PlanCandidate `json:"candidates"`
 }
 
-type NoRouteError struct {
-	Reason     string
-	Candidates []PlanCandidate
+// ResponsesDecisionInput is the native-versus-local question for one
+// `/v1/responses` request. The forwarding path answers the three booleans from
+// the live router and the local runtime; the Monitor's inspector passes the same
+// shape from its dry run.
+type ResponsesDecisionInput struct {
+	Strategy        ResponsesStrategy
+	NativeAvailable bool
+	NativePresent   bool
+	LocalAvailable  bool
 }
 
-func (e *NoRouteError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if e.Reason == "" {
-		return ErrNoRoute.Error()
-	}
-	return fmt.Sprintf("%s: %s", ErrNoRoute, e.Reason)
+// ResponsesDecision is the shared answer: either serve the request through the
+// local Responses runtime, or reject it with the message the client sees.
+type ResponsesDecision struct {
+	UseLocal     bool
+	RejectReason string
 }
 
-func Plan(req Request, upstreams []UpstreamCandidate) (Result, error) {
-	req = normalizeRequest(req)
-	var candidates []PlanCandidate
-	switch req.Entrypoint {
-	case EntrypointChatCompletions:
-		candidates = planForEndpoint(req, upstreams, ExecutionModeProxyPass, UpstreamEndpointChatCompletions, ReasonRequiresChatCompletions)
-	case EntrypointAnthropicMessage:
-		candidates = planForEndpoint(req, upstreams, ExecutionModeProxyPass, UpstreamEndpointAnthropicMessage, ReasonRequiresAnthropicMessages)
-	case EntrypointResponses:
-		var err error
-		candidates, err = planResponses(req, upstreams)
-		if err != nil {
-			return Result{Candidates: candidates}, err
-		}
-	default:
-		return Result{}, &NoRouteError{Reason: ReasonUnsupportedEntrypoint}
-	}
-
-	selected, ok := firstSelectable(candidates)
-	if !ok {
-		reason := ReasonNoCandidate
-		for _, candidate := range candidates {
-			switch candidate.Reason {
-			case ReasonTargetCircuitOpen, ReasonTargetUnhealthy, ReasonModelCircuitOpen:
-				reason = ReasonAllTargetsOpen
-			}
-			if reason == ReasonAllTargetsOpen {
-				break
-			}
-		}
-		return Result{Candidates: candidates}, &NoRouteError{Reason: reason, Candidates: candidates}
-	}
-	return Result{Plan: routePlanFromCandidate(req, selected, candidates), Candidates: candidates}, nil
-}
-
-func normalizeRequest(req Request) Request {
-	req.RequestedModel = strings.TrimSpace(req.RequestedModel)
-	if req.ResponsesStrategy == "" {
-		req.ResponsesStrategy = ResponsesStrategyAuto
-	}
-	if len(req.ResolvedModelCandidates) == 0 && req.RequestedModel != "" {
-		req.ResolvedModelCandidates = []ResolvedModelCandidate{{Model: req.RequestedModel, Source: "request"}}
-	}
-	seen := map[string]struct{}{}
-	out := make([]ResolvedModelCandidate, 0, len(req.ResolvedModelCandidates))
-	for _, candidate := range req.ResolvedModelCandidates {
-		candidate.Model = strings.TrimSpace(candidate.Model)
-		candidate.Alias = strings.TrimSpace(candidate.Alias)
-		candidate.ChannelID = strings.TrimSpace(candidate.ChannelID)
-		if candidate.Model == "" {
-			continue
-		}
-		key := strings.ToLower(candidate.ChannelID + "\x00" + candidate.Model)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, candidate)
-	}
-	req.ResolvedModelCandidates = out
-	return req
-}
-
-func planForEndpoint(req Request, upstreams []UpstreamCandidate, mode ExecutionMode, endpoint UpstreamEndpoint, capabilityReason string) []PlanCandidate {
-	plans := make([]PlanCandidate, 0, len(upstreams))
-	for _, upstream := range sortUpstreams(upstreams) {
-		plan := basePlanCandidate(upstream, mode, endpoint, 0)
-		if !upstream.Enabled {
-			plan.Reason = ReasonChannelNotEnabled
-		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
-			plan.Reason = modelMismatchReason(req, upstream)
-		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
-			plan.Reason = capabilityReason
-		} else if req.HasTools && !upstream.supportsToolCalling(matchedModel) {
-			plan.Reason = "requires_tool_calling"
-		} else {
-			plan.Selectable = true
-			plan.Reason = ReasonSelected
-		}
-		applyCandidateHealth(&plan, upstream, time.Now())
-		plans = append(plans, plan)
-	}
-	return plans
-}
-
-func planResponses(req Request, upstreams []UpstreamCandidate) ([]PlanCandidate, error) {
-	strategy := req.ResponsesStrategy
-	if strategy == "" {
-		strategy = ResponsesStrategyAuto
-	}
-	var plans []PlanCandidate
-	switch strategy {
-	case ResponsesStrategyAuto, ResponsesStrategyPreferNative:
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeProxyPass, UpstreamEndpointResponses, 0)...)
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeResponsesServer, UpstreamEndpointChatCompletions, 1)...)
-	case ResponsesStrategyPreferLocalServer:
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeResponsesServer, UpstreamEndpointChatCompletions, 0)...)
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeProxyPass, UpstreamEndpointResponses, 1)...)
-	case ResponsesStrategyNativeOnly:
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeProxyPass, UpstreamEndpointResponses, 0)...)
-		plans = markDisallowed(plans, req, upstreams, ExecutionModeResponsesServer, UpstreamEndpointChatCompletions, ReasonStrategyDisallowsChatFallback)
-	case ResponsesStrategyLocalServerOnly:
-		plans = append(plans, responsesPlans(req, upstreams, ExecutionModeResponsesServer, UpstreamEndpointChatCompletions, 0)...)
-		plans = markDisallowed(plans, req, upstreams, ExecutionModeProxyPass, UpstreamEndpointResponses, ReasonStrategyDisallowsNativeResponses)
-	default:
-		return plans, &NoRouteError{Reason: ReasonUnsupportedStrategy}
-	}
-	return plans, nil
-}
-
-func responsesPlans(req Request, upstreams []UpstreamCandidate, mode ExecutionMode, endpoint UpstreamEndpoint, rank int) []PlanCandidate {
-	plans := make([]PlanCandidate, 0, len(upstreams))
-	for _, upstream := range sortUpstreams(upstreams) {
-		plan := basePlanCandidate(upstream, mode, endpoint, rank)
-		if !upstream.Enabled {
-			plan.Reason = ReasonChannelNotEnabled
-		} else if req.RequiresLocalResponsesRuntime && mode != ExecutionModeResponsesServer {
-			plan.Reason = ReasonRequiresLocalResponsesRuntime
-		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
-			plan.Reason = modelMismatchReason(req, upstream)
-		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
-			if endpoint == UpstreamEndpointResponses {
-				plan.Reason = ReasonRequiresResponses
-			} else {
-				plan.Reason = ReasonRequiresChatCompletions
-			}
-		} else if req.HasTools && !upstream.supportsToolCalling(matchedModel) {
-			plan.Reason = "requires_tool_calling"
-		} else {
-			plan.Selectable = true
-			plan.Reason = ReasonSelected
-		}
-		applyCandidateHealth(&plan, upstream, time.Now())
-		plans = append(plans, plan)
-	}
-	return plans
-}
-
-// applyCandidateHealth downgrades a structurally selectable candidate when the
-// live router reports it as unavailable (open circuit, exhausted probation, …).
-func applyCandidateHealth(plan *PlanCandidate, upstream UpstreamCandidate, now time.Time) {
-	if plan == nil || upstream.Health == nil {
-		return
-	}
-	health := upstream.Health
-	plan.HealthState = health.HealthState
-	plan.ModelHealthState = health.ModelHealthState
-	if health.OpenUntil != nil && health.OpenUntil.After(now) {
-		plan.CircuitOpen = true
-		until := *health.OpenUntil
-		plan.AvailableAt = &until
-	}
-	if health.ModelOpenUntil != nil && health.ModelOpenUntil.After(now) &&
-		(plan.AvailableAt == nil || health.ModelOpenUntil.Before(*plan.AvailableAt)) {
-		until := *health.ModelOpenUntil
-		plan.AvailableAt = &until
-	}
-	if health.Selectable || !plan.Selectable {
-		return
-	}
-	plan.Selectable = false
-	switch {
-	case plan.CircuitOpen:
-		plan.Reason = ReasonTargetCircuitOpen
-	case health.Reason == ReasonModelCircuitOpen ||
-		(health.ModelOpenUntil != nil && health.ModelOpenUntil.After(now)):
-		plan.Reason = ReasonModelCircuitOpen
-	case health.Reason != "":
-		plan.Reason = health.Reason
-	default:
-		plan.Reason = ReasonTargetUnhealthy
-	}
-}
-
-func markDisallowed(existing []PlanCandidate, req Request, upstreams []UpstreamCandidate, mode ExecutionMode, endpoint UpstreamEndpoint, reason string) []PlanCandidate {
-	for _, upstream := range sortUpstreams(upstreams) {
-		plan := basePlanCandidate(upstream, mode, endpoint, 99)
-		_, _ = req, upstream
-		plan.Reason = reason
-		existing = append(existing, plan)
-	}
-	return existing
-}
-
-func basePlanCandidate(upstream UpstreamCandidate, mode ExecutionMode, endpoint UpstreamEndpoint, rank int) PlanCandidate {
-	return PlanCandidate{
-		CandidateID:      upstream.ID,
-		RouteTargetID:    upstream.RouteTargetID,
-		ChannelID:        upstream.ChannelID,
-		ExecutionMode:    mode,
-		UpstreamEndpoint: endpoint,
-		Rank:             rank,
-	}
-}
-
-// modelMatches reports whether the request resolves to a model on this upstream and returns the
-// matched model name so per-model capabilities can be resolved. When the request carries no
-// resolved model candidates every model is considered a match and the matched model is empty.
+// DecideResponses is the single implementation of the Responses
+// native-versus-local policy. It replaces the proxy handler's strategy switch so
+// the forwarding hot path and the Monitor's dry run cannot disagree about which
+// strategy is in effect or which rejection message a client gets.
 //
-// A model the upstream does not declare never matches. This is the same rule
-// Target.supportsModelLocked applies on the forwarding path: a provider serves
-// exactly the models the operator enabled, and an undeclared name is rejected
-// before any upstream request is made.
-func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) (string, bool) {
-	if len(req.ResolvedModelCandidates) == 0 {
-		return "", true
-	}
-	models := map[string]struct{}{}
-	for _, model := range upstream.Models {
-		model = strings.ToLower(strings.TrimSpace(model))
-		if model != "" {
-			models[model] = struct{}{}
+// An empty or unknown strategy behaves as `auto`.
+func DecideResponses(in ResponsesDecisionInput) ResponsesDecision {
+	switch in.Strategy {
+	case ResponsesStrategyPreferLocalServer:
+		if in.LocalAvailable {
+			return ResponsesDecision{UseLocal: true}
 		}
-	}
-	for _, candidate := range req.ResolvedModelCandidates {
-		if candidate.ChannelID != "" && candidate.ChannelID != upstream.ChannelID {
-			continue
+		if in.NativeAvailable {
+			return ResponsesDecision{}
 		}
-		model := strings.ToLower(strings.TrimSpace(candidate.Model))
-		if model == "" {
-			continue
+		return ResponsesDecision{RejectReason: noMatchingResponsesRoute}
+	case ResponsesStrategyNativeOnly:
+		if in.NativeAvailable {
+			return ResponsesDecision{}
 		}
-		if _, ok := models[model]; ok {
-			return matchedUpstreamModel(candidate, plan), true
+		return ResponsesDecision{RejectReason: "responses_strategy native_only requires a matching native Responses upstream"}
+	case ResponsesStrategyLocalServerOnly:
+		if in.LocalAvailable {
+			return ResponsesDecision{UseLocal: true}
 		}
-	}
-	return "", false
-}
-
-// modelMismatchReason distinguishes "this channel switched the model off" from
-// "no channel declares the model", so the inspector and the proxy agree on what
-// the operator should fix.
-func modelMismatchReason(req Request, upstream UpstreamCandidate) string {
-	disabled := map[string]struct{}{}
-	for _, model := range upstream.DisabledModels {
-		disabled[strings.ToLower(strings.TrimSpace(model))] = struct{}{}
-	}
-	for _, candidate := range req.ResolvedModelCandidates {
-		if candidate.ChannelID != "" && candidate.ChannelID != upstream.ChannelID {
-			continue
+		return ResponsesDecision{RejectReason: "responses_strategy local_server_only requires a matching chat completions backend"}
+	case ResponsesStrategyAuto, ResponsesStrategyPreferNative, "":
+		if in.NativeAvailable {
+			return ResponsesDecision{}
 		}
-		model := strings.ToLower(strings.TrimSpace(candidate.Model))
-		if model == "" {
-			continue
+		if in.NativePresent {
+			return ResponsesDecision{RejectReason: "native Responses upstream exists but is not selectable for this request"}
 		}
-		if _, ok := disabled[model]; ok {
-			return ReasonModelNotEnabled
+		if in.LocalAvailable {
+			return ResponsesDecision{UseLocal: true}
 		}
-	}
-	return ReasonModelNotMatched
-}
-
-func matchedUpstreamModel(candidate ResolvedModelCandidate, plan *PlanCandidate) string {
-	if plan != nil {
-		plan.UpstreamModel = candidate.Model
-	}
-	return candidate.Model
-}
-
-func supportsEndpoint(upstream UpstreamCandidate, endpoint UpstreamEndpoint, model string) bool {
-	switch endpoint {
-	case UpstreamEndpointChatCompletions:
-		return upstream.supportsChatCompletions(model)
-	case UpstreamEndpointResponses:
-		return upstream.supportsResponses(model)
-	case UpstreamEndpointAnthropicMessage:
-		return upstream.supportsAnthropicMessages(model)
+		return ResponsesDecision{RejectReason: noMatchingResponsesRoute}
 	default:
-		return false
+		return DecideResponses(ResponsesDecisionInput{
+			Strategy:        ResponsesStrategyAuto,
+			NativeAvailable: in.NativeAvailable,
+			NativePresent:   in.NativePresent,
+			LocalAvailable:  in.LocalAvailable,
+		})
 	}
 }
 
-func firstSelectable(candidates []PlanCandidate) (PlanCandidate, bool) {
-	for _, candidate := range candidates {
-		if candidate.Selectable {
-			return candidate, true
-		}
-	}
-	return PlanCandidate{}, false
-}
-
-func routePlanFromCandidate(req Request, selected PlanCandidate, candidates []PlanCandidate) RoutePlan {
-	return RoutePlan{
-		ClientEntrypoint:        req.Entrypoint,
-		RequestedModel:          req.RequestedModel,
-		ResolvedModelCandidates: append([]ResolvedModelCandidate(nil), req.ResolvedModelCandidates...),
-		ExecutionMode:           selected.ExecutionMode,
-		UpstreamEndpoint:        selected.UpstreamEndpoint,
-		SelectedCandidateID:     selected.CandidateID,
-		SelectedRouteTargetID:   selected.RouteTargetID,
-		SelectedChannelID:       selected.ChannelID,
-		UpstreamModel:           selected.UpstreamModel,
-		Strategy:                req.ResponsesStrategy,
-		Reason:                  ReasonSelected,
-		FallbacksConsidered:     append([]PlanCandidate(nil), candidates...),
-	}
-}
-
-func sortUpstreams(upstreams []UpstreamCandidate) []UpstreamCandidate {
-	out := append([]UpstreamCandidate(nil), upstreams...)
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority > out[j].Priority
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out
-}
+const noMatchingResponsesRoute = "no matching Responses route is available for the requested model and strategy"

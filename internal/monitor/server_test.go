@@ -5931,7 +5931,7 @@ func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 		t.Fatalf("UpsertModelAlias() error = %v", err)
 	}
 
-	handler := routingInspectAPIHandler(st, nil)
+	handler := routingInspectAPIHandler(st, newInspectRouter(t, st))
 	req := httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(`{"endpoint":"responses","model":"coder"}`))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -5950,74 +5950,145 @@ func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 	}
 }
 
-// TestApplyLiveHealthToInspectCandidatesCoversTheModelBreaker pins the inspect
-// overlay against the per-model breaker. The channel-level snapshot stays
-// `healthy` when only one model trips its own breaker, so an overlay that reads
-// just HealthState previews `selectable=true` while the proxy refuses the same
-// request with `no_supporting_target`.
-func TestApplyLiveHealthToInspectCandidatesCoversTheModelBreaker(t *testing.T) {
-	openUntil := time.Now().Add(30 * time.Second)
-	upstreams := []routeplan.UpstreamCandidate{
+// TestRoutingInspectMatchesTheRoutersDryRun pins that the inspector is a thin
+// wrapper around the forwarding path's own selection logic: Router.Explain runs
+// the real candidate/health/ranking core in dry-run mode. It also pins that
+// previewing a decision mutates nothing (no inflight accounting, no sticky
+// state), and that a rejected plan still carries the attempted execution mode
+// and endpoint the frontend renders.
+func TestRoutingInspectMatchesTheRoutersDryRun(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	// One native Responses channel and one Chat Completions channel serving the
+	// same model: auto must prefer the native one, and a local_server_only
+	// inspection must reject it while still naming the surface it tried.
+	channels := []store.ChannelConfigRecord{
 		{
-			ID:                      "single-model",
-			RouteTargetID:           "single-model",
-			ChannelID:               "single-model",
-			Enabled:                 true,
-			Models:                  []string{"deepseek-flash"},
-			SupportsChatCompletions: true,
+			ID:             "native",
+			Name:           "Native Responses",
+			BaseURL:        "https://native.example/v1",
+			ProviderPreset: "openai",
+			APIType:        upstream.APITypeResponsesNative,
+			Enabled:        true,
+		},
+		{
+			ID:             "chat",
+			Name:           "Chat backend",
+			BaseURL:        "https://chat.example/v1",
+			ProviderPreset: "openai",
+			APIType:        upstream.APITypeChatCompletions,
+			Enabled:        true,
 		},
 	}
-
-	applyLiveHealthToInspectCandidates(upstreams, nil, "deepseek-flash")
-	if upstreams[0].Health != nil {
-		t.Fatalf("no router should leave the candidate without live health, got %+v", upstreams[0].Health)
+	for _, channel := range channels {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channel.ID, err)
+		}
+		if _, err := st.UpsertChannelModel(channel.ID, store.ChannelModelRecord{
+			Model: "gpt-5", Source: "manual", Enabled: true,
+		}); err != nil {
+			t.Fatalf("UpsertChannelModel(%s) error = %v", channel.ID, err)
+		}
 	}
 
-	snapshot := router.Snapshot{
-		ID:            "single-model",
-		RouteTargetID: "single-model",
-		ChannelID:     "single-model",
-		Enabled:       true,
-		HealthState:   router.HealthHealthy,
-		ModelHealth: map[string]router.ModelHealthSnapshot{
-			"deepseek-flash": {HealthState: router.HealthOpen, OpenUntil: openUntil, ErrorRate: 0.51},
-		},
-	}
-	applyInspectSnapshot(upstreams, 0, snapshot, "deepseek-flash", time.Now())
+	rtr := newInspectRouter(t, st)
+	handler := routingInspectAPIHandler(st, rtr)
 
-	health := upstreams[0].Health
-	if health == nil {
-		t.Fatalf("overlay did not set candidate health")
+	body := `{"endpoint":"responses","model":"gpt-5"}`
+
+	// The handler's answer must be the router's dry-run answer.
+	direct := rtr.Explain(router.ExplainRequest{
+		RawPath:        "/v1/responses",
+		Body:           []byte(`{"model":"gpt-5","stream":false}`),
+		Strategy:       routeplan.ResponsesStrategyAuto,
+		LocalAvailable: true,
+	})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if health.Selectable {
-		t.Fatalf("candidate health = %+v, want selectable=false for an open model breaker", health)
+	var resp routingInspectResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode inspect response: %v", err)
 	}
-	if health.Reason != routeplan.ReasonModelCircuitOpen {
-		t.Fatalf("health.Reason = %q, want %q", health.Reason, routeplan.ReasonModelCircuitOpen)
+	if resp.Error != "" || resp.Result == nil {
+		t.Fatalf("inspect response = %+v, want a plan", resp)
 	}
-	if health.ModelHealthState != router.HealthOpen {
-		t.Fatalf("health.ModelHealthState = %q, want %q", health.ModelHealthState, router.HealthOpen)
+	if resp.Result.Plan.SelectedCandidateID != direct.Result.Plan.SelectedCandidateID ||
+		resp.Result.Plan.ExecutionMode != direct.Result.Plan.ExecutionMode ||
+		resp.Result.Plan.UpstreamEndpoint != direct.Result.Plan.UpstreamEndpoint {
+		t.Fatalf("inspect plan = %+v, want the router dry run plan %+v", resp.Result.Plan, direct.Result.Plan)
 	}
-	if health.ModelOpenUntil == nil || !health.ModelOpenUntil.Equal(openUntil) {
-		t.Fatalf("health.ModelOpenUntil = %v, want %v", health.ModelOpenUntil, openUntil)
+	if resp.Result.Plan.SelectedCandidateID != "native" || resp.Result.Plan.ExecutionMode != routeplan.ExecutionModeProxyPass {
+		t.Fatalf("inspect plan = %+v, want native proxy_pass", resp.Result.Plan)
+	}
+	if len(resp.Result.Candidates) != len(direct.Result.Candidates) {
+		t.Fatalf("inspect candidates = %d, want %d from the dry run", len(resp.Result.Candidates), len(direct.Result.Candidates))
 	}
 
-	// A model whose breaker has already elapsed must not be filtered.
-	upstreams[0].Health = nil
-	expired := router.Snapshot{
-		ID:            "single-model",
-		RouteTargetID: "single-model",
-		ChannelID:     "single-model",
-		Enabled:       true,
-		HealthState:   router.HealthHealthy,
-		ModelHealth: map[string]router.ModelHealthSnapshot{
-			"deepseek-flash": {HealthState: router.HealthOpen, OpenUntil: time.Now().Add(-time.Second)},
-		},
+	// And it is repeatable: two identical inspections agree.
+	firstResult := fmt.Sprintf("%+v", resp.Result)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(body)))
+	var again routingInspectResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &again); err != nil {
+		t.Fatalf("decode second inspect response: %v", err)
 	}
-	applyInspectSnapshot(upstreams, 0, expired, "deepseek-flash", time.Now())
-	if !upstreams[0].Health.Selectable {
-		t.Fatalf("candidate health = %+v, want selectable=true once the model window elapsed", upstreams[0].Health)
+	if fmt.Sprintf("%+v", again.Result) != firstResult {
+		t.Fatalf("second inspect result changed: %+v != %s", again.Result, firstResult)
 	}
+
+	// A rejected strategy plan still names the attempted mode/endpoint so the
+	// frontend can render it. Seed a model that only the native channel serves,
+	// then ask for local_server_only: the local runtime has no Chat Completions
+	// backend for it, so the plan is rejected on the local attempt.
+	if _, err := st.UpsertChannelModel("native", store.ChannelModelRecord{
+		Model: "native-only-model", Source: "manual", Enabled: true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelModel(native-only-model) error = %v", err)
+	}
+	if err := st.SaveAppSettingJSON(context.Background(), routingSettingsKey, map[string]string{
+		"responses_strategy": string(routeplan.ResponsesStrategyLocalServerOnly),
+	}); err != nil {
+		t.Fatalf("SaveAppSettingJSON() error = %v", err)
+	}
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if err := rtr.Reload(targets); err != nil {
+		t.Fatalf("router.Reload() error = %v", err)
+	}
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/routing/inspect",
+		strings.NewReader(`{"endpoint":"responses","model":"native-only-model"}`)))
+	var rejected routingInspectResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &rejected); err != nil {
+		t.Fatalf("decode inspect response: %v", err)
+	}
+	if rejected.Result == nil {
+		t.Fatalf("rejected inspect response = %+v, want a plan with an error", rejected)
+	}
+	if rejected.Error == "" {
+		t.Fatalf("rejected inspect error is empty, want the local_server_only rejection")
+	}
+	if rejected.Result.Plan.ExecutionMode != routeplan.ExecutionModeResponsesServer ||
+		rejected.Result.Plan.UpstreamEndpoint != routeplan.UpstreamEndpointChatCompletions {
+		t.Fatalf("rejected plan = %+v, want the attempted responses_server/chat_completions surface named", rejected.Result.Plan)
+	}
+
+	// Dry-run inspection must not perturb live routing state.
+	for _, snapshot := range rtr.Snapshots() {
+		if snapshot.Inflight != 0 || snapshot.InflightStreaming != 0 {
+			t.Fatalf("snapshot %q inflight = %d/%d after inspect, want 0", snapshot.ID, snapshot.Inflight, snapshot.InflightStreaming)
+		}
+	}
+
 }
 
 // TestParsePageSizeClampsToAServingBound pins that a page size read from the

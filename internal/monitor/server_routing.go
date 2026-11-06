@@ -158,6 +158,12 @@ func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
+// routingInspectAPIHandler answers "what would the router do for this request"
+// by asking the live router itself. The handler used to project the stored
+// channel rows into a second planner that re-derived capabilities, health and
+// selection; that planner could disagree with the forwarding path. Router.Explain
+// now runs the real selection core in dry-run mode, so the inspector reports the
+// same decision (and the same rejection) the proxy would take.
 func routingInspectAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -173,28 +179,73 @@ func routingInspectAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid routing inspect payload"})
 			return
 		}
+		if rtr == nil {
+			// Production always has a live router; a test or a mis-wired
+			// management server without one cannot preview a decision.
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "routing inspector requires a live router"})
+			return
+		}
+		rawPath, err := routingInspectRawPath(req.Endpoint)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		settings, err := loadRoutingSettings(r.Context(), st)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		planReq, upstreams, err := routingInspectPlanInput(st, req, settings)
+		body, err := routingInspectBody(req)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		applyLiveHealthToInspectCandidates(upstreams, rtr, planReq.RequestedModel)
-		result, planErr := routeplan.Plan(planReq, upstreams)
-		resp := routingInspectResponse{Request: req, RefreshedAt: time.Now().UTC()}
-		if planErr != nil {
-			resp.Error = planErr.Error()
-			resp.Result = &result
-			writeJSON(w, http.StatusOK, resp)
-			return
+		explained := rtr.Explain(router.ExplainRequest{
+			RawPath:        rawPath,
+			Body:           body,
+			Strategy:       routeplan.ResponsesStrategy(settings.ResponsesStrategy),
+			LocalAvailable: true,
+		})
+		resp := routingInspectResponse{
+			Request:     req,
+			Result:      &explained.Result,
+			Error:       explained.Error,
+			RefreshedAt: time.Now().UTC(),
 		}
-		resp.Result = &result
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+// routingInspectRawPath maps the inspect request's endpoint selector onto the
+// client path the router plans for.
+func routingInspectRawPath(value string) (string, error) {
+	switch strings.TrimSpace(value) {
+	case "", "responses", "/v1/responses":
+		return "/v1/responses", nil
+	case "chat_completions", "/v1/chat/completions":
+		return "/v1/chat/completions", nil
+	case "anthropic_messages", "/v1/messages":
+		return "/v1/messages", nil
+	default:
+		return "", fmt.Errorf("unsupported endpoint %q", value)
+	}
+}
+
+// routingInspectBody renders the prospective request body the router plans from.
+// Only the fields the decision reads are set: the model, the stream flag, and,
+// when requested, one stub tool so the tool-calling capability filter applies.
+func routingInspectBody(req routingInspectRequest) ([]byte, error) {
+	payload := map[string]any{
+		"model":  strings.TrimSpace(req.Model),
+		"stream": req.Stream,
+	}
+	if req.Tools {
+		payload["tools"] = []map[string]any{{
+			"type":     "function",
+			"function": map[string]any{"name": "inspect_tool"},
+		}}
+	}
+	return json.Marshal(payload)
 }
 
 func defaultRoutingSettings() routingSettingsView {
@@ -262,43 +313,6 @@ func validateRoutingSettings(settings routingSettingsView) error {
 		return fmt.Errorf("unsupported route_plan_log_level %q", settings.RoutePlanLogLevel)
 	}
 	return nil
-}
-
-func routingInspectPlanInput(st *store.Store, req routingInspectRequest, settings routingSettingsView) (routeplan.Request, []routeplan.UpstreamCandidate, error) {
-	entrypoint, err := routingInspectEntrypoint(req.Endpoint)
-	if err != nil {
-		return routeplan.Request{}, nil, err
-	}
-	model := strings.TrimSpace(req.Model)
-	resolved, err := resolvedModelCandidatesForInspect(st, model)
-	if err != nil {
-		return routeplan.Request{}, nil, err
-	}
-	upstreams, err := upstreamCandidatesForInspect(st)
-	if err != nil {
-		return routeplan.Request{}, nil, err
-	}
-	return routeplan.Request{
-		Entrypoint:              entrypoint,
-		RequestedModel:          model,
-		ResolvedModelCandidates: resolved,
-		ResponsesStrategy:       routeplan.ResponsesStrategy(settings.ResponsesStrategy),
-		HasTools:                req.Tools,
-		Stream:                  req.Stream,
-	}, upstreams, nil
-}
-
-func routingInspectEntrypoint(value string) (routeplan.ClientEntrypoint, error) {
-	switch strings.TrimSpace(value) {
-	case "", "responses", "/v1/responses":
-		return routeplan.EntrypointResponses, nil
-	case "chat_completions", "/v1/chat/completions":
-		return routeplan.EntrypointChatCompletions, nil
-	case "anthropic_messages", "/v1/messages":
-		return routeplan.EntrypointAnthropicMessage, nil
-	default:
-		return "", fmt.Errorf("unsupported endpoint %q", value)
-	}
 }
 
 func toRoutingFailureItems(records []store.RoutingFailureRecord) []routingFailureItem {

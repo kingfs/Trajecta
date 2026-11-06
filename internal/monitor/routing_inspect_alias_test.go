@@ -56,7 +56,7 @@ func TestRoutingInspectResolvesAliasedModelCapabilities(t *testing.T) {
 		t.Fatalf("UpsertModelAlias() error = %v", err)
 	}
 
-	handler := routingInspectAPIHandler(st, nil)
+	handler := routingInspectAPIHandler(st, newInspectRouter(t, st))
 	plans := map[string]struct {
 		mode     string
 		endpoint string

@@ -85,7 +85,7 @@ func TestRoutingInspectCapabilitiesFollowTheProtocolFamily(t *testing.T) {
 				}
 			}
 
-			handler := routingInspectAPIHandler(st, nil)
+			handler := routingInspectAPIHandler(st, newInspectRouter(t, st))
 			body := `{"endpoint":"` + tc.endpoint + `","model":"model-` + tc.channel + `"}`
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(body)))

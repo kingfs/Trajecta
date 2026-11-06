@@ -816,11 +816,10 @@ func SupportsProtocolFamily(protocolFamily string, provider string, endpoint str
 //
 // SupportsRawPath cannot answer this on its own: `/v1/responses` is the one endpoint an
 // OpenAI-compatible Chat Completions channel can also serve, through the local runtime, so
-// SupportsEndpointForModel accepts it for chat-only channels. The route planner derives that
-// local candidate (`responses_server`) from the Chat Completions capability, which means a
-// channel-level "can serve Responses" flag - such as the one the Monitor inspector passes to
-// routeplan.UpstreamCandidate - has to report the native surface only, or every Chat Completions
-// channel is offered a `proxy_pass` candidate it cannot honour.
+// SupportsEndpointForModel accepts it for chat-only channels. The router's dry-run Explain
+// derives that local candidate (`responses_server`) from the Chat Completions capability, which
+// means a channel-level "can serve Responses" flag has to report the native surface only, or
+// every Chat Completions channel is offered a `proxy_pass` candidate it cannot honour.
 func (u ResolvedUpstream) SupportsNativeResponsesPath(model string) bool {
 	return u.SupportsResponsesAPIForModel(model) && u.SupportsRawPath("/v1/responses", model)
 }

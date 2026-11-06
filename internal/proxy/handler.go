@@ -1367,43 +1367,22 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 	nativePresent := h.router != nil && h.router.HasNativeResponsesTargetWithBody(r, bodyBytes)
 	localAvailable := h.responsesBuilder != nil && h.responsesChatBackendAvailable(r, bodyBytes)
 	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, nativePresent: nativePresent, localAvailable: localAvailable}
-
-	switch strategy {
-	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative:
-		if nativeAvailable {
-			return decision
-		}
-		if nativePresent {
-			h.decorateWithHealthHint(r, bodyBytes, "native Responses upstream exists but is not selectable for this request", &decision)
-			return decision
-		}
-		if localAvailable {
-			decision.useLocal = true
-			return decision
-		}
-	case routeplan.ResponsesStrategyPreferLocalServer:
-		if localAvailable {
-			decision.useLocal = true
-			return decision
-		}
-		if nativeAvailable {
-			return decision
-		}
-	case routeplan.ResponsesStrategyNativeOnly:
-		if nativeAvailable {
-			return decision
-		}
-		h.decorateWithHealthHint(r, bodyBytes, "responses_strategy native_only requires a matching native Responses upstream", &decision)
-		return decision
-	case routeplan.ResponsesStrategyLocalServerOnly:
-		if localAvailable {
-			decision.useLocal = true
-			return decision
-		}
-		h.decorateWithHealthHint(r, bodyBytes, "responses_strategy local_server_only requires a matching chat completions backend", &decision)
+	// The native-versus-local policy is shared with the Monitor's dry run, so the
+	// inspector cannot describe a different decision or rejection message than the
+	// one a client actually gets.
+	shared := routeplan.DecideResponses(routeplan.ResponsesDecisionInput{
+		Strategy:        strategy,
+		NativeAvailable: nativeAvailable,
+		NativePresent:   nativePresent,
+		LocalAvailable:  localAvailable,
+	})
+	if shared.UseLocal {
+		decision.useLocal = true
 		return decision
 	}
-	h.decorateWithHealthHint(r, bodyBytes, "no matching Responses route is available for the requested model and strategy", &decision)
+	if shared.RejectReason != "" {
+		h.decorateWithHealthHint(r, bodyBytes, shared.RejectReason, &decision)
+	}
 	return decision
 }
 

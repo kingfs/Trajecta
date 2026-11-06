@@ -42,7 +42,7 @@ func TestRoutingInspectDescribesStrictModelAuthorization(t *testing.T) {
 		}
 	}
 
-	handler := routingInspectAPIHandler(st, nil)
+	handler := routingInspectAPIHandler(st, newInspectRouter(t, st))
 	inspect := func(model string) routingInspectResponse {
 		t.Helper()
 		rr := httptest.NewRecorder()

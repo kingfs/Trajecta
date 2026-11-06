@@ -339,12 +339,15 @@ type CandidateDecision struct {
 	// cannot tell a configuration problem from an open model circuit.
 	ModelHealthState string     `json:"model_health_state,omitempty"`
 	ModelOpenUntil   *time.Time `json:"model_open_until,omitempty"`
-	SupportsPath     bool       `json:"supports_path"`
-	SupportsModel    bool       `json:"supports_model"`
-	SupportsTools    bool       `json:"supports_tools"`
-	Excluded         bool       `json:"excluded,omitempty"`
-	Selectable       bool       `json:"selectable"`
-	FilterReason     string     `json:"filter_reason,omitempty"`
+	// OpenUntil is the target-level breaker window, exposed so a dry run can
+	// explain circuit_open/available_at without a second health projection.
+	OpenUntil     *time.Time `json:"open_until,omitempty"`
+	SupportsPath  bool       `json:"supports_path"`
+	SupportsModel bool       `json:"supports_model"`
+	SupportsTools bool       `json:"supports_tools"`
+	Excluded      bool       `json:"excluded,omitempty"`
+	Selectable    bool       `json:"selectable"`
+	FilterReason  string     `json:"filter_reason,omitempty"`
 }
 
 type StickyDecision struct {
@@ -899,6 +902,8 @@ func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) 
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	candidates := r.candidatesForRequest(rawPath, model, features, false)
 	now := time.Now()
 	for _, candidate := range candidates {
@@ -916,6 +921,8 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	candidates := r.candidatesForRequest(rawPath, model, features, false)
 	now := time.Now()
 	for _, candidate := range candidates {
@@ -1005,18 +1012,42 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 	return earliest, found
 }
 
+// selectOptions tunes the shared selection core.
+//
+// DryRun is what Router.Explain passes: the candidate filtering, health rules
+// and ranking are the same ones the forwarding path uses, but the call never
+// reads or writes sticky bindings and never increments an inflight counter, so
+// asking "what would happen" cannot change what happens next.
+type selectOptions struct {
+	DryRun bool
+}
+
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
 func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
+	return r.selectTargetsWith(req, body, excludeIDs, selectOptions{})
+}
+
+// selectTargetsWith is the real selection path; selectTargets is the forwarding
+// wrapper and Explain is the dry-run wrapper.
+func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []string, opts selectOptions) (*Selection, error) {
 	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
-	// Bind per (session, model): the binding chooses the upstream that keeps a
-	// model's prompt cache warm, so two models on one session must not overwrite
-	// each other's target. The raw session value never leaves this function; the
-	// decision trace only carries its fingerprint.
-	stickyKey := composeStickyKey(extractStickyKey(req, body), model)
-	stickyFingerprint := stickyKeyFingerprint(stickyKey)
-	stickyTargetID, hasStickyBinding := r.sticky.Lookup(stickyKey)
+	var (
+		stickyKey         string
+		stickyFingerprint string
+		stickyTargetID    string
+		hasStickyBinding  bool
+	)
+	if !opts.DryRun {
+		// Bind per (session, model): the binding chooses the upstream that keeps a
+		// model's prompt cache warm, so two models on one session must not overwrite
+		// each other's target. The raw session value never leaves this function; the
+		// decision trace only carries its fingerprint.
+		stickyKey = composeStickyKey(extractStickyKey(req, body), model)
+		stickyFingerprint = stickyKeyFingerprint(stickyKey)
+		stickyTargetID, hasStickyBinding = r.sticky.Lookup(stickyKey)
+	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1083,7 +1114,7 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	}
 	if selected == nil {
 		selected, score = r.pick(available, features)
-		if stickyKey != "" {
+		if !opts.DryRun && stickyKey != "" {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
 				previousTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
@@ -1093,7 +1124,9 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 			}
 		}
 	}
-	selected.onStart(features)
+	if !opts.DryRun {
+		selected.onStart(features)
+	}
 
 	candidateIDs := make([]string, 0, len(available))
 	for _, candidate := range available {
@@ -1781,6 +1814,10 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		SupportsModel:  t.supportsModelLocked(model),
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
+	}
+	if !t.openUntil.IsZero() {
+		openUntil := t.openUntil
+		decision.OpenUntil = &openUntil
 	}
 	if modelKey := strings.ToLower(strings.TrimSpace(model)); modelKey != "" {
 		if state := t.modelHealth[modelKey]; state != nil {

@@ -1,6 +1,6 @@
 # 本地 Responses Runtime
 
-本文只记录当前代码事实：`/v1/responses` 落在 Trajecta 本地 Responses runtime 时的选路、请求处理、Codex 兼容、hosted tools、compact 与配置面。仓库级不变量见 `./ARCHITECTURE.md`，路由与凭据模型见 `./ROUTING_AND_CREDENTIALS.md`，审计查询面见 `./OBSERVATION_AND_AUDIT.md`，协议矩阵见 `./protocol-reference/README.md`。字段与行为以 `internal/responses/**`、`internal/proxy/**`、`internal/config/config.go`、`internal/routeplan` 为准。
+本文只记录当前代码事实：`/v1/responses` 落在 Trajecta 本地 Responses runtime 时的选路、请求处理、Codex 兼容、hosted tools、compact 与配置面。仓库级不变量见 `./ARCHITECTURE.md`，路由与凭据模型见 `./ROUTING_AND_CREDENTIALS.md`，审计查询面见 `./OBSERVATION_AND_AUDIT.md`，协议矩阵见 `./protocol-reference/README.md`。字段与行为以 `internal/responses/**`、`internal/proxy/**`、`internal/config/config.go`、`internal/router`（候选/选择）与 `internal/routeplan`（共享 DTO/`DecideResponses`）为准。
 
 ## 定位与开关
 
@@ -21,9 +21,9 @@
 
 ## 路由决策
 
-代码位置：选路策略与候选约束在 `internal/routeplan`，请求侧决策在 `internal/proxy/handler.go` 的 `responsesRoutingDecision` / `responsesStrategy`，本地 runtime 在 `internal/responses/runtime`，HTTP 面在 `internal/responses/httpapi`，上游调用与录制在 `internal/proxy/responses_server.go`。候选过滤顺序与 native/local 的按模型解析由 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md) 拥有，本节只记录本地 runtime 侧的策略语义。
+代码位置：候选约束、健康与选择在 `internal/router`（Inspector 用 `Router.Explain` dry-run 复用同一实现），native/local 的策略函数是 `internal/routeplan.DecideResponses`，请求侧调用在 `internal/proxy/handler.go` 的 `responsesRoutingDecision` / `responsesStrategy`，本地 runtime 在 `internal/responses/runtime`，HTTP 面在 `internal/responses/httpapi`，上游调用与录制在 `internal/proxy/responses_server.go`。候选过滤顺序与 native/local 的按模型解析由 [ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md) 拥有，本节只记录本地 runtime 侧的策略语义。
 
-`responses_strategy` 由 `internal/routeplan` 定义并校验，合法值五档：
+`responses_strategy` 由 `internal/routeplan` 定义、由 `DecideResponses` 统一执行并校验，合法值五档：
 
 | 策略 | 行为 |
 | --- | --- |

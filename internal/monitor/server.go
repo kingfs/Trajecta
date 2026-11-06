@@ -24,7 +24,6 @@ import (
 	"github.com/kingfs/Trajecta/internal/reanalysis"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
-	"github.com/kingfs/Trajecta/internal/routeplan"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
@@ -1293,123 +1292,6 @@ func writeAliasValidationError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-}
-
-// applyLiveHealthToInspectCandidates overlays the router's live health onto the
-// statically loaded candidates so the inspector previews the same decision the
-// proxy would actually take (circuit breakers, degraded state, …).
-func applyLiveHealthToInspectCandidates(upstreams []routeplan.UpstreamCandidate, rtr *router.Router, model string) {
-	if rtr == nil || len(upstreams) == 0 {
-		return
-	}
-	snapshots := rtr.Snapshots()
-	if len(snapshots) == 0 {
-		return
-	}
-	byID := make(map[string]router.Snapshot, len(snapshots))
-	for _, snapshot := range snapshots {
-		if snapshot.ID != "" {
-			byID[snapshot.ID] = snapshot
-		}
-		if snapshot.RouteTargetID != "" {
-			byID[snapshot.RouteTargetID] = snapshot
-		}
-	}
-	now := time.Now()
-	for i := range upstreams {
-		snapshot, ok := byID[upstreams[i].ID]
-		if !ok {
-			continue
-		}
-		applyInspectSnapshot(upstreams, i, snapshot, model, now)
-	}
-}
-
-// applyInspectSnapshot projects one router snapshot onto one candidate.
-func applyInspectSnapshot(upstreams []routeplan.UpstreamCandidate, i int, snapshot router.Snapshot, model string, now time.Time) {
-	{
-		health := &routeplan.CandidateHealth{
-			HealthState: snapshot.HealthState,
-			Selectable:  inspectHealthSelectable(snapshot, now),
-		}
-		if !snapshot.OpenUntil.IsZero() {
-			openUntil := snapshot.OpenUntil
-			health.OpenUntil = &openUntil
-		}
-		// The per-model breaker opens on that model's own failure EWMA even
-		// while the channel-level state stays healthy, so it has to be overlaid
-		// separately or the inspector previews a selection the proxy refuses.
-		if modelState, ok := snapshot.ModelHealth[strings.ToLower(strings.TrimSpace(model))]; ok {
-			health.ModelHealthState = modelState.HealthState
-			if !modelState.OpenUntil.IsZero() {
-				modelOpenUntil := modelState.OpenUntil
-				health.ModelOpenUntil = &modelOpenUntil
-			}
-			if modelState.HealthState == router.HealthOpen &&
-				!modelState.OpenUntil.IsZero() && now.Before(modelState.OpenUntil) {
-				health.Selectable = false
-				health.Reason = routeplan.ReasonModelCircuitOpen
-			}
-		}
-		if !health.Selectable && health.Reason == "" {
-			if health.OpenUntil != nil && health.OpenUntil.After(now) {
-				health.Reason = routeplan.ReasonTargetCircuitOpen
-			} else {
-				health.Reason = routeplan.ReasonTargetUnhealthy
-			}
-		}
-		upstreams[i].Health = health
-	}
-}
-
-// probationInflightLimitMirror mirrors router.probationInflightLimit: a
-// probation target serves one in-flight request at a time.
-const probationInflightLimitMirror int64 = 1
-
-// inspectHealthSelectable mirrors the router's canSelect health rules.
-func inspectHealthSelectable(snapshot router.Snapshot, now time.Time) bool {
-	if !snapshot.Enabled {
-		return false
-	}
-	switch snapshot.HealthState {
-	case router.HealthOpen:
-		if snapshot.OpenUntil.IsZero() || now.Before(snapshot.OpenUntil) {
-			return false
-		}
-	case router.HealthProbation:
-		if snapshot.Inflight >= probationInflightLimitMirror {
-			return false
-		}
-	}
-	return true
-}
-
-func resolvedModelCandidatesForInspect(st *store.Store, model string) ([]routeplan.ResolvedModelCandidate, error) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return nil, nil
-	}
-	out := []routeplan.ResolvedModelCandidate{{Model: model, Source: "request"}}
-	aliases, err := st.ListModelAliases(model, true)
-	if err != nil {
-		return nil, err
-	}
-	for _, alias := range aliases {
-		out = append(out, routeplan.ResolvedModelCandidate{
-			Model:     alias.TargetModel,
-			Alias:     alias.Alias,
-			ChannelID: alias.ChannelID,
-			Source:    alias.Source,
-		})
-	}
-	return out, nil
-}
-
-type inspectCapabilities struct {
-	chatCompletions   bool
-	responses         bool
-	anthropicMessages bool
-	toolCalling       bool
 }
 
 func parseBoolQuery(value string, fallback bool) bool {

@@ -35,7 +35,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/channel`：渠道（provider）配置与 probe 用例、legacy YAML bootstrap、runtime targets。
 - `internal/responses`：本地 Responses 运行时及其子系统——`runtime`（编排与 state store）、`httpapi`（HTTP handler）、`chatclient`（内部 Chat Completions client）、`audit`（审计查询与写入）、`functionexec`（本地函数执行器）、`tools`（hosted tools：`hosted`、`mcp`、`websearch`）、`protocol`（类型定义）、`codexfixtures`（Codex 兼容 fixture）。
 - `internal/router`：多上游选择、健康、重试、sticky、决策记录与路由快照发布。
-- `internal/routeplan`：入口 endpoint、执行模式与 `responses_strategy` 的路由决策计划。
+- `internal/routeplan`：Inspector 与转发路径共享的路由 DTO/词汇、`responses_strategy` 常量，以及唯一的 `DecideResponses` 执行模式决策；它**不再包含 planner**，候选过滤/健康/选择由 `internal/router` 的 `Explain` dry-run 与热路径共用。
 - `internal/appdbmigrate`：应用 Postgres checked-in migration 的加载与应用。
 - `internal/monitor`：Monitor API 与内嵌 React UI（`go:embed ui/dist/*`）。
 - `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
@@ -69,7 +69,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 
 1. SDK、CLI 或应用把 LLM API 请求发到本地代理（如 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`）。
 2. proxy 归一化入口 endpoint，并按请求路径与上游配置识别协议族。
-3. routeplan/router 依据入口、模型、能力与 `responses_strategy` 选择 route target，并记录决策与候选。
+3. router 依据入口、模型、能力与 `responses_strategy` 选择 route target，并记录决策与候选；`POST /api/routing/inspect` 通过 `router.Explain` 的 dry-run 复用同一套候选/健康/选择逻辑（不读写 sticky、不增加 inflight），因此 Inspector 与热路径不会给出不同答案。
 4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。**凭据与个人数据遮蔽也在这一步、真正发包之前发生，且默认开启**：通过规则与置信度门限的值（API key、SSH/PEM 私钥块、身份证号、手机号等）被替换为等长保形假值后才发给上游，cassette 记录的仍是原始请求体，响应在写回 client 之前把假值换回真值（流式响应按跨 delta 重组）；两个方向各写 `secret.masked` / `secret.restored` 事件且不携带凭据字节。细节与边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
 5. 请求转发到上游，响应以流式或非流式返回 client。若某次 `/v1/responses` 请求被判定为原生直通，则该请求只会在「自己实现 Responses API」的目标里选择：只能靠本地 runtime 翻译的 Chat Completions 目标在这一请求上不可选（重试重新选择时同样不可选），否则原样转发会把 Responses 请求发给不实现该协议的上游。转发路径自己写响应体（不经 `httputil.ReverseProxy` 的拷贝），所以「流式响应逐次 flush」这条契约由它承担：流式（或长度未知）的响应每写一次就 flush 一次，否则小于服务端输出缓冲的写入会被攒着，client 在 handler 返回前收不到任何东西——连响应头都收不到，`stream: true` 就退化成「最后一个 token 之后一次性收到完整回答」，首字节时间等于总时长。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event；写 prelude 前，它从请求头/URL/body 窗口识别客户端 harness，把结论写入 meta 的 `client_harness*` 字段与一条 `harness.detected` 事件，再由索引列镜像到 `logs`。

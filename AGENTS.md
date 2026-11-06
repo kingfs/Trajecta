@@ -25,7 +25,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Upstream resolution and capability/protocol-family rules: `internal/upstream`
 - Channel (渠道; the configured upstream connection + credential; a provider preset names the upstream vendor) config and probe services: `internal/channel`
 - Per-model connectivity probe and interface auto-detection behind the Monitor's model-card test/detect buttons: `internal/modelprobe` (protocol-aware minimal request, status classification and suggestions; no store writes, no cassette/recording). `POST /api/provider-model-detect` probes a model's real chat/responses/messages/generateContent surfaces and persists only the decisive per-model `supports_*` values.
-- Routing core: multi-upstream selection, health, retries, sticky routing and snapshot publication in `internal/router`; entry-endpoint and execution-mode decisions in `internal/routeplan`; request rate limiting in `internal/limit`
+- Routing core: multi-upstream selection, health, retries, sticky routing, snapshot publication and the Inspector's dry-run `Explain` in `internal/router`; `internal/routeplan` is only the shared DTO/vocabulary plus the single `DecideResponses` native-vs-local decision (no second planner); request rate limiting in `internal/limit`
 - Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses` (subpackages `runtime`, `httpapi`, `chatclient`, `audit`, `functionexec`, `tools`, `protocol`, `codexfixtures`)
 - Postgres application migrations: `internal/appdbmigrate`; legacy V2 cassette upgrade and index rebuild: `internal/migrate`
 - Monitor UI: `internal/monitor`; MCP tool surface: `internal/mcpserver`
