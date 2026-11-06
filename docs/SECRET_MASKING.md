@@ -87,10 +87,34 @@ secret_masking:
 - **启动加载。** 默认加载全部（`load_limit: 0`）且不淘汰，已记录的假值不会被挤出内存；正数只加载最新 N 条（按插入序号倒序取），用启动内存换识别窗口。内存里没有的真值在首次遇到时先按 `by_real` 查文件：这就是「映射已淘汰/不在窗口内，但真值再次出现时仍得到原假值」的保证。查文件只发生在首次遇到某个真值，已命中的值走内存。
 - **假值识别。** 加载进内存的假值同时进入 `byFake`，`Mask` 遇到完全相同的假值时跳过。于是一个假值跨重启、跨上下文压缩都保持不变，不会被再遮蔽成第二个假值。
 - **文件只增不减。** bbolt 不把释放的页归还给文件系统；按真值去重意味着增长上限是「见过的不同敏感值数」，不是请求数。需要缩小文件时停进程后重建；直接删文件会丢映射，旧假值不再被识别。运行中直接 `cp` 也可能拿到不一致的页，备份应在进程停止时做或用文件系统快照。
+- **清理工具。** `trajecta db secret-mapping` 在服务停止后查看与清理这个文件（`stats` / `list` / `delete` / `prune` / `compact`），详见下一节。删除一个映射不会改变历史 cassette 与审计行，但那个旧假值之后不再被识别：模型上下文里还带着它时，会被当成一个新值重新遮蔽。
+
+### 映射文件的清理（`trajecta db secret-mapping`）
+
+`{{output_dir}}/secret_mask_mappings.db` 是整个 output_dir 共用的一份 bbolt 映射：键是真实值（`by_real` 用本地密钥对真值做 HMAC），值是本地密钥封存的 `{real, fake}` 对，另加插入序号；文件里没有 session/trace、偏移或检测时间，也不按 trace 分区。按 trace 记录「哪次请求替换了哪些值」的是 application DB 的 `credential_mask_audits` 表，两者用途不同：审计表是逐次记录，映射文件只用于重启后复用与识别假值。
+
+运行中的 serve 持有 bbolt 排他锁，所以清理前必须先停 serve；命令不会静默失败，会报明确的「stop serve first」。所有写命令默认 dry-run，只有 `--apply` 才落盘；`--config/-c` 与 `--format json` 对所有子命令可用。dry-run 的承诺是「不改映射行」：为了读取真值，命令仍会以读写方式打开 bbolt（可能更新文件元页），`stats`/`list`/`delete`/`prune` 还要打开 application DB（`auto_migrate` 生效时可能触发迁移），只有 `compact` 不打开数据库。
+
+| 子命令 | 作用 |
+| --- | --- |
+| `stats` | 路径、是否存在、条目数/索引数、文件大小、密文/明文/不可读行数、序号范围、加密模式 |
+| `list [--show-values] [--contains <子串>] [--limit N \| --all]` | 默认脱敏（seq、真值/假值长度、真值的**带密钥 HMAC 前缀**、假值的 SHA-256 前缀；真值前缀不用裸 SHA-256，否则低熵手机号可被离线穷举确认。没有本地密钥时 `by_real` 本身退化为域分隔 SHA-256，指纹随之退化，但此时映射文件已经是明文）；`--show-values` 才输出明文；`--contains` 匹配真值或假值 |
+| `delete (--real <值> \| --seq <n> \| --contains <子串>) [--apply]` | 三选一；在一个 bbolt 事务里同时删除 mappings 行与 by_real 索引行 |
+| `prune --rule <规则名> [--since RFC3339] [--until RFC3339] [--purge-audits] [--apply]` | 先从 `credential_mask_audits` 取出该规则/时间窗产生的真值，再删除对应映射行；`--purge-audits` 同时删除匹配的审计行（只删 `credential_mask_audits`，不动 system_events）。映射文件没有时间戳，时间窗只筛审计行 |
+| `compact [--apply]` | bbolt 删除行后文件不会缩小；用活行重建并保留 `<path>.bak`（已有 `.bak` 时拒绝）。`.bak` 同样含真值，校验后应删除 |
+
+清理线上误报的典型流程（旧算法写进映射与审计的错误条目）：
+
+1. 停 serve，先 `stats` 看清规模；
+2. 用 `prune --rule env.secret_assignment --until <修复上线时间>` 做 dry-run：代码片段的误报都记在 `env.secret_assignment` 下，但同一规则名下也可能有正常条目，时间窗用来把清理限定在修复上线之前；dry-run 输出 `would_delete_mappings` 与 `audit_rows`（`purged_audit_rows` 只在 `--apply` 后出现），确认量级后需要连审计表一起清就加 `--purge-audits`；
+3. `--apply` 落盘，再 `compact --apply` 回收文件空间（确认后删除 `.bak`）；
+4. 重启 serve：被删除的旧假值不再被识别，模型上下文里若还带着它们，会被当作新值重新遮蔽；历史 cassette 与已保留的审计行不受影响。
+
+退出码沿用 CLI 契约：成功 0，操作失败 1，用法错误 3。`stats`/`list`/`delete`/`prune` 需要 application DB（真值用 `trace_index.secret` 解密、HMAC 索引也用它）；DB 连不上时这些命令会失败，`compact` 只做原始字节复制、不依赖 DB。密钥轮换后旧行不可解密：`stats` 的不可读行计数与 `list` 会显示，用 `delete --seq` 清理；`prune` 无法解密的审计行计入 `undecryptable_audit_rows`。
 
 ## 识别与打分
 
-引擎分四层，越往后越贵，只有前一层放行的候选才进入下一层；另有一条独立的原生「名称锚定赋值」通道在 DFA 之后运行（见下），两者结果合并后共同参与改写。
+引擎分四层，越往后越贵，只有前一层放行的候选才进入下一层；另有一条独立的原生通道在 DFA 之后运行，负责词法层看不到的两类值——env 赋值与 DSN 密码（见下），两者结果合并后共同参与改写。
 
 **L1 词法 DFA。** `pkg/secretmask/rules.rl` 是 DFA 词法模式的唯一事实源（名称锚定的两条 env 规则不在状态机里，见下），由 Ragel 编译成 Go 状态机（`rules_ragel.go`，已提交）。扫描器用 `|* ... *|`，因此**最长匹配优先，等长时先声明者优先**，规则顺序具有语义。运行时不做回溯。
 
@@ -100,18 +124,26 @@ secret_masking:
 
 **粗筛与细判。** 带前缀的凭据（`sk-proj-`、`AIza`、`ghp_` …）由状态机直接给出规则 ID，因为锚点本身就是词法。数字类个人数据没有这样的锚点：身份证号是 18 位，手机号 11 位，银行卡 12–19 位，它们共同的词法只是「一段数字」。为每一类各写一条 `[0-9]{n}` 会让状态机按长度重复展开；先粗扫再细扫则等于把同一份请求扫两遍。`rules.rl` 因此只有一条粗规则 `digit_run = [0-9]+ [Xx]?;`，命中后交给 `scan.go` 的 `emitDigits`：按 `digitClasses` 的顺序逐类试长度与校验器，第一类通过即采用，两侧边界由 `bounded` 统一检查。加一类数字（手机号、银行卡）只改 `digitClasses` 与该规则的元数据，**不新增 DFA 状态、也不需要重新生成**，一次扫描同时服务所有数字类。手机号就是按这条路径加入的：`rules.rl` 未改、生成表未因该规则变化，改动集中在规则元数据、候选检查与渲染器。
 
-**名称锚定的赋值扫描（原生，不是 DFA）。** 还有一类值没有词法形状：`POSTGRES_PASSWORD=…`、`DATABASE_DSN=postgres://user:pass@host`、docker-compose 的 `auth_password: …`、工具输出里的整段 `.env`。它们的证据是变量名，`pkg/secretmask/assignment.go` 因此在 DFA 之外做一遍原生扫描：以 `=` / `:` 为触发点，向前最多回看 64 字节取变量名，向后按引号/转义形态取 value span；单遍 O(n)、无命中路径零分配，也不解析 JSON（body 可能是嵌在 JSON 字符串里的 JSON 文本）。两条规则追加在 `rule.go` 末尾：
+**原生赋值与 DSN 扫描（不是 DFA）。** 还有两类值没有词法形状，或者只有「用不上」的词法：
 
-- `env.secret_assignment`（Strong，70 分 → High）：改写**整个 value**。变量名末段是 `PASSWORD`/`PASSWD`/`PWD`/`PASS`/`PASSPHRASE`/`SECRET`/`SECRETS`/`TOKEN`/`CREDENTIAL`/`CREDENTIALS`/`APIKEY`，或是没有分隔符的后缀 `PASSWORD`/`PASSWD`/`PASSPHRASE`/`SECRET(S)`/`CREDENTIAL(S)`/`TOKEN`/`APIKEY`（`PGPASSWORD` 这类 env 拼写），或是复合后缀 `ACCESS_KEY`/`PRIVATE_KEY`/`AUTH_TOKEN`/`CLIENT_SECRET`/`JWT_SECRET`，或是裸名 `KEY`/`TOKEN`/`PASSWORD`/`SECRET`；token 边界同时认 `_` `-` `.` `/` `\` `"` 与 camelCase。`KEY` 只在裸名、分隔符之后或 `APIKEY` 里成立（`MONKEY`/`TURKEY` 不算）；`PASS`/`PWD` 只作为更长名字里的一个 token（`DB_PASS`、`MYSQL_PWD`），裸 `pass` 是普通散文。
-- `env.url_credential`（同 kind/strength）：名字末段是 `DSN`/`URI`/`URL` 或含 `CONNECTION_STRING` 后缀时按 URL 类处理，只改写 `scheme://user:password@host` 里的 password；没有 userinfo password 的值一律不动，整个 DSN 从不整段改写（host 是运维要读的地址，不是凭据）。
+- env 赋值：`POSTGRES_PASSWORD=…`、`OPENAI_API_KEY=…`、工具输出里的整段 `.env`。证据是变量名，而变量名必须是环境变量的写法：**全大写**，且以 `_KEY` 或 `_PASSWORD` 结尾（`OPENAI_API_KEY`、`AWS_SECRET_ACCESS_KEY`、`POSTGRES_PASSWORD`）。这条限制是线上误报的直接修复：更早的规则把任何末段为 KEY/TOKEN/SECRET/PASSWORD 的名字（`clientSecret:`、`token:`、`dbPassword=`、`PGPASSWORD`、裸 `KEY`）都当成赋值，于是工具结果里回传的源码被整段改写——`clientSecret: string(target.ClientSecret)` 里的 `string(target.ClientSecret`、Go 里 `bodyKey: strings.TrimSpace(key)` 里的 `strings.TrimSpace(key` 都曾出现在审计表里。代码片段不是凭据，改错一个比漏掉一个 shapeless 值的代价更大。
+- DSN：`postgres://user:password@host:5432/db`。唯一秘密的部分是 userinfo 里的 password，scheme 本身就是「中间那段是密码」的证据，因此不需要变量名。`dsn.go` 对一组服务 scheme（`postgres`/`postgresql`/`pgsql`/`cockroachdb`/`redis`/`rediss`/`mysql`/`mariadb`/`mongodb`/`mongodb+srv`/`amqp`/`amqps`/`mssql`/`sqlserver`/`clickhouse`）做封闭列表识别，只改写 password 子跨度；用户名、主机、端口与库名保持可读。列表是封闭的：通用的 `scheme://user:password@host` 会把文档示例与 `git clone` URL 也改掉。
+
+`pkg/secretmask/assignment.go` 因此在 DFA 之外做一遍原生扫描：以 `=` / `:` 为触发点，向前最多回看 64 字节取变量名或 scheme，向后按引号/转义形态取 value span；单遍 O(n)、无命中路径零分配，也不解析 JSON（body 可能是嵌在 JSON 字符串里的 JSON 文本）。DSN 与 env 赋值共用这一遍遍历：DSN 由 `:` 后的 `//` 触发，被 URL 类名字赋值的 DSN 由 `env.url_credential` 认领（`=` 先到，整段 value 已被消费），因此同一个 password 不会被报告两次。三条规则追加在 `rule.go` 末尾：
+
+- `env.secret_assignment`（Strong，70 分 → High）：改写**整个 value**。名字必须全大写并以 `_KEY` 或 `_PASSWORD` 结尾；`_KEY` 的 value ≥ 16 字节，`_PASSWORD` 的 value ≥ 6 字节。
+- `env.url_credential`（同 kind/strength）：名字全大写且以 `_URL`/`_URI`/`_DSN`/`_CONNECTION_STRING` 结尾时按 URL 类处理，只改写 `scheme://user:password@host` 里的 password；没有 userinfo password 的值一律不动，整个 DSN 从不整段改写（host 是运维要读的地址，不是凭据）。
+- `dsn.password`（同 kind/strength）：任意位置出现的、scheme 在封闭列表里的 DSN，只改写 userinfo password，不需要变量名。
 
 支持的写法：`NAME=value`、`export NAME=value` / `set NAME=value`、`NAME = value`、YAML `NAME: value`、JSON `"NAME": "value"`、以及字符串内嵌 JSON 的转义形态 `\"NAME\": \"value\"`（转义深度 1–3）；单/双引号按内层引号原样保留，`.env` 段落在转义 JSON 字符串里以 `\n`/`\r`/`\t`/`\"` 或原始空白换行。span 只覆盖 value 本身，引号、分隔符与空白不在改写范围内。
 
-长度与跳过：password 类 value ≥ 6 字节，key/token 类 ≥ 16，URL userinfo password ≥ 3。`${NAME:-default}` / `$NAME` 引用、空值、以 `$ % < {` 开头的值、未加引号的 JSON 数字/`true`/`false`/`null`、占位词（`***`、`xxx`、`…`、`changeme`/`change_me`/`change-me`、`password`/`passwd`/`secret`/`token`/`key`/`dummy`/`example`/`sample`/`test`、JSON schema 类型名、`redacted`/`masked`、`your_*`、`replace*`）、以及引号内超过 1024 字节的「值」都跳过；引号内以空白开头的值也跳过（通常是 shell 命令把收尾引号读成了起始引号）。
+长度与跳过：`${NAME:-default}` / `$NAME` 引用、空值、以 `$ % < {` 开头的值、未加引号的 JSON 数字/`true`/`false`/`null`（仅整值赋值；DSN password 可以是纯数字）、占位词（`***`、`xxx`、`…`、`changeme`/`change_me`/`change-me`、`password`/`passwd`/`secret`/`token`/`key`/`dummy`/`example`/`sample`/`test`、JSON schema 类型名、`redacted`/`masked`、`your_*`、`replace*`）、以及引号内超过 1024 字节的「值」都跳过；引号内以空白开头的值也跳过（通常是 shell 命令把收尾引号读成了起始引号）。未加引号的 value 另外拒绝代码表达式：含 `(`/`[`/`{`/`<`，或首段是小写标识符的点号成员访问（`process.env.OPENAI_API_KEY`、`config.API_KEY`）——`.env` 的 value 与 JSON 字符串不长这样。
 
-协议词排除：`assignmentExcludedNames` 把变量名去掉 `_`/`-`/`.` 并小写后与固定表比较——`promptcachekey`、`nexttoken`、`pagetoken`、`continuationtoken`、`cachekey`、`idempotencykey`、`sortkey`、`partitionkey`、`routingkey`、`groupkey`、`primarykey`、`foreignkey`、`objectkey`、`storagekey`、`s3key`、`tokentype`、`tokencount`、`maxtokens`、`prompttokens`、`completiontokens`、`totaltokens`、`reasoningtokens`。这些名字末段是 KEY/TOKEN，但值是协议参数、计数器或标识符；不改写 `prompt_cache_key` 才不会改变 OpenAI Responses 的缓存键。排除是整名匹配，`PROXY_KEY`/`OPENAI_API_KEY` 不受影响。代价是 `*_KEY`/`*_TOKEN` 的覆盖偏宽，表外的协议名需要继续补。
+协议词排除：`assignmentExcludedNames` 把变量名去掉 `_`/`-`/`.` 并小写后与固定表比较——`promptcachekey`、`nexttoken`、`pagetoken`、`continuationtoken`、`cachekey`、`idempotencykey`、`sortkey`、`partitionkey`、`routingkey`、`groupkey`、`primarykey`、`foreignkey`、`objectkey`、`storagekey`、`s3key`、`tokentype`、`tokencount`、`maxtokens`、`prompttokens`、`completiontokens`、`totaltokens`、`reasoningtokens`。这些名字末段是 KEY，但值是协议参数、计数器或标识符；不改写 `PROMPT_CACHE_KEY` 才不会改变 OpenAI Responses 的缓存键。排除是整名匹配，`PROXY_KEY`/`OPENAI_API_KEY` 不受影响。
 
-与 DFA 结果的合并：`mergeFindings` 保证两组 span 不重叠、按 start 排序。名称锚定的 span **严格包含**一个或多个 DFA span 时用前者（名字说整个 value 是一个秘密，DFA 可能只认出了其中形似的一段）；等长时若 DFA finding 本来可改写则保留 DFA（厂商规则在审计里更具体），否则用名称锚定的（`KEY="sk-..."` 由弱通用形状升格为可改写就靠这条）；其它重叠（被包含或仅交叉）保留 DFA。方向同其他规则：只在**请求方向**改写，cassette 仍记录原始 body，客户端在响应里拿到还原后的真值。
+与 DFA 结果的合并：`mergeFindings` 保证两组 span 不重叠、按 start 排序。原生 span **严格包含**一个或多个 DFA span 时用前者（名字说整个 value 是一个秘密，DFA 可能只认出了其中形似的一段）；等长时若 DFA finding 本来可改写则保留 DFA（厂商规则在审计里更具体），否则用原生的（`PROXY_KEY="sk-..."` 由弱通用形状升格为可改写就靠这条）；其它重叠（被包含或仅交叉）保留 DFA。方向同其他规则：只在**请求方向**改写，cassette 仍记录原始 body，客户端在响应里拿到还原后的真值。
+
+**名称锚定通道的取舍。** 收紧后的覆盖是刻意保守的：`*_TOKEN`、`*_SECRET`、`PGPASSWORD`、`dbPassword`、裸 `KEY`/`PASSWORD`、以及 `_KEY`/`_PASSWORD` 之外的 shapeless 名字都不再改写。它们当中确实可能有真凭据（`GITHUB_TOKEN`、`JWT_SECRET`、`PGPASSWORD`），这是用漏报换误报的方向：线上一次把代码当密码改写，会让上游看到损坏的代码、客户端收到被换回的片段，比漏掉一个没有词法锚点的值更难接受。词法上可判定的 key（`ghp_`、`sk-` 等）仍由 DFA 覆盖，与名字无关。
 
 **L2 结构校验。** `validators.go` 实现六个离线校验，规则通过 `Validator` 字段引用：
 
@@ -138,14 +170,14 @@ secret_masking:
 
 ## 覆盖范围
 
-凭据与个人数据可改写规则集共 80 条：Strong 38、Anchored 24、Generic 18（另有 2 条 ReportOnly 访问指示符 `access.url` / `access.local_path` 不计入，规则元数据表共 82 条）。范围是四组：
+凭据与个人数据可改写规则集共 81 条：Strong 39、Anchored 24、Generic 18（另有 2 条 ReportOnly 访问指示符 `access.url` / `access.local_path` 不计入，规则元数据表共 83 条）。范围是四组：
 
 1. 结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；`sk-` 池的 body 字符类是 `b62d`（字母、数字、`_`、`-`），因此形如 `sk-…_…` 的 key 不会再在分隔符处被截断，具体 `sk-ant`/`sk-proj`/`sk-or` 规则仍按等长先声明者优先拿到标签；
 2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`；
 3. 个人数据：中国居民身份证号（`pii.chinese_id`）与手机号（`pii.cn_mobile`）。两者都按 Generic 计分——18 位或 11 位数字本身不证明什么。身份证的校验器通过即认定，因此实际只会改写省份、生日与校验位三者同时成立的号码；手机号没有校验位，号段只是候选检查，只有命中 `手机号`/`phone` 这类上下文才进入 Medium 并被改写，裸 11 位数字只上报（Low）；
-4. 名称锚定的 env 赋值（`env.secret_assignment` 与 `env.url_credential`，两条都按 Strong 计分）：不是 DFA 规则，由 `assignment.go` 的原生遍历产出；覆盖范围、写法、跳过与排除见上一节。
+4. 原生通道（`env.secret_assignment`、`env.url_credential` 与 `dsn.password`，三条都按 Strong 计分）：不是 DFA 规则，由 `assignment.go` / `dsn.go` 的原生遍历产出；覆盖范围、写法、跳过与排除见上一节。
 
-**另有两条只上报的访问指示符规则。** `access.url` 与 `access.local_path`（`indicator.rl`）不计入上面的 80 条与 Strength 分布，也永远不会被改写。URL 覆盖 `http`/`https`/`ws`/`wss`；本地路径覆盖 POSIX 绝对路径、已知根目录、`~/`、`./`、`../`、Windows 盘符、UNC 与带扩展名的相对路径。机器只负责最长的 URL/路径字节串，`indicator.go` 的候选检查才决定它是不是一次本地读取：`/v1/chat/completions` 这类路由前缀、`application/vnd.api+json` 这类 MIME、`net/http` 这类 import 路径、`example.com/path` 这类域名相对引用与 `#/definitions/Foo` 这类 JSON pointer 都被排除。路径字符类本身不含圆括号、`=`、`!` 与 `&`，所以 `(modules/x.md`、`registry_file=internal/x.go` 只记录括号或赋值号后面的那段值（候选检查只能丢弃候选，不能改写值，前缀必须在状态机里就不被消费）。`./`、`../`、`~/` 之后必须跟一个带扩展名的文件或至少两段目录，`../`、`../a`、`./$` 因此不算一次读取。反斜杠开头只接受两种自洽形态：解码形态是一个前导 `\\` 加单分隔符（`\\server\share`），转义形态是两个前导 `\\` 加成对分隔符（`\\\\server\\share`）；两者混用（`\\n\\tid`、`\\d+)\\.(\\d+`、`\\n\\n`）只可能是转义文本，直接拒绝；段名本身是 `n`/`t`/`r` 加行号、`\uXXXX`、`\xXX`，或含 `%s` 这类 printf 占位符时也不接受（`q:\n%s`、`z:\n244`）。句末或 markdown 的收尾标点（`).`、`**`）由 `TrimRight` 从值里去掉，但成对括号属于 URL 本身（`…/wiki/Foo_(bar)`），只有落单的收尾括号才被去掉。段内不包含空白：URL 到第一个空白/引号/反斜杠为止，这是路径与正文之间唯一可靠的分界；`internal/resources` 只在候选 token 被整段命中时才收录，所以含空格的路径（`C:\Program Files\…`、`/home/a/my file.txt`）目前不会进入资源索引，这是为精度保留的已知边界。工具调用参数是 JSON 文本，其中的 Windows 路径反斜杠成对出现（`C:\\Users\\…`）；机器同时接受单、双反斜杠两种形式，资源提取在记录前把成对反斜杠还原成单个，UNC 的两段网络根保持不变。它们的消费方是 `internal/resources` 的资源索引：它只把模型自己产生的工具调用（响应侧、请求侧 assistant 历史与 entry 的原始请求/响应）里的路径/URL 字段、shell 操作数与 patch 头部作为候选，解析 worker 在解析后按值去重，写入 `resources` / `trace_resources`（见[观测与审计](./OBSERVATION_AND_AUDIT.md) 的「资源索引」）；工具结果、消息正文和代码内容不参与，资源不替换、不进入 `secret_mask_mappings.db`，只记录访问了哪些路径与 URL，不记录文件内容。路径 key 与 shell 操作数调用 `IndicatorsWithOptions` 的 `PathOperand`：相对目录（`web/dist/learn`、`../src`）在那里是路径；`/v1` 这类路由前缀、MIME、域名与转义残渣仍被排除，正文与普通 token 使用上面的严格检查。`/dev/null` 等设备 sink 无论作为重定向目标还是 `-o` 一类选项值都不计入。
+**另有两条只上报的访问指示符规则。** `access.url` 与 `access.local_path`（`indicator.rl`）不计入上面的 81 条与 Strength 分布，也永远不会被改写。URL 覆盖 `http`/`https`/`ws`/`wss`；本地路径覆盖 POSIX 绝对路径、已知根目录、`~/`、`./`、`../`、Windows 盘符、UNC 与带扩展名的相对路径。机器只负责最长的 URL/路径字节串，`indicator.go` 的候选检查才决定它是不是一次本地读取：`/v1/chat/completions` 这类路由前缀、`application/vnd.api+json` 这类 MIME、`net/http` 这类 import 路径、`example.com/path` 这类域名相对引用与 `#/definitions/Foo` 这类 JSON pointer 都被排除。路径字符类本身不含圆括号、`=`、`!` 与 `&`，所以 `(modules/x.md`、`registry_file=internal/x.go` 只记录括号或赋值号后面的那段值（候选检查只能丢弃候选，不能改写值，前缀必须在状态机里就不被消费）。`./`、`../`、`~/` 之后必须跟一个带扩展名的文件或至少两段目录，`../`、`../a`、`./$` 因此不算一次读取。反斜杠开头只接受两种自洽形态：解码形态是一个前导 `\\` 加单分隔符（`\\server\share`），转义形态是两个前导 `\\` 加成对分隔符（`\\\\server\\share`）；两者混用（`\\n\\tid`、`\\d+)\\.(\\d+`、`\\n\\n`）只可能是转义文本，直接拒绝；段名本身是 `n`/`t`/`r` 加行号、`\uXXXX`、`\xXX`，或含 `%s` 这类 printf 占位符时也不接受（`q:\n%s`、`z:\n244`）。句末或 markdown 的收尾标点（`).`、`**`）由 `TrimRight` 从值里去掉，但成对括号属于 URL 本身（`…/wiki/Foo_(bar)`），只有落单的收尾括号才被去掉。段内不包含空白：URL 到第一个空白/引号/反斜杠为止，这是路径与正文之间唯一可靠的分界；`internal/resources` 只在候选 token 被整段命中时才收录，所以含空格的路径（`C:\Program Files\…`、`/home/a/my file.txt`）目前不会进入资源索引，这是为精度保留的已知边界。工具调用参数是 JSON 文本，其中的 Windows 路径反斜杠成对出现（`C:\\Users\\…`）；机器同时接受单、双反斜杠两种形式，资源提取在记录前把成对反斜杠还原成单个，UNC 的两段网络根保持不变。它们的消费方是 `internal/resources` 的资源索引：它只把模型自己产生的工具调用（响应侧、请求侧 assistant 历史与 entry 的原始请求/响应）里的路径/URL 字段、shell 操作数与 patch 头部作为候选，解析 worker 在解析后按值去重，写入 `resources` / `trace_resources`（见[观测与审计](./OBSERVATION_AND_AUDIT.md) 的「资源索引」）；工具结果、消息正文和代码内容不参与，资源不替换、不进入 `secret_mask_mappings.db`，只记录访问了哪些路径与 URL，不记录文件内容。路径 key 与 shell 操作数调用 `IndicatorsWithOptions` 的 `PathOperand`：相对目录（`web/dist/learn`、`../src`）在那里是路径；`/v1` 这类路由前缀、MIME、域名与转义残渣仍被排除，正文与普通 token 使用上面的严格检查。`/dev/null` 等设备 sink 无论作为重定向目标还是 `-o` 一类选项值都不计入。
 
 **PEM 私钥块按整块改写，不是只改头行。** `structural.pem_private_key` 仍然只匹配头行、只上报（`policySkipMask` 只豁免这一条规则 ID），因为头行不含密钥材料；真正承载密钥的是 `structural.pem_private_key_block`。footer 必须重复 header 的标签（`OPENSSH` 对 `OPENSSH`），这是一次反向引用，正则/DFA 表达不了，所以扩展写在 `pem.go` 里、由头行命中触发，沿用 `digit_run` → `digitClasses` 的「粗锚点 + 原生细判」打法：不新增 DFA 状态，也不重新生成 `rules_ragel.go`。
 
@@ -159,7 +191,7 @@ secret_masking:
 
 **手机号只覆盖 11 位连写。** 带 `+86`、空格或连字符的写法只命中其中的 11 位数字段（`+86 13800138000` 可以）；`8613800138000` 这种 13 位连写是单个数字 run，不命中；分机写法（`13800138000x123`）同样不命中。号段表按公开分配整理，新号段上线后需要补表；未列入的号段即使上下文命中也不会改写。词表里没有裸 `tel`（它是 `hotel`、`intel` 的子串，会把旅店记录里的数字都当成手机号），带引号的 JSON 键 `"tel"`（以及它在字符串内嵌 JSON 里的转义形式 `\"tel\"`）在词表内，因此 `{"tel":"…"}` 与 `"content":"{\"tel\":…}"` 都能改写，而 YAML 的 `tel: …` 不能。
 
-**DSN 与 Cookie 的子跨度边界。** DSN 只有 password 是秘密（`postgres://user:pass@host` 里的 pass），Cookie 只有值的一部分是秘密。名称锚定通道补上了 DSN 的这一半：当整个值挂在一个 URL 类名字（`*_URL`、`*_DSN`、`*_URI`、`*_CONNECTION_STRING`）下、且值里有 `scheme://user:password@host` 时，`env.url_credential` 只改写 password 子跨度，host、用户名与查询参数保持原样；没有 userinfo password 的 DSN 不改写。ADO.NET 形态（`Server=…;Password=…`）不是 URL，因此 `CONNECTION_STRING` 值本身不做 userinfo 解析，但其中的 `Password=…` 会作为独立赋值命中 `env.secret_assignment`。`Cookie: a=b` 没有这样的名字锚点，仍不自动改写，由 `internal/analyzer` 的正则事后上报。
+**DSN 与 Cookie 的子跨度边界。** DSN 只有 password 是秘密（`postgres://user:pass@host` 里的 pass），Cookie 只有值的一部分是秘密。DSN 由 `dsn.password` 按 scheme 直接识别，不要求变量名：任意位置出现的 `scheme://user:password@host`（scheme 在封闭列表内）都只改写 password 子跨度，host、用户名、端口与查询参数保持原样；没有 userinfo password 的 DSN 不改写。同一个 DSN 挂在 URL 类名字（`*_URL`、`*_DSN`、`*_URI`、`*_CONNECTION_STRING`，名字须全大写）下时由 `env.url_credential` 认领，审计里能看到是名字给了证据，密码只报告一次。ADO.NET 形态（`Server=…;Password=…`）不是 URL，`CONNECTION_STRING` 值本身不做 userinfo 解析，其中的 `Password=…` 也不再命中（`_PASSWORD` 是前半段而不是名字末段；这是收紧后的已知取舍）。`Cookie: a=b` 没有这样的名字锚点，仍不自动改写，由 `internal/analyzer` 的正则事后上报。
 
 `internal/analyzer` 仍保留 DSN、Cookie 与裸 Bearer 形态的正则用于**事后上报**：上报可以有误报，自动改写不能。`structural.bearer_token` 是本规则集里最激进的一条——Bearer token 本身没有形状，锚点就是 RFC 6750 的 scheme 名，而上下文窗口包含匹配自身，所以正文里任何 `Bearer ` 加 20 字节以上的串都会被改写，示例与占位值也不例外。这是刻意的：用户无意贴出的 `Authorization: Bearer …` 正是要遮的东西。代理不改写请求**头**，所以真正用于向上认证的 `Authorization` 头不受影响。
 
@@ -214,7 +246,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，cassette 只记原始请求体，回填与重建索引的路径没有接入映射文件，所以它们**不写**这张表。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
 
-开启 `mapping_store` 时还有第四份持久化副本：`{{output_dir}}/secret_mask_mappings.db` 按**真值**去重保存同一对值。它不是审计记录——没有 trace、偏移与命中次数，只用于启动加载、假值识别和真值复用；审计读取面不读它，删掉它不影响已有 trace，只影响后续重启能否复用旧假值。
+开启 `mapping_store` 时还有第四份持久化副本：`{{output_dir}}/secret_mask_mappings.db` 按**真值**去重保存同一对值。它不是审计记录——没有 trace、偏移与命中时间，只用于启动加载、假值识别和真值复用；审计读取面不读它，删掉它不影响已有 trace，只影响后续重启能否复用旧假值。它也不按 session 或 trace 分区：整个 `output_dir` 只有一份文件，真值是唯一的键，同一个值在哪条 trace、哪个会话里出现都映射到同一条记录。按 trace 的「哪次请求被改了哪些值」在 `credential_mask_audits` 表里，两者用途不同。清理见「映射文件的清理」一节的 `trajecta db secret-mapping`。
 
 **3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。身份证与手机号替换走同一条通知与 `secretmask:rule:<rule>` 指纹，只是 `rule`/`kind` 不同（`pii.chinese_id`/`national_id`、`pii.cn_mobile`/`mobile`）；两个读入口都按 `kind` 原样显示，不区分凭据与个人数据。
 
@@ -252,13 +284,14 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 - **逐 token 的极小分片不重组。** 链从假值的第一段开始跟；普通假值的开链门槛是 8 字节，长假值（如私钥块）是 16 字节。对 SSE 的 JSON 字符串分片，长假值在首段止于该字符串的结束引号时会破例收下短于门槛的首段（`restore.go` 的 `chainStart`），因此 17 字节甚至 5 字节的首段都能开链；真正不重组的是既短于门槛、又不在 JSON 字符串边界的切法，例如逐字节的纯文本流，或首段后紧跟非引号字节。此时客户端拿到的是拼接后的**假值**而不是真值——功能上失败，但没有改写任何无关字节。（注意 `content` 与工具调用参数都走同一条路径，所以这一条对两者都成立。）手机号假值只有 11 字节，8 字节的开链门槛意味着首段被切到 7 字节以下（例如 6+5）就不会重组；身份证 18 字节的余量稍大，但同受这条限制。
 - **`/tokenize` 计数请求不遮蔽。** 本地 Responses runtime 的 token 计数器会把待压缩的对话正文原样 POST 到上游的 `/tokenize` 端点（`internal/responses/runtime/tokenize_counter.go`，经 `runtime.go` 的 `EstimateResponsePromptTokens` 在自动压缩时调用），这条路径没有接入 vault。它需要显式配置才启用：`model_profiles` 里要有 `name`/`pattern`、`context_window_tokens`，以及声明了 `capabilities.tokenize` 的启用目标，或用 `tokenize_counter.enabled` 显式打开；跟踪的默认配置里没有 `model_profiles`，因此当前不生效。一旦启用，它发出的正文里含真实凭据。
 - **不透明 JSON 字段的边界。** 跳过区间只来自单个完整、无尾随字节的 JSON 文档：NDJSON 或「一份 JSON 后接垃圾」的请求体会退回常规遮蔽，免得一个非法体的区间把真凭据一起跳过。字段名预筛按字面字节匹配，所以把 ASCII 成员名写成 `\u` 转义的请求体（例如 `"encrypted_\u0063ontent"`）不会被识别；标准 JSON 编码器不会这样输出 ASCII 键名，这属于已记录的行为边界，届时密文会按旧行为参与扫描。`url`/`image_url` 只在值是 base64 data URI 时跳过，普通远程 URL 仍参与扫描。整块规则（`thinking`、`redacted_thinking`、`reasoning`、`reasoning.*` 等）按对象 `type` 的结构匹配，不按 provider 或请求路径限定：如果客户端自己的工具参数 JSON（例如 Gemini `functionCall.args`、Anthropic `tool_use.input`）恰好使用了这些 type 值，对象内的字符串也会被整块跳过；这是为了签名完整性而接受的代价。`thinking` 块整块跳过意味着块内即使出现凭据形态也不会改写——同样是为了维持签名；响应侧还原仍按字节匹配假值，如果模型在思考块里回显了假值，客户端拿回真值后再回传仍可能破坏签名，这条属于还原侧的已知边界。
-- **名称锚定赋值的边界。** 它按名字而不是按形状判定，因此 `*_KEY`/`*_TOKEN`/`*_SECRET` 的覆盖天然偏宽：`assignmentExcludedNames` 只排除已知协议名（`prompt_cache_key`、`next_token`、分页/排序/分区 key、token 计数器等），表外的协议字段可能被当作秘密改写；`KEY` 只在裸名/分隔符后/`APIKEY` 里成立，`PASS`/`PWD` 只作为更长名字的 token，裸 `pass` 不会命中。引号内超过 1024 字节的值直接跳过（真实秘密远短于此，长私钥仍由 PEM 规则在值内命中）；URL 类值没有 userinfo password 时不做任何改写；值只在请求方向被改写，cassette 与详情页仍是原始 body，客户端通过响应还原看到真值。数值型配置（`MAX_TOKEN=4096`、`true`/`false`/`null`）与占位符不会进入改写。
+- **原生通道的边界。** env 赋值只接受全大写的 `_KEY`/`_PASSWORD` 名字，因此 `*_TOKEN`、`*_SECRET`、`PGPASSWORD`、`dbPassword`、裸 `KEY`/`PASSWORD` 与表外的协议名都不再改写——这是用漏报换误报的取舍（`GITHUB_TOKEN`、`JWT_SECRET` 这类没有词法形状的值会漏）。`assignmentExcludedNames` 仍排除已知协议名（`PROMPT_CACHE_KEY`、分页/排序/分区 key、token 计数器等），表外的 `*_KEY` 协议字段仍可能被当成秘密改写；`_KEY` 的 value 要求 ≥ 16 字节、`_PASSWORD` ≥ 6 字节。未加引号的 value 另拒绝代码表达式（含 `(`/`[`/`{`/`<`，或首段是小写标识符的点号成员访问），这是代码片段误报的另一半修复；以大写词开头的点号值仍可能被当成密码（`Correct.Horse.Battery` 会改写），而全小写词加点号的密码会漏（`my.pass.word`）。引号内超过 1024 字节的值直接跳过（真实秘密远短于此，长私钥仍由 PEM 规则在值内命中）；URL 类值没有 userinfo password 时不做任何改写；值只在请求方向被改写，cassette 与详情页仍是原始 body，客户端通过响应还原看到真值。数值型整值配置（`MAX_TOKENS=5529`、`PASSWORD_LENGTH=12`）与占位符不会进入改写。
+- **DSN 只覆盖封闭的 scheme 列表。** `dsn.password` 只认 `dsn.go` 里列出的数据库/缓存/消息队列 scheme，以及 SQLAlchemy 风格的 `scheme+driver` 拼写（`postgresql+psycopg`、`mysql+pymysql`；按 `+` 前的基础 scheme 归属）；`https://user:pass@host`、`ssh://`、`ftp://` 之类不在列表内，除非挂在全大写 URL 类名字下（`env.url_credential`）。userinfo 里合法的 sub-delims（`! $ & ' ( ) * + , ; =`）与 `:` 可以原样出现，会被整段改写；userinfo 扫描在控制字符/空白、非 ASCII 字节、`"`、反引号、`\`、`< > | ^ { } [ ]` 与 URL 结构字符 `/ ? #` 处停止，password 里未 percent-encode 的 `/`、`?`、`#`、空白因此会截断 authority，这段值可能识别不到（这些都是 RFC 3986 要求 percent-encode 的字符，`'` 是例外：它合法且不作为终止符，所以 `postgres://u:pa'ss@h/db` 会整段改写）。未 percent-encode 的 `@` 是 URL 的 userinfo 分隔符：按第一个 `@` 切分，只改写它前面的部分（RFC 3986 要求 password 里的 `@` 写成 `%40`）。由此带来的语法歧义：无空白分隔的 `,`/`;`/`=` 后紧跟一个带 `@` 的 token 时，整段仍是一个合法 URL，会被解析成 userinfo（例如 `postgres://db:5565,user@example.com` 的 password 是 `5565,user`）；用空白、双引号/反引号或路径分隔两个 token 即可避免。某些编码器把 `/` 写成 JSON 转义形式 `\/`（`postgres:\/\/user:pass@host`）时不识别。没有 userinfo 的 DSN 不改写。新服务要覆盖时把 scheme 加进 `dsnSchemes` 并补一条测试即可，不需要改 DFA 或重新生成。
 - **派生与编码形式绕过。** 引擎不做熵估计、不支持 look-behind，也只解码校验器真正需要的那部分（JWT 的三段、JWE 的头部、GitHub 与 age 的校验位）。被编码、截断、改大小写或重新格式化过的凭据识别不到。
 - **不阻止「借刀杀人」。** 它保护值不泄露给上游，但不阻止模型通过工具调用让下游系统去使用该凭据。
 
 ## 度量
 
-以下数字来自 `go test ./pkg/secretmask -run '^$' -bench . -benchmem -count=3` 在 24 线程机器上的稳定值，看数量级即可；`task bench:secretmask` 跑同一套（`-count=1`，更快但抖动略大）。基准载荷是 transcript 形状：散文、代码、40 位 commit hash、MD5、UUID 与稀疏凭据混合，比纯英文更接近真实 agent 请求。请求扫描的数字是在名称锚定赋值遍历加入前测的：该遍历与 DFA 扫同一份字节，基准显示再增加约 5–9% 的扫描成本（取决于 body 里 `=`/`:` 的密度），命中路径零分配。
+以下数字来自 `go test ./pkg/secretmask -run '^$' -bench . -benchmem -count=3` 在 24 线程机器上的稳定值，看数量级即可；`task bench:secretmask` 跑同一套（`-count=1`，更快但抖动略大）。基准载荷是 transcript 形状：散文、代码、40 位 commit hash、MD5、UUID 与稀疏凭据混合，比纯英文更接近真实 agent 请求。请求扫描的数字包含原生遍历（env 赋值 + DSN）：该遍历与 DFA 扫同一份字节，基准显示比只跑 DFA 多约 5–9% 扫描成本（取决于 body 里 `=`/`:` 与 `://` 的密度），命中路径零分配。
 
 ### 请求与响应路径
 
@@ -283,4 +316,4 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 - 长假值在还原侧的开链门槛是 16 字节而不是 8：私钥块的 `-----BEGIN ` 与所有 PEM 头共享 11 字节，8 字节门槛会让响应里每个证书头都开一条永远凑不齐的链，在 PEM 密集的极端载荷上把还原吞吐从约 280 MB/s 拖到约 50 MB/s，并让流式输出暂扣 512 字节。同一份极端载荷在 16 字节门槛下不再开链。
 - 映射文件不改变请求热路径：已加载或已命中的值只查内存 map，只有首次遇到某个真值时才查一次 bbolt；新值渲染后的写入在后台批量提交。启动加载是一次性成本，默认加载全部，规模由不同敏感值的数量决定；正数 `load_limit` 可限制启动内存。
 - 还原：散文载荷约 340 MB/s，流式约 348 MB/s；上表的 transcript 载荷约 139 MB/s。跨 delta 重组只增加一次判定，代价已包含在内；「整条假值优先于链」的判定在链开着时逐字节执行，这部分开销也在测量值里，换来的是不漏还原、不拼接。
-- 精度：对 `git ls-files` 的 1,122 个文本文件（约 20 MB，另加本地 `config/config.dev.yaml`）扫描得到 83 处命中、25 个文件。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报：`ek_` 开头的 Go 标识符、`go.sum` 里形似 `LTAI` 的串、`17179869184` 常量、HTML 快照里的一个 11 位数字；Low 一律不会改写。身份证规则 15 处（全 High）；手机号规则 29 处，其中 12 处 Medium 全部落在 `mobile_test.go` 与 `secretmask_test.go` 的样例里，其余 17 处为 Low。PEM 私钥块规则本身在当前工作树没有命中；新增的 SSH 测试夹具带来 2 处 PEM 头命中。
+- 精度：对 `git ls-files` 的 1,217 个文本文件（约 25 MB，另加本地 `config/config.dev.yaml`）扫描得到 135 处命中、40 个文件（High 102、Medium 15、Low 18）。除 `config/config.dev.yaml` 里 2 处真实 key 外，其余全部是测试夹具、文档示例或已知的 Low 误报（`go.sum` 里形似 `LTAI` 的串、`ent/dao` 生成代码里的常量、HTML 快照里的一个 11 位数字等）；Low 一律不会改写。本次收紧的原生规则命中都落在测试夹具与文档示例里（`env.secret_assignment` 19 处、`env.url_credential` 9 处、`dsn.password` 8 处）；在仓库跟踪的 663 个 `.go`/`.ts`/`.js`/`.py` 源文件（约 13 MB，排除 `*_test.go`）上只有 3 处命中、**0 处可改写命中**——工具结果里回传的代码不会再被当成凭据改写，这正是本次修复的目标。

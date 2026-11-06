@@ -71,6 +71,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 | `db migrate optimize-indexes` | Postgres 索引优化 | 仅 Postgres 生效，应用非事务性 `CREATE INDEX CONCURRENTLY`；支持 `--dry-run`，SQLite 报 not applicable |
 | `db summary rebuild sessions` | 派生汇总重建 | 从 logs 重建 `session_summaries`；支持 `--session-id`、`--dry-run` |
 | `db secret status` / `export` / `rotate` | 本地 channel secret 加密密钥 | `rotate` 必须显式 `--yes`；`export` 支持 `--out` |
+| `db secret-mapping stats` / `list` / `delete` / `prune` / `compact` | 本地 bbolt 遮蔽映射文件（不是 application DB 表） | 必须在 serve 停止后运行（bbolt 排他锁）；写命令默认 dry-run，`--apply` 才落盘；`stats`/`list`/`delete`/`prune` 经 `appdb.Open` 打开 application DB（受 `auto_migrate` 影响），`compact` 只做原始字节复制、不连库；`--purge-audits` 会删 `credential_mask_audits` 行但不动 `system_events` |
 | `auth migrate up` / `down` / `status` | 认证表 | 见下一节 |
 | `migrate`（顶层） | cassette 重写与索引重建 | 默认 `--rewrite-v2 --rebuild-index`，支持 `--dry-run`；打开应用库时同样受 `auto_migrate` 影响，不会运行 auth migrator |
 | `analyze ...` | 派生数据重算 | 见“派生数据与重算” |
@@ -210,7 +211,7 @@ trajecta db summary rebuild sessions [--session-id <id>]
 - 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）的数据仍然留在已有 Postgres 库里；Postgres 的历史迁移仍然创建该表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到一张空表。`overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP：新库不会建表，已有旧库升级时数据随表一并删除（down 迁移只重建空表，不可逆）。运行时代码、必需表检查与任何命令都不会读取或删除 `semantic_nodes`；是否回收其空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`（先备份；删除不可逆，且代码不会代做）。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
 - `credential_mask_audits` 是这张规则的一个例外，两点都要知道：它是**按 trace** 保存真值与假值的表，假值由进程内 vault 生成、cassette 只记原始请求体，所以删掉这些行之后**无法重建**；反过来，它每天只随真正被改写的请求增长（每个被替换的值一行），量级远低于 `logs`，因此没有自动保留策略。长期保留真值是一项有意的运维取舍：需要缩短留存时按 `detected_at` 手工删除即可，删行不影响 replay 与 trace 详情。
-- `{{output_dir}}/secret_mask_mappings.db` 是遮蔽映射的 bbolt 文件，保存真值与假值、按真值去重，默认开启（`secret_masking.mapping_store`）。它和 cassette、审计表一样按凭据级别对待：用 `trace_index.secret` 加密（无本地密钥时为明文），`0600`，不能跨机器共享，同一目录只能被一个进程打开（bbolt 排他锁）。备份时与 SQLite DB、`.http` 目录一起备份，但要在进程停止时复制或用文件系统快照——运行中直接 `cp` 一个 bbolt 文件可能拿到不一致的页。删除它不影响已有 cassette 与审计行，只影响重启后能否复用旧假值。
+- `{{output_dir}}/secret_mask_mappings.db` 是遮蔽映射的 bbolt 文件，保存真值与假值、按真值去重，默认开启（`secret_masking.mapping_store`）。它和 cassette、审计表一样按凭据级别对待：用 `trace_index.secret` 加密（无本地密钥时为明文），`0600`，不能跨机器共享，同一目录只能被一个进程打开（bbolt 排他锁）。备份时与 SQLite DB、`.http` 目录一起备份，但要在进程停止时复制或用文件系统快照——运行中直接 `cp` 一个 bbolt 文件可能拿到不一致的页。删除它不影响已有 cassette 与审计行，只影响重启后能否复用旧假值。停 serve 后可用 `trajecta db secret-mapping stats|list|delete|prune|compact` 查看与清理它（默认 dry-run，`--apply` 才落盘；`prune --rule <规则名>` 从 `credential_mask_audits` 找真值再删映射，`compact` 用于回收 bbolt 不归还的空间），细节见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md)。
 - 显式选择的 SQLite DB 默认位于输出目录内，备份时应把 SQLite DB、`secret_mask_mappings.db` 与 `.http` 目录一起备份；Postgres 备份与归档策略见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 - `db migrate status --check-db` 对 SQLite 是只读的：不会创建缺失文件、不会修复 drift、不会重写用户数据。手工修复前先备份 SQLite DB 与 `.http` 目录。
 
