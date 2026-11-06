@@ -8,7 +8,10 @@
  * link keeps the reader's other query parameters while resetting the page.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   KNOWN_HARNESS_IDS,
@@ -189,6 +192,41 @@ describe("harnessFilterSearch / harnessFilterHref", () => {
   it("builds an absolute path for the traffic page", () => {
     assert.match(harnessFilterHref("/traces", "?window=30d", "claude-code"), /^\/traces\?/);
     assert.match(harnessFilterHref("", "", "claude-code"), /^\/traces\?/);
+  });
+});
+
+// The Go backend owns the vocabulary; this module only mirrors it. Reading the
+// catalogue here keeps the two lists from drifting apart silently: a rule added
+// or renamed on the Go side without updating the mirror would leave a real
+// harness out of the filter's suggestions, which no runtime type can catch.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+function readBackend(relativePath) {
+  return readFileSync(join(repoRoot, relativePath), "utf8");
+}
+
+function catalogIDs() {
+  const source = readBackend("internal/harness/catalog.go");
+  return [...source.matchAll(/^\s*id:\s+"([^"]+)",$/gm)].map((match) => match[1]);
+}
+
+describe("backend vocabulary parity", () => {
+  it("KNOWN_HARNESS_IDS is exactly the Go catalogue's ids", () => {
+    const ids = catalogIDs();
+    assert.ok(ids.length >= 20, `parsed only ${ids.length} catalogue ids; did the catalogue shape change?`);
+    assert.deepEqual([...KNOWN_HARNESS_IDS].sort(), [...ids].sort());
+  });
+
+  it("every capability the backend emits has a label mapping", () => {
+    const source = readBackend("internal/harness/signals.go");
+    const capabilities = [...source.matchAll(/caps = append\(caps, "([^"]+)"\)/g)].map((match) => match[1]);
+    assert.ok(capabilities.includes("streaming") && capabilities.includes("responses-api"), `parsed capabilities: ${capabilities}`);
+    // The translate function only resolves keys the module knows; a raw suffix
+    // coming back means the tag has no localised label.
+    const translateCapabilities = (key) => (key.startsWith("harness.capability.") ? "translated" : key);
+    for (const capability of capabilities) {
+      assert.equal(harnessTagLabel(`capability:${capability}`, translateCapabilities), "translated", `capability:${capability} has no label mapping`);
+    }
   });
 });
 

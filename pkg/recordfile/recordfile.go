@@ -118,14 +118,17 @@ type MetaData struct {
 	StickyStatus             string `json:"sticky_status,omitempty"`
 	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
 	// The client-side harness that produced this request, derived from the
-	// request headers and body by internal/harness. This is a classification of
-	// the traffic, never a rewrite of it: the recorded request and the request
-	// sent upstream are untouched. The canonical id (`claude-code`, `codex-cli`,
-	// ...) is what the Monitor filters on; Name is its display label, Version
-	// the client version the traffic carried, Kind the product class
-	// (`agent-cli`, `ide-extension`, `agent-app`, `gateway`, `sdk`) and Tags the
-	// stable capability/SDK labels. Confidence is `high` for a product token,
-	// `medium` for body-only evidence and `low` for an SDK fallback.
+	// request head only - headers and URL path - by internal/harness; the body is
+	// never read. This is a classification of the traffic, never a rewrite of
+	// it: the recorded request and the request sent upstream are untouched. The
+	// canonical id (`claude-code`, `codex-cli`, ...) is what the Monitor filters
+	// on; Name is its display label, Version the client version the traffic
+	// carried, Kind the product class (`agent-cli`, `ide-extension`,
+	// `agent-app`, `gateway`) and Tags the stable capability/SDK labels.
+	// Confidence is `high` for a product UA token or a product-private header and
+	// `medium` for a corroborating header combination; `low` is reserved, no rule
+	// produces it - a request without a product signature keeps its SDK and
+	// capability tags with an empty id instead of claiming a class.
 	//
 	// The same facts are also written as one `harness.detected` prelude event,
 	// which is the durable record; these fields mirror it into the indexed row

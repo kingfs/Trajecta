@@ -32,7 +32,8 @@ const (
 	KindIDE      = "ide-extension"
 	KindAgentApp = "agent-app"
 	KindGateway  = "gateway"
-	KindSDK      = "sdk"
+	// KindSDK is reserved: no rule returns it (tag-only detections carry an empty Kind).
+	KindSDK = "sdk"
 )
 
 // Confidence levels. A product-identifying header or a system-prompt
@@ -205,7 +206,6 @@ func detected(confidence string, version string, evidence ...string) (matchResul
 // lives in the headers the client sends, and detection cost is a handful of
 // header lookups regardless of payload size.
 type requestView struct {
-	method string
 	path   string
 	query  string
 	header http.Header
@@ -213,7 +213,6 @@ type requestView struct {
 
 func newRequestView(req *http.Request) requestView {
 	return requestView{
-		method: strings.ToUpper(req.Method),
 		path:   req.URL.Path,
 		query:  req.URL.RawQuery,
 		header: req.Header,

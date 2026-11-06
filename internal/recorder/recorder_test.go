@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -746,5 +747,66 @@ func TestUpdateLogFileIndexesClientHarness(t *testing.T) {
 		t.Fatalf("ListPage(other harness) error = %v", err)
 	} else if len(other.Items) != 0 {
 		t.Fatalf("other-harness items = %d, want 0", len(other.Items))
+	}
+}
+
+// TestPrepareLogFileHarnessDetectionIgnoresBody pins the recorder half of the
+// head-only contract: the classification written into the cassette meta does not
+// depend on the request body at all, so an empty and an oversized body with a
+// spoofing prompt produce the same harness metadata.
+func TestPrepareLogFileHarnessDetectionIgnoresBody(t *testing.T) {
+	classify := func(t *testing.T, body string) recordfile.MetaData {
+		t.Helper()
+		rec := New(t.TempDir(), false, nil)
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
+		req.Header.Set("anthropic-beta", "claude-code-20250219")
+		info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+		if err != nil {
+			t.Fatalf("PrepareLogFile() error = %v", err)
+		}
+		defer info.File.Close()
+		return info.Header.Meta
+	}
+
+	empty := classify(t, "")
+	huge := classify(t, `{"system":"You are Qwen Code, an interactive CLI tool."}`+strings.Repeat(" ", 2*1024*1024))
+	if empty.ClientHarness != huge.ClientHarness ||
+		empty.ClientHarnessName != huge.ClientHarnessName ||
+		empty.ClientHarnessVersion != huge.ClientHarnessVersion ||
+		empty.ClientHarnessKind != huge.ClientHarnessKind ||
+		empty.ClientHarnessConfidence != huge.ClientHarnessConfidence ||
+		!reflect.DeepEqual(empty.ClientHarnessTags, huge.ClientHarnessTags) {
+		t.Fatalf("harness metadata depends on the body: empty=%+v huge=%+v", empty, huge)
+	}
+	if empty.ClientHarness != "claude-code" || empty.ClientHarnessConfidence != "high" {
+		t.Fatalf("harness metadata = %+v, want claude-code/high", empty)
+	}
+}
+
+// TestDetectClientHarnessExchangeKinds pins the exchange-kind gate: only the
+// proxy-minted local Responses child (`model`) is skipped. Every client-visible
+// exchange kind is classified, and a nil request is a no-op rather than a panic.
+func TestDetectClientHarnessExchangeKinds(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("User-Agent", "claude-cli/2.0.14")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	for _, kind := range []string{"", "entry", "proxy"} {
+		if got := detectClientHarness(req, kind); got.ID != "claude-code" {
+			t.Fatalf("exchange kind %q detection = %+v, want claude-code", kind, got)
+		}
+	}
+	if got := detectClientHarness(req, "model"); !got.Empty() {
+		t.Fatalf("model child detection = %+v, want empty", got)
+	}
+	if got := detectClientHarness(nil, "entry"); !got.Empty() {
+		t.Fatalf("nil request detection = %+v, want empty", got)
 	}
 }

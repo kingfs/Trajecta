@@ -2,7 +2,9 @@ package harness
 
 import (
 	"bytes"
+	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -359,10 +361,30 @@ func TestDetectUnknownRequest(t *testing.T) {
 func TestDetectDoesNotMutateRequest(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/messages",
 		map[string]string{"User-Agent": "claude-cli/2.0.14"}, `{"model":"claude-sonnet-4-5","system":"You are Claude Code"}`)
-	before := req.Header.Get("User-Agent")
+	headersBefore := req.Header.Clone()
+	methodBefore := req.Method
+	urlBefore := req.URL.String()
+	hostBefore := req.Host
+	bodyBefore, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(body) error = %v", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(bodyBefore))
+
 	_ = Detect(req)
-	if req.Header.Get("User-Agent") != before {
-		t.Fatalf("Detect mutated the request headers")
+
+	if req.Method != methodBefore || req.URL.String() != urlBefore || req.Host != hostBefore {
+		t.Fatalf("Detect mutated the request line: method=%q url=%q host=%q", req.Method, req.URL, req.Host)
+	}
+	if !reflect.DeepEqual(req.Header, headersBefore) {
+		t.Fatalf("Detect mutated the request headers: %v -> %v", headersBefore, req.Header)
+	}
+	bodyAfter, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(body) after Detect error = %v", err)
+	}
+	if !bytes.Equal(bodyAfter, bodyBefore) {
+		t.Fatalf("Detect mutated or consumed the request body")
 	}
 }
 
@@ -490,5 +512,101 @@ func TestDetectBrowserAccessHeaderAloneIsNotClaudeCode(t *testing.T) {
 	got := Detect(req)
 	if got.ID != "" {
 		t.Fatalf("detection = %+v, want no harness from the browser-access header alone", got)
+	}
+}
+
+func TestDetectEvidenceNamesOnlySignals(t *testing.T) {
+	// Evidence is written into the trace index and the cassette prelude, so it
+	// must contain signal names - never bytes copied out of a client header.
+	// The sentinel sits in the value parts a naive implementation would reuse
+	// (a User-Agent product suffix, an originator value), so it may never
+	// surface in evidence.
+	const sentinel = "sentinelvalue"
+	cases := map[string]map[string]string{
+		"codex-variant-ua": {"User-Agent": "codex-tui_" + sentinel + "/1.2.3"},
+		"codex-exec-ua":    {"User-Agent": "codex_exec-" + sentinel + "/1.2.3"},
+		"codex-originator": {"User-Agent": "codex_cli_rs/1.2.3", "originator": "codex_cli_rs " + sentinel + "@example.com /etc/passwd"},
+		"kimi-variant-ua":  {"User-Agent": "kimicli-" + sentinel + "/1.2.3"},
+		"claude-ua":        {"User-Agent": "claude-cli/1.2.3"},
+	}
+	for name, headers := range cases {
+		t.Run(name, func(t *testing.T) {
+			detection := Detect(request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", headers, ""))
+			if detection.Empty() {
+				t.Fatalf("detection is empty for %v", headers)
+			}
+			for _, evidence := range detection.Evidence {
+				if strings.Contains(strings.ToLower(evidence), sentinel) {
+					t.Fatalf("evidence %q copies a header value", evidence)
+				}
+				// A signal name has no whitespace and no Header-value punctuation.
+				if strings.ContainsAny(evidence, " \t@/") {
+					t.Fatalf("evidence %q is not a signal name", evidence)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectEvidenceNamesTheMatchedSignal(t *testing.T) {
+	// Evidence must name the signal that actually fired: a trace labelled from
+	// originator/session_id must not claim the HTTP-Referer rule matched.
+	cases := []struct {
+		name     string
+		headers  map[string]string
+		id       string
+		evidence []string
+	}{
+		{"claude-beta-and-x-app", map[string]string{"x-app": "cli", "anthropic-beta": "claude-code-20250219"}, "claude-code", []string{"header:x-app=cli", "header:anthropic-beta=claude-code"}},
+		{"claude-beta-only", map[string]string{"anthropic-beta": "claude-code-20250219"}, "claude-code", []string{"header:anthropic-beta=claude-code"}},
+		{"codex-tui-variant", map[string]string{"User-Agent": "codex-tui_rs/1.0.0"}, "codex-cli", []string{"user-agent:codex-tui"}},
+		{"codex-exec-token", map[string]string{"User-Agent": "codex_exec/1.0.0"}, "codex-cli", []string{"user-agent:codex_exec"}},
+		{"kimi-legacy-variant", map[string]string{"User-Agent": "kimicli-preview/1.0.0"}, "kimi-code", []string{"user-agent:kimicli"}},
+		{"cline-originator", map[string]string{"originator": "cline", "session_id": "s-1"}, "cline", []string{"header:originator:cline"}},
+		{"cline-title", map[string]string{"X-Title": "Cline", "X-CLIENT-TYPE": "vscode"}, "cline", []string{"header:x-title=cline"}},
+		{"roo-title", map[string]string{"X-Title": "Roo Code", "X-CLIENT-TYPE": "vscode"}, "roo-code", []string{"header:x-title=roo-code"}},
+		{"gemini-code-assist-ua", map[string]string{"User-Agent": "CloudCodeVSCode/2.1.0 (aidev_client)"}, "gemini-code-assist", []string{"user-agent:cloudcode-vscode"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := Detect(request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", test.headers, ""))
+			if got.ID != test.id {
+				t.Fatalf("detection = %+v, want %s", got, test.id)
+			}
+			if !reflect.DeepEqual(got.Evidence, test.evidence) {
+				t.Fatalf("evidence = %v, want %v", got.Evidence, test.evidence)
+			}
+		})
+	}
+}
+
+func TestDetectBodyIndependence(t *testing.T) {
+	// The body is never an input, whether it is empty, oversized or carries a
+	// prompt that names a different harness.
+	headers := map[string]string{
+		"User-Agent":     "claude-cli/2.0.14 (external, cli)",
+		"anthropic-beta": "claude-code-20250219",
+	}
+	empty := request(t, http.MethodPost, "http://proxy.local/v1/messages", headers, "")
+	hugeBody := strings.Repeat("x", 2*1024*1024)
+	huge := request(t, http.MethodPost, "http://proxy.local/v1/messages", headers, hugeBody)
+	spoof := request(t, http.MethodPost, "http://proxy.local/v1/messages", headers,
+		`{"system":"You are Qwen Code, an interactive CLI tool."}`+strings.Repeat(" ", 1024*1024))
+
+	want := Detect(empty)
+	for name, req := range map[string]*http.Request{"huge body": huge, "spoofing body": spoof} {
+		if got := Detect(req); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s detection = %+v, want %+v: the body must never be an input", name, got, want)
+		}
+	}
+
+	// Detect must also leave the body unread: the recorder reads it itself and
+	// the classification happens independently of that.
+	body, err := io.ReadAll(huge.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(body) error = %v", err)
+	}
+	if len(body) != len(hugeBody) {
+		t.Fatalf("body length after Detect = %d, want %d: Detect consumed the body", len(body), len(hugeBody))
 	}
 }

@@ -67,12 +67,15 @@ var catalog = []rule{
 			if agent.productPrefix("claude-cli") || agent.productPrefix("claude-code") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:claude-cli")
 			}
-			if strings.EqualFold(view.headerValue("x-app"), "cli") {
-				if view.headerContains("anthropic-beta", "claude-code") {
+			// The beta flag alone decides the classification; `x-app: cli` is a
+			// corroborating signal Claude Code also sends, so it is recorded as
+			// additional evidence but never required (Qwen Code sends the same
+			// header on some builds). A separate branch that required both used
+			// to return the same classification as the beta-only check.
+			if view.headerContains("anthropic-beta", "claude-code") {
+				if strings.EqualFold(view.headerValue("x-app"), "cli") {
 					return detected(ConfidenceHigh, "", "header:x-app=cli", "header:anthropic-beta=claude-code")
 				}
-			}
-			if view.headerContains("anthropic-beta", "claude-code") {
 				return detected(ConfidenceHigh, "", "header:anthropic-beta=claude-code")
 			}
 			return matchResult{}, false
@@ -133,17 +136,29 @@ var catalog = []rule{
 			if originator == "cline" || agent.productPrefix("cline") {
 				return matchResult{}, false
 			}
-			if agent.productPrefix("codex_cli_rs") || agent.productPrefix("codex-cli") || agent.productPrefix("codex-tui") || agent.productPrefix("codex_exec") {
-				// The evidence names the token that actually arrived, so
-				// codex-tui and codex_exec traffic does not read as codex_cli_rs.
-				evidence := []string{"user-agent:" + agent.product}
-				if originator != "" {
+			// The evidence names the fixed token family that matched, never the
+			// UA token itself: a variant such as `codex-tui_rs` must not copy
+			// header bytes into the trace. The switch keeps the no-match path
+			// allocation-free.
+			uaEvidence := ""
+			switch {
+			case agent.productPrefix("codex_cli_rs"):
+				uaEvidence = "user-agent:codex_cli_rs"
+			case agent.productPrefix("codex-cli"):
+				uaEvidence = "user-agent:codex-cli"
+			case agent.productPrefix("codex-tui"):
+				uaEvidence = "user-agent:codex-tui"
+			case agent.productPrefix("codex_exec"):
+				uaEvidence = "user-agent:codex_exec"
+			}
+			if uaEvidence != "" {
+				evidence := []string{uaEvidence}
+				if isCodexOriginator(originator) {
 					evidence = append(evidence, "header:originator:"+originator)
 				}
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), evidence...)
 			}
-			switch originator {
-			case "codex_cli_rs", "codex-tui", "codex-tui_rs", "codex_exec":
+			if isCodexOriginator(originator) {
 				return detected(ConfidenceHigh, "", "header:originator:"+originator)
 			}
 			if name := view.headerNameWithPrefix("x-codex-"); name != "" {
@@ -165,8 +180,11 @@ var catalog = []rule{
 		kind: KindIDE,
 		match: func(view requestView) (matchResult, bool) {
 			agent := parseUserAgent(view.headerValue("User-Agent"))
-			if agent.productPrefix("cloudcodevscode") || agent.contains("proxy_client=geminicli") {
-				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:cloudcode-vscode", "user-agent:proxy_client=geminicli")
+			if agent.productPrefix("cloudcodevscode") {
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:cloudcode-vscode")
+			}
+			if agent.contains("proxy_client=geminicli") {
+				return detected(ConfidenceHigh, "", "user-agent:proxy_client=geminicli")
 			}
 			return matchResult{}, false
 		},
@@ -254,7 +272,16 @@ var catalog = []rule{
 		match: func(view requestView) (matchResult, bool) {
 			agent := parseUserAgent(view.headerValue("User-Agent"))
 			if agent.productPrefix("kimicli") || agent.productPrefix("kimi-code-cli") || agent.productPrefix("kimi-cli") {
-				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:"+agent.product)
+				// Name the fixed token family the UA matched; a variant token
+				// such as `kimicli-anything` must not put its suffix in evidence.
+				token := "kimicli"
+				switch {
+				case agent.productPrefix("kimi-code-cli"):
+					token = "kimi-code-cli"
+				case agent.productPrefix("kimi-cli"):
+					token = "kimi-cli"
+				}
+				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:"+token)
 			}
 			if view.headerValue("x-msh-platform") != "" {
 				return detected(ConfidenceHigh, "", "header:x-msh-platform")
@@ -370,10 +397,14 @@ var catalog = []rule{
 			if agent.productPrefix("cline") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:cline")
 			}
-			if view.headerContains("http-referer", "cline.bot") ||
-				(strings.EqualFold(view.headerFirst("x-title"), "cline") && view.headerValue("x-client-type") != "") ||
-				(strings.EqualFold(view.headerFirst("originator"), "cline") && view.headerValue("session_id") != "") {
+			if view.headerContains("http-referer", "cline.bot") {
 				return detected(ConfidenceHigh, "", "header:http-referer=cline.bot")
+			}
+			if strings.EqualFold(view.headerFirst("x-title"), "cline") && view.headerValue("x-client-type") != "" {
+				return detected(ConfidenceHigh, "", "header:x-title=cline")
+			}
+			if strings.EqualFold(view.headerFirst("originator"), "cline") && view.headerValue("session_id") != "" {
+				return detected(ConfidenceHigh, "", "header:originator:cline")
 			}
 			return matchResult{}, false
 		},
@@ -389,9 +420,11 @@ var catalog = []rule{
 			if agent.productPrefix("roo-code") || agent.productPrefix("roocode") || agent.productPrefix("roo code") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:roo-code")
 			}
-			if view.headerContains("http-referer", "RooVetGit") ||
-				(strings.EqualFold(view.headerFirst("x-title"), "roo code") && view.headerValue("x-client-type") != "") {
+			if view.headerContains("http-referer", "RooVetGit") {
 				return detected(ConfidenceHigh, "", "header:http-referer=RooVetGit")
+			}
+			if strings.EqualFold(view.headerFirst("x-title"), "roo code") && view.headerValue("x-client-type") != "" {
+				return detected(ConfidenceHigh, "", "header:x-title=roo-code")
 			}
 			return matchResult{}, false
 		},
@@ -548,4 +581,16 @@ var catalog = []rule{
 			return matchResult{}, false
 		},
 	},
+}
+
+// isCodexOriginator reports whether the originator value is one of the fixed
+// tokens the Codex client writes. Only these known names may enter the
+// evidence: the header value itself is client-controlled, so accepting it
+// verbatim would copy header bytes into the trace index.
+func isCodexOriginator(originator string) bool {
+	switch originator {
+	case "codex_cli_rs", "codex-tui", "codex-tui_rs", "codex_exec":
+		return true
+	}
+	return false
 }
