@@ -8,7 +8,8 @@ import (
 )
 
 // request builds the minimal request Detect reads. The body is attached with
-// http.NewRequest so ContentLength and the URL are realistic.
+// http.NewRequest so ContentLength and the URL are realistic, but Detect never
+// reads it: identification comes from the headers and URL alone.
 func request(t *testing.T, method string, target string, headers map[string]string, body string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(method, target, bytes.NewBufferString(body))
@@ -28,17 +29,18 @@ func TestDetectClaudeCode(t *testing.T) {
 			"x-app":            "cli",
 			"anthropic-beta":   "claude-code-20250219,oauth-2025-04-20",
 			"x-stainless-lang": "js",
+			"Accept":           "text/event-stream",
 		},
-		`{"model":"claude-sonnet-4-5","max_tokens":32000,"stream":true,"system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"Bash","description":"run"}]}`)
+		`{"model":"claude-sonnet-4-5","max_tokens":32000,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
-	got := Detect(req, []byte(`{"model":"claude-sonnet-4-5","max_tokens":32000,"stream":true,"system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"Bash","description":"run"}]}`))
+	got := Detect(req)
 	if got.ID != "claude-code" || got.Name != "Claude Code" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
 		t.Fatalf("detection = %+v, want claude-code agent-cli high", got)
 	}
 	if got.Version != "2.0.14" {
 		t.Fatalf("version = %q, want 2.0.14", got.Version)
 	}
-	assertTagsContain(t, got.Tags, "harness:claude-code", "kind:agent-cli", "sdk:anthropic-typescript", "capability:tool-use", "capability:streaming")
+	assertTagsContain(t, got.Tags, "harness:claude-code", "kind:agent-cli", "sdk:anthropic-typescript", "capability:streaming")
 	if len(got.Evidence) == 0 {
 		t.Fatalf("evidence is empty")
 	}
@@ -56,33 +58,34 @@ func TestDetectCodexCLI(t *testing.T) {
 		"OpenAI-Beta":           "responses=experimental",
 		"x-codex-turn-metadata": `{"model":"gpt-5"}`,
 		"session_id":            "sess-1",
+		"Accept":                "text/event-stream",
 	}
-	body := `{"model":"gpt-5-codex","instructions":"You are a coding agent running in the Codex CLI.","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"tools":[{"type":"function","name":"shell"},{"type":"custom","name":"apply_patch"}],"stream":true,"store":false,"prompt_cache_key":"sess-1"}`
+	body := `{"model":"gpt-5-codex","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", headers, body)
 
-	got := Detect(req, []byte(body))
+	got := Detect(req)
 	if got.ID != "codex-cli" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
 		t.Fatalf("detection = %+v, want codex-cli agent-cli high", got)
 	}
 	if got.Version != "0.20.0" {
 		t.Fatalf("version = %q, want 0.20.0", got.Version)
 	}
-	assertTagsContain(t, got.Tags, "harness:codex-cli", "kind:agent-cli", "capability:tool-use", "capability:prompt-cache", "capability:streaming", "capability:responses-api")
+	assertTagsContain(t, got.Tags, "harness:codex-cli", "kind:agent-cli", "capability:streaming", "capability:responses-api")
 }
 
 func TestDetectCodexExec(t *testing.T) {
 	// `codex exec` (non-interactive) switches the originator to codex_exec, so
 	// both the UA product and the originator header carry that token instead
-	// of codex_cli_rs. The body deliberately carries no Codex system prompt,
-	// so only the header signals can classify it.
+	// of codex_cli_rs. Only the header signals can classify it.
 	headers := map[string]string{
 		"User-Agent": "codex_exec/0.165.0 (Mac OS 26.5.2; arm64) unknown (codex_exec; 0.165.0)",
 		"originator": "codex_exec",
+		"Accept":     "text/event-stream",
 	}
 	body := `{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", headers, body)
 
-	got := Detect(req, []byte(body))
+	got := Detect(req)
 	if got.ID != "codex-cli" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
 		t.Fatalf("detection = %+v, want codex-cli agent-cli high", got)
 	}
@@ -99,23 +102,23 @@ func TestDetectDeepSeekHarness(t *testing.T) {
 	headers := map[string]string{
 		"User-Agent": "deepseek-harness/0.2.2-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)",
 	}
-	body := `{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"stream":true,"tools":[{"type":"function","function":{"name":"shell"}}]}`
+	body := `{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"stream":true}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", headers, body)
 
-	got := Detect(req, []byte(body))
+	got := Detect(req)
 	if got.ID != "deepseek-harness" || got.Name != "DeepSeek Harness" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
 		t.Fatalf("detection = %+v, want deepseek-harness/DeepSeek Harness agent-cli high", got)
 	}
 	if got.Version != "0.2.2-rc.1" {
 		t.Fatalf("version = %q, want 0.2.2-rc.1", got.Version)
 	}
-	assertTagsContain(t, got.Tags, "harness:deepseek-harness", "kind:agent-cli", "capability:tool-use", "capability:streaming")
+	assertTagsContain(t, got.Tags, "harness:deepseek-harness", "kind:agent-cli")
 }
 
 func TestDetectFactoryDroid(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{"User-Agent": "factory-cli/1.2.3"}, `{"model":"gpt-5","messages":[]}`)
-	got := Detect(req, []byte(`{"model":"gpt-5","messages":[]}`))
+	got := Detect(req)
 	if got.ID != "factory-droid" || got.Name != "Factory Droid" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh || got.Version != "1.2.3" {
 		t.Fatalf("detection = %+v, want factory-droid/Factory Droid agent-cli high 1.2.3", got)
 	}
@@ -135,7 +138,7 @@ func TestDetectKimiCode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", test.headers, `{"model":"kimi-k2","messages":[]}`)
-			got := Detect(req, []byte(`{"model":"kimi-k2","messages":[]}`))
+			got := Detect(req)
 			if got.ID != "kimi-code" || got.Kind != KindAgentCLI || got.Confidence != ConfidenceHigh {
 				t.Fatalf("detection = %+v, want kimi-code agent-cli high", got)
 			}
@@ -149,13 +152,13 @@ func TestDetectKimiCode(t *testing.T) {
 func TestDetectPi(t *testing.T) {
 	detailed := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{"User-Agent": "pi/0.84.0 (darwin; node/v24.0.0; arm64)"}, `{"model":"gpt-5","messages":[]}`)
-	got := Detect(detailed, []byte(`{"model":"gpt-5","messages":[]}`))
+	got := Detect(detailed)
 	if got.ID != "pi" || got.Kind != KindAgentCLI || got.Version != "0.84.0" {
 		t.Fatalf("detailed detection = %+v, want pi agent-cli 0.84.0", got)
 	}
 	short := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{"User-Agent": "pi"}, `{"model":"gpt-5","messages":[]}`)
-	got = Detect(short, []byte(`{"model":"gpt-5","messages":[]}`))
+	got = Detect(short)
 	if got.ID != "pi" || got.Version != "" {
 		t.Fatalf("short detection = %+v, want pi with no version", got)
 	}
@@ -163,7 +166,7 @@ func TestDetectPi(t *testing.T) {
 	// name merely starts with "pi" must not claim the label.
 	lookalike := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{"User-Agent": "pijamas/1.0.0"}, `{"model":"gpt-5","messages":[]}`)
-	if got := Detect(lookalike, []byte(`{"model":"gpt-5","messages":[]}`)); !got.Empty() {
+	if got := Detect(lookalike); !got.Empty() {
 		t.Fatalf("lookalike detection = %+v, want empty", got)
 	}
 }
@@ -201,28 +204,13 @@ func TestCatalogPrecedence(t *testing.T) {
 	before("zed", "openrouter")
 }
 
-// TestDetectPromptInTailDoesNotClaim pins the head-only prompt search: a
-// prompt phrase that only appears in the tail window (a pasted conversation,
-// not a system prompt) must not claim the trace.
-func TestDetectPromptInTailDoesNotClaim(t *testing.T) {
-	head := `{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}`
-	filler := `,"padding":"` + strings.Repeat("x", bodyPrefixScan+bodySuffixScan+1024) + `"`
-	tail := `,"instructions":"You are a coding agent running in the Codex CLI."}`
-	body := head + filler + tail
-	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", nil, body)
-	got := Detect(req, []byte(body))
-	if !got.Empty() {
-		t.Fatalf("detection = %+v, want empty for a tail-only prompt phrase", got)
-	}
-}
-
 // TestDetectProductTokenBoundary pins the separator-aware product match: a
 // product token that merely starts with a known token's letters (without a
 // separator) is a different product.
 func TestDetectProductTokenBoundary(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{"User-Agent": "continuedev/1.0.0"}, `{"model":"gpt-5","messages":[]}`)
-	if got := Detect(req, []byte(`{"model":"gpt-5","messages":[]}`)); !got.Empty() {
+	if got := Detect(req); !got.Empty() {
 		t.Fatalf("detection = %+v, want empty for continuedev", got)
 	}
 }
@@ -232,85 +220,63 @@ func TestDetectProductTokenBoundary(t *testing.T) {
 func TestDetectSpaceSeparatedUserAgent(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/responses",
 		map[string]string{"User-Agent": "codex-cli 0.153.4"}, `{"model":"gpt-5","input":[]}`)
-	got := Detect(req, []byte(`{"model":"gpt-5","input":[]}`))
+	got := Detect(req)
 	if got.ID != "codex-cli" || got.Version != "0.153.4" {
 		t.Fatalf("detection = %+v, want codex-cli 0.153.4", got)
 	}
 }
 
+// TestDetectCodexVSCode pins the VS Code surface: it is the same Responses
+// agent as the CLI but identifies itself only through the originator.
 func TestDetectCodexVSCode(t *testing.T) {
-	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", map[string]string{"originator": "codex_vscode"}, `{"model":"gpt-5","instructions":"You are Codex.","input":[]}`)
-	got := Detect(req, []byte(`{"model":"gpt-5","instructions":"You are Codex.","input":[]}`))
+	req := request(t, http.MethodPost, "http://proxy.local/v1/responses", map[string]string{"originator": "codex_vscode"}, `{"model":"gpt-5","input":[]}`)
+	got := Detect(req)
 	if got.ID != "codex-vscode" || got.Kind != KindIDE {
 		t.Fatalf("detection = %+v, want codex-vscode ide-extension", got)
 	}
 }
 
 func TestDetectGeminiCLI(t *testing.T) {
-	body := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"systemInstruction":{"parts":[{"text":"You are Gemini CLI, an interactive CLI agent."}]},"tools":[{"functionDeclarations":[{"name":"run_shell_command"},{"name":"read_many_files"}]}],"generationConfig":{}}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse",
-		map[string]string{"User-Agent": "GeminiCLI/0.5.0 (linux; x64)"}, body)
+		map[string]string{"User-Agent": "GeminiCLI/0.5.0 (linux; x64)"}, `{"contents":[]}`)
 
-	got := Detect(req, []byte(body))
+	got := Detect(req)
 	if got.ID != "gemini-cli" || got.Kind != KindAgentCLI || got.Version != "0.5.0" {
 		t.Fatalf("detection = %+v, want gemini-cli 0.5.0", got)
 	}
-	assertTagsContain(t, got.Tags, "harness:gemini-cli", "capability:streaming", "capability:tool-use")
+	assertTagsContain(t, got.Tags, "harness:gemini-cli", "capability:streaming")
 }
 
 func TestDetectQwenCodeBeforeGeminiFamily(t *testing.T) {
-	body := `{"systemInstruction":{"parts":[{"text":"You are Qwen Code, an interactive CLI tool."}]},"contents":[]}`
-	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", map[string]string{"User-Agent": "QwenCode/0.9.0"}, body)
-	got := Detect(req, []byte(body))
+	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
+		map[string]string{"User-Agent": "QwenCode/0.9.0"}, `{"contents":[]}`)
+	got := Detect(req)
 	if got.ID != "qwen-code" || got.Version != "0.9.0" {
 		t.Fatalf("detection = %+v, want qwen-code 0.9.0", got)
 	}
 }
 
-func TestDetectPromptOnlyHarnesses(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		id   string
-	}{
-		{
-			name: "cline",
-			body: `{"model":"gpt-4.1","messages":[{"role":"system","content":"You are Cline, a highly skilled software engineer. <execute_command> <read_file> <write_to_file>"}]}`,
-			id:   "cline",
-		},
-		{
-			name: "roo",
-			body: `{"model":"gpt-4.1","messages":[{"role":"system","content":"You are Roo, a highly skilled software engineer. <switch_mode> <apply_diff>"}]}`,
-			id:   "roo-code",
-		},
-		{
-			name: "kilo",
-			body: `{"model":"gpt-4.1","messages":[{"role":"system","content":"You are Kilo Code, a highly skilled software engineer."}]}`,
-			id:   "kilo-code",
-		},
-		{
-			name: "opencode",
-			body: `{"model":"gpt-4.1","messages":[{"role":"system","content":"You are opencode, an AI coding agent."}]}`,
-			id:   "opencode",
-		},
-		{
-			name: "claude-code",
-			body: `{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],"messages":[]}`,
-			id:   "claude-code",
-		},
+// TestDetectIgnoresBody pins the header-only contract: the body is never
+// read, so a product prompt in the body cannot claim a trace whose headers
+// name something else - or nothing at all. This is the deliberate boundary
+// that keeps identification cheap and free of prompt-position guessing; the
+// cost is that prompt-only clients (no product header) stay unrecognized.
+func TestDetectIgnoresBody(t *testing.T) {
+	// A Qwen Code prompt in the body must not override the Claude Code UA.
+	spoofed := request(t, http.MethodPost, "http://proxy.local/v1/messages",
+		map[string]string{
+			"User-Agent": "claude-cli/2.0.14 (external, cli)",
+			"x-app":      "cli",
+		}, `{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"You are Qwen Code, an interactive CLI tool."}],"messages":[]}`)
+	if got := Detect(spoofed); got.ID != "claude-code" {
+		t.Fatalf("detection = %+v, want claude-code (body prompt must not disambiguate)", got)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// No User-Agent and no vendor headers: only the body can identify it.
-			req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", nil, test.body)
-			got := Detect(req, []byte(test.body))
-			if got.ID != test.id {
-				t.Fatalf("detection = %+v, want %s", got, test.id)
-			}
-			if got.Confidence != ConfidenceHigh {
-				t.Fatalf("confidence = %q, want high", got.Confidence)
-			}
-		})
+
+	// A Claude Code prompt with no product header at all is unrecognized.
+	anonymous := request(t, http.MethodPost, "http://proxy.local/v1/messages", nil,
+		`{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI."}],"messages":[]}`)
+	if got := Detect(anonymous); !got.Empty() {
+		t.Fatalf("detection = %+v, want empty for a prompt-only request", got)
 	}
 }
 
@@ -336,7 +302,7 @@ func TestDetectHeaderOnlyHarnesses(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", test.headers, `{"model":"gpt-4.1","messages":[]}`)
-			got := Detect(req, nil)
+			got := Detect(req)
 			if got.ID != test.id || got.Kind != test.kind {
 				t.Fatalf("detection = %+v, want %s/%s", got, test.id, test.kind)
 			}
@@ -345,19 +311,19 @@ func TestDetectHeaderOnlyHarnesses(t *testing.T) {
 }
 
 func TestDetectPlainSDKKeepsTagsWithoutHarnessID(t *testing.T) {
-	body := `{"model":"gpt-4.1","stream":true,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup"}}],"response_format":{"type":"json_schema","json_schema":{"name":"x","schema":{}}}}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
 		map[string]string{
 			"User-Agent":                  "OpenAI/Python 1.40.0",
 			"x-stainless-lang":            "python",
 			"x-stainless-package-version": "1.40.0",
-		}, body)
+			"Accept":                      "text/event-stream",
+		}, `{"model":"gpt-4.1","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
-	got := Detect(req, []byte(body))
+	got := Detect(req)
 	if !got.Empty() {
 		t.Fatalf("ID = %q, want empty for a plain SDK call", got.ID)
 	}
-	assertTagsContain(t, got.Tags, "sdk:openai-python", "capability:streaming", "capability:tool-use", "capability:structured-output")
+	assertTagsContain(t, got.Tags, "sdk:openai-python", "capability:streaming")
 	for _, tag := range got.Tags {
 		if strings.HasPrefix(tag, "harness:") || strings.HasPrefix(tag, "kind:") {
 			t.Fatalf("tag %q invented a harness classification", tag)
@@ -372,7 +338,7 @@ func TestDetectAnthropicSDK(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/messages",
 		map[string]string{"User-Agent": "Anthropic/Python 0.40.0", "anthropic-version": "2023-06-01"},
 		`{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[]}`)
-	got := Detect(req, nil)
+	got := Detect(req)
 	if !got.Empty() {
 		t.Fatalf("ID = %q, want empty", got.ID)
 	}
@@ -381,11 +347,11 @@ func TestDetectAnthropicSDK(t *testing.T) {
 
 func TestDetectUnknownRequest(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", nil, `{"model":"m","messages":[]}`)
-	got := Detect(req, nil)
+	got := Detect(req)
 	if !got.Empty() || len(got.Tags) != 0 || len(got.Evidence) != 0 {
 		t.Fatalf("detection = %+v, want zero value", got)
 	}
-	if Detect(nil, nil).Empty() != true {
+	if !Detect(nil).Empty() {
 		t.Fatalf("Detect(nil) must be empty")
 	}
 }
@@ -394,28 +360,10 @@ func TestDetectDoesNotMutateRequest(t *testing.T) {
 	req := request(t, http.MethodPost, "http://proxy.local/v1/messages",
 		map[string]string{"User-Agent": "claude-cli/2.0.14"}, `{"model":"claude-sonnet-4-5","system":"You are Claude Code"}`)
 	before := req.Header.Get("User-Agent")
-	_ = Detect(req, []byte(`{"model":"claude-sonnet-4-5","system":"You are Claude Code"}`))
+	_ = Detect(req)
 	if req.Header.Get("User-Agent") != before {
 		t.Fatalf("Detect mutated the request headers")
 	}
-}
-
-// TestDetectLargeBodyWindow documents the deliberate bound: markers are sought
-// in the head and tail of a body, not throughout a multi-megabyte payload, so
-// detection cost stays flat. A harness prompt always lands in the head (system
-// message / instructions / systemInstruction) and a tool array in the tail.
-func TestDetectLargeBodyWindow(t *testing.T) {
-	head := `{"model":"gpt-4.1","messages":[{"role":"system","content":"You are Cline, a highly skilled software engineer."}]`
-	filler := `,"padding":"` + strings.Repeat("x", bodyPrefixScan+bodySuffixScan+1024) + `"`
-	tail := `,"tools":[{"type":"function"}]}`
-	body := head + filler + tail
-
-	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", nil, body)
-	got := Detect(req, []byte(body))
-	if got.ID != "cline" {
-		t.Fatalf("detection = %+v, want cline from the head window", got)
-	}
-	assertTagsContain(t, got.Tags, "capability:tool-use")
 }
 
 func assertTagsContain(t *testing.T, tags []string, wanted ...string) {
@@ -440,29 +388,12 @@ func tagsSorted(tags []string) bool {
 	return true
 }
 
-// TestDetectQwenCodeSpoofingClaudeCode covers the one deliberate impersonation
-// found in the wild: Qwen Code sends claude-cli/<version> + x-app: cli when its
-// base URL is not Anthropic. The body prompt is what keeps the classification
-// correct, which is why the Qwen rule runs before the Claude Code rule.
-func TestDetectQwenCodeSpoofingClaudeCode(t *testing.T) {
-	body := `{"model":"claude-sonnet-4-5","system":[{"type":"text","text":"You are Qwen Code, an interactive CLI tool."}],"messages":[{"role":"user","content":"hi"}]}`
-	req := request(t, http.MethodPost, "http://proxy.local/v1/messages", map[string]string{
-		"User-Agent": "claude-cli/2.0.14 (external, cli)",
-		"x-app":      "cli",
-	}, body)
-
-	got := Detect(req, []byte(body))
-	if got.ID != "qwen-code" {
-		t.Fatalf("detection = %+v, want qwen-code for the spoofed Claude Code headers", got)
-	}
-}
-
 func TestDetectCodexHeaderNamespace(t *testing.T) {
 	// A proxy may strip originator and rewrite the UA; the private x-codex-*
 	// namespace survives because it carries request state the agent needs.
 	req := request(t, http.MethodPost, "http://proxy.local/v1/responses",
 		map[string]string{"x-codex-installation-id": "install-1"}, `{"model":"gpt-5","input":[]}`)
-	got := Detect(req, nil)
+	got := Detect(req)
 	if got.ID != "codex-cli" {
 		t.Fatalf("detection = %+v, want codex-cli from x-codex-*", got)
 	}
@@ -476,7 +407,7 @@ func TestDetectCodexOriginatorVariants(t *testing.T) {
 	}
 	for originator, want := range cases {
 		req := request(t, http.MethodPost, "http://proxy.local/v1/responses", map[string]string{"originator": originator}, `{"model":"gpt-5","input":[]}`)
-		got := Detect(req, nil)
+		got := Detect(req)
 		if got.ID != want {
 			t.Fatalf("originator %q detection = %+v, want %s", originator, got, want)
 		}
@@ -490,7 +421,7 @@ func TestDetectCopilotHeaderMixin(t *testing.T) {
 		"Editor-Plugin-Version":  "copilot-chat/0.30.0",
 		"VScode-SessionId":       "session-1",
 	}, `{"model":"claude-sonnet-4-5","messages":[]}`)
-	got := Detect(req, nil)
+	got := Detect(req)
 	if got.ID != "github-copilot" || got.Kind != KindIDE {
 		t.Fatalf("detection = %+v, want github-copilot ide-extension", got)
 	}
@@ -512,7 +443,7 @@ func TestDetectIDEAttributionHeaders(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions", test.headers, `{"model":"m","messages":[]}`)
-			got := Detect(req, nil)
+			got := Detect(req)
 			if got.ID != test.id {
 				t.Fatalf("detection = %+v, want %s", got, test.id)
 			}
@@ -521,10 +452,10 @@ func TestDetectIDEAttributionHeaders(t *testing.T) {
 }
 
 func TestDetectVercelAISDKGetsSDKTag(t *testing.T) {
-	body := `{"model":"m","messages":[],"stream":true}`
 	req := request(t, http.MethodPost, "http://proxy.local/v1/chat/completions",
-		map[string]string{"User-Agent": "node.js/v22.14.0 ai-sdk-provider-utils/1.2.0"}, body)
-	got := Detect(req, []byte(body))
+		map[string]string{"User-Agent": "node.js/v22.14.0 ai-sdk-provider-utils/1.2.0", "Accept": "text/event-stream"},
+		`{"model":"m","messages":[],"stream":true}`)
+	got := Detect(req)
 	if !got.Empty() {
 		t.Fatalf("ID = %q, want empty (AI SDK is a framework, not a harness)", got.ID)
 	}
@@ -541,8 +472,8 @@ func TestDetectClineOverCodexWire(t *testing.T) {
 		"session_id":         "sess-1",
 		"ChatGPT-Account-Id": "acct-1",
 		"x-codex-window-id":  "sess-1:1",
-	}, `{"model":"gpt-5-codex","instructions":"You are Cline.","input":[]}`)
-	got := Detect(req, nil)
+	}, `{"model":"gpt-5-codex","input":[]}`)
+	got := Detect(req)
 	if got.ID != "cline" {
 		t.Fatalf("detection = %+v, want cline for the Codex-account passthrough", got)
 	}
@@ -556,7 +487,7 @@ func TestDetectBrowserAccessHeaderAloneIsNotClaudeCode(t *testing.T) {
 		"x-api-key":         "sk-ant-api03-example",
 		"anthropic-version": "2023-06-01",
 	}, `{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[]}`)
-	got := Detect(req, nil)
+	got := Detect(req)
 	if got.ID != "" {
 		t.Fatalf("detection = %+v, want no harness from the browser-access header alone", got)
 	}

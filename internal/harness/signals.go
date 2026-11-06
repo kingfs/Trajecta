@@ -179,44 +179,22 @@ func (view requestView) sdkTag() string {
 	return vendor + "-" + language
 }
 
-// capabilities infers the protocol capabilities a request visibly uses. The
-// checks are marker searches over the same bounded body windows as the
-// catalogue: they are advisory labels, not proof, and a capability missed on an
-// oversized payload degrades to a missing tag rather than a wrong one. The
-// markers are JSON keys/verbs that are unescaped inside JSON strings, so a
-// match cannot be an artefact of the encoder.
+// capabilities infers the protocol capabilities visible in the request head:
+// the headers and URL only. Streaming is announced by the Accept header or
+// the Gemini streaming path/query, and the Responses surface by the URL path.
+// Everything that used to come from the body (tool use, reasoning, prompt
+// cache, vision, structured output) is gone with the body scan: a capability
+// the head cannot prove is simply not tagged, which is the same degradation
+// rule the body-window design already documented, now total.
 func (view requestView) capabilities() []string {
-	caps := make([]string, 0, 6)
-	if view.bodyContainsAny(`"stream":true`, `"stream": true`) ||
-		strings.Contains(strings.ToLower(view.headerValue("Accept")), "text/event-stream") ||
+	caps := make([]string, 0, 2)
+	if strings.Contains(strings.ToLower(view.headerValue("Accept")), "text/event-stream") ||
 		strings.Contains(view.path, "streamGenerateContent") ||
 		strings.Contains(view.query, "alt=sse") {
 		caps = append(caps, "streaming")
 	}
-	if view.bodyContainsAny(`"tools":[`, `"tools": [`, `"functions":[`, `"functions": [`, `"tool_choice"`, `"tool_calls"`, `"tool_use"`) {
-		caps = append(caps, "tool-use")
-	}
-	if view.bodyContainsAny(`"reasoning"`, `"thinking"`, `"reasoning_effort"`, `"include_reasoning"`) {
-		caps = append(caps, "reasoning")
-	}
-	if view.bodyContainsAny(`"cache_control"`, `"prompt_cache_key"`, `"cached_content"`, `"cache_creation_input_tokens"`) ||
-		view.headerContains("anthropic-beta", "prompt-caching") {
-		caps = append(caps, "prompt-cache")
-	}
-	if view.bodyContainsAny(`"image_url"`, `"input_image"`, `"inline_data"`, `"inlineData"`, `"type":"image"`, `"type": "image"`) {
-		caps = append(caps, "vision")
-	}
-	if strings.Contains(view.path, "/responses") ||
-		view.bodyContainsAny(`"instructions"`, `"text":{"format"`, `"text": {"format"`) {
+	if strings.Contains(view.path, "/responses") {
 		caps = append(caps, "responses-api")
-	}
-	if view.bodyContainsAny(`"response_format"`, `"json_schema"`, `"responseSchema"`, `"response_schema"`, `"format":{"type":"json_schema"`) {
-		caps = append(caps, "structured-output")
 	}
 	return caps
 }
-
-// harnessEvidence renders the evidence token for a prompt fingerprint. The
-// value is the marker's short name, never the matched text, so a prompt phrase
-// cannot leak into the index.
-func promptEvidence(name string) string { return "prompt:" + name }

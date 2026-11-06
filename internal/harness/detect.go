@@ -8,10 +8,10 @@
 // without re-reading the request bytes. Detection therefore runs once on the
 // write path and its result is stored as trace metadata.
 //
-// Detection is deliberately passive: it reads the request headers, URL path and
-// body and never rewrites any of them. The evidence it returns contains marker
-// identifiers only ("user-agent:claude-cli", "prompt:you-are-claude-code"), so
-// no prompt text, header value or credential can leak into the trace index. The
+// Detection is deliberately passive: it reads the request headers and URL path
+// and never rewrites any of them. The evidence it returns contains marker
+// identifiers only ("user-agent:claude-cli", "header:originator:codex_exec"),
+// so no header value or credential can leak into the trace index. The
 // highest-confidence signal wins; when several products share an SDK (GitHub
 // Copilot and a plain OpenAI call both carry `openai-python` headers, for
 // example) the product-specific signature is tried first and the SDK is only the
@@ -19,7 +19,6 @@
 package harness
 
 import (
-	"bytes"
 	"net/http"
 	"sort"
 	"strings"
@@ -76,31 +75,17 @@ func (d Detection) Empty() bool {
 	return d.ID == ""
 }
 
-// Detect classifies req, optionally using body (which may be nil for a request
-// without one, such as a model listing). It does not mutate req.
-//
-// Identification is header-first and body-last. Phase one runs the catalogue
-// over the headers and URL only (a view with no body windows) and returns the
-// first high-confidence match without ever touching the body bytes, so the
-// common case - a harness that sends a product User-Agent or a private header
-// - costs a handful of header lookups. Only when no header signal names a
-// product does phase two run the full catalogue with the body windows, which
-// is where the prompt/tool fallbacks for header-less clients (Kilo Code,
-// Goose) and the Qwen Code impersonation check live. The one short-circuit
-// exception is Claude Code: Qwen Code spoofs its `claude-cli` User-Agent, so
-// a phase-one claude-code claim is always re-checked against the Qwen prompt
-// in phase two before it is accepted.
-func Detect(req *http.Request, body []byte) Detection {
+// Detect classifies req from its headers and URL only - the facts frozen
+// when the client established the request. It does not read the body: a body
+// scan would be slow, would have to guess at prompt positions, and would let
+// a prompt quoted in user content claim the trace. A harness that sends no
+// product header is simply unrecognized; that is a deliberate, documented
+// boundary, not a missed case. It does not mutate req.
+func Detect(req *http.Request) Detection {
 	if req == nil {
 		return Detection{}
 	}
-	view := newRequestView(req, body)
-
-	if detection, ok := firstHeaderHigh(newRequestView(req, nil)); ok && detection.ID != "claude-code" {
-		detection.Tags = buildTags(detection, view)
-		detection.Evidence = dedupeStrings(detection.Evidence)
-		return detection
-	}
+	view := newRequestView(req)
 
 	var best Detection
 	for _, rule := range catalog {
@@ -140,30 +125,6 @@ func Detect(req *http.Request, body []byte) Detection {
 	best.Tags = buildTags(best, view)
 	best.Evidence = dedupeStrings(best.Evidence)
 	return best
-}
-
-// firstHeaderHigh runs the catalogue over a header-only view and returns the
-// first high-confidence match in catalogue order, which is the specificity
-// order. A view without body windows makes every body marker miss, so only
-// header- and path-based rules can match here; medium/low header matches are
-// deliberately not returned, because a body signal may still claim the trace
-// with higher confidence in phase two.
-func firstHeaderHigh(view requestView) (Detection, bool) {
-	for _, rule := range catalog {
-		match, ok := rule.match(view)
-		if !ok || match.confidence != ConfidenceHigh {
-			continue
-		}
-		return Detection{
-			ID:         rule.id,
-			Name:       rule.name,
-			Kind:       rule.kind,
-			Version:    match.version,
-			Confidence: match.confidence,
-			Evidence:   match.evidence,
-		}, true
-	}
-	return Detection{}, false
 }
 
 func confidenceRank(confidence string) int {
@@ -239,55 +200,24 @@ func detected(confidence string, version string, evidence ...string) (matchResul
 	}, true
 }
 
-// requestView is the read-only projection of a request the rules work on. Body
-// markers are searched through bounded windows rather than the whole payload:
-// the system prompt and tool declarations of every agent harness observed so
-// far sit at the start of the body (chat system message, anthropic system
-// field, responses instructions, gemini systemInstruction), while OpenAI-style
-// tool arrays sit at the end. Two windows therefore cover the interesting text
-// without making detection cost grow with a multi-megabyte conversation.
+// requestView is the read-only projection of a request the rules work on:
+// its headers and URL. The body is deliberately absent - harness identity
+// lives in the headers the client sends, and detection cost is a handful of
+// header lookups regardless of payload size.
 type requestView struct {
 	method string
 	path   string
 	query  string
 	header http.Header
-	// bodyWindows are the byte slices the marker search may read. They are
-	// sub-slices of body, so no copy is made.
-	bodyWindows [][]byte
-	// body is the full body, used only by the cheap capability checks that need
-	// JSON field semantics.
-	body []byte
 }
 
-const (
-	// bodyPrefixScan is how much of a request body is searched for prompt and
-	// tool markers.
-	bodyPrefixScan = 512 << 10
-	// bodySuffixScan covers the tail of a request, where OpenAI-style tool
-	// arrays and response-API item lists usually sit.
-	bodySuffixScan = 256 << 10
-)
-
-func newRequestView(req *http.Request, body []byte) requestView {
-	view := requestView{
+func newRequestView(req *http.Request) requestView {
+	return requestView{
 		method: strings.ToUpper(req.Method),
 		path:   req.URL.Path,
 		query:  req.URL.RawQuery,
 		header: req.Header,
-		body:   body,
 	}
-	if len(body) == 0 {
-		return view
-	}
-	if len(body) <= bodyPrefixScan+bodySuffixScan {
-		view.bodyWindows = [][]byte{body}
-		return view
-	}
-	view.bodyWindows = [][]byte{
-		body[:bodyPrefixScan],
-		body[len(body)-bodySuffixScan:],
-	}
-	return view
 }
 
 // header returns the first value of a header. Go's Header.Get is canonical-key
@@ -342,70 +272,6 @@ func (view requestView) headerContains(name string, sub string) bool {
 		}
 	}
 	return false
-}
-
-// bodyContains reports whether any body window contains marker. Markers are
-// exact bytes that JSON leaves unescaped: plain ASCII phrases and tool names.
-// The search works on the byte windows directly, so a marker check never copies
-// the payload and detection stays allocation-flat on the write path.
-func (view requestView) bodyContains(marker string) bool {
-	if marker == "" {
-		return false
-	}
-	needle := []byte(marker)
-	for _, window := range view.bodyWindows {
-		if bytes.Contains(window, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-// bodyHeadContainsAny reports whether any marker occurs in the head body
-// window only. System prompts and instruction fields sit at the start of the
-// body on every protocol, while the tail window holds tool arrays and the
-// most recent conversation - exactly where a user quoting `"You are Codex"`
-// would live. Searching prompt phrases in the head only keeps a pasted prompt
-// from claiming the trace, which a whole-body scan cannot avoid.
-func (view requestView) bodyHeadContainsAny(markers ...string) bool {
-	if len(view.bodyWindows) == 0 {
-		return false
-	}
-	head := view.bodyWindows[0]
-	for _, marker := range markers {
-		if marker != "" && bytes.Contains(head, []byte(marker)) {
-			return true
-		}
-	}
-	return false
-}
-
-// bodyContainsAny reports whether any marker occurs in the body windows. It
-// exists so a rule can name one strong marker set in one call instead of
-// repeating the loop.
-func (view requestView) bodyContainsAny(markers ...string) bool {
-	for _, marker := range markers {
-		if view.bodyContains(marker) {
-			return true
-		}
-	}
-	return false
-}
-
-// bodyContainsAll reports whether every marker occurs in the body windows.
-func (view requestView) bodyContainsAll(markers ...string) bool {
-	for _, marker := range markers {
-		if !view.bodyContains(marker) {
-			return false
-		}
-	}
-	return true
-}
-
-// hasJSONShape reports whether the query string or path carries a marker (the
-// Gemini protocol puts the streaming verb in the query).
-func (view requestView) hasJSONShape(shape string) bool {
-	return strings.Contains(view.query, shape) || strings.Contains(view.path, shape)
 }
 
 func dedupeStrings(values []string) []string {

@@ -320,7 +320,7 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 
 会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。锚点落在步骤内部（消息里的调用、并进调用块的结果）时同样定位到承载它的那段步骤。带 `hl`（资源定位）或命中值（finding 定位）时只高亮匹配的字节，不再给整个步骤描边，避免读成「整条消息都命中」；没有可高亮的值时才保留整段定位提示。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
 
-详情页头部在 endpoint / provider 标签旁显示同一枚 harness 标签，并列出该请求的能力/SDK 标签（`capability:tool-use`、`prompt-cache` 等，已本地化；冗余的 `harness:`/`kind:` 标签不重复显示）。这些字段来自 cassette prelude 的 `header.meta`。
+详情页头部在 endpoint / provider 标签旁显示同一枚 harness 标签，并列出该请求的能力/SDK 标签（`capability:streaming`、`capability:responses-api` 等，已本地化；冗余的 `harness:`/`kind:` 标签不重复显示）。这些字段来自 cassette prelude 的 `header.meta`。
 
 可执行动作：
 

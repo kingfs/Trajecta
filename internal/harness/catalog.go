@@ -10,10 +10,11 @@ import "strings"
 //
 // A rule's confidence describes how uniquely its signals name the product:
 //
-//   - high   - a product-identifying User-Agent token, a vendor header only that
-//     product sets, or a system-prompt sentence that exists in no other tool.
-//   - medium - a combination of tool names or a generic prompt phrase that the
-//     product inherits from its upstream family.
+//   - high   - a product-identifying User-Agent token or a vendor header only
+//     that product sets.
+//   - medium - a combination of header signals that corroborate each other
+//     without naming the product alone (for example a session id plus an
+//     editor version).
 //   - low    - reserved for a future fallback class that many products
 //     share; no catalogue rule returns it today. Gateway rules (LiteLLM,
 //     Portkey, OpenRouter) return high, because the agent behind them is
@@ -22,8 +23,9 @@ import "strings"
 //     that stays unlabelled (no ID) instead.
 //
 // Evidence always names the signal (`user-agent:claude-cli`,
-// `prompt:you-are-claude-code`), never its value, so detection cannot copy
-// prompt or header bytes into the trace index.
+// `header:originator:codex_exec`), never its value, so detection cannot copy
+// header bytes into the trace index. No rule reads the body: identity lives
+// in the headers, and a harness without a product header stays unrecognized.
 //
 // The markers below were read out of the harnesses' own published code; each
 // rule names its source in a comment. A signal a vendor documents as
@@ -39,9 +41,10 @@ var catalog = []rule{
 		// Qwen Code is a Gemini CLI fork that deliberately impersonates Claude
 		// Code when it talks to a non-anthropic.com base URL: it sends
 		// `claude-cli/...` + `x-app: cli` (QwenLM/qwen-code,
-		// anthropicContentGenerator.ts). Its own system prompt survives that
-		// rewriting, so this rule must run before the Claude Code rule can claim
-		// the spoofed headers; the product UA is the clean path.
+		// anthropicContentGenerator.ts). With no body read to disambiguate,
+		// that spoofed traffic is labelled claude-code; only its own product
+		// UA names Qwen Code. The rule still runs first so a genuine
+		// QwenCode UA is never stolen by a later rule.
 		id:   "qwen-code",
 		name: "Qwen Code",
 		kind: KindAgentCLI,
@@ -49,13 +52,6 @@ var catalog = []rule{
 			agent := parseUserAgent(view.headerValue("User-Agent"))
 			if agent.productPrefix("qwencode") || agent.productPrefix("qwen-code") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:qwencode")
-			}
-			if view.bodyHeadContainsAny(
-				"You are Qwen Code, an interactive CLI tool",
-				"You are Qwen Code",
-				"Qwen Code is an open-source AI agent",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-qwen-code"))
 			}
 			return matchResult{}, false
 		},
@@ -78,20 +74,6 @@ var catalog = []rule{
 			}
 			if view.headerContains("anthropic-beta", "claude-code") {
 				return detected(ConfidenceHigh, "", "header:anthropic-beta=claude-code")
-			}
-			if view.bodyHeadContainsAny(
-				"You are Claude Code, Anthropic's official CLI for Claude",
-				"You are Claude Code, Anthropic's official CLI",
-				"You are Claude Code",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-claude-code"))
-			}
-			// The user id format `user_<hash>_account__session_<uuid>` is reported
-			// from live Claude Code traffic but is not in the published client, so
-			// it only corroborates a classification; it never creates one.
-			if view.bodyContainsAll(`"metadata"`, `"user_id"`) &&
-				view.bodyContains(`_account__session_`) {
-				return detected(ConfidenceMedium, "", "metadata:user-id-session")
 			}
 			return matchResult{}, false
 		},
@@ -167,19 +149,6 @@ var catalog = []rule{
 			if name := view.headerNameWithPrefix("x-codex-"); name != "" {
 				return detected(ConfidenceHigh, "", "header:"+name)
 			}
-			if view.bodyHeadContainsAny(
-				"You are a coding agent running in the Codex CLI",
-				"You are Codex, a coding agent",
-				"You are Codex",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-codex"))
-			}
-			// The Responses body of codex-rs: store:false,
-			// include:[reasoning.encrypted_content], prompt_cache_key, instructions.
-			if view.bodyContainsAll(`"instructions"`, `"apply_patch"`) &&
-				view.bodyContainsAny(`"prompt_cache_key"`, `"reasoning.encrypted_content"`) {
-				return detected(ConfidenceMedium, "", "prompt:codex-instructions", "tool:apply_patch")
-			}
 			return matchResult{}, false
 		},
 	},
@@ -213,19 +182,6 @@ var catalog = []rule{
 			if agent.productPrefix("geminicli") || agent.productPrefix("gemini-cli") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:geminicli")
 			}
-			if view.bodyHeadContainsAny(
-				"You are Gemini CLI, an interactive CLI agent",
-				"You are Gemini CLI",
-				"Gemini CLI is an open-source AI agent",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-gemini-cli"))
-			}
-			// The Gemini CLI tool set is shared with its forks, so it only
-			// corroborates the protocol path, not the product.
-			if view.hasJSONShape(":generateContent") &&
-				view.bodyContainsAny(`"run_shell_command"`, `"read_many_files"`, `"google_web_search"`) {
-				return detected(ConfidenceMedium, "", "path:generateContent", "tools:gemini-cli")
-			}
 			return matchResult{}, false
 		},
 	},
@@ -244,13 +200,6 @@ var catalog = []rule{
 			}
 			if name := view.headerNameWithPrefix("x-opencode-"); name != "" {
 				return detected(ConfidenceHigh, "", "header:"+name)
-			}
-			if view.bodyHeadContainsAny(
-				"You are opencode, an AI coding agent",
-				"You are OpenCode, an AI coding agent",
-				"You are opencode",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-opencode"))
 			}
 			return matchResult{}, false
 		},
@@ -347,18 +296,6 @@ var catalog = []rule{
 					return detected(ConfidenceHigh, "", "header:"+header)
 				}
 			}
-			if view.bodyHeadContainsAny(
-				"You are Cursor, a coding agent",
-				"You are Cursor",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-cursor"))
-			}
-			// Cursor's agent tool names are stable; they are medium on their own
-			// because other IDE agents copied the vocabulary.
-			if view.bodyContainsAny(`"run_terminal_cmd"`, `"fetch_rules"`, `"reapply"`) &&
-				view.bodyContainsAny(`"edit_file"`, `"read_file"`, `"grep_search"`, `"list_dir"`) {
-				return detected(ConfidenceMedium, "", "tools:cursor-agent")
-			}
 			return matchResult{}, false
 		},
 	},
@@ -418,12 +355,6 @@ var catalog = []rule{
 			if view.headerValue("x-continue-session-id") != "" {
 				return detected(ConfidenceHigh, "", "header:x-continue-session-id")
 			}
-			if view.bodyHeadContainsAny(
-				"You are Continue, an AI coding assistant",
-				"You are Continue",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-continue"))
-			}
 			return matchResult{}, false
 		},
 	},
@@ -444,18 +375,6 @@ var catalog = []rule{
 				(strings.EqualFold(view.headerFirst("originator"), "cline") && view.headerValue("session_id") != "") {
 				return detected(ConfidenceHigh, "", "header:http-referer=cline.bot")
 			}
-			if view.bodyHeadContainsAny(
-				"You are Cline, a highly skilled software engineer",
-				"You are Cline",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-cline"))
-			}
-			// Cline's XML tool vocabulary is inherited by its forks but the full
-			// combination is still distinctive.
-			if view.bodyContainsAll(`"<execute_command>"`, `"<read_file>"`) &&
-				view.bodyContainsAny(`"<write_to_file>"`, `"<replace_in_file>"`) {
-				return detected(ConfidenceMedium, "", "tools:cline-xml")
-			}
 			return matchResult{}, false
 		},
 	},
@@ -474,34 +393,22 @@ var catalog = []rule{
 				(strings.EqualFold(view.headerFirst("x-title"), "roo code") && view.headerValue("x-client-type") != "") {
 				return detected(ConfidenceHigh, "", "header:http-referer=RooVetGit")
 			}
-			if view.bodyHeadContainsAny(
-				"You are Roo, a highly skilled software engineer",
-				"You are Roo",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-roo"))
-			}
-			if view.bodyContainsAll(`"<switch_mode>"`, `"<apply_diff>"`) {
-				return detected(ConfidenceMedium, "", "tools:roo-code-xml")
-			}
 			return matchResult{}, false
 		},
 	},
 	{
 		// Kilo Code's provider layer does not set a product UA (only the
-		// anthropic headers), so the mode prompt is the only verified signal.
+		// anthropic headers). Some Kilo builds and UA presets do send
+		// `Kilo-Code/<version>`; without it Kilo traffic is unrecognized by
+		// design, because detection no longer reads the body where its mode
+		// prompt used to be.
 		id:   "kilo-code",
 		name: "Kilo Code",
 		kind: KindIDE,
 		match: func(view requestView) (matchResult, bool) {
 			agent := parseUserAgent(view.headerValue("User-Agent"))
-			if agent.productPrefix("kilo-code") || agent.productPrefix("kilocode") || agent.productPrefix("kilo code") {
+			if agent.productPrefix("kilo-code") || agent.productPrefix("kilocode") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:kilo-code")
-			}
-			if view.bodyHeadContainsAny(
-				"You are Kilo Code, a highly skilled software engineer",
-				"You are Kilo Code",
-			) {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-kilo-code"))
 			}
 			return matchResult{}, false
 		},
@@ -533,15 +440,13 @@ var catalog = []rule{
 			if agent.productPrefix("charm-crush") || agent.productPrefix("crush") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:charm-crush")
 			}
-			if view.bodyHeadContainsAny("You are Crush, a coding agent", "You are Crush") {
-				return detected(ConfidenceHigh, "", promptEvidence("you-are-crush"))
-			}
 			return matchResult{}, false
 		},
 	},
 	{
-		// Block's goose providers do not set a product UA either; the prompt is
-		// the only signal and is left at medium confidence.
+		// Block's goose providers do not set a product UA; the prompt was the
+		// only signal, and with the body scan removed this build goes
+		// unrecognized unless a deployment sets one.
 		id:   "goose",
 		name: "Goose",
 		kind: KindAgentCLI,
@@ -549,9 +454,6 @@ var catalog = []rule{
 			agent := parseUserAgent(view.headerValue("User-Agent"))
 			if agent.productPrefix("goose") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:goose")
-			}
-			if view.bodyHeadContainsAny("You are Goose, an AI agent", "You are Goose") {
-				return detected(ConfidenceMedium, "", promptEvidence("you-are-goose"))
 			}
 			return matchResult{}, false
 		},
@@ -565,13 +467,6 @@ var catalog = []rule{
 			if agent.product == "amp" || agent.productPrefix("amp-cli") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:amp")
 			}
-			if view.bodyHeadContainsAny(
-				"You are Amp, an AI coding agent",
-				"You are Amp, a coding agent",
-				"You are Amp, an interactive coding agent",
-			) {
-				return detected(ConfidenceMedium, "", promptEvidence("you-are-amp"))
-			}
 			return matchResult{}, false
 		},
 	},
@@ -583,9 +478,6 @@ var catalog = []rule{
 			agent := parseUserAgent(view.headerValue("User-Agent"))
 			if agent.productPrefix("openhands") {
 				return detected(ConfidenceHigh, agent.versionOrEmpty(), "user-agent:openhands")
-			}
-			if view.bodyHeadContainsAny("You are OpenHands", "You are an OpenHands agent") {
-				return detected(ConfidenceMedium, "", promptEvidence("you-are-openhands"))
 			}
 			return matchResult{}, false
 		},

@@ -39,7 +39,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 | Stream fidelity | SSE data is stored chunk by chunk and replayed in its original chunk order, with no artificial pacing or timing simulation |
 | Record format | `LLM_PROXY_V3` compact prelude plus raw HTTP bytes; legacy V2 recordings stay readable |
 | Monitor UI | Go-embedded React interface: request list, session grouping, trace detail, routing decisions, audit, model and provider management |
-| Client detection | Classifies the client harness behind a request (Claude Code, Codex, Gemini CLI, Cline, Cursor, ...) from headers, URL and body windows, tags the trace and supports `?harness=` filtering; the classification never rewrites traffic |
+| Client detection | Classifies the client harness behind a request (Claude Code, Codex, Gemini CLI, Cline, Cursor, ...) from headers and URL only (never the body), tags the trace and supports `?harness=` filtering; the classification never rewrites traffic |
 | Trajectory parsing | Cassettes are parsed into an Observation IR that yields findings such as dangerous tool calls and sensitive data |
 | Session export | Export a session's cumulative history as ATIF v1.8 JSONL |
 | Agent interface | An MCP server exposes 21 query and reanalysis tools so agents read trajectories instead of scraping HTML |
