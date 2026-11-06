@@ -755,6 +755,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// The proxy URL may carry credentials and changing it moves every outbound
 	// request, so this is admin-only like the rest of the system surface.
 	mux.HandleFunc("/api/settings/network-proxy", monitorAdminRequired(networkProxySettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/rates-alerts", monitorAdminRequired(ratesAlertsSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasListCreateAPIHandler(st)
@@ -2109,6 +2110,10 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 			}
 			attachTracePreviews(resp.Attention.RecentFailures)
 			attachTracePreviews(resp.Attention.SlowTraces)
+			// Rate quota alerts are opportunistic: the Overview already polls
+			// roughly once a minute per open tab, so the check runs here
+			// (throttled) without a background ticker.
+			maybeEvaluateRatesAlerts(st, r)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}

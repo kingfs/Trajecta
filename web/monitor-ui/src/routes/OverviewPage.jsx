@@ -55,6 +55,7 @@ export function OverviewPage() {
   const breakdown = data?.breakdown || {};
   const attention = data?.attention || {};
   const findingCount = (breakdown.finding_categories || []).reduce((sum, item) => sum + Number(item.count || 0), 0);
+  const rateBreachCount = (eventSummary?.by_category || []).filter((item) => item.label === "rate_breach").reduce((sum, item) => sum + Number(item.count || 0), 0);
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -92,6 +93,15 @@ export function OverviewPage() {
         <StatCard label={t("common.avgTtft")} value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
         <StatCard label={t("overview.latency")} value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
       </section>
+
+      {rateBreachCount > 0 ? (
+        <Button asChild variant="ghost" className="icon-text-button" to="/events?category=rate_breach">
+          <Link to="/events?category=rate_breach">
+            <span>{t("overview.rateBreach")}</span>
+            <span className="nav-item-badge nav-item-badge-alert">{t("overview.rateBreachDetail", { count: formatCount(rateBreachCount) })}</span>
+          </Link>
+        </Button>
+      ) : null}
 
       <Card as="section">
         <div className="panel-head">

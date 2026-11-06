@@ -159,6 +159,8 @@ function ModelCard({ item, windowValue }) {
         <Metric label={t("common.requests")} value={formatCount(summary.request_count)} />
         <Metric label={t("common.errors")} value={formatCount(failed)} danger={failed > 0} />
         <Metric label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+        <Metric label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatCount(summary.avg_rpm ?? 0) })} />
+        <Metric label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatCount(summary.avg_tpm ?? 0) })} />
         <Metric label={t("models.today")} value={formatCount(today.total_tokens)} detail={usageCoverageDetail(today.missing_usage_request, t)} />
       </div>
       <div className="model-market-footer">
