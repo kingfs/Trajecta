@@ -164,7 +164,7 @@ func BenchmarkOverviewTimeline(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		items, _, _, err := st.overviewTimeline(whereSQL, whereArgs, opts)
+		items, _, _, _, err := st.overviewTimeline(whereSQL, whereArgs, opts)
 		if err != nil {
 			b.Fatal(err)
 		}

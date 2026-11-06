@@ -105,11 +105,19 @@ func maybeEvaluateRatesAlerts(st *store.Store, r *http.Request) {
 	}()
 
 	settings, err := st.LoadRatesAlertsSettings(r.Context())
-	if err != nil || !settings.Enabled {
+	if err != nil {
+		return
+	}
+	if !settings.Enabled {
+		// Alerting is off, so no later evaluation will ever raise or clear a
+		// rate event. Resolve the ones still waiting instead of leaving them
+		// unread in the inbox forever: the setting that produced them no
+		// longer exists, so they can never clear on their own.
+		resolveClearedRatesAlerts(st, nil)
 		return
 	}
 	settings = settings.Normalize()
-	breaches, evaluated, err := st.EvaluateRatesAlerts(settings)
+	breaches, _, err := st.EvaluateRatesAlerts(settings)
 	if err != nil {
 		return
 	}
@@ -129,7 +137,15 @@ func maybeEvaluateRatesAlerts(st *store.Store, r *http.Request) {
 	// automatic clear. Every unread fingerprint either breached (keep) or
 	// cleared/silent (resolve), including scopes that went silent with no
 	// traffic this round and were not evaluated.
-	_ = evaluated
+	resolveClearedRatesAlerts(st, breached)
+}
+
+// resolveClearedRatesAlerts resolves unread rate-breach events whose scope did
+// not breach this round. breached holds the fingerprints still over threshold;
+// nil means nothing is over threshold (alerting was disabled, or no scope had
+// traffic). Only unread events are touched, so a read or ignored event keeps
+// the status the operator gave it.
+func resolveClearedRatesAlerts(st *store.Store, breached map[string]bool) {
 	unread, err := st.ListRatesAlertFingerprints(store.SystemEventStatusUnread)
 	if err != nil {
 		return

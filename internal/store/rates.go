@@ -368,13 +368,28 @@ func RatesAlertSystemEvent(breach RatesBreach, severity string) (SystemEvent, er
 	if breach.Key != "" {
 		scopeLabel += " " + breach.Key
 	}
+	// Mention only the dimensions that are actually limited and over their
+	// limit. A threshold of 0 disables that dimension (ratesBreachFor never
+	// compares it), so naming it in the message would claim a breach that was
+	// never checked.
+	var exceeded []string
+	if breach.MaxRPM > 0 && breach.RPM > breach.MaxRPM {
+		exceeded = append(exceeded, fmt.Sprintf("RPM %d/min exceeds max_rpm=%d", breach.RPM, breach.MaxRPM))
+	}
+	if breach.MaxTPM > 0 && breach.TPM > breach.MaxTPM {
+		exceeded = append(exceeded, fmt.Sprintf("TPM %d/min exceeds max_tpm=%d", breach.TPM, breach.MaxTPM))
+	}
+	message := fmt.Sprintf("%s: RPM %d/min, TPM %d/min within the configured limits", scopeLabel, breach.RPM, breach.TPM)
+	if len(exceeded) > 0 {
+		message = scopeLabel + ": " + strings.Join(exceeded, "; ")
+	}
 	event := SystemEvent{
 		Fingerprint: breach.Fingerprint(),
 		Source:      "rates",
 		Category:    "rate_breach",
 		Severity:    severity,
 		Title:       "Rate threshold exceeded",
-		Message:     fmt.Sprintf("%s: RPM %d/min, TPM %d/min exceed max_rpm=%d max_tpm=%d", scopeLabel, breach.RPM, breach.TPM, breach.MaxRPM, breach.MaxTPM),
+		Message:     message,
 		DetailsJSON: details,
 	}
 	switch breach.Scope {

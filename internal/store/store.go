@@ -3675,10 +3675,12 @@ func (s *Store) listChildExchangesChunk(out map[string][]LogEntry, parents []Log
 // ListTraceIDs return for that filter, so the monitor can show one set of
 // numbers next to its list.
 //
-// It is a single aggregate pass. The monitor list page asks for it on every
-// render, so the previous four separate aggregates (total, success, mean TTFT,
-// token sum) over the same rows were four times the scan cost, and the result is
-// cached per filter for statsCacheTTL.
+// The window is one aggregate pass (total, success, mean TTFT, token sum and
+// MAX(recorded_at) together). The monitor list page asks for it on every render,
+// so the previous four separate aggregates over the same rows were four times
+// the scan cost, and the result is cached per filter for statsCacheTTL. Only the
+// trailing-60s rates are a second statement, and that one reads the recorded_at
+// index range rather than the window.
 func (s *Store) Stats(filter ListFilter) (Stats, error) {
 	whereSQL, whereArgs := buildLogFilterClause(filter, "")
 	whereSQL = andSQL(whereSQL, clientVisibleLogClause(""))
@@ -3690,19 +3692,23 @@ func (s *Store) Stats(filter ListFilter) (Stats, error) {
 		return cached, nil
 	}
 	var (
-		total        int
-		successCount int
-		avgTTFT      float64
-		totalTokens  int
+		total         int
+		successCount  int
+		avgTTFT       float64
+		totalTokens   int
+		lastSeenValue any
 	)
+	// MAX(recorded_at) rides in the same pass: the average-rate span end is the
+	// latest row, and reading it separately re-scanned the whole window.
 	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total_request,
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(AVG(CASE WHEN status_code >= 200 AND status_code < 300 THEN ttft_ms END), 0) AS avg_ttft,
-			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN total_tokens ELSE 0 END), 0) AS total_tokens
+			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN total_tokens ELSE 0 END), 0) AS total_tokens,
+			MAX(recorded_at) AS last_seen
 		FROM logs
-		WHERE `+whereSQL, whereArgs...).Scan(&total, &successCount, &avgTTFT, &totalTokens); err != nil {
+		WHERE `+whereSQL, whereArgs...).Scan(&total, &successCount, &avgTTFT, &totalTokens, &lastSeenValue); err != nil {
 		return Stats{}, err
 	}
 
@@ -3734,12 +3740,8 @@ func (s *Store) Stats(filter ListFilter) (Stats, error) {
 		// Same data-derived span end as Overview/Usage (latest row, not
 		// wall-clock): a window whose traffic ended hours ago still reports
 		// the rate the traffic actually sustained.
-		var latestRecordedAt any
-		if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
-			return Stats{}, err
-		}
 		referenceTime := sampledAt
-		if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		if latestTime, err := timeParseNullableValue(lastSeenValue); err != nil {
 			return Stats{}, err
 		} else if !latestTime.IsZero() {
 			referenceTime = latestTime

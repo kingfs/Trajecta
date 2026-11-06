@@ -148,11 +148,11 @@ func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 		if err != nil {
 			return OverviewDashboard{}, err
 		}
-		timeline, peakRPM, peakTPM, err := s.overviewTimeline(whereSQL, whereArgs, opts)
+		timeline, peakRPM, peakTPM, referenceTime, err := s.overviewTimeline(whereSQL, whereArgs, opts)
 		if err != nil {
 			return OverviewDashboard{}, err
 		}
-		if err := s.attachOverviewRates(&summary, whereSQL, whereArgs, opts.Since, peakRPM, peakTPM); err != nil {
+		if err := s.attachOverviewRates(&summary, whereSQL, whereArgs, opts.Since, referenceTime, peakRPM, peakTPM); err != nil {
 			return OverviewDashboard{}, err
 		}
 		breakdown, err := s.overviewBreakdown(whereSQL, whereArgs, opts.Since, opts.Limit)
@@ -253,19 +253,25 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 // samples, which the caller already computed in its own aggregate pass; the
 // lookup itself is the only query left.
 
-// overviewTimeline returns the bucketed timeline plus the peak per-minute RPM
-// and TPM inside the scan. The peak needs minute granularity because the
-// display buckets are hours wide: a 60-minute bucket cannot answer "what was
-// the busiest minute". Minute buckets are accumulated alongside the display
-// buckets from the same rows, so the peak costs no extra scan.
-func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, int, int, error) {
+// overviewTimeline returns the bucketed timeline, the peak per-minute RPM and
+// TPM inside the scan, and the instant the scan is anchored at: the latest row
+// the window matched, or wall-clock now when the window is empty. Peak needs
+// minute granularity because the display buckets are hours wide (a 60-minute
+// bucket cannot answer "what was the busiest minute"); minute buckets are
+// accumulated alongside the display buckets from the same rows, so the peak
+// costs no extra scan.
+//
+// The anchor is returned rather than re-queried because the average rates need
+// the same instant: the dashboard used to run the identical MAX(recorded_at)
+// statement a second time, one extra whole-window scan per render.
+func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, int, int, time.Time, error) {
 	referenceTime := time.Now().UTC()
 	var latestRecordedAt any
 	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, time.Time{}, err
 	}
 	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, time.Time{}, err
 	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
@@ -278,7 +284,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		ORDER BY recorded_at ASC
 	`, queryArgs...)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, time.Time{}, err
 	}
 	defer rows.Close()
 
@@ -314,14 +320,14 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 			durationMs  int64
 		)
 		if err := rows.Scan(&recordedAt, &statusCode, &errorText, &totalTokens, &ttftMs, &durationMs); err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, time.Time{}, err
 		}
 		recorded, err := timeParseValue(recordedAt)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, time.Time{}, err
 		}
 		if recorded.IsZero() {
-			return nil, 0, 0, errors.New("overview timeline: log row has an empty recorded_at")
+			return nil, 0, 0, time.Time{}, errors.New("overview timeline: log row has an empty recorded_at")
 		}
 		bucketTime := bucketSlot(recorded, opts.BucketSize, opts.Location)
 		bucket, ok := buckets[bucketTime]
@@ -351,7 +357,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		minute.totalTokens += totalTokens
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, time.Time{}, err
 	}
 
 	peakRPM, peakTPM := 0, 0
@@ -389,15 +395,16 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		}
 		out = append(out, item)
 	}
-	return out, peakRPM, peakTPM, nil
+	return out, peakRPM, peakTPM, referenceTime, nil
 }
 
 // attachOverviewRates fills the rate fields of summary from one trailing-60s
 // query plus the window totals it already holds. Average rates divide the
 // window totals by the elapsed span from since to the latest row (or now when
 // the window is empty); an unwindowed ("all") query leaves them at zero
-// because there is no finite span to divide by.
-func (s *Store) attachOverviewRates(summary *OverviewSummary, whereSQL string, whereArgs []any, since time.Time, peakRPM, peakTPM int) error {
+// because there is no finite span to divide by. referenceTime is the anchor
+// overviewTimeline already read out of the same window.
+func (s *Store) attachOverviewRates(summary *OverviewSummary, whereSQL string, whereArgs []any, since, referenceTime time.Time, peakRPM, peakTPM int) error {
 	currentRPM, currentTPM, err := s.currentRatesAll(whereSQL, whereArgs)
 	if err != nil {
 		return err
@@ -406,22 +413,11 @@ func (s *Store) attachOverviewRates(summary *OverviewSummary, whereSQL string, w
 	summary.CurrentTPM = currentTPM
 	summary.PeakRPM = peakRPM
 	summary.PeakTPM = peakTPM
-	sampledAt := time.Now().UTC()
 	if summary.RequestCount > 0 {
-		summary.RatesSampledAt = sampledAt
+		summary.RatesSampledAt = time.Now().UTC()
 	}
 	if since.IsZero() {
 		return nil
-	}
-	var latestRecordedAt any
-	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
-		return err
-	}
-	referenceTime := sampledAt
-	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
-		return err
-	} else if !latestTime.IsZero() {
-		referenceTime = latestTime
 	}
 	windowMinutes := rateWindowMinutes(since, referenceTime)
 	summary.AvgRPM, summary.AvgTPM = rateAvg(summary.RequestCount, summary.TotalTokens, windowMinutes)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -149,4 +150,47 @@ func TestRatesAlertsEvaluateGlobalAndModel(t *testing.T) {
 
 func alertLogName(i int) string {
 	return "rates-alert-" + string(rune('a'+i)) + ".http"
+}
+
+// A breach message must name only the dimensions that are limited and over
+// their limit: max_* == 0 disables that dimension, so claiming it was exceeded
+// (the old message always printed both) would be a false statement in the
+// event feed.
+func TestRatesAlertSystemEventMessageMentionsOnlyBreachedDimension(t *testing.T) {
+	sampled := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	rpmOnly := RatesBreach{Scope: RatesAlertScopeGlobal, RPM: 5, TPM: 900, MaxRPM: 4, MaxTPM: 0, Sampled: sampled}
+	event, err := RatesAlertSystemEvent(rpmOnly, "warning")
+	if err != nil {
+		t.Fatalf("RatesAlertSystemEvent(rpm only) error = %v", err)
+	}
+	if !strings.Contains(event.Message, "RPM 5/min exceeds max_rpm=4") {
+		t.Fatalf("rpm-only message = %q, want the breached RPM dimension", event.Message)
+	}
+	if strings.Contains(event.Message, "TPM") {
+		t.Fatalf("rpm-only message = %q, must not claim an unchecked TPM dimension", event.Message)
+	}
+
+	both := RatesBreach{Scope: RatesAlertScopeModel, Key: "gpt-x", RPM: 5, TPM: 900, MaxRPM: 4, MaxTPM: 100, Sampled: sampled}
+	event, err = RatesAlertSystemEvent(both, "error")
+	if err != nil {
+		t.Fatalf("RatesAlertSystemEvent(both) error = %v", err)
+	}
+	if !strings.Contains(event.Message, "RPM 5/min exceeds max_rpm=4") || !strings.Contains(event.Message, "TPM 900/min exceeds max_tpm=100") {
+		t.Fatalf("both-dimension message = %q, want RPM and TPM", event.Message)
+	}
+	if !strings.Contains(event.Message, "model gpt-x") {
+		t.Fatalf("both-dimension message = %q, want the scope and key", event.Message)
+	}
+
+	// The comparison in ratesBreachFor only raises a breach on a limit that is
+	// set and crossed, so the builder must not claim "exceeds" for values that
+	// are within their limits when it is called defensively.
+	within := RatesBreach{Scope: RatesAlertScopeGlobal, RPM: 1, TPM: 1, MaxRPM: 4, MaxTPM: 100, Sampled: sampled}
+	event, err = RatesAlertSystemEvent(within, "warning")
+	if err != nil {
+		t.Fatalf("RatesAlertSystemEvent(within) error = %v", err)
+	}
+	if strings.Contains(event.Message, "exceeds") {
+		t.Fatalf("within-limits message = %q, must not claim a breach", event.Message)
+	}
 }

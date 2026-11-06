@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/appdbmigrate"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
@@ -82,18 +84,29 @@ func TestOverviewRates(t *testing.T) {
 	if math.Abs(summary.AvgRPM-0.4) > 0.05 {
 		t.Fatalf("avg rpm = %v, want ~0.4 (4 requests over ~10 minutes)", summary.AvgRPM)
 	}
-	// Timeline bucket RPM/TPM normalize by the 60-minute bucket span.
-	var found bool
+	// Timeline bucket RPM/TPM normalize by the 60-minute bucket span. Assert the
+	// arithmetic and the totals rather than "one bucket holds all four rows":
+	// the rows are seeded relative to the wall-clock now, so the 5-minute-old row
+	// falls in the previous hour bucket whenever the test runs in the first five
+	// minutes after the hour.
+	var bucketRequests, bucketTokens int
 	for _, item := range dashboard.Timeline {
-		if item.RequestCount == 4 {
-			found = true
-			if math.Abs(item.RPM-4.0/60.0) > 1e-9 || math.Abs(item.TPM-85.0/60.0) > 1e-9 {
-				t.Fatalf("timeline bucket rpm/tpm = %v/%v, want 4/60 and 85/60", item.RPM, item.TPM)
+		bucketRequests += item.RequestCount
+		bucketTokens += item.TotalTokens
+		if item.RequestCount == 0 && item.TotalTokens == 0 {
+			if item.RPM != 0 || item.TPM != 0 {
+				t.Fatalf("empty timeline bucket rates = %v/%v, want 0/0", item.RPM, item.TPM)
 			}
+			continue
+		}
+		if math.Abs(item.RPM-float64(item.RequestCount)/60.0) > 1e-9 || math.Abs(item.TPM-float64(item.TotalTokens)/60.0) > 1e-9 {
+			t.Fatalf("timeline bucket (requests=%d tokens=%d) rpm/tpm = %v/%v, want %v/%v",
+				item.RequestCount, item.TotalTokens, item.RPM, item.TPM,
+				float64(item.RequestCount)/60.0, float64(item.TotalTokens)/60.0)
 		}
 	}
-	if !found {
-		t.Fatalf("timeline has no bucket with 4 requests: %+v", dashboard.Timeline)
+	if bucketRequests != 4 || bucketTokens != 85 {
+		t.Fatalf("timeline totals = requests:%d tokens:%d, want 4/85 across buckets: %+v", bucketRequests, bucketTokens, dashboard.Timeline)
 	}
 
 	stats, err := st.Stats(ListFilter{Since: now.Add(-10 * time.Minute)})
@@ -218,5 +231,159 @@ func TestUsageRates(t *testing.T) {
 				t.Fatalf("trend rpm/tpm = %v/%v, want 2/60 and 100/60", trend.RPM, trend.TPM)
 			}
 		}
+	}
+}
+
+// Model identity is case-insensitive throughout the index, so one model recorded
+// under two spellings must produce one catalog card. The grouped usage summary
+// used to aggregate the raw column while the catalog looked its summary up by the
+// lowercased id, so a model whose rows were spelled "GPT-5" showed zero traffic -
+// and, since this change, zero RPM/TPM - on its card.
+func TestModelCatalogRatesTreatModelCasingAsOneModel(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	now := time.Now().UTC()
+	seedRateLog(t, st, dir, "casing-lower.http", now.Add(-20*time.Second), 30, "gpt-casing")
+	seedRateLog(t, st, dir, "casing-upper.http", now.Add(-10*time.Second), 70, "GPT-Casing")
+
+	since := now.Add(-10 * time.Minute)
+	grouped, err := st.usageSummariesByModel(since)
+	if err != nil {
+		t.Fatalf("usageSummariesByModel() error = %v", err)
+	}
+	if _, ok := grouped["GPT-Casing"]; ok {
+		t.Fatalf("grouped summaries = %v, want the model keyed by its lowercase id only", grouped)
+	}
+	record := grouped["gpt-casing"]
+	if record.RequestCount != 2 || record.TotalTokens != 100 {
+		t.Fatalf("grouped gpt-casing = requests:%d tokens:%d, want 2/100", record.RequestCount, record.TotalTokens)
+	}
+	if record.CurrentRPM != 2 || record.CurrentTPM != 100 {
+		t.Fatalf("grouped gpt-casing rates = %d/%d, want 2/100", record.CurrentRPM, record.CurrentTPM)
+	}
+
+	catalog, err := st.ListModelCatalogAnalytics(since, now.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("ListModelCatalogAnalytics() error = %v", err)
+	}
+	var found bool
+	for _, item := range catalog {
+		if item.Model != "gpt-casing" {
+			continue
+		}
+		found = true
+		if item.Summary.RequestCount != 2 || item.Summary.TotalTokens != 100 {
+			t.Fatalf("catalog gpt-casing summary = requests:%d tokens:%d, want 2/100", item.Summary.RequestCount, item.Summary.TotalTokens)
+		}
+		if item.Summary.CurrentRPM != 2 || item.Summary.CurrentTPM != 100 {
+			t.Fatalf("catalog gpt-casing rates = %d/%d, want 2/100", item.Summary.CurrentRPM, item.Summary.CurrentTPM)
+		}
+	}
+	if !found {
+		t.Fatalf("catalog = %+v, want gpt-casing", catalog)
+	}
+}
+
+// An empty window must stay the zero summary: no rates, no sample instant, and no
+// division by a span the aggregate never saw (the average span end now comes from
+// the aggregate's own MAX(recorded_at)).
+func TestStatsAvgEmptyWindow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	stats, err := st.Stats(ListFilter{Since: time.Now().UTC().Add(-time.Hour)})
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats != (Stats{}) {
+		t.Fatalf("Stats(empty window) = %+v, want the zero summary", stats)
+	}
+}
+
+// TestPostgresRateQueries runs the same rate paths against Postgres when a
+// disposable test database is configured, because the trailing-60s comparison
+// binds a formatted string against a timestamptz column there (an instant) while
+// it is a text comparison on SQLite. Both must agree.
+func TestPostgresRateQueries(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TRAJECTA_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set TRAJECTA_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	// A unique model keeps the assertions independent of the rows other Postgres
+	// tests in this shared database may have written.
+	model := "rate-pg-" + strings.ReplaceAll(t.Name(), "/", "_") + "-" + time.Now().UTC().Format("20060102150405.000000000")
+	now := time.Now().UTC()
+	seedRateLog(t, st, dir, "pg-current.http", now.Add(-10*time.Second), 40, model)
+	seedRateLog(t, st, dir, "pg-old.http", now.Add(-10*time.Minute), 7, model)
+	since := now.Add(-20 * time.Minute)
+
+	stats, err := st.Stats(ListFilter{Model: model, Since: since})
+	if err != nil {
+		t.Fatalf("Stats(postgres) error = %v", err)
+	}
+	if stats.CurrentRPM != 1 || stats.CurrentTPM != 40 {
+		t.Fatalf("postgres stats rates = %d/%d, want 1/40 (trailing 60s only)", stats.CurrentRPM, stats.CurrentTPM)
+	}
+	if stats.AvgRPM <= 0 || stats.AvgTPM <= 0 {
+		t.Fatalf("postgres stats avg rates = %v/%v, want positive for a 20-minute window", stats.AvgRPM, stats.AvgTPM)
+	}
+
+	grouped, err := st.usageSummariesByModel(since)
+	if err != nil {
+		t.Fatalf("usageSummariesByModel(postgres) error = %v", err)
+	}
+	if got := grouped[model]; got.RequestCount != 2 || got.CurrentRPM != 1 || got.CurrentTPM != 40 {
+		t.Fatalf("postgres grouped summary = %+v, want requests 2 and rates 1/40", got)
+	}
+
+	breaches, _, err := st.EvaluateRatesAlerts(RatesAlertsSettings{Enabled: true, MaxRPM: 1, MaxTPM: 1000000, Severity: "warning"})
+	if err != nil {
+		t.Fatalf("EvaluateRatesAlerts(postgres) error = %v", err)
+	}
+	var modelBreach *RatesBreach
+	for index := range breaches {
+		if breaches[index].Scope == RatesAlertScopeModel && breaches[index].Key == model {
+			modelBreach = &breaches[index]
+		}
+	}
+	if modelBreach == nil {
+		t.Fatalf("postgres model breaches = %+v, want one for %q", breaches, model)
+	}
+	event, err := RatesAlertSystemEvent(*modelBreach, "warning")
+	if err != nil {
+		t.Fatalf("RatesAlertSystemEvent(postgres) error = %v", err)
+	}
+	if _, err := st.UpsertSystemEvent(event); err != nil {
+		t.Fatalf("UpsertSystemEvent(postgres) error = %v", err)
+	}
+	loaded, err := st.GetSystemEventByFingerprint(event.Fingerprint)
+	if err != nil {
+		t.Fatalf("GetSystemEventByFingerprint(postgres) error = %v", err)
+	}
+	if loaded.Category != "rate_breach" || loaded.Source != "rates" {
+		t.Fatalf("postgres event = %+v, want rates/rate_breach", loaded)
 	}
 }

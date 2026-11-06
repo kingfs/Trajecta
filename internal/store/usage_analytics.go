@@ -138,20 +138,30 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 }
 
 // usageSummaryGroupKeys is the closed set of columns a grouped usage summary may
-// group by. The key is interpolated into the query text, so it is validated
-// against this map instead of being taken from a caller.
-var usageSummaryGroupKeys = map[string]struct{}{
-	"model":                {},
-	"selected_upstream_id": {},
+// group by, and the SQL expression each one groups on. The expression is
+// interpolated into the query text, so it is validated against this map instead
+// of being taken from a caller.
+//
+// model groups on LOWER(model) because model identity is case-insensitive
+// everywhere else in the index (listLogModels, modelLogChannels and routing all
+// lowercase it): grouping the raw column split one model recorded under two
+// spellings into two keys, and because the model catalog looks its summary up by
+// the lowercased id, the mixed-case rows - including their RPM/TPM - silently
+// disappeared from the model card. The map key stays the lowercase model.
+var usageSummaryGroupKeys = map[string]string{
+	"model":                "LOWER(model)",
+	"selected_upstream_id": "selected_upstream_id",
 }
 
 // usageSummariesByGroupKey computes the same aggregate as usageSummary for one
-// equality clause on groupKey, for every group in one pass, keyed by the raw
-// column value. The model catalog and the channel list otherwise run this
-// aggregate once per entry (twice per model, once per channel); a group the map
-// does not contain is the zero summary a no-match single-key query returned.
+// equality clause on groupKey, for every group in one pass. A model group is
+// keyed by its lowercase id, every other group by the raw column value. The
+// model catalog and the channel list otherwise run this aggregate once per entry
+// (twice per model, once per channel); a group the map does not contain is the
+// zero summary a no-match single-key query returned.
 func (s *Store) usageSummariesByGroupKey(groupKey string, since time.Time) (map[string]UsageSummaryRecord, error) {
-	if _, ok := usageSummaryGroupKeys[groupKey]; !ok {
+	groupExpr, ok := usageSummaryGroupKeys[groupKey]
+	if !ok {
 		return nil, fmt.Errorf("unsupported usage summary group key %q", groupKey)
 	}
 	where := "1=1"
@@ -161,10 +171,10 @@ func (s *Store) usageSummariesByGroupKey(groupKey string, since time.Time) (map[
 		args = append(args, since.UTC().Format(timeLayout))
 	}
 	rows, err := s.db.Query(`
-		SELECT `+groupKey+`,`+usageSummaryAggregateColumns+`
+		SELECT `+groupExpr+`,`+usageSummaryAggregateColumns+`
 		FROM logs
 		WHERE `+where+`
-		GROUP BY `+groupKey+`
+		GROUP BY `+groupExpr+`
 	`, args...)
 	if err != nil {
 		return nil, err
@@ -208,7 +218,7 @@ func (s *Store) usageSummariesByGroupKey(groupKey string, since time.Time) (map[
 		return nil, err
 	}
 	now := time.Now().UTC()
-	current, err := s.currentRatesAllByGroup(groupKey, where, args)
+	current, err := s.currentRatesAllByGroup(groupExpr, where, args)
 	if err != nil {
 		return nil, err
 	}
