@@ -69,6 +69,7 @@ func newDBCommand(runtime *Runtime) *cobra.Command {
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newDBSummaryCommand(runtime))
 	cmd.AddCommand(newDBSecretCommand(runtime))
+	cmd.AddCommand(newDBSecretMappingCommand(runtime))
 	return cmd
 }
 
