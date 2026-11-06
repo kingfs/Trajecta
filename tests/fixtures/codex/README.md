@@ -34,12 +34,18 @@ Coverage:
   `include`, `external_web_access`, and `search_content_types`.
 - `forced_web_search_request.json`: forced hosted web search descriptor,
   documenting the execution-or-stable-rejection contract.
+- `mcp_descriptor_request.json`: hosted `mcp` descriptor accepted as
+  compatibility input (the executor itself is implemented in
+  `internal/responses/tools/mcp`; a descriptor executes only when external
+  servers are configured under `tools.mcp`).
 - `unsupported_mcp_request.json`, `unsupported_file_search_request.json`,
   `unsupported_code_interpreter_request.json`, and
   `unsupported_computer_use_preview_request.json`: standalone request examples
-  for hosted tools that must be rejected until explicit runtimes exist.
+  for hosted tools that must be rejected in this shape — the `mcp` fixture has
+  no configured external server, and `file_search` / `code_interpreter` /
+  `computer_use_preview` have no executor at all.
 - `unsupported_hosted_tool_expected_error.json`: expected stable error shape for
-  unsupported hosted tools such as `mcp`, `file_search`, and
-  `code_interpreter`, and `computer_use_preview`. Runtime and HTTP tests assert
-  the stable `unsupported_tool` rejection path for forced hosted tool execution;
-  the tools themselves are not implemented.
+  hosted tools without a configured runtime (`mcp` with no configured server,
+  plus `file_search`, `code_interpreter`, and `computer_use_preview`).
+  Runtime and HTTP tests assert the stable `unsupported_tool` rejection path
+  for forced hosted tool execution.

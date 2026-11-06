@@ -1,11 +1,11 @@
 import React from "react";
 import { CollapsibleCard } from "../common/Display";
 import { useI18n } from "../../lib/i18n";
-import { RouteInspectorPanel, RoutingSettingsPanel } from "../../routes/RoutingPage";
+import { RatesAlertsPanel, RouteInspectorPanel, RoutingSettingsPanel } from "../../routes/RoutingPage";
 
 /*
- * The mount point for the two routing controls that used to be a standalone
- * /routing page.
+ * The mount point for the deployment-wide routing controls that used to be a
+ * standalone /routing page.
  *
  * They are advanced material - a deployment-wide policy and a dry run - so they
  * sit at the bottom of the channel page inside collapsed disclosures rather
@@ -25,6 +25,9 @@ export function ChannelRoutingPanels() {
     <div className="grid gap-4">
       <CollapsibleCard title={t("routing.settings")} subtitle={t("routing.systemPolicy")} defaultOpen={false}>
         <RoutingSettingsPanel />
+      </CollapsibleCard>
+      <CollapsibleCard title={t("routing.ratesAlerts")} subtitle={t("routing.ratesAlertsDetail")} defaultOpen={false}>
+        <RatesAlertsPanel />
       </CollapsibleCard>
       <CollapsibleCard title={t("routing.routeInspector")} subtitle={t("routing.dryRun")} defaultOpen={false}>
         <RouteInspectorPanel />

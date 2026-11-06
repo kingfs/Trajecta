@@ -47,7 +47,7 @@ task migrate:db:up  # apply Postgres migrations (only when database.auto_migrate
 
 ## What to run before opening a pull request
 
-- **Always**: `task check:quick`. Its formatting check covers the same directories as CI (`./cmd`, `./internal`, `./pkg`, `./unittest`, `./web/monitor-ui/test-fixtures`), so a green local run also passes the CI formatting step.
+- **Always**: `task check:quick`. Its formatting check covers the same directories as CI (`./cmd`, `./internal`, `./pkg`, `./unittest`, `./tests`, `./web/monitor-ui/test-fixtures`), so a green local run also passes the CI formatting step.
 - **If you touched storage, the record format, the proxy, the Responses runtime, routing, or the UI**: `task check:full`.
 - **If you changed the monitor UI**: run `task ui:build`. The bundle in `internal/monitor/ui/dist` is embedded with `go:embed`, so the rebuilt files belong in the same commit as the source change.
 

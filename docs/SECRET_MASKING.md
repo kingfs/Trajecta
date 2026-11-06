@@ -123,7 +123,7 @@ secret_masking:
 
 ## 覆盖范围
 
-凭据与个人数据规则集共 78 条：Strong 36、Anchored 24、Generic 18。范围是三组：
+凭据与个人数据可改写规则集共 78 条：Strong 36、Anchored 24、Generic 18（另有 2 条 ReportOnly 访问指示符 `access.url` / `access.local_path` 不计入，规则元数据表共 80 条）。范围是三组：
 
 1. 结构形状（JWT、JWE、PEM 头与 PEM 私钥块、Bearer）与 LLM 厂商前缀，即 [密钥与 Token 格式识别参考](./SECRET_FORMAT_REFERENCE.md) 第 3、4 节所述内容，外加 `sk-`/`sk_` 两个通用池；
 2. 该参考 §8.1「可离线判定」里**锚点足够窄**的那几条：AWS AccessKeyId、GitHub 经典 PAT（CRC32 校验位）与细粒度 PAT、PyPI token、age 私钥、PowerShell `ConvertTo-SecureString`；

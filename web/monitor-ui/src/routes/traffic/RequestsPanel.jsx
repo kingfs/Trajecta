@@ -11,6 +11,7 @@ import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, apiURL } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { formatDuration, formatTokenCount, normalizeListWindow, setOrDeleteParam } from "../../lib/monitor";
+import { KNOWN_HARNESS_IDS } from "../../lib/harness";
 
 const PAGE_SIZE = 50;
 
@@ -127,8 +128,14 @@ export function RequestsPanel() {
             placeholder={t("requests.harnessPlaceholder")}
             aria-label={t("requests.harness")}
             value={filters.harness}
+            list="harness-suggestions"
             onChange={(event) => setFilters((current) => ({ ...current, harness: event.target.value }))}
           />
+          <datalist id="harness-suggestions">
+            {KNOWN_HARNESS_IDS.map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
           <select
             className="filter-input filter-select"
             value={filters.observation}

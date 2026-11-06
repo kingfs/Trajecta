@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes land on the latest release track (`v2.x`). Older releases are not maintained.
+Security fixes land on the latest release track (`v3.x`). Older releases are not maintained.
 
 ## Reporting a vulnerability
 

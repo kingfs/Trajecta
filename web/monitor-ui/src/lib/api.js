@@ -91,6 +91,7 @@ export const apiPaths = {
   routingInspect: "/api/routing/inspect",
   routingSettings: "/api/settings/routing",
   networkProxySettings: "/api/settings/network-proxy",
+  ratesAlertsSettings: "/api/settings/rates-alerts",
   modelAliases: "/api/model-aliases",
   modelAliasValidate: "/api/model-aliases/validate",
   modelAlias: (aliasID) => `/api/model-aliases/${encodeURIComponent(aliasID)}`,

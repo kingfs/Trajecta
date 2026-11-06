@@ -25,6 +25,7 @@ import {
   buildProviderLink,
   formatCount,
   formatDateTime,
+  formatRateAvg,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -91,6 +92,8 @@ export function ModelDetailPage() {
           <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
           <StatCard label={t("models.today")} value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request, t)} />
+          <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+          <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
         </div>
       </Card>
 
@@ -154,6 +157,7 @@ function ModelChannelRow({ item, windowValue, t }) {
       <span>{t("models.reqShort", { count: formatCount(summary.request_count) })}</span>
       <span>{t("models.errShort", { count: formatCount(summary.failed_request) })}</span>
       <span>{t("models.tokShort", { count: formatCount(summary.total_tokens) })}{summary.missing_usage_request ? ` · ${usageCoverageDetail(summary.missing_usage_request, t)}` : ""}</span>
+      <span>{t("overview.rpm")}: {formatCount(summary.current_rpm ?? 0)} · {t("overview.tpm")}: {formatCount(summary.current_tpm ?? 0)}</span>
     </Link>
   );
 }

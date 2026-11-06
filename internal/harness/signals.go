@@ -34,8 +34,22 @@ func parseUserAgent(raw string) userAgent {
 	if agent.raw == "" {
 		return agent
 	}
-	first, rest, _ := strings.Cut(agent.raw, "/")
+	first, rest, found := strings.Cut(agent.raw, "/")
 	agent.product = strings.ToLower(strings.TrimSpace(first))
+	if !found {
+		// Space-separated form without a slash (`codex-cli 0.153.4`, or the
+		// bare token `pi`): the first field is the product and a version-like
+		// second field is the version. Without this, the whole string becomes
+		// the product and both the match and the version silently fail.
+		fields := strings.Fields(agent.raw)
+		if len(fields) > 0 {
+			agent.product = strings.ToLower(fields[0])
+		}
+		if len(fields) > 1 && versionRe.MatchString(fields[1]) {
+			agent.version = strings.TrimPrefix(fields[1], "v")
+		}
+		return agent
+	}
 	fields := strings.Fields(rest)
 	if len(fields) > 0 {
 		agent.tail = strings.TrimRight(fields[0], ";,)")
@@ -52,11 +66,26 @@ func parseUserAgent(raw string) userAgent {
 	return agent
 }
 
-// productPrefix reports whether the UA product starts with prefix, case
-// insensitively. A prefix is safer than a substring because a product token is
-// exactly the first token.
+// productPrefix reports whether the UA product is prefix or continues it with
+// a separator (`-`, `_`, `.`), case insensitively. A bare HasPrefix would let
+// a short token such as `continue` or `zed` claim unrelated products like
+// `continuedev` or `zed_protocol`; requiring the exact token or a separator
+// boundary keeps the match on the product that actually sent the UA, while
+// still covering variant tokens such as `codex-tui_rs` for `codex-tui` or
+// `continue-dev` for `continue`.
 func (agent userAgent) productPrefix(prefix string) bool {
-	return strings.HasPrefix(agent.product, strings.ToLower(prefix))
+	prefix = strings.ToLower(prefix)
+	if agent.product == prefix {
+		return true
+	}
+	if !strings.HasPrefix(agent.product, prefix) {
+		return false
+	}
+	switch agent.product[len(prefix)] {
+	case '-', '_', '.':
+		return true
+	}
+	return false
 }
 
 // versionOrEmpty returns the parsed version, never a guess.
@@ -150,44 +179,22 @@ func (view requestView) sdkTag() string {
 	return vendor + "-" + language
 }
 
-// capabilities infers the protocol capabilities a request visibly uses. The
-// checks are marker searches over the same bounded body windows as the
-// catalogue: they are advisory labels, not proof, and a capability missed on an
-// oversized payload degrades to a missing tag rather than a wrong one. The
-// markers are JSON keys/verbs that are unescaped inside JSON strings, so a
-// match cannot be an artefact of the encoder.
+// capabilities infers the protocol capabilities visible in the request head:
+// the headers and URL only. Streaming is announced by the Accept header or
+// the Gemini streaming path/query, and the Responses surface by the URL path.
+// Everything that used to come from the body (tool use, reasoning, prompt
+// cache, vision, structured output) is gone with the body scan: a capability
+// the head cannot prove is simply not tagged, which is the same degradation
+// rule the body-window design already documented, now total.
 func (view requestView) capabilities() []string {
-	caps := make([]string, 0, 6)
-	if view.bodyContainsAny(`"stream":true`, `"stream": true`) ||
-		strings.Contains(strings.ToLower(view.headerValue("Accept")), "text/event-stream") ||
+	caps := make([]string, 0, 2)
+	if strings.Contains(strings.ToLower(view.headerValue("Accept")), "text/event-stream") ||
 		strings.Contains(view.path, "streamGenerateContent") ||
 		strings.Contains(view.query, "alt=sse") {
 		caps = append(caps, "streaming")
 	}
-	if view.bodyContainsAny(`"tools":[`, `"tools": [`, `"functions":[`, `"functions": [`, `"tool_choice"`, `"tool_calls"`, `"tool_use"`) {
-		caps = append(caps, "tool-use")
-	}
-	if view.bodyContainsAny(`"reasoning"`, `"thinking"`, `"reasoning_effort"`, `"include_reasoning"`) {
-		caps = append(caps, "reasoning")
-	}
-	if view.bodyContainsAny(`"cache_control"`, `"prompt_cache_key"`, `"cached_content"`, `"cache_creation_input_tokens"`) ||
-		view.headerContains("anthropic-beta", "prompt-caching") {
-		caps = append(caps, "prompt-cache")
-	}
-	if view.bodyContainsAny(`"image_url"`, `"input_image"`, `"inline_data"`, `"inlineData"`, `"type":"image"`, `"type": "image"`) {
-		caps = append(caps, "vision")
-	}
-	if strings.Contains(view.path, "/responses") ||
-		view.bodyContainsAny(`"instructions"`, `"text":{"format"`, `"text": {"format"`) {
+	if strings.Contains(view.path, "/responses") {
 		caps = append(caps, "responses-api")
-	}
-	if view.bodyContainsAny(`"response_format"`, `"json_schema"`, `"responseSchema"`, `"response_schema"`, `"format":{"type":"json_schema"`) {
-		caps = append(caps, "structured-output")
 	}
 	return caps
 }
-
-// harnessEvidence renders the evidence token for a prompt fingerprint. The
-// value is the marker's short name, never the matched text, so a prompt phrase
-// cannot leak into the index.
-func promptEvidence(name string) string { return "prompt:" + name }

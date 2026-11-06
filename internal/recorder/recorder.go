@@ -333,14 +333,14 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		},
 	}
 
-	// Classify the client harness from the request bytes exactly once, here,
-	// while the original headers and body are still in hand. The classification
-	// is metadata only: neither the recorded request nor the bytes sent upstream
-	// are touched. The same facts are mirrored into the `harness.detected`
-	// prelude event below, so a human reading the cassette can see why the row
-	// was labelled without opening the index.
+	// Classify the client harness from the request headers and URL exactly
+	// once, here, while the original request is still in hand. The
+	// classification is metadata only: neither the recorded request nor the
+	// bytes sent upstream are touched. The same facts are mirrored into the
+	// `harness.detected` prelude event below, so a human reading the cassette
+	// can see why the row was labelled without opening the index.
 	events := []RecordEvent(nil)
-	if detection := detectClientHarness(req, bodyBytes, opts.ExchangeKind); !detection.Empty() {
+	if detection := detectClientHarness(req, opts.ExchangeKind); !detection.Empty() {
 		header.Meta.ClientHarness = detection.ID
 		header.Meta.ClientHarnessName = detection.Name
 		header.Meta.ClientHarnessVersion = detection.Version
@@ -369,11 +369,11 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 // product and their body is a conversion of the client request, so classifying
 // them would attribute the child to the client. Only client-visible traffic -
 // pass-through requests and the local entry exchange - is classified.
-func detectClientHarness(req *http.Request, body []byte, exchangeKind string) harness.Detection {
+func detectClientHarness(req *http.Request, exchangeKind string) harness.Detection {
 	if req == nil || exchangeKind == "model" {
 		return harness.Detection{}
 	}
-	return harness.Detect(req, body)
+	return harness.Detect(req)
 }
 
 // harnessDetectedEvent is the durable record of a classification. Evidence is a

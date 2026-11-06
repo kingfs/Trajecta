@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
+import { Switch } from "../components/common/Controls";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { EmptyState } from "../components/common/EmptyState";
@@ -32,9 +33,6 @@ import { formatCount } from "../lib/monitor";
 export function RoutingSettingsPanel() {
   const { t } = useI18n();
   const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c" });
-  // The loading flag and its error belong to the read that fills the form; the
-  // save reports itself through a toast like every other write here.
-  const [loadingSettings, setLoadingSettings] = useState(true);
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
@@ -42,14 +40,12 @@ export function RoutingSettingsPanel() {
     requestJSON(apiPaths.routingSettings)
       .then((payload) => {
         if (!cancelled) {
-          setSettings({ ...settings, ...payload });
-          setLoadingSettings(false);
+          setSettings((current) => ({ ...current, ...payload }));
           setLoadError("");
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setLoadingSettings(false);
           setLoadError(error.message);
         }
       });
@@ -95,7 +91,79 @@ export function RoutingSettingsPanel() {
             </SelectContent>
           </Select>
         </label>
-        <Button variant="ghost" type="submit" disabled={loadingSettings}>{t("common.save")}</Button>
+        <Button variant="ghost" type="submit" disabled={save.isPending}>{t("common.save")}</Button>
+        {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
+      </form>
+    </>
+  );
+}
+
+// RatesAlertsPanel is the RPM/TPM threshold form added upstream. It used to be a
+// second card inside RoutingSettingsPanel; the standalone routing page is gone,
+// so it is exported separately and the caller owns the card shell, exactly like
+// the other relocated panels.
+export function RatesAlertsPanel() {
+  const { t } = useI18n();
+  const [settings, setSettings] = useState({ enabled: false, max_rpm: 0, max_tpm: 0, severity: "warning" });
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    requestJSON(apiPaths.ratesAlertsSettings)
+      .then((payload) => {
+        if (!cancelled) {
+          setSettings((current) => ({ ...current, ...payload }));
+          setLoadError("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const save = useWriteMutation({
+    mutationFn: () => patchJSON(apiPaths.ratesAlertsSettings, {
+      enabled: Boolean(settings.enabled),
+      max_rpm: Number(settings.max_rpm || 0),
+      max_tpm: Number(settings.max_tpm || 0),
+      severity: settings.severity,
+    }),
+    success: "routing.saved",
+    error: "routing.ratesUnavailable",
+    onSuccess: (payload) => setSettings((current) => ({ ...current, ...payload })),
+  });
+
+  return (
+    <>
+      {loadError ? <EmptyState title={t("routing.ratesUnavailable")} detail={loadError} compact /> : null}
+      <form className="filter-bar routing-filter-bar" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
+        <Switch checked={Boolean(settings.enabled)} onChange={(enabled) => update("enabled", enabled)} label={t("routing.ratesEnabled")} />
+        <label className="filter-label">
+          {t("routing.ratesMaxRpm")}
+          <Input className="min-w-[120px]" type="number" min="0" value={settings.max_rpm} disabled={!settings.enabled} onChange={(event) => update("max_rpm", event.target.value)} />
+        </label>
+        <label className="filter-label">
+          {t("routing.ratesMaxTpm")}
+          <Input className="min-w-[120px]" type="number" min="0" value={settings.max_tpm} disabled={!settings.enabled} onChange={(event) => update("max_tpm", event.target.value)} />
+        </label>
+        <label className="filter-label">
+          {t("routing.ratesSeverity")}
+          <Select value={settings.severity || "warning"} onValueChange={(next) => update("severity", next)} disabled={!settings.enabled}>
+            <SelectTrigger aria-label={t("routing.ratesSeverity")} className="min-w-[120px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="warning">warning</SelectItem>
+              <SelectItem value="error">error</SelectItem>
+              <SelectItem value="critical">critical</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <Button variant="ghost" type="submit" disabled={save.isPending}>{t("common.save")}</Button>
         {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
       </form>
     </>

@@ -19,7 +19,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
-import { buildProviderLink, formatCount, formatDateTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildProviderLink, formatCount, formatDateTime, formatRateAvg, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 // The create form asks only for what a channel actually needs. Interface
 // capabilities are detected per model now, so the legacy channel-level
@@ -380,6 +380,8 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         <Metric label={t("overview.models")} value={`${formatCount(item.enabled_model_count)} / ${formatCount(item.model_count)}`} />
         <Metric label={t("overview.requests")} value={formatCount(summary.request_count)} />
         <Metric label={t("overview.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+        <Metric label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+        <Metric label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
       </div>
       <p className="trace-subline">{!item.enabled ? t("providers.routingDisabled") : !item.enabled_model_count ? t("providers.chooseModels") : t("providers.routingEnabled")}</p>
       <div className="upstream-card-footer">

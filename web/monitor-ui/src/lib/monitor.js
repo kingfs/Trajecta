@@ -517,6 +517,21 @@ export function formatTokenCount(value = 0) {
   return formatCount(value);
 }
 
+// Averages (avg_rpm/avg_tpm) are fractional by construction: an integer count
+// over a window that can exceed 3600 minutes yields values below 1, which
+// formatCount would round to 0. Show up to two decimals for small rates while
+// keeping formatCount compaction for larger ones.
+export function formatRateAvg(value = 0) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number < 0) {
+    return "0";
+  }
+  if (number < 10) {
+    return number.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+  return formatCount(number);
+}
+
 function formatSeconds(value = 0) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) {

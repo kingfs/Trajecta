@@ -28,6 +28,10 @@ type UpstreamAnalyticsRecord struct {
 	LastModel      string
 	RecentErrors   []string
 	RecentFailures []UpstreamFailureRecord
+	// Current* is the trailing-60s rate for this upstream.
+	CurrentRPM     int
+	CurrentTPM     int
+	RatesSampledAt time.Time
 }
 
 type RoutingFailureAnalytics struct {
@@ -280,6 +284,12 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 	if err != nil {
 		return nil, err
 	}
+	// Trailing-60s rates per upstream, fetched once for the whole page.
+	currentRates, err := s.currentRatesSuccessTokensByGroup("selected_upstream_id", "selected_upstream_id <> ''"+whereSQL, whereArgs)
+	if err != nil {
+		return nil, err
+	}
+	ratesSampledAt := time.Now().UTC()
 
 	var out []UpstreamAnalyticsRecord
 	for rows.Next() {
@@ -310,6 +320,11 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 		record.LastModel = coverage.LastModel
 		record.RecentErrors = errorsByUpstream[record.UpstreamID]
 		record.RecentFailures = failuresByUpstream[record.UpstreamID]
+		if rates := currentRates[record.UpstreamID]; rates.rpm > 0 || rates.tpm > 0 {
+			record.CurrentRPM = rates.rpm
+			record.CurrentTPM = rates.tpm
+			record.RatesSampledAt = ratesSampledAt
+		}
 		out = append(out, record)
 	}
 	return out, rows.Err()

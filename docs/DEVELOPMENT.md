@@ -10,7 +10,7 @@
 
 | task | 实际执行 |
 | --- | --- |
-| `task fmt` | `gofmt -w ./cmd ./internal ./pkg ./unittest` |
+| `task fmt` | `gofmt -w ./cmd ./internal ./pkg ./unittest ./tests ./web/monitor-ui/test-fixtures` |
 | `task fmt:check` | `gofmt -l` 检查同样的目录，不改文件，有输出即失败 |
 | `task lint` | `golangci-lint run ./...` |
 | `task lint:vet` | `go vet ./...` |
@@ -31,7 +31,7 @@
 | `task build:all` | `task ui:build` 然后 `task build:go`（`task build`、`default` 同此） |
 | `task run` | `go run ./cmd/server -c {{.CONFIG}}`，不带子命令即启动 serve |
 | `task ui:build` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run build` |
-| `task ui:test` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui` |
+| `task ui:test` | 在 `web/monitor-ui` 下依次跑 `bun run typecheck`（`tsc --noEmit`）、`test:unit`（`node --test`）与 `test:ui`（Playwright 浏览器测试） |
 | `task ui:test:real` | 在 `web/monitor-ui` 下 `bun install --frozen-lockfile` + `bun run test:ui:real` |
 | `task ui:screenshots` | 在 `web/monitor-ui` 下 `bunx playwright test --config playwright.screenshots.config.js`，重新生成 README 截图 |
 | `task migrate` | `go run ./cmd/trajecta migrate -c {{.CONFIG}}`（V2 cassette 重写为 V3 并重建索引） |
@@ -248,7 +248,7 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 
 另有 `docker` job，仅在 push 事件运行、依赖 `build` job：登录 Docker Hub 后构建并推送 `linux/amd64` 与 `linux/arm64` 多架构镜像，tag 由 `docker/metadata-action` 生成（`latest`、`sha`、版本 tag），并启用 gha 构建缓存。
 
-CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，而 `task fmt:check` 只覆盖 `./cmd ./internal ./pkg ./unittest`；CI 跑 `go test -v ./...` 而不跑 `test:race`、`test:e2e` 和 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
+CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，与 `task fmt:check` 的覆盖范围相同；CI 跑 `go test -v ./...` 而不跑 `test:race`、`test:e2e` 和 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
 
 ## 给 AI Agent 的默认选择
 

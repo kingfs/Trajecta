@@ -68,6 +68,15 @@ type overviewSummaryView struct {
 	P95DurationMs  int64   `json:"p95_duration_ms"`
 	StreamCount    int     `json:"stream_count"`
 	SessionCount   int     `json:"session_count"`
+	// Rate metrics: rolling-60s current rate, window average, and busiest
+	// single minute (peak). See store.OverviewSummary.
+	CurrentRPM     int       `json:"current_rpm"`
+	CurrentTPM     int       `json:"current_tpm"`
+	AvgRPM         float64   `json:"avg_rpm"`
+	AvgTPM         float64   `json:"avg_tpm"`
+	PeakRPM        int       `json:"peak_rpm"`
+	PeakTPM        int       `json:"peak_tpm"`
+	RatesSampledAt time.Time `json:"rates_sampled_at,omitempty"`
 }
 
 type overviewBreakdownView struct {
@@ -411,12 +420,17 @@ type recordHeaderView struct {
 type recordEventView map[string]interface{}
 
 type LogStats struct {
-	TotalRequest   int     `json:"total_request"`
-	AvgTTFT        int     `json:"avg_ttft"`
-	TotalTokens    int     `json:"total_tokens"`
-	SuccessRequest int     `json:"success_request"`
-	FailedRequest  int     `json:"failed_request"`
-	SuccessRate    float64 `json:"success_rate"`
+	TotalRequest   int       `json:"total_request"`
+	AvgTTFT        int       `json:"avg_ttft"`
+	TotalTokens    int       `json:"total_tokens"`
+	SuccessRequest int       `json:"success_request"`
+	FailedRequest  int       `json:"failed_request"`
+	SuccessRate    float64   `json:"success_rate"`
+	CurrentRPM     int       `json:"current_rpm"`
+	CurrentTPM     int       `json:"current_tpm"`
+	AvgRPM         float64   `json:"avg_rpm"`
+	AvgTPM         float64   `json:"avg_tpm"`
+	RatesSampledAt time.Time `json:"rates_sampled_at,omitempty"`
 }
 
 type RouteOptions struct {
@@ -663,6 +677,11 @@ type usageSummaryView struct {
 	AvgTTFT          int       `json:"avg_ttft"`
 	AvgDurationMs    int64     `json:"avg_duration_ms"`
 	LastSeen         time.Time `json:"last_seen,omitempty"`
+	CurrentRPM       int       `json:"current_rpm"`
+	CurrentTPM       int       `json:"current_tpm"`
+	AvgRPM           float64   `json:"avg_rpm"`
+	AvgTPM           float64   `json:"avg_tpm"`
+	RatesSampledAt   time.Time `json:"rates_sampled_at,omitempty"`
 }
 
 type usageTrendView struct {
@@ -672,6 +691,8 @@ type usageTrendView struct {
 	MissingUsage  int       `json:"missing_usage_request"`
 	TotalTokens   int       `json:"total_tokens"`
 	ModelCount    int       `json:"model_count"`
+	RPM           float64   `json:"rpm"`
+	TPM           float64   `json:"tpm"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -733,6 +754,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// The proxy URL may carry credentials and changing it moves every outbound
 	// request, so this is admin-only like the rest of the system surface.
 	mux.HandleFunc("/api/settings/network-proxy", monitorAdminRequired(networkProxySettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/rates-alerts", monitorAdminRequired(ratesAlertsSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasListCreateAPIHandler(st)
@@ -1350,6 +1372,11 @@ func usageSummaryViewFromRecord(record store.UsageSummaryRecord) usageSummaryVie
 		AvgTTFT:          record.AvgTTFT,
 		AvgDurationMs:    record.AvgDurationMs,
 		LastSeen:         record.LastSeen,
+		CurrentRPM:       record.CurrentRPM,
+		CurrentTPM:       record.CurrentTPM,
+		AvgRPM:           record.AvgRPM,
+		AvgTPM:           record.AvgTPM,
+		RatesSampledAt:   record.RatesSampledAt,
 	}
 }
 
@@ -1363,6 +1390,8 @@ func usageTrendViews(records []store.UsageTrendRecord) []usageTrendView {
 			MissingUsage:  record.MissingUsage,
 			TotalTokens:   record.TotalTokens,
 			ModelCount:    record.ModelCount,
+			RPM:           record.RPM,
+			TPM:           record.TPM,
 		})
 	}
 	return out
@@ -1503,6 +1532,9 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		TotalTokens:       analytics.TotalTokens,
 		AvgTTFT:           analytics.AvgTTFT,
 		LastSeen:          analytics.LastSeen,
+		CurrentRPM:        analytics.CurrentRPM,
+		CurrentTPM:        analytics.CurrentTPM,
+		RatesSampledAt:    analytics.RatesSampledAt,
 		RecentModels:      analytics.Models,
 		LastModel:         analytics.LastModel,
 		RecentErrors:      analytics.RecentErrors,
@@ -1571,6 +1603,9 @@ func newUpstreamItemFromStore(target store.UpstreamTargetRecord, models []string
 		TotalTokens:       analytics.TotalTokens,
 		AvgTTFT:           analytics.AvgTTFT,
 		LastSeen:          analytics.LastSeen,
+		CurrentRPM:        analytics.CurrentRPM,
+		CurrentTPM:        analytics.CurrentTPM,
+		RatesSampledAt:    analytics.RatesSampledAt,
 		RecentModels:      analytics.Models,
 		LastModel:         analytics.LastModel,
 		RecentErrors:      analytics.RecentErrors,
@@ -1740,6 +1775,11 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 				SuccessRequest: stats.SuccessRequest,
 				FailedRequest:  stats.FailedRequest,
 				SuccessRate:    stats.SuccessRate,
+				CurrentRPM:     stats.CurrentRPM,
+				CurrentTPM:     stats.CurrentTPM,
+				AvgRPM:         stats.AvgRPM,
+				AvgTPM:         stats.AvgTPM,
+				RatesSampledAt: stats.RatesSampledAt,
 			},
 			RefreshedAt: time.Now().UTC(),
 		}
@@ -1953,6 +1993,10 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 			}
 			attachTracePreviews(resp.Attention.RecentFailures)
 			attachTracePreviews(resp.Attention.SlowTraces)
+			// Rate quota alerts are opportunistic: the Overview already polls
+			// roughly once a minute per open tab, so the check runs here
+			// (throttled) without a background ticker.
+			maybeEvaluateRatesAlerts(st, r)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -2447,6 +2491,13 @@ func overviewResponseFromStore(window string, dashboard store.OverviewDashboard)
 			P95DurationMs:  dashboard.Summary.P95DurationMs,
 			StreamCount:    dashboard.Summary.StreamCount,
 			SessionCount:   dashboard.Summary.SessionCount,
+			CurrentRPM:     dashboard.Summary.CurrentRPM,
+			CurrentTPM:     dashboard.Summary.CurrentTPM,
+			AvgRPM:         dashboard.Summary.AvgRPM,
+			AvgTPM:         dashboard.Summary.AvgTPM,
+			PeakRPM:        dashboard.Summary.PeakRPM,
+			PeakTPM:        dashboard.Summary.PeakTPM,
+			RatesSampledAt: dashboard.Summary.RatesSampledAt,
 		},
 		Timeline: overviewTimelineViews(dashboard.Timeline),
 		Breakdown: overviewBreakdownView{

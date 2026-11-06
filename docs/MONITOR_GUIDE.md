@@ -65,7 +65,7 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 
 #### 概览 `/overview`
 
-时间窗口内的请求量、成功/失败数、Token、平均 TTFT、延迟、发现项和系统事件概览。趋势图按请求量、Token、延迟三个面板展示，1200px 以上按 1.25:1:1 分宽，请求/失败图是主图；主要拆分收敛为一个面板，用分段控件在模型、渠道、端点、上游、路由失败、发现类别之间切换，而不是六列并排。概览的数据由实时 socket 推送（见「实时推送」一节），并给出两条去向链接：质量页的发现项与事件收件箱。已配置渠道的卡片列表与派生数据健康度不再放在这里——前者的完整版本在「渠道」页，后者是解析管道的属性而不是最近一小时流量的属性，现已移到「质量 → 数据健康」标签页。概览页只向 `GET /api/overview` 请求 `sections=traffic` 这一半，解析管道的 `sections=health` 由数据健康页单独请求：健康段按设计覆盖全部 trace，两页都不再为对方不需要的聚合扫描整张 `logs` / `trace_findings`。右侧系统事件角标与导航栏共用同一个 `GET /api/events/summary?window=all`，因此一次页面加载只有一次摘要请求，两处数字也必然一致。六列 KPI 读数条在 1440px 一排；所有统计条在 900px 以下折成两列，720px 以下单元格内边距与数值再缩小一档；「需要复查」队列只保留模型、状态、预览和行操作，延迟与 token 读数留在流量列表与详情页，避免同一页重复两次指标。
+时间窗口内的请求量、成功/失败数、Token、RPM/TPM、平均 TTFT、延迟、发现项和系统事件概览。RPM/TPM 是每分钟请求数与每分钟 Token 数：KPI 主数值是最近 60 秒的滚动速率（与厂商配额的检查口径一致），副信息给出窗口平均与窗口内最忙的一分钟（峰值）；模型、渠道与上游的详情/列表页同样展示当前速率与窗口平均。速率告警在渠道页底部的「路由设置」卡片配置（`GET`/`PATCH /api/settings/rates-alerts`，仅 admin）：当前一分钟速率超过 `max_rpm`/`max_tpm` 时在系统事件中产生一条 `rate_breach`，全局、上游与模型维度用同一套阈值，告警只观测不拦截流量；概览页在存在未读超限事件时直接给出入口。趋势图按请求量、Token、速率、延迟四个面板展示，1200px 以上按 1.25:1:1 分宽，请求/失败图是主图；主要拆分收敛为一个面板，用分段控件在模型、渠道、端点、上游、路由失败、发现类别之间切换，而不是六列并排。概览的数据由实时 socket 推送（见「实时推送」一节），并给出两条去向链接：质量页的发现项与事件收件箱。已配置渠道的卡片列表与派生数据健康度不再放在这里——前者的完整版本在「渠道」页，后者是解析管道的属性而不是最近一小时流量的属性，现已移到「质量 → 数据健康」标签页。概览页只向 `GET /api/overview` 请求 `sections=traffic` 这一半，解析管道的 `sections=health` 由数据健康页单独请求：健康段按设计覆盖全部 trace，两页都不再为对方不需要的聚合扫描整张 `logs` / `trace_findings`。右侧系统事件角标与导航栏共用同一个 `GET /api/events/summary?window=all`，因此一次页面加载只有一次摘要请求，两处数字也必然一致。六列 KPI 读数条在 1440px 一排；所有统计条在 900px 以下折成两列，720px 以下单元格内边距与数值再缩小一档；「需要复查」队列只保留模型、状态、预览和行操作，延迟与 token 读数留在流量列表与详情页，避免同一页重复两次指标。
 
 所有统计组共用同一条读数条（`src/styles/console.css` 的 `.hero-grid`）：4/5/6 个数值等分一排、1px 分隔线、12px 外圆角，每个单元格不再有自己的边框和阴影；独立于 Card 的组（概览、事件、流量、渠道、模型）带外框，Card 内的组（路由、质量→数据健康、系统、详情页、请求信息）只保留分隔线，由所在 Card 提供外框，避免卡片套卡片。单元格内边距 12px/16px（Card 内 10px/16px），数值 1.5rem，弱化文字 11px、详情 12px，整条高度约 58–89px；渠道与模型的汇总从原 Card 提到页头下方，和概览/事件同处一个位置。
 
@@ -79,7 +79,7 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 - 识别到客户端 harness 的行在 endpoint / 上游 / stream 标签前显示一枚可点击的 harness 标签（显示名 + 版本，如 `Claude Code 2.0.14`；上游 child exchange 不显示）。点击标签把当前流量页按该 harness 过滤（写入 `harness` 查询参数并回到第 1 页）；悬停给出 canonical id、类型、置信度与能力/SDK 标签。列表字段与过滤语义见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - 每行在 endpoint / 上游 / stream 标签之后还有一枚审计标签：数值是该 trace 已落库的审计事件总数（`credential_mask_audits` 的替换事件加 `trace_findings` 的发现项）。含身份证、手机号或敏感 Key 时标签为红色，只有拒答、工具错误等其它发现项时为黄色，没有任何审计事件时整枚标签不显示；悬停给出身份证/手机号、敏感 Key、其它发现、脱敏事件与发现项的分项。计数来自 `GET /api/traces` 的 `audit` 字段，每个来源对整个列表页各做一次分组查询，不逐条读 cassette。
 - 时间与会话那行下面显示该 trace 的第一条 user 消息（前 80 个字符，超出以 `…` 截断；system 提示不参与），由服务端从 cassette 的请求段读出后随列表的 `request_preview` 返回。请求体超过 4 MiB、读不到用户消息或 cassette 不可读时，该行不显示预览。
-- harness 过滤项 `harness` 按 canonical id 精确匹配且大小写不敏感（例如 `claude-code`、`codex-cli`），空值表示不过滤。它与 `model`/`endpoint`/`upstream` 的「子串匹配」语义不同，因为 harness 是一组有限枚举而不是用户输入的自由文本；输入框只接受 canonical id。
+- harness 过滤项 `harness` 按 canonical id 精确匹配且大小写不敏感（例如 `claude-code`、`codex-cli`），空值表示不过滤。它与 `model`/`endpoint`/`upstream` 的「子串匹配」语义不同，因为 harness 是一组有限枚举而不是用户输入的自由文本；输入框带已知 canonical id 的下拉建议（`KNOWN_HARNESS_IDS`，与后端规则表同源），仍可自由输入。
 - 过滤语义：`model`、`endpoint`、`upstream` 三个过滤项都按子串匹配且大小写不敏感，过滤值里的 `%`、`_` 与反斜杠按字面量处理，不作为 LIKE 通配符——因此按 `gpt_oss` 过滤只会命中包含 `gpt_oss` 的 trace。统计、trace id 导出与 session 列表共用同一套过滤条件，结论必须与列表一致。
 - `status` 过滤只识别 `success`、`error` 与 `failed`（`failed` 是 `error` 的同义值，大小写不敏感；session 列表用的是同一套取值），其它取值不参与过滤、也不报错。trace 级别的 `error`/`failed` 还包含「HTTP 已返回 2xx、但记录里带 `error_text`」的 trace（例如流式响应中途断掉），而 session 列表的 `failed` 按状态码统计（与页面展示的 `success_request`/`failed_request` 同源），两者口径不同是刻意的。
 
@@ -120,8 +120,8 @@ session ID 的抽取顺序为：
 
 Trajecta 自身的事件收件箱：
 
-- 来源：代码当前发出 `parser`、`analyzer`、`router`、`upstream`、`secretmask`；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽。
-- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`。
+- 来源：代码当前发出 `parser`、`analyzer`、`router`、`upstream`、`secretmask`、`rates`；UI 的来源过滤下拉额外提供 `proxy`、`recorder`、`monitor`、`store`、`auth`、`mcp`，即过滤项比实际发出的来源更宽（`rates` 已发出但下拉里暂无选项，见已知缺口）。
+- 类别：`parse_failure`、`analysis_failure`、`analysis_job_failure`、`routing_failure`、`transport_error`、`credential_masked`、`rate_breach`。
 - 状态：`unread`、`read`、`resolved`、`ignored`。
 - 级别过滤提供 `critical`、`error`、`warning`、`info`。
 
@@ -320,7 +320,7 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 
 会话的定位锚点是每个节点的地址：`trace#<traceID>#node#<nodeID>#path#<JSON 路径>`。审计行、质量页的发现项列表和概览的高风险队列都用它跳转，点击后进入 `/traces/:traceID?node=<锚点>`，页面会滚动到对应步骤、短暂标记并展开被折叠的长文本。锚点落在步骤内部（消息里的调用、并进调用块的结果）时同样定位到承载它的那段步骤。带 `hl`（资源定位）或命中值（finding 定位）时只高亮匹配的字节，不再给整个步骤描边，避免读成「整条消息都命中」；没有可高亮的值时才保留整段定位提示。`node=` 接受四种写法：裸节点 ID、`$.input[159]` 形式的 JSON 路径、`trace#<id>#node#<nodeID>` 和完整的证据路径；`node_id` 为空的「整条 trace」级 findings 也能正确落到会话顶部。
 
-详情页头部在 endpoint / provider 标签旁显示同一枚 harness 标签，并列出该请求的能力/SDK 标签（`capability:tool-use`、`prompt-cache` 等，已本地化；冗余的 `harness:`/`kind:` 标签不重复显示）。这些字段来自 cassette prelude 的 `header.meta`。
+详情页头部在 endpoint / provider 标签旁显示同一枚 harness 标签，并列出该请求的能力/SDK 标签（`capability:streaming`、`capability:responses-api` 等，已本地化；冗余的 `harness:`/`kind:` 标签不重复显示）。这些字段来自 cassette prelude 的 `header.meta`。
 
 可执行动作：
 
@@ -347,7 +347,7 @@ Deep link 支持 query 参数 `tab`（`conversation`、`protocol`、`tools`、`a
 
 ## 前端实现
 
-Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19、`react-router-dom`、Vite 8、TypeScript）。`vite build` 输出到 `internal/monitor/ui/dist`，由 `internal/monitor/server.go` 的 `//go:embed ui/dist/*` 嵌进二进制，再由 `internal/monitor` 用 `http.FileServer` 提供，生产环境不需要额外的 Node 进程。`task ui:test` 依次跑 `bun run typecheck`（`tsc --noEmit`）、`node --test` 单元测试与 Playwright 浏览器测试；只跑类型检查用 `task ui:typecheck`。
+Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19、`react-router-dom`、Vite 8；`.jsx`/`.tsx` 混合栈）。`vite build` 输出到 `internal/monitor/ui/dist`，由 `internal/monitor/server.go` 的 `//go:embed ui/dist/*` 嵌进二进制，再由 `internal/monitor` 用 `http.FileServer` 提供，生产环境不需要额外的 Node 进程。`task ui:test` 依次跑 `bun run typecheck`（`tsc --noEmit`）、`node --test` 单元测试与 Playwright 浏览器测试；只跑类型检查用 `task ui:typecheck`。
 
 样式是 Tailwind CSS v4（`@tailwindcss/vite` 插件）加一份 OKLCH 调色板。`src/styles/tokens.css` 现在把中性色收紧了：画布、表面、描边与三级文字是自定义的暖石墨值，不再直接取 slate 色阶；深色主题的默认面是近黑石墨，浅色主题是暖纸色，卡片的层级靠 1.05:1 以上的明度步进而非阴影。主色是自定义的 signal copper 值，状态色（green、amber、red、cyan、violet）保留 Radix 色阶；主色用于主操作、当前选中、焦点与录制标记，状态色只表达状态，两者不混用。`tests-unit/tokens.test.js` 仍逐条校验正文、弱化文字、状态色与实心填充的对比度，以及每层表面的可见步进，因此 token 被手工改动或色阶升级后会在测试里失败而不是在眼睛里失败。`tokens.css` 留在 cascade layer 之外：它只声明自定义属性，而它使用的主题属性选择器必须继续压过 `:root` 默认值。`getComputedStyle` 对这些 `color-mix()` 属性返回 `oklab(...)` 或 `color(srgb …)` 而不是 `rgb()`，按字符串正则解析颜色的断言必须改成交给浏览器解析（`tests/monitor-smoke.spec.js` 里的 `window.__paint` 就是把颜色画进 1×1 canvas 再读回像素）。字体栈以系统 UI 字体为先（`ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text", …`），数字统一使用等宽数字；自定义样式集中在 `src/styles/console.css`，它在 `pages.css` 之后加载，负责把命令面板、六列指标条、概览里的内层数据区与 trace 失败行压平，避免卡片套卡片；同一层里还放着 trace 列表的弹性列、sticky 表头、1100px 以下的紧凑行、会话步骤的细线分隔、finding/tool/timeline 行的去卡片化，以及 390px 下的 64px 侧栏与 12px 页面留白。其余历史样式表由 `src/styles/tailwind.css` 导入到最低优先级的 `legacy` 层（层序 `legacy < theme < base < components < utilities`），所以迁移期间一个 utility 类总能盖过同名的旧页面规则，不需要考虑特异性或源码顺序。Tailwind 的 preflight 故意不引入：它会重置 `styles.css` 等历史样式表所依赖的元素默认值，引入等于重排每个页面，`base.css` 已经带着 Monitor 实际需要的 reset。
 

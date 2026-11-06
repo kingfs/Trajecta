@@ -77,7 +77,7 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 
 - **幂等**：每行用 `INSERT ... ON CONFLICT DO NOTHING` 写入，主键或其它唯一键已存在的行会被跳过并计入 `duplicate`，可以反复执行。
 - **只写交集列**：只迁移 SQLite 与 Postgres 都存在的列。Postgres 侧 `NOT NULL` 且无默认值、而旧表没有的列会让该表进入 `blocked` 状态并打印列名；确认可以用占位值填充时加 `--fill-missing-required`。
-- **目标库没有的表整张跳过**：合并逐表读目标库的 `information_schema`（`targetTableColumns`），目标库不存在的表会以 `status: skipped`（`reason: target table does not exist in Postgres`）跳过，不计入失败。注意 `semantic_nodes` 与 `overview_metric_buckets` / `overview_metric_bucket_members` 仍由历史迁移创建（`20260622130545_add_runtime_store_tables`、`20260703110000_add_overview_metric_buckets`，没有 drop 迁移），所以新建 Postgres 库仍有这三张表，旧库的对应行照常被复制与校验；只有运维按 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 手工 `DROP TABLE` 之后，它们才会变成「目标库没有的表」而被跳过，旧行只留在归档的 `*.sqlite3.migrated` 里。
+- **目标库没有的表整张跳过**：合并逐表读目标库的 `information_schema`（`targetTableColumns`），目标库不存在的表会以 `status: skipped`（`reason: target table does not exist in Postgres`）跳过，不计入失败。注意：`overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP，新建 Postgres 库不会有这两张表，旧库的对应行会以 `status: skipped` 跳过（不复制、不校验），只留在归档的 `*.sqlite3.migrated` 里。`semantic_nodes` 仍由历史迁移 `20260622130545_add_runtime_store_tables` 创建（没有 drop 迁移），所以新建 Postgres 库仍有该表，旧库的对应行照常被复制与校验；只有运维按 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 手工 `DROP TABLE semantic_nodes` 之后，它才会变成「目标库没有的表」而被跳过。
 - **时间戳**：旧库里的时间列存在四种历史编码——raw SQL 的 RFC3339Nano（`2025-12-23T12:17:14.088863521Z`）、SQLite 驱动写入的 `time.Time.String()`（`2026-05-15 01:54:55.069380977 +0000 UTC`）、带单调时钟后缀的同一格式（`... m=+0.095068526`）、以及 `CURRENT_TIMESTAMP` 的 `2026-01-02 03:04:05`。四者都会解析为 UTC；Postgres 的 `timestamptz` 精确到微秒，纳秒部分由 Postgres 四舍五入。
 - **布尔**：旧库用 `numeric` 存布尔，`0/1`、`true/false`、`yes/no`、`t/f` 都能转换。
 - **自增主键**：Postgres 的 identity 列由数据库生成，值按源数据写入；写完一张表后，工具会把对应序列推进到不小于 `MAX(列)`，且**绝不回退**（例如 `channel_models` 的 `START WITH 47244640256` 不会被拉低）。
@@ -233,7 +233,7 @@ CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发�
 | `logs.path` | trace 索引主键，也是 `logs` 的唯一路径来源 |
 | `upstream_exchanges.cassette_path` | 可选副本（可空） |
 
-`overview_metric_bucket_members` 仍由历史迁移创建（除非运维手工 `DROP`），但已不再被读取或维护，所以 `layout apply` 不改写它的 `path`（`cmd/trajecta/layout_apply.go`、`internal/legacymigrate/layout_apply.go` 当前只处理上面两列）；该表里遗留的旧路径不会再被使用，删表也不会让命令报错。
+`overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` DROP，不再被读取或维护，所以 `layout apply` 不改写它的 `path`（`cmd/trajecta/layout_apply.go` 当前只处理上面两列）；旧库里残留的该表路径不会再被使用，删表也不会让命令报错。
 
 `logs.trace_id` 从不改写，因此 `parse_jobs`、`trace_observations`、`trace_findings`、`analysis_runs`、`system_events` 与 trace 的关联保持不变（`analysis_jobs` 按 `target_type`/`target_id`、`session_summaries` 按 `session_id` 关联，两者都不带 `trace_id`）；`request_audits.path`（HTTP 路径）与 `trace_findings.evidence_path` 不是 cassette 路径，也不参与搬迁。不要用 `migrate --rebuild-index` 代替搬迁：它会清空并重建 `logs`，给每个路径重新生成 `trace_id`，派生分析数据会全部失联。
 
@@ -313,7 +313,7 @@ COMMIT;
 
 要点：
 
-- 另一张表也存 cassette 路径：`upstream_exchanges.cassette_path`。含旧前缀时同样要改写；先统计它，为 0 才只需改 `logs.path`。`overview_metric_bucket_members.path` 也存路径，但该表已不被读取或维护（它仍由历史迁移创建，除非手工 `DROP`），所以 `layout apply` 不再改写它。
+- 另一张表也存 cassette 路径：`upstream_exchanges.cassette_path`。含旧前缀时同样要改写；先统计它，为 0 才只需改 `logs.path`。`overview_metric_bucket_members.path` 也存路径，但该表已由迁移 `20261009120000_drop_overview_metric_tables` DROP，不再被读取或维护，所以 `layout apply` 不再改写它。
 - 改写前先落一份 `trace_id,path` 回滚清单，回滚就是反向 `replace`；也要先查新路径是否已被既有行占用。
 - 旧根里可能有索引没收录的 `.http`（旧索引没收，或索引重建过）。它们会被复制进 vault，但**不会**自动获得索引行：`layout plan` 只整理布局、不为文件建索引，`migrate --rebuild-index` 会重新生成 `trace_id`，不能用于已有数据。
 - 导入后这些行与其它行没有区别（前缀统一、能被 API 打开）；它们不会有 Observation/findings，除非另行重解析。

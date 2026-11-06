@@ -6,56 +6,62 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 输入与判定顺序
 
-识别只读取三样东西：
+识别**只读请求头和 URL，绝不读 body**。harness 身份是客户端建连时冻结的事实，写在它自己发出的头里；读 body 既慢（要猜提示词在哪个位置）、又容易被用户对话里粘贴的提示词冒充，所以这条路不走。三个输入位置：
 
-1. 请求头：`User-Agent` 的产品 token 与版本，以及少数产品私有 header（`originator`、`x-app`、`x-codex-*`、`x-opencode-*`、`copilot-integration-id`、`x-portkey-*`、`x-openrouter-*` 等）。
-2. URL path/query：例如 Gemini 的 `:generateContent` / `:streamGenerateContent`。
-3. 请求体中的固定标记：系统提示词原句、工具名、协议字段。body 只扫描**头部 512 KiB + 尾部 256 KiB**（`bodyPrefixScan` / `bodySuffixScan`），系统提示词落在这两个窗口内，多 MB 的对话历史不会让识别成本随请求体线性增长；标记匹配直接在字节窗口上做，不复制 body。
+1. **User-Agent 的产品 token 与版本**（`parseUserAgent` 解析）：`/` 前的第一段是产品（如 `deepseek-harness`、`codex_exec`），版本是紧随其后的数字段（唯一用到正则的地方，见下）。无 `/` 的空格形式（`codex-cli 0.153.4`）与裸 token（`pi`）同样解析。
+2. **产品私有 header**：`originator`、`x-app`、`anthropic-beta`、`x-codex-*`、`x-opencode-*`、`Copilot-Integration-Id`、`Editor-Plugin-Version`、`X-Msh-*`、`x-cursor-client-version` 等具名头、`x-continue-session-id`、`HTTP-Referer`、`X-Title` 等——每个产品只认它自己写的头；只有 `x-codex-*`、`x-opencode-*` 用整段前缀扫描（`X-Msh-*` 先精确匹配 `x-msh-platform`，再前缀扫描兜底），其余都是具名头精确匹配。
+3. **URL path/query**：如 Gemini 的 `:generateContent` / `:streamGenerateContent`、Responses 的 `/responses`。
 
-规则按「具体 → 泛化」排序，命中第一条 high confidence 规则即停止；否则取已匹配规则中 confidence 最高者。任何一条证据只记录**信号名字**（如 `prompt:you-are-claude-code`），不记录命中的原文、header 值或 prompt 内容。
+匹配是**纯字符串运算，不是正则**：产品 token 要求精确相等或以 `-`/`_` / `.` 分隔续接（`codex-tui_rs` 认 `codex-tui`，但 `continuedev` 不认 `continue`）；header 值用大小写不敏感的相等/包含；私有头命名空间用前缀扫描（`x-codex-*`、`x-msh-*`）。唯一的正则在 `signals.go` 的 `versionRe`（`^v?[0-9]+(\.[0-9]+)+([-+.][0-9A-Za-z.-]+)?$`），只用来判断 UA 里的版本段长什么样、值是什么。
+
+规则按「具体 → 泛化」排序，命中第一条 high confidence 规则即停止；否则取已匹配规则中 confidence 最高者。任何一条证据只记录**信号名字**（如 `user-agent:claude-cli`、`header:originator:codex_exec`），不记录 header 值。
 
 ## 置信度
 
 | 置信度 | 含义 |
 | --- | --- |
-| `high` | 产品级 UA token、只有该产品写的 header，或独有系统提示词原句 |
-| `medium` | 工具名组合、上游家族共享的提示词，或需要多条弱信号互相印证 |
-| `low` | 网关/框架类，仅用于给 trace 一个来源说明，不用来断言具体 harness |
+| `high` | 产品级 UA token、或只有该产品写的 header。网关规则（LiteLLM/Portkey/OpenRouter）也是 high：网关背后的 agent 不可见，但网关自己的 UA token/私有头唯一指向网关 |
+| `medium` | 多条头信号互相印证、但单看任一条都不足以命名产品（如 Copilot 的 `VScode-SessionId` + `Editor-Version` 组合） |
+| `low` | 预留：无产品信号的 SDK fallback 目前不返回 ID，所以还没有规则产生 low |
 
 识别结果为空也是正常答案：手写 curl、内部合成请求（如 `/v1/models` 聚合响应）或 header 被网关剥离的请求没有可识别客户端。
 
 ## 已识别的产品
 
-下表列出当前 `internal/harness/catalog.go` 的规则。产品信号来自各 harness 自己发布的代码；标「提示词」的规则只依赖请求体，因此 header 被剥离时仍可识别。
+下表列出当前 `internal/harness/catalog.go` 的规则。产品信号来自各 harness 自己发布的代码。
 
 | `client_harness` | 显示名 | 类型 | 主要信号 |
 | --- | --- | --- | --- |
-| `claude-code` | Claude Code | `agent-cli` | UA `claude-cli/` 或 `claude-code/`；`x-app: cli` + `anthropic-beta` 含 `claude-code`；提示词 `You are Claude Code` |
-| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui`；UA `codex_cli_rs/`；任意 `x-codex-*` header；提示词 `You are a coding agent running in the Codex CLI` |
+| `claude-code` | Claude Code | `agent-cli` | UA `claude-cli/` 或 `claude-code/`；`x-app: cli` + `anthropic-beta` 含 `claude-code`，或 `anthropic-beta` 单独含 `claude-code` |
+| `codex-cli` | Codex CLI | `agent-cli` | `originator: codex_cli_rs` / `codex-tui` / `codex_exec`（非交互 `codex exec` 模式）；UA `codex_cli_rs/` / `codex_exec/` / `codex-tui`；任意 `x-codex-*` header |
 | `codex-vscode` | Codex (VS Code) | `ide-extension` | `originator: codex_vscode` |
 | `codex-app` | Codex App | `agent-app` | `originator: codex_atlas` / `codex_chatgpt_desktop` |
-| `qwen-code` | Qwen Code | `agent-cli` | UA `QwenCode/`；提示词 `You are Qwen Code`（优先于 Claude Code，见「已知误判」） |
-| `gemini-cli` | Gemini CLI | `agent-cli` | UA `GeminiCLI/`（含 `GeminiCLI-<client>/`）；提示词 `You are Gemini CLI`；Gemini 工具集 |
+| `qwen-code` | Qwen Code | `agent-cli` | UA `QwenCode/`（优先于 Claude Code，见「已知误判」） |
+| `gemini-cli` | Gemini CLI | `agent-cli` | UA `GeminiCLI/`（含 `GeminiCLI-<client>/`） |
 | `gemini-code-assist` | Gemini Code Assist | `ide-extension` | UA `CloudCodeVSCode/` 或 `proxy_client=geminicli` |
-| `opencode` | OpenCode | `agent-cli` | UA `opencode/`；任意 `x-opencode-*` header；提示词 `You are opencode` |
-| `cursor` | Cursor | `ide-extension` | `x-cursor-*` header 或 UA `cursor/`；提示词 `You are Cursor`；Cursor 工具名组合 |
-| `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-*` |
+| `opencode` | OpenCode | `agent-cli` | UA `opencode/`；任意 `x-opencode-*` header |
+| `deepseek-harness` | DeepSeek Harness | `agent-cli` | UA `deepseek-harness/<version> (+https://github.com/deepseek-ai/deepseek-harness)`（dsh 的 attribution 只发这一条 UA，不发私有 header） |
+| `factory-droid` | Factory Droid | `agent-cli` | UA `factory-cli/<version>` |
+| `kimi-code` | Kimi Code | `agent-cli` | UA `KimiCLI/<version>`（旧 Python kimi-cli）或 `kimi-code-cli/<version>`；`X-Msh-Platform`（`kimi_cli` / `kimi_code_cli`）或任意 `X-Msh-*` 设备指纹头 |
+| `pi` | Pi | `agent-cli` | UA 产品 token 精确等于 `pi`：详细形态 `pi/<version> (<platform>; <runtime>/<ver>; <arch>)`，或短形态裸 `pi` |
+| `cursor` | Cursor | `ide-extension` | `x-cursor-client-version` / `x-cursor-checksum` / `x-cursor-config-version` header 或 UA `cursor/` |
+| `windsurf` | Windsurf | `ide-extension` | UA `Windsurf/`、`Codeium/`；`x-codeium-request-id` / `x-codeium-client-version` |
 | `github-copilot` | GitHub Copilot Chat | `ide-extension` | `Copilot-Integration-Id`、`Editor-Plugin-Version: copilot-chat/...`；`VScode-SessionId` + `Editor-Version` |
-| `continue` | Continue | `ide-extension` | UA `Continue/`；`x-continue-session-id`；提示词 `You are Continue` |
-| `cline` | Cline | `ide-extension` | UA `Cline/`；`HTTP-Referer: https://cline.bot`；`X-Title: Cline` + `X-CLIENT-TYPE`；提示词 `You are Cline` |
-| `roo-code` | Roo Code | `ide-extension` | UA `RooCode/`；`HTTP-Referer: .../RooVetGit/Roo-Cline`；提示词 `You are Roo` |
-| `kilo-code` | Kilo Code | `ide-extension` | 提示词 `You are Kilo Code`（该产品不发产品级 UA） |
+| `continue` | Continue | `ide-extension` | UA `Continue/`；`x-continue-session-id` |
+| `cline` | Cline | `ide-extension` | UA `Cline/`；`HTTP-Referer: https://cline.bot`；`X-Title: Cline` + `X-CLIENT-TYPE`；`originator: cline` + `session_id`（Codex 账号透传） |
+| `roo-code` | Roo Code | `ide-extension` | UA `RooCode/`；`HTTP-Referer: .../RooVetGit/Roo-Cline`；`X-Title: Roo Code` + `X-CLIENT-TYPE` |
+| `kilo-code` | Kilo Code | `ide-extension` | UA `Kilo-Code/` / `kilo-code/`（少数发产品 UA 的构建） |
 | `aider` | Aider | `agent-cli` | UA `aider/`；实际流量通常经 LiteLLM，因此更常见的是 `litellm` 标签 |
-| `crush` | Crush | `agent-cli` | UA `Charm-Crush/`；提示词 `You are Crush` |
-| `goose` | Goose | `agent-cli` | 提示词 `You are Goose`（中等置信度） |
-| `amp` | Amp | `agent-cli` | UA `amp/`；提示词 `You are Amp`（中等置信度） |
-| `openhands` | OpenHands | `agent-app` | UA `OpenHands/`；提示词 `You are OpenHands`（中等置信度） |
-| `zed` | Zed | `ide-extension` | UA `Zed/`；`x-zed-*` |
-| `litellm` | LiteLLM | `gateway` | UA `litellm/`；`x-litellm-*` |
-| `portkey` | Portkey | `gateway` | `x-portkey-*` |
-| `openrouter` | OpenRouter | `gateway` | `x-openrouter-title` / `x-openrouter-categories` |
+| `crush` | Crush | `agent-cli` | UA `Charm-Crush/` |
+| `goose` | Goose | `agent-cli` | UA `goose/` |
+| `amp` | Amp | `agent-cli` | UA `amp/`（精确匹配）或 `amp-cli/` |
+| `openhands` | OpenHands | `agent-app` | UA `OpenHands/` |
+| `zed` | Zed | `ide-extension` | UA `Zed/`；`x-zed-version` / `x-zed-client` |
+| `litellm` | LiteLLM | `gateway` | UA `litellm/`；`x-litellm-call-id` / `x-litellm-model-id` |
+| `portkey` | Portkey | `gateway` | `x-portkey-trace-id` / `x-portkey-config` |
+| `openrouter` | OpenRouter | `gateway` | `x-openrouter-title` / `x-openrouter-categories` / `x-openrouter-app-visibility` |
 
-普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：UA `OpenAI/Python`、`Anthropic/JS` 等结合 `x-stainless-*` 得到 `sdk:openai-python` / `sdk:anthropic-typescript`，经 Google 生成客户端（`x-goog-api-client: gl-python/...`）得到 `sdk:google-genai-python`，Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
+普通 SDK 调用不会被当成 agent harness，但会保留 SDK 标签：SDK 家族完全由 UA product（如 `OpenAI/Python`、`Anthropic/JS`）决定，语言再由 UA 后缀或 `x-stainless-lang` 决定，`x-stainless-*` 不是必需条件，得到 `sdk:openai-python` / `sdk:anthropic-typescript`；经 Google 生成客户端（`x-goog-api-client: gl-python/...`）得到 `sdk:google-genai-python`，Vercel AI SDK 得到 `sdk:vercel-ai-sdk`。这些 trace 的 `client_harness` 为空，只有标签。
 
 ## 标签（tags）
 
@@ -66,15 +72,10 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 | `harness:<id>` | 命中的产品（与 `client_harness` 相同） |
 | `kind:<kind>` | `agent-cli` / `ide-extension` / `agent-app` / `gateway` |
 | `sdk:<family>` | 请求明显由某个 SDK 发出，如 `sdk:openai-python`、`sdk:anthropic-typescript`、`sdk:vercel-ai-sdk` |
-| `capability:streaming` | `stream: true`、Accept 为 SSE，或 Gemini 的流式 path |
-| `capability:tool-use` | 请求带 tools/functions/tool_choice 或历史工具调用 |
-| `capability:reasoning` | 带 reasoning/thinking 相关字段 |
-| `capability:prompt-cache` | 带 cache_control、prompt_cache_key 等显式缓存字段 |
-| `capability:vision` | 带图片输入字段 |
-| `capability:responses-api` | 走 Responses 协议或带 `instructions` |
-| `capability:structured-output` | 带 response_format/json_schema/responseSchema |
+| `capability:streaming` | Accept 为 SSE，或 Gemini 流式 path/query（`:streamGenerateContent`、`alt=sse`） |
+| `capability:responses-api` | URL path 含 `/responses` |
 
-能力标签来自请求形状，是辅助信息而非协议证明：在超大 body 上跳过深读时宁可少一个标签，也不会猜一个。
+能力标签只从请求头与 URL 推断——body 里的 tools/reasoning/cache 等形状不再读，所以这些旧标签（`capability:tool-use` 等）从此不再产生。标签是辅助信息而非协议证明：头上证明不了，就不打。
 
 ## 落点
 
@@ -87,19 +88,20 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 边界与已知误判
 
-- **只识别客户端可见的交换。** 本地 Responses runtime 的内部上游 `/v1/chat/completions`（`exchange_kind=model`）不参与识别：它的 header 由本进程生成、body 是客户端请求的转换结果，识别它会把内部调用误标成客户端。列表里的 child exchange 因此没有 harness 标签。
-- **Qwen Code 会冒充 Claude Code。** Qwen Code 在非 `*.anthropic.com` base URL 上发送 `claude-cli/<version>` + `x-app: cli`；规则表把 Qwen Code 放在 Claude Code 之前，并用其自身系统提示词兜底。若网关同时剥离了 body 中的系统提示词，这类流量会被标成 `claude-code`——这是已知的、无法从剩余字节区分的边界。
-- **body 只读取首尾窗口。** 标记不在窗口内的超大请求可能识别不到；系统提示词与工具声明实际都落在窗口内。
+- **只识别客户端可见的交换。** 本地 Responses runtime 的内部上游 `/v1/chat/completions`（`exchange_kind=model`）不参与识别：它的 header 由本进程生成，识别它会把内部调用误标成客户端。列表里的 child exchange 因此没有 harness 标签。
+- **Qwen Code 会冒充 Claude Code。** Qwen Code 在非 `*.anthropic.com` base URL 上发送 `claude-cli/<version>` + `x-app: cli`；不读 body 后无法再用其系统提示词区分，这类流量会被标成 `claude-code`。只有发自有 UA（`QwenCode/`）的流量才标为 `qwen-code`。
+- **无产品头的 harness 不可识别。** Kilo Code、Goose 等默认构建只发 Anthropic/SDK 头、不发产品 UA 时，流量无标签（空结果是正常答案）。机会性补充：发 `Kilo-Code/` UA 的构建仍可识别。
+- **pi 会借用 Kimi 的身份。** pi（以及 omp 等 fork）在 `kimi-coding` provider 上把 UA 伪装成 `KimiCLI/<version>` 以通过 Kimi 的用量策略，这类流量会被标成 `kimi-code`，而不是 `pi`——外观即标签，伪装本身就是流量写明的事实。
 - **历史 cassette 不回填。** 本次改动之前录制的 trace 没有分类字段；它们不会因为重新索引而获得标签（prelude 里没有这些字段）。如需识别历史流量，需要重新录制。
 - **网关会改写 UA。** LiteLLM 等网关会把 UA 改写成自己的产品 token；此类 trace 会得到 `litellm` 网关标签，客户端 harness 不可见。
 - **标签不是鉴权事实。** 可用于筛选、审计来源与排障，不能用于准入控制。
 
 ## 扩展方式
 
-新增一个 harness：在 `internal/harness/catalog.go` 按「具体 → 泛化」的顺序加一条 `rule`，在 `detect_test.go` 补至少一个真实请求形状的用例；如引入新的能力标签，在 `signals.go` 的 `capabilities` 中增加标记。不要为了让识别命中而修改录制或转发路径，也不要把 header 值或 prompt 原文写进 `Evidence`。
+新增一个 harness：在 `internal/harness/catalog.go` 按「具体 → 泛化」的顺序加一条 `rule`（只用头与 URL 信号），在 `detect_test.go` 补至少一个真实请求头形状的用例。不要为了让识别命中而修改录制或转发路径，不要把 header 值写进 `Evidence`，不要重新引入 body 扫描。
 
 ## 测试
 
-- `internal/harness/detect_test.go`：各产品 header/body/path 指纹、Qwen 冒充、SDK-only 标签、未知请求、大 body 窗口、证据不含原文。
+- `internal/harness/detect_test.go`：各产品 header/path 指纹、body 无关性（提示词不参与判定）、SDK-only 标签、未知请求、产品 token 边界（`continuedev` 不是 `continue`）、空格形式 UA（`codex-cli 0.153.4`）、Qwen 伪装的已知落点、规则顺序契约、证据不含原文。
 - `internal/recorder/recorder_test.go`：meta 字段与 `harness.detected` 事件写入、model child 跳过、SDK-only 不写事件。
 - `internal/store` / `internal/monitor`：字段 round-trip、`?harness=` 过滤、列表 JSON 暴露。

@@ -48,6 +48,17 @@ type OverviewSummary struct {
 	P95DurationMs  int64
 	StreamCount    int
 	SessionCount   int
+	// Rates are vendor-style per-minute rates derived from logs.recorded_at:
+	// Current* counts the trailing 60s (rolling window, best compared against
+	// provider quotas), Avg* divides the whole window totals by the window
+	// span, Peak* is the busiest single minute inside the timeline scan.
+	CurrentRPM     int
+	CurrentTPM     int
+	AvgRPM         float64
+	AvgTPM         float64
+	PeakRPM        int
+	PeakTPM        int
+	RatesSampledAt time.Time
 }
 
 type OverviewTimelineItem struct {
@@ -57,6 +68,9 @@ type OverviewTimelineItem struct {
 	TotalTokens   int
 	AvgTTFTMs     int
 	AvgDurationMs int64
+	// RPM/TPM are the bucket totals normalized by the bucket span in minutes.
+	RPM float64
+	TPM float64
 }
 
 type OverviewBreakdown struct {
@@ -134,8 +148,11 @@ func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 		if err != nil {
 			return OverviewDashboard{}, err
 		}
-		timeline, err := s.overviewTimeline(whereSQL, whereArgs, opts)
+		timeline, peakRPM, peakTPM, err := s.overviewTimeline(whereSQL, whereArgs, opts)
 		if err != nil {
+			return OverviewDashboard{}, err
+		}
+		if err := s.attachOverviewRates(&summary, whereSQL, whereArgs, opts.Since, peakRPM, peakTPM); err != nil {
 			return OverviewDashboard{}, err
 		}
 		breakdown, err := s.overviewBreakdown(whereSQL, whereArgs, opts.Since, opts.Limit)
@@ -236,14 +253,19 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 // samples, which the caller already computed in its own aggregate pass; the
 // lookup itself is the only query left.
 
-func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
+// overviewTimeline returns the bucketed timeline plus the peak per-minute RPM
+// and TPM inside the scan. The peak needs minute granularity because the
+// display buckets are hours wide: a 60-minute bucket cannot answer "what was
+// the busiest minute". Minute buckets are accumulated alongside the display
+// buckets from the same rows, so the peak costs no extra scan.
+func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, int, int, error) {
 	referenceTime := time.Now().UTC()
 	var latestRecordedAt any
 	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
@@ -256,7 +278,7 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		ORDER BY recorded_at ASC
 	`, queryArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	defer rows.Close()
 
@@ -269,11 +291,16 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		durationSum   int64
 		durationCount int
 	}
+	type minuteAccumulator struct {
+		requestCount int
+		totalTokens  int
+	}
 	buckets := make(map[time.Time]*bucketAccumulator, opts.BucketCount)
 	for index := 0; index < opts.BucketCount; index++ {
 		bucketTime := bucketStart.Add(time.Duration(index) * opts.BucketSize)
 		buckets[bucketTime] = &bucketAccumulator{}
 	}
+	minutes := map[time.Time]*minuteAccumulator{}
 	for rows.Next() {
 		var (
 			// Scanned as any: the Postgres driver hands back a time.Time for
@@ -287,14 +314,14 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 			durationMs  int64
 		)
 		if err := rows.Scan(&recordedAt, &statusCode, &errorText, &totalTokens, &ttftMs, &durationMs); err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 		recorded, err := timeParseValue(recordedAt)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 		if recorded.IsZero() {
-			return nil, errors.New("overview timeline: log row has an empty recorded_at")
+			return nil, 0, 0, errors.New("overview timeline: log row has an empty recorded_at")
 		}
 		bucketTime := bucketSlot(recorded, opts.BucketSize, opts.Location)
 		bucket, ok := buckets[bucketTime]
@@ -314,11 +341,33 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 			bucket.durationSum += durationMs
 			bucket.durationCount++
 		}
+		minuteSlot := recorded.UTC().Truncate(time.Minute)
+		minute, ok := minutes[minuteSlot]
+		if !ok {
+			minute = &minuteAccumulator{}
+			minutes[minuteSlot] = minute
+		}
+		minute.requestCount++
+		minute.totalTokens += totalTokens
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
+	peakRPM, peakTPM := 0, 0
+	for _, minute := range minutes {
+		if minute.requestCount > peakRPM {
+			peakRPM = minute.requestCount
+		}
+		if minute.totalTokens > peakTPM {
+			peakTPM = minute.totalTokens
+		}
+	}
+
+	bucketMinutes := 0.0
+	if opts.BucketSize > 0 {
+		bucketMinutes = opts.BucketSize.Minutes()
+	}
 	out := make([]OverviewTimelineItem, 0, opts.BucketCount)
 	for index := 0; index < opts.BucketCount; index++ {
 		bucketTime := bucketStart.Add(time.Duration(index) * opts.BucketSize)
@@ -329,6 +378,9 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 			FailedRequest: bucket.failedCount,
 			TotalTokens:   bucket.totalTokens,
 		}
+		if bucketMinutes > 0 {
+			item.RPM, item.TPM = rateAvg(bucket.requestCount, bucket.totalTokens, bucketMinutes)
+		}
 		if bucket.ttftCount > 0 {
 			item.AvgTTFTMs = int(math.Round(float64(bucket.ttftSum) / float64(bucket.ttftCount)))
 		}
@@ -337,7 +389,43 @@ func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts Overview
 		}
 		out = append(out, item)
 	}
-	return out, nil
+	return out, peakRPM, peakTPM, nil
+}
+
+// attachOverviewRates fills the rate fields of summary from one trailing-60s
+// query plus the window totals it already holds. Average rates divide the
+// window totals by the elapsed span from since to the latest row (or now when
+// the window is empty); an unwindowed ("all") query leaves them at zero
+// because there is no finite span to divide by.
+func (s *Store) attachOverviewRates(summary *OverviewSummary, whereSQL string, whereArgs []any, since time.Time, peakRPM, peakTPM int) error {
+	currentRPM, currentTPM, err := s.currentRatesAll(whereSQL, whereArgs)
+	if err != nil {
+		return err
+	}
+	summary.CurrentRPM = currentRPM
+	summary.CurrentTPM = currentTPM
+	summary.PeakRPM = peakRPM
+	summary.PeakTPM = peakTPM
+	sampledAt := time.Now().UTC()
+	if summary.RequestCount > 0 {
+		summary.RatesSampledAt = sampledAt
+	}
+	if since.IsZero() {
+		return nil
+	}
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+		return err
+	}
+	referenceTime := sampledAt
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return err
+	} else if !latestTime.IsZero() {
+		referenceTime = latestTime
+	}
+	windowMinutes := rateWindowMinutes(since, referenceTime)
+	summary.AvgRPM, summary.AvgTPM = rateAvg(summary.RequestCount, summary.TotalTokens, windowMinutes)
+	return nil
 }
 
 // overviewBreakdownColumns are the log columns the Overview renders as top-N

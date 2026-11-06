@@ -24,6 +24,8 @@ type overviewTimelineItem struct {
 	TotalTokens   int       `json:"total_tokens"`
 	AvgTTFTMs     int       `json:"avg_ttft_ms"`
 	AvgDurationMs int64     `json:"avg_duration_ms"`
+	RPM           float64   `json:"rpm"`
+	TPM           float64   `json:"tpm"`
 }
 
 type systemEventListResponse struct {
@@ -582,6 +584,8 @@ func overviewTimelineViews(items []store.OverviewTimelineItem) []overviewTimelin
 			TotalTokens:   item.TotalTokens,
 			AvgTTFTMs:     item.AvgTTFTMs,
 			AvgDurationMs: item.AvgDurationMs,
+			RPM:           item.RPM,
+			TPM:           item.TPM,
 		})
 	}
 	return out
