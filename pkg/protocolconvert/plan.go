@@ -76,6 +76,34 @@ func (d Decision) Passthrough() bool { return d.Action == ActionPassthrough }
 func (d Decision) Convert() bool     { return d.Action == ActionConvert }
 func (d Decision) Reject() bool      { return d.Action == ActionReject }
 
+// PlanRequest is the full input to PlanForRequest: the same triple as Plan
+// plus whether the client asked for a stream.
+type PlanRequest struct {
+	Client Protocol
+	Caps   Capabilities
+	Mode   Mode
+	// Stream rejects conversion. Streaming responses are converted by
+	// aggregating the whole stream and re-encoding it (see
+	// ConvertStreamResponse), which destroys incremental delivery and
+	// bounds neither memory nor latency; the correct answer for a streaming
+	// client on a mismatched upstream is a selection failure, not a
+	// silently buffered stream. This is a correctness guardrail, not a
+	// missing feature: passthrough streaming is unaffected.
+	Stream bool
+}
+
+// PlanForRequest is Plan with the streaming guardrail applied.
+func PlanForRequest(req PlanRequest) (Decision, error) {
+	decision, err := Plan(req.Client, req.Caps, req.Mode)
+	if err != nil || !req.Stream || !decision.Convert() {
+		return decision, err
+	}
+	decision.Action = ActionReject
+	decision.UpstreamProtocol = ""
+	decision.Reason = fmt.Sprintf("upstream does not serve %s and streaming conversion is not supported", decision.ClientProtocol)
+	return decision, nil
+}
+
 // Plan decides, for one request, whether to pass it through byte for byte,
 // convert it to a protocol the upstream serves, or reject it.
 //

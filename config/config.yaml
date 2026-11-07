@@ -126,6 +126,11 @@ router:
     # check is what keeps a session off a target several times slower than the
     # alternative. Momentary queueing is deliberately not part of the check.
     sticky_max_cost_ratio: 2.0
+    # Opt-in protocol conversion: when true, the router may select an upstream
+    # that cannot serve the client's protocol natively, and the proxy converts
+    # the request/response between protocols (pkg/protocolconvert). Default
+    # false: native passthrough only. Streaming requests never convert.
+    protocol_conversion: false
 
 debug:
   output_dir: "./data/traces"

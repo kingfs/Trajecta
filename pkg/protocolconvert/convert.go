@@ -39,6 +39,12 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if !from.Valid() || !to.Valid() {
 		return Result{}, fmt.Errorf("protocolconvert: invalid protocol pair %q -> %q", from, to)
 	}
+	// Same-protocol conversion is byte passthrough. Routing a request through
+	// the IR would silently drop every field the IR does not carry, which is
+	// exactly the corruption passthrough exists to avoid.
+	if from == to {
+		return Result{Body: append([]byte(nil), body...), From: from, To: to}, nil
+	}
 	parsed, err := llm.ParseRequest(ProviderFor(from, vertex), from.Endpoint(), body)
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: parse %s request: %w", from, err)
@@ -60,7 +66,39 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: encode %s request: %w", to, err)
 	}
+	// The IR has no Stream field, but stream is a client-visible behaviour,
+	// not metadata: dropping it would turn a streaming call into a
+	// non-streaming one. Re-inject it from the source body.
+	if stream := bodyStreamFlag(body); stream {
+		out, err = setBodyStreamFlag(out, true)
+		if err != nil {
+			return Result{}, fmt.Errorf("protocolconvert: preserve stream flag: %w", err)
+		}
+	}
 	return Result{Body: out, Warnings: requestWarnings(parsed, from, to), From: from, To: to}, nil
+}
+
+func bodyStreamFlag(body []byte) bool {
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return payload.Stream
+}
+
+func setBodyStreamFlag(body []byte, stream bool) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(stream)
+	if err != nil {
+		return nil, err
+	}
+	payload["stream"] = raw
+	return json.Marshal(payload)
 }
 
 // ConvertResponse converts an upstream response body from one protocol to
@@ -70,12 +108,21 @@ func ConvertResponse(body []byte, from Protocol, to Protocol, model string, vert
 	if !from.Valid() || !to.Valid() {
 		return Result{}, fmt.Errorf("protocolconvert: invalid protocol pair %q -> %q", from, to)
 	}
+	if from == to {
+		return Result{Body: append([]byte(nil), body...), From: from, To: to}, nil
+	}
 	parsed, err := llm.ParseResponse(ProviderFor(from, vertex), from.Endpoint(), body)
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: parse %s response: %w", from, err)
 	}
 	if model != "" {
 		parsed.Model = model
+	}
+	// The IR keeps tool calls in Candidate.ToolCalls, but the Anthropic
+	// encoder only reads tool_use content blocks. Fold them in so a
+	// converted tool call is not silently dropped.
+	if to == ProtocolMessages {
+		foldToolCallsIntoContent(&parsed)
 	}
 	adapter, err := llm.AdapterFor(ProviderFor(to, vertex), to.Endpoint())
 	if err != nil {
@@ -115,8 +162,48 @@ func responseWarnings(resp llm.LLMResponse, from Protocol, to Protocol) []Warnin
 		if candidate.Refusal != nil && to != ProtocolResponses && to != ProtocolChatCompletions {
 			warnings = append(warnings, Warning{Field: "refusal", Reason: fmt.Sprintf("refusal text is not representable in %s responses", to)})
 		}
+		if len(candidate.ToolCalls) > 0 && to == ProtocolGemini {
+			// The Gemini response encoder emits text parts only; tool calls
+			// do not survive a conversion to Gemini.
+			warnings = append(warnings, Warning{Field: "tool_calls", Reason: "tool calls are not representable in gemini responses"})
+		}
 	}
 	return warnings
+}
+
+// foldToolCallsIntoContent appends each candidate's tool calls as tool_use
+// content blocks, unless an equivalent block already exists (some parsers
+// duplicate the call in both places).
+func foldToolCallsIntoContent(resp *llm.LLMResponse) {
+	for i := range resp.Candidates {
+		candidate := &resp.Candidates[i]
+		for _, call := range candidate.ToolCalls {
+			exists := false
+			for _, content := range candidate.Content {
+				if content.Type == "tool_use" && content.ToolName == call.Name && content.ToolCallID == call.ID {
+					exists = true
+					break
+				}
+			}
+			if exists {
+				continue
+			}
+			args := call.Args
+			if args == nil && call.ArgsText != "" {
+				var decoded map[string]any
+				if err := json.Unmarshal([]byte(call.ArgsText), &decoded); err == nil {
+					args = decoded
+				}
+			}
+			candidate.Content = append(candidate.Content, llm.LLMContent{
+				Type:       "tool_use",
+				ID:         call.ID,
+				ToolCallID: call.ID,
+				ToolName:   call.Name,
+				ToolArgs:   args,
+			})
+		}
+	}
 }
 
 // UnsupportedFields lists the top-level JSON keys present in body that the

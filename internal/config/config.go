@@ -269,6 +269,13 @@ type RouterConfig struct {
 		// fastest alternative by this factor. A missing value means 2.0; zero
 		// or a negative value disables the rebalancing check.
 		StickyMaxCostRatio *float64 `yaml:"sticky_max_cost_ratio"`
+		// ProtocolConversion allows the router to select an upstream that
+		// cannot serve the client's protocol natively, in which case the
+		// proxy converts the request/response between protocols
+		// (pkg/protocolconvert). Default off: native passthrough only, which
+		// preserves the historical behaviour exactly. Streaming requests
+		// never convert; they require a native passthrough upstream.
+		ProtocolConversion bool `yaml:"protocol_conversion"`
 	} `yaml:"selection"`
 }
 

@@ -1028,15 +1028,66 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			upstreamBodyBytes = rewrittenBody
 		}
 
+		// Protocol conversion (opt-in via router.selection.protocol_conversion):
+		// the router may have selected a target that cannot serve the client's
+		// protocol natively. The cassette keeps upstreamBodyBytes, the
+		// client-visible bytes; only the wire bytes and the upstream path
+		// change. Streaming requests never carry a conversion (the router
+		// excludes them), and passthrough selections leave both untouched, so
+		// the default path costs one nil check.
+		wireBodyBytes := upstreamBodyBytes
+		sendPathOverride := ""
+		conversion, convErr := h.conversionForSelection(r, selection, upstreamBodyBytes)
+		if convErr == nil && conversion != nil {
+			var converted []byte
+			converted, convErr = conversion.convertRequestBody(wireBodyBytes)
+			if convErr == nil {
+				wireBodyBytes = converted
+				sendPathOverride = conversion.upstreamPath()
+			}
+		}
+		if convErr != nil {
+			// A request we cannot translate never reaches the upstream; fail
+			// this candidate exactly like a network error and try the next
+			// one, which may serve the client protocol natively.
+			slog.Warn("Protocol conversion failed, will retry with next candidate",
+				"upstream_id", selection.Target.ID,
+				"model", selection.Request.ModelName,
+				"error", convErr,
+			)
+			lastErr = convErr
+			h.router.Complete(selection, router.Outcome{
+				Success:    false,
+				StatusCode: 0,
+				Stream:     selection.Request.Stream,
+			})
+			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), false))
+			if len(triedIDs) >= roundCandidateCount {
+				delay := retryDelay(retryAttempt, nil, retryDeadline)
+				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, 0, convErr.Error(), true))
+				if !sleepBeforeRetry(r.Context(), delay) {
+					if r.Context().Err() != nil {
+						return
+					}
+					break
+				}
+				retryAttempt++
+				triedIDs = nil
+				_, _ = h.router.RefreshNow()
+				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), true))
+			}
+			continue
+		}
+
 		// Masking splits the recorded body from the body sent upstream: the cassette
 		// keeps the original bytes, so replay and a human reading a trace see the
 		// real values, while the upstream only ever receives stand-ins. The bytes
 		// handed to the router above are deliberately left alone, so routing keys,
 		// fingerprints and every failure cassette are unaffected.
-		sendBodyBytes := upstreamBodyBytes
+		sendBodyBytes := wireBodyBytes
 		var maskedEvents []secretmask.MaskEvent
 		if h.secretVault != nil {
-			if masked, events := h.secretVault.Mask(upstreamBodyBytes); len(events) > 0 {
+			if masked, events := h.secretVault.Mask(sendBodyBytes); len(events) > 0 {
 				sendBodyBytes = masked
 				maskedEvents = events
 			}
@@ -1075,6 +1126,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+		if conversion != nil {
+			logInfo.Events = append(logInfo.Events, protocolConversionEvent(conversion, start))
+		}
 		logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
 		logInfo.MaskAudit = secretMaskAuditRecords(maskedEvents)
 
@@ -1101,7 +1155,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, sendBodyBytes)
+		resp, reqErr := h.sendUpstreamRequestWithPath(r, selection.Target, sendBodyBytes, sendPathOverride)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()
@@ -1190,6 +1244,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, true))
 			}
 			continue
+		}
+
+		// Successful upstream response. When this selection converted the
+		// request, translate the response back before it reaches the client:
+		// the cassette then records what the client actually saw, which is
+		// what replay parses. A response that cannot be translated is a
+		// candidate failure, never a wrong-protocol body for the client.
+		if conversion != nil {
+			convertedResp, convErr := conversion.convertResponseBody(resp)
+			if convErr != nil {
+				logInfo.Header.Meta.Error = convErr.Error()
+				resp.Body.Close()
+				lastErr = convErr
+				h.router.Complete(selection, router.Outcome{
+					Success:    false,
+					StatusCode: resp.StatusCode,
+					DurationMs: float64(time.Since(start).Milliseconds()),
+					Stream:     selection.Request.Stream,
+				})
+				retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, convErr.Error(), false))
+				h.closeLogFile(logInfo)
+				if len(triedIDs) >= roundCandidateCount {
+					delay := retryDelay(retryAttempt, nil, retryDeadline)
+					retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, resp.StatusCode, convErr.Error(), true))
+					if !sleepBeforeRetry(r.Context(), delay) {
+						if r.Context().Err() != nil {
+							return
+						}
+						break
+					}
+					retryAttempt++
+					triedIDs = nil
+					_, _ = h.router.RefreshNow()
+					retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, resp.StatusCode, convErr.Error(), true))
+				}
+				continue
+			}
+			resp = convertedResp
 		}
 
 		// 成功 —— 将上游响应写入客户端
@@ -2162,9 +2254,21 @@ func releaseRetryWaitSlot() {
 // discards the Body), applies the director logic (URL rewrite, auth headers), and returns
 // the upstream response. The caller is responsible for closing resp.Body.
 func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Target, bodyBytes []byte) (*http.Response, error) {
+	return h.sendUpstreamRequestWithPath(original, target, bodyBytes, "")
+}
+
+// sendUpstreamRequestWithPath is sendUpstreamRequest with an explicit
+// upstream path, used when protocol conversion rewrote the request for a
+// different protocol surface. The client query string is not carried over
+// for converted requests: query options belong to the client protocol.
+// An empty pathOverride preserves the passthrough behaviour exactly.
+func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *router.Target, bodyBytes []byte, pathOverride string) (*http.Response, error) {
 	clientPath := original.URL.Path
 	if original.URL.RawQuery != "" {
 		clientPath += "?" + original.URL.RawQuery
+	}
+	if pathOverride != "" {
+		clientPath = pathOverride
 	}
 
 	fullURL, err := target.Upstream.BuildURL(clientPath)

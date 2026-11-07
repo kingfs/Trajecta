@@ -39,11 +39,21 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 - `top_k` 转到 Chat Completions/Responses 时不携带（warnings 会报告）。
 - reasoning effort、presence/frequency penalty、provider options 等协议特有字段不在 IR 中，转换时丢失；`UnsupportedFields` 可列出源 body 中 IR 不携带的顶层键。
 
-## 接入点
+## 热路径接入
 
-转发热路径（`internal/proxy`）目前仍是协议感知直通 + 录制/解析，不在转发时调用转换；`/v1/responses` 经本地 Responses runtime 转 Chat Completions 是唯一例外。需要启用转换的调用方按以下顺序使用本包：
+转发热路径在配置 `router.selection.protocol_conversion: true` 时启用转换，默认关闭（关闭时行为与引入转换前完全一致）。启用后：
+
+- 路由选路（`internal/router`）把 `PlanForRequest` 纳入候选判定：原生直通仍优先；只有上游不支持客户端协议、且请求非流式时，转换候选才入选。流式请求永远不转换（聚合式流转换会破坏增量交付），需要原生直通上游。
+- 代理（`internal/proxy`）在选路后转换请求 body 并改写上游路径（`RequestPath`），响应回来先转回客户端协议再写出；转换失败按候选失败处理，试下一个候选（可能原生直通），不会把错误协议的字节发给客户端。
+- 错误响应（非 2xx）不转换，原样透传：错误 body 是 provider 特有的诊断，经 IR 会变成空壳。
+- 录制不变：cassette 记录客户端可见的原始请求与转换后的响应（即客户端实际看到的字节），V3 格式不变；转换在 cassette 中以 `protocol_conversion` 事件记录（含协议对与 warnings 字段）。
+- 转换顺序：先转换、再做 secret masking（掩码作用于实际上游的字节）；响应侧先转换、再做 stand-in 还原。
+
+`PlanForRequest` 的流式拦截是正确性护栏，不是功能缺失：流式转换需要逐帧翻译器（桥接包的 `StreamDecoder/StreamEncoder` 形态），聚合式重编码不能满足"增量交付"这一正确性要求，在实现逐帧翻译前不启用。
+
+## 库调用顺序（非热路径调用方）
 
 1. `DetectFromPath` 判定客户端协议；
-2. `ProtocolCapabilitiesForModel` 取上游能力，`Plan` 决策；
+2. `ProtocolCapabilitiesForModel` 取上游能力，`Plan`（或 `PlanForRequest`）决策；
 3. `convert` 时用 `ConvertRequest` 得到上游 body + `RequestPath` 得到上游路径，响应回来用 `ConvertResponse`/`ConvertStreamResponse` 转回客户端协议；
 4. 录制时仍记录客户端可见的原始请求/响应（`pkg/recordfile` 的 V3 格式不变），转换只影响上游字节。
