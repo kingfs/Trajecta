@@ -227,6 +227,65 @@ func TestUnsupportedFieldsReportsDroppedKeys(t *testing.T) {
 	}
 }
 
+func TestDetectFromPathRejectsCountTokens(t *testing.T) {
+	if _, err := DetectFromPath("/v1/messages/count_tokens"); err == nil {
+		t.Error("count_tokens must not be convertible (different semantics/response shape)")
+	}
+}
+
+func TestConvertRequestRejectsMultimodalInsteadOfCorrupting(t *testing.T) {
+	cases := map[string]string{
+		"chat image_url":    `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"type":"image_url","image_url":{"url":"https://example/x.png"}}]}]}`,
+		"messages image":    `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}]}]}`,
+		"messages thinking": `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret plan"}]}]}`,
+	}
+	// chat -> messages for the first, messages -> chat for the other two.
+	if _, err := ConvertRequest([]byte(cases["chat image_url"]), ProtocolChatCompletions, ProtocolMessages, "", false); err == nil {
+		t.Error("chat image_url must be rejected, not silently turned into text")
+	}
+	if _, err := ConvertRequest([]byte(cases["messages image"]), ProtocolMessages, ProtocolChatCompletions, "", false); err == nil {
+		t.Error("messages image must be rejected, not silently dropped")
+	}
+	if _, err := ConvertRequest([]byte(cases["messages thinking"]), ProtocolMessages, ProtocolChatCompletions, "", false); err == nil {
+		t.Error("thinking block must be rejected, not re-encoded as text")
+	}
+	// Ordinary prose containing the words must still convert.
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"How does photosynthesis use image and signature and thinking words?"}],"max_tokens":10}`)
+	if _, err := ConvertRequest(body, ProtocolChatCompletions, ProtocolMessages, "", false); err != nil {
+		t.Errorf("plain prose must convert: %v", err)
+	}
+}
+
+func TestConvertRequestWarningsReportUnsupportedFields(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"seed":42,"response_format":{"type":"json_object"},"max_tokens":10}`)
+	result, err := ConvertRequest(body, ProtocolChatCompletions, ProtocolMessages, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := map[string]bool{}
+	for _, w := range result.Warnings {
+		fields[w.Field] = true
+	}
+	for _, want := range []string{"seed", "response_format"} {
+		if !fields[want] {
+			t.Errorf("warnings missing %q, got %v", want, result.Warnings)
+		}
+	}
+}
+
+func TestConvertStreamResponseSameProtocolIsPassthrough(t *testing.T) {
+	body := []byte("data: {\"id\":\"1\"}\n\n")
+	result, err := ConvertStreamResponse(body, ProtocolChatCompletions, ProtocolChatCompletions, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result.Body) != string(body) {
+		t.Errorf("same-protocol stream must be byte-identical:\n got %s\nwant %s", result.Body, body)
+	}
+	if _, err := ConvertStreamResponse(body, Protocol("nope"), ProtocolChatCompletions, "", false); err == nil {
+		t.Error("invalid from protocol must error")
+	}
+}
 func TestConvertRequestVertexGemini(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}`)
 	result, err := ConvertRequest(body, ProtocolChatCompletions, ProtocolGemini, "gemini-2.5-flash", true)

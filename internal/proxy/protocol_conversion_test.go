@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
@@ -187,6 +188,31 @@ func TestHandlerRejectsMessagesWhenConversionDisabled(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("resp.StatusCode = %d, want 502 (no supporting target without conversion)", resp.StatusCode)
+	}
+}
+
+func TestConversionForSelectionRejectsCompressedBody(t *testing.T) {
+	h := &Handler{cfg: func() *config.Config {
+		cfg := &config.Config{}
+		cfg.Router.Selection.ProtocolConversion = true
+		return cfg
+	}()}
+	target := &router.Target{Upstream: func() upstream.ResolvedUpstream {
+		// Build from a minimal chat upstream via the string zero value is
+		// not enough; instead exercise the gzip guard before any caps check
+		// by asserting the error message shape.
+		return upstream.ResolvedUpstream{}
+	}()}
+	_ = target
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m"}`))
+	req.Header.Set("Content-Encoding", "gzip")
+	sel := &router.Selection{Target: target, Request: router.RequestFeatures{ModelName: "m"}}
+	if _, err := h.conversionForSelection(req, sel, []byte(`{"model":"m"}`)); err == nil || !strings.Contains(err.Error(), "Content-Encoding") {
+		t.Fatalf("compressed body must error explicitly, got %v", err)
+	}
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"m"}`))
+	if conv, err := h.conversionForSelection(req2, sel, []byte(`{"model":"m"}`)); conv != nil || err != nil {
+		t.Errorf("count_tokens must never convert (conv=%v err=%v)", conv, err)
 	}
 }
 

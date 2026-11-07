@@ -914,6 +914,22 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 }
 
 func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil {
+		return false
+	}
+	return r.hasSelectableCandidateWithBody(req, body, r.conversionEnabled)
+}
+
+// HasSelectableNativeCandidateWithBody reports whether a target can serve
+// this request natively (no protocol conversion). The local Responses
+// runtime uses it for its chat backend check: that runtime forwards a
+// Chat Completions body verbatim and never converts, so a target that could
+// only serve it through protocol conversion is not a usable backend.
+func (r *Router) HasSelectableNativeCandidateWithBody(req *http.Request, body []byte) bool {
+	return r.hasSelectableCandidateWithBody(req, body, false)
+}
+
+func (r *Router) hasSelectableCandidateWithBody(req *http.Request, body []byte, allowConversion bool) bool {
 	if r == nil || req == nil {
 		return false
 	}
@@ -922,7 +938,7 @@ func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) 
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, allowConversion)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.canSelect(now, model) {
@@ -941,7 +957,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, false)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
@@ -1151,11 +1167,11 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 			}
 		} else if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil {
 			selected = bound
-			score = r.expectedCost(bound, features)
-			if best := r.stickyRebalanceTarget(available, bound, features); best != nil {
+			score = r.pickScore(bound, features, rawPath)
+			if best := r.stickyRebalanceTarget(available, bound, features, rawPath); best != nil {
 				r.sticky.Bind(stickyKey, best.RouteTargetID)
 				selected = best
-				score = r.expectedCost(best, features)
+				score = r.pickScore(best, features, rawPath)
 				decision.withStickyTarget("rebalance", stickyFingerprint, best, best.ID, targetAlias(bound, stickyTargetID))
 			} else {
 				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
@@ -1210,11 +1226,18 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 // and throw away its prompt cache. The question here is "is this hardware much
 // slower", not "is it busy right now"; load spreading stays with P2C for new
 // sessions.
-func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures) *Target {
+func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures, rawPath string) *Target {
 	if r.stickyMaxCostRatio <= 0 || bound == nil {
 		return nil
 	}
+	// Latency-only comparison (see comment above), with the conversion
+	// penalty folded in: a converting candidate must be that much faster
+	// in raw latency to justify moving the binding, and a converting
+	// bound target is judged at its effective cost too.
 	boundCost := r.targetLatencyCost(bound, req)
+	if !supportsPath(bound, rawPath, req) {
+		boundCost *= conversionCostPenaltyFactor
+	}
 	var best *Target
 	var bestCost float64
 	for _, candidate := range available {
@@ -1222,6 +1245,9 @@ func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req R
 			continue
 		}
 		candidateCost := r.targetLatencyCost(candidate, req)
+		if !supportsPath(candidate, rawPath, req) {
+			candidateCost *= conversionCostPenaltyFactor
+		}
 		if best == nil || candidateCost < bestCost {
 			best, bestCost = candidate, candidateCost
 		}
@@ -1482,10 +1508,14 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures, rawPat
 }
 
 func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures, requireNativeResponses bool) []*Target {
+	return r.candidatesForRequestWithConversion(rawPath, model, features, requireNativeResponses, r.conversionEnabled)
+}
+
+func (r *Router) candidatesForRequestWithConversion(rawPath string, model string, features RequestFeatures, requireNativeResponses bool, allowConversion bool) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if r.supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1499,7 +1529,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
 				continue
 			}
-			if r.supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1520,7 +1550,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		if model != "" && !target.allowUndeclaredModels {
 			continue
 		}
-		if !r.supportsPath(target, rawPath, features) || !supportsRequestFeatures(target, features) {
+		if !r.supportsPathWithConversion(target, rawPath, features, allowConversion) || !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
@@ -2295,7 +2325,11 @@ func supportsPath(target *Target, rawPath string, features RequestFeatures) bool
 // conversion is disabled, so the default path costs one branch.
 func (r *Router) supportsPath(target *Target, rawPath string, features RequestFeatures) bool {
 	enabled := r != nil && r.conversionEnabled
-	return convertAwareSupportsPath(target, rawPath, features, enabled)
+	return r.supportsPathWithConversion(target, rawPath, features, enabled)
+}
+
+func (r *Router) supportsPathWithConversion(target *Target, rawPath string, features RequestFeatures, allowConversion bool) bool {
+	return convertAwareSupportsPath(target, rawPath, features, allowConversion)
 }
 
 // convertAwareSupportsPath is supportsPath plus the optional conversion
@@ -2362,10 +2396,18 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
+		// A body that cannot be parsed cannot be proven non-streaming.
+		// Treat it as streaming so protocol conversion stays disabled for
+		// it (fail closed): converting an opaque body would either fail
+		// in the adapter or buffer an SSE stream as JSON.
+		features.Stream = true
 		return features
 	}
 	if stream, ok := payload["stream"].(bool); ok {
 		features.Stream = stream
+	}
+	if streamStr, ok := payload["stream"].(string); ok {
+		features.Stream = streamStr == "true" || streamStr == "True" || streamStr == "TRUE" || streamStr == "1"
 	}
 	// Google's generateContent family signals streaming in the request line
 	// (`:streamGenerateContent`), not in the body, and the proxy answers it by streaming: it is

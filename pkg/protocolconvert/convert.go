@@ -45,6 +45,14 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if from == to {
 		return Result{Body: append([]byte(nil), body...), From: from, To: to}, nil
 	}
+	// Fail loudly instead of silently corrupting what the IR cannot carry.
+	// Multimodal media, encrypted/thinking blocks and opaque signatures
+	// have no IR representation; the pkg/llm adapters would turn them
+	// into prose text or drop them. A caller that needs those shapes
+	// must use a native passthrough target.
+	if field, ok := unsupportedContentField(body); ok {
+		return Result{}, fmt.Errorf("protocolconvert: %s request carries %q which the conversion IR cannot represent; use a native passthrough target", from, field)
+	}
 	parsed, err := llm.ParseRequest(ProviderFor(from, vertex), from.Endpoint(), body)
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: parse %s request: %w", from, err)
@@ -75,7 +83,7 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 			return Result{}, fmt.Errorf("protocolconvert: preserve stream flag: %w", err)
 		}
 	}
-	return Result{Body: out, Warnings: requestWarnings(parsed, from, to), From: from, To: to}, nil
+	return Result{Body: out, Warnings: requestWarnings(parsed, from, to, body), From: from, To: to}, nil
 }
 
 func bodyStreamFlag(body []byte) bool {
@@ -139,7 +147,7 @@ func ConvertResponse(body []byte, from Protocol, to Protocol, model string, vert
 // The IR carries model/system/messages/tools/tool_choice/stop/temperature/
 // top_p/top_k/max_tokens; everything else in the source body is lost. We
 // detect the common extras by scanning the raw JSON keys the IR ignores.
-func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol) []Warning {
+func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol, body []byte) []Warning {
 	var warnings []Warning
 	if from == to {
 		return nil
@@ -150,7 +158,43 @@ func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol) []Warning {
 	if req.TopK != nil && (to == ProtocolChatCompletions || to == ProtocolResponses) {
 		warnings = append(warnings, Warning{Field: "top_k", Reason: fmt.Sprintf("top_k is not carried by %s encoding", to)})
 	}
+	// Generic: any top-level key the IR does not carry is lost. Report it so
+	// a caller can reject or log instead of silently degrading (seed,
+	// response_format, reasoning_effort, cache_control, metadata, ...).
+	// Stream is re-injected and model is overridden, so skip both.
+	for _, field := range UnsupportedFields(body, from) {
+		lower := strings.ToLower(field)
+		if lower == "stream" || lower == "model" {
+			continue
+		}
+		warnings = append(warnings, Warning{Field: field, Reason: fmt.Sprintf("%s field is not carried by the conversion IR when converting to %s", field, to)})
+	}
 	return warnings
+}
+
+// unsupportedContentField scans a raw request body for content whose IR
+// representation is lossy or absent. It returns the offending type/key when
+// found. Thinking and opaque signatures are included deliberately: they are
+// byte-exact protocol values (see pkg/secretmask/opaque.go) and re-encoding
+// them as text would corrupt them.
+func unsupportedContentField(body []byte) (string, bool) {
+	// Cheap, robust prefilter before a full walk: these bytes cannot appear
+	// in a text-only request without indicating a shape the IR drops.
+	// All needles are quoted/protocol terms so ordinary prose mentioning
+	// "image", "signature" or "thinking" does not trip the filter (in JSON
+	// string content those words are escaped and never appear quoted).
+	needles := []string{"image_url", "input_audio", "file_data", "inlineData", "inline_data", "\"image\"", "\"audio\"", "\"file\"", "\"document\"", "thoughtSignature", "encrypted_content", "redacted_thinking", "\"thinking\"", "\"reasoning\"", "reasoning_content", "\"signature\""}
+	haystack := string(body)
+	for _, needle := range needles {
+		if strings.Contains(haystack, needle) {
+			return needle, true
+		}
+	}
+	// Gemini function parts are also dropped by the IR adapters.
+	if strings.Contains(haystack, "functionCall") || strings.Contains(haystack, "functionResponse") {
+		return "functionCall/functionResponse", true
+	}
+	return "", false
 }
 
 func responseWarnings(resp llm.LLMResponse, from Protocol, to Protocol) []Warning {

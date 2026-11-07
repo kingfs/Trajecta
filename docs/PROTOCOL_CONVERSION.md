@@ -26,9 +26,9 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 ## 转换 API
 
 - `ConvertRequest` / `ConvertResponse`：非流式请求/响应转换。`model` 参数覆盖转换后 body 中的模型（上游 wire 名）；转到 Anthropic 时自动补 `max_tokens=4096`（Messages 必填）。
-- `ConvertStreamResponse`：把上游 SSE 流聚合成 `LLMResponse` 后，按客户端协议重新编码为 SSE（文本 delta + 工具调用在最终帧）。它不是逐帧翻译，上游增量顺序不保留，但客户端拿到的是自己协议下格式完好的流。
-- `Protocol.RequestPath(model, stream, vertex)`：转换后请求应发往的上游路径；Gemini 的模型在路径里，其余协议模型在 body 里。
-- `DetectFromPath`：只从请求头（路径）判定客户端协议，不读 body。
+- `ConvertStreamResponse`：把上游 SSE 流聚合成 `LLMResponse` 后，按客户端协议重新编码为 SSE（文本 delta + 工具调用在最终帧）。它不是逐帧翻译，上游增量顺序不保留，但客户端拿到的是自己协议下格式完好的流。**未接入热路径**：热路径对流式一律拒绝（见下），调用方不得自行接它满足流式转换。
+- `Protocol.RequestPath(model, stream, vertex)`：转换后请求应发往的上游路径；Gemini 的模型在路径里（URL 转义），其余协议模型在 body 里。
+- `DetectFromPath`：只从请求头（路径）判定客户端协议，不读 body。`/v1/messages/count_tokens` 明确报错（语义/响应形状与生成请求不同），不得转换。
 - `Result.Warnings`：转换丢掉的信息（见下）。调用方不能容忍丢失时应检查 warnings 并拒绝，而不是静默降级。
 
 ## 已知边界（IR 限制）
@@ -37,16 +37,18 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 
 - Gemini 编码只保留文本 parts，消息中的 `tool_use`/`tool_result` 在转到 Gemini 时丢失；反之亦然。
 - `top_k` 转到 Chat Completions/Responses 时不携带（warnings 会报告）。
-- reasoning effort、presence/frequency penalty、provider options 等协议特有字段不在 IR 中，转换时丢失；`UnsupportedFields` 可列出源 body 中 IR 不携带的顶层键。
+- reasoning effort、presence/frequency penalty、provider options 等协议特有字段不在 IR 中，转换时丢失；`UnsupportedFields` 可列出源 body 中 IR 不携带的顶层键。请求侧 warnings 由 `ConvertRequest` 统一计算（顶层未携带字段 + `top_k` 特例），热路径已写入 cassette 的 `protocol_conversion` 事件；响应侧 warnings 以 `protocol_conversion_response` 事件写入。
+- **多模态/不透明块直接拒绝**：`image_url`/`input_audio`/`file`/`inlineData`/`thinking`/`redacted_thinking`/`encrypted_content`/`thoughtSignature`/Gemini `functionCall` 等在 IR 中无忠实表示，`ConvertRequest` 返回错误并走快速失败，绝不静默损坏为文本。需要这些形态时只能用原生直通上游。
+- 压缩请求体（`Content-Encoding: gzip` 等）不可转换；`/v1/messages/count_tokens` 不可转换；Gemini `?alt=sse` 不可转换（路由按 `URL.Path` 判断，看不见 query，代理侧单独拦截）。
 
 ## 热路径接入
 
 转发热路径在配置 `router.selection.protocol_conversion: true` 时启用转换，默认关闭（关闭时行为与引入转换前完全一致）。启用后：
 
-- 路由选路（`internal/router`）把 `PlanForRequest` 纳入候选判定：原生直通仍优先；只有上游不支持客户端协议、且请求非流式时，转换候选才入选。转换候选在成本比较中带 2 倍惩罚（`conversionCostPenaltyFactor`），原生候选在成本接近时优先。流式请求永远不转换（聚合式流转换会破坏增量交付），需要原生直通上游。
-- 代理（`internal/proxy`）在选路后转换请求 body 并改写上游路径（`RequestPath`），响应回来先转回客户端协议再写出；转换失败按候选失败处理，试下一个候选（可能原生直通），不会把错误协议的字节发给客户端。
-- 错误响应（非 2xx）与空 body 的成功响应不转换，原样透传：错误 body 是 provider 特有的诊断，经 IR 会变成空壳；空 body 没有可翻译的内容。响应转换是全量缓冲，上限与请求体上限一致（默认 64MiB），超限时该候选失败并重试下一个。
-- 录制不变：cassette 记录客户端可见的原始请求与转换后的响应（即客户端实际看到的字节），V3 格式不变；转换在 cassette 中以 `protocol_conversion` 事件记录（含协议对与 warnings 字段）。
+- 路由选路（`internal/router`）把 `PlanForRequest` 纳入候选判定：原生直通仍优先；只有上游不支持客户端协议、且请求非流式时，转换候选才入选。转换候选在成本比较中带 2 倍惩罚（`conversionCostPenaltyFactor`），原生候选在成本接近时优先。流式请求永远不转换（聚合式流转换会破坏增量交付），需要原生直通上游。本地 Responses runtime 的 chat 后端判定用 `HasSelectableNativeCandidateWithBody`（原生-only），转换候选不当后端——该 runtime 只会原样转发 Chat 字节。
+- 代理（`internal/proxy`）在选路后转换请求 body 并改写上游路径（`RequestPath`），并按目标协议修正头（Anthropic `anthropic-version` 补/隔离、`anthropic-beta` 隔离、Gemini `?key=` 转 `x-goog-api-key`、`Content-Type: application/json`）；响应回来先转回客户端协议再写出（同步改 `Content-Type/Content-Length`）；转换失败**快速失败**：只试本轮剩余候选（可能原生直通），不烧重试预算、不开新轮次，坏请求不再空转 30 秒。不会把错误协议的字节发给客户端。
+- 错误响应（非 2xx）与空 body 的成功响应不转换，原样透传：错误 body 是 provider 特有的诊断，经 IR 会变成空壳；空 body 没有可翻译的内容。响应转换是全量缓冲，上限与请求体上限一致（默认 64MiB），超限时按转换失败走快速失败。
+- 录制不变：cassette 记录客户端可见的原始请求与转换后的响应（即客户端实际看到的字节），V3 格式不变；转换在 cassette 中以 `protocol_conversion` 事件记录（含协议对与请求侧 warnings 字段），响应侧 warnings 以 `protocol_conversion_response` 事件记录。
 - 转换顺序：先转换、再做 secret masking（掩码作用于实际上游的字节）；响应侧先转换、再做 stand-in 还原。
 
 `PlanForRequest` 的流式拦截是正确性护栏，不是功能缺失：流式转换需要逐帧翻译器（桥接包的 `StreamDecoder/StreamEncoder` 形态），聚合式重编码不能满足"增量交付"这一正确性要求，在实现逐帧翻译前不启用。

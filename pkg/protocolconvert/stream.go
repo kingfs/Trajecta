@@ -19,6 +19,15 @@ import (
 // in its own protocol, which is what a converted call needs.
 func ConvertStreamResponse(body []byte, from Protocol, to Protocol, model string, vertex bool) (Result, error) {
 	from, to = canonical(from), canonical(to)
+	if !from.Valid() || !to.Valid() {
+		return Result{}, fmt.Errorf("protocolconvert: invalid protocol pair %q -> %q", from, to)
+	}
+	// Same-protocol: byte passthrough, consistent with ConvertRequest /
+	// ConvertResponse. Aggregating and re-encoding would destroy the
+	// original SSE framing for no reason.
+	if from == to {
+		return Result{Body: append([]byte(nil), body...), From: from, To: to}, nil
+	}
 	parsed, err := llm.ParseStreamResponse(ProviderFor(from, vertex), from.Endpoint(), body)
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: parse %s stream: %w", from, err)

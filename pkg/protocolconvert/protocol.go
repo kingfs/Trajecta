@@ -27,6 +27,7 @@ package protocolconvert
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/kingfs/Trajecta/pkg/llm"
@@ -133,12 +134,20 @@ func ProviderFor(p Protocol, vertex bool) string {
 // classification happens from the request head only.
 func DetectFromPath(rawPath string) (Protocol, error) {
 	endpoint := llm.NormalizeEndpoint(rawPath)
+	// count_tokens has a different response shape ({input_tokens}) and
+	// different semantics from a generation request. Mapping it to
+	// ProtocolMessages would send it to /v1/messages as a real generation.
+	// It must stay on the native path (or the proxy's synthetic fallback),
+	// never through conversion.
+	if endpoint == "/v1/messages/count_tokens" {
+		return "", fmt.Errorf("protocolconvert: count_tokens endpoint %q is not convertible", rawPath)
+	}
 	switch endpoint {
 	case "/v1/chat/completions":
 		return ProtocolChatCompletions, nil
 	case "/v1/responses":
 		return ProtocolResponses, nil
-	case "/v1/messages", "/v1/messages/count_tokens":
+	case "/v1/messages":
 		return ProtocolMessages, nil
 	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent",
 		"/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
@@ -161,16 +170,21 @@ func (p Protocol) RequestPath(model string, stream bool, vertex bool) string {
 	case ProtocolMessages:
 		return "/v1/messages"
 	case ProtocolGemini:
+		// The model travels in the path; escape it so a model name
+		// containing ":" or "/" cannot break the :generateContent suffix
+		// or inject path segments. Publishers/projects prefixes are owned
+		// by the caller's BaseURL, not by this function.
+		escaped := url.PathEscape(model)
 		if vertex {
 			if stream {
-				return "/v1/publishers/models/" + model + ":streamGenerateContent"
+				return "/v1/publishers/models/" + escaped + ":streamGenerateContent"
 			}
-			return "/v1/publishers/models/" + model + ":generateContent"
+			return "/v1/publishers/models/" + escaped + ":generateContent"
 		}
 		if stream {
-			return "/v1beta/models/" + model + ":streamGenerateContent"
+			return "/v1beta/models/" + escaped + ":streamGenerateContent"
 		}
-		return "/v1beta/models/" + model + ":generateContent"
+		return "/v1beta/models/" + escaped + ":generateContent"
 	}
 	return ""
 }

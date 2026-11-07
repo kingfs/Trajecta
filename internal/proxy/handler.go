@@ -1047,10 +1047,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if convErr != nil {
-			// A request we cannot translate never reaches the upstream; fail
-			// this candidate exactly like a network error and try the next
-			// one, which may serve the client protocol natively.
-			slog.Warn("Protocol conversion failed, will retry with next candidate",
+			// A request we cannot translate is deterministic: every other
+			// converting candidate will fail it the same way. Only a native
+			// passthrough candidate (which needs no conversion at all) could
+			// rescue it. Try the remaining candidates of this round, but do
+			// NOT burn the retry budget (backoff + new selection round): a
+			// malformed/compressed/multimodal body must fail fast, not spin
+			// for the full upstream retry budget.
+			slog.Warn("Protocol conversion failed, will try remaining candidates without retry budget",
 				"upstream_id", selection.Target.ID,
 				"model", selection.Request.ModelName,
 				"error", convErr,
@@ -1063,18 +1067,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), false))
 			if len(triedIDs) >= roundCandidateCount {
-				delay := retryDelay(retryAttempt, nil, retryDeadline)
-				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, 0, convErr.Error(), true))
-				if !sleepBeforeRetry(r.Context(), delay) {
-					if r.Context().Err() != nil {
-						return
-					}
-					break
-				}
-				retryAttempt++
-				triedIDs = nil
-				_, _ = h.router.RefreshNow()
-				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), true))
+				break // exhausted this round: report now, do not start a new round
 			}
 			continue
 		}
@@ -1155,7 +1148,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequestWithPath(r, selection.Target, sendBodyBytes, sendPathOverride)
+		resp, reqErr := h.sendUpstreamRequestWithPath(r, selection.Target, sendBodyBytes, sendPathOverride, conversion)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()
@@ -1254,6 +1247,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if conversion != nil {
 			convertedResp, convErr := conversion.convertResponseBody(resp, h.maxRequestBodyBytes())
 			if convErr != nil {
+				// Same rule as the request side: an untranslatable response
+				// is deterministic, not a candidate-specific transient.
+				// Try remaining candidates of this round; never burn the
+				// retry budget on it.
 				logInfo.Header.Meta.Error = convErr.Error()
 				resp.Body.Close()
 				lastErr = convErr
@@ -1265,23 +1262,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 				retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, convErr.Error(), false))
 				h.closeLogFile(logInfo)
+				logInfo = nil
 				if len(triedIDs) >= roundCandidateCount {
-					delay := retryDelay(retryAttempt, nil, retryDeadline)
-					retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, resp.StatusCode, convErr.Error(), true))
-					if !sleepBeforeRetry(r.Context(), delay) {
-						if r.Context().Err() != nil {
-							return
-						}
-						break
-					}
-					retryAttempt++
-					triedIDs = nil
-					_, _ = h.router.RefreshNow()
-					retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, resp.StatusCode, convErr.Error(), true))
+					break
 				}
 				continue
 			}
 			resp = convertedResp
+			if len(conversion.responseWarnings) > 0 {
+				logInfo.Events = append(logInfo.Events, responseConversionEvent(conversion, start))
+			}
 		}
 
 		// 成功 —— 将上游响应写入客户端
@@ -1546,7 +1536,11 @@ func (h *Handler) responsesChatBackendAvailable(r *http.Request, bodyBytes []byt
 	chatReq.URL.Path = "/v1/chat/completions"
 	chatReq.URL.RawPath = ""
 	chatReq.RequestURI = chatReq.URL.RequestURI()
-	return h.router.HasSelectableCandidateWithBody(chatReq, bodyBytes)
+	// Native-only: the local Responses runtime forwards a Chat Completions
+	// body verbatim and never converts. A target that could only serve
+	// it through protocol conversion would receive Chat JSON on a
+	// Messages/Gemini surface and 404/400. (See HasSelectableNative...).
+	return h.router.HasSelectableNativeCandidateWithBody(chatReq, bodyBytes)
 }
 
 func sleepBeforeRetry(ctx context.Context, delay time.Duration) bool {
@@ -2254,7 +2248,7 @@ func releaseRetryWaitSlot() {
 // discards the Body), applies the director logic (URL rewrite, auth headers), and returns
 // the upstream response. The caller is responsible for closing resp.Body.
 func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Target, bodyBytes []byte) (*http.Response, error) {
-	return h.sendUpstreamRequestWithPath(original, target, bodyBytes, "")
+	return h.sendUpstreamRequestWithPath(original, target, bodyBytes, "", nil)
 }
 
 // sendUpstreamRequestWithPath is sendUpstreamRequest with an explicit
@@ -2262,7 +2256,9 @@ func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Tar
 // different protocol surface. The client query string is not carried over
 // for converted requests: query options belong to the client protocol.
 // An empty pathOverride preserves the passthrough behaviour exactly.
-func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *router.Target, bodyBytes []byte, pathOverride string) (*http.Response, error) {
+// conv, when non-nil, carries the target protocol so protocol-scoped
+// headers can be fixed up (Anthropic version/beta, Gemini API key).
+func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *router.Target, bodyBytes []byte, pathOverride string, conv *protocolConversion) (*http.Response, error) {
 	clientPath := original.URL.Path
 	if original.URL.RawQuery != "" {
 		clientPath += "?" + original.URL.RawQuery
@@ -2296,6 +2292,9 @@ func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *ro
 		for _, val := range vals {
 			outreq.Header.Add(key, val)
 		}
+	}
+	if conv != nil && pathOverride != "" {
+		applyConvertedHeaders(outreq, original, conv)
 	}
 
 	target.Upstream.ApplyAuthHeaders(outreq.Header)

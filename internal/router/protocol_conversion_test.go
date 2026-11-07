@@ -85,3 +85,26 @@ func TestPickScorePenalizesConversionCandidates(t *testing.T) {
 		t.Error("pick should prefer the native chat target over the anthropic (convert) target at equal cost")
 	}
 }
+
+// TestLocalResponsesBackendIgnoresConversionTargets pins P0-1: the local
+// Responses runtime forwards a Chat body verbatim and never converts, so a
+// Messages-only target must not count as its chat backend even when
+// protocol conversion is enabled.
+func TestLocalResponsesBackendIgnoresConversionTargets(t *testing.T) {
+	anthropicTarget := &Target{Upstream: upstream.ResolvedUpstream{
+		ProtocolFamily: upstream.ProtocolFamilyAnthropicMessages,
+		APIType:        upstream.APITypeMessages,
+	}}
+	r := &Router{policy: PolicyFirstAvailable, costs: defaultCostConfig(), conversionEnabled: true}
+	features := RequestFeatures{ModelName: "m"}
+	// Conversion-aware eligibility: chat on an Anthropic target is eligible
+	// only through conversion.
+	if !r.supportsPathWithConversion(anthropicTarget, "/v1/chat/completions", features, true) {
+		t.Fatal("conversion-aware check should find the anthropic target eligible via conversion")
+	}
+	// The local Responses runtime check (native-only) must not: it speaks
+	// Chat natively or not at all.
+	if r.supportsPathWithConversion(anthropicTarget, "/v1/chat/completions", features, false) {
+		t.Fatal("native-only check must not count the anthropic target as a local Responses chat backend")
+	}
+}
