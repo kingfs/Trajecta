@@ -1,20 +1,19 @@
 # 路由、渠道与凭据
 
 本文描述当前代码事实下的渠道（provider）配置、模型与别名管理、路由选择、凭据路由与 limit scope。
-渠道配置的长期归属是应用数据库，YAML 只承担启动配置与首次 bootstrap。
+渠道配置只属于应用数据库；YAML 不再接受 `upstream` / `upstreams`，加载到这两个键会直接报错并提示去 Monitor 配置。
 相关主题见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[PROTOCOLS_AND_PROVIDERS.md](./PROTOCOLS_AND_PROVIDERS.md)、[RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)、[MONITOR_GUIDE.md](./MONITOR_GUIDE.md)、[MCP_GUIDE.md](./MCP_GUIDE.md) 与 [STORAGE_AND_DEPLOYMENT.md](./STORAGE_AND_DEPLOYMENT.md)。
 
 ## 配置来源与所有权
 
-- YAML 的 `upstreams`（或 legacy 单 `upstream`）只在数据库尚无渠道时导入。
-  `channel.Service.BootstrapFromConfig` 把 target 写入 `channel_configs` / `channel_models`，导入渠道的 `source` 记为 `bootstrap`；Monitor 中创建的渠道 `source` 为 `manual`。
-- 导入使用稳定 ID：YAML 显式 `id` 优先；未显式 `id` 时，列表第一条（`idx == 0`，因此也包括 legacy 单 `upstream`）且 `base_url` 非空者取 `default`；其余由 provider preset 与 `base_url` 的 host 拼成 slug，slug 仍为空时回落到 `upstream-<n>`。
-- 第一次数据库写入（bootstrap 导入或任意管理写）会在应用库 `app_settings` 写入 `channels.initialized`。
+- 启动只为数据库中的渠道构建 `RuntimeTargets`；没有任何 YAML 导入步骤。
+  所有渠道、渠道模型与别名都由 Monitor 的渠道管理 API 写入 `channel_configs` / `channel_models` / `model_aliases`；`channel.Service.RuntimeTargets` 是唯一的运行时投影。
+- 渠道 ID 由 Monitor 创建时给定；同一数据库内唯一。
+- 第一次管理写会在应用库 `app_settings` 写入 `channels.initialized`。
   此后数据库拥有路由配置，即使所有渠道都被禁用或删除。
 - `GET /api/settings/channels` 返回 `{"initialized": <bool>}`；`DELETE /api/settings/channels` 在 `ConfigurationTransaction` 内清除该标记。
-  仅当数据库仍然没有任何渠道时，下一次启动才会重新执行 YAML bootstrap。
-- 带显式 `credentials` 列表的 YAML 渠道保持 YAML 管理：`cmd/server/serve.go` 检测到显式 credentials 时以 `WithReadOnly(true)` 构造 channel service，所有 Monitor 渠道/模型/别名写路径返回 `409` 与 `upstreams are managed by YAML credentials; edit YAML and restart instead`。
-  `BootstrapFromConfig` 也会跳过含显式 credentials 的配置，不把其导入数据库。
+  该标记只用于 `GET /api/settings/channels` 报告“是否已有配置”；启动时不再导入 YAML，清掉标记也不会重新生成渠道。
+- 不存在 YAML 只读模式：channel service 没有 `ReadOnly` 状态，Monitor 的渠道/模型/别名写路径始终走数据库事务。
 - 环境变量只用于启动与本地部署覆盖，不是长期的渠道/模型管理面。
 
 ## 数据模型
@@ -26,8 +25,7 @@
 - `model_catalog`：按模型保存展示元信息（`display_name`、`family`、`vendor`、`description`、标签、首末出现时间），它不是路由事实来源；可路由性由 `channel_models.enabled` 与 router 内存快照决定。
 - `channel_probe_runs`：探测历史（状态、耗时、发现/启用数量、endpoint、`status_code`、错误文本、`request_meta_json`、`response_sample_json`）。
 - `upstream_targets` / `upstream_models`：旧的运行时快照与兼容投影。配置事务与后台 refresh **不再写入**（router 只维护内存快照）；保留这两张表是为了兼容旧库、旧页面回退读与 `trajecta upgrade` 的漂移校验，新代码不再以它们作为路由或授权输入。
-- 凭据：YAML `credentials[]` 的字段是 `id`、`name`、`enabled`、`api_key`、`headers`、`concurrency_limit`。
-  未配置显式 credentials 时，inline `upstream.api_key` 被视为一个隐式 credential（见下）。
+- 凭据：每个渠道的 API key 在数据库中以加密形式保存（`channel_configs.api_key_ciphertext`），Monitor 只显示 hint；没有 YAML credentials 列表。
 
 SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` 中的版本化迁移（例如 `20260629192000_add_model_aliases.up.sql` 与配对的 `.down.sql`；`model_aliases` 没有 ent schema，只存在于 SQL 迁移里）。
 
@@ -40,7 +38,7 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 - Monitor 侧由 `configurationAPIHandler` 统一包装：GET/HEAD 与 `/validate` 直接执行；其它方法先检查 `svc.ReadOnly()`，只读时返回 409；否则在事务内以 `txService`/`txStore` 执行原 handler，把响应缓冲到 `configurationResponse`。
 - handler 返回错误状态时事务回滚；唯一例外是 `/probe` 返回 `502` 且结果为 `failed`，此时提交事务以保留诊断记录，但不会改动路由。
 - 写成功后依次执行 `MarkConfigurationInitialized`、`txService.RuntimeTargets()`，再以 `rtr.ReloadWithCommit(targets, tx, commit)` 在提交前构建新快照。提交成功后才对外发布路由；失败则保留旧快照。
-- `RuntimeTargets` 只包含 `enabled = true` 的渠道：`StaticModels` = 该渠道已启用模型加上可在该渠道展开的启用别名，`DisabledModels` 记录被禁用的模型，`ConfiguredModelsOnly` 为 `true`；headers、capabilities、`model_capabilities` 与 API key 只在内存中交给 router/proxy。
+- `RuntimeTargets` 只包含 `enabled = true` 的渠道：`StaticModels` = 该渠道已启用模型加上可在该渠道展开的启用别名，`DisabledModels` 记录被禁用的模型，`ConfiguredModelsOnly` 为 `true`；headers、capabilities、`model_capabilities`、API key 与渠道级 proxy 策略只在内存中交给 router/proxy。渠道代理来自 `channel_configs.proxy_json`，在 `upstream.Resolve` 时编译为 `ResolvedUpstream.Proxy`；关闭时该渠道跟随系统策略。
 - reload 按 target ID 继承既有运行时状态（EWMA/health），锁顺序固定为 `configMu → upstreamMu → reloadMu → r.mu`。
 - 后台 upstream refresh 以 best-effort 方式持久化：`LockUpstreamWrites` 阻塞等待，`TryLockUpstreamWrites` 在配置变更持锁时直接跳过写库。
 
@@ -106,7 +104,7 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 
 - 新发现模型的默认启用状态由 `enable_discovered` 决定，缺省为 `false`；重复探测只刷新 `last_seen_at` / `last_probe_at`，不会覆盖操作者的启用状态或已采纳的模型 profile。
 - `upstream_models` 只在探测成功时整体替换；router 不再改写它。
-- 探测结果会返回 `added_count` / `removed_count`：新增是本次首次出现的模型，移除是非操作者声明（`manual` 或 YAML `static_models` 导入的 `static`）且本次未再返回的 `discovered` 行；失败探测不改变快照。
+- 探测结果会返回 `added_count` / `removed_count`：新增是本次首次出现的模型，移除是非操作者声明（`manual` 或 `static`）且本次未再返回的 `discovered` 行；失败探测不改变快照。
 - 探测失败不会自动禁用渠道；失败会写入 `channel_probe_runs`，并在 `request_meta_json` 中记录分类与重试建议：`auth_error`、`not_found`、`invalid_json`、`network_error`、`rate_limited`、`upstream_error`、`configuration_error`、`probe_error`。
 - `POST /api/provider-probe/report/apply` 只对 `detected` 的结果生效，且只填补缺失字段（`no missing fields to apply`）；应用了字段才触发 router reload。
 - provider probe 只判断「路由是否存在」：它给 `/v1/responses` 发的是空 body，很多 provider 会回 `400 missing model`，这个 400 被算作 endpoint 存在，却**不能证明某个模型在该 endpoint 上可用**。因此 route-only probe 不再自动把 `capabilities.responses` 写给 Chat Completions 渠道：只有渠道 `api_type` 为 `responses` / `responses_native`，或 probe 根本没有发现 `chat_completions` surface（此时 responses 只能表示原生 API）时才应用该 capability；其余情况由模型级 `supports_responses` 覆盖或按模型连通性测试实测决定。
@@ -124,13 +122,13 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 - 各档策略的完整语义与本地 runtime 执行细节见 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)；本节只记录路由决策侧的事实。
 - `/v1/responses` 的 native/local 判定由 `routeplan.DecideResponses` 统一实现，代理与 Inspector 都调用它：native 可选中则直通；native 存在但本请求不可选时直接拒绝并说明原因；否则在有本地 runtime 且存在 Chat Completions backend 时走 `responses_server`。Inspector 的候选来自同一次 dry-run selection，因此不会再出现「routeplan 列出本地 fallback、热路径却拒绝」的候选序列差异。
 - `POST /api/routing/inspect` 的每个 candidate 都带过滤原因（`selected`、`model_not_matched`、`requires_chat_completions`、`requires_responses`、`requires_anthropic_messages`、`requires_tool_calling`、`no_route_candidate` 等），由 router 的真实 candidate 决策映射而来；候选的可服务性由 `upstream.ResolvedUpstream.SupportsRawPath` 判定（协议族、API surface 与 adapter 三者同时满足），与转发热路径共用同一个实现，因此 `api_type` 留空、由 provider preset 决定协议族的渠道不会被误判成 Chat Completions 渠道。V3 cassette 的 `routing.route_plan` 事件由 router 生成，其 `candidate_summary[].filter_reason` 取值为 `unsupported_path`、`unsupported_model`、`unsupported_tools`、`native_responses_required`（标记为 pass-through 的 `/v1/responses` 只接受原生 Responses target：该 target 能通过本地 runtime 服务同一路径，但无法不改写地接收请求）、`target_open`、`target_probation_full`、`model_open`、`model_probation_full`、`excluded`（选中项为空；空字符串表示未被过滤），失败原因写在 `failure_reason`。
-- native-vs-local 按模型解析：`channel_models.supports_responses` / `supports_chat_completions` 的显式值覆盖渠道级 `api_type` / `capabilities`，未声明则回退渠道级；YAML 等价项是 `upstream.model_capabilities`。**native 直通需要显式声明**：模型的 `supports_responses` 显式为 true，或渠道 `api_type` 为 `responses` / `responses_native`；渠道级 `capabilities.responses=true` 本身只表示 `/v1/responses` 可由本地 runtime 翻译，不再被当成原生 Responses 的证据（只有渠道显式 `chat_completions: false`、没有本地 runtime backend 时才把 responses capability 解释为原生）。
-- 负载均衡策略取自 router 配置 `router.selection.policy`：`p2c`（默认）或 `first_available`；缺失模型没有回退开关（见下一节的严格授权）；上游模型发现由每个 target 的 `model_discovery` 控制：`list_models`（默认）、`static_only`、`disabled`。这三个值在加载时校验：`config.Load` 遇到无法识别的取值会直接失败并列出可选值（与 `limits.scope` 相同）；数值字段同样在加载时校验有限性——YAML 的 `.nan`/`.inf`/`-.inf` 会被 `validateFiniteNumbers` 直接拒绝并报出字段路径（如 `upstreams[0].weight`），因为非有限数不会被 `x < 0 || x > 1` 这类区间判断拦住，也不会命中 router 的「非正数=默认」约定（`NaN <= 0` 为假），它会一路进入打分：`weight`/`capacity_hint` 是预期成本的除数，NaN 成本会让成本比较失去全序（该 target 对任何候选都比较为「更优」）并让 Monitor 的快照无法序列化（`json: unsupported value: NaN`）；router 侧 `defaultFloat` 也把非有限值按默认值处理，防止这类值从存储行或旧库导入进入热路径，因为 router 侧对未知取值是「回落到默认」而非报错——`policy: first-availble` 会静默选中 `p2c`，`model_discovery: static` 会静默变回 `list_models`。空值仍然合法，表示使用默认。候选在打分前先按健康/退避过滤（`router.selection.open_window` 默认 15s、`selection.failure_threshold` 默认 3，以及 EWMA 驱动的 degraded/probation/open 状态；对应 `filter_reason` 为 `target_open`、`target_probation_full`、`model_open`、`model_probation_full`），再按 EWMA 成本与 priority/weight/capacity 打分。成本打分读取的请求特征是：`EstPromptTokens`（按请求体字节数估算）、输出上限 `MaxTokens`（依次取 `max_output_tokens`、`max_completion_tokens`、`max_tokens`，Google generateContent 族取 `generationConfig.maxOutputTokens`，都缺省时用 512）、以及流式标志 `Stream`（OpenAI/Anthropic 取请求体的 `stream`，Google 取请求行里的 `:streamGenerateContent`——与 `upstream.BuildURL` 添加 `alt=sse` 用的是同一个信号）。
+- native-vs-local 按模型解析：`channel_models.supports_responses` / `supports_chat_completions` 的显式值覆盖渠道级 `api_type` / `capabilities`，未声明则回退渠道级；数据库对应表为 `channel_models.supports_*`。**native 直通需要显式声明**：模型的 `supports_responses` 显式为 true，或渠道 `api_type` 为 `responses` / `responses_native`；渠道级 `capabilities.responses=true` 本身只表示 `/v1/responses` 可由本地 runtime 翻译，不再被当成原生 Responses 的证据（只有渠道显式 `chat_completions: false`、没有本地 runtime backend 时才把 responses capability 解释为原生）。
+- 负载均衡策略取自 router 配置 `router.selection.policy`：`p2c`（默认）或 `first_available`；缺失模型没有回退开关（见下一节的严格授权）；上游模型发现由每个 target 的 `model_discovery` 控制：`list_models`（默认）、`static_only`、`disabled`。`router.selection.policy` 在 `config.Load` 时校验，无法识别的取值会直接失败并列出可选值（与 `limits.scope` 相同）；数值字段同样在加载时校验有限性——YAML 的 `.nan`/`.inf`/`-.inf` 会被 `validateFiniteNumbers` 直接拒绝并报出字段路径（如 `router.selection.epsilon`）。数据库渠道的 `weight`/`capacity_hint` 由 router 的 `defaultFloat` 把非有限值按默认值处理，防止存储行进入热路径。空值仍然合法，表示使用默认。候选在打分前先按健康/退避过滤（`router.selection.open_window` 默认 15s、`selection.failure_threshold` 默认 3，以及 EWMA 驱动的 degraded/probation/open 状态；对应 `filter_reason` 为 `target_open`、`target_probation_full`、`model_open`、`model_probation_full`），再按 EWMA 成本与 priority/weight/capacity 打分。成本打分读取的请求特征是：`EstPromptTokens`（按请求体字节数估算）、输出上限 `MaxTokens`（依次取 `max_output_tokens`、`max_completion_tokens`、`max_tokens`，Google generateContent 族取 `generationConfig.maxOutputTokens`，都缺省时用 512）、以及流式标志 `Stream`（OpenAI/Anthropic 取请求体的 `stream`，Google 取请求行里的 `:streamGenerateContent`——与 `upstream.BuildURL` 添加 `alt=sse` 用的是同一个信号）。
 - 模型授权是严格的：路由只使用 `channel_models` 中**已启用**且**当前可路由**的行，加上该行的 `upstream_model` 线上名。没有任何「允许未知模型」开关。
-  - 模型状态（`internal/channel/service.go` 的 `ModelAvailability`）：`enabled`（已启用且最近一次成功同步仍返回它）、`disabled`（操作者关闭）、`removed`（最近一次成功同步不再返回它，操作者的开关保留但不参与路由）、`unverified`（操作者声明的模型——手动添加或 YAML `static_models` 导入的 `static` 行——或渠道从未成功同步过；可路由但标记未验证）。`channel.last_probe_at` 只在成功探测时推进，失败的同步不会把任何模型标成 `removed`，也不会把已判定的模型翻成 `unverified`，上一次成功快照继续生效。升级注意：旧版本把失败探测的时间也写进 `channel_configs.last_probe_at`，这类库里的 `discovered` 模型可能暂时被判成 `removed`，直到一次成功同步重新锚定（重启不会修复，Monitor 的 探测/同步模型 可以）；`manual`/YAML `static_models` 模型不受影响。
+  - 模型状态（`internal/channel/service.go` 的 `ModelAvailability`）：`enabled`（已启用且最近一次成功同步仍返回它）、`disabled`（操作者关闭）、`removed`（最近一次成功同步不再返回它，操作者的开关保留但不参与路由）、`unverified`（操作者声明的模型——手动添加的 `static` 行——或渠道从未成功同步过；可路由但标记未验证）。`channel.last_probe_at` 只在成功探测时推进，失败的同步不会把任何模型标成 `removed`，也不会把已判定的模型翻成 `unverified`，上一次成功快照继续生效。升级注意：旧版本把失败探测的时间也写进 `channel_configs.last_probe_at`，这类库里的 `discovered` 模型可能暂时被判成 `removed`，直到一次成功同步重新锚定（重启不会修复，Monitor 的 探测/同步模型 可以）；`manual`/`static` 模型不受影响。
   - 未开启或未声明的模型由代理直接回答 **404**：`model_not_enabled`（在某个渠道声明过但不可路由，提示去供应商页开启/重新同步）或 `model_unknown`（没有渠道声明过，提示同步模型）；不会发往任何上游，也不会被包装成 502 `upstream_error`。
   - `/v1/models` 聚合列表只包含 `enabled` 与 `unverified` 的模型；`upstream_model` 线上名可路由但不出现在列表里。
-  - YAML 的遗留单 `upstream:` 形态（`upstreams` 为空、只有 `upstream.base_url`）没有可声明的模型清单，因此保留历史行为：未声明的模型名原样转发，启动时会打印一条警告。数据库渠道与 `upstreams[]` 永远不会走这条兼容路径；要在 YAML 下获得严格授权，使用 `upstreams[].static_models`。
+  - 数据库渠道一律严格：只服务 `channel_models` 中启用的模型及其 `upstream_model` wire name。仅 `internal/router` 的内存单 upstream 投影（`Config.Upstream`，不再来自 YAML）保留未声明模型透传，供本地测试与旧调用方使用；生产启动始终由 `RuntimeTargets` 生成带 `ConfiguredModelsOnly` 的数据库目标。
 - 别名在 proxy 侧改写上游请求体 `model`：`Target.ResolveModelAlias` 命中时把下游模型名替换为 `target_model`，route plan event 同时记录 `requested_model` 与 `upstream_model`。
 
 ## Sticky Route Target
@@ -144,9 +142,7 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 ## 凭据与隐式 default credential
 
 - 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、`api_key` 覆盖与 route target 身份。`credentials[].headers` 目前只被 CLI `trajecta provider probe` 读取，router/proxy 不合并它。
-- 配置了显式 `credentials` 时，每个 credential 展开成一个独立 route target（`<channel_id>:<credential_id>`）；credential 的 `api_key` 覆盖 target 的 resolved key，`credential_id` 缺省由 `name` 生成 slug，再缺省为 `credential-N`。
-- 没有显式 `credentials` 且 `upstream.api_key` 非空时，该 inline key 被视为隐式 credential：`credential_id = default`、`route_target_id = <channel_id>:default`。
-- 没有显式 credentials 也没有 inline key 时，渠道仍会产生一个 route target，其 credential id 为 `default`。
+- 每个数据库渠道展开为一个 route target（`route_target_id = <channel_id>:default`）；渠道 API key 直接从数据库解密后使用。
 - `api_key` 应引用环境变量（例如 `$env:OPENAI_PRIMARY_API_KEY`），`id` 要稳定，因为它进入 route target identity 并可能出现在 cassette metadata 中。
 - `credentials[].enabled: false` 表示该 credential 不参与路由：router 在展开 route target 时跳过它（与 CLI `trajecta provider probe` 选探测凭据时的规则一致）。若某个渠道声明的 credentials 全部被禁用，该渠道不产生任何 route target，`New()` 会以 `no enabled upstream targets configured` 失败，而**不会**回退到渠道级 `upstream.api_key`——否则被关掉的 key 会继续发流量。跳过的 credential 不会改变其余 credential 的索引，因此由索引生成的 `credential-N` 与 route target ID 保持稳定。
 - `credentials[].concurrency_limit` 目前只是配置字段，没有运行时消费者；实际并发限制由下方 limit scope 统一处理。
@@ -210,7 +206,7 @@ CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe
 - 没有 `POST /api/router/reload`，也无需手动 reload：管理写成功即自动发布新快照。
 - 没有 `POST /api/channels/{id}/enable`、`/disable` 与 `models:bulk-update`；启停走 `PATCH`，批量启停走 `PATCH /api/channels/{id}/models/batch`。
 - 没有 `GET /api/models/{model}/channels`、`GET /api/models/{model}/trends`、`GET /api/channels/{id}/trends`；覆盖与趋势在模型详情与渠道详情响应内返回。
-- `selection_policy`、`route_plan_log_level` 会被持久化与校验，但当前没有作用于运行中的 router；运行时策略来自 YAML `router.selection.policy`。`missing_model_policy` 已随「允许未知模型」一起移除。
+- `selection_policy`、`route_plan_log_level` 会被持久化与校验，但当前没有作用于运行中的 router；运行时策略来自 `app_settings` 的 `routing.settings`。`missing_model_policy` 已随「允许未知模型」一起移除。
 - `credentials[].concurrency_limit` 没有运行时消费者。
 - 没有 `unsupported_entrypoint`、`unsupported_responses_strategy`、`channel_not_enabled`、`requires_local_responses_runtime`、`strategy_disallows_native_responses`、`strategy_disallows_chat_fallback` 这些候选原因：`internal/routeplan` 已删除这六个没有生产者的常量（并有包测试防止再声明死值），inspect 只输出 `router.Explain` 真实会产出的 reason；未知 `responses_strategy` 按 `auto` 处理。
 - 没有独立的 `route_decisions` 表；路由决策以 V3 cassette event 与日志字段形式保存。

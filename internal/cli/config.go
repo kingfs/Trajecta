@@ -24,6 +24,7 @@ const (
 	configSourceEmpty         = "empty"
 	configSourceDerived       = "derived"
 	configSourceNotConfigured = "not_configured"
+	configSourceDatabase      = "database"
 )
 
 type configInspectOptions struct {
@@ -130,8 +131,7 @@ type configInspectMCPToolServer struct {
 }
 
 type configInspectProviderProbe struct {
-	StartupFill bool   `json:"startup_fill"`
-	Timeout     string `json:"timeout"`
+	Timeout string `json:"timeout"`
 }
 
 type configInspectUpstreams struct {
@@ -333,12 +333,8 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			MCP: inspectMCPTools(mcpTools),
 		},
 		ProviderProbe: configInspectProviderProbe{
-			StartupFill: cfg.ProviderProbeStartupFillEnabled(),
-			Timeout:     cfg.ProviderProbeTimeout().String(),
+			Timeout: cfg.ProviderProbeTimeout().String(),
 		},
-	}
-	for _, target := range cfg.EffectiveUpstreams() {
-		result.Upstreams.Targets = append(result.Upstreams.Targets, inspectUpstreamTarget(target))
 	}
 	result.Sources = buildConfigInspectSources(configPath, cfg)
 	return result
@@ -569,43 +565,12 @@ func (p configSourceProbe) databaseDSNSource(cfg *appconfig.Config) string {
 	return configSourceDerived
 }
 
-func (p configSourceProbe) upstreamsSourceSummary(cfg *appconfig.Config) configInspectUpstreamsSourceSummary {
-	targets := configSourceNotConfigured
-	credentials := configSourceNotConfigured
-	if p.has("upstreams") {
-		targets = configSourceConfigFile
-		credentials = configSourceConfigFile
-	}
-	if p.has("upstream") && !p.has("upstreams") {
-		targets = configSourceConfigFile
-	}
-	if anyStringEnvSet(
-		"TRAJECTA_UPSTREAM_BASE_URL",
-		"TRAJECTA_UPSTREAM_API_KEY",
-		"TRAJECTA_UPSTREAM_PROVIDER_PRESET",
-		"TRAJECTA_UPSTREAM_API_TYPE",
-		"TRAJECTA_UPSTREAM_MODE",
-		"TRAJECTA_UPSTREAM_PROTOCOL_FAMILY",
-		"TRAJECTA_UPSTREAM_ROUTING_PROFILE",
-		"TRAJECTA_UPSTREAM_API_VERSION",
-		"TRAJECTA_UPSTREAM_DEPLOYMENT",
-		"TRAJECTA_UPSTREAM_PROJECT",
-		"TRAJECTA_UPSTREAM_LOCATION",
-		"TRAJECTA_UPSTREAM_MODEL_RESOURCE",
-		"TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL",
-		"TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY",
-	) {
-		targets = configSourceEffective
-	}
-	if anyStringEnvSet("TRAJECTA_UPSTREAM_API_KEY", "TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY") {
-		credentials = configSourceEffective
-	}
-	if strings.TrimSpace(cfg.Upstream.ApiKey) != "" && len(cfg.Upstreams) == 0 && credentials == configSourceNotConfigured {
-		credentials = configSourceDerived
-	}
+func (p configSourceProbe) upstreamsSourceSummary(_ *appconfig.Config) configInspectUpstreamsSourceSummary {
+	// Channels are not configuration-file state any more: they are rows in the
+	// application database, and the runtime reads them from there.
 	return configInspectUpstreamsSourceSummary{
-		Targets:     targets,
-		Credentials: credentials,
+		Targets:     configSourceDatabase,
+		Credentials: configSourceDatabase,
 	}
 }
 
@@ -638,27 +603,6 @@ func configInspectMCPPath(cfg *appconfig.Config) string {
 		return strings.TrimSpace(cfg.MCP.Path)
 	}
 	return normalized
-}
-
-func inspectUpstreamTarget(target appconfig.UpstreamTargetConfig) configInspectUpstreamTarget {
-	enabled := true
-	if target.Enabled != nil {
-		enabled = *target.Enabled
-	}
-	upstream := target.Upstream
-	return configInspectUpstreamTarget{
-		ID:               strings.TrimSpace(target.ID),
-		Enabled:          enabled,
-		BaseURL:          redactURLLike(upstream.BaseURL),
-		APIType:          strings.TrimSpace(upstream.APIType),
-		ProtocolFamily:   strings.TrimSpace(upstream.ProtocolFamily),
-		ProviderPreset:   strings.TrimSpace(upstream.ProviderPreset),
-		Mode:             strings.TrimSpace(upstream.Mode),
-		Capabilities:     upstream.Capabilities,
-		ModelDiscovery:   strings.TrimSpace(target.ModelDiscovery),
-		StaticModelCount: len(target.StaticModels),
-		CredentialCount:  len(target.EffectiveCredentials()),
-	}
 }
 
 func inspectMCPTools(cfg appconfig.MCPToolConfig) configInspectMCPTools {
@@ -803,7 +747,7 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 			len(server.DisabledTools),
 		)
 	}
-	fmt.Fprintf(w, "provider_probe: startup_fill=%t timeout=%s\n", result.ProviderProbe.StartupFill, result.ProviderProbe.Timeout)
+	fmt.Fprintf(w, "provider_probe: timeout=%s\n", result.ProviderProbe.Timeout)
 	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s responses_server.codex_compat.enabled=%s responses_server.codex_compat.auto_inject_hosted_tools=%s responses_server.codex_compat.inject_when_tools_absent=%s responses_server.codex_compat.preserve_client_tools=%s responses_server.codex_compat.default_tool_choice=%s tools.web_search.provider=%s tools.mcp.enabled=%s tools.mcp.default_timeout_ms=%s tools.mcp.max_result_bytes=%s tools.mcp.servers=%s upstreams.targets=%s upstreams.credentials=%s\n",
 		result.Sources.ConfigPath,
 		result.Sources.Server.Port,

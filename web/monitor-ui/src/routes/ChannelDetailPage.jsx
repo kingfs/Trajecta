@@ -950,6 +950,10 @@ function emptyEditForm() {
     weight: 1,
     capacity_hint: 1,
     headers_text: "",
+    proxy_enabled: false,
+    proxy_http: "",
+    proxy_https: "",
+    proxy_no_proxy: "",
   };
 }
 
@@ -972,6 +976,10 @@ function editFormFromProvider(provider = {}) {
     weight: provider.weight ?? 1,
     capacity_hint: provider.capacity_hint ?? 1,
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
+    proxy_enabled: Boolean(provider.proxy?.enabled),
+    proxy_http: provider.proxy?.http_proxy || "",
+    proxy_https: provider.proxy?.https_proxy || "",
+    proxy_no_proxy: provider.proxy?.no_proxy || "",
   };
 }
 
@@ -992,6 +1000,12 @@ function providerPayloadFromForm(form) {
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
     headers: parseHeadersText(form.headers_text),
+    proxy: {
+      enabled: Boolean(form.proxy_enabled),
+      http_proxy: String(form.proxy_http || "").trim(),
+      https_proxy: String(form.proxy_https || "").trim(),
+      no_proxy: String(form.proxy_no_proxy || "").trim(),
+    },
   };
   if (form.api_key.trim()) {
     payload.api_key = form.api_key.trim();

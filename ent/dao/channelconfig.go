@@ -53,6 +53,8 @@ type ChannelConfig struct {
 	APIKeyHint string `json:"api_key_hint,omitempty"`
 	// HeadersJSON holds the value of the "headers_json" field.
 	HeadersJSON string `json:"headers_json,omitempty"`
+	// ProxyJSON holds the value of the "proxy_json" field.
+	ProxyJSON string `json:"proxy_json,omitempty"`
 	// Enabled holds the value of the "enabled" field.
 	Enabled bool `json:"enabled,omitempty"`
 	// Priority holds the value of the "priority" field.
@@ -91,7 +93,7 @@ func (*ChannelConfig) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case channelconfig.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldAPIType, channelconfig.FieldMode, channelconfig.FieldCapabilitiesJSON, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
+		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldAPIType, channelconfig.FieldMode, channelconfig.FieldCapabilitiesJSON, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldProxyJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
 			values[i] = new(sql.NullString)
 		case channelconfig.FieldCreatedAt, channelconfig.FieldUpdatedAt, channelconfig.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -223,6 +225,12 @@ func (_m *ChannelConfig) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field headers_json", values[i])
 			} else if value.Valid {
 				_m.HeadersJSON = value.String
+			}
+		case channelconfig.FieldProxyJSON:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field proxy_json", values[i])
+			} else if value.Valid {
+				_m.ProxyJSON = value.String
 			}
 		case channelconfig.FieldEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -382,6 +390,9 @@ func (_m *ChannelConfig) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("headers_json=")
 	builder.WriteString(_m.HeadersJSON)
+	builder.WriteString(", ")
+	builder.WriteString("proxy_json=")
+	builder.WriteString(_m.ProxyJSON)
 	builder.WriteString(", ")
 	builder.WriteString("enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Enabled))

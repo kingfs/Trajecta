@@ -24,10 +24,6 @@ func configurationAPIHandler(st *store.Store, rtr *router.Router, svc *channel.S
 			return
 		}
 		svc := effectiveChannelService(st, svc)
-		if svc.ReadOnly() {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "upstreams are managed by YAML credentials; edit YAML and restart instead"})
-			return
-		}
 		response := &configurationResponse{header: make(http.Header)}
 		rejected := errors.New("configuration request rejected")
 		err := st.ConfigurationTransaction(r.Context(), func(tx *store.Store, commit func() error) error {

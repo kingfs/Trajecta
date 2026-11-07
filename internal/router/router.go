@@ -142,12 +142,11 @@ type Target struct {
 	ModelAliases         map[string]string
 	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
-	Upstream             upstream.ResolvedUpstream
-
-	// legacyPassthrough keeps the pre-`upstreams` single-upstream YAML form
-	// working: that form had no way to declare a model list, so an undeclared
-	// name is forwarded. Database-managed channels never set this.
-	legacyPassthrough bool
+	// allowUndeclaredModels is set only for the in-memory single-upstream
+	// projection (no upstreams list). Database-managed channels always declare
+	// their models and stay strict.
+	allowUndeclaredModels bool
+	Upstream              upstream.ResolvedUpstream
 
 	mu                  sync.Mutex
 	inflight            int64
@@ -417,9 +416,9 @@ func New(cfg *config.Config) (*Router, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.legacySingleUpstream(cfg) {
+	if len(cfg.Upstreams) == 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		for _, target := range targets {
-			target.legacyPassthrough = true
+			target.allowUndeclaredModels = true
 		}
 	}
 	r.targets = targets
@@ -1363,11 +1362,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		if target.configuredModelsOnly && model != "" {
 			continue
 		}
-		// The legacy single-upstream YAML form keeps its historical passthrough:
-		// it has no model list to declare, and turning it strict would break an
-		// existing deployment silently. New configuration uses `upstreams[]`,
-		// which is strict.
-		if model != "" && !target.legacyPassthrough {
+		if model != "" && !target.allowUndeclaredModels {
 			continue
 		}
 		if !supportsPath(target, rawPath, features) || !supportsRequestFeatures(target, features) {
@@ -1379,28 +1374,6 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		fallback = append(fallback, target)
 	}
 	return fallback
-}
-
-// legacySingleUpstream reports whether the configuration uses the pre-`upstreams`
-// single `upstream:` block, which has no per-target model list.
-func (r *Router) legacySingleUpstream(cfg *config.Config) bool {
-	return cfg != nil && len(cfg.Upstreams) == 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != ""
-}
-
-// LegacyPassthrough reports whether at least one target accepts undeclared model
-// names because the deployment still uses the legacy single-upstream form.
-func (r *Router) LegacyPassthrough() bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, target := range r.targets {
-		if target.legacyPassthrough {
-			return true
-		}
-	}
-	return false
 }
 
 // noCandidateFailure explains why no target can serve a named model without
@@ -1473,14 +1446,11 @@ func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 	for _, model := range target.UpstreamModelNames {
 		modelSet[strings.ToLower(model)] = struct{}{}
 	}
-	if inferred := inferConfiguredModel(target.Upstream); inferred != "" {
-		modelSet[strings.ToLower(inferred)] = struct{}{}
-	}
 
 	status := "static"
 	var discoverErr error
 	if target.ModelDiscovery != ModelDiscoveryDisabled && target.ModelDiscovery != ModelDiscoveryStaticOnly {
-		discovered, err := upstream.DiscoverModelsResolved(target.Upstream, nil)
+		discovered, err := upstream.DiscoverModelsResolved(target.Upstream, target.Upstream.HTTPClient(nil))
 		if err != nil {
 			discoverErr = err
 			status = "error"
@@ -1903,10 +1873,8 @@ func (t *Target) supportsModelLocked(model string) bool {
 	if modelKey == "" || modelKey == ModelDiscoveryListModels {
 		return true
 	}
-	if _, ok := t.models[modelKey]; ok {
-		return true
-	}
-	return t.legacyPassthrough
+	_, ok := t.models[modelKey]
+	return ok || t.allowUndeclaredModels
 }
 
 func (t *Target) onStart(req RequestFeatures) {
@@ -2272,14 +2240,6 @@ func parseNumber(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func inferConfiguredModel(resolved upstream.ResolvedUpstream) string {
-	model := llm.ModelFromPath("/" + strings.Trim(resolved.ModelResource, "/"))
-	if model != "" {
-		return model
-	}
-	return ""
 }
 
 func readAndRestoreBody(req *http.Request) ([]byte, error) {

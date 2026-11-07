@@ -511,6 +511,11 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		if !ok || selection == nil || selection.Target == nil {
 			return
 		}
+		// A channel can carry its own outbound proxy policy. The shared
+		// transport reads this per-request override before the system policy, so
+		// no second transport is needed. Assigning through *req keeps the
+		// context change visible to the transport after Director returns.
+		*req = *req.WithContext(netproxy.WithResolver(req.Context(), selection.Target.Upstream.Proxy))
 		clientPath := req.URL.Path
 		if req.URL.RawQuery != "" {
 			clientPath += "?" + req.URL.RawQuery
@@ -2177,7 +2182,7 @@ func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Tar
 	// server timeout left the outbound request running, pinning a handler
 	// goroutine, an upstream connection and the upstream's own token spend until
 	// the upstream chose to finish on its own.
-	outreq, err := http.NewRequestWithContext(original.Context(), original.Method, fullURL, body)
+	outreq, err := http.NewRequestWithContext(netproxy.WithResolver(original.Context(), target.Upstream.Proxy), original.Method, fullURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("create outbound request: %w", err)
 	}

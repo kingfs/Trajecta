@@ -49,6 +49,8 @@ const (
 	FieldAPIKeyHint = "api_key_hint"
 	// FieldHeadersJSON holds the string denoting the headers_json field in the database.
 	FieldHeadersJSON = "headers_json"
+	// FieldProxyJSON holds the string denoting the proxy_json field in the database.
+	FieldProxyJSON = "proxy_json"
 	// FieldEnabled holds the string denoting the enabled field in the database.
 	FieldEnabled = "enabled"
 	// FieldPriority holds the string denoting the priority field in the database.
@@ -96,6 +98,7 @@ var Columns = []string{
 	FieldAPIKeyCiphertext,
 	FieldAPIKeyHint,
 	FieldHeadersJSON,
+	FieldProxyJSON,
 	FieldEnabled,
 	FieldPriority,
 	FieldWeight,
@@ -154,6 +157,8 @@ var (
 	DefaultAPIKeyHint string
 	// DefaultHeadersJSON holds the default value on creation for the "headers_json" field.
 	DefaultHeadersJSON string
+	// DefaultProxyJSON holds the default value on creation for the "proxy_json" field.
+	DefaultProxyJSON string
 	// DefaultEnabled holds the default value on creation for the "enabled" field.
 	DefaultEnabled bool
 	// DefaultPriority holds the default value on creation for the "priority" field.
@@ -269,6 +274,11 @@ func ByAPIKeyHint(opts ...sql.OrderTermOption) OrderOption {
 // ByHeadersJSON orders the results by the headers_json field.
 func ByHeadersJSON(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldHeadersJSON, opts...).ToFunc()
+}
+
+// ByProxyJSON orders the results by the proxy_json field.
+func ByProxyJSON(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProxyJSON, opts...).ToFunc()
 }
 
 // ByEnabled orders the results by the enabled field.

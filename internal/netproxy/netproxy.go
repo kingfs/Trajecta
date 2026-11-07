@@ -36,10 +36,10 @@ const SettingKey = "network.proxy"
 
 // Settings is the persisted proxy policy.
 type Settings struct {
-	Enabled    bool   `json:"enabled"`
-	HTTPProxy  string `json:"http_proxy"`
-	HTTPSProxy string `json:"https_proxy"`
-	NoProxy    string `json:"no_proxy"`
+	Enabled    bool   `json:"enabled" yaml:"enabled"`
+	HTTPProxy  string `json:"http_proxy" yaml:"http_proxy"`
+	HTTPSProxy string `json:"https_proxy" yaml:"https_proxy"`
+	NoProxy    string `json:"no_proxy" yaml:"no_proxy"`
 }
 
 // DefaultSettings is the off state: every outbound request goes direct.
@@ -120,6 +120,11 @@ func (r *Resolver) Settings() Settings {
 	return r.settings
 }
 
+// Enabled reports whether the resolver was compiled from an enabled policy.
+func (r *Resolver) Enabled() bool {
+	return r != nil && r.settings.Enabled
+}
+
 // ProxyURL returns the proxy a request with scheme and host uses, or nil for a
 // direct connection. It implements the shape http.Transport.Proxy expects.
 func (r *Resolver) ProxyURL(scheme, host, port string) *url.URL {
@@ -152,6 +157,33 @@ func (r *Resolver) ProxyFunc(req *http.Request) (*url.URL, error) {
 		return nil, nil
 	}
 	return r.ProxyURL(req.URL.Scheme, req.URL.Hostname(), req.URL.Port()), nil
+}
+
+// proxyResolverKey carries a channel-level policy override on a request
+// context. The process-wide transport reads it before the system policy, so a
+// request can use one channel's proxy without a second transport.
+type proxyResolverKey struct{}
+
+// WithResolver marks ctx so ProxyFunc and Transport honour resolver for this
+// request. A nil or disabled resolver leaves ctx unchanged, which is what makes
+// an unconfigured channel follow the process-wide system policy.
+func WithResolver(ctx context.Context, resolver *Resolver) context.Context {
+	if !resolver.Enabled() {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, proxyResolverKey{}, resolver)
+}
+
+// ResolverFromContext returns the per-request policy override, if any.
+func ResolverFromContext(ctx context.Context) *Resolver {
+	if ctx == nil {
+		return nil
+	}
+	resolver, _ := ctx.Value(proxyResolverKey{}).(*Resolver)
+	return resolver
 }
 
 // Manager holds the current policy. A transport built once with
@@ -212,6 +244,11 @@ func (m *Manager) Current() Settings {
 
 // ProxyFunc returns the http.Transport.Proxy function for the current policy.
 func (m *Manager) ProxyFunc(req *http.Request) (*url.URL, error) {
+	if req != nil {
+		if override := ResolverFromContext(req.Context()); override != nil {
+			return override.ProxyFunc(req)
+		}
+	}
 	if m == nil {
 		return nil, nil
 	}
@@ -250,6 +287,62 @@ func (m *Manager) Transport() *http.Transport {
 // Client returns a client with the manager's transport and the given timeout.
 func (m *Manager) Client(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: m.Transport()}
+}
+
+// ClientWith returns a client that behaves like base (timeout, redirects, jar)
+// but whose transport applies resolver. It is how a channel-level policy reaches
+// callers that already receive an *http.Client, such as the provider probes and
+// the local Responses runtime.
+//
+// A nil base means a default client. A nil or disabled resolver returns base
+// unchanged, so callers with no channel override keep the exact client they were
+// given. The base transport is cloned when it is an *http.Transport, so a test
+// harness's dialer and TLS settings survive the proxy change. Only the Proxy
+// field is replaced.
+func ClientWith(base *http.Client, resolver *Resolver) *http.Client {
+	if !resolver.Enabled() {
+		return base
+	}
+	timeout := time.Duration(0)
+	if base != nil {
+		timeout = base.Timeout
+	}
+	client := &http.Client{Timeout: timeout, Transport: transportWithProxy(base, resolver.ProxyFunc)}
+	if base != nil {
+		client.Jar = base.Jar
+		client.CheckRedirect = base.CheckRedirect
+	}
+	return client
+}
+
+func transportWithProxy(base *http.Client, proxy func(*http.Request) (*url.URL, error)) *http.Transport {
+	var transport *http.Transport
+	if base != nil {
+		if existing, ok := base.Transport.(*http.Transport); ok && existing != nil {
+			transport = existing.Clone()
+		}
+	}
+	if transport == nil {
+		if existing, ok := http.DefaultTransport.(*http.Transport); ok && existing != nil {
+			transport = existing.Clone()
+		}
+	}
+	if transport == nil {
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
+	}
+	transport.Proxy = proxy
+	return transport
 }
 
 // SettingLoader is the slice of the application store Load needs.

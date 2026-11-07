@@ -137,7 +137,7 @@ func (c *responsesProviderTokenizeCounter) CountChatPromptTokens(req responsesru
 		Model:   firstNonEmpty(profile.upstreamModel, req.Model),
 		Headers: headers,
 		Timeout: profile.timeout,
-		Client:  c.client,
+		Client:  target.Upstream.HTTPClient(c.client),
 	})
 	if err != nil {
 		return 0, err

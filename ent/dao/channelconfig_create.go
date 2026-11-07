@@ -251,6 +251,20 @@ func (_c *ChannelConfigCreate) SetNillableHeadersJSON(v *string) *ChannelConfigC
 	return _c
 }
 
+// SetProxyJSON sets the "proxy_json" field.
+func (_c *ChannelConfigCreate) SetProxyJSON(v string) *ChannelConfigCreate {
+	_c.mutation.SetProxyJSON(v)
+	return _c
+}
+
+// SetNillableProxyJSON sets the "proxy_json" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillableProxyJSON(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetProxyJSON(*v)
+	}
+	return _c
+}
+
 // SetEnabled sets the "enabled" field.
 func (_c *ChannelConfigCreate) SetEnabled(v bool) *ChannelConfigCreate {
 	_c.mutation.SetEnabled(v)
@@ -506,6 +520,10 @@ func (_c *ChannelConfigCreate) defaults() {
 		v := channelconfig.DefaultHeadersJSON
 		_c.mutation.SetHeadersJSON(v)
 	}
+	if _, ok := _c.mutation.ProxyJSON(); !ok {
+		v := channelconfig.DefaultProxyJSON
+		_c.mutation.SetProxyJSON(v)
+	}
 	if _, ok := _c.mutation.Enabled(); !ok {
 		v := channelconfig.DefaultEnabled
 		_c.mutation.SetEnabled(v)
@@ -610,6 +628,9 @@ func (_c *ChannelConfigCreate) check() error {
 	}
 	if _, ok := _c.mutation.HeadersJSON(); !ok {
 		return &ValidationError{Name: "headers_json", err: errors.New(`dao: missing required field "ChannelConfig.headers_json"`)}
+	}
+	if _, ok := _c.mutation.ProxyJSON(); !ok {
+		return &ValidationError{Name: "proxy_json", err: errors.New(`dao: missing required field "ChannelConfig.proxy_json"`)}
 	}
 	if _, ok := _c.mutation.Enabled(); !ok {
 		return &ValidationError{Name: "enabled", err: errors.New(`dao: missing required field "ChannelConfig.enabled"`)}
@@ -754,6 +775,10 @@ func (_c *ChannelConfigCreate) createSpec() (*ChannelConfig, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.HeadersJSON(); ok {
 		_spec.SetField(channelconfig.FieldHeadersJSON, field.TypeString, value)
 		_node.HeadersJSON = value
+	}
+	if value, ok := _c.mutation.ProxyJSON(); ok {
+		_spec.SetField(channelconfig.FieldProxyJSON, field.TypeString, value)
+		_node.ProxyJSON = value
 	}
 	if value, ok := _c.mutation.Enabled(); ok {
 		_spec.SetField(channelconfig.FieldEnabled, field.TypeBool, value)
@@ -1070,6 +1095,18 @@ func (u *ChannelConfigUpsert) SetHeadersJSON(v string) *ChannelConfigUpsert {
 // UpdateHeadersJSON sets the "headers_json" field to the value that was provided on create.
 func (u *ChannelConfigUpsert) UpdateHeadersJSON() *ChannelConfigUpsert {
 	u.SetExcluded(channelconfig.FieldHeadersJSON)
+	return u
+}
+
+// SetProxyJSON sets the "proxy_json" field.
+func (u *ChannelConfigUpsert) SetProxyJSON(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldProxyJSON, v)
+	return u
+}
+
+// UpdateProxyJSON sets the "proxy_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdateProxyJSON() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldProxyJSON)
 	return u
 }
 
@@ -1533,6 +1570,20 @@ func (u *ChannelConfigUpsertOne) SetHeadersJSON(v string) *ChannelConfigUpsertOn
 func (u *ChannelConfigUpsertOne) UpdateHeadersJSON() *ChannelConfigUpsertOne {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateHeadersJSON()
+	})
+}
+
+// SetProxyJSON sets the "proxy_json" field.
+func (u *ChannelConfigUpsertOne) SetProxyJSON(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetProxyJSON(v)
+	})
+}
+
+// UpdateProxyJSON sets the "proxy_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdateProxyJSON() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateProxyJSON()
 	})
 }
 
@@ -2189,6 +2240,20 @@ func (u *ChannelConfigUpsertBulk) SetHeadersJSON(v string) *ChannelConfigUpsertB
 func (u *ChannelConfigUpsertBulk) UpdateHeadersJSON() *ChannelConfigUpsertBulk {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateHeadersJSON()
+	})
+}
+
+// SetProxyJSON sets the "proxy_json" field.
+func (u *ChannelConfigUpsertBulk) SetProxyJSON(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetProxyJSON(v)
+	})
+}
+
+// UpdateProxyJSON sets the "proxy_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdateProxyJSON() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateProxyJSON()
 	})
 }
 

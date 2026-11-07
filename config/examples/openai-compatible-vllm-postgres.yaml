@@ -56,31 +56,7 @@ router:
     open_window: 15s
     failure_threshold: 3
 
-upstreams:
-  - id: "primary"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "static_only"
-    static_models:
-      - "$env:TRAJECTA_RESPONSES_DEFAULT_MODEL"
-    upstream:
-      base_url: "$env:TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL"
-      api_key: "$env:TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY"
-      provider_preset: "vllm"
-      api_type: "chat_completions"
-      mode: "proxy"
-      capabilities:
-        chat_completions: true
-        responses: false
-        tool_calling: true
-        models: true
-        tokenize: true
-      protocol_family: "openai_compatible"
-      routing_profile: "vllm_openai"
-      headers: {}
-
+# Channels are configured in the Monitor and stored in the application database.
 debug:
   output_dir: "./data/traces"
   mask_key: true

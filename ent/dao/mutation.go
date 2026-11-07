@@ -2780,6 +2780,7 @@ type ChannelConfigMutation struct {
 	api_key_ciphertext   *[]byte
 	api_key_hint         *string
 	headers_json         *string
+	proxy_json           *string
 	enabled              *bool
 	priority             *int
 	addpriority          *int
@@ -3565,6 +3566,42 @@ func (m *ChannelConfigMutation) ResetHeadersJSON() {
 	m.headers_json = nil
 }
 
+// SetProxyJSON sets the "proxy_json" field.
+func (m *ChannelConfigMutation) SetProxyJSON(s string) {
+	m.proxy_json = &s
+}
+
+// ProxyJSON returns the value of the "proxy_json" field in the mutation.
+func (m *ChannelConfigMutation) ProxyJSON() (r string, exists bool) {
+	v := m.proxy_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProxyJSON returns the old "proxy_json" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldProxyJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProxyJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProxyJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProxyJSON: %w", err)
+	}
+	return oldValue.ProxyJSON, nil
+}
+
+// ResetProxyJSON resets all changes to the "proxy_json" field.
+func (m *ChannelConfigMutation) ResetProxyJSON() {
+	m.proxy_json = nil
+}
+
 // SetEnabled sets the "enabled" field.
 func (m *ChannelConfigMutation) SetEnabled(b bool) {
 	m.enabled = &b
@@ -4068,7 +4105,7 @@ func (m *ChannelConfigMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelConfigMutation) Fields() []string {
-	fields := make([]string, 0, 29)
+	fields := make([]string, 0, 30)
 	if m.name != nil {
 		fields = append(fields, channelconfig.FieldName)
 	}
@@ -4122,6 +4159,9 @@ func (m *ChannelConfigMutation) Fields() []string {
 	}
 	if m.headers_json != nil {
 		fields = append(fields, channelconfig.FieldHeadersJSON)
+	}
+	if m.proxy_json != nil {
+		fields = append(fields, channelconfig.FieldProxyJSON)
 	}
 	if m.enabled != nil {
 		fields = append(fields, channelconfig.FieldEnabled)
@@ -4200,6 +4240,8 @@ func (m *ChannelConfigMutation) Field(name string) (ent.Value, bool) {
 		return m.APIKeyHint()
 	case channelconfig.FieldHeadersJSON:
 		return m.HeadersJSON()
+	case channelconfig.FieldProxyJSON:
+		return m.ProxyJSON()
 	case channelconfig.FieldEnabled:
 		return m.Enabled()
 	case channelconfig.FieldPriority:
@@ -4267,6 +4309,8 @@ func (m *ChannelConfigMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldAPIKeyHint(ctx)
 	case channelconfig.FieldHeadersJSON:
 		return m.OldHeadersJSON(ctx)
+	case channelconfig.FieldProxyJSON:
+		return m.OldProxyJSON(ctx)
 	case channelconfig.FieldEnabled:
 		return m.OldEnabled(ctx)
 	case channelconfig.FieldPriority:
@@ -4423,6 +4467,13 @@ func (m *ChannelConfigMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetHeadersJSON(v)
+		return nil
+	case channelconfig.FieldProxyJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProxyJSON(v)
 		return nil
 	case channelconfig.FieldEnabled:
 		v, ok := value.(bool)
@@ -4657,6 +4708,9 @@ func (m *ChannelConfigMutation) ResetField(name string) error {
 		return nil
 	case channelconfig.FieldHeadersJSON:
 		m.ResetHeadersJSON()
+		return nil
+	case channelconfig.FieldProxyJSON:
+		m.ResetProxyJSON()
 		return nil
 	case channelconfig.FieldEnabled:
 		m.ResetEnabled()

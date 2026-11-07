@@ -154,6 +154,11 @@ func HeadersJSON(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldHeadersJSON, v))
 }
 
+// ProxyJSON applies equality check predicate on the "proxy_json" field. It's identical to ProxyJSONEQ.
+func ProxyJSON(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldProxyJSON, v))
+}
+
 // Enabled applies equality check predicate on the "enabled" field. It's identical to EnabledEQ.
 func Enabled(v bool) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldEnabled, v))
@@ -1362,6 +1367,71 @@ func HeadersJSONEqualFold(v string) predicate.ChannelConfig {
 // HeadersJSONContainsFold applies the ContainsFold predicate on the "headers_json" field.
 func HeadersJSONContainsFold(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldContainsFold(FieldHeadersJSON, v))
+}
+
+// ProxyJSONEQ applies the EQ predicate on the "proxy_json" field.
+func ProxyJSONEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldProxyJSON, v))
+}
+
+// ProxyJSONNEQ applies the NEQ predicate on the "proxy_json" field.
+func ProxyJSONNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldProxyJSON, v))
+}
+
+// ProxyJSONIn applies the In predicate on the "proxy_json" field.
+func ProxyJSONIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldProxyJSON, vs...))
+}
+
+// ProxyJSONNotIn applies the NotIn predicate on the "proxy_json" field.
+func ProxyJSONNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldProxyJSON, vs...))
+}
+
+// ProxyJSONGT applies the GT predicate on the "proxy_json" field.
+func ProxyJSONGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldProxyJSON, v))
+}
+
+// ProxyJSONGTE applies the GTE predicate on the "proxy_json" field.
+func ProxyJSONGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldProxyJSON, v))
+}
+
+// ProxyJSONLT applies the LT predicate on the "proxy_json" field.
+func ProxyJSONLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldProxyJSON, v))
+}
+
+// ProxyJSONLTE applies the LTE predicate on the "proxy_json" field.
+func ProxyJSONLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldProxyJSON, v))
+}
+
+// ProxyJSONContains applies the Contains predicate on the "proxy_json" field.
+func ProxyJSONContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldProxyJSON, v))
+}
+
+// ProxyJSONHasPrefix applies the HasPrefix predicate on the "proxy_json" field.
+func ProxyJSONHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldProxyJSON, v))
+}
+
+// ProxyJSONHasSuffix applies the HasSuffix predicate on the "proxy_json" field.
+func ProxyJSONHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldProxyJSON, v))
+}
+
+// ProxyJSONEqualFold applies the EqualFold predicate on the "proxy_json" field.
+func ProxyJSONEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldProxyJSON, v))
+}
+
+// ProxyJSONContainsFold applies the ContainsFold predicate on the "proxy_json" field.
+func ProxyJSONContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldProxyJSON, v))
 }
 
 // EnabledEQ applies the EQ predicate on the "enabled" field.

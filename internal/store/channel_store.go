@@ -42,6 +42,7 @@ type ChannelConfigRecord struct {
 	APIKeyCiphertext []byte
 	APIKeyHint       string
 	HeadersJSON      string
+	ProxyJSON        string
 	Enabled          bool
 	Priority         int
 	Weight           float64
@@ -193,6 +194,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 	if strings.TrimSpace(record.CapabilitiesJSON) == "" {
 		record.CapabilitiesJSON = "{}"
 	}
+	if strings.TrimSpace(record.ProxyJSON) == "" {
+		record.ProxyJSON = "{}"
+	}
 	if strings.TrimSpace(record.ModelDiscovery) == "" {
 		record.ModelDiscovery = "list_models"
 	}
@@ -238,6 +242,7 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetModelResource(strings.TrimSpace(record.ModelResource)).
 		SetAPIKeyHint(strings.TrimSpace(record.APIKeyHint)).
 		SetHeadersJSON(storedHeaders).
+		SetProxyJSON(strings.TrimSpace(record.ProxyJSON)).
 		SetEnabled(record.Enabled).
 		SetPriority(record.Priority).
 		SetWeight(record.Weight).
@@ -1201,6 +1206,7 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		ModelResource:    row.ModelResource,
 		APIKeyHint:       row.APIKeyHint,
 		HeadersJSON:      row.HeadersJSON,
+		ProxyJSON:        row.ProxyJSON,
 		Enabled:          row.Enabled,
 		Priority:         row.Priority,
 		Weight:           row.Weight,

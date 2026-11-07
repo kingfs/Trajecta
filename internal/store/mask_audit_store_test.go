@@ -246,9 +246,10 @@ func TestCredentialMaskAuditAndEventAreAtomic(t *testing.T) {
 func TestReconcileCredentialMaskEventsHealsMissingEvent(t *testing.T) {
 	st := configTransactionTestStore(t)
 	const original = "11010519491231002X"
+	base := time.Now().UTC()
 	if err := st.UpsertCredentialMaskAudits([]CredentialMaskAuditRecord{
-		{TraceID: "trace-heal-1", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 12, Original: original, StandIn: "110101195001011234"},
-		{TraceID: "trace-heal-2", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 24, Original: original, StandIn: "110101195001011234"},
+		{TraceID: "trace-heal-1", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 12, Original: original, StandIn: "110101195001011234", DetectedAt: base.Add(-time.Minute)},
+		{TraceID: "trace-heal-2", EventIndex: 0, Rule: "pii.chinese_id", Kind: "national_id", Vendor: "", Confidence: "high", Score: 95, Start: 24, Original: original, StandIn: "110101195001011234", DetectedAt: base},
 	}); err != nil {
 		t.Fatalf("UpsertCredentialMaskAudits() error = %v", err)
 	}

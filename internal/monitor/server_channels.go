@@ -66,6 +66,11 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel payload"})
 			return
 		}
+		existingProxy, _ := channel.ChannelProxySettings(existing)
+		if err := normalizeChannelProxySettings(&req, existingProxy); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.ID = channelID
 		record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, existing))
 		if err != nil {

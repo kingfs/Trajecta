@@ -182,9 +182,9 @@ Trajecta 自身的事件收件箱：
 
 每个模型卡还有「连通性测试」按钮：它按当前声明协议发最小请求并给出逐协议结论，当 chat 可用而 `/v1/responses` 不可用时给出「关闭该模型的 Responses 支持」的一键操作（只写模型级 `supports_responses=false`，立即 reload 路由，不需要重启）。测试与识别都不写 probe 记录、不产生 cassette/logs、不进入用量统计。
 
-**模型清单是唯一授权来源。** 详情页的「同步模型」按钮执行一次探测，返回新增/移除数量，并保持每个模型原有的开启状态；新模型默认关闭。每行带一个状态：`enabled`（已开启且最近一次成功同步仍返回它）、`disabled`（已关闭）、`removed`（最近一次成功同步不再返回它，开关保留但不参与路由，重新同步后恢复）、`unverified`（操作者声明：手动添加或 YAML `static_models` 导入，或渠道从未成功同步过，可路由但标记未验证；失败的同步不会让状态变化）。`upstream_model`（发往上游的模型名）在行内显示；需要别名改写时在模型详情页设置。开启/关闭立即发布到路由，不需要重启；不支持「允许未知模型」——未开启的模型由代理直接返回 404 `model_not_enabled`（声明过但不可路由）或 `model_unknown`（没有渠道声明过），不会发往任何上游。
+**模型清单是唯一授权来源。** 详情页的「同步模型」按钮执行一次探测，返回新增/移除数量，并保持每个模型原有的开启状态；新模型默认关闭。每行带一个状态：`enabled`（已开启且最近一次成功同步仍返回它）、`disabled`（已关闭）、`removed`（最近一次成功同步不再返回它，开关保留但不参与路由，重新同步后恢复）、`unverified`（操作者手动添加，或渠道从未成功同步过，可路由但标记未验证；失败的同步不会让状态变化）。`upstream_model`（发往上游的模型名）在行内显示；需要别名改写时在模型详情页设置。开启/关闭立即发布到路由，不需要重启；不支持「允许未知模型」——未开启的模型由代理直接返回 404 `model_not_enabled`（声明过但不可路由）或 `model_unknown`（没有渠道声明过），不会发往任何上游。
 
-配置归属：渠道、模型与别名的长期配置保存在 application store；YAML 只作为首次 bootstrap 输入。由 YAML 显式 `credentials` 列表管理的配置下，Monitor 的这三类写操作返回 409。配置来源、bootstrap 标记与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
+配置归属：渠道、模型与别名只保存在 application store；YAML 不再接受渠道配置。配置来源与状态机见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 
 #### 接入 `/connect`
 
@@ -239,6 +239,8 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 网络代理是出站请求的服务端策略，保存在 application database 的 `app_settings` 键 `network.proxy`，默认关闭。它按 Linux 的 `http_proxy` / `https_proxy` / `no_proxy` 语义解释三个字段：`http_proxy` 用于 HTTP 目标，`https_proxy` 用于 HTTPS 目标且留空时等于 `http_proxy`，`no_proxy` 是逗号分隔的例外列表。`no_proxy` 支持精确主机名、域名后缀（`example.com` 与 `.example.com` 都匹配自身及子域）、IP、CIDR（`10.0.0.0/8`、`fd00::/8`）、可选的 `host:port`，以及表示全部直连的 `*`；回环地址（`localhost`、`127.0.0.0/8`、`::1`）始终直连。代理地址接受裸 `host:port`，也接受 `http://`、`https://`、`socks5://`（含 `user:pass@` 认证）；写入时统一规范化为带 scheme 与端口的形式。关闭开关后所有出站请求直连，**不读取进程环境变量**，因此内网上游不会因为启动 shell 里的 `HTTP_PROXY` 而意外绕行；需要环境变量行为时把同样的值填进这一页即可。策略在每个请求上读取，保存后立即生效、无需重启。
 
 适用范围是进程内所有没有自带 transport 的出站 HTTP client：LLM 上游转发（透传路径的反向代理 transport 直接绑定该策略）、本地 Responses 运行时的内部 Chat Completions 调用、tokenize 计数、模型发现与 provider probe（含启动期 probe）、web 搜索与 GitHub 版本检查。保存成功后 `PATCH` 返回规范化后的策略与派生的 `effective_https_proxy`；服务端会在启动时把该行读入进程并按需打印脱敏后的代理地址。
+
+系统级代理是默认策略，不是唯一策略。渠道的高级选项（新建渠道与渠道详情页的「高级选项」）里有一个**渠道网络代理**开关，默认关闭：关闭时该渠道完全跟随上面的系统策略；开启后可以单独填写 `http_proxy` / `https_proxy` / `no_proxy`，只有发往这个渠道的请求使用这组值，字段语义、校验与规范化与系统页完全一致（`https_proxy` 留空继承 `http_proxy`，回环地址始终直连，地址可以带 `user:pass@`）。渠道级策略覆盖该渠道的透传转发、本地 Responses runtime 的内部 Chat Completions 调用、tokenize 计数、模型发现、渠道 probe、provider probe 与单模型连通性/接口探测；其它渠道和系统级工具（web 搜索、GitHub 版本检查等）仍用系统策略。保存时后端先编译校验，非法地址返回 400，不会写入；渠道详情接口以 `proxy` 对象返回当前策略，其中代理密码显示为 `xxxxx`；把该占位符原样保存回去会沿用已存密码，因此编辑渠道不需要重新输入代理凭据。
 
 `GET /api/system/host` 报告主机资源事实，全部来自 `/proc` 与 `syscall.Statfs` 等系统调用，不需要额外 agent：主机名、uptime、内核版本；CPU 核数、总使用率与 user/system/iowait/idle 分解、1/5/15 分钟负载、每核使用率；内存总量/已用/可用/页缓存与 swap；每个挂载点的文件系统、设备、总量/已用/可用/使用率；网络接口的累计收发字节数与瞬时速率；以及本进程的 PID、RSS、虚拟内存、CPU 占用、线程数与打开文件数。非 Linux 平台返回 `unsupported=true` 与 `reason`，页面显示说明而不是报错。瞬时速率在两个采样点之间计算，同一进程内两次请求间隔不足 500 ms 时复用上一次结果，间隔超过 5 分钟则重置基线（此时速率显示为 0 而不是把休眠期间的平均值当成当前速率）。页面展示时会折叠噪音：同一设备上的多个挂载点（容器 overlay 层与 bind mount）按设备折叠后再汇总成一张磁盘占用环图（环心显示已用比例与「已用 / 总容量」，悬停显示该扇形代表的具体容量），从未传输过字节的网络接口不显示。每个资源在页面上只有一个落点：CPU 与内存的历史画成一条 资源趋势 曲线（打开本页时服务端每 5 秒采样一次，样本随 `system` 主题推送到达，页面因此不需要手动刷新；历史只保留最近 5 分钟（60 个采样点），没有标签页在看时不采样），内存与磁盘的构成画成并排的两张环图（同一行、同一控件，因为它们回答的是同一个「还剩多少」）。内存环的三片是按内核三个数的实际嵌套关系切的：`used_bytes` 是 MemTotal 减 MemAvailable，因此**不含**可回收的页缓存（这也是长时间运行的机器上页缓存常常是已用的好几倍的原因：写这份代码的机器上是 24 GiB 对 5 GiB），而 `cached_bytes`（`Cached + SReclaimable`）属于可用那一侧，所以「已用 / 页缓存 / 剩余可用」三片正好等于总量；把已用、页缓存、可用三片直接对着总量画会重复计算页缓存，环图总和会超过机器内存。环心的可用值仍单列一行，因为它才是回答「新进程还能拿到多少」的那个数，CPU 的 user/system/iowait/idle 分解与主机名、内核、uptime、1/5/15 分钟负载合成一张事实网格。逐核心使用率不再展示：八条细条复述的正是趋势图第一行已经给出的总量，在核多的机器上是一片噪音。网络速率同样画成趋势：`systemHostPoint` 现在除了 CPU、内存百分比与负载，还带聚合的 `rx_bytes_per_sec` / `tx_bytes_per_sec`，接口表因此只留接口名与两个速率列，累计收发字节数落到行的 `title` 上——累计值只会单调增长，回答不了「现在多快」。进程的线程数与打开文件数属进程内部细节，页面不再展示；网络带宽不是实时采集项，按页面请求读取当时数值。
 
@@ -376,7 +378,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 - 代理不做协议族之间的转换，唯一例外是 `/v1/responses` 的本地 Responses runtime；边界见 [架构与代码地图](./ARCHITECTURE.md) 与 [实现状态](./IMPLEMENTATION_STATUS.md)。
 - Monitor 没有用户管理界面：用户由 `auth init-user`、`auth reset-password`、`auth create-token` 等 CLI 命令创建和维护，界面只支持修改自己的密码。
 - Monitor API 不接受个人 API token；个人 token 面向 proxy 与 MCP。
-- Monitor 不能修改由 YAML 显式 `credentials` 管理的渠道、模型和别名，这类写操作返回 409。
+- 渠道、模型和别名始终由 Monitor 写入应用数据库；不存在 YAML 只读模式。
 - 写接口不接受 `output`、`command`、`args`、`env` 等敏感可执行字段，Monitor overlay 不能创建新的可执行 command；字段语义见 [本地 Responses Runtime](./RESPONSES_RUNTIME.md)。
 - `external_command` 只有轻量进程约束（工作目录、绝对 command、允许目录、拒绝 root），不等同于容器或 namespace 沙箱。
 - Monitor 不轮询上游、也不做后台外联：版本检查只在读者按下按钮时发生；匿名装机上报已从 Web UI 移除（见「关于 `/about`」）。Monitor 没有管理员界面之外的版本管理能力，也不下载或安装更新。

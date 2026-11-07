@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -123,18 +122,28 @@ func runProviderProbeWithOptions(opts providerProbeOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	targets, err := providerProbeTargets(*cfg, opts.id)
-	if err != nil {
-		slog.Error("Provider probe target selection failed", "error", err)
-		return 2
-	}
 	timeout := opts.timeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
 	client := &http.Client{Timeout: timeout}
 	ctx := context.Background()
-	result := providerprobe.ProbeBatch(ctx, targets, client)
+	st, err := appdb.Open(cfg)
+	if err != nil {
+		slog.Error("Open application store failed", "error", err)
+		return 1
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			slog.Error("Close application store failed", "error", err)
+		}
+	}()
+	svc := channel.NewService(st).WithHTTPClient(client)
+	result, err := svc.ProviderProbeReport(ctx, channel.ProviderProbeReportOptions{ChannelID: strings.TrimSpace(opts.id)})
+	if err != nil {
+		slog.Error("Provider probe target selection failed", "error", err)
+		return 2
+	}
 	for _, report := range result.Reports {
 		if report.Status == providerprobe.StatusError && report.Error != "" {
 			slog.Error("Provider probe failed", "provider_id", report.ProviderID, "error", report.Error)
@@ -152,34 +161,6 @@ func runProviderProbeWithOptions(opts providerProbeOptions) int {
 		return 1
 	}
 	return 0
-}
-
-func providerProbeTargets(cfg config.Config, id string) ([]providerprobe.ProbeTarget, error) {
-	id = strings.TrimSpace(id)
-	configured := cfg.EffectiveUpstreams()
-	targets := make([]providerprobe.ProbeTarget, 0, len(configured))
-	for _, target := range configured {
-		if target.Enabled != nil && !*target.Enabled {
-			continue
-		}
-		targetID := strings.TrimSpace(target.ID)
-		if id != "" && targetID != id {
-			continue
-		}
-		probeTarget := providerprobe.TargetFromConfig(target)
-		probeTarget.TargetSource = "upstream"
-		if strings.TrimSpace(probeTarget.BaseURL) == "" {
-			continue
-		}
-		targets = append(targets, probeTarget)
-	}
-	if id != "" && len(targets) == 0 {
-		return nil, fmt.Errorf("upstream target %q was not found or has no base_url", id)
-	}
-	if len(targets) == 0 {
-		return nil, errors.New("no enabled upstream provider with base_url is configured")
-	}
-	return targets, nil
 }
 
 func runProviderProbeApplyWithOptions(opts providerProbeOptions) int {

@@ -39,6 +39,10 @@ func (ChannelConfig) Fields() []ent.Field {
 		field.Bytes("api_key_ciphertext").Optional().Nillable(),
 		field.String("api_key_hint").Default(""),
 		field.String("headers_json").Default("{}"),
+		// proxy_json holds the channel-level outbound proxy policy. It follows
+		// the same schema as app_settings.network.proxy but applies only to this
+		// channel; an empty object means the system-level policy applies.
+		field.String("proxy_json").Default("{}"),
 		field.Bool("enabled").Default(true),
 		field.Int("priority").Default(0),
 		field.Float("weight").Default(1),

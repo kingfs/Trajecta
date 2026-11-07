@@ -98,13 +98,13 @@ Codex 兼容性：`tests/fixtures/codex/` 存放离线 fixture，`task test:code
 
 ## 渠道与模型管理
 
-YAML 的 `upstream` / `upstreams` 只是首次 bootstrap 输入。第一次写库会写入应用库 `app_settings` 键 `channels.initialized`；此后数据库拥有路由配置，即使渠道被全部禁用或删除也仍然如此。`GET /api/settings/channels` 返回 `{"initialized": bool}`，其值是 `channel.Service.HasConfiguration()`——`channels.initialized` 标记为真时为 true，标记被 `DELETE /api/settings/channels` 清除后只要数据库中仍存有任意渠道行也仍为 true，因此清除标记后该接口会继续保持 `{"initialized": true}`。
+渠道只从应用数据库读取；YAML 的 `upstream` / `upstreams` 已移除，`config.Load` 遇到这两个键会直接报错。第一次管理写会写入应用库 `app_settings` 键 `channels.initialized`；`GET /api/settings/channels` 返回 `{"initialized": bool}`，其值是 `channel.Service.HasConfiguration()`——`channels.initialized` 标记为真时为 true，标记被 `DELETE /api/settings/channels` 清除后只要数据库中仍存有任意渠道行也仍为 true。
 
-YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Monitor 的渠道、模型和 alias 写操作返回 409。
+不存在 YAML 只读模式；Monitor 的渠道、模型和 alias 写操作始终写数据库。
 
 所有管理写操作（渠道、模型、alias、provider setup 与 probe apply）都在一个 `store.ConfigurationTransaction` 内执行，runtime 路由只在提交成功后才发布。
 
-配置来源与所有权（YAML bootstrap、`channels.initialized` 标记与 409 规则）见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，`ConfigurationTransaction` 的锁顺序、事务范围与后台 refresh 的 best-effort 语义见 [架构与代码地图](./ARCHITECTURE.md)。
+配置来源与所有权（数据库唯一来源、`channels.initialized` 标记）见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，`ConfigurationTransaction` 的锁顺序、事务范围与后台 refresh 的 best-effort 语义见 [架构与代码地图](./ARCHITECTURE.md)。
 
 已实现的配置能力：
 
@@ -115,7 +115,7 @@ YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Mon
 - `POST /api/provider-model-detect` 按模型自动识别接口并写回 `channel_models.supports_*`：OpenAI-compatible 探测 chat/responses（并行、强制忽略现有声明），Anthropic 探测 messages，Google/Vertex 探测 generateContent；`ok` 写支持、`endpoint_not_supported`/`model_not_found` 写不支持、不确定结果不写；`overwrite=false` 只补 NULL。网络探测在配置锁外完成，之后一个 `ConfigurationTransaction` 写能力并 reload 路由；不写 `last_probe_at`/`channel_probe_runs`/cassette/logs。渠道/模型 API 返回计算后的 `interfaces`，Monitor 在启用模型时自动补全未声明接口，模型卡与渠道工具栏提供识别动作。
 - `provider probe-apply` 复用同一 channel service 用例。
 - `config inspect` 输出脱敏 effective config，并用 `sources` 摘要标注字段来自 config file、default、effective、empty、derived 或 not_configured。
-- `provider_probe.startup_fill=true` 时 serve 启动只在内存中填补 YAML upstream 缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置、不覆盖显式配置。
+- 渠道 probe 与接口识别由 Monitor/CLI 主动触发；serve 启动不再对 YAML 渠道做 provider probe。
 
 路由与凭据细节见 [./ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。
 
@@ -129,7 +129,7 @@ Session 详情页提供默认（带上限）与完整流式两种导出（UI 标
 
 About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关，不外联）与 `GET /api/version/latest`（仅在点击「检查新版本」后查询项目 releases feed，恒返回 200 并在 `status` 里给出 `update_available`/`up_to_date`/`no_release`/`unknown`/`unavailable`/`disabled`，成功结果缓存 10 分钟、失败不缓存）支撑。页面只列版本、提交、构建时间与标签四项构建事实，发布检查结果在弹窗里给出当前版本与最新版本；`telemetry` 配置与 `/api/about` 的 `telemetry`/`install_id` 字段仍然保留，但 Web UI 不再展示「使用统计」，也不再发送匿名装机上报。详见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
-出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页一节。
+出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。渠道高级选项另有**渠道网络代理**开关（`channel_configs.proxy_json`，`GET/PATCH /api/channels/{id}` 的 `proxy` 字段）：关闭时跟随系统策略，开启后只有该渠道的转发、本地 Responses、tokenize、模型发现与各类 probe 使用渠道自己的 `http_proxy`/`https_proxy`/`no_proxy`，语义与系统页一致。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页与渠道页一节。
 
 主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`（复用 `router.Explain` dry-run，与转发路径同一 planner）、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/provider-model-test`、`/api/provider-model-detect`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 

@@ -59,6 +59,16 @@ docker compose -f "$COMPOSE_FILE" exec -T trajecta-live \
   /app/bin/server -c /app/config/config.yaml auth init-user \
   --username "$TRAJECTA_LIVE_MONITOR_USER" --password "$TRAJECTA_LIVE_MONITOR_PASSWORD" || true
 
+echo "==> seeding channels through the Monitor API"
+TRAJECTA_LIVE_MONITOR_URL="$TRAJECTA_LIVE_MONITOR_URL" \
+TRAJECTA_LIVE_MONITOR_USER="$TRAJECTA_LIVE_MONITOR_USER" \
+TRAJECTA_LIVE_MONITOR_PASSWORD="$TRAJECTA_LIVE_MONITOR_PASSWORD" \
+TRAJECTA_LIVE_CHAT_BASE="${TRAJECTA_LIVE_CHAT_BASE:-https://ai-api-gateway.app.baizhi.cloud/api/openai}" \
+TRAJECTA_LIVE_MESSAGES_BASE="${TRAJECTA_LIVE_MESSAGES_BASE:-https://ai-api-gateway.app.baizhi.cloud/api/anthropic}" \
+TRAJECTA_LIVE_API_KEY="$TRAJECTA_LIVE_API_KEY" \
+TRAJECTA_LIVE_MODEL="$TRAJECTA_LIVE_MODEL" \
+  "$REPO_ROOT/tests/live/seed-channels.sh" main
+
 echo "==> issuing a proxy API token"
 TRAJECTA_LIVE_PROXY_TOKEN="$(
   docker compose -f "$COMPOSE_FILE" exec -T trajecta-live \

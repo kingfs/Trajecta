@@ -210,30 +210,6 @@ func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
 	}
 }
 
-// The pre-`upstreams` single `upstream:` block has no model list, so it keeps
-// the historical passthrough. Database-managed channels never do.
-func TestRouterLegacySingleUpstreamStillForwardsUndeclaredModel(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Upstream.BaseURL = "https://api.openai.com/v1"
-	cfg.Upstream.ProviderPreset = "openai"
-
-	rtr, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if !rtr.LegacyPassthrough() {
-		t.Fatal("LegacyPassthrough() = false, want true for the single-upstream form")
-	}
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"legacy-model"}`))
-	if err != nil {
-		t.Fatalf("http.NewRequest() error = %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if _, err := rtr.Select(req); err != nil {
-		t.Fatalf("Select() error = %v, want the legacy passthrough to forward it", err)
-	}
-}
-
 func TestRouterSingleTargetDoesNotWidenModelAuthorization(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

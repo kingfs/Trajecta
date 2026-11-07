@@ -162,27 +162,7 @@ tools:
         enabled_tools: [search, fetch]
         disabled_tools: [delete]
 provider_probe:
-  startup_fill: true
   timeout: 3s
-upstreams:
-  - id: openai
-    enabled: true
-    model_discovery: static_only
-    static_models: [gpt-5, gpt-5-mini]
-    upstream:
-      base_url: https://user:upstream-url-secret@api.example.com/v1?token=url-token-secret
-      api_key: "$env:OPENAI_TEST_KEY"
-      api_type: chat_completions
-      protocol_family: openai
-      provider_preset: openai
-      mode: proxy
-      headers:
-        Authorization: Bearer upstream-header-secret
-    credentials:
-      - id: primary
-        api_key: credential-api-secret
-        headers:
-          X-API-Key: credential-header-secret
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -268,8 +248,7 @@ upstreams:
 				} `json:"tools"`
 			} `json:"sources"`
 			ProviderProbe struct {
-				StartupFill bool   `json:"startup_fill"`
-				Timeout     string `json:"timeout"`
+				Timeout string `json:"timeout"`
 			} `json:"provider_probe"`
 			Upstreams struct {
 				Targets []struct {
@@ -313,15 +292,8 @@ upstreams:
 	if envelope.Result.Sources.Tools.MCP.Enabled != "config_file" || envelope.Result.Sources.Tools.MCP.DefaultTimeoutMS != "config_file" || envelope.Result.Sources.Tools.MCP.MaxResultBytes != "config_file" || envelope.Result.Sources.Tools.MCP.Servers != "config_file" {
 		t.Fatalf("tools.mcp sources = %+v, want config_file", envelope.Result.Sources.Tools.MCP)
 	}
-	if !envelope.Result.ProviderProbe.StartupFill || envelope.Result.ProviderProbe.Timeout != "3s" {
+	if envelope.Result.ProviderProbe.Timeout != "3s" {
 		t.Fatalf("provider_probe result = %+v", envelope.Result.ProviderProbe)
-	}
-	if len(envelope.Result.Upstreams.Targets) != 1 {
-		t.Fatalf("upstreams targets = %+v", envelope.Result.Upstreams.Targets)
-	}
-	target := envelope.Result.Upstreams.Targets[0]
-	if target.ID != "openai" || !target.Enabled || target.StaticModelCount != 2 || target.CredentialCount != 1 || !strings.Contains(target.BaseURL, "%3Credacted%3E") {
-		t.Fatalf("upstream target = %+v", target)
 	}
 }
 
@@ -347,13 +319,6 @@ responses_server:
       tool_output_token_limit: 7000
       model_reasoning_effort: high
       compact_history_item_threshold: 9
-upstreams:
-  - id: openai
-    upstream:
-      base_url: https://user:upstream-url-secret@api.example.com/v1?token=url-token-secret
-      api_key: "$env:OPENAI_TEST_KEY"
-      headers:
-        Authorization: Bearer upstream-header-secret
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -486,8 +451,6 @@ responses_server:
   model_profiles:
     - pattern: "qwen3*"
       context_window_tokens: 32000
-upstream:
-  api_key: "$env:OPENAI_TEST_KEY"
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -3627,16 +3590,34 @@ func TestProviderProbeJSONReportsSuggestedAPISurface(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	configBody := `
-upstreams:
-  - id: "openai-local"
-    upstream:
-      base_url: "` + upstreamServer.URL + `/api/v1"
-      api_key: "secret-probe-key"
-      api_type: "chat_completions"
-      protocol_family: "openai_compatible"
+database:
+  driver: sqlite
+  dsn: ` + dir + `/trace_index.sqlite3
+trace:
+  output_dir: ` + dir + `
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-local",
+		Name:             "openai-local",
+		BaseURL:          upstreamServer.URL + "/api/v1",
+		ProviderPreset:   "openai",
+		APIType:          "chat_completions",
+		ProtocolFamily:   "openai_compatible",
+		APIKeyCiphertext: []byte("secret-probe-key"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 
 	cmd := newRootCommand()
@@ -3703,16 +3684,34 @@ func TestProviderProbeReportJSONReportsConfiguredUpstreams(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	configBody := `
-upstreams:
-  - id: "openai-report"
-    upstream:
-      base_url: "` + upstreamServer.URL + `/v1"
-      api_key: "secret-report-key"
-      api_type: "responses"
-      protocol_family: "openai_compatible"
+database:
+  driver: sqlite
+  dsn: ` + dir + `/trace_index.sqlite3
+trace:
+  output_dir: ` + dir + `
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-report",
+		Name:             "openai-report",
+		BaseURL:          upstreamServer.URL + "/v1",
+		ProviderPreset:   "openai",
+		APIType:          "responses",
+		ProtocolFamily:   "openai_compatible",
+		APIKeyCiphertext: []byte("secret-report-key"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 
 	cmd := newRootCommand()
@@ -3748,7 +3747,7 @@ upstreams:
 		t.Fatalf("probe-report envelope = %+v", envelope)
 	}
 	report := envelope.Result.Reports[0]
-	if report.TargetSource != "upstream" || report.ProviderID != "openai-report" || report.Status != "detected" {
+	if report.TargetSource != "channel" || report.ProviderID != "openai-report" || report.Status != "detected" {
 		t.Fatalf("probe-report identity/status = %+v", report)
 	}
 	if report.SuggestedAPIType != "chat_completions" || report.SuggestedProtocolFamily != "openai_compatible" {
@@ -3929,8 +3928,6 @@ server:
   port: "8080"
 monitor:
   port: ""
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -3971,8 +3968,6 @@ monitor:
 database:
   driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -4188,8 +4183,6 @@ monitor:
 database:
   driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -4299,8 +4292,6 @@ monitor:
 database:
   driver: "sqlite"
   dsn: "file:` + dbPath + `?mode=rwc"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -4583,8 +4574,6 @@ monitor:
   port: ""
 auth:
   database_path: "` + filepath.Join(dir, "control.sqlite3") + `"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -4671,8 +4660,6 @@ database:
   auto_migrate: true
 trace:
   output_dir: "` + dir + `"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false

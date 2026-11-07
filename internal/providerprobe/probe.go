@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/upstream"
 )
 
@@ -37,6 +38,9 @@ type ProbeTarget struct {
 	Headers                 map[string]string `json:"headers,omitempty"`
 	SpecifiedAPIType        string            `json:"specified_api_type,omitempty"`
 	SpecifiedProtocolFamily string            `json:"specified_protocol_family,omitempty"`
+	// Proxy is the channel-level outbound proxy policy. A disabled policy keeps
+	// the process-wide system policy.
+	Proxy netproxy.Settings `json:"-"`
 }
 
 type CapabilitySuggestion struct {
@@ -95,6 +99,13 @@ func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
+	resolver, err := netproxy.Compile(target.Proxy)
+	if err != nil {
+		report.Status = StatusError
+		report.Error = "proxy: " + err.Error()
+		return report, fmt.Errorf("providerprobe: proxy: %w", err)
+	}
+	client = netproxy.ClientWith(client, resolver)
 
 	scores := map[string]float64{}
 	capabilities := map[string]struct{}{}

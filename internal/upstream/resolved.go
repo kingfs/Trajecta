@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/pkg/llm"
 )
 
@@ -103,6 +104,10 @@ type ResolvedUpstream struct {
 	Location          string
 	ModelResource     string
 	Headers           map[string]string
+	// Proxy is the channel-level outbound proxy policy, compiled once at
+	// resolution time. A nil or disabled resolver means the process-wide system
+	// policy applies.
+	Proxy *netproxy.Resolver
 }
 
 type StartupDiagnostics struct {
@@ -138,6 +143,11 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		ModelResource:     strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
 		Headers:           cloneStringMap(cfg.Headers),
 	}
+	proxyResolver, err := netproxy.Compile(cfg.Proxy)
+	if err != nil {
+		return ResolvedUpstream{}, fmt.Errorf("upstream.proxy: %w", err)
+	}
+	resolved.Proxy = proxyResolver
 	applyHostProviderDefaults(&resolved, parsed)
 	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
 		return ResolvedUpstream{}, err
@@ -302,6 +312,13 @@ func PresetSupportMatrix() map[string]ProviderPresetSpec {
 		out[key] = value
 	}
 	return out
+}
+
+// HTTPClient returns base (or a default client when base is nil) carrying this
+// upstream's channel-level proxy policy. A disabled channel policy returns base
+// unchanged, so the process-wide system policy still applies.
+func (u ResolvedUpstream) HTTPClient(base *http.Client) *http.Client {
+	return netproxy.ClientWith(base, u.Proxy)
 }
 
 func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {

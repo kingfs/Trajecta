@@ -138,28 +138,6 @@ func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
 	}
 }
 
-func TestProviderProbeConfigLoadsStartupFillAndTimeout(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(`
-provider_probe:
-  startup_fill: true
-  timeout: 2s
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if !cfg.ProviderProbeStartupFillEnabled() {
-		t.Fatalf("ProviderProbeStartupFillEnabled() = false, want true")
-	}
-	if got := cfg.ProviderProbeTimeout(); got != 2*time.Second {
-		t.Fatalf("ProviderProbeTimeout() = %v, want 2s", got)
-	}
-}
-
 func TestDatabaseUseSessionSummaryReadDefaultsOffAndLoadsConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(`
@@ -193,330 +171,19 @@ func TestDatabaseUseSessionSummaryReadEnvOverride(t *testing.T) {
 	}
 }
 
-func TestProviderProbeConfigEnvOverrides(t *testing.T) {
-	t.Setenv("TRAJECTA_PROVIDER_PROBE_STARTUP_FILL", "true")
-	t.Setenv("TRAJECTA_PROVIDER_PROBE_TIMEOUT", "3s")
-
-	cfg := Config{}
-	applyEnvOverrides(&cfg)
-
-	if !cfg.ProviderProbeStartupFillEnabled() {
-		t.Fatalf("ProviderProbeStartupFillEnabled() = false, want true")
-	}
-	if got := cfg.ProviderProbeTimeout(); got != 3*time.Second {
-		t.Fatalf("ProviderProbeTimeout() = %v, want 3s", got)
-	}
-}
-
-func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
-	t.Setenv("TRAJECTA_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
-	t.Setenv("TRAJECTA_UPSTREAM_API_KEY", "env-placeholder-key")
-	t.Setenv("TRAJECTA_UPSTREAM_PROVIDER_PRESET", "openrouter")
-	t.Setenv("TRAJECTA_UPSTREAM_API_TYPE", "responses")
-	t.Setenv("TRAJECTA_UPSTREAM_MODE", "server")
-
-	cfg := Config{
-		Upstreams: []UpstreamTargetConfig{
-			{
-				ID: "primary",
-				Upstream: UpstreamConfig{
-					BaseURL:        "https://api.openai.com/v1",
-					ApiKey:         "config-placeholder-key",
-					ProviderPreset: "openai",
-					APIType:        "chat_completions",
-					Mode:           "proxy",
-				},
-			},
-			{
-				ID: "secondary",
-				Upstream: UpstreamConfig{
-					BaseURL:        "https://secondary.example.com/v1",
-					ApiKey:         "secondary-placeholder-key",
-					ProviderPreset: "openai",
-					APIType:        "chat_completions",
-					Mode:           "proxy",
-				},
-			},
-		},
-	}
-	applyEnvOverrides(&cfg)
-
-	if cfg.Upstreams[0].Upstream.BaseURL != "https://proxy.example.com/v1" {
-		t.Fatalf("first upstream base_url = %q", cfg.Upstreams[0].Upstream.BaseURL)
-	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "env-placeholder-key" {
-		t.Fatalf("first upstream api_key = %q", cfg.Upstreams[0].Upstream.ApiKey)
-	}
-	if cfg.Upstreams[0].Upstream.ProviderPreset != "openrouter" {
-		t.Fatalf("first upstream provider_preset = %q", cfg.Upstreams[0].Upstream.ProviderPreset)
-	}
-	if cfg.Upstreams[0].Upstream.APIType != "responses" {
-		t.Fatalf("first upstream api_type = %q", cfg.Upstreams[0].Upstream.APIType)
-	}
-	if cfg.Upstreams[0].Upstream.Mode != "server" {
-		t.Fatalf("first upstream mode = %q", cfg.Upstreams[0].Upstream.Mode)
-	}
-	if cfg.Upstreams[1].Upstream.ApiKey != "secondary-placeholder-key" {
-		t.Fatalf("second upstream api_key = %q", cfg.Upstreams[1].Upstream.ApiKey)
-	}
-	if cfg.Upstreams[1].Upstream.APIType != "chat_completions" {
-		t.Fatalf("second upstream api_type = %q", cfg.Upstreams[1].Upstream.APIType)
-	}
-}
-
-func TestBootstrapUpstreamEnvOverridesOnlyFirstConfiguredUpstream(t *testing.T) {
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
-
-	cfg := Config{
-		Upstream: UpstreamConfig{
-			BaseURL: "https://legacy.example.com/v1",
-			ApiKey:  "legacy-placeholder-key",
-		},
-		Upstreams: []UpstreamTargetConfig{
-			{
-				ID: "primary",
-				Upstream: UpstreamConfig{
-					BaseURL: "https://api.openai.com/v1",
-					ApiKey:  "config-placeholder-key",
-				},
-			},
-			{
-				ID: "secondary",
-				Upstream: UpstreamConfig{
-					BaseURL: "https://secondary.example.com/v1",
-					ApiKey:  "secondary-placeholder-key",
-				},
-			},
-		},
-	}
-	applyEnvOverrides(&cfg)
-
-	if cfg.Upstream.BaseURL != "https://legacy.example.com/v1" || cfg.Upstream.ApiKey != "legacy-placeholder-key" {
-		t.Fatalf("legacy upstream = %+v, want unchanged", cfg.Upstream)
-	}
-	if cfg.Upstreams[0].Upstream.BaseURL != "http://host.docker.internal:8000/v1" {
-		t.Fatalf("first upstream base_url = %q", cfg.Upstreams[0].Upstream.BaseURL)
-	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "bootstrap-placeholder-key" {
-		t.Fatalf("first upstream api_key = %q", cfg.Upstreams[0].Upstream.ApiKey)
-	}
-	if cfg.Upstreams[1].Upstream.BaseURL != "https://secondary.example.com/v1" || cfg.Upstreams[1].Upstream.ApiKey != "secondary-placeholder-key" {
-		t.Fatalf("second upstream = %+v, want unchanged", cfg.Upstreams[1].Upstream)
-	}
-}
-
-func TestBootstrapUpstreamEnvCreatesSingleDefaultUpstream(t *testing.T) {
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
-
-	cfg := Config{}
-	applyEnvOverrides(&cfg)
-
-	targets := cfg.EffectiveUpstreams()
-	if len(targets) != 1 {
-		t.Fatalf("len(EffectiveUpstreams()) = %d, want 1", len(targets))
-	}
-	target := targets[0]
-	if target.Upstream.BaseURL != "http://host.docker.internal:8000/v1" {
-		t.Fatalf("bootstrap base_url = %q", target.Upstream.BaseURL)
-	}
-	if target.Upstream.ApiKey != "bootstrap-placeholder-key" {
-		t.Fatalf("bootstrap api_key = %q", target.Upstream.ApiKey)
-	}
-	if target.Upstream.ProviderPreset != "openai" || target.Upstream.ProtocolFamily != "openai_compatible" {
-		t.Fatalf("bootstrap upstream preset/family = %q/%q", target.Upstream.ProviderPreset, target.Upstream.ProtocolFamily)
-	}
-	if target.Upstream.RoutingProfile != "openai_default" {
-		t.Fatalf("bootstrap routing_profile = %q, want openai_default", target.Upstream.RoutingProfile)
-	}
-	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
-		t.Fatalf("bootstrap chat_completions capability = %#v", target.Upstream.Capabilities.ChatCompletions)
-	}
-}
-
 func TestLoadExpandsEnvReferences(t *testing.T) {
-	t.Setenv("OPENAI_TEST_KEY", "test-placeholder-key")
+	t.Setenv("TRAJECTA_TEST_DATABASE_DSN", "postgres://user:pass@example.com:5432/traces")
 	path := writeTempConfig(t, `
-server:
-  port: "8080"
-upstreams:
-  - id: "primary"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:OPENAI_TEST_KEY"
-      provider_preset: "openai"
+database:
+  dsn: "$env:TRAJECTA_TEST_DATABASE_DSN"
 `)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "test-placeholder-key" {
-		t.Fatalf("api_key = %q, want test-placeholder-key", cfg.Upstreams[0].Upstream.ApiKey)
-	}
-}
-
-func TestLoadAllowsMissingLegacyLLMAPIKeyReference(t *testing.T) {
-	oldValue, wasSet := os.LookupEnv("LLM_API_KEY")
-	if err := os.Unsetenv("LLM_API_KEY"); err != nil {
-		t.Fatalf("Unsetenv() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if wasSet {
-			_ = os.Setenv("LLM_API_KEY", oldValue)
-			return
-		}
-		_ = os.Unsetenv("LLM_API_KEY")
-	})
-	path := writeTempConfig(t, `
-server:
-  port: "8080"
-upstreams:
-  - id: "primary"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:LLM_API_KEY"
-      provider_preset: "openai"
-`)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "" {
-		t.Fatalf("api_key = %q, want empty", cfg.Upstreams[0].Upstream.ApiKey)
-	}
-}
-
-func TestLoadParsesUpstreamAPISurface(t *testing.T) {
-	path := writeTempConfig(t, `
-upstreams:
-  - id: "primary"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_type: "responses"
-      mode: "server"
-      capabilities:
-        responses: true
-        chat_completions: false
-        tool_calling: false
-        embeddings: true
-        models: true
-        tokenize: false
-`)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	upstream := cfg.Upstreams[0].Upstream
-	if upstream.APIType != "responses" || upstream.Mode != "server" {
-		t.Fatalf("api surface = api_type:%q mode:%q, want responses/server", upstream.APIType, upstream.Mode)
-	}
-	if upstream.Capabilities.Responses == nil || !*upstream.Capabilities.Responses {
-		t.Fatalf("capabilities.responses = %v, want true", upstream.Capabilities.Responses)
-	}
-	if upstream.Capabilities.ChatCompletions == nil || *upstream.Capabilities.ChatCompletions {
-		t.Fatalf("capabilities.chat_completions = %v, want false", upstream.Capabilities.ChatCompletions)
-	}
-	if upstream.Capabilities.ToolCalling == nil || *upstream.Capabilities.ToolCalling {
-		t.Fatalf("capabilities.tool_calling = %v, want false", upstream.Capabilities.ToolCalling)
-	}
-	if upstream.Capabilities.Embeddings == nil || !*upstream.Capabilities.Embeddings {
-		t.Fatalf("capabilities.embeddings = %v, want true", upstream.Capabilities.Embeddings)
-	}
-	if upstream.Capabilities.Models == nil || !*upstream.Capabilities.Models {
-		t.Fatalf("capabilities.models = %v, want true", upstream.Capabilities.Models)
-	}
-	if upstream.Capabilities.Tokenize == nil || *upstream.Capabilities.Tokenize {
-		t.Fatalf("capabilities.tokenize = %v, want false", upstream.Capabilities.Tokenize)
-	}
-}
-
-func TestLoadParsesExplicitCredentials(t *testing.T) {
-	t.Setenv("OPENAI_TEST_KEY", "test-key-from-env")
-	t.Setenv("OPENAI_BACKUP_KEY", "backup-key-from-env")
-	path := writeTempConfig(t, `
-upstreams:
-  - id: "primary"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:OPENAI_TEST_KEY"
-      provider_preset: "openai"
-    credentials:
-      - id: "primary"
-        name: "Primary account"
-        api_key: "$env:OPENAI_TEST_KEY"
-        concurrency_limit: 2
-        headers:
-          X-Test-Credential: "primary"
-      - id: "backup"
-        name: "Backup account"
-        api_key: "$env:OPENAI_BACKUP_KEY"
-`)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	target := cfg.Upstreams[0]
-	if !target.HasExplicitCredentials() {
-		t.Fatalf("HasExplicitCredentials() = false, want true")
-	}
-	credentials := target.EffectiveCredentials()
-	if len(credentials) != 2 {
-		t.Fatalf("len(EffectiveCredentials()) = %d, want 2", len(credentials))
-	}
-	if credentials[0].ID != "primary" || credentials[0].ApiKey != "test-key-from-env" || credentials[0].ConcurrencyLimit != 2 {
-		t.Fatalf("primary credential = %+v", credentials[0])
-	}
-	if credentials[0].Headers["X-Test-Credential"] != "primary" {
-		t.Fatalf("primary credential headers = %+v", credentials[0].Headers)
-	}
-	if credentials[1].ID != "backup" || credentials[1].ApiKey != "backup-key-from-env" {
-		t.Fatalf("backup credential = %+v", credentials[1])
-	}
-}
-
-func TestEffectiveCredentialsUsesExplicitCredentialsBeforeInlineKey(t *testing.T) {
-	target := UpstreamTargetConfig{
-		Upstream: UpstreamConfig{
-			ApiKey: "inline-placeholder",
-		},
-		Credentials: []CredentialConfig{
-			{
-				ID:     "explicit",
-				ApiKey: "explicit-placeholder",
-			},
-		},
-	}
-
-	credentials := target.EffectiveCredentials()
-	if len(credentials) != 1 {
-		t.Fatalf("len(EffectiveCredentials()) = %d, want 1", len(credentials))
-	}
-	if credentials[0].ID != "explicit" || credentials[0].ApiKey != "explicit-placeholder" {
-		t.Fatalf("EffectiveCredentials()[0] = %+v, want explicit credential", credentials[0])
-	}
-}
-
-func TestEffectiveCredentialsCompilesImplicitDefaultFromInlineKey(t *testing.T) {
-	target := UpstreamTargetConfig{
-		Upstream: UpstreamConfig{
-			ApiKey: "inline-placeholder",
-		},
-	}
-
-	credentials := target.EffectiveCredentials()
-	if len(credentials) != 1 {
-		t.Fatalf("len(EffectiveCredentials()) = %d, want 1", len(credentials))
-	}
-	if credentials[0].ID != "default" || credentials[0].ApiKey != "inline-placeholder" {
-		t.Fatalf("EffectiveCredentials()[0] = %+v, want implicit default credential", credentials[0])
-	}
-	if credentials[0].Enabled == nil || !*credentials[0].Enabled {
-		t.Fatalf("implicit default Enabled = %v, want true", credentials[0].Enabled)
+	if cfg.Database.DSN != "postgres://user:pass@example.com:5432/traces" {
+		t.Fatalf("database.dsn = %q, want the expanded value", cfg.Database.DSN)
 	}
 }
 
@@ -1225,12 +892,8 @@ func TestLimitScopeDefaults(t *testing.T) {
 
 func TestLoadFailsWhenEnvReferenceMissing(t *testing.T) {
 	path := writeTempConfig(t, `
-server:
-  port: "8080"
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "$env:DOES_NOT_EXIST_FOR_TEST"
-  provider_preset: "openai"
+database:
+  dsn: "$env:DOES_NOT_EXIST_FOR_TEST"
 `)
 
 	if _, err := Load(path); err == nil {
@@ -1269,64 +932,6 @@ func clearMCPToolsEnv(t *testing.T) {
 		"TRAJECTA_TOOLS_MCP_MAX_RESULT_BYTES",
 	} {
 		t.Setenv(name, "")
-	}
-}
-
-func TestUpstreamModelCapabilitiesLoadFromYAML(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(`
-upstreams:
-  - id: "mixed"
-    enabled: true
-    model_discovery: "static_only"
-    static_models:
-      - "model-native"
-      - "model-chat"
-    upstream:
-      base_url: "https://api.example.com/v1"
-      provider_preset: "openai"
-      api_type: "responses_native"
-      capabilities:
-        responses: true
-        chat_completions: false
-      model_capabilities:
-        model-native:
-          responses: true
-          chat_completions: false
-        "MODEL-Chat":
-          responses: false
-          chat_completions: true
-        model-tools:
-          tool_calling: false
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(cfg.Upstreams) != 1 {
-		t.Fatalf("len(Upstreams) = %d, want 1", len(cfg.Upstreams))
-	}
-	modelCaps := cfg.Upstreams[0].Upstream.ModelCapabilities
-	if len(modelCaps) != 3 {
-		t.Fatalf("len(ModelCapabilities) = %d, want 3 (%v)", len(modelCaps), modelCaps)
-	}
-	native, ok := modelCaps["model-native"]
-	if !ok || native.Responses == nil || !*native.Responses || native.ChatCompletions == nil || *native.ChatCompletions {
-		t.Fatalf("model-native = %+v, want responses=true chat=false", native)
-	}
-	chat, ok := modelCaps["MODEL-Chat"]
-	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
-		t.Fatalf("MODEL-Chat = %+v, want responses=false chat=true", chat)
-	}
-	tools, ok := modelCaps["model-tools"]
-	if !ok || tools.ToolCalling == nil || *tools.ToolCalling {
-		t.Fatalf("model-tools = %+v, want tool_calling=false", tools)
-	}
-	if tools.Responses != nil || tools.ChatCompletions != nil {
-		t.Fatalf("model-tools must leave undeclared flags nil, got %+v", tools)
 	}
 }
 
@@ -1535,37 +1140,6 @@ server:
 	}
 }
 
-// TestUpstreamEnvFillsTheSingleUpstreamConfigWhenThereIsNoList covers the shape
-// the configuration had before the list existed: the legacy single `upstream`
-// block. Each TRAJECTA_UPSTREAM_* variable writes it as well as the first entry of
-// the list, and only the list half was covered by a test, so a refactor that
-// dropped the direct assignment passed every existing test.
-func TestUpstreamEnvFillsTheSingleUpstreamConfigWhenThereIsNoList(t *testing.T) {
-	t.Setenv("TRAJECTA_UPSTREAM_BASE_URL", "https://single.example.com/v1")
-	t.Setenv("TRAJECTA_UPSTREAM_API_KEY", "single-placeholder-key")
-	t.Setenv("TRAJECTA_UPSTREAM_MODE", "server")
-
-	cfg := Config{}
-	applyEnvOverrides(&cfg)
-
-	if cfg.Upstream.BaseURL != "https://single.example.com/v1" {
-		t.Fatalf("single upstream base_url = %q, want the env value", cfg.Upstream.BaseURL)
-	}
-	if cfg.Upstream.ApiKey != "single-placeholder-key" {
-		t.Fatalf("single upstream api_key = %q, want the env value", cfg.Upstream.ApiKey)
-	}
-	if cfg.Upstream.Mode != "server" {
-		t.Fatalf("single upstream mode = %q, want the env value", cfg.Upstream.Mode)
-	}
-	// With no configured list there is no entry to override, so none is invented.
-	if len(cfg.Upstreams) != 0 {
-		t.Fatalf("upstreams = %+v, want none", cfg.Upstreams)
-	}
-}
-
-// TestEnvOverridesIgnoreUnparsableValues pins the failure mode of the override
-// layer: a value that does not parse leaves the loaded value in place rather than
-// failing startup or zeroing the field.
 func TestEnvOverridesIgnoreUnparsableValues(t *testing.T) {
 	// These fields are anonymous structs, so they are set through the value rather
 	// than a composite literal.
@@ -1627,8 +1201,8 @@ func TestApplyEnvOverridesKeepsItsSurfaceInOnePlace(t *testing.T) {
 			t.Fatalf("%s appears %d times, want once", key, count)
 		}
 	}
-	if len(seen) < 40 {
-		t.Fatalf("applyEnvOverrides handles %d variables, want at least 40; a removal this size should be deliberate", len(seen))
+	if len(seen) < 25 {
+		t.Fatalf("applyEnvOverrides handles %d variables, want at least 25; a removal this size should be deliberate", len(seen))
 	}
 }
 
@@ -1659,6 +1233,8 @@ func functionBodyForTest(source, name string) (string, bool) {
 // values in the message, the way an unknown limits.scope already did. `on_missing_model` is
 // no longer a field at all: the unknown-model fallback was removed.
 func TestLoadRejectsRoutingValuesNoConsumerRecognises(t *testing.T) {
+	// Channel model_discovery is no longer a YAML key, so only the router
+	// selection policy remains here. The accepted spellings still load.
 	for _, tc := range []struct {
 		name string
 		body string
@@ -1668,17 +1244,6 @@ func TestLoadRejectsRoutingValuesNoConsumerRecognises(t *testing.T) {
 			name: "selection policy",
 			body: "router:\n  selection:\n    policy: first-availble\n",
 			want: `router.selection.policy "first-availble" is not supported; use one of p2c, first_available`,
-		},
-		{
-			name: "target model discovery",
-			body: "upstreams:\n" +
-				"  - id: primary\n" +
-				"    model_discovery: static\n" +
-				"    upstream:\n" +
-				"      base_url: http://127.0.0.1:1/v1\n" +
-				"      api_key: k\n" +
-				"      provider_preset: openai\n",
-			want: `upstreams[0] (primary) model_discovery "static" is not supported; use one of list_models, static_only, disabled`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1692,25 +1257,13 @@ func TestLoadRejectsRoutingValuesNoConsumerRecognises(t *testing.T) {
 		})
 	}
 
-	// The accepted values and an omitted value still load, and a target without an id is
-	// still located by its index.
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
-		{
-			name: "accepted values",
-			body: "router:\n  selection:\n    policy: first_available\n" +
-				"upstreams:\n  - id: primary\n    model_discovery: disabled\n",
-		},
-		{
-			name: "values omitted",
-			body: "router:\n  selection: {}\nupstreams:\n  - id: primary\n",
-		},
-		{
-			name: "mixed case accepted",
-			body: "router:\n  selection:\n    policy: First_Available\n",
-		},
+		{name: "accepted values", body: "router:\n  selection:\n    policy: first_available\n"},
+		{name: "values omitted", body: "router:\n  selection: {}\n"},
+		{name: "mixed case accepted", body: "router:\n  selection:\n    policy: First_Available\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Load(writeTempConfig(t, tc.body)); err != nil {
@@ -1718,23 +1271,8 @@ func TestLoadRejectsRoutingValuesNoConsumerRecognises(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("target without id", func(t *testing.T) {
-		body := "upstreams:\n  - model_discovery: static\n"
-		_, err := Load(writeTempConfig(t, body))
-		if err == nil {
-			t.Fatal("Load() accepted an unrecognised model_discovery")
-		}
-		if !strings.Contains(err.Error(), `upstreams[0] model_discovery "static"`) {
-			t.Fatalf("Load() error = %v, want the target located by index", err)
-		}
-	})
 }
 
-// TestShippedConfigsUseKnownRoutingValues runs the routing-value check over every tracked
-// config file. The examples are loaded with environment references expanded only when their
-// variables exist, so the check decodes each file and applies the validation directly rather
-// than going through Load.
 func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
 	t.Parallel()
 
@@ -2051,5 +1589,20 @@ telemetry:
 	}
 	if !strings.Contains(err.Error(), "telemetry.provider") {
 		t.Fatalf("Load() error = %v, want it to name telemetry.provider", err)
+	}
+}
+
+func TestLoadRejectsYAMLChannelConfiguration(t *testing.T) {
+	for _, body := range []string{
+		"upstream:\n  base_url: https://api.openai.com/v1\n",
+		"upstreams:\n  - id: primary\n    upstream:\n      base_url: https://api.openai.com/v1\n",
+	} {
+		_, err := Load(writeTempConfig(t, body))
+		if err == nil {
+			t.Fatalf("Load(%q) error = nil, want a YAML channel rejection", body)
+		}
+		if !strings.Contains(err.Error(), "no longer supported") || !strings.Contains(err.Error(), "application database") {
+			t.Fatalf("Load() error = %v, want an actionable database-only message", err)
+		}
 	}
 }

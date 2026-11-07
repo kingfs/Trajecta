@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/recorder"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/responses/chatclient"
@@ -163,6 +164,10 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	// The default transport reads the request-context override, but an adapter
+	// with its own client may not. Apply the channel policy explicitly so both
+	// paths agree.
+	httpClient = netproxy.ClientWith(httpClient, selection.Target.Upstream.Proxy)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		logInfo.Header.Meta.Error = "send chat completion request: " + err.Error()
@@ -670,7 +675,7 @@ func buildResponsesServerChatRequest(ctx context.Context, selection *router.Sele
 	if err != nil {
 		return nil, nil, fmt.Errorf("build chat completion target URL: %w", err)
 	}
-	actualReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+	actualReq, err := http.NewRequestWithContext(netproxy.WithResolver(ctx, selection.Target.Upstream.Proxy), http.MethodPost, fullURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create chat completion request: %w", err)
 	}

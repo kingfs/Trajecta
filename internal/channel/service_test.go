@@ -14,152 +14,11 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/modelprobe"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
 )
-
-func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	enabled := true
-	responsesEnabled := false
-	chatCompletionsEnabled := true
-	toolCallingEnabled := true
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID:             "openai-primary",
-				Enabled:        &enabled,
-				Priority:       100,
-				Weight:         1,
-				CapacityHint:   2,
-				ModelDiscovery: "static_only",
-				StaticModels:   []string{"gpt-5", "GPT-5", "gpt-4.1"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        "https://api.openai.com/v1",
-					ApiKey:         "test-inline-key",
-					ProviderPreset: "openai",
-					APIType:        "chat_completions",
-					Mode:           "responses_server",
-					Capabilities: config.UpstreamCapabilitiesConfig{
-						Responses:       &responsesEnabled,
-						ChatCompletions: &chatCompletionsEnabled,
-						ToolCalling:     &toolCallingEnabled,
-					},
-					Headers: map[string]string{
-						"X-Test": "true",
-					},
-				},
-			},
-		},
-	}
-
-	svc := NewService(st)
-	imported, err := svc.BootstrapFromConfig(cfg)
-	if err != nil {
-		t.Fatalf("BootstrapFromConfig() error = %v", err)
-	}
-	if imported != 1 {
-		t.Fatalf("imported = %d, want 1", imported)
-	}
-	imported, err = svc.BootstrapFromConfig(cfg)
-	if err != nil {
-		t.Fatalf("second BootstrapFromConfig() error = %v", err)
-	}
-	if imported != 0 {
-		t.Fatalf("second imported = %d, want 0", imported)
-	}
-	record, err := st.GetChannelConfig("openai-primary")
-	if err != nil {
-		t.Fatalf("GetChannelConfig() error = %v", err)
-	}
-	if record.Source != "bootstrap" {
-		t.Fatalf("record.Source = %q, want bootstrap", record.Source)
-	}
-	if record.APIType != "chat_completions" || record.Mode != "responses_server" {
-		t.Fatalf("record api surface = %q/%q", record.APIType, record.Mode)
-	}
-	if !strings.Contains(record.CapabilitiesJSON, `"chat_completions":true`) || !strings.Contains(record.CapabilitiesJSON, `"responses":false`) {
-		t.Fatalf("record.CapabilitiesJSON = %s", record.CapabilitiesJSON)
-	}
-
-	targets, err := svc.RuntimeTargets()
-	if err != nil {
-		t.Fatalf("RuntimeTargets() error = %v", err)
-	}
-	if len(targets) != 1 {
-		t.Fatalf("len(targets) = %d, want 1", len(targets))
-	}
-	target := targets[0]
-	if target.ID != "openai-primary" {
-		t.Fatalf("target.ID = %q", target.ID)
-	}
-	if target.Upstream.ApiKey != "test-inline-key" {
-		t.Fatalf("target.Upstream.ApiKey = %q", target.Upstream.ApiKey)
-	}
-	if got := target.Upstream.Headers["X-Test"]; got != "true" {
-		t.Fatalf("target header X-Test = %q", got)
-	}
-	if target.Upstream.APIType != "chat_completions" || target.Upstream.Mode != "responses_server" {
-		t.Fatalf("target api surface = %q/%q", target.Upstream.APIType, target.Upstream.Mode)
-	}
-	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
-		t.Fatalf("target.Upstream.Capabilities.ChatCompletions = %#v", target.Upstream.Capabilities.ChatCompletions)
-	}
-	if target.Upstream.Capabilities.Responses == nil || *target.Upstream.Capabilities.Responses {
-		t.Fatalf("target.Upstream.Capabilities.Responses = %#v", target.Upstream.Capabilities.Responses)
-	}
-	if len(target.StaticModels) != 2 || target.StaticModels[0] != "gpt-4.1" || target.StaticModels[1] != "gpt-5" {
-		t.Fatalf("target.StaticModels = %#v", target.StaticModels)
-	}
-}
-
-func TestBootstrapFromConfigSkipsExplicitCredentialsWithoutStorageProjection(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID: "openai-primary",
-				Upstream: config.UpstreamConfig{
-					BaseURL:        "https://api.openai.com/v1",
-					ApiKey:         "test-inline-key",
-					ProviderPreset: "openai",
-				},
-				Credentials: []config.CredentialConfig{
-					{
-						ID:     "primary",
-						ApiKey: "test-explicit-key",
-					},
-				},
-			},
-		},
-	}
-
-	imported, err := NewService(st).BootstrapFromConfig(cfg)
-	if err != nil {
-		t.Fatalf("BootstrapFromConfig() error = %v", err)
-	}
-	if imported != 0 {
-		t.Fatalf("imported = %d, want 0", imported)
-	}
-	channels, err := st.ListChannelConfigs()
-	if err != nil {
-		t.Fatalf("ListChannelConfigs() error = %v", err)
-	}
-	if len(channels) != 0 {
-		t.Fatalf("len(channels) = %d, want 0", len(channels))
-	}
-}
 
 func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -833,58 +692,6 @@ func TestRuntimeTargetsProjectsPerModelCapabilities(t *testing.T) {
 	}
 }
 
-func TestBootstrapFromConfigImportsPerModelCapabilities(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	enabled := true
-	responsesDisabled := false
-	chatEnabled := true
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID:             "mixed",
-				Enabled:        &enabled,
-				ModelDiscovery: "static_only",
-				StaticModels:   []string{"gpt-native", "gpt-chat"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        "https://api.example.com/v1",
-					ProviderPreset: "openai",
-					APIType:        "responses_native",
-					Mode:           "proxy",
-					ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
-						"gpt-chat": {Responses: &responsesDisabled, ChatCompletions: &chatEnabled},
-					},
-				},
-			},
-		},
-	}
-
-	svc := NewService(st)
-	if _, err := svc.BootstrapFromConfig(cfg); err != nil {
-		t.Fatalf("BootstrapFromConfig() error = %v", err)
-	}
-
-	targets, err := svc.RuntimeTargets()
-	if err != nil {
-		t.Fatalf("RuntimeTargets() error = %v", err)
-	}
-	if len(targets) != 1 {
-		t.Fatalf("len(targets) = %d, want 1", len(targets))
-	}
-	caps := targets[0].Upstream.ModelCapabilities
-	chat, ok := caps["gpt-chat"]
-	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
-		t.Fatalf("gpt-chat capabilities = %+v, want responses=false chat=true", chat)
-	}
-	if _, ok := caps["gpt-native"]; ok {
-		t.Fatalf("gpt-native must not carry an override, got %+v", caps["gpt-native"])
-	}
-}
-
 func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"new"},{"id":"enabled"},{"id":"disabled"}]}`))
@@ -933,139 +740,16 @@ func TestServiceBuildersLeaveTheirReceiverUntouched(t *testing.T) {
 
 	base := NewService(st)
 	scoped := base.WithStore(st)
-	readOnly := base.WithReadOnly(true)
 	withClient := base.WithHTTPClient(&http.Client{})
 
-	if base.ReadOnly() {
-		t.Fatal("WithReadOnly mutated the receiver")
-	}
-	if !readOnly.ReadOnly() {
-		t.Fatal("WithReadOnly did not apply to the derived service")
-	}
 	if base.httpClient != nil {
 		t.Fatal("WithHTTPClient mutated the receiver")
 	}
 	if withClient.httpClient == nil {
 		t.Fatal("WithHTTPClient did not apply to the derived service")
 	}
-	if scoped == base || readOnly == base || withClient == base {
+	if scoped == base || withClient == base {
 		t.Fatal("With* helpers returned the receiver instead of a derived service")
-	}
-	// A derived service must keep the specialization of the service it came from.
-	if !readOnly.WithStore(st).ReadOnly() {
-		t.Fatal("WithStore dropped the read-only flag")
-	}
-}
-
-func TestResetConfigurationInitializedReopensYAMLImport(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-	svc := NewService(st)
-
-	if initialized, err := svc.HasConfiguration(); err != nil || initialized {
-		t.Fatalf("HasConfiguration() on a fresh store = %v, %v; want false", initialized, err)
-	}
-	if err := svc.MarkConfigurationInitialized(); err != nil {
-		t.Fatalf("MarkConfigurationInitialized() error = %v", err)
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
-		t.Fatalf("HasConfiguration() after marking = %v, %v; want true", initialized, err)
-	}
-	if err := svc.ResetConfigurationInitialized(); err != nil {
-		t.Fatalf("ResetConfigurationInitialized() error = %v", err)
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || initialized {
-		t.Fatalf("HasConfiguration() after reset = %v, %v; want false", initialized, err)
-	}
-	// Resetting never deletes channels: stored configuration still wins over YAML.
-	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1"}); err != nil {
-		t.Fatal(err)
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
-		t.Fatalf("HasConfiguration() with a stored channel = %v, %v; want true", initialized, err)
-	}
-	if err := svc.ResetConfigurationInitialized(); err != nil {
-		t.Fatalf("ResetConfigurationInitialized() error = %v", err)
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
-		t.Fatalf("reset dropped stored channels: initialized=%v err=%v", initialized, err)
-	}
-}
-
-func TestBootstrapFromConfigStopsWritingOnceInitialized(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-	svc := NewService(st)
-
-	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.ResetConfigurationInitialized(); err != nil {
-		t.Fatal(err)
-	}
-	imported, err := svc.BootstrapFromConfig(&config.Config{})
-	if err != nil || imported != 0 {
-		t.Fatalf("BootstrapFromConfig() = %d, %v; want 0, nil", imported, err)
-	}
-	var marker bool
-	if found, err := st.LoadAppSettingJSON(context.Background(), "channels.initialized", &marker); err != nil {
-		t.Fatal(err)
-	} else if found {
-		t.Fatal("an already-initialized startup rewrote the bootstrap marker")
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
-		t.Fatalf("stored channels no longer count as initialized: initialized=%v err=%v", initialized, err)
-	}
-}
-
-func TestBootstrapFromConfigReimportsYAMLAfterReset(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-	svc := NewService(st)
-
-	enabled := true
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{{
-			ID:      "openai-primary",
-			Enabled: &enabled,
-			Upstream: config.UpstreamConfig{
-				BaseURL:        "https://example.invalid/v1",
-				ProviderPreset: "openai",
-			},
-		}},
-	}
-	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 1 {
-		t.Fatalf("first BootstrapFromConfig() = %d, %v; want 1, nil", imported, err)
-	}
-	channels, err := st.ListChannelConfigs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, record := range channels {
-		if err := st.DeleteChannelConfig(record.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
-		t.Fatalf("marker was not persisted by the first import: initialized=%v err=%v", initialized, err)
-	}
-	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 0 {
-		t.Fatalf("BootstrapFromConfig() before reset = %d, %v; want 0, nil", imported, err)
-	}
-	if err := svc.ResetConfigurationInitialized(); err != nil {
-		t.Fatal(err)
-	}
-	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 1 {
-		t.Fatalf("BootstrapFromConfig() after reset = %d, %v; want 1, nil", imported, err)
 	}
 }
 
@@ -1617,5 +1301,44 @@ func TestEffectiveModelInterfacesUnresolvableChannelDegradesToFamily(t *testing.
 	}, store.ChannelModelRecord{Model: "m", Enabled: true})
 	if got != (ModelInterfaces{}) {
 		t.Fatalf("EffectiveModelInterfaces() = %+v, want a zero value", got)
+	}
+}
+
+func TestChannelProxySettingsFlowThroughRuntimeTargets(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	proxyJSON, _ := json.Marshal(netproxy.Settings{
+		Enabled:   true,
+		HTTPProxy: "127.0.0.1:7890",
+		NoProxy:   ".internal.example.com",
+	})
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "proxied",
+		Name:           "proxied",
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		ProxyJSON:      string(proxyJSON),
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("proxied", store.ChannelModelRecord{Model: "gpt-5", Source: "static", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel() error = %v", err)
+	}
+
+	svc := NewService(st)
+	targets, err := svc.RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	if !targets[0].Upstream.Proxy.Enabled || targets[0].Upstream.Proxy.HTTPProxy != "127.0.0.1:7890" {
+		t.Fatalf("runtime target proxy = %+v, want the stored policy", targets[0].Upstream.Proxy)
 	}
 }

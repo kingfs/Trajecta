@@ -185,6 +185,9 @@ func Run(ctx context.Context, target Target, protocol Protocol, client *http.Cli
 	if client == nil {
 		client = defaultHTTPClient()
 	}
+	// The channel's own proxy policy wins over the system policy for every
+	// protocol probe. A disabled policy returns the client unchanged.
+	client = target.Resolved.HTTPClient(client)
 	selected, deferred := selectProtocols(&report, target, protocol)
 	for _, candidate := range selected {
 		result := runOne(ctx, target, candidate, client)
@@ -240,6 +243,7 @@ func RunForced(ctx context.Context, target Target, protocols []Protocol, client 
 	if client == nil {
 		client = defaultHTTPClient()
 	}
+	client = target.Resolved.HTTPClient(client)
 	seen := make(map[Protocol]bool, len(protocols))
 	for _, protocol := range protocols {
 		if protocol == ProtocolAuto || seen[protocol] {

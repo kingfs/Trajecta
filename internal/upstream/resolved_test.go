@@ -2,12 +2,11 @@ package upstream
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 )
 
 func TestResolveProviderPresets(t *testing.T) {
@@ -898,34 +897,6 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 	}
 }
 
-// The bootstrap upstream synthesized from TRAJECTA_BOOTSTRAP_UPSTREAM_*
-// must satisfy the same registry validation as a hand-written config, so the
-// two pieces cannot drift apart.
-func TestBootstrapUpstreamFromConfigResolves(t *testing.T) {
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", "https://api.example.com/v1")
-	t.Setenv("TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
-
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("server:\n  port: \"8080\"\n"), 0o600); err != nil {
-		t.Fatalf("write temp config: %v", err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	targets := cfg.EffectiveUpstreams()
-	if len(targets) != 1 {
-		t.Fatalf("len(EffectiveUpstreams()) = %d, want 1", len(targets))
-	}
-	resolved, err := Resolve(targets[0].Upstream)
-	if err != nil {
-		t.Fatalf("Resolve(bootstrap upstream): %v", err)
-	}
-	if resolved.RoutingProfile != RoutingProfileOpenAIDefault {
-		t.Fatalf("routing_profile = %q, want %q", resolved.RoutingProfile, RoutingProfileOpenAIDefault)
-	}
-}
-
 // TestResponsesNativeRequiresExplicitDeclaration pins the routing contract for
 // `/v1/responses`: a channel-level `capabilities.responses: true` is not on its
 // own a declaration of the native Responses API. This is the NVIDIA NIM incident
@@ -1128,5 +1099,31 @@ func TestResponsesModelOverrideFalseBeatsNativeChannel(t *testing.T) {
 	}
 	if got := resolved.SupportsEndpointForModel("/v1/responses", "local-only"); !got {
 		t.Fatalf("SupportsEndpointForModel(/v1/responses, local-only) = false, want the local fallback to stay available")
+	}
+}
+
+func TestResolveCompilesChannelProxy(t *testing.T) {
+	t.Parallel()
+
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+		Proxy:   netproxy.Settings{Enabled: true, HTTPProxy: "127.0.0.1:7890"},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.Proxy == nil || !resolved.Proxy.Enabled() {
+		t.Fatalf("resolved.Proxy = %+v, want an enabled resolver", resolved.Proxy)
+	}
+	if got := resolved.Proxy.Settings().HTTPProxy; got != "http://127.0.0.1:7890" {
+		t.Fatalf("HTTPProxy = %q, want canonical http://127.0.0.1:7890", got)
+	}
+
+	_, err = Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+		Proxy:   netproxy.Settings{Enabled: true, HTTPSProxy: "ftp://proxy.internal:21"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "upstream.proxy") {
+		t.Fatalf("Resolve(invalid proxy) error = %v, want an upstream.proxy error", err)
 	}
 }

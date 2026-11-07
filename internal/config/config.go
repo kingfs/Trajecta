@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/redaction"
 
 	"gopkg.in/yaml.v3"
@@ -128,8 +129,11 @@ type Config struct {
 		SyncInterval time.Duration `yaml:"sync_interval"`
 	} `yaml:"trace"`
 
-	Upstream  UpstreamConfig         `yaml:"upstream"`
-	Upstreams []UpstreamTargetConfig `yaml:"upstreams"`
+	// Upstream/Upstreams are the in-memory routing projection built from the
+	// application database by cmd/server. They are deliberately not YAML keys:
+	// channels are configured and stored only in the application database.
+	Upstream  UpstreamConfig         `yaml:"-"`
+	Upstreams []UpstreamTargetConfig `yaml:"-"`
 
 	ProviderProbe ProviderProbeConfig `yaml:"provider_probe"`
 
@@ -189,6 +193,12 @@ type UpstreamConfig struct {
 	Location          string                                `yaml:"location"`
 	ModelResource     string                                `yaml:"model_resource"`
 	Headers           map[string]string                     `yaml:"headers"`
+	// Proxy overrides the system-level outbound proxy policy for this upstream
+	// only. The fields follow the same http_proxy / https_proxy / no_proxy
+	// semantics as the Monitor's System page; leaving it disabled means the
+	// process-wide policy applies. A channel configured from the Monitor stores
+	// the same value in channel_configs.proxy_json.
+	Proxy netproxy.Settings `yaml:"proxy"`
 }
 
 type UpstreamCapabilitiesConfig struct {
@@ -224,8 +234,7 @@ type UpstreamTargetConfig struct {
 }
 
 type ProviderProbeConfig struct {
-	StartupFill bool          `yaml:"startup_fill"`
-	Timeout     time.Duration `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type CredentialConfig struct {
@@ -498,11 +507,15 @@ func Load(path string) (*Config, error) {
 	// disagree about the stand-in for the same value.
 	cfg.SecretMasking.MappingStore.Enabled = true
 	cfg.SecretMasking.MappingStore.LoadLimit = DefaultSecretMappingLoadLimit
+	if err := rejectLegacyChannelConfig(data); err != nil {
+		return nil, err
+	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 	warnUnknownConfigKeys(data)
 	applyEnvOverrides(&cfg)
+	warnLegacyChannelEnv()
 	if err := expandEnvRefs(&cfg); err != nil {
 		return nil, err
 	}
@@ -529,6 +542,35 @@ func Load(path string) (*Config, error) {
 		slog.Warn("neither trace.output_dir nor debug.output_dir is set; recordings and the default SQLite database are written relative to the process working directory")
 	}
 	return &cfg, nil
+}
+
+// legacyChannelEnv lists the environment variables that used to configure YAML
+// channels. They are no longer read; naming them at startup is better than
+// silently starting with no routes because an old deployment still exports one.
+var legacyChannelEnv = []string{
+	"TRAJECTA_UPSTREAM_BASE_URL",
+	"TRAJECTA_UPSTREAM_API_KEY",
+	"TRAJECTA_UPSTREAM_PROVIDER_PRESET",
+	"TRAJECTA_UPSTREAM_API_TYPE",
+	"TRAJECTA_UPSTREAM_MODE",
+	"TRAJECTA_UPSTREAM_PROTOCOL_FAMILY",
+	"TRAJECTA_UPSTREAM_ROUTING_PROFILE",
+	"TRAJECTA_UPSTREAM_API_VERSION",
+	"TRAJECTA_UPSTREAM_DEPLOYMENT",
+	"TRAJECTA_UPSTREAM_PROJECT",
+	"TRAJECTA_UPSTREAM_LOCATION",
+	"TRAJECTA_UPSTREAM_MODEL_RESOURCE",
+	"TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL",
+	"TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY",
+	"TRAJECTA_PROVIDER_PROBE_STARTUP_FILL",
+}
+
+func warnLegacyChannelEnv() {
+	for _, name := range legacyChannelEnv {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			slog.Warn("legacy channel environment variable is ignored; configure channels in the Monitor (application database)", "name", name)
+		}
+	}
 }
 
 // validChaosActions lists the actions internal/proxy implements. The proxy matches the action
@@ -658,6 +700,28 @@ var validLimitScopes = map[string]struct{}{
 // router.model_discovery.startup_policy) survive in config files and docs
 // without any effect. Re-decoding with KnownFields(true) turns that drift into a
 // visible startup warning instead of silence.
+// rejectLegacyChannelConfig turns a stale YAML channel block into an actionable
+// startup error. Channels are read from the application database now; silently
+// ignoring the block would start a server with no routes and make the operator
+// hunt for the reason in logs.
+func rejectLegacyChannelConfig(data []byte) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	doc := root.Content[0]
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		key := strings.TrimSpace(doc.Content[i].Value)
+		if key == "upstream" || key == "upstreams" {
+			return fmt.Errorf("YAML channel configuration is no longer supported: remove %q and configure channels in the Monitor; channels are read from the application database", key)
+		}
+	}
+	return nil
+}
+
 func warnUnknownConfigKeys(data []byte) {
 	for _, detail := range unknownConfigKeys(data) {
 		slog.Warn("configuration key is not read by this build and was ignored", "detail", detail)
@@ -703,15 +767,6 @@ var validSelectionPolicies = map[string]struct{}{
 	"first_available": {},
 }
 
-// validModelDiscoveryModes lists the values internal/router honours for a target's
-// model_discovery. An unknown value is normalized to list_models, so a typo can switch the
-// upstream model discovery back on for an operator who meant to turn it off.
-var validModelDiscoveryModes = map[string]struct{}{
-	"list_models": {},
-	"static_only": {},
-	"disabled":    {},
-}
-
 // validateRouterEnums rejects routing values that no consumer recognises.
 //
 // The router reads these through normalizing helpers (normalizePolicy,
@@ -724,19 +779,6 @@ func validateRouterEnums(cfg *Config) error {
 	if value := strings.TrimSpace(cfg.Router.Selection.Policy); value != "" {
 		if _, ok := validSelectionPolicies[strings.ToLower(value)]; !ok {
 			return fmt.Errorf("router.selection.policy %q is not supported; use one of p2c, first_available", value)
-		}
-	}
-	for i, target := range cfg.Upstreams {
-		value := strings.TrimSpace(target.ModelDiscovery)
-		if value == "" {
-			continue
-		}
-		if _, ok := validModelDiscoveryModes[strings.ToLower(value)]; !ok {
-			where := fmt.Sprintf("upstreams[%d]", i)
-			if id := strings.TrimSpace(target.ID); id != "" {
-				where = fmt.Sprintf("upstreams[%d] (%s)", i, id)
-			}
-			return fmt.Errorf("%s model_discovery %q is not supported; use one of list_models, static_only, disabled", where, value)
 		}
 	}
 	return nil
@@ -782,21 +824,6 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Telemetry.Endpoint, "TRAJECTA_TELEMETRY_ENDPOINT")
 	envString(&cfg.Telemetry.PathPrefix, "TRAJECTA_TELEMETRY_PATH_PREFIX")
 	envDuration(&cfg.Telemetry.Interval, "TRAJECTA_TELEMETRY_INTERVAL")
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROVIDER_PRESET", func(u *UpstreamConfig, v string) { u.ProviderPreset = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_TYPE", func(u *UpstreamConfig, v string) { u.APIType = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_MODE", func(u *UpstreamConfig, v string) { u.Mode = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROTOCOL_FAMILY", func(u *UpstreamConfig, v string) { u.ProtocolFamily = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_ROUTING_PROFILE", func(u *UpstreamConfig, v string) { u.RoutingProfile = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_API_VERSION", func(u *UpstreamConfig, v string) { u.APIVersion = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_DEPLOYMENT", func(u *UpstreamConfig, v string) { u.Deployment = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_PROJECT", func(u *UpstreamConfig, v string) { u.Project = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_LOCATION", func(u *UpstreamConfig, v string) { u.Location = v })
-	envUpstream(cfg, "TRAJECTA_UPSTREAM_MODEL_RESOURCE", func(u *UpstreamConfig, v string) { u.ModelResource = v })
-	envBootstrapUpstream(cfg, "TRAJECTA_BOOTSTRAP_UPSTREAM_BASE_URL", func(u *UpstreamConfig, v string) { u.BaseURL = v })
-	envBootstrapUpstream(cfg, "TRAJECTA_BOOTSTRAP_UPSTREAM_API_KEY", func(u *UpstreamConfig, v string) { u.ApiKey = v })
-	envBool(&cfg.ProviderProbe.StartupFill, "TRAJECTA_PROVIDER_PROBE_STARTUP_FILL")
 	envDuration(&cfg.ProviderProbe.Timeout, "TRAJECTA_PROVIDER_PROBE_TIMEOUT")
 	envStringPair(&cfg.Debug.OutputDir, &cfg.Trace.OutputDir, "TRAJECTA_OUTPUT_DIR")
 	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
@@ -911,73 +938,6 @@ func envList(target *[]string, key string) {
 	}
 }
 
-// envUpstream applies a value to the single-upstream configuration and to the
-// first entry of the upstream list, which is what the variables did as blocks: the
-// configuration carries both shapes, and an entry only exists once the list does.
-func envUpstream(cfg *Config, key string, assign func(*UpstreamConfig, string)) {
-	if v := os.Getenv(key); v != "" {
-		assign(&cfg.Upstream, v)
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
-			assign(upstream, v)
-		})
-	}
-}
-
-// envBootstrapUpstream is envUpstream for the variables that create the bootstrap
-// entry first, and only when no upstream is configured.
-func envBootstrapUpstream(cfg *Config, key string, assign func(*UpstreamConfig, string)) {
-	if v := os.Getenv(key); v != "" {
-		ensureBootstrapUpstream(cfg)
-		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
-			assign(upstream, v)
-		})
-	}
-}
-
-func applyFirstUpstreamOverride(cfg *Config, apply func(*UpstreamConfig)) {
-	if len(cfg.Upstreams) == 0 {
-		return
-	}
-	apply(&cfg.Upstreams[0].Upstream)
-}
-
-func applyFirstUpstreamOverrideOrSingle(cfg *Config, apply func(*UpstreamConfig)) {
-	if len(cfg.Upstreams) > 0 {
-		apply(&cfg.Upstreams[0].Upstream)
-		return
-	}
-	apply(&cfg.Upstream)
-}
-
-func ensureBootstrapUpstream(cfg *Config) {
-	if cfg == nil || len(cfg.Upstreams) > 0 || strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
-		return
-	}
-	chatCompletions := true
-	responses := false
-	toolCalling := true
-	models := true
-	tokenize := false
-	cfg.Upstream = UpstreamConfig{
-		ProviderPreset: "openai",
-		APIType:        "chat_completions",
-		Mode:           "proxy",
-		Capabilities: UpstreamCapabilitiesConfig{
-			ChatCompletions: &chatCompletions,
-			Responses:       &responses,
-			ToolCalling:     &toolCalling,
-			Models:          &models,
-			Tokenize:        &tokenize,
-		},
-		ProtocolFamily: "openai_compatible",
-		// Must be a routing profile registered in internal/upstream; the bare
-		// "openai" value is only a provider preset name and would be rejected
-		// by upstream.Resolve.
-		RoutingProfile: "openai_default",
-		Headers:        map[string]string{},
-	}
-}
-
 func expandEnvRefs(target any) error {
 	return expandEnvValue(reflect.ValueOf(target), "")
 }
@@ -1056,21 +1016,15 @@ func expandEnvString(raw string, path string) (string, error) {
 	}
 	value, ok := os.LookupEnv(name)
 	if !ok {
-		if optionalMissingEnvRef(name, path) {
-			return "", nil
-		}
 		return "", fmt.Errorf("environment variable %s referenced at %s is not set", name, path)
 	}
 	return value, nil
 }
 
-func optionalMissingEnvRef(name string, path string) bool {
-	if name != "LLM_API_KEY" {
-		return false
-	}
-	return path == "Upstream.ApiKey" || strings.HasSuffix(path, ".Upstream.ApiKey")
-}
-
+// EffectiveUpstreams returns the in-memory router projection. It is never
+// populated from YAML; cmd/server fills Upstreams from channel.Service.
+// Upstream remains a single-target convenience for tests and the local
+// Responses runtime, not a configuration source.
 func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {
 	if len(c.Upstreams) > 0 {
 		return append([]UpstreamTargetConfig(nil), c.Upstreams...)
@@ -1089,42 +1043,6 @@ func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {
 			Upstream: c.Upstream,
 		},
 	}
-}
-
-func (t UpstreamTargetConfig) HasExplicitCredentials() bool {
-	return len(t.Credentials) > 0
-}
-
-func (t UpstreamTargetConfig) EffectiveCredentials() []CredentialConfig {
-	if len(t.Credentials) > 0 {
-		return cloneCredentialConfigs(t.Credentials)
-	}
-	if strings.TrimSpace(t.Upstream.ApiKey) == "" {
-		return nil
-	}
-	enabled := true
-	return []CredentialConfig{
-		{
-			ID:      "default",
-			Name:    "default",
-			Enabled: &enabled,
-			ApiKey:  t.Upstream.ApiKey,
-		},
-	}
-}
-
-func cloneCredentialConfigs(in []CredentialConfig) []CredentialConfig {
-	out := make([]CredentialConfig, len(in))
-	for i, credential := range in {
-		out[i] = credential
-		if credential.Headers != nil {
-			out[i].Headers = make(map[string]string, len(credential.Headers))
-			for key, value := range credential.Headers {
-				out[i].Headers[key] = value
-			}
-		}
-	}
-	return out
 }
 
 func (c Config) AuthSessionTTL() time.Duration {
@@ -1556,10 +1474,6 @@ func (c Config) DebugSlowQueryThreshold() time.Duration {
 		return c.Debug.SlowQueryThreshold
 	}
 	return 0
-}
-
-func (c Config) ProviderProbeStartupFillEnabled() bool {
-	return c.ProviderProbe.StartupFill
 }
 
 func (c Config) ProviderProbeTimeout() time.Duration {

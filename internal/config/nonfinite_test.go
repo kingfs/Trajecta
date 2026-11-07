@@ -23,21 +23,6 @@ func TestLoadRejectsNonFiniteNumbers(t *testing.T) {
 		want string
 	}{
 		{
-			name: "weight NaN",
-			body: "upstreams:\n  - id: a\n    base_url: https://a.test/v1\n    api_key: k\n    weight: .nan\n",
-			want: "upstreams[0].weight",
-		},
-		{
-			name: "capacity_hint +Inf",
-			body: "upstreams:\n  - id: a\n    base_url: https://a.test/v1\n    api_key: k\n    capacity_hint: .inf\n",
-			want: "upstreams[0].capacity_hint",
-		},
-		{
-			name: "weight -Inf on the second target",
-			body: "upstreams:\n  - id: a\n    base_url: https://a.test/v1\n    api_key: k\n  - id: b\n    base_url: https://b.test/v1\n    api_key: k\n    weight: -.inf\n",
-			want: "upstreams[1].weight",
-		},
-		{
 			name: "router epsilon NaN",
 			body: "router:\n  selection:\n    epsilon: .nan\n",
 			want: "router.selection.epsilon",
@@ -70,7 +55,7 @@ func TestLoadRejectsNonFiniteNumbers(t *testing.T) {
 // TestLoadAcceptsFiniteNumbers keeps the check from drifting into a blanket float check: the
 // documented non-positive-means-default values stay loadable.
 func TestLoadAcceptsFiniteNumbers(t *testing.T) {
-	body := "upstreams:\n  - id: a\n    base_url: https://a.test/v1\n    api_key: k\n    weight: -3\n    capacity_hint: 0\nrouter:\n  selection:\n    epsilon: 0\nchaos:\n  rules:\n    - action: delay\n      rate: 0.5\n"
+	body := "router:\n  selection:\n    epsilon: 0\nchaos:\n  rules:\n    - action: delay\n      rate: 0.5\n"
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -80,7 +65,7 @@ func TestLoadAcceptsFiniteNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v, want the documented finite values to load", err)
 	}
-	if cfg.Upstreams[0].Weight != -3 || cfg.Upstreams[0].CapacityHint != 0 {
-		t.Fatalf("loaded weight/capacity = %v/%v, want -3/0", cfg.Upstreams[0].Weight, cfg.Upstreams[0].CapacityHint)
+	if cfg.Router.Selection.Epsilon != 0 || len(cfg.Chaos.Rules) != 1 || cfg.Chaos.Rules[0].Rate != 0.5 {
+		t.Fatalf("loaded finite values = %+v / %+v", cfg.Router.Selection, cfg.Chaos.Rules)
 	}
 }

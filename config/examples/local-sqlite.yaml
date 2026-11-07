@@ -39,45 +39,7 @@ router:
     open_window: 15s
     failure_threshold: 3
 
-upstreams:
-  - id: "local"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "static_only"
-    static_models:
-      - "gpt-4o-mini"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:OPENAI_API_KEY"
-      provider_preset: "openai"
-      # api_type declares how this channel serves Responses: "chat_completions"
-      # means /v1/responses goes through the local Responses runtime unless a
-      # model opts in with a per-model responses override; "responses" declares
-      # the native Responses API (this example keeps OpenAI's native surface).
-      api_type: "responses"
-      mode: "proxy"
-      capabilities:
-        chat_completions: true
-        responses: true
-        tool_calling: true
-        models: true
-      # Optional per-model overrides. A model listed here uses these capability
-      # flags instead of the ones above, which is what lets one upstream serve
-      # some models natively and route others through the local Responses mode.
-      # Unlisted models keep the upstream-level capabilities.
-      # model_capabilities:
-      #   gpt-4o-mini:
-      #     responses: true
-      #     chat_completions: false
-      #   gpt-4o-mini-chat:
-      #     responses: false
-      #     chat_completions: true
-      protocol_family: "openai_compatible"
-      routing_profile: "openai_default"
-      headers: {}
-
+# Channels are configured in the Monitor and stored in the application database.
 debug:
   output_dir: "./logs/local"
   mask_key: true

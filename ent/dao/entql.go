@@ -141,6 +141,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			channelconfig.FieldAPIKeyCiphertext:   {Type: field.TypeBytes, Column: channelconfig.FieldAPIKeyCiphertext},
 			channelconfig.FieldAPIKeyHint:         {Type: field.TypeString, Column: channelconfig.FieldAPIKeyHint},
 			channelconfig.FieldHeadersJSON:        {Type: field.TypeString, Column: channelconfig.FieldHeadersJSON},
+			channelconfig.FieldProxyJSON:          {Type: field.TypeString, Column: channelconfig.FieldProxyJSON},
 			channelconfig.FieldEnabled:            {Type: field.TypeBool, Column: channelconfig.FieldEnabled},
 			channelconfig.FieldPriority:           {Type: field.TypeInt, Column: channelconfig.FieldPriority},
 			channelconfig.FieldWeight:             {Type: field.TypeFloat64, Column: channelconfig.FieldWeight},
@@ -1226,6 +1227,11 @@ func (f *ChannelConfigFilter) WhereAPIKeyHint(p entql.StringP) {
 // WhereHeadersJSON applies the entql string predicate on the headers_json field.
 func (f *ChannelConfigFilter) WhereHeadersJSON(p entql.StringP) {
 	f.Where(p.Field(channelconfig.FieldHeadersJSON))
+}
+
+// WhereProxyJSON applies the entql string predicate on the proxy_json field.
+func (f *ChannelConfigFilter) WhereProxyJSON(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldProxyJSON))
 }
 
 // WhereEnabled applies the entql bool predicate on the enabled field.

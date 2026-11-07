@@ -32,13 +32,13 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/harness`：只从请求头与 URL 识别发请求的客户端 harness（不读 body）（Claude Code、Codex CLI、Cline、Cursor 等），产出 trace 标签；只读旁路，不改变请求、响应或发往上游的字节。规则、置信度与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。
 - `internal/upstream`：上游解析、协议族、能力/路由 profile 与鉴权/URL 规则。
-- `internal/channel`：渠道（provider）配置与 probe 用例、legacy YAML bootstrap、runtime targets。
+- `internal/channel`：渠道（provider）配置与 probe 用例、runtime targets；渠道只来自应用数据库，没有 YAML bootstrap。
 - `internal/responses`：本地 Responses 运行时及其子系统——`runtime`（编排与 state store）、`httpapi`（HTTP handler）、`chatclient`（内部 Chat Completions client）、`audit`（审计查询与写入）、`functionexec`（本地函数执行器）、`tools`（hosted tools：`hosted`、`mcp`、`websearch`）、`protocol`（类型定义）、`codexfixtures`（Codex 兼容 fixture）。
 - `internal/router`：多上游选择、健康、重试、sticky、决策记录与路由快照发布。
 - `internal/routeplan`：Inspector 与转发路径共享的路由 DTO/词汇、`responses_strategy` 常量，以及唯一的 `DecideResponses` 执行模式决策；它**不再包含 planner**，候选过滤/健康/选择由 `internal/router` 的 `Explain` dry-run 与热路径共用。
 - `internal/appdbmigrate`：应用 Postgres checked-in migration 的加载与应用。
 - `internal/monitor`：Monitor API 与内嵌 React UI（`go:embed ui/dist/*`）。
-- `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
+- `internal/netproxy`：出站代理策略。系统级策略存于 `app_settings` 键 `network.proxy`，渠道级策略存于 `channel_configs.proxy_json`；两者都按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换系统策略。进程启动时读库并安装 `http.DefaultTransport`；渠道策略随 `upstream.Resolve` 编译进 `ResolvedUpstream.Proxy`，转发路径通过请求 context 覆盖共享 transport 的代理决策，probe/发现/本地 Responses/tokenize 则用渠道 resolver 包装各自的 client，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页与渠道页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
 - `internal/resources`：从 Observation IR 的模型工具调用中提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引；工具结果、消息正文与代码内容不参与。
@@ -51,7 +51,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/evals`：基于 replay 的确定性 eval 基线执行（HTTP 状态、TTFT/token 预算、tool-call 校验等）。
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
 - `internal/auth`：认证 user/token 与 JWT。
-- `internal/config`：YAML/env 配置装载（含 legacy bootstrap 输入）。
+- `internal/config`：YAML/env 配置装载；`upstream` / `upstreams` 不是 YAML 键，加载时会被明确拒绝。
 - `internal/limit`：请求限流；`internal/redaction`：URL 与敏感参数脱敏；`internal/chaos`：配置驱动的故障注入（`action` 取 `delay`/`error`，大小写不敏感；`rate` 必须在 0.0~1.0，`status_code` 必须是 0 或 100~999，否则 `Load` 报错而不让规则静默失效或让 `WriteHeader` panic）。
 - `pkg/recordfile`：V2/V3 cassette 解析与写入。
 - `pkg/replay`：测试回放 transport。
@@ -95,7 +95,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 - native：匹配到支持 Responses 的上游时直接透传。
 - 本地 runtime：把请求编排为一次内部上游 `/v1/chat/completions` 调用（`responses_server` 执行模式）。该模式始终可用且没有配置开关；旧的 `responses_server.enabled` 与 `TRAJECTA_RESPONSES_ENABLED` 已移除。本地 runtime 延迟构建，构建失败只影响触发该次构建的请求，不阻塞启动。
 - 策略存于 application DB 的 `app_settings` 键 `routing.settings`，经 `GET`/`PATCH /api/settings/routing` 读写，不是 YAML 键；取值为 `auto`、`prefer_native`、`prefer_local_server`、`native_only`、`local_server_only`。
-- native 与 local 的选择按模型解析而非按渠道：`channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 可编辑）覆盖渠道级 `api_type`/`capabilities`，未声明值的模型回落到渠道级行为；YAML 侧对应 `upstream.model_capabilities`。
+- native 与 local 的选择按模型解析而非按渠道：`channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 可编辑）覆盖渠道级 `api_type`/`capabilities`，未声明值的模型回落到渠道级行为；数据库侧对应 `channel_models.supports_*`。
 
 本地 Responses 运行时的编排、审计与 hosted tools 细节见 [Responses 运行时](./RESPONSES_RUNTIME.md)。
 
@@ -152,7 +152,7 @@ Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个
 
 `ConfigurationTransaction` 串行化管理配置写入：全程持有进程级配置锁、upstream 写锁与单个 SQL 事务，提交成功后才发布路由快照。router 不再写 `upstream_targets` / `upstream_models`（它们只是旧运行时快照与兼容投影），刷新结果只更新内存快照，因此一次配置提交之后不会再被后台刷新用旧数据覆盖。
 
-渠道配置的 DB 优先规则：YAML `upstream`/`upstreams` 只是首次 bootstrap 输入；首次数据库写入记录 `app_settings` 键 `channels.initialized`，此后 DB 是路由配置来源，即使全部渠道停用或删除也不回退 YAML。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 仅清除标记（只有在 DB 中确实没有渠道时，下次启动才会重新导入）。带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，并拒绝 Monitor 的渠道/模型/别名写入（返回 409）。
+渠道配置只来自应用数据库：YAML 的 `upstream` / `upstreams` 已移除，`config.Load` 遇到这两个键会报错并提示在 Monitor 配置。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 只清除标记，不再触发任何重新导入。不存在 YAML 只读模式，Monitor 的渠道/模型/别名写操作始终走 `ConfigurationTransaction`。
 
 ## 事实源边界
 

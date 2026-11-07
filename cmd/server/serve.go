@@ -136,14 +136,6 @@ func runServeWithConfig(configPath string) int {
 		)
 	}
 
-	// The probe fills in optional protocol fields from the provider itself. It
-	// runs after the proxy policy is published so the probe reaches a provider
-	// behind the same proxy as the request path.
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, nil); err != nil {
-		slog.Error("Startup provider probe failed", "error", err)
-		return 1
-	}
-
 	syncCtx, cancelSync := context.WithCancel(context.Background())
 	var background sync.WaitGroup
 	defer func() {
@@ -165,18 +157,11 @@ func runServeWithConfig(configPath string) int {
 	startCredentialMaskEventReconciliation(syncCtx, traceStore, 5*time.Minute, &background)
 
 	channelService := channel.NewService(traceStore)
-	if imported, err := channelService.BootstrapFromConfig(cfg); err != nil {
-		slog.Error("Failed to bootstrap channel config", "error", err)
-		return 1
-	} else if imported > 0 {
-		slog.Info("Imported upstream config into channel store", "channels", imported)
-	}
-	routerCfg, source, err := routerConfigFromChannels(cfg, channelService)
+	routerCfg, err := routerConfigFromChannels(cfg, channelService)
 	if err != nil {
 		slog.Error("Failed to build router config from channels", "error", err)
 		return 1
 	}
-	slog.Info("Resolved router config source", "source", source)
 	if err := validateServeRouterConfig(cfg, routerCfg); err != nil {
 		// Non-fatal by design: without an eligible chat completions upstream the
 		// local Responses server simply cannot serve /v1/responses, but the
@@ -198,9 +183,6 @@ func runServeWithConfig(configPath string) int {
 	defer rtr.Close()
 	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
-	if rtr.LegacyPassthrough() {
-		slog.Warn("Legacy single upstream forwards undeclared model names; migrate to upstreams[].static_models or the Monitor for strict model authorization")
-	}
 
 	functionExecutorManager, err := buildResponsesFunctionExecutorManager(context.Background(), cfg, traceStore)
 	if err != nil {
@@ -550,35 +532,16 @@ func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) err
 	return nil
 }
 
-func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {
-	if configHasExplicitCredentials(cfg) {
-		return cfg, "yaml", nil
-	}
+// routerConfigFromChannels builds the router input exclusively from the
+// application database. YAML no longer configures channels: the configuration
+// file only names the database and process settings.
+func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, error) {
 	targets, err := channelService.RuntimeTargets()
 	if err != nil {
-		return nil, "", err
-	}
-	initialized, err := channelService.HasConfiguration()
-	if err != nil {
-		return nil, "", err
-	}
-	if !initialized {
-		return cfg, "yaml", nil
+		return nil, err
 	}
 	routerCfg := *cfg
 	routerCfg.Upstream = config.UpstreamConfig{}
 	routerCfg.Upstreams = targets
-	return &routerCfg, "database", nil
-}
-
-func configHasExplicitCredentials(cfg *config.Config) bool {
-	if cfg == nil {
-		return false
-	}
-	for _, target := range cfg.EffectiveUpstreams() {
-		if target.HasExplicitCredentials() {
-			return true
-		}
-	}
-	return false
+	return &routerCfg, nil
 }

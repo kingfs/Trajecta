@@ -29,14 +29,14 @@ docker build -t trajecta:local \
 tests/live/run-live.sh
 ```
 
-`run-live.sh` 会：`docker compose up -d` → 等端口 → `auth init-user` / `auth create-token` → 导出 `TRAJECTA_LIVE_PROXY_TOKEN` → 执行 `go test ./tests/live -v`。
+`run-live.sh` 会：`docker compose up -d` → 等端口 → `auth init-user` / `auth create-token` → 通过 Monitor API 写入主栈渠道（`seed-channels.sh main`）→ 导出 `TRAJECTA_LIVE_PROXY_TOKEN` → 执行 `go test ./tests/live -v`。
 
 ## 环境变量
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `TRAJECTA_LIVE_UPSTREAM` | 是 | 置 `1` 才运行；否则所有用例 `t.Skip` |
-| `TRAJECTA_LIVE_API_KEY` | 是 | 上游 API key（写入配置时用 `$env:TRAJECTA_LIVE_API_KEY`） |
+| `TRAJECTA_LIVE_API_KEY` | 是 | 上游 API key；由 `seed-channels.sh` 写入应用数据库的渠道记录 |
 | `TRAJECTA_LIVE_CHAT_API_BASE` | 是 | Chat Completions 上游 base（需含 API 前缀） |
 | `TRAJECTA_LIVE_RESPONSES_API_BASE` | 是 | Responses 上游 base |
 | `TRAJECTA_LIVE_MESSAGES_API_BASE` | 是 | Anthropic Messages 上游 base |
@@ -70,6 +70,6 @@ tests/live/run-live.sh
 - 代理入口 `/v1/*` 强制鉴权，所有请求都要带 `Authorization: Bearer $TRAJECTA_LIVE_PROXY_TOKEN`。
 - Monitor `/api/*` 需要 JWT（`/api/auth/login`），MCP `/mcp` 需要 API token。
 - 测试会切换 `routing.settings.responses_strategy`，`withResponsesStrategy` 会在用例结束时恢复原值。
-- `run-live.sh` 使用的配置文件在 `tests/live/config/`，其中 key 走 `$env:` 展开，**不要把真实 key 写进仓库**。
-- `fault_test.go` 的用例在缺少对应的 `*_URL` 时整条 `t.Skip`，所以只跑主栈（`run-live.sh`）不会受影响。要复现故障注入结论，按 `tests/live/config/live-{failover,outage,chaos}.yaml` 各起一个实例（端口 18094–18097、18092/18093），分别导出 `TRAJECTA_LIVE_*_URL` / `_TOKEN` / `_DIR`（token 用 `server auth create-token -c <该配置>` 生成，注意 CLI 也需要 `TRAJECTA_LIVE_FAILOVER_DIR` / `_OUTAGE_DIR` / `_CHAOS_DIR` 这几个 `$env:` 变量）。
+- `run-live.sh` 使用的配置文件在 `tests/live/config/`，只包含进程/数据库/路由等非渠道配置；渠道由 `seed-channels.sh` 通过 Monitor API 写入应用数据库，**不要把真实 key 写进仓库**。
+- `fault_test.go` 的用例在缺少对应的 `*_URL` 时整条 `t.Skip`，所以只跑主栈（`run-live.sh`）不会受影响。要复现故障注入结论，按 `tests/live/config/live-{failover,outage,chaos}.yaml` 各起一个实例（端口 18094–18097、18092/18093），导出 `TRAJECTA_LIVE_*_URL` / `_TOKEN` / `_DIR`，再用对应的 `seed-channels.sh failover|outage|chaos` 写入该实例的渠道（token 仍用 `server auth create-token -c <该配置>` 生成，CLI 也需要 `TRAJECTA_LIVE_FAILOVER_DIR` / `_OUTAGE_DIR` / `_CHAOS_DIR` 这几个 `$env:` 变量）。
 - `live-outage.yaml` 的用例会在**约 30s 后**才拿到 502（重试预算，见 `internal/proxy/handler.go:90`），属预期行为。

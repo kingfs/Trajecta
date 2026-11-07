@@ -12,6 +12,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -159,6 +160,7 @@ type channelItem struct {
 	APIKeyHint        string               `json:"api_key_hint,omitempty"`
 	SecretStorageMode string               `json:"secret_storage_mode"`
 	Headers           map[string]string    `json:"headers,omitempty"`
+	Proxy             netproxy.Settings    `json:"proxy"`
 	Enabled           bool                 `json:"enabled"`
 	Priority          int                  `json:"priority"`
 	Weight            float64              `json:"weight"`
@@ -283,12 +285,13 @@ type channelProbeRequest struct {
 }
 
 type providerProbeRequest struct {
-	ProviderID     string            `json:"provider_id"`
-	BaseURL        string            `json:"base_url"`
-	APIKey         string            `json:"api_key"`
-	Headers        map[string]string `json:"headers"`
-	APIType        string            `json:"api_type"`
-	ProtocolFamily string            `json:"protocol_family"`
+	ProviderID     string             `json:"provider_id"`
+	BaseURL        string             `json:"base_url"`
+	APIKey         string             `json:"api_key"`
+	Headers        map[string]string  `json:"headers"`
+	APIType        string             `json:"api_type"`
+	ProtocolFamily string             `json:"protocol_family"`
+	Proxy          *netproxy.Settings `json:"proxy"`
 }
 
 type providerSetupRequest struct {
@@ -334,6 +337,7 @@ type channelUpsertRequest struct {
 	ModelResource  string                             `json:"model_resource"`
 	APIKey         string                             `json:"api_key"`
 	Headers        map[string]channelHeaderUpdate     `json:"headers"`
+	Proxy          *netproxy.Settings                 `json:"proxy"`
 	Enabled        *bool                              `json:"enabled"`
 	Priority       *int                               `json:"priority"`
 	Weight         *float64                           `json:"weight"`
@@ -683,6 +687,15 @@ func providerProbeAPIHandler() http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe payload"})
 			return
 		}
+		proxySettings := netproxy.DefaultSettings()
+		if req.Proxy != nil {
+			resolver, err := netproxy.Compile(*req.Proxy)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			proxySettings = resolver.Settings()
+		}
 		report, err := providerprobe.Probe(r.Context(), providerprobe.ProbeTarget{
 			ProviderID:              strings.TrimSpace(req.ProviderID),
 			BaseURL:                 strings.TrimSpace(req.BaseURL),
@@ -690,6 +703,7 @@ func providerProbeAPIHandler() http.HandlerFunc {
 			Headers:                 req.Headers,
 			SpecifiedAPIType:        strings.TrimSpace(req.APIType),
 			SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+			Proxy:                   proxySettings,
 		}, nil)
 		if err != nil && report.Status == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -717,6 +731,10 @@ func providerSetupAPIHandlerUncommitted(st *store.Store, rtr *router.Router, cha
 		var req providerSetupRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider setup payload"})
+			return
+		}
+		if err := normalizeChannelProxySettings(&req.channelUpsertRequest, netproxy.DefaultSettings()); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		resp, probeErr := buildProviderSetupResponse(r.Context(), req, st)
@@ -769,6 +787,10 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
 		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
 	}
+	proxySettings := netproxy.DefaultSettings()
+	if strings.TrimSpace(record.ProxyJSON) != "" {
+		_ = json.Unmarshal([]byte(record.ProxyJSON), &proxySettings)
+	}
 	return channelItem{
 		ID:                record.ID,
 		Name:              record.Name,
@@ -789,6 +811,7 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 		APIKeyHint:        secretHint(req.APIKey),
 		SecretStorageMode: secretStorageMode(st),
 		Headers:           redactHeaders(headers),
+		Proxy:             proxySettings,
 		Enabled:           record.Enabled,
 		Priority:          record.Priority,
 		Weight:            record.Weight,
@@ -816,6 +839,7 @@ func providerSetupUpsertRequest(normalized channelItem, original channelUpsertRe
 		ModelResource:  normalized.ModelResource,
 		APIKey:         original.APIKey,
 		Headers:        original.Headers,
+		Proxy:          original.Proxy,
 		Enabled:        &normalized.Enabled,
 		Priority:       &normalized.Priority,
 		Weight:         &normalized.Weight,
@@ -950,6 +974,10 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 			var req channelUpsertRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel payload"})
+				return
+			}
+			if err := normalizeChannelProxySettings(&req, netproxy.DefaultSettings()); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
 			record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, store.ChannelConfigRecord{}))
@@ -1360,6 +1388,101 @@ func modelAliasItemFromRecord(record store.ModelAliasRecord) modelAliasItem {
 	}
 }
 
+// normalizeChannelProxySettings validates and canonicalizes the channel-level
+// proxy before it is persisted. An omitted field leaves the stored value alone;
+// an explicit one must compile, so a malformed proxy is a 400 rather than a
+// stored row that breaks router reload.
+func normalizeChannelProxySettings(req *channelUpsertRequest, existing netproxy.Settings) error {
+	if req == nil || req.Proxy == nil {
+		return nil
+	}
+	merged := mergeRedactedProxySettings(*req.Proxy, existing)
+	resolver, err := netproxy.Compile(merged)
+	if err != nil {
+		return err
+	}
+	normalized := resolver.Settings()
+	req.Proxy = &normalized
+	return nil
+}
+
+// proxyRedactedPassword is the placeholder the channel API returns in place of
+// a proxy password. A save that sends it back keeps the stored password, so the
+// UI can edit a channel without ever receiving the secret.
+const proxyRedactedPassword = "xxxxx"
+
+func redactedProxySettings(settings netproxy.Settings) netproxy.Settings {
+	settings.HTTPProxy = redactProxyPassword(settings.HTTPProxy)
+	settings.HTTPSProxy = redactProxyPassword(settings.HTTPSProxy)
+	return settings
+}
+
+func redactProxyPassword(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, ok := parseProxyForRedaction(raw)
+	if !ok || parsed.User == nil {
+		return raw
+	}
+	username := parsed.User.Username()
+	if _, hasPassword := parsed.User.Password(); !hasPassword {
+		return raw
+	}
+	parsed.User = url.UserPassword(username, proxyRedactedPassword)
+	return parsed.String()
+}
+
+// mergeRedactedProxySettings keeps the stored password when a request sends the
+// redacted placeholder back. It only touches the two proxy URLs; no_proxy and
+// the enable switch are taken from the request.
+func mergeRedactedProxySettings(incoming, existing netproxy.Settings) netproxy.Settings {
+	incoming.HTTPProxy = mergeRedactedProxyPassword(incoming.HTTPProxy, existing.HTTPProxy)
+	incoming.HTTPSProxy = mergeRedactedProxyPassword(incoming.HTTPSProxy, existing.HTTPSProxy)
+	return incoming
+}
+
+func mergeRedactedProxyPassword(incoming, existing string) string {
+	incoming = strings.TrimSpace(incoming)
+	if incoming == "" {
+		return ""
+	}
+	parsed, ok := parseProxyForRedaction(incoming)
+	if !ok || parsed.User == nil {
+		return incoming
+	}
+	password, hasPassword := parsed.User.Password()
+	if !hasPassword || password != proxyRedactedPassword {
+		return incoming
+	}
+	existingParsed, existingOK := parseProxyForRedaction(existing)
+	if !existingOK || existingParsed.User == nil {
+		return incoming
+	}
+	existingPassword, existingHasPassword := existingParsed.User.Password()
+	if !existingHasPassword {
+		return incoming
+	}
+	parsed.User = url.UserPassword(parsed.User.Username(), existingPassword)
+	return parsed.String()
+}
+
+func parseProxyForRedaction(raw string) (*url.URL, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return nil, false
+	}
+	return parsed, true
+}
+
 func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelConfigRecord) store.ChannelConfigRecord {
 	record := existing
 	if strings.TrimSpace(req.ID) != "" {
@@ -1407,6 +1530,12 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 		data, _ := json.Marshal(headers)
 		record.HeadersJSON = string(data)
 	}
+	if req.Proxy != nil {
+		data, _ := json.Marshal(req.Proxy)
+		record.ProxyJSON = string(data)
+	} else if strings.TrimSpace(record.ProxyJSON) == "" {
+		record.ProxyJSON = "{}"
+	}
 	if req.Enabled != nil {
 		record.Enabled = *req.Enabled
 	} else if existing.ID == "" {
@@ -1436,6 +1565,11 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
 		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
 	}
+	proxySettings := netproxy.DefaultSettings()
+	if strings.TrimSpace(record.ProxyJSON) != "" {
+		_ = json.Unmarshal([]byte(record.ProxyJSON), &proxySettings)
+	}
+	proxySettings = redactedProxySettings(proxySettings)
 	return channelItem{
 		ID:                record.ID,
 		Name:              record.Name,
@@ -1456,6 +1590,7 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		APIKeyHint:        record.APIKeyHint,
 		SecretStorageMode: st.SecretStorageMode(),
 		Headers:           redactHeaders(headers),
+		Proxy:             proxySettings,
 		Enabled:           record.Enabled,
 		Priority:          record.Priority,
 		Weight:            record.Weight,

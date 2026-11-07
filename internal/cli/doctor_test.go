@@ -56,11 +56,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -90,11 +85,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: anthropic
-  protocol_family: anthropic
-  api_type: responses
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -105,8 +95,8 @@ upstream:
 	if envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Warn == 0 || envelope.Result.Summary.Fail != 0 {
 		t.Fatalf("doctor summary = %+v", envelope.Result.Summary)
 	}
-	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusWarn {
-		t.Fatalf("responses_server.backend status = %q, want warn", got)
+	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusPass {
+		t.Fatalf("responses_server.backend status = %q, want pass for the database-backed runtime", got)
 	}
 }
 
@@ -121,11 +111,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -160,11 +145,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -208,11 +188,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -246,11 +221,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
@@ -303,11 +273,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
@@ -358,11 +323,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 	codexPath := filepath.Join(dir, "codex.toml")
 	codexBody := `
@@ -407,11 +367,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -441,11 +396,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -475,11 +425,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -516,11 +461,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -563,11 +503,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -596,11 +531,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -629,11 +559,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -670,11 +595,6 @@ database:
   dsn: "`+dbPath+`"
 trace:
   output_dir: "`+dir+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
@@ -716,11 +636,6 @@ database:
   dsn: "`+dbPath+`"
 trace:
   output_dir: "`+dir+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
@@ -753,11 +668,6 @@ database:
   driver: mysql
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -781,11 +691,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -814,11 +719,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -849,11 +749,6 @@ database:
   auto_migrate: false
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -896,11 +791,6 @@ database:
   auto_migrate: false
 trace:
   output_dir: "`+dir+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
@@ -941,11 +831,6 @@ database:
   auto_migrate: false
 trace:
   output_dir: "`+dir+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
@@ -974,11 +859,6 @@ database:
   auto_migrate: false
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
@@ -1014,11 +894,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1045,11 +920,6 @@ tools:
   web_search:
     enabled: true
     provider: searxng
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1075,11 +945,6 @@ trace:
 tools:
   mcp:
     enabled: false
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1103,11 +968,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1134,11 +994,6 @@ trace:
 responses_server:
   codex_compat:
     enabled: true
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1171,11 +1026,6 @@ tools:
     enabled: false
   mcp:
     enabled: false
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1210,11 +1060,6 @@ tools:
   web_search:
     enabled: true
     provider: mock
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1241,11 +1086,6 @@ trace:
 tools:
   mcp:
     enabled: true
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1282,11 +1122,6 @@ tools:
       - id: disabled
         enabled: false
         bearer_token_env: DOCTOR_MCP_TOKEN
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1316,11 +1151,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: https://api.example.com/v1
-  provider_preset: openai
-  protocol_family: openai
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--fail-on-warn")
@@ -1352,22 +1182,6 @@ tools:
     enabled: true
     provider: searxng
     base_url: https://search.example.com?api_key=doctor-search-secret
-upstreams:
-  - id: openai
-    enabled: true
-    upstream:
-      base_url: https://user:doctor-url-secret@api.example.com/v1?token=doctor-url-token
-      api_key: "$env:DOCTOR_TEST_OPENAI_KEY"
-      provider_preset: openai
-      protocol_family: openai
-      api_type: chat_completions
-      headers:
-        Authorization: Bearer doctor-header-secret
-    credentials:
-      - id: primary
-        api_key: doctor-credential-secret
-        headers:
-          X-API-Key: doctor-credential-header-secret
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1416,12 +1230,6 @@ database:
   driver: sqlite
 trace:
   output_dir: "`+t.TempDir()+`"
-upstream:
-  base_url: "`+upstreamServer.URL+`/v1"
-  api_key: doctor-default-secret
-  provider_preset: openai
-  protocol_family: openai_compatible
-  api_type: chat_completions
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
@@ -1462,22 +1270,25 @@ func TestDoctorProbeProvidersReportsDetectedSummary(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	configPath := writeDoctorTestConfig(t, `
+	dir := t.TempDir()
+	configPath := writeDoctorTestConfigInDir(t, dir, `
 server:
   port: "8080"
 database:
   driver: sqlite
+  dsn: "`+dir+`/trace_index.sqlite3"
 trace:
-  output_dir: "`+t.TempDir()+`"
-upstreams:
-  - id: openai-local
-    upstream:
-      base_url: "`+upstreamServer.URL+`/v1"
-      api_key: doctor-probe-secret
-      provider_preset: openai
-      protocol_family: openai_compatible
-      api_type: responses
+  output_dir: "`+dir+`"
 `)
+	seedDoctorChannel(t, dir, store.ChannelConfigRecord{
+		ID:               "doctor-probe",
+		Name:             "doctor-probe",
+		BaseURL:          upstreamServer.URL + "/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("doctor-probe-secret"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	})
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--probe-providers")
 	if err != nil {
@@ -1512,22 +1323,25 @@ func TestDoctorProbeProvidersReportsNetworkFailure(t *testing.T) {
 	probeURL := upstreamServer.URL
 	upstreamServer.Close()
 
-	configPath := writeDoctorTestConfig(t, `
+	dir := t.TempDir()
+	configPath := writeDoctorTestConfigInDir(t, dir, `
 server:
   port: "8080"
 database:
   driver: sqlite
+  dsn: "`+dir+`/trace_index.sqlite3"
 trace:
-  output_dir: "`+t.TempDir()+`"
-upstreams:
-  - id: closed-local
-    upstream:
-      base_url: "`+probeURL+`/v1"
-      api_key: doctor-failure-secret
-      provider_preset: openai
-      protocol_family: openai_compatible
-      api_type: chat_completions
+  output_dir: "`+dir+`"
 `)
+	seedDoctorChannel(t, dir, store.ChannelConfigRecord{
+		ID:               "doctor-failure",
+		Name:             "doctor-failure",
+		BaseURL:          probeURL + "/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("doctor-failure-secret"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	})
 
 	out, err := executeDoctorForTest(configPath, "--format", "json", "--probe-providers")
 	if err == nil {
@@ -1588,11 +1402,30 @@ func executeDoctorForTest(configPath string, args ...string) (string, error) {
 func writeDoctorTestConfig(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
+	return writeDoctorTestConfigInDir(t, dir, body)
+}
+
+func writeDoctorTestConfigInDir(t *testing.T, dir string, body string) string {
+	t.Helper()
 	configPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(body), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
 	return configPath
+}
+
+func seedDoctorChannel(t *testing.T, dir string, record store.ChannelConfigRecord) {
+	t.Helper()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(record); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
 }
 
 func decodeDoctorEnvelopeForTest(t *testing.T, output string) doctorEnvelopeForTest {
