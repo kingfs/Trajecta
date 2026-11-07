@@ -135,6 +135,30 @@ func (s *Store) ListChannelConfigs() ([]ChannelConfigRecord, error) {
 	return out, nil
 }
 
+// ListChannelConfigMetadata returns every channel's configuration without
+// decrypting its API key or headers. Read paths that only project availability
+// - the model square, the model detail's channel roles - use it: they render no
+// secret, and one channel whose secret cannot be decrypted must not make the
+// whole page fail. The returned records carry an empty API key and "{}" for the
+// headers on purpose; callers cannot accidentally use a value they did not
+// authenticate.
+func (s *Store) ListChannelConfigMetadata() ([]ChannelConfigRecord, error) {
+	rows, err := s.client.ChannelConfig.Query().
+		Order(channelconfig.ByPriority(entsql.OrderDesc()), channelconfig.ByID()).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelConfigRecord, 0, len(rows))
+	for _, row := range rows {
+		record := channelConfigRecordFromEnt(row)
+		record.APIKeyCiphertext = nil
+		record.HeadersJSON = "{}"
+		out = append(out, record)
+	}
+	return out, nil
+}
+
 func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {

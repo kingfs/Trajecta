@@ -107,6 +107,9 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
     }
+    if (path === "/api/model-square") {
+      return route.fulfill({ json: modelSquarePayload() });
+    }
     if (path === "/api/auth/tokens" && method === "GET") {
       return route.fulfill({ json: tokenListPayload() });
     }
@@ -386,12 +389,19 @@ test("models marketplace and detail render", async ({ page }) => {
   await page.goto("/models");
   await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /gpt-5/i })).toBeVisible();
-  await expect(page.getByText("1 missing usage").first()).toBeVisible();
+  // The square leads with the catalogue record and the channels that serve the
+  // model; usage is deliberately a tab away.
+  await expect(page.getByText("OpenAI Primary").first()).toBeVisible();
+  await expect(page.getByText("Callable").first()).toBeVisible();
 
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
   await expect(page.getByText("Channel coverage")).toBeVisible();
   await expect(page.getByText("openai-primary").first()).toBeVisible();
+
+  await page.getByRole("tab", { name: "Live usage" }).click();
+  await expect(page.getByText("1 missing usage").first()).toBeVisible();
+  await expect(page.getByText("Channel usage")).toBeVisible();
 });
 
 test("channel management renders and supports core actions", async ({ page }) => {
@@ -609,6 +619,23 @@ test("the channel page keeps the routing settings and the dry-run inspector", as
 // The alias table moved to the page whose subject it is: an alias resolves a
 // model name, so it now sits under the model catalogue, in the same kind of
 // collapsed card.
+// The square's filter is the part a unit test cannot see: the scope switch and
+// the search box have to reach the API with the params the endpoint reads.
+test("the model square forwards its scope and search to the API", async ({ page }) => {
+  const requests = [];
+  await page.route("**/api/model-square*", (route) => {
+    requests.push(new URL(route.request().url()).searchParams);
+    return route.fulfill({ json: modelSquarePayload() });
+  });
+  await page.goto("/models");
+  await page.getByRole("radio", { name: "All configured" }).click();
+  await expect.poll(() => requests.some((params) => params.get("scope") === "all")).toBeTruthy();
+
+  await page.getByPlaceholder("Search model, provider, or channel").fill("gpt");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => requests.some((params) => params.get("square_q") === "gpt")).toBeTruthy();
+});
+
 test("the model page keeps the alias table", async ({ page }) => {
   await page.goto("/models");
   const aliases = page.getByRole("button", { name: /Model aliases/ });
@@ -1569,17 +1596,78 @@ function modelListPayload() {
   };
 }
 
+function modelSquarePayload() {
+  return {
+    refreshed_at: new Date().toISOString(),
+    scope: "enabled",
+    summary: { models: 1, available: 1, matched: 1, channels: 1 },
+    items: [{
+      model: "gpt-5",
+      display_name: "gpt-5",
+      available: true,
+      channel_count: 1,
+      available_channel_count: 1,
+      channels: [{
+        channel_id: "openai-primary",
+        channel_name: "OpenAI Primary",
+        channel_enabled: true,
+        model_enabled: true,
+        available: true,
+        state: "unverified",
+        routable: true,
+        source: "manual",
+        provider_preset: "openai",
+        api_type: "chat_completions",
+        protocol_family: "openai_compatible",
+        upstream_model: "gpt-5",
+        interfaces: { chat_completions: true, native_responses: true },
+        context_window: 400000,
+        max_output_tokens: 128000,
+      }],
+      facts: {
+        query: "gpt-5",
+        matched: true,
+        id: "openai/gpt-5",
+        name: "OpenAI: GPT-5",
+        provider: "OpenAI",
+        developer: "openai",
+        family: "GPT-5",
+        series: "GPT-5",
+        summary: "OpenAI flagship reasoning model.",
+        description: "OpenAI's flagship reasoning model with tool use and structured output.",
+        description_cn: "OpenAI 的旗舰推理模型，支持工具调用和结构化输出。",
+        official_url: "https://openai.com/gpt-5",
+        model_card_url: "https://platform.openai.com/docs/models/gpt-5",
+        context_length: 400000,
+        max_output: 128000,
+        capabilities: ["TextIn", "TextOut", "ImageIn", "FunctionCall", "JsonMode"],
+        tags: ["reasoning"],
+      },
+    }],
+  };
+}
+
 function modelDetailPayload() {
   return {
     model: modelListPayload().items[0],
     trends: trendItems(),
     channels: [{
       channel_id: "openai-primary",
+      channel_name: "OpenAI Primary",
       model: "gpt-5",
       enabled: true,
+      channel_enabled: true,
+      available: true,
+      state: "unverified",
+      routable: true,
       source: "manual",
+      interfaces: { chat_completions: true, native_responses: true },
+      upstream_model: "gpt-5",
+      context_window: 400000,
       summary: usageSummary({ request_count: 12, missing_usage_request: 1, total_tokens: 23000 }),
     }],
+    facts: modelSquarePayload().items[0].facts,
+    available_channel_count: 1,
     refreshed_at: new Date().toISOString(),
     window: "24h",
   };
@@ -2987,10 +3075,10 @@ test("flat dotted keys and single-brace interpolation render through the UI", as
 
   // A dotted key resolves literally, not as a path into a nested object.
   await expect(page.getByTitle(/^total duration · /).first()).toBeVisible();
-  // Interpolation uses single braces. `/models` renders providers.missingUsage,
-  // which passes a `count`; there is no plural key, so i18next must resolve the
-  // base key rather than falling back to the key name.
-  await page.goto("/models");
+  // Interpolation uses single braces. The usage tab of `/models` renders
+  // providers.missingUsage, which passes a `count`; there is no plural key, so
+  // i18next must resolve the base key rather than falling back to the key name.
+  await page.goto("/models?tab=usage");
   await expect(page.getByText(/^1 missing usage$/).first()).toBeVisible();
   // The remaining edge cases - a message whose whole value is a brace pair, and
   // a key no language defines - have no screen that renders them on demand, so
@@ -3250,6 +3338,7 @@ test("no light-mode surface resolves dark on any route", async ({ page }) => {
     ".detail-meta-pill",
     ".provider-model-card",
     ".model-catalog-row",
+    ".model-square-card",
     ".timeline-card",
     ".payload-card",
     ".breakdown-card",
@@ -3471,7 +3560,7 @@ test("every route and every tab renders without reaching the error boundary", as
     ["/events", []],
     ["/audit", ["findings", "lineage", "analysis", "health"]],
     ["/channels", []],
-    ["/models", []],
+    ["/models", ["square", "usage"]],
     ["/connect", ["clients", "tokens"]],
     ["/system", ["runtime", "server", "network", "database", "slow", "tools"]],
     ["/about", []],
@@ -3537,10 +3626,12 @@ test("the card sections keep the panel box", async ({ page }) => {
 // pushed the content down; the range control that used to sit in whichever
 // panel happened to own it now sits at the right of the title.
 test("every page has one heading layer and its range control in the header", async ({ page }) => {
-  const WINDOWED = ["/overview", "/events", "/traces", "/channels", "/models"];
+  const WINDOWED = ["/overview", "/events", "/traces", "/channels", "/models?tab=usage"];
   // Data health reports the parse pipeline over every indexed trace, not a
-  // window of traffic, so it deliberately has no range control.
-  const PLAIN = ["/audit?tab=health", "/system", "/connect"];
+  // window of traffic, so it deliberately has no range control. The model
+  // square is a catalogue with no time dimension either; only its usage tab is
+  // windowed.
+  const PLAIN = ["/models", "/audit?tab=health", "/system", "/connect"];
   for (const route of [...WINDOWED, ...PLAIN]) {
     await page.goto(route);
     const header = page.locator(".page-header");

@@ -5,8 +5,9 @@ import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ExternalLink } from "lucide-react";
 import { StatCard } from "../components/common/Display";
-import { WindowToggle } from "../components/common/Tabs";
+import { TabStrip, Tabs, TabsContent, WindowToggle } from "../components/common/Tabs";
 import { DetailMetaPill, DetectIcon, HomeIcon, InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
@@ -22,10 +23,18 @@ import {
   summarizeDetectResult,
 } from "../lib/interfaces";
 import {
+  modelCapabilityChips,
+  modelContextWindow,
+  modelDescription,
+  modelMaxOutput,
+  safeExternalURL,
+} from "../lib/modelFacts";
+import {
   buildProviderLink,
   formatCount,
   formatDateTime,
   formatRateAvg,
+  formatTokenCount,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -35,6 +44,7 @@ export function ModelDetailPage() {
   const { language, t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
+  const tab = searchParams.get("tab") === "usage" ? "usage" : "overview";
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const detail = useJSON(apiURL(apiPaths.model(model), params), [model, windowValue]);
@@ -43,10 +53,20 @@ export function ModelDetailPage() {
   const summary = modelItem.summary || {};
   const trends = detail.data?.trends || [];
   const channels = detail.data?.channels || [];
+  const facts = detail.data?.facts || null;
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
+    setSearchParams(next);
+  };
+  const setTab = (nextTab) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextTab === "overview") {
+      next.delete("tab");
+    } else {
+      next.set("tab", nextTab);
+    }
     setSearchParams(next);
   };
 
@@ -57,7 +77,7 @@ export function ModelDetailPage() {
           <div className="detail-heading-row">
             <h1>{modelItem.display_name || model}</h1>
             <div className="trace-tag-group detail-tag-group">
-              <InlineTag tone="accent">{t("models.enabled", { count: formatCount(modelItem.enabled_channel_count || 0) })}</InlineTag>
+              <InlineTag tone="accent">{t("models.availableChannels", { count: formatCount(detail.data?.available_channel_count || 0) })}</InlineTag>
               <InlineTag>{t("models.channels", { count: formatCount(modelItem.channel_count || 0) })}</InlineTag>
             </div>
           </div>
@@ -81,68 +101,199 @@ export function ModelDetailPage() {
         </div>
       </header>
 
-      <Card as="section">
-        <div className="panel-head">
-          <div>
-            <h2>{t("models.usage")}</h2>
-          </div>
-        </div>
-        <div className="hero-grid hero-grid-compact">
-          <StatCard label={t("common.requests")} value={formatCount(summary.request_count)} />
-          <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
-          <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
-          <StatCard label={t("models.today")} value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request, t)} />
-          <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
-          <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
-        </div>
-      </Card>
-
       {detail.error ? <EmptyState title={t("models.detailLoadError")} detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title={t("models.detailLoading")} detail={t("models.detailLoadingDetail")} /> : null}
 
       {detail.data ? (
-        <>
-          <Card as="section">
-            <div className="panel-head">
-              <div>
-                <h2>{t("models.requestsTokens")}</h2>
-              </div>
-            </div>
-            <SingleUsageCharts items={trends} />
-          </Card>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabStrip
+            tabs={[
+              { id: "overview", label: t("models.tabOverview") },
+              { id: "usage", label: t("models.tabUsage") },
+            ]}
+            activeId={tab}
+            onSelect={setTab}
+            label={t("common.pageSections")}
+          />
+          <TabsContent value="overview" className="page-body">
+            <ModelFactsCard model={model} facts={facts} channels={channels} language={language} />
 
-          <Card as="section">
-            <div className="panel-head">
-              <div>
-                <h2>{t("models.providerCoverage")}</h2>
+            <Card as="section">
+              <div className="panel-head">
+                <div>
+                  <h2>{t("models.providerCoverage")}</h2>
+                  <p className="trace-subline">{t("models.channelSupportHint")}</p>
+                </div>
               </div>
-            </div>
-            <div className="channel-model-table">
-              {channels.length ? channels.map((channel) => <ModelChannelRow key={channel.channel_id} item={channel} windowValue={windowValue} t={t} />) : <EmptyState title={t("models.noChannels")} detail={t("models.noChannelsDetail")} compact />}
-            </div>
-          </Card>
+              <div className="channel-model-table">
+                {channels.length ? channels.map((channel) => <ModelChannelSupportRow key={channel.channel_id} item={channel} windowValue={windowValue} t={t} />) : <EmptyState title={t("models.noChannels")} detail={t("models.noChannelsDetail")} compact />}
+              </div>
+            </Card>
 
-          <Card as="section">
-            <div className="panel-head">
-              <div>
-                <h2>{t("models.codexConfig")}</h2>
+            <Card as="section">
+              <div className="panel-head">
+                <div>
+                  <h2>{t("models.codexConfig")}</h2>
+                </div>
+                {spec.data?.suggestion ? <InlineTag tone={spec.data.matched ? "green" : "accent"}>{spec.data.matched ? t("models.specMatched") : t("models.specCandidate")}</InlineTag> : null}
               </div>
-              {spec.data?.suggestion ? <InlineTag tone={spec.data.matched ? "green" : "accent"}>{spec.data.matched ? t("models.specMatched") : t("models.specCandidate")}</InlineTag> : null}
-            </div>
-            {spec.error ? <EmptyState title={t("models.specLoadError")} detail={spec.error} tone="danger" compact /> : null}
-            <div className="model-config-grid">
-              {channels.length ? channels.map((channel) => (
-                <ModelConfigCard key={`${channel.channel_id}-config`} item={channel} model={model} suggestion={spec.data?.suggestion} language={language} t={t} />
-              )) : <EmptyState title={t("models.noConfigTargets")} detail={t("models.noChannelsDetail")} compact />}
-            </div>
-          </Card>
-        </>
+              {spec.error ? <EmptyState title={t("models.specLoadError")} detail={spec.error} tone="danger" compact /> : null}
+              <div className="model-config-grid">
+                {channels.length ? channels.map((channel) => (
+                  <ModelConfigCard key={`${channel.channel_id}-config`} item={channel} model={model} suggestion={spec.data?.suggestion} language={language} t={t} />
+                )) : <EmptyState title={t("models.noConfigTargets")} detail={t("models.noChannelsDetail")} compact />}
+              </div>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="usage" className="page-body">
+            <Card as="section">
+              <div className="panel-head">
+                <div>
+                  <h2>{t("models.usage")}</h2>
+                </div>
+              </div>
+              <div className="hero-grid hero-grid-compact">
+                <StatCard label={t("common.requests")} value={formatCount(summary.request_count)} />
+                <StatCard label={t("common.errors")} value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
+                <StatCard label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+                <StatCard label={t("models.today")} value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request, t)} />
+                <StatCard label={t("overview.rpm")} value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
+                <StatCard label={t("overview.tpm")} value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
+              </div>
+            </Card>
+
+            <Card as="section">
+              <div className="panel-head">
+                <div>
+                  <h2>{t("models.requestsTokens")}</h2>
+                </div>
+              </div>
+              <SingleUsageCharts items={trends} />
+            </Card>
+
+            <Card as="section">
+              <div className="panel-head">
+                <div>
+                  <h2>{t("models.channelUsage")}</h2>
+                </div>
+              </div>
+              <div className="channel-model-table">
+                {channels.length ? channels.map((channel) => <ModelChannelRow key={channel.channel_id} item={channel} windowValue={windowValue} t={t} />) : <EmptyState title={t("models.noChannels")} detail={t("models.noChannelsDetail")} compact />}
+              </div>
+            </Card>
+          </TabsContent>
+        </Tabs>
       ) : null}
     </div>
   );
 }
 
+function ModelFactsCard({ model, facts, channels, language }) {
+  const { t } = useI18n();
+  const description = modelDescription(facts, language);
+  const contextWindow = modelContextWindow(facts, channels);
+  const maxOutput = modelMaxOutput(facts, channels);
+  const capabilities = modelCapabilityChips(facts, t);
+  const officialURL = safeExternalURL(facts?.official_url);
+  const modelCardURL = safeExternalURL(facts?.model_card_url);
+  return (
+    <Card as="section">
+      <div className="panel-head">
+        <div>
+          <h2>{t("models.factsTitle")}</h2>
+        </div>
+        {facts ? <InlineTag tone="green">{t("models.factsMatched")}</InlineTag> : <InlineTag tone="gold">{t("models.factsUnmatched")}</InlineTag>}
+      </div>
+      <div className="model-facts-head">
+        <div className="model-facts-identity">
+          {facts ? <p className="eyebrow">{facts.provider}</p> : null}
+          <code title={model}>{model}</code>
+          {facts?.id && facts.id !== model ? <span className="trace-subline">{t("models.factsCanonical", { id: facts.id })}</span> : null}
+        </div>
+        <div className="model-facts-links">
+          {officialURL ? (
+            <a className="model-facts-link" href={officialURL} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} aria-hidden="true" />
+              {t("models.squareOfficial")}
+            </a>
+          ) : null}
+          {modelCardURL ? (
+            <a className="model-facts-link" href={modelCardURL} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} aria-hidden="true" />
+              {t("models.squareModelCard")}
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <p className={description ? "model-facts-description" : "model-facts-description model-facts-description-empty"}>
+        {description || t("models.factsNoDescription")}
+      </p>
+      <div className="model-facts-metrics">
+        <DetailMetaPill label={t("models.squareContext")} value={contextWindow ? formatTokenCount(contextWindow) : t("models.squareUnknown")} />
+        <DetailMetaPill label={t("models.squareMaxOutput")} value={maxOutput ? formatTokenCount(maxOutput) : t("models.squareUnknown")} />
+        {facts?.family ? <DetailMetaPill label={t("models.factsFamily")} value={facts.family} /> : null}
+        {facts?.series && facts.series.toLowerCase() !== String(facts.family || "").toLowerCase() ? (
+          <DetailMetaPill label={t("models.factsSeries")} value={facts.series} />
+        ) : null}
+      </div>
+      {capabilities.length ? (
+        <div className="model-facts-chips">
+          {capabilities.map((chip) => <InlineTag key={chip} tone="default">{chip}</InlineTag>)}
+        </div>
+      ) : null}
+      {facts?.tags?.length ? (
+        <div className="model-facts-tags">
+          {facts.tags.slice(0, 16).map((tag) => <span key={tag}>{tag}</span>)}
+        </div>
+      ) : null}
+      {!facts ? <p className="trace-subline">{t("models.factsUnmatchedDetail")}</p> : null}
+    </Card>
+  );
+}
+
+function ModelChannelSupportRow({ item, windowValue, t }) {
+  const supportState = channelSupportState(item, t);
+  return (
+    <Link className="channel-model-row model-support-row" to={buildProviderLink(item.channel_id, windowValue)}>
+      <div>
+        <strong>{item.channel_name || item.channel_id}</strong>
+        <span>{item.channel_id}{item.source ? ` ${item.source}` : ""}</span>
+      </div>
+      <InlineTag tone={supportState.tone}>{supportState.label}</InlineTag>
+      <span className="channel-interface-chips-compact">
+        {interfaceChipsOrUnknown(item.interfaces).map((chip) => t(chip.labelKey)).join(" · ")}
+      </span>
+      <span title={item.upstream_model || ""}>{item.upstream_model || item.model}</span>
+      <span>{item.context_window ? formatTokenCount(item.context_window) : t("models.squareUnknown")}</span>
+    </Link>
+  );
+}
+
+function channelSupportState(item, t) {
+  if (item.source === "trace") {
+    return { label: t("channelDetail.historyOnlyTag"), tone: "default" };
+  }
+  if (!item.channel_enabled) {
+    return { label: t("models.channelDisabled"), tone: "danger" };
+  }
+  // The detail's support list answers "can this channel serve the model", not
+  // "has the last sync verified it" - the channel page owns the sync state. A
+  // manual, unverified model is routable and therefore callable here.
+  switch (item.state) {
+    case "removed":
+      return { label: t("channelDetail.stateRemoved"), tone: "danger" };
+    case "disabled":
+      return { label: t("channelDetail.stateDisabled"), tone: "default" };
+    default:
+      return item.available
+        ? { label: t("models.squareAvailable"), tone: "green" }
+        : { label: t("models.squareUnavailable"), tone: "default" };
+  }
+}
+
 function ModelChannelRow({ item, windowValue, t }) {
+  const supportState = channelSupportState(item, t);
   const summary = item.summary || {};
   return (
     <Link className="channel-model-row" to={buildProviderLink(item.channel_id, windowValue)}>
@@ -150,7 +301,7 @@ function ModelChannelRow({ item, windowValue, t }) {
         <strong>{item.channel_id}</strong>
         <span>{item.source || "unknown"}</span>
       </div>
-      <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? t("overview.enabled") : t("overview.disabled")}</InlineTag>
+      <InlineTag tone={supportState.tone}>{supportState.label}</InlineTag>
       <span className="channel-interface-chips-compact">
         {interfaceChipsOrUnknown(item.interfaces).map((chip) => t(chip.labelKey)).join(" · ")}
       </span>

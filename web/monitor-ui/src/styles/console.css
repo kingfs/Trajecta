@@ -1096,3 +1096,332 @@ body {
 .detail-meta-pill small {
   font-size: var(--text-label);
 }
+
+/* ------------------------------------------------------- model square */
+
+/* The catalogue card is not the usage card: it leads with identity and
+ * capability, and its footer carries outbound links to the vendor. The grid
+ * therefore sizes by a readable card width rather than the two-column
+ * .model-market-grid, and the card is a flex column so footers line up when
+ * descriptions differ in length. */
+.model-square-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.model-square-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow: hidden;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.model-square-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.model-square-card-unavailable {
+  opacity: 0.84;
+}
+
+.model-square-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-5);
+  color: inherit;
+  text-decoration: none;
+}
+
+.model-square-main:focus-visible {
+  outline: 2px solid var(--accent-solid);
+  outline-offset: -2px;
+}
+
+.model-square-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.model-square-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-square-provider {
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.model-square-head h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.model-square-identity code {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.model-square-description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.model-square-description-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.model-square-relations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.model-square-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.model-square-metric {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.model-square-metric span {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.model-square-metric strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.model-square-capabilities,
+.model-square-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-square-channels {
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--border-subtle);
+}
+
+/* One chip per channel: the dot is the availability of that channel for this
+ * model, so a model served by two channels of which one is disabled reads at a
+ * glance without expanding anything. */
+.model-square-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-square-channel-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.model-square-channel-on {
+  border-color: var(--success-border);
+  color: var(--text-primary);
+}
+
+.model-square-channel-on .model-square-channel-dot {
+  background: var(--success-solid);
+}
+
+.model-square-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 10px var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+
+.model-square-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.model-square-link,
+.model-square-detail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.model-square-link:hover,
+.model-square-detail-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.model-square-unmatched {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.model-square-detail-link {
+  color: var(--accent-solid);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------- model facts (detail page) */
+
+.model-facts-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.model-facts-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-facts-identity code {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.model-facts-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.model-facts-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-solid);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.model-facts-link:hover {
+  text-decoration: underline;
+}
+
+.model-facts-description {
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.model-facts-description-empty {
+  color: var(--text-tertiary);
+}
+
+.model-facts-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.model-facts-chips,
+.model-facts-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-3);
+}
+
+.model-facts-tags span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.model-facts-tags span::before {
+  content: "#";
+  margin-right: 1px;
+}
+
+/* The support row carries identity, availability, interfaces, upstream model
+ * and context window in the same grid the usage row uses for its metrics; five
+ * columns keep it inside the card instead of widening the page. An upstream
+ * model id has no spaces, so every cell may wrap and shrink - a max-content
+ * track would push a long deployment id past the card. */
+.model-support-row {
+  grid-template-columns: minmax(180px, 1fr) auto auto minmax(120px, auto) auto;
+}
+
+.model-support-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .model-support-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  }
+}

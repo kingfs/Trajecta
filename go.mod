@@ -1,6 +1,6 @@
 module github.com/kingfs/Trajecta
 
-go 1.25.0
+go 1.26.0
 
 require (
 	ariga.io/atlas v0.36.2-0.20250730182955-2c6300d0a3e1
@@ -9,6 +9,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/kingfs/Argus v0.9.20
 	github.com/kingfs/go-llm-specs v0.5.28
 	github.com/lib/pq v1.12.3
 	github.com/mattn/go-sqlite3 v1.14.42

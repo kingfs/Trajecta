@@ -12,6 +12,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/modelinfo"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -442,18 +443,27 @@ type modelItem struct {
 }
 
 type modelDetailResponse struct {
-	Model       modelItem          `json:"model"`
-	Trends      []usageTrendView   `json:"trends"`
-	Channels    []modelChannelItem `json:"channels"`
-	RefreshedAt time.Time          `json:"refreshed_at"`
-	Window      string             `json:"window"`
+	Model    modelItem          `json:"model"`
+	Trends   []usageTrendView   `json:"trends"`
+	Channels []modelChannelItem `json:"channels"`
+	Facts    *modelinfo.Facts   `json:"facts,omitempty"`
+	// AvailableChannelCount counts the channels that can actually serve this
+	// model right now (channel enabled and the channel-model pair routable).
+	// Model.EnabledChannelCount is the model-level count the usage list uses, so
+	// the detail page reports both instead of overloading one field.
+	AvailableChannelCount int       `json:"available_channel_count"`
+	RefreshedAt           time.Time `json:"refreshed_at"`
+	Window                string    `json:"window"`
 }
 
 type modelChannelItem struct {
 	ChannelID                   string                  `json:"channel_id"`
+	ChannelName                 string                  `json:"channel_name,omitempty"`
 	Model                       string                  `json:"model"`
 	DisplayName                 string                  `json:"display_name,omitempty"`
 	Enabled                     bool                    `json:"enabled"`
+	ChannelEnabled              bool                    `json:"channel_enabled"`
+	Available                   bool                    `json:"available"`
 	State                       string                  `json:"state"`
 	Routable                    bool                    `json:"routable"`
 	Source                      string                  `json:"source"`
@@ -558,6 +568,15 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				}
 			}
 		}
+		channelConfigs := map[string]store.ChannelConfigRecord{}
+		if configs, err := st.ListChannelConfigMetadata(); err == nil {
+			for _, config := range configs {
+				channelConfigs[config.ID] = config
+			}
+		}
+		if facts, ok := modelinfo.Lookup(model); ok {
+			resp.Facts = &facts
+		}
 		for _, channelRecord := range detail.Channels {
 			item := modelChannelItem{
 				ChannelID: channelRecord.ChannelID,
@@ -567,8 +586,10 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				Summary:   usageSummaryViewFromRecord(channelRecord.Summary),
 			}
 			if record, ok := modelRecords[channelRecord.ChannelID]; ok {
-				channelConfig, _ := st.GetChannelConfig(channelRecord.ChannelID)
-				enrichModelChannelItemFromRecord(&item, channelConfig, record)
+				enrichModelChannelItemFromRecord(&item, channelConfigs[channelRecord.ChannelID], record)
+				if item.Available {
+					resp.AvailableChannelCount++
+				}
 			}
 			resp.Channels = append(resp.Channels, item)
 		}
