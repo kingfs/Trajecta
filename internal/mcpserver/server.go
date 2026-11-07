@@ -55,7 +55,7 @@ type queryRoutingDecisionsInput struct {
 type queryStickyRoutingInput struct {
 	Page                 int    `json:"page,omitempty" jsonschema:"1-based page number"`
 	PageSize             int    `json:"page_size,omitempty" jsonschema:"number of matching sticky rows per page, max 200"`
-	Status               string `json:"status,omitempty" jsonschema:"optional sticky status filter: hit, miss, bind, or break"`
+	Status               string `json:"status,omitempty" jsonschema:"optional sticky status filter: hit, miss, bind, break, hold, spill, or rebalance"`
 	UpstreamID           string `json:"upstream_id,omitempty" jsonschema:"optional upstream id filter"`
 	PreviousUpstreamID   string `json:"previous_upstream_id,omitempty" jsonschema:"optional previous upstream id filter"`
 	StickyKeyFingerprint string `json:"sticky_key_fingerprint,omitempty" jsonschema:"optional sticky key fingerprint filter"`

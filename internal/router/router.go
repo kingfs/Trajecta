@@ -88,22 +88,23 @@ func DefaultHealthThresholds() HealthThresholds {
 }
 
 type Router struct {
-	mu               sync.RWMutex
-	reloadMu         sync.Mutex
-	targets          []*Target
-	modelToTargets   map[string][]*Target
-	policy           string
-	openWindow       time.Duration
-	failureThreshold int64
-	refreshInterval  time.Duration
-	discoveryEnabled bool
-	costs            costConfig
-	sticky           *StickyBindingStore
-	stopCh           chan struct{}
-	stopOnce         sync.Once
-	refreshMu        sync.Mutex
-	refreshCond      *sync.Cond
-	refreshing       bool
+	mu                 sync.RWMutex
+	reloadMu           sync.Mutex
+	targets            []*Target
+	modelToTargets     map[string][]*Target
+	policy             string
+	openWindow         time.Duration
+	failureThreshold   int64
+	refreshInterval    time.Duration
+	discoveryEnabled   bool
+	costs              costConfig
+	sticky             *StickyBindingStore
+	stickyMaxCostRatio float64
+	stopCh             chan struct{}
+	stopOnce           sync.Once
+	refreshMu          sync.Mutex
+	refreshCond        *sync.Cond
+	refreshing         bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -385,19 +386,31 @@ func New(cfg *config.Config) (*Router, error) {
 	}
 
 	r := &Router{
-		modelToTargets:   make(map[string][]*Target),
-		policy:           normalizePolicy(cfg.Router.Selection.Policy),
-		openWindow:       cfg.Router.Selection.OpenWindow,
-		failureThreshold: cfg.Router.Selection.FailureThreshold,
-		refreshInterval:  cfg.Router.ModelDiscovery.RefreshInterval,
-		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
-		costs:            defaultCostConfig(),
-		sticky:           NewStickyBindingStore(defaultStickyBindingTTL),
-		stopCh:           make(chan struct{}),
+		modelToTargets:     make(map[string][]*Target),
+		policy:             normalizePolicy(cfg.Router.Selection.Policy),
+		openWindow:         cfg.Router.Selection.OpenWindow,
+		failureThreshold:   cfg.Router.Selection.FailureThreshold,
+		refreshInterval:    cfg.Router.ModelDiscovery.RefreshInterval,
+		discoveryEnabled:   cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
+		costs:              defaultCostConfig(),
+		stickyMaxCostRatio: defaultStickyMaxCostRatio,
+		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
 	if cfg.Router.Selection.Epsilon > 0 {
 		r.costs.Epsilon = cfg.Router.Selection.Epsilon
+	}
+	// nil means enabled: a deployment that never mentions sticky keeps the
+	// historical behaviour. false is the explicit opt-out, not a missing value.
+	if cfg.Router.Selection.Sticky == nil || *cfg.Router.Selection.Sticky {
+		stickyTTL := cfg.Router.Selection.StickyTTL
+		if stickyTTL <= 0 {
+			stickyTTL = defaultStickyBindingTTL
+		}
+		r.sticky = NewStickyBindingStore(stickyTTL)
+	}
+	if ratio := cfg.Router.Selection.StickyMaxCostRatio; ratio != nil {
+		r.stickyMaxCostRatio = *ratio
 	}
 	if r.openWindow <= 0 {
 		r.openWindow = 15 * time.Second
@@ -1038,11 +1051,12 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		stickyTargetID    string
 		hasStickyBinding  bool
 	)
-	if !opts.DryRun {
+	if !opts.DryRun && r.sticky != nil {
 		// Bind per (session, model): the binding chooses the upstream that keeps a
 		// model's prompt cache warm, so two models on one session must not overwrite
 		// each other's target. The raw session value never leaves this function; the
-		// decision trace only carries its fingerprint.
+		// decision trace only carries its fingerprint. A nil store means the operator
+		// turned affinity off, in which case no sticky state is read or written at all.
 		stickyKey = composeStickyKey(extractStickyKey(req, body), model)
 		stickyFingerprint = stickyKeyFingerprint(stickyKey)
 		stickyTargetID, hasStickyBinding = r.sticky.Lookup(stickyKey)
@@ -1099,21 +1113,56 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 
 	var selected *Target
 	var score float64
+	stickyTarget := (*Target)(nil)
 	if hasStickyBinding {
-		if stickyTarget := findTargetByRouteTargetID(available, stickyTargetID); stickyTarget != nil {
-			selected = stickyTarget
-			score = r.expectedCost(selected, features)
-			decision.withStickyTarget("hit", stickyFingerprint, stickyTarget, stickyTarget.ID, "")
+		stickyTarget = findTargetByRouteTargetID(candidates, stickyTargetID)
+	}
+	// An exclusion describes this attempt, not the session: the proxy passes the
+	// targets it already tried. Keeping the binding when the excluded target is
+	// the bound one stops a single transient upstream error from rewriting the
+	// conversation onto the fallback for the whole TTL; if the target is really
+	// down, its circuit breaker opens and the normal break/rebind path takes over.
+	stickyHeld := hasStickyBinding && stickyTarget != nil && stringSliceContains(excludeIDs, stickyTarget.ID)
+	switch {
+	case stickyHeld:
+		decision.withStickyTarget("hold", stickyFingerprint, nil, "", targetAlias(stickyTarget, stickyTargetID))
+	case hasStickyBinding:
+		if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil && stickyTargetBusy(bound) && len(available) > 1 {
+			// The bound target is already executing a request. A concurrent
+			// sibling must not queue behind it just to keep the prompt cache:
+			// this is exactly the heterogeneous pair where the slow target is
+			// busy and the fast one is idle. Let the normal cost comparison
+			// decide, but keep the binding (do not rebind) so sequential
+			// traffic returns to it once it is free again.
+			if picked, pickedScore := r.pick(available, features); picked != bound {
+				selected = picked
+				score = pickedScore
+				decision.withStickyTarget("spill", stickyFingerprint, nil, "", targetAlias(bound, stickyTargetID))
+			} else {
+				selected = bound
+				score = pickedScore
+				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
+			}
+		} else if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil {
+			selected = bound
+			score = r.expectedCost(bound, features)
+			if best := r.stickyRebalanceTarget(available, bound, features); best != nil {
+				r.sticky.Bind(stickyKey, best.RouteTargetID)
+				selected = best
+				score = r.expectedCost(best, features)
+				decision.withStickyTarget("rebalance", stickyFingerprint, best, best.ID, targetAlias(bound, stickyTargetID))
+			} else {
+				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
+			}
 		} else {
-			stickyTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
 			decision.withStickyTarget("break", stickyFingerprint, stickyTarget, targetAlias(stickyTarget, stickyTargetID), targetAlias(stickyTarget, stickyTargetID))
 		}
-	} else if stickyKey != "" {
+	case stickyKey != "":
 		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
 		selected, score = r.pick(available, features)
-		if !opts.DryRun && stickyKey != "" {
+		if !opts.DryRun && stickyKey != "" && !stickyHeld {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
 				previousTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
@@ -1140,6 +1189,87 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		Decision:       decision.withSelectedTarget(selected, score),
 		Credential:     credentialDecisionFromTarget(selected),
 	}, nil
+}
+
+// stickyRebalanceTarget reports whether the session's bound target is so much
+// slower than the best alternative that keeping the binding is worse than
+// losing the upstream prompt cache. It answers nil when the check is disabled,
+// there is no alternative, or the bound target is still within the configured
+// factor. The comparison is a strict factor rather than a plain comparison, so
+// an equal pair keeps its binding.
+//
+// The comparison deliberately uses the measured latency part of expectedCost
+// (see targetLatencyCost) rather than the full cost: a momentary queue on the
+// bound target - the inflight terms of the full cost - must not move a session
+// and throw away its prompt cache. The question here is "is this hardware much
+// slower", not "is it busy right now"; load spreading stays with P2C for new
+// sessions.
+func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures) *Target {
+	if r.stickyMaxCostRatio <= 0 || bound == nil {
+		return nil
+	}
+	boundCost := r.targetLatencyCost(bound, req)
+	var best *Target
+	var bestCost float64
+	for _, candidate := range available {
+		if candidate == nil || candidate == bound {
+			continue
+		}
+		candidateCost := r.targetLatencyCost(candidate, req)
+		if best == nil || candidateCost < bestCost {
+			best, bestCost = candidate, candidateCost
+		}
+	}
+	if best == nil || bestCost*r.stickyMaxCostRatio >= boundCost {
+		return nil
+	}
+	return best
+}
+
+// targetLatencyCost is the latency component of expectedCost: measured TTFT and
+// total duration for this request shape, scaled by the target's declared
+// capacity. It is only used to decide whether a sticky binding is worth
+// keeping; the forwarding path keeps using the full expectedCost.
+func (r *Router) targetLatencyCost(target *Target, req RequestFeatures) float64 {
+	target.mu.Lock()
+	ttftFast := target.ttftFastMs
+	ttftSlow := target.ttftSlowMs
+	latencyFast := target.reqLatencyFastMs
+	latencySlow := target.reqLatencySlowMs
+	capacity := math.Max(1, target.Weight*target.CapacityHint)
+	target.mu.Unlock()
+
+	queuePressure := 0.35*norm(ttftFast, 1200) +
+		0.20*maxFloat(0, norm(ttftFast, 1200)-norm(ttftSlow, 1200))
+	decodePressure := 0.35*norm(latencyFast, 4000) +
+		0.25*maxFloat(0, norm(latencyFast, 4000)-norm(latencySlow, 4000))
+	cost := (queuePressure*estimatePrefillCost(req) + decodePressure*estimateDecodeCost(req)) / capacity
+	if cost < r.costs.MinCostFloor {
+		return r.costs.MinCostFloor
+	}
+	return cost
+}
+
+// stickyTargetBusy reports whether the bound target is already executing at
+// least one request. The counter is maintained by onStart/onFinish/onRelease,
+// so a concurrent sibling sees it, while a sequential request after the previous
+// one finished does not.
+func stickyTargetBusy(target *Target) bool {
+	if target == nil {
+		return false
+	}
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return target.inflight > 0
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func findTargetByRouteTargetID(targets []*Target, routeTargetID string) *Target {

@@ -256,6 +256,19 @@ type RouterConfig struct {
 		Epsilon          float64       `yaml:"epsilon"`
 		OpenWindow       time.Duration `yaml:"open_window"`
 		FailureThreshold int64         `yaml:"failure_threshold"`
+		// Sticky keeps one (session, model) on one route target so the upstream
+		// prompt cache keeps hitting. A missing value means enabled; false turns
+		// the binding off entirely, which trades cache locality for spreading a
+		// concurrent burst across every target.
+		Sticky *bool `yaml:"sticky"`
+		// StickyTTL bounds a binding's life. Zero or a negative value keeps the
+		// one-hour default; set Sticky to false to disable affinity instead.
+		StickyTTL time.Duration `yaml:"sticky_ttl"`
+		// StickyMaxCostRatio breaks a binding when the bound target's measured
+		// latency cost (TTFT and duration EWMA, up to capacity) exceeds the
+		// fastest alternative by this factor. A missing value means 2.0; zero
+		// or a negative value disables the rebalancing check.
+		StickyMaxCostRatio *float64 `yaml:"sticky_max_cost_ratio"`
 	} `yaml:"selection"`
 }
 
@@ -525,6 +538,9 @@ func Load(path string) (*Config, error) {
 	if err := validateRouterEnums(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateRouterSelection(&cfg); err != nil {
+		return nil, err
+	}
 	if err := validateTelemetry(&cfg); err != nil {
 		return nil, err
 	}
@@ -765,6 +781,19 @@ func validateLimits(cfg *Config) error {
 var validSelectionPolicies = map[string]struct{}{
 	"p2c":             {},
 	"first_available": {},
+}
+
+// validateRouterSelection rejects sticky settings the router cannot honour in the way the
+// operator wrote them. A negative TTL or ratio would otherwise be silently read as "use the
+// default", and an operator who typed a negative number meant to change something.
+func validateRouterSelection(cfg *Config) error {
+	if cfg.Router.Selection.StickyTTL < 0 {
+		return fmt.Errorf("router.selection.sticky_ttl must not be negative; set router.selection.sticky: false to disable affinity")
+	}
+	if ratio := cfg.Router.Selection.StickyMaxCostRatio; ratio != nil && *ratio < 0 {
+		return fmt.Errorf("router.selection.sticky_max_cost_ratio must not be negative; use 0 to disable cost-aware rebalancing")
+	}
+	return nil
 }
 
 // validateRouterEnums rejects routing values that no consumer recognises.

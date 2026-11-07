@@ -15,6 +15,8 @@ import (
 
 func boolPtr(v bool) *bool { return &v }
 
+func float64Ptr(v float64) *float64 { return &v }
+
 func TestRouterSelectUsesModelCatalog(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
@@ -668,6 +670,9 @@ func TestRouterStickySessionReusesBoundTarget(t *testing.T) {
 		},
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	// This test pins the affinity mechanics, not the rebalancing policy: disable
+	// the cost check so the deliberately slower bound target stays sticky.
+	cfg.Router.Selection.StickyMaxCostRatio = float64Ptr(0)
 
 	rtr, err := New(cfg)
 	if err != nil {
@@ -705,7 +710,7 @@ func TestRouterStickySessionReusesBoundTarget(t *testing.T) {
 	}
 }
 
-func TestRouterStickySessionBreaksWhenTargetExcluded(t *testing.T) {
+func TestRouterStickyBindingSurvivesRetryExclusion(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
@@ -759,22 +764,106 @@ func TestRouterStickySessionBreaksWhenTargetExcluded(t *testing.T) {
 	if selection.Target.ID != "fallback" {
 		t.Fatalf("excluded sticky target selection = %q, want fallback", selection.Target.ID)
 	}
-	if !hasStickyDecision(selection.Decision, "break", "primary") {
-		t.Fatalf("sticky events = %+v, want break for primary", selection.Decision.StickyEvents)
+	// The exclusion only describes this attempt, so the decision holds the
+	// binding instead of rewriting it to the fallback.
+	if selection.Decision.StickyStatus != "hold" {
+		t.Fatalf("sticky status = %q, want hold", selection.Decision.StickyStatus)
+	}
+	if !hasStickyDecision(selection.Decision, "hold", "primary") {
+		t.Fatalf("sticky events = %+v, want hold for primary", selection.Decision.StickyEvents)
 	}
 	if selection.Decision.StickyBreakID != "primary" {
 		t.Fatalf("sticky break id = %q, want primary", selection.Decision.StickyBreakID)
 	}
 
+	// The next request must try the preferred target again rather than staying
+	// pinned to the fallback for the rest of the TTL.
 	selection, err = rtr.Select(stickyRequest(t, "session-break"))
+	if err != nil {
+		t.Fatalf("Select(after retry) error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("after retry target = %q, want primary", selection.Target.ID)
+	}
+	if selection.Decision.StickyStatus != "hit" {
+		t.Fatalf("after retry sticky status = %q, want hit", selection.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickyBindingBreaksWhenTargetUnavailable keeps the other half of
+// the contract: a binding whose target is unavailable for a reason other than
+// this request's own retry exclusion is still broken and rebound, so a target
+// that is genuinely down does not keep receiving traffic.
+func TestRouterStickyBindingBreaksWhenTargetUnavailable(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: "https://api.openai.com/v1", ProviderPreset: "openai"},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: "https://openrouter.ai/api/v1", ProviderPreset: "openrouter"},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	first, err := rtr.SelectWithBody(stickyRequest(t, "session-open"), body)
+	if err != nil {
+		t.Fatalf("Select(first) error = %v", err)
+	}
+	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("first selection target/status = %q/%q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+
+	primary := rtr.targets[0]
+	for i := 0; i < 3; i++ {
+		primary.onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: false, StatusCode: 503}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	}
+	// A 5xx on a known model is model-scoped: the target-level breaker stays
+	// healthy and the per-model one is what removes the candidate.
+	if state := primary.snapshot().ModelHealth["gpt-5"].HealthState; state != HealthOpen {
+		t.Fatalf("primary gpt-5 model health = %q, want open", state)
+	}
+
+	second, err := rtr.SelectWithBody(stickyRequest(t, "session-open"), body)
+	if err != nil {
+		t.Fatalf("Select(open) error = %v", err)
+	}
+	if second.Target.ID != "fallback" {
+		t.Fatalf("open-target selection = %q, want fallback", second.Target.ID)
+	}
+	if !hasStickyDecision(second.Decision, "break", "primary") {
+		t.Fatalf("sticky events = %+v, want break for primary", second.Decision.StickyEvents)
+	}
+	if second.Decision.StickyStatus != "bind" {
+		t.Fatalf("sticky status = %q, want bind to the fallback", second.Decision.StickyStatus)
+	}
+
+	third, err := rtr.SelectWithBody(stickyRequest(t, "session-open"), body)
 	if err != nil {
 		t.Fatalf("Select(after rebind) error = %v", err)
 	}
-	if selection.Target.ID != "fallback" {
-		t.Fatalf("after rebind target = %q, want fallback", selection.Target.ID)
-	}
-	if selection.Decision.StickyStatus != "hit" {
-		t.Fatalf("after rebind sticky status = %q, want hit", selection.Decision.StickyStatus)
+	if third.Target.ID != "fallback" || third.Decision.StickyStatus != "hit" {
+		t.Fatalf("after rebind target/status = %q/%q, want fallback hit", third.Target.ID, third.Decision.StickyStatus)
 	}
 }
 
@@ -991,6 +1080,7 @@ func TestRouterStickyBindsConcreteCredentialRouteTarget(t *testing.T) {
 	if first.Decision.StickyTargetID != "openai-primary:a" || first.Decision.SelectedRouteTargetID != "openai-primary:a" {
 		t.Fatalf("first decision = %+v, want concrete route target binding", first.Decision)
 	}
+	rtr.Release(first)
 
 	second, err := rtr.SelectWithBody(stickyRequest(t, "credential-sticky"), body)
 	if err != nil {
@@ -1002,27 +1092,32 @@ func TestRouterStickyBindsConcreteCredentialRouteTarget(t *testing.T) {
 	if !hasStickyRouteDecision(second.Decision, "hit", "openai-primary:a", "") {
 		t.Fatalf("sticky events = %+v, want hit for concrete route target", second.Decision.StickyEvents)
 	}
+	rtr.Release(second)
 
-	rebound, err := rtr.SelectWithExclusion(stickyRequest(t, "credential-sticky"), body, []string{"openai-primary:a"})
+	held, err := rtr.SelectWithExclusion(stickyRequest(t, "credential-sticky"), body, []string{"openai-primary:a"})
 	if err != nil {
 		t.Fatalf("SelectWithExclusion() error = %v", err)
 	}
-	if rebound.Target.ID != "openai-primary:b" {
-		t.Fatalf("rebound target = %q, want openai-primary:b", rebound.Target.ID)
+	if held.Target.ID != "openai-primary:b" {
+		t.Fatalf("excluded selection = %q, want openai-primary:b", held.Target.ID)
 	}
-	if !hasStickyRouteDecision(rebound.Decision, "break", "openai-primary:a", "openai-primary:a") {
-		t.Fatalf("sticky events = %+v, want break for openai-primary:a", rebound.Decision.StickyEvents)
+	if held.Decision.StickyStatus != "hold" {
+		t.Fatalf("sticky status = %q, want hold", held.Decision.StickyStatus)
 	}
-	if !hasStickyRouteDecision(rebound.Decision, "bind", "openai-primary:b", "openai-primary:a") {
-		t.Fatalf("sticky events = %+v, want rebind to openai-primary:b", rebound.Decision.StickyEvents)
+	if !hasStickyRouteDecision(held.Decision, "hold", "", "openai-primary:a") {
+		t.Fatalf("sticky events = %+v, want hold for openai-primary:a", held.Decision.StickyEvents)
 	}
+	rtr.Release(held)
 
+	// The binding must still name the concrete route target the failed attempt
+	// excluded, so the next request returns to that credential rather than
+	// silently moving the conversation to the backup one.
 	third, err := rtr.SelectWithBody(stickyRequest(t, "credential-sticky"), body)
 	if err != nil {
 		t.Fatalf("Select(third) error = %v", err)
 	}
-	if third.Target.ID != "openai-primary:b" || third.Decision.StickyStatus != "hit" {
-		t.Fatalf("third selection target/status = %q/%q, want openai-primary:b hit", third.Target.ID, third.Decision.StickyStatus)
+	if third.Target.ID != "openai-primary:a" || third.Decision.StickyStatus != "hit" {
+		t.Fatalf("third selection target/status = %q/%q, want openai-primary:a hit", third.Target.ID, third.Decision.StickyStatus)
 	}
 }
 
@@ -2383,8 +2478,7 @@ func TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen(t *testing.T) {
 
 // stickyAffinityRouter builds two channels that serve the same two models, so a
 // test can distinguish "which route target" from "which model".
-func stickyAffinityRouter(t *testing.T) *Router {
-	t.Helper()
+func stickyAffinityConfig() *config.Config {
 	target := func(id string, priority int, baseURL string) config.UpstreamTargetConfig {
 		return config.UpstreamTargetConfig{
 			ID:             id,
@@ -2402,6 +2496,19 @@ func stickyAffinityRouter(t *testing.T) *Router {
 		},
 	}
 	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	// These tests pin which target a session is bound to, so keep the
+	// cost-based rebalancing check out of the way; rebalancing has its own test.
+	cfg.Router.Selection.StickyMaxCostRatio = float64Ptr(0)
+	return cfg
+}
+
+func stickyAffinityRouter(t *testing.T) *Router {
+	t.Helper()
+	return routerFromConfig(t, stickyAffinityConfig())
+}
+
+func routerFromConfig(t *testing.T, cfg *config.Config) *Router {
+	t.Helper()
 	rtr, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2410,6 +2517,205 @@ func stickyAffinityRouter(t *testing.T) *Router {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 	return rtr
+}
+
+func stickyTargetsByID(rtr *Router) map[string]*Target {
+	targets := rtr.Targets()
+	byID := make(map[string]*Target, len(targets))
+	for _, target := range targets {
+		byID[target.ID] = target
+	}
+	return byID
+}
+
+// TestRouterStickySpillsWhenBoundTargetBusy pins the concurrency half: while
+// the session's bound target is executing a request, a concurrent sibling is
+// scheduled by cost instead of queueing behind it, and the binding survives so
+// the next sequential request returns to it.
+func TestRouterStickySpillsWhenBoundTargetBusy(t *testing.T) {
+	rtr := stickyAffinityRouter(t)
+
+	req, body := stickyModelRequest(t, "session-busy", "gpt-5")
+	first, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(first) error = %v", err)
+	}
+	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("first selection = %q status %q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+	// Leave the first request in flight: the sibling below arrives while the
+	// bound target is still executing it.
+
+	req, body = stickyModelRequest(t, "session-busy", "gpt-5")
+	spilled, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(spill) error = %v", err)
+	}
+	if spilled.Target.ID != "fallback" || spilled.Decision.StickyStatus != "spill" {
+		t.Fatalf("spill selection = %q status %q, want fallback spill", spilled.Target.ID, spilled.Decision.StickyStatus)
+	}
+	if !hasStickyDecision(spilled.Decision, "spill", "primary") {
+		t.Fatalf("sticky events = %+v, want spill from primary", spilled.Decision.StickyEvents)
+	}
+
+	// The binding is kept: once the in-flight request finishes, the next
+	// sequential request returns to the preferred target.
+	rtr.Release(first)
+	rtr.Release(spilled)
+	req, body = stickyModelRequest(t, "session-busy", "gpt-5")
+	back, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(back) error = %v", err)
+	}
+	if back.Target.ID != "primary" || back.Decision.StickyStatus != "hit" {
+		t.Fatalf("sequential selection = %q status %q, want primary hit", back.Target.ID, back.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickyRebalancesToMuchCheaperTarget covers the heterogeneous
+// hardware case: a session first bound to the slow target must move once the
+// other target has been measured to be several times cheaper, instead of
+// staying pinned for the whole TTL.
+func TestRouterStickyRebalancesToMuchCheaperTarget(t *testing.T) {
+	cfg := stickyAffinityConfig()
+	cfg.Router.Selection.StickyMaxCostRatio = float64Ptr(2)
+	rtr := routerFromConfig(t, cfg)
+
+	req, body := stickyModelRequest(t, "session-rebalance", "gpt-5")
+	first, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(first) error = %v", err)
+	}
+	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("first selection target/status = %q/%q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+
+	targets := stickyTargetsByID(rtr)
+	targets["primary"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 5000, TTFTMs: 1800}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	targets["fallback"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+
+	req, body = stickyModelRequest(t, "session-rebalance", "gpt-5")
+	rebalanced, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(rebalance) error = %v", err)
+	}
+	if rebalanced.Target.ID != "fallback" {
+		t.Fatalf("rebalanced target = %q, want fallback", rebalanced.Target.ID)
+	}
+	if rebalanced.Decision.StickyStatus != "rebalance" {
+		t.Fatalf("sticky status = %q, want rebalance", rebalanced.Decision.StickyStatus)
+	}
+	if !hasStickyRouteDecision(rebalanced.Decision, "rebalance", "fallback:default", "primary") {
+		t.Fatalf("sticky events = %+v, want rebalance from primary to fallback", rebalanced.Decision.StickyEvents)
+	}
+
+	req, body = stickyModelRequest(t, "session-rebalance", "gpt-5")
+	after, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(after) error = %v", err)
+	}
+	if after.Target.ID != "fallback" || after.Decision.StickyStatus != "hit" {
+		t.Fatalf("after rebalance target/status = %q/%q, want fallback hit", after.Target.ID, after.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickyKeepsBindingWithinCostRatio pins the hysteresis: equal-cost
+// targets must keep the binding, and a merely noisy measurement must not move
+// the session and lose its prompt cache.
+func TestRouterStickyKeepsBindingWithinCostRatio(t *testing.T) {
+	cfg := stickyAffinityConfig()
+	cfg.Router.Selection.StickyMaxCostRatio = float64Ptr(2)
+	rtr := routerFromConfig(t, cfg)
+
+	req, body := stickyModelRequest(t, "session-within-ratio", "gpt-5")
+	if _, err := rtr.SelectWithBody(req, body); err != nil {
+		t.Fatalf("SelectWithBody(first) error = %v", err)
+	}
+
+	targets := stickyTargetsByID(rtr)
+	targets["primary"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 450, TTFTMs: 90}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	targets["fallback"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+
+	req, body = stickyModelRequest(t, "session-within-ratio", "gpt-5")
+	selection, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(second) error = %v", err)
+	}
+	if selection.Target.ID != "primary" || selection.Decision.StickyStatus != "hit" {
+		t.Fatalf("selection target/status = %q/%q, want primary hit", selection.Target.ID, selection.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickyRebalanceCanBeDisabled documents the opt-out: a ratio of 0
+// keeps the historical "binding always wins" behaviour.
+func TestRouterStickyRebalanceCanBeDisabled(t *testing.T) {
+	cfg := stickyAffinityConfig()
+	cfg.Router.Selection.StickyMaxCostRatio = float64Ptr(0)
+	rtr := routerFromConfig(t, cfg)
+
+	req, body := stickyModelRequest(t, "session-no-rebalance", "gpt-5")
+	if _, err := rtr.SelectWithBody(req, body); err != nil {
+		t.Fatalf("SelectWithBody(first) error = %v", err)
+	}
+
+	targets := stickyTargetsByID(rtr)
+	targets["primary"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 5000, TTFTMs: 1800}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	targets["fallback"].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+
+	req, body = stickyModelRequest(t, "session-no-rebalance", "gpt-5")
+	selection, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(second) error = %v", err)
+	}
+	if selection.Target.ID != "primary" || selection.Decision.StickyStatus != "hit" {
+		t.Fatalf("selection target/status = %q/%q, want primary hit", selection.Target.ID, selection.Decision.StickyStatus)
+	}
+}
+
+// TestRouterStickySelectionConfig covers the three settings: the one-hour TTL
+// and 2.0 ratio defaults, an explicit TTL/ratio, and the binding opt-out.
+func TestRouterStickySelectionConfig(t *testing.T) {
+	cfg := stickyAffinityConfig()
+	cfg.Router.Selection.StickyMaxCostRatio = nil
+	rtr := routerFromConfig(t, cfg)
+	if rtr.sticky == nil {
+		t.Fatal("sticky store = nil, want enabled by default")
+	}
+	if rtr.sticky.ttl != defaultStickyBindingTTL {
+		t.Fatalf("sticky ttl = %v, want %v", rtr.sticky.ttl, defaultStickyBindingTTL)
+	}
+	if rtr.stickyMaxCostRatio != defaultStickyMaxCostRatio {
+		t.Fatalf("sticky max cost ratio = %v, want %v", rtr.stickyMaxCostRatio, defaultStickyMaxCostRatio)
+	}
+
+	cfg = stickyAffinityConfig()
+	ttl := 5 * time.Minute
+	ratio := 1.5
+	cfg.Router.Selection.StickyTTL = ttl
+	cfg.Router.Selection.StickyMaxCostRatio = &ratio
+	rtr = routerFromConfig(t, cfg)
+	if rtr.sticky == nil || rtr.sticky.ttl != ttl {
+		t.Fatalf("sticky store = %+v, want ttl %v", rtr.sticky, ttl)
+	}
+	if rtr.stickyMaxCostRatio != ratio {
+		t.Fatalf("sticky max cost ratio = %v, want %v", rtr.stickyMaxCostRatio, ratio)
+	}
+
+	cfg = stickyAffinityConfig()
+	disabled := false
+	cfg.Router.Selection.Sticky = &disabled
+	rtr = routerFromConfig(t, cfg)
+	if rtr.sticky != nil {
+		t.Fatal("sticky store != nil, want nil when router.selection.sticky is false")
+	}
+	req, body := stickyModelRequest(t, "session-disabled", "gpt-5")
+	selection, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("SelectWithBody(disabled) error = %v", err)
+	}
+	if selection.Decision.StickyStatus != "" || len(selection.Decision.StickyEvents) != 0 {
+		t.Fatalf("sticky decision = %+v, want none when affinity is disabled", selection.Decision)
+	}
 }
 
 func stickyModelRequest(t *testing.T, session string, model string) (*http.Request, []byte) {
@@ -2459,6 +2765,7 @@ func TestRouterStickyBindingIsPerSessionAndModel(t *testing.T) {
 	if second.Target.ID != "primary" || second.Decision.StickyStatus != "hit" {
 		t.Fatalf("second gpt-5 selection = %q status %q, want sticky primary hit", second.Target.ID, second.Decision.StickyStatus)
 	}
+	rtr.Release(second)
 
 	// A different model gets its own binding. Establish it on the fallback by
 	// excluding primary, then prove it survives independently.
@@ -2470,6 +2777,7 @@ func TestRouterStickyBindingIsPerSessionAndModel(t *testing.T) {
 	if chatBound.Target.ID != "fallback" || chatBound.Decision.StickyStatus != "bind" {
 		t.Fatalf("gpt-4o binding = %q status %q, want fallback bind (a new model must not hit the gpt-5 binding)", chatBound.Target.ID, chatBound.Decision.StickyStatus)
 	}
+	rtr.Release(chatBound)
 	if chatBound.Decision.StickyKeyFingerprint == first.Decision.StickyKeyFingerprint {
 		t.Fatal("gpt-5 and gpt-4o share a sticky key fingerprint, so their bindings collide")
 	}
@@ -2482,6 +2790,7 @@ func TestRouterStickyBindingIsPerSessionAndModel(t *testing.T) {
 	if chatHit.Target.ID != "fallback" || chatHit.Decision.StickyStatus != "hit" {
 		t.Fatalf("second gpt-4o selection = %q status %q, want sticky fallback hit", chatHit.Target.ID, chatHit.Decision.StickyStatus)
 	}
+	rtr.Release(chatHit)
 
 	// The gpt-4o binding must not have moved the gpt-5 conversation.
 	req, body = stickyModelRequest(t, "session-a", "gpt-5")
@@ -2508,6 +2817,7 @@ func TestRouterStickySessionScopesToOneSessionAndOneTarget(t *testing.T) {
 	if first.Target.ID != "primary" || first.Decision.StickyStatus != "bind" {
 		t.Fatalf("session-a first = %q status %q, want primary bind", first.Target.ID, first.Decision.StickyStatus)
 	}
+	rtr.Release(first)
 
 	// The same session keeps the same target across selections.
 	for i := 0; i < 2; i++ {
@@ -2519,6 +2829,7 @@ func TestRouterStickySessionScopesToOneSessionAndOneTarget(t *testing.T) {
 		if selection.Target.ID != "primary" || selection.Decision.StickyStatus != "hit" {
 			t.Fatalf("session-a repeat %d = %q status %q, want sticky primary hit", i, selection.Target.ID, selection.Decision.StickyStatus)
 		}
+		rtr.Release(selection)
 	}
 
 	// A different session has no binding and is free to land elsewhere.
@@ -2530,6 +2841,7 @@ func TestRouterStickySessionScopesToOneSessionAndOneTarget(t *testing.T) {
 	if distributed.Target.ID != "fallback" || distributed.Decision.StickyStatus != "bind" {
 		t.Fatalf("session-b first = %q status %q, want its own fallback bind", distributed.Target.ID, distributed.Decision.StickyStatus)
 	}
+	rtr.Release(distributed)
 
 	// Each session now hits its own binding, proving the two are independent.
 	sessionBReq, sessionBBody = stickyModelRequest(t, "session-b", "gpt-5")
@@ -2540,6 +2852,7 @@ func TestRouterStickySessionScopesToOneSessionAndOneTarget(t *testing.T) {
 	if hitB.Target.ID != "fallback" || hitB.Decision.StickyStatus != "hit" {
 		t.Fatalf("session-b repeat = %q status %q, want sticky fallback hit", hitB.Target.ID, hitB.Decision.StickyStatus)
 	}
+	rtr.Release(hitB)
 
 	sessionAReq, sessionABody = stickyModelRequest(t, "session-a", "gpt-5")
 	hitA, err := rtr.SelectWithBody(sessionAReq, sessionABody)
@@ -2579,6 +2892,7 @@ func TestRouterStickyBodyFallbacksCreateAffinity(t *testing.T) {
 			if first.Decision.StickyStatus != "bind" {
 				t.Fatalf("first sticky status = %q, want bind from the body session source", first.Decision.StickyStatus)
 			}
+			rtr.Release(first)
 			req, err = http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(body))
 			if err != nil {
 				t.Fatalf("http.NewRequest() error = %v", err)
@@ -2612,6 +2926,7 @@ func TestRouterStickyXSessionHeaderCreatesAffinity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectWithBody(first) error = %v", err)
 	}
+	rtr.Release(first)
 	second, err := rtr.SelectWithBody(request(), body)
 	if err != nil {
 		t.Fatalf("SelectWithBody(second) error = %v", err)
