@@ -2442,7 +2442,7 @@ func TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen(t *testing.T) {
 	}
 	target := newTarget(now.Add(-time.Second))
 
-	decision := target.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"}, false)
+	decision := target.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"}, false, false)
 	if decision.FilterReason != "" {
 		t.Fatalf("fixture is not routable: filter_reason=%q supports_path=%v supports_model=%v supports_tools=%v",
 			decision.FilterReason, decision.SupportsPath, decision.SupportsModel, decision.SupportsTools)
@@ -2464,7 +2464,7 @@ func TestCandidateDecisionDoesNotReportAnElapsedOpenWindowAsOpen(t *testing.T) {
 
 	// A window that is still live must stay open and unselectable.
 	live := newTarget(now.Add(time.Minute))
-	liveDecision := live.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"}, false)
+	liveDecision := live.candidateDecision("/v1/chat/completions", "deepseek-flash", now, RequestFeatures{ModelName: "deepseek-flash"}, false, false)
 	if liveDecision.HealthState != HealthOpen {
 		t.Fatalf("live window health_state = %q, want %q", liveDecision.HealthState, HealthOpen)
 	}
