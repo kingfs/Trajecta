@@ -70,6 +70,7 @@ func newDBCommand(runtime *Runtime) *cobra.Command {
 	cmd.AddCommand(newDBSummaryCommand(runtime))
 	cmd.AddCommand(newDBSecretCommand(runtime))
 	cmd.AddCommand(newDBSecretMappingCommand(runtime))
+	cmd.AddCommand(newDBCleanupCommand(runtime))
 	return cmd
 }
 

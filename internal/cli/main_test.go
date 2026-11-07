@@ -54,7 +54,7 @@ func TestRootCommandRegistersManagementCommandGroups(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "auth create-token", "analyze", "analyze repair-usage", "analyze backfill-exchanges", "analyze reanalyze", "analyze batch", "analyze refresh", "schema"} {
+	for _, want := range []string{"migrate", "db", "db cleanup", "db cleanup requests", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "auth create-token", "analyze", "analyze repair-usage", "analyze backfill-exchanges", "analyze reanalyze", "analyze batch", "analyze refresh", "schema"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != rootName+" "+want {
