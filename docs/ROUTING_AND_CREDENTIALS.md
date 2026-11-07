@@ -139,13 +139,12 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 - binding TTL 固定为 1 小时（当前没有配置项），记录在进程内的 `StickyBindingStore`。命中且 target 仍可用时复用同一 route target（因此也复用了上游的 prompt cache）；命中但 target 不可用时记录一次 `sticky break` 并重新绑定；未命中则正常选择后绑定。
 - Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`（sha256 前缀），不暴露原始 session 值。
 
-## 凭据与隐式 default credential
+## 凭据与 route target
 
-- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；credential 负责 secret、`api_key` 覆盖与 route target 身份。`credentials[].headers` 目前只被 CLI `trajecta provider probe` 读取，router/proxy 不合并它。
-- 每个数据库渠道展开为一个 route target（`route_target_id = <channel_id>:default`）；渠道 API key 直接从数据库解密后使用。
-- `api_key` 应引用环境变量（例如 `$env:OPENAI_PRIMARY_API_KEY`），`id` 要稳定，因为它进入 route target identity 并可能出现在 cassette metadata 中。
-- `credentials[].enabled: false` 表示该 credential 不参与路由：router 在展开 route target 时跳过它（与 CLI `trajecta provider probe` 选探测凭据时的规则一致）。若某个渠道声明的 credentials 全部被禁用，该渠道不产生任何 route target，`New()` 会以 `no enabled upstream targets configured` 失败，而**不会**回退到渠道级 `upstream.api_key`——否则被关掉的 key 会继续发流量。跳过的 credential 不会改变其余 credential 的索引，因此由索引生成的 `credential-N` 与 route target ID 保持稳定。
-- `credentials[].concurrency_limit` 目前只是配置字段，没有运行时消费者；实际并发限制由下方 limit scope 统一处理。
+- 渠道负责 base URL、provider preset、routing profile、priority/weight/capacity 与模型覆盖；API key 与自定义 headers 加密保存在渠道行内，router/proxy 只在内存中使用明文。
+- 每个数据库渠道展开为一个 route target（`route_target_id = <channel_id>:default`），凭据 id 为 `default`。
+- API key 由 Monitor 的渠道表单写入 `channel_configs.api_key_ciphertext`，不来自 YAML，也不进入 route target ID。
+- `concurrency_limit` 不是渠道字段；并发限制由下方 limit scope 统一处理。
 
 ## Limit 与 scope
 

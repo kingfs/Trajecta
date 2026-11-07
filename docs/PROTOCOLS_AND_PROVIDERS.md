@@ -134,7 +134,7 @@ host 推断的当前规则（按顺序匹配）：`api.deepseek.com` 且未指�
 
 ## Provider Probe
 
-`provider probe` 是手动诊断命令，用于检查配置中的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
+`provider probe` 是手动诊断命令，用于检查应用数据库中渠道的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
 
 ```bash
 trajecta --config config.yaml provider probe --id openai-local --format json

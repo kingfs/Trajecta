@@ -238,7 +238,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 网络代理是出站请求的服务端策略，保存在 application database 的 `app_settings` 键 `network.proxy`，默认关闭。它按 Linux 的 `http_proxy` / `https_proxy` / `no_proxy` 语义解释三个字段：`http_proxy` 用于 HTTP 目标，`https_proxy` 用于 HTTPS 目标且留空时等于 `http_proxy`，`no_proxy` 是逗号分隔的例外列表。`no_proxy` 支持精确主机名、域名后缀（`example.com` 与 `.example.com` 都匹配自身及子域）、IP、CIDR（`10.0.0.0/8`、`fd00::/8`）、可选的 `host:port`，以及表示全部直连的 `*`；回环地址（`localhost`、`127.0.0.0/8`、`::1`）始终直连。代理地址接受裸 `host:port`，也接受 `http://`、`https://`、`socks5://`（含 `user:pass@` 认证）；写入时统一规范化为带 scheme 与端口的形式。关闭开关后所有出站请求直连，**不读取进程环境变量**，因此内网上游不会因为启动 shell 里的 `HTTP_PROXY` 而意外绕行；需要环境变量行为时把同样的值填进这一页即可。策略在每个请求上读取，保存后立即生效、无需重启。
 
-适用范围是进程内所有没有自带 transport 的出站 HTTP client：LLM 上游转发（透传路径的反向代理 transport 直接绑定该策略）、本地 Responses 运行时的内部 Chat Completions 调用、tokenize 计数、模型发现与 provider probe（含启动期 probe）、web 搜索与 GitHub 版本检查。保存成功后 `PATCH` 返回规范化后的策略与派生的 `effective_https_proxy`；服务端会在启动时把该行读入进程并按需打印脱敏后的代理地址。
+适用范围是进程内所有没有自带 transport 的出站 HTTP client：LLM 上游转发（透传路径的反向代理 transport 直接绑定该策略）、本地 Responses 运行时的内部 Chat Completions 调用、tokenize 计数、模型发现与 provider probe、web 搜索与 GitHub 版本检查。保存成功后 `PATCH` 返回规范化后的策略与派生的 `effective_https_proxy`；服务端会在启动时把该行读入进程并按需打印脱敏后的代理地址。
 
 系统级代理是默认策略，不是唯一策略。渠道的高级选项（新建渠道与渠道详情页的「高级选项」）里有一个**渠道网络代理**开关，默认关闭：关闭时该渠道完全跟随上面的系统策略；开启后可以单独填写 `http_proxy` / `https_proxy` / `no_proxy`，只有发往这个渠道的请求使用这组值，字段语义、校验与规范化与系统页完全一致（`https_proxy` 留空继承 `http_proxy`，回环地址始终直连，地址可以带 `user:pass@`）。渠道级策略覆盖该渠道的透传转发、本地 Responses runtime 的内部 Chat Completions 调用、tokenize 计数、模型发现、渠道 probe、provider probe 与单模型连通性/接口探测；其它渠道和系统级工具（web 搜索、GitHub 版本检查等）仍用系统策略。保存时后端先编译校验，非法地址返回 400，不会写入；渠道详情接口以 `proxy` 对象返回当前策略，其中代理密码显示为 `xxxxx`；把该占位符原样保存回去会沿用已存密码，因此编辑渠道不需要重新输入代理凭据。
 
