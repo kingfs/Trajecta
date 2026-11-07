@@ -138,8 +138,12 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 - route target 身份是 `<channel_id>:<credential_id>`，没有显式凭据时为 `<channel_id>:default`。
 - sticky key 依次从请求头 `Session_id`、`X-Session-Id`、`Session-Id`、`X-Conversation-Id`、`X-Claude-Code-Session-Id`、`X-Codex-Window-Id`（取 `:` 前前缀）、`X-Codex-Turn-Metadata` 的 `session_id` 提取；都没有时回退到请求体的 `previous_response_id`、`prompt_cache_key`、`metadata.session_id`、`conversation_id`、`session_id`。body 只解析一次；格式错误的 body 视为没有会话键。
 - binding key 是 **`session + 模型名`** 的组合（模型名小写）：粘住的不是“这个会话”，而是“这个会话里的这个模型”。这样同一会话切到另一个模型时不会覆盖前一个模型的绑定，两个模型各自的供应商 prompt cache 都能继续命中。没有模型名时保持历史上的 session-only key；没有 session key 时不绑定。
-- binding TTL 固定为 1 小时（当前没有配置项），记录在进程内的 `StickyBindingStore`。命中且 target 仍可用时复用同一 route target（因此也复用了上游的 prompt cache）；命中但 target 不可用时记录一次 `sticky break` 并重新绑定；未命中则正常选择后绑定。
-- Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`（sha256 前缀），不暴露原始 session 值。
+- binding 记录在进程内的 `StickyBindingStore`，TTL 由 `router.selection.sticky_ttl` 控制（默认 1h，`0` 也按默认值处理）；`router.selection.sticky: false` 关闭整个绑定：不读、不写，也不产生任何 `routing.sticky.*` 事件，进程重启会清空全部绑定。
+- 命中且 target 仍可用时复用同一 route target（因此也复用了上游的 prompt cache）；命中但 target 不可用（熔断打开、被删除）时记录一次 `sticky break` 并重新绑定；未命中则正常选择后绑定。
+- 命中时如果绑定目标正在执行请求（inflight > 0）且还有其他可用目标，本次请求交给正常的成本选择（记录 `sticky spill`），不排队等待绑定目标、也不改写绑定；绑定目标空闲后，后续顺序请求仍回到它。这正是“快机器空闲、慢机器仍在执行”时避免把新请求继续压到慢机器的机制。
+- 命中后还会做一次延迟复核：当绑定目标的已测延迟成本（TTFT + 总耗时的 EWMA，按 capacity 缩放；不含 inflight 与熔断惩罚）超过最便宜候选的 `router.selection.sticky_max_cost_ratio` 倍（默认 `2.0`，`0` 关闭该检查）时，改绑到延迟最低的候选并记录 `sticky rebalance`。这是避免会话被钉在明显更慢的硬件上的机制；代价是失去原目标的 prompt cache，因此阈值刻意取 2 倍而不是“只要更便宜就换”，等速双机不会来回抖动。瞬时排队不算“更慢”，不会仅因为绑定目标正忙就换绑。
+- 重试时的排除（`SelectWithExclusion` 的 `excludeIDs`）只对当前请求生效。被排除的恰好是当前绑定时，记录 `sticky hold` 但**保留**绑定，本次请求走备用目标，下一次请求仍先试原目标；只有原目标真的不可用（健康/模型熔断、被移除）才走 `break` + rebind。这样一次瞬时 500 不会把整个会话改绑到备用目标并钉住一个 TTL。
+- Monitor、MCP 与 cassette event 只暴露 `sticky_key_fingerprint`（sha256 前缀），不暴露原始 session 值。`sticky_status` 的取值为 `hit`、`miss`、`bind`、`break`、`hold`、`spill`、`rebalance`。
 
 ## 凭据与隐式 default credential
 

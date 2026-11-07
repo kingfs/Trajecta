@@ -114,6 +114,18 @@ router:
     epsilon: 0.02
     open_window: 15s
     failure_threshold: 3
+    # Session affinity keeps one (session, model) on one route target so the
+    # upstream prompt cache keeps hitting. Set to false to disable the binding
+    # entirely (a concurrent burst then spreads across every target).
+    sticky: true
+    # How long a binding survives. Omit (or 0) for the one-hour default.
+    sticky_ttl: 1h
+    # Break a binding when the bound target's measured latency cost (TTFT and
+    # duration EWMA, up to capacity) exceeds the fastest alternative by this
+    # factor. 0 disables the check and restores "the binding always wins"; the
+    # check is what keeps a session off a target several times slower than the
+    # alternative. Momentary queueing is deliberately not part of the check.
+    sticky_max_cost_ratio: 2.0
 
 debug:
   output_dir: "./data/traces"

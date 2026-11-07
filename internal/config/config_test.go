@@ -1762,12 +1762,37 @@ func TestShippedConfigsUseKnownRoutingValues(t *testing.T) {
 		if err := validateRouterEnums(&cfg); err != nil {
 			t.Errorf("%s: %v", path, err)
 		}
+		if err := validateRouterSelection(&cfg); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
 		if err := validateLimits(&cfg); err != nil {
 			t.Errorf("%s: %v", path, err)
 		}
 		if err := validateChaosRules(&cfg); err != nil {
 			t.Errorf("%s: %v", path, err)
 		}
+	}
+}
+
+func TestValidateRouterSelectionRejectsNegativeStickyValues(t *testing.T) {
+	cfg := &Config{}
+	cfg.Router.Selection.StickyTTL = -time.Second
+	if err := validateRouterSelection(cfg); err == nil {
+		t.Fatal("validateRouterSelection() = nil, want an error for a negative sticky_ttl")
+	}
+
+	cfg = &Config{}
+	ratio := -1.0
+	cfg.Router.Selection.StickyMaxCostRatio = &ratio
+	if err := validateRouterSelection(cfg); err == nil {
+		t.Fatal("validateRouterSelection() = nil, want an error for a negative sticky_max_cost_ratio")
+	}
+
+	cfg = &Config{}
+	disabled := 0.0
+	cfg.Router.Selection.StickyMaxCostRatio = &disabled
+	if err := validateRouterSelection(cfg); err != nil {
+		t.Fatalf("validateRouterSelection(0 ratio) = %v, want nil (0 disables rebalancing)", err)
 	}
 }
 
