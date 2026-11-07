@@ -56,7 +56,8 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/limit`：请求限流；`internal/redaction`：URL 与敏感参数脱敏；`internal/chaos`：配置驱动的故障注入（`action` 取 `delay`/`error`，大小写不敏感；`rate` 必须在 0.0~1.0，`status_code` 必须是 0 或 100~999，否则 `Load` 报错而不让规则静默失效或让 `WriteHeader` panic）。
 - `pkg/recordfile`：V2/V3 cassette 解析与写入。
 - `pkg/replay`：测试回放 transport。
-- `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。
+- `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`；其 marshal 方法也供 `pkg/protocolconvert` 做请求/响应编码。
+- `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径仅在 `router.selection.protocol_conversion: true` 且没有可用原生候选时使用。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
 - `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号与手机号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类；PEM 私钥块由 `pem.go` 从 DFA 命中的头行原生扩展到配对 footer（标签必须一致，反向引用无法用 DFA 表达），不新增 DFA 状态。vault 的 `real -> fake` 映射由 `internal/store` 的 bbolt 文件持久化（默认开启），启动默认加载全部、首次遇到未知真值时回查，因此假值跨重启与上下文压缩保持稳定；正数 `load_limit` 可限制启动内存并形成识别窗口。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
@@ -85,10 +86,11 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 
 ## 协议边界
 
-当前是协议族感知的透传代理，不是跨协议转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
+当前是协议族感知的透传代理，默认不是跨协议转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
 
-- `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native` 在转发热路径中互不转换；上游必须支持 client 实际请求的 endpoint（例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游）。
-- `pkg/llm`/`pkg/observe` 可以把不同协议归一化为统一摘要与 Observation IR，但这不等于可以无损转发到另一个协议。
+- 默认情况下 `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native` 在转发热路径中互不转换；上游必须支持 client 实际请求的 endpoint（例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游）。
+- 开启 `router.selection.protocol_conversion` 后，只有当本轮没有可用原生候选、请求非流式、入口为 chat/messages/gemini 时，`pkg/protocolconvert` 才会把请求/响应转换到目标协议；原生候选始终优先，`/v1/responses` 不参与转换。流式、多模态/thinking、以及 IR 不携带的语义字段不被转换。
+- `pkg/llm`/`pkg/observe` 可以把不同协议归一化为统一摘要与 Observation IR；`pkg/protocolconvert` 只在 IR 明确承载的字段上做转换，其余字段默认拒绝而不是猜测。
 - proxy 无条件接受 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`。
 
 `/v1/responses` 是唯一例外，按请求在 native 与本地 runtime 之间二选一：

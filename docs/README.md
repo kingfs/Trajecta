@@ -29,6 +29,7 @@
 | [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md) | 配置从哪来、怎么写库、路由与限流怎么生效 |
 | [客户端 Harness 识别](./HARNESS_DETECTION.md) | 怎么从请求识别客户端 agent、结果落到哪些字段与标签、有哪些已知误判 |
 | [本地 Responses Runtime](./RESPONSES_RUNTIME.md) | `/v1/responses` 怎么处理、Codex 兼容面、hosted tools |
+| [协议转换](./PROTOCOL_CONVERSION.md) | 直通优先与协议转换怎么决策、转换 API 与 IR 边界 |
 | [语义解析、Observation IR 与审计](./OBSERVATION_AND_AUDIT.md) | 录制怎么变成 Observation IR、findings 与重分析怎么工作 |
 | [存储与部署](./STORAGE_AND_DEPLOYMENT.md) | 数据放在哪、怎么迁移、怎么部署 |
 

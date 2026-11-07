@@ -2,12 +2,20 @@ package llm
 
 // ========== OpenAI Chat Completions 映射 ==========
 
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
+
 type OpenAIChatMessage struct {
 	Role       string           `json:"role"`
 	Content    interface{}      `json:"content"`
 	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Name       string           `json:"name,omitempty"`
+	Refusal    string           `json:"refusal,omitempty"`
 }
 
 type OpenAIToolCall struct {
@@ -25,6 +33,7 @@ type OpenAIToolFunction struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
 	Parameters  JSONSchema `json:"parameters,omitempty"`
+	Strict      *bool      `json:"strict,omitempty"`
 }
 
 type OpenAITool struct {
@@ -37,7 +46,7 @@ type OpenAIChatRequest struct {
 	Messages []OpenAIChatMessage `json:"messages"`
 
 	Tools      []OpenAITool `json:"tools,omitempty"`
-	ToolChoice string       `json:"tool_choice,omitempty"`
+	ToolChoice any          `json:"tool_choice,omitempty"`
 
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
@@ -70,39 +79,100 @@ type OpenAIChatResponse struct {
 
 // ---- LLMRequest -> OpenAIChatRequest ----
 
+// ToOpenAI renders the request for Chat Completions. Tool calls become the
+// assistant message's tool_calls, and each tool_result block becomes its own
+// role "tool" message: Chat Completions has one tool result per message, while
+// Messages carries them as blocks in a user message.
 func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
-	// 预分配 messages
-	totalMsgs := len(r.System) + len(r.Messages)
-	msgs := make([]OpenAIChatMessage, 0, totalMsgs)
+	msgs := make([]OpenAIChatMessage, 0, len(r.System)+len(r.Messages))
 
-	// system
 	for i := range r.System {
 		c := &r.System[i]
-		if c.Type == "text" {
-			msgs = append(msgs, OpenAIChatMessage{
-				Role:    "system",
-				Content: c.Text,
-			})
+		if c.Type == "text" && c.Text != "" {
+			msgs = append(msgs, OpenAIChatMessage{Role: "system", Content: c.Text})
 		}
 	}
 
-	// messages
+	callSequence := 0
+	callIDs := make(map[string]string)
 	for i := range r.Messages {
 		m := &r.Messages[i]
-		if len(m.Content) == 0 {
+		role := canonicalRole(m.Role)
+
+		var textParts []string
+		var toolCalls []OpenAIToolCall
+		var toolResults []LLMContent
+		for j := range m.Content {
+			c := &m.Content[j]
+			switch c.Type {
+			case "text":
+				if c.Text != "" {
+					textParts = append(textParts, c.Text)
+				}
+			case "tool_use":
+				callSequence++
+				id := firstNonEmpty(c.ToolCallID, c.ID)
+				if id == "" {
+					id = fmt.Sprintf("call_%d", callSequence)
+				}
+				args := c.ToolArgs
+				if args == nil {
+					args = map[string]any{}
+				}
+				argsText, err := json.Marshal(args)
+				if err != nil {
+					argsText = []byte("{}")
+				}
+				if c.ToolName != "" {
+					callIDs[c.ToolName] = id
+				}
+				toolCalls = append(toolCalls, OpenAIToolCall{
+					ID:   id,
+					Type: "function",
+					Function: OpenAIToolFunctionCall{
+						Name:      c.ToolName,
+						Arguments: string(argsText),
+					},
+				})
+			case "tool_result":
+				toolResults = append(toolResults, *c)
+			}
+		}
+
+		if len(toolResults) > 0 {
+			// Anthropic expresses tool results as blocks in a user message.
+			// Chat Completions needs one role "tool" message per result.
+			for k := range toolResults {
+				result := &toolResults[k]
+				id := firstNonEmpty(result.ToolCallID, result.ID)
+				if id == "" {
+					id = callIDs[result.ToolName]
+				}
+				if id == "" {
+					callSequence++
+					id = fmt.Sprintf("call_%d", callSequence)
+				}
+				// Chat's tool message schema is role/content/tool_call_id;
+				// the name is not part of it and strict providers reject
+				// unknown properties.
+				msgs = append(msgs, OpenAIChatMessage{
+					Role:       "tool",
+					ToolCallID: id,
+					Content:    ToolResultText(*result),
+				})
+			}
+			if len(textParts) > 0 {
+				msgs = append(msgs, OpenAIChatMessage{Role: contentRoleForToolResult(role), Content: chatContent(textParts)})
+			}
 			continue
 		}
-		msg := OpenAIChatMessage{Role: m.Role}
-		if len(m.Content) == 1 && m.Content[0].Type == "text" {
-			msg.Content = m.Content[0].Text
-		} else {
-			msg.Content = toOpenAIMessageContent(m.Content)
+
+		if len(textParts) == 0 && len(toolCalls) == 0 {
+			continue
 		}
-		for _, content := range m.Content {
-			if content.Type == "tool_result" {
-				msg.ToolCallID = content.ToolCallID
-				msg.Name = content.ToolName
-			}
+		msg := OpenAIChatMessage{Role: role, ToolCalls: toolCalls}
+		if len(textParts) > 0 {
+			msg.Content = chatContent(textParts)
 		}
 		msgs = append(msgs, msg)
 	}
@@ -116,6 +186,7 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.Parameters,
+				Strict:      t.Strict,
 			},
 		})
 	}
@@ -124,7 +195,7 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 		Model:       r.Model,
 		Messages:    msgs,
 		Tools:       tools,
-		ToolChoice:  r.ToolChoice,
+		ToolChoice:  encodeChatToolChoice(r.ToolChoice),
 		Temperature: r.Temperature,
 		TopP:        r.TopP,
 		MaxTokens:   r.MaxTokens,
@@ -133,12 +204,35 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 	}
 }
 
+// chatContent keeps a single text part as the string form OpenAI clients expect
+// and falls back to the array form only for a genuinely multi-part message.
+func chatContent(parts []string) any {
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	out := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, map[string]any{"type": "text", "text": part})
+	}
+	return out
+}
+
+// contentRoleForToolResult picks the role of the prose that shared a user
+// message with tool_result blocks. Chat has no such message; the text belongs
+// to the user turn the results are reported in.
+func contentRoleForToolResult(role string) string {
+	if role == "assistant" {
+		return "assistant"
+	}
+	return "user"
+}
+
 // ---- OpenAIChatRequest -> LLMRequest ----
 
 func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
 	llmReq := LLMRequest{
 		Model:       req.Model,
-		ToolChoice:  req.ToolChoice,
+		ToolChoice:  parseToolChoiceValue(req.ToolChoice),
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
 		MaxTokens:   req.MaxTokens,
@@ -146,22 +240,52 @@ func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
 		UserID:      req.User,
 	}
 
-	// ---- System + Messages ----
 	llmReq.System = make([]LLMContent, 0, 1)
 	llmReq.Messages = make([]LLMMessage, 0, len(req.Messages))
 
+	toolNames := make(map[string]string)
 	for i := range req.Messages {
 		m := &req.Messages[i]
+		for _, toolCall := range m.ToolCalls {
+			if toolCall.ID != "" && toolCall.Function.Name != "" {
+				toolNames[toolCall.ID] = toolCall.Function.Name
+			}
+		}
 
 		// system message
-		if m.Role == "system" {
+		if m.Role == "system" || m.Role == "developer" {
 			appendOpenAIContentToSystem(&llmReq, m.Content)
+			continue
+		}
+
+		// A Chat tool result is a message of its own. The IR carries it as a
+		// tool_result block whose text is the output, which is what every
+		// target encoder reads.
+		if m.Role == "tool" || m.Role == "function" {
+			text := openAIContentText(m.Content)
+			name := firstNonEmpty(m.Name, toolNames[m.ToolCallID])
+			llmReq.Messages = append(llmReq.Messages, LLMMessage{
+				Role: "tool",
+				Content: []LLMContent{{
+					Type:       "tool_result",
+					ID:         m.ToolCallID,
+					ToolCallID: m.ToolCallID,
+					ToolName:   name,
+					Text:       text,
+				}},
+			})
 			continue
 		}
 
 		msg := LLMMessage{
 			Role:    m.Role,
 			Content: parseOpenAIMessageContent(m.Content),
+		}
+		if m.Refusal != "" {
+			// A refusal is an assistant answer of its own. Keep it as text
+			// carrying the refusal marker so cross-protocol encoders do not
+			// drop it; Chat can re-emit it as the message's refusal field.
+			msg.Content = append(msg.Content, LLMContent{Type: "text", Text: m.Refusal, Refusal: m.Refusal})
 		}
 		for _, toolCall := range m.ToolCalls {
 			msg.Content = append(msg.Content, LLMContent{
@@ -172,17 +296,9 @@ func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
 				ToolArgs:   parseJSONObject(toolCall.Function.Arguments),
 			})
 		}
-		if m.ToolCallID != "" || m.Name != "" {
-			msg.Content = append(msg.Content, LLMContent{
-				Type:       "tool_result",
-				ToolCallID: m.ToolCallID,
-				ToolName:   m.Name,
-			})
-		}
 		llmReq.Messages = append(llmReq.Messages, msg)
 	}
 
-	// ---- Tools ----
 	llmReq.Tools = make([]LLMTool, 0, len(req.Tools))
 	for i := range req.Tools {
 		t := &req.Tools[i]
@@ -190,10 +306,37 @@ func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
 			Name:        t.Function.Name,
 			Description: t.Function.Description,
 			Parameters:  t.Function.Parameters,
+			Strict:      t.Function.Strict,
 		})
 	}
 
 	return llmReq
+}
+
+// openAIContentText flattens a tool message's content to the text the IR
+// carries. Some providers send the tool output as a single string, others as a
+// content-part array.
+func openAIContentText(raw interface{}) string {
+	switch value := raw.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case []interface{}:
+		var builder strings.Builder
+		for _, item := range value {
+			part, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := part["text"].(string); ok {
+				builder.WriteString(text)
+			}
+		}
+		return builder.String()
+	default:
+		return marshalCompactString(value)
+	}
 }
 
 // ---- OpenAIChatResponse -> LLMResponse ----
@@ -217,13 +360,17 @@ func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
 			})
 		}
 
-		cands = append(cands, LLMCandidate{
+		candidate := LLMCandidate{
 			Index:        ch.Index,
 			Role:         ch.Message.Role,
 			Content:      content,
 			FinishReason: ch.FinishReason,
 			ToolCalls:    toolCalls,
-		})
+		}
+		if ch.Message.Refusal != "" {
+			candidate.Refusal = &LLMRefusal{Reason: "refusal", Message: ch.Message.Refusal}
+		}
+		cands = append(cands, candidate)
 	}
 
 	var usage *LLMUsage
@@ -250,33 +397,45 @@ func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
 func (r *LLMResponse) ToOpenAIResponse() OpenAIChatResponse {
 	choices := make([]OpenAIChatChoice, 0, len(r.Candidates))
 
-	for _, c := range r.Candidates {
-		// 只处理 text（基准场景）
-		text := ""
-		if len(c.Content) > 0 && c.Content[0].Type == "text" {
-			text = c.Content[0].Text
-		}
-		toolCalls := make([]OpenAIToolCall, 0, len(c.ToolCalls))
-		for _, toolCall := range c.ToolCalls {
-			toolCalls = append(toolCalls, OpenAIToolCall{
-				ID:   toolCall.ID,
-				Type: firstNonEmpty(toolCall.Type, "function"),
-				Function: OpenAIToolFunctionCall{
-					Name:      toolCall.Name,
-					Arguments: firstNonEmpty(toolCall.ArgsText, marshalCompactString(toolCall.Args)),
-				},
-			})
-		}
+	for i := range r.Candidates {
+		c := &r.Candidates[i]
+		text := c.ResponseText()
+		toolCalls := c.ResponseToolCalls()
 
-		choices = append(choices, OpenAIChatChoice{
+		choice := OpenAIChatChoice{
 			Index: c.Index,
 			Message: OpenAIChatMessage{
-				Role:      c.Role,
-				Content:   text,
-				ToolCalls: toolCalls,
+				Role: "assistant",
 			},
 			FinishReason: c.FinishReason,
-		})
+		}
+		if text != "" {
+			choice.Message.Content = text
+		}
+		if c.Refusal != nil && c.Refusal.Message != "" {
+			choice.Message.Refusal = c.Refusal.Message
+		}
+		if len(toolCalls) > 0 {
+			choice.Message.ToolCalls = make([]OpenAIToolCall, 0, len(toolCalls))
+			for _, call := range toolCalls {
+				choice.Message.ToolCalls = append(choice.Message.ToolCalls, OpenAIToolCall{
+					ID:   firstNonEmpty(call.ID, fmt.Sprintf("call_%d", len(choice.Message.ToolCalls)+1)),
+					Type: firstNonEmpty(call.Type, "function"),
+					Function: OpenAIToolFunctionCall{
+						Name:      call.Name,
+						Arguments: firstNonEmpty(call.ArgsText, marshalCompactString(call.Args), "{}"),
+					},
+				})
+			}
+		}
+		if choice.FinishReason == "" {
+			if len(toolCalls) > 0 {
+				choice.FinishReason = "tool_calls"
+			} else {
+				choice.FinishReason = "stop"
+			}
+		}
+		choices = append(choices, choice)
 	}
 
 	var usage *OpenAIUsage
@@ -288,10 +447,15 @@ func (r *LLMResponse) ToOpenAIResponse() OpenAIChatResponse {
 		}
 	}
 
+	created := r.CreatedAt
+	if created == 0 {
+		created = time.Now().Unix()
+	}
 	return OpenAIChatResponse{
-		ID:      r.ID,
+		ID:      firstNonEmpty(r.ID, "chatcmpl-converted"),
+		Object:  "chat.completion",
+		Created: created,
 		Model:   r.Model,
-		Created: r.CreatedAt,
 		Choices: choices,
 		Usage:   usage,
 	}
@@ -336,27 +500,6 @@ func parseOpenAIMessageContent(raw interface{}) []LLMContent {
 	default:
 		return []LLMContent{{Type: "text", Text: marshalCompactString(value)}}
 	}
-}
-
-func toOpenAIMessageContent(contents []LLMContent) []map[string]any {
-	result := make([]map[string]any, 0, len(contents))
-	for _, content := range contents {
-		switch content.Type {
-		case "text":
-			result = append(result, map[string]any{
-				"type": "text",
-				"text": content.Text,
-			})
-		default:
-			if content.Text != "" {
-				result = append(result, map[string]any{
-					"type": content.Type,
-					"text": content.Text,
-				})
-			}
-		}
-	}
-	return result
 }
 
 func stringValue(v any) string {

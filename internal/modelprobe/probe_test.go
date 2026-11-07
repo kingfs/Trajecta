@@ -355,7 +355,7 @@ func TestRunGenerateContentPaths(t *testing.T) {
 			family:         upstream.ProtocolFamilyVertexNative,
 			routingProfile: upstream.RoutingProfileVertexExpress,
 			wireModel:      "gemini-2.5-pro",
-			wantPath:       "/v1/publishers/models/gemini-2.5-pro:generateContent",
+			wantPath:       "/v1/publishers/google/models/gemini-2.5-pro:generateContent",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

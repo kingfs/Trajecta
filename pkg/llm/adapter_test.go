@@ -83,7 +83,7 @@ func TestParseOpenAIResponsesRequest(t *testing.T) {
 			{"type":"function_call","call_id":"call_1","name":"weather","arguments":"{\"city\":\"Shanghai\"}"},
 			{"type":"function_call_output","call_id":"call_1","name":"weather","output":{"temp_c":22}}
 		],
-		"tools":[{"type":"function","function":{"name":"weather","description":"Lookup weather","parameters":{"type":"object"}}}]
+		"tools":[{"type":"function","name":"weather","description":"Lookup weather","parameters":{"type":"object"}}]
 	}`)
 
 	req, err := ParseRequest(ProviderOpenAICompatible, "/v1/responses", body)
@@ -356,4 +356,13 @@ func TestModelFromBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseOpenAIResponsesNestedToolCompatibility(t *testing.T) {
+	body := []byte(`{"model":"gpt-5","input":"hi","tools":[{"type":"function","function":{"name":"weather","description":"d","parameters":{"type":"object"}}}]}`)
+	req, err := ParseRequest(ProviderOpenAICompatible, "/v1/responses", body)
+	require.NoError(t, err)
+	require.Len(t, req.Tools, 1)
+	assert.Equal(t, "weather", req.Tools[0].Name)
+	assert.Equal(t, "d", req.Tools[0].Description)
 }

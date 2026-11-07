@@ -2,6 +2,11 @@ package llm
 
 // ========== Anthropic Messages 映射 ==========
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 type AnthropicContentBlock struct {
 	Type      string      `json:"type"` // "text", "tool_use", ...
 	Text      string      `json:"text,omitempty"`
@@ -16,7 +21,34 @@ type AnthropicContentBlock struct {
 
 type AnthropicMessage struct {
 	Role    string                  `json:"role"`
-	Content []AnthropicContentBlock `json:"content"`
+	Content AnthropicMessageContent `json:"content"`
+}
+
+// AnthropicMessageContent accepts the two wire forms of a message body: a plain
+// string (the shorthand Anthropic allows for a single text turn) and an array
+// of content blocks. It always encodes as the block array.
+type AnthropicMessageContent []AnthropicContentBlock
+
+func (c *AnthropicMessageContent) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		*c = nil
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+		*c = AnthropicMessageContent{{Type: "text", Text: text}}
+		return nil
+	}
+	var blocks []AnthropicContentBlock
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return err
+	}
+	*c = blocks
+	return nil
 }
 
 type AnthropicTool struct {
@@ -32,7 +64,7 @@ type AnthropicRequest struct {
 	Messages []AnthropicMessage `json:"messages"`
 
 	Tools      []AnthropicTool `json:"tools,omitempty"`
-	ToolChoice string          `json:"tool_choice,omitempty"`
+	ToolChoice any             `json:"tool_choice,omitempty"`
 
 	MaxTokens   *int     `json:"max_tokens,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`
@@ -63,62 +95,75 @@ type AnthropicResponse struct {
 
 // ---- LLMRequest -> AnthropicRequest ----
 
+// ToAnthropic renders the request for Messages. A tool_result block belongs to
+// a "user" message and must precede the prose of that message, so tool results
+// are collected separately and emitted first. Chat's separate role "tool"
+// messages become exactly that shape.
 func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 	msgs := make([]AnthropicMessage, 0, len(r.Messages))
 
 	for i := range r.Messages {
 		m := &r.Messages[i]
-		blocks := make([]AnthropicContentBlock, len(m.Content))
+		var toolResults []AnthropicContentBlock
+		var others []AnthropicContentBlock
+
 		for j := range m.Content {
 			c := &m.Content[j]
 			switch c.Type {
 			case "text":
-				blocks[j] = AnthropicContentBlock{
-					Type: "text",
-					Text: c.Text,
+				if c.Text != "" {
+					others = append(others, AnthropicContentBlock{Type: "text", Text: c.Text})
 				}
 			case "tool_use":
-				blocks[j] = AnthropicContentBlock{
+				id := firstNonEmpty(c.ToolCallID, c.ID)
+				others = append(others, AnthropicContentBlock{
 					Type:  "tool_use",
-					ID:    firstNonEmpty(c.ID, c.ToolCallID),
+					ID:    id,
 					Name:  c.ToolName,
-					Input: c.ToolArgs,
-				}
+					Input: nonNilMap(c.ToolArgs),
+				})
 			case "tool_result":
-				blocks[j] = AnthropicContentBlock{
+				toolResults = append(toolResults, AnthropicContentBlock{
 					Type:      "tool_result",
-					ToolUseID: c.ToolCallID,
-					Content:   c.ToolResult,
-					IsError:   false,
-				}
-			default:
-				blocks[j] = AnthropicContentBlock{
-					Type: "text",
-					Text: c.Text,
-				}
+					ToolUseID: firstNonEmpty(c.ToolCallID, c.ID),
+					// Messages accepts a string or an array of content blocks,
+					// not an arbitrary JSON object; a structured result is
+					// rendered as its JSON text.
+					Content: ToolResultText(*c),
+					IsError: c.Refusal == "error",
+				})
 			}
 		}
+
+		blocks := append(toolResults, others...)
+		if len(blocks) == 0 {
+			continue
+		}
+		role := anthropicRole(m.Role)
+		if len(toolResults) > 0 {
+			// Messages only accepts tool_result blocks in a user turn.
+			role = "user"
+		}
 		msgs = append(msgs, AnthropicMessage{
-			Role:    m.Role,
-			Content: blocks,
+			Role:    role,
+			Content: AnthropicMessageContent(blocks),
 		})
 	}
 
 	var system any
-	if len(r.System) == 1 && r.System[0].Type == "text" {
-		system = r.System[0].Text
-	} else if len(r.System) > 0 {
-		blocks := make([]AnthropicContentBlock, len(r.System))
-		for i := range r.System {
-			c := &r.System[i]
-			if c.Type == "text" {
-				blocks[i] = AnthropicContentBlock{
-					Type: "text",
-					Text: c.Text,
-				}
-			}
+	systemBlocks := make([]AnthropicContentBlock, 0, len(r.System))
+	for i := range r.System {
+		c := &r.System[i]
+		if c.Type == "text" && c.Text != "" {
+			systemBlocks = append(systemBlocks, AnthropicContentBlock{Type: "text", Text: c.Text})
 		}
-		system = blocks
+	}
+	switch len(systemBlocks) {
+	case 0:
+	case 1:
+		system = systemBlocks[0].Text
+	default:
+		system = systemBlocks
 	}
 
 	tools := make([]AnthropicTool, 0, len(r.Tools))
@@ -131,9 +176,9 @@ func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 		})
 	}
 
-	meta := map[string]string{}
+	var metadata map[string]string
 	if r.UserID != "" {
-		meta["user_id"] = r.UserID
+		metadata = map[string]string{"user_id": r.UserID}
 	}
 
 	return AnthropicRequest{
@@ -141,14 +186,29 @@ func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 		System:        system,
 		Messages:      msgs,
 		Tools:         tools,
-		ToolChoice:    r.ToolChoice,
+		ToolChoice:    encodeAnthropicToolChoice(r.ToolChoice),
 		MaxTokens:     r.MaxTokens,
 		Temperature:   r.Temperature,
 		TopP:          r.TopP,
 		TopK:          r.TopK,
 		StopSequences: r.StopSeq,
-		Metadata:      meta,
+		Metadata:      metadata,
 	}
+}
+
+// anthropicRole maps the IR roles onto the two roles Messages accepts.
+func anthropicRole(role string) string {
+	if canonicalRole(role) == "assistant" {
+		return "assistant"
+	}
+	return "user"
+}
+
+func nonNilMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
 }
 
 // ---- AnthropicRequest -> LLMRequest ----
@@ -156,7 +216,7 @@ func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
 	llmReq := LLMRequest{
 		Model:          req.Model,
-		ToolChoice:     req.ToolChoice,
+		ToolChoice:     parseToolChoiceValue(req.ToolChoice),
 		Temperature:    req.Temperature,
 		TopP:           req.TopP,
 		TopK:           req.TopK,
@@ -173,13 +233,9 @@ func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
 	}
 
 	// ---- System ----
-	switch v := req.System.(type) {
-	case string:
-		llmReq.System = []LLMContent{{Type: "text", Text: v}}
-	case []AnthropicContentBlock:
-		llmReq.System = make([]LLMContent, 0, len(v))
-		for i := range v {
-			appendAnthropicContentBlock(&llmReq.System, v[i])
+	for _, block := range anthropicSystemBlocks(req.System) {
+		if block.Type == "text" && block.Text != "" {
+			llmReq.System = append(llmReq.System, LLMContent{Type: "text", Text: block.Text})
 		}
 	}
 
@@ -213,6 +269,75 @@ func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
 	return llmReq
 }
 
+// anthropicSystemBlocks accepts both wire forms of the system field: a plain
+// string and an array of content blocks (the form Claude clients use when they
+// attach cache_control). Decoding through "any" yields []any, so a type switch
+// on []AnthropicContentBlock alone silently dropped every block-array prompt.
+func anthropicSystemBlocks(value any) []AnthropicContentBlock {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if typed == "" {
+			return nil
+		}
+		return []AnthropicContentBlock{{Type: "text", Text: typed}}
+	case []AnthropicContentBlock:
+		return typed
+	case []map[string]any:
+		out := make([]AnthropicContentBlock, 0, len(typed))
+		for _, item := range typed {
+			if block, ok := anthropicBlockFromMap(item); ok {
+				out = append(out, block)
+			}
+		}
+		return out
+	case []any:
+		out := make([]AnthropicContentBlock, 0, len(typed))
+		for _, item := range typed {
+			switch block := item.(type) {
+			case AnthropicContentBlock:
+				out = append(out, block)
+			case map[string]any:
+				if parsed, ok := anthropicBlockFromMap(block); ok {
+					out = append(out, parsed)
+				}
+			}
+		}
+		return out
+	case map[string]any:
+		if block, ok := anthropicBlockFromMap(typed); ok {
+			return []AnthropicContentBlock{block}
+		}
+	}
+	return nil
+}
+
+func anthropicBlockFromMap(value map[string]any) (AnthropicContentBlock, bool) {
+	kind, _ := value["type"].(string)
+	switch kind {
+	case "text":
+		text, _ := value["text"].(string)
+		return AnthropicContentBlock{Type: "text", Text: text}, true
+	case "tool_use":
+		name, _ := value["name"].(string)
+		id, _ := value["id"].(string)
+		input, _ := value["input"].(map[string]any)
+		return AnthropicContentBlock{Type: "tool_use", ID: id, Name: name, Input: input}, true
+	case "tool_result":
+		id, _ := value["tool_use_id"].(string)
+		isError, _ := value["is_error"].(bool)
+		return AnthropicContentBlock{Type: "tool_result", ToolUseID: id, Content: value["content"], IsError: isError}, true
+	case "thinking":
+		text, _ := value["thinking"].(string)
+		if text == "" {
+			text, _ = value["text"].(string)
+		}
+		return AnthropicContentBlock{Type: "thinking", Thinking: text}, true
+	}
+	return AnthropicContentBlock{}, false
+}
+
 // ---- AnthropicResponse -> LLMResponse ----
 
 func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
@@ -240,6 +365,9 @@ func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
 		Content:      content,
 		FinishReason: resp.StopReason,
 	}
+	if cand.Role == "" {
+		cand.Role = "assistant"
+	}
 
 	cands := getCandidateSlice()
 	cands = append(cands, cand)
@@ -252,36 +380,30 @@ func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
 	}
 }
 
-// ---- LLMResponse -> OpenAIChatResponse ----
+// ---- LLMResponse -> AnthropicResponse ----
+
 func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
-	// Claude 只支持单候选
-	var c LLMCandidate
+	// Claude only supports a single candidate.
+	var candidate LLMCandidate
 	if len(r.Candidates) > 0 {
-		c = r.Candidates[0]
+		candidate = r.Candidates[0]
 	}
 
-	blocks := make([]AnthropicContentBlock, 0, len(c.Content))
-	for _, cc := range c.Content {
-		switch cc.Type {
-		case "text":
-			blocks = append(blocks, AnthropicContentBlock{
-				Type: "text",
-				Text: cc.Text,
-			})
-		case "tool_use":
-			blocks = append(blocks, AnthropicContentBlock{
-				Type:  "tool_use",
-				ID:    firstNonEmpty(cc.ID, cc.ToolCallID),
-				Name:  cc.ToolName,
-				Input: cc.ToolArgs,
-			})
-		case "tool_result":
-			blocks = append(blocks, AnthropicContentBlock{
-				Type:      "tool_result",
-				ToolUseID: cc.ToolCallID,
-				Content:   cc.ToolResult,
-			})
-		}
+	blocks := make([]AnthropicContentBlock, 0, len(candidate.Content)+len(candidate.ToolCalls))
+	if text := candidate.ResponseText(); text != "" {
+		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: text})
+	} else if candidate.Refusal != nil && candidate.Refusal.Message != "" {
+		// Messages has a refusal stop reason; keep the refusal text as the
+		// answer instead of returning an empty content array.
+		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: candidate.Refusal.Message})
+	}
+	for _, call := range candidate.ResponseToolCalls() {
+		blocks = append(blocks, AnthropicContentBlock{
+			Type:  "tool_use",
+			ID:    firstNonEmpty(call.ID, "toolu_converted"),
+			Name:  call.Name,
+			Input: nonNilMap(call.Args),
+		})
 	}
 
 	var usage *AnthropicUsage
@@ -295,12 +417,12 @@ func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
 	}
 
 	return AnthropicResponse{
-		ID:         r.ID,
+		ID:         firstNonEmpty(r.ID, "msg_converted"),
 		Type:       "message",
-		Role:       c.Role,
+		Role:       "assistant",
 		Model:      r.Model,
 		Content:    blocks,
-		StopReason: c.FinishReason,
+		StopReason: candidate.FinishReason,
 		Usage:      usage,
 	}
 }
@@ -326,17 +448,50 @@ func appendAnthropicContentBlock(target *[]LLMContent, block AnthropicContentBlo
 			ToolArgs:   normalizeToolResult(block.Input),
 		})
 	case "tool_result":
-		text := ""
-		if raw, ok := block.Content.(string); ok {
-			text = raw
-		}
+		text, normalized := anthropicToolResult(block.Content)
 		*target = append(*target, LLMContent{
 			Type:       "tool_result",
 			ToolCallID: block.ToolUseID,
 			Text:       text,
-			ToolResult: normalizeToolResult(block.Content),
+			ToolResult: normalized,
 			Refusal:    boolMarker(block.IsError, "error"),
 		})
+	}
+}
+
+// anthropicToolResult renders a tool_result content field, which may be a bare
+// string, an array of text blocks, or an arbitrary JSON value.
+func anthropicToolResult(value any) (string, map[string]any) {
+	switch typed := value.(type) {
+	case nil:
+		return "", nil
+	case string:
+		// Keep the raw value available to the observation/monitor paths
+		// (ToolResult) while also exposing the text the encoders read.
+		return typed, normalizeToolResult(typed)
+	case []any:
+		var text []string
+		for _, item := range typed {
+			block, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if kind, _ := block["type"].(string); kind == "text" {
+				if segment, ok := block["text"].(string); ok {
+					text = append(text, segment)
+				}
+			}
+		}
+		if len(text) == len(typed) {
+			joined := ""
+			for _, segment := range text {
+				joined += segment
+			}
+			return joined, normalizeToolResult(joined)
+		}
+		return "", normalizeToolResult(typed)
+	default:
+		return "", normalizeToolResult(typed)
 	}
 }
 

@@ -1028,15 +1028,58 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			upstreamBodyBytes = rewrittenBody
 		}
 
+		// Protocol conversion (opt-in via router.selection.protocol_conversion):
+		// the router may have selected a target that cannot serve the client's
+		// protocol natively. The cassette keeps upstreamBodyBytes, the
+		// client-visible bytes; only the wire bytes and the upstream path
+		// change. Streaming requests never carry a conversion (the router
+		// excludes them), and passthrough selections leave both untouched, so
+		// the default path costs one nil check.
+		wireBodyBytes := upstreamBodyBytes
+		sendPathOverride := ""
+		conversion, convErr := h.conversionForSelection(r, selection, upstreamBodyBytes)
+		if convErr == nil && conversion != nil {
+			var converted []byte
+			converted, convErr = conversion.convertRequestBody(wireBodyBytes)
+			if convErr == nil {
+				wireBodyBytes = converted
+				sendPathOverride, convErr = conversion.upstreamPath()
+			}
+		}
+		if convErr != nil {
+			// A request we cannot translate is deterministic: every other
+			// converting candidate will fail it the same way. Only a native
+			// passthrough candidate (which needs no conversion at all) could
+			// rescue it. Try the remaining candidates of this round, but do
+			// NOT burn the retry budget (backoff + new selection round): a
+			// malformed/compressed/multimodal body must fail fast, not spin
+			// for the full upstream retry budget.
+			slog.Warn("Protocol conversion failed, will try remaining candidates without retry budget",
+				"upstream_id", selection.Target.ID,
+				"model", selection.Request.ModelName,
+				"error", convErr,
+			)
+			lastErr = convErr
+			// The failure is local and deterministic (unsupported content or a
+			// lossy field), not an upstream health signal: release the slot
+			// without touching the target's error rate or circuit breaker.
+			h.router.Release(selection)
+			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), false))
+			if len(triedIDs) >= roundCandidateCount {
+				break // exhausted this round: report now, do not start a new round
+			}
+			continue
+		}
+
 		// Masking splits the recorded body from the body sent upstream: the cassette
 		// keeps the original bytes, so replay and a human reading a trace see the
 		// real values, while the upstream only ever receives stand-ins. The bytes
 		// handed to the router above are deliberately left alone, so routing keys,
 		// fingerprints and every failure cassette are unaffected.
-		sendBodyBytes := upstreamBodyBytes
+		sendBodyBytes := wireBodyBytes
 		var maskedEvents []secretmask.MaskEvent
 		if h.secretVault != nil {
-			if masked, events := h.secretVault.Mask(upstreamBodyBytes); len(events) > 0 {
+			if masked, events := h.secretVault.Mask(sendBodyBytes); len(events) > 0 {
 				sendBodyBytes = masked
 				maskedEvents = events
 			}
@@ -1075,6 +1118,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+		if conversion != nil {
+			logInfo.Events = append(logInfo.Events, protocolConversionEvent(conversion, start))
+		}
 		logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
 		logInfo.MaskAudit = secretMaskAuditRecords(maskedEvents)
 
@@ -1101,7 +1147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, sendBodyBytes)
+		resp, reqErr := h.sendUpstreamRequestWithPath(r, selection.Target, sendBodyBytes, sendPathOverride, conversion)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()
@@ -1190,6 +1236,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, true))
 			}
 			continue
+		}
+
+		// Successful upstream response. When this selection converted the
+		// request, translate the response back before it reaches the client:
+		// the cassette then records what the client actually saw, which is
+		// what replay parses. A response that cannot be translated is a
+		// candidate failure, never a wrong-protocol body for the client.
+		if conversion != nil {
+			convertedResp, convErr := conversion.convertResponseBody(resp, h.maxRequestBodyBytes())
+			if convErr != nil {
+				// Same rule as the request side: an untranslatable response
+				// is deterministic, not a candidate-specific transient.
+				// Try remaining candidates of this round; never burn the
+				// retry budget on it.
+				logInfo.Header.Meta.Error = convErr.Error()
+				// convertResponseBody already closed the upstream body.
+				lastErr = convErr
+				// The upstream answered successfully; only the local
+				// translation failed, so this is a success as far as the
+				// target's health and latency are concerned.
+				h.router.Complete(selection, router.Outcome{
+					Success:    true,
+					StatusCode: resp.StatusCode,
+					DurationMs: float64(time.Since(start).Milliseconds()),
+					Stream:     selection.Request.Stream,
+				})
+				retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, convErr.Error(), false))
+				h.closeLogFile(logInfo)
+				logInfo = nil
+				if len(triedIDs) >= roundCandidateCount {
+					break
+				}
+				continue
+			}
+			resp = convertedResp
+			if len(conversion.responseWarnings) > 0 {
+				logInfo.Events = append(logInfo.Events, responseConversionEvent(conversion, start))
+			}
 		}
 
 		// 成功 —— 将上游响应写入客户端
@@ -1333,6 +1417,14 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 	// closed by closeLogFile in the retry loop).
 	retryAfter, blockedByHealth := h.transientAvailability(r, bodyBytes)
 	applyTransientAvailabilityHeaders(w, retryAfter, blockedByHealth)
+	var conversionErr *protocolConversionRequestError
+	if errors.As(lastErr, &conversionErr) {
+		if h.recorder != nil {
+			h.recordSelectionFailureWithSelection(r, start, http.StatusBadRequest, lastErr, bodyBytes, retryEvents, selection)
+		}
+		writeProxyError(w, r, http.StatusBadRequest, "protocol_conversion_unsupported", lastErr.Error())
+		return
+	}
 	status := selectionFailureStatus(lastErr)
 	if status == http.StatusNotFound {
 		// Re-selection after a failed attempt found no target for the model (for
@@ -1454,7 +1546,11 @@ func (h *Handler) responsesChatBackendAvailable(r *http.Request, bodyBytes []byt
 	chatReq.URL.Path = "/v1/chat/completions"
 	chatReq.URL.RawPath = ""
 	chatReq.RequestURI = chatReq.URL.RequestURI()
-	return h.router.HasSelectableCandidateWithBody(chatReq, bodyBytes)
+	// Native-only: the local Responses runtime forwards a Chat Completions
+	// body verbatim and never converts. A target that could only serve
+	// it through protocol conversion would receive Chat JSON on a
+	// Messages/Gemini surface and 404/400. (See HasSelectableNative...).
+	return h.router.HasSelectableNativeCandidateWithBody(chatReq, bodyBytes)
 }
 
 func sleepBeforeRetry(ctx context.Context, delay time.Duration) bool {
@@ -2161,10 +2257,20 @@ func releaseRetryWaitSlot() {
 // It creates a fresh outgoing request (not cloning the original, because http.Request.Clone
 // discards the Body), applies the director logic (URL rewrite, auth headers), and returns
 // the upstream response. The caller is responsible for closing resp.Body.
-func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Target, bodyBytes []byte) (*http.Response, error) {
+// sendUpstreamRequestWithPath sends a request with an explicit upstream path,
+// used when protocol conversion rewrote the request for a different protocol
+// surface. The client query string is not carried over
+// for converted requests: query options belong to the client protocol.
+// An empty pathOverride preserves the passthrough behaviour exactly.
+// conv, when non-nil, carries the target protocol so protocol-scoped
+// headers can be fixed up (Anthropic version/beta, Gemini API key).
+func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *router.Target, bodyBytes []byte, pathOverride string, conv *protocolConversion) (*http.Response, error) {
 	clientPath := original.URL.Path
 	if original.URL.RawQuery != "" {
 		clientPath += "?" + original.URL.RawQuery
+	}
+	if pathOverride != "" {
+		clientPath = pathOverride
 	}
 
 	fullURL, err := target.Upstream.BuildURL(clientPath)
@@ -2192,6 +2298,9 @@ func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Tar
 		for _, val := range vals {
 			outreq.Header.Add(key, val)
 		}
+	}
+	if conv != nil && pathOverride != "" {
+		applyConvertedHeaders(outreq, original, conv)
 	}
 
 	target.Upstream.ApplyAuthHeaders(outreq.Header)

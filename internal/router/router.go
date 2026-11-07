@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 const (
@@ -100,11 +101,15 @@ type Router struct {
 	costs              costConfig
 	sticky             *StickyBindingStore
 	stickyMaxCostRatio float64
-	stopCh             chan struct{}
-	stopOnce           sync.Once
-	refreshMu          sync.Mutex
-	refreshCond        *sync.Cond
-	refreshing         bool
+	// conversionEnabled lets candidatesForRequest select an upstream that
+	// cannot serve the client's protocol natively, for later conversion by
+	// the proxy. Off by default (config router.selection.protocol_conversion).
+	conversionEnabled bool
+	stopCh            chan struct{}
+	stopOnce          sync.Once
+	refreshMu         sync.Mutex
+	refreshCond       *sync.Cond
+	refreshing        bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -394,6 +399,7 @@ func New(cfg *config.Config) (*Router, error) {
 		discoveryEnabled:   cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
 		costs:              defaultCostConfig(),
 		stickyMaxCostRatio: defaultStickyMaxCostRatio,
+		conversionEnabled:  cfg.Router.Selection.ProtocolConversion,
 		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
@@ -908,6 +914,22 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 }
 
 func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil {
+		return false
+	}
+	return r.hasSelectableCandidateWithBody(req, body, r.conversionEnabled)
+}
+
+// HasSelectableNativeCandidateWithBody reports whether a target can serve
+// this request natively (no protocol conversion). The local Responses
+// runtime uses it for its chat backend check: that runtime forwards a
+// Chat Completions body verbatim and never converts, so a target that could
+// only serve it through protocol conversion is not a usable backend.
+func (r *Router) HasSelectableNativeCandidateWithBody(req *http.Request, body []byte) bool {
+	return r.hasSelectableCandidateWithBody(req, body, false)
+}
+
+func (r *Router) hasSelectableCandidateWithBody(req *http.Request, body []byte, allowConversion bool) bool {
 	if r == nil || req == nil {
 		return false
 	}
@@ -916,7 +938,7 @@ func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) 
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, allowConversion)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.canSelect(now, model) {
@@ -935,7 +957,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, false)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
@@ -1006,7 +1028,7 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 		if target == nil {
 			continue
 		}
-		decision := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
+		decision := target.candidateDecision(rawPath, model, now, features, requireNativeResponses, r.conversionEnabled)
 		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools ||
 			blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 			continue
@@ -1096,6 +1118,12 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		}
 		available = append(available, candidate)
 	}
+	// Passthrough is a hard preference, not a cost heuristic: while any native
+	// candidate is healthy and selectable, conversion candidates stay out of
+	// the comparison. Only when every native candidate is unavailable does the
+	// converting fallback take over, which keeps the common case byte-exact and
+	// makes the choice independent of measured latency.
+	available = preferNativeCandidates(available, rawPath, features)
 	decision.markAvailable(available)
 	if len(available) == 0 {
 		reason := SelectionFailureAllTargetsOpen
@@ -1302,7 +1330,7 @@ func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []s
 	}
 	now := time.Now()
 	for _, target := range r.targets {
-		candidate := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
+		candidate := target.candidateDecision(rawPath, model, now, features, requireNativeResponses, r.conversionEnabled)
 		if _, excluded := excludeSet[target.ID]; excluded {
 			candidate.Excluded = true
 			candidate.Selectable = false
@@ -1457,10 +1485,14 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 }
 
 func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures, requireNativeResponses bool) []*Target {
+	return r.candidatesForRequestWithConversion(rawPath, model, features, requireNativeResponses, r.conversionEnabled)
+}
+
+func (r *Router) candidatesForRequestWithConversion(rawPath string, model string, features RequestFeatures, requireNativeResponses bool, allowConversion bool) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1474,7 +1506,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
 				continue
 			}
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1495,7 +1527,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		if model != "" && !target.allowUndeclaredModels {
 			continue
 		}
-		if !supportsPath(target, rawPath, features) || !supportsRequestFeatures(target, features) {
+		if !r.supportsPathWithConversion(target, rawPath, features, allowConversion) || !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
@@ -1886,7 +1918,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	return true
 }
 
-func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures, requireNativeResponses bool) CandidateDecision {
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures, requireNativeResponses bool, conversionEnabled bool) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1910,7 +1942,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		Priority:       t.Priority,
 		Weight:         t.Weight,
 		HealthState:    t.healthState,
-		SupportsPath:   supportsPath(t, rawPath, features),
+		SupportsPath:   convertAwareSupportsPath(t, rawPath, features, conversionEnabled),
 		SupportsModel:  t.supportsModelLocked(model),
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
@@ -2264,6 +2296,66 @@ func supportsPath(target *Target, rawPath string, features RequestFeatures) bool
 	return target.Upstream.SupportsRawPath(rawPath, features.ModelName)
 }
 
+func (r *Router) supportsPathWithConversion(target *Target, rawPath string, features RequestFeatures, allowConversion bool) bool {
+	return convertAwareSupportsPath(target, rawPath, features, allowConversion)
+}
+
+// preferNativeCandidates drops conversion-only candidates while at least one
+// native candidate is available. It is the hard passthrough-first rule; the
+// candidate list it receives has already been filtered for health, exclusions
+// and model support.
+func preferNativeCandidates(available []*Target, rawPath string, features RequestFeatures) []*Target {
+	if len(available) < 2 {
+		return available
+	}
+	native := 0
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			native++
+		}
+	}
+	if native == 0 || native == len(available) {
+		return available
+	}
+	out := make([]*Target, 0, native)
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// convertAwareSupportsPath is supportsPath plus the optional conversion
+// fallback. It is a free function because candidateDecision (a Target
+// method) needs the same answer for the inspector's dry run.
+func convertAwareSupportsPath(target *Target, rawPath string, features RequestFeatures, conversionEnabled bool) bool {
+	if supportsPath(target, rawPath, features) {
+		return true
+	}
+	if !conversionEnabled || target == nil {
+		return false
+	}
+	client, err := protocolconvert.DetectFromPath(rawPath)
+	if err != nil {
+		// Endpoints with no conversion vocabulary (models, embeddings,
+		// tokenize) keep the native rule only.
+		return false
+	}
+	// The Responses entrypoint is owned by the local Responses runtime; the
+	// forwarding path never converts it (see the proxy's conversion gate).
+	if client == protocolconvert.ProtocolResponses {
+		return false
+	}
+	decision, err := protocolconvert.PlanForRequest(protocolconvert.PlanRequest{
+		Client: client,
+		Caps:   target.Upstream.ProtocolCapabilitiesForModel(features.ModelName),
+		Mode:   protocolconvert.ModePassthroughPreferred,
+		Stream: features.Stream,
+	})
+	return err == nil && !decision.Reject()
+}
+
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 	if target == nil {
 		return false
@@ -2303,10 +2395,18 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
+		// A body that cannot be parsed cannot be proven non-streaming.
+		// Treat it as streaming so protocol conversion stays disabled for
+		// it (fail closed): converting an opaque body would either fail
+		// in the adapter or buffer an SSE stream as JSON.
+		features.Stream = true
 		return features
 	}
 	if stream, ok := payload["stream"].(bool); ok {
 		features.Stream = stream
+	}
+	if streamStr, ok := payload["stream"].(string); ok {
+		features.Stream = streamStr == "true" || streamStr == "True" || streamStr == "TRUE" || streamStr == "1"
 	}
 	// Google's generateContent family signals streaming in the request line
 	// (`:streamGenerateContent`), not in the body, and the proxy answers it by streaming: it is
