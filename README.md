@@ -38,7 +38,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 | 离线回放 | `pkg/replay` 实现 `http.RoundTripper`，单元测试无需网络与 API key |
 | 流式保真 | 逐片保存 SSE 数据流；回放按原始分片顺序交付字节，不做限速或时序重放 |
 | 录制格式 | `LLM_PROXY_V3` 紧凑 prelude + 原始 HTTP 字节；继续兼容读取 V2 记录 |
-| Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、模型与服务商管理 |
+| Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、带 Argus 元数据的模型广场与渠道管理 |
 | 客户端识别 | 只从请求头与 URL 识别 Claude Code、Codex、Gemini CLI、Cline、Cursor 等客户端 harness（不读 body），给 trace 打标签并支持 `?harness=` 过滤；识别不会改写流量 |
 | 轨迹解析 | 把 cassette 解析成 Observation IR，产出危险工具调用、敏感数据等 findings |
 | 会话轨迹导出 | 把一次 session 的累积历史导出为 ATIF v1.8 JSONL |
@@ -67,7 +67,7 @@ docker compose exec trajecta /app/bin/trajecta \
 
 ### 方式二：从源码运行
 
-需要 Go 1.25+，[Task](https://taskfile.dev) 可选但推荐。
+需要 Go 1.26+，[Task](https://taskfile.dev) 可选但推荐。
 
 ```bash
 task build && task run                  # 默认 Postgres-first 配置：config/config.yaml

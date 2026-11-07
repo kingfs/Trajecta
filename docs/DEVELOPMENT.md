@@ -124,7 +124,7 @@ task build:go
 
 ## 依赖管理
 
-- Go：`task deps:verify` 只校验不改文件（`go mod verify` + `go list -mod=readonly ./...`）；只有依赖确实变化时才用 `task deps:tidy`（会改写 `go.mod` / `go.sum`）。`go.mod` 声明 `go 1.25.0`。
+- Go：`task deps:verify` 只校验不改文件（`go mod verify` + `go list -mod=readonly ./...`）；只有依赖确实变化时才用 `task deps:tidy`（会改写 `go.mod` / `go.sum`）。`go.mod` 声明 `go 1.26.0`。
 - 前端：依赖锁定在 `web/monitor-ui/bun.lock`，task 与 CI 都使用 `bun install --frozen-lockfile`。
 - ent 代码生成：`task generate:ent` 重新生成 `ent` 控制面 DAO；新增 SQLite / Postgres migration 分别用 `task migrate:ent:sqlite NAME=...` 和 `task migrate:ent:postgres NAME=... DEV_URL=...`。
 - 凭据 DFA 代码生成：`task generate:secretmask` 从 `pkg/secretmask/rules.rl` 重新生成 `pkg/secretmask/rules_ragel.go`。**需要 `ragel-go` 二进制**：通用 `ragel` 对这台机器输出 C，两者不可互换。生成文件已提交，因此常规构建、测试与 `task check:full` 都不需要它；只有改规则时才要装，并须同时改 `rules.rl`（模式）与 `rule.go`（元数据），把生成文件一起提交，不要手工编辑生成文件。
@@ -230,7 +230,7 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 
 1. `actions/checkout@v4`。
 2. `oven-sh/setup-bun@v2`（bun `1.3.11`）。
-3. `actions/setup-go@v5`（Go `1.25.x`，开启 module cache）。
+3. `actions/setup-go@v5`（Go `1.26.x`，开启 module cache）。
 4. `go mod download`。
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。

@@ -82,7 +82,7 @@ func runServeWithConfig(configPath string) int {
 		}
 	}
 
-	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.25+")
+	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.26+")
 
 	authStore, err := appdb.OpenAuthStore(cfg)
 	if err != nil {

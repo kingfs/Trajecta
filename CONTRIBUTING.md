@@ -12,7 +12,7 @@ Thanks for taking the time to contribute. This document covers how to set up the
 
 | Requirement | Notes |
 | --- | --- |
-| Go 1.25+ | Version pinned in `go.mod` |
+| Go 1.26+ | Version pinned in `go.mod` |
 | [Task](https://taskfile.dev) | Optional; every task has a plain `go`/`bun` equivalent |
 | Bun + Node | Only for the monitor UI in `web/monitor-ui` |
 | Postgres | Optional. `task run` uses the Postgres-first `config/config.yaml`; `CONFIG=config/examples/local-sqlite.yaml task run` needs no Postgres at all |

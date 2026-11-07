@@ -162,9 +162,15 @@ Trajecta 自身的事件收件箱：
 
 #### 模型 `/models`
 
-按模型查看时间窗口内的流量：模型覆盖哪些渠道，以及请求数、错误数、Token 与趋势。详情路由为 `/models/:model`，详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。
+模型页按两个问题拆成同一路由下的两个标签页，默认落在**模型广场**，`?tab=usage` 是**实时统计**。
 
-模型页把汇总读数条放在页头下方，模型卡按 18 个/页分页；卡片的 head/footer 允许换行，长 channel id 在自己的卡内省略而不是撑宽两列网格。真实数据的 97 个模型现在没有横向溢出。
+**模型广场**回答“当前平台能调用哪些模型”。数据来自 `GET /api/model-square`：按小写模型名聚合 `channel_models`，每个模型一张卡，卡上列出声明该模型的所有渠道（渠道名 + 可用/停用圆点，芯片的 tooltip 给出渠道 ID、上游模型名与状态），并给出声明该模型的渠道总数。可调用 = 渠道本身启用、且该 channel-model 对路由可用（`channel.ModelRoutable`，即模型启用且未被最近一次成功同步判定为 removed）；默认只显示至少有一个可调用渠道的模型，分段控件切到“全部已配置”后连未启用、仅挂在停用渠道上或上游已移除的模型也会出现，便于对照配置。搜索覆盖模型名、显示名、渠道名、渠道 ID，以及 Argus 元数据中的模型名、供应商和描述；广场使用 `square_q` / `square_page`，与实时统计的 `q` / `page` 分开保存，切换标签页不会把一种列表的过滤条件带到另一种列表。卡片按可调用优先、可调用渠道数、渠道数、模型名排序，24 个/页；头部四张读数卡分别是模型数、可调用模型数、可用渠道数和已匹配元数据数。
+
+卡片的模型信息来自编译进二进制的 [Argus](https://github.com/kingfs/Argus) 静态模型库（`internal/modelinfo`），不访问网络：供应商、系列、中英文描述、上下文/最大输出、能力位、标签、官网与模型卡链接。匹配是保守的“可用则用”策略：精确 ID/别名优先，其次才是去掉路由前缀（`azure/gpt-4o`）、点分厂商命名空间（`us.anthropic.claude-…`）、日期/修订后缀（`-20240620-v1:0`）、`-latest` 与 `:free` 之类标签，最后把数字间的连字符改写为点（`claude-3-5-sonnet` → `claude-3.5-sonnet`）。没有匹配就不显示元数据，绝不猜一个别的模型；卡片仍会展示渠道自己声明的上下文窗口与最大输出。未匹配的卡片带“未收录”标记，详情页也会说明原因。
+
+**实时统计**保留原来的按窗口聚合：模型覆盖哪些渠道，以及请求数、错误数、Token、RPM/TPM 与趋势。它只显示窗口内真正有请求的模型——没有流量的模型属于广场，不再因为“有配置但没调用”而混进统计。窗口选择器只在这个标签页的页头出现，广场没有时间维度。
+
+详情路由为 `/models/:model`，同样分**概览**与**实时统计**两页。概览顶部是模型信息卡（Argus 描述、能力、标签、官网/模型卡链接；未匹配时给出说明），随后是渠道支持列表与每个渠道的 Codex 配置卡；实时统计是汇总读数条、请求/Token 趋势和渠道用量。页头与渠道行按路由口径显示“可调用渠道数 / 渠道总数”，行状态同时考虑渠道启用、模型启用与 removed 判定（渠道已停用、已停用、上游已移除，其余按是否可调用显示），不再只显示模型级 `enabled`；完整的同步状态（含“未验证”）仍在渠道页的模型卡上；从实时统计或概览页的模型分布点进详情时默认落在实时统计，从广场点进时落在概览。详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。模型别名表仍在模型广场页底部折叠卡片中。
 
 #### 渠道 `/channels`
 

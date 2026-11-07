@@ -776,6 +776,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), monitorVerifier))
+	// The model square is the configuration-facing list: every model an enabled
+	// channel exposes, with its catalogue card. /api/models above stays the
+	// traffic-facing list and is unchanged.
+	mux.HandleFunc("/api/model-square", monitorAuthRequired(modelSquareAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks", monitorAuthRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks/", monitorAuthRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))

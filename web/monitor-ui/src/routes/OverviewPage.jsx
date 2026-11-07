@@ -15,6 +15,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import {
+  buildModelLink,
   buildRoutingLink,
   buildTraceLink,
   formatCount,
@@ -303,7 +304,9 @@ function buildOverviewBreakdownLink(kind, value, windowValue) {
   }
   switch (kind) {
     case "models":
-      return `/models/${encodeURIComponent(label)}${windowValue && windowValue !== "today" ? `?window=${encodeURIComponent(windowValue)}` : ""}`;
+      // The overview is a traffic reading, so its model link opens the model's
+      // usage tab rather than the catalogue overview.
+      return buildModelLink(label, windowValue, "usage");
     case "providers":
       return `/traces?provider=${encodeURIComponent(label)}`;
     case "endpoints":
