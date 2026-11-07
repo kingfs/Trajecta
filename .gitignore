@@ -28,3 +28,4 @@ __pycache__/
 .dsh-cache/
 # 本地临时物：复跑脚本与临时配置，不入库
 .scratch/
+.gocache/
