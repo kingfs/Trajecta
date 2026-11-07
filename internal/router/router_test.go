@@ -561,6 +561,7 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 	decision := SelectionDecision(err)
 	if decision == nil {
 		t.Fatalf("SelectionDecision() = nil, want decision trace")
+		return
 	}
 	if decision.ModelName != "claude-3-7-sonnet" {
 		t.Fatalf("decision.ModelName = %q, want claude-3-7-sonnet", decision.ModelName)

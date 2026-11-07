@@ -113,6 +113,7 @@ func TestExhaustedUpstreamFailureKeepsAttemptedTargetAttribution(t *testing.T) {
 	failure := eventByType(parsed.Events, "routing.failure")
 	if failure == nil {
 		t.Fatalf("routing.failure event missing from trace events: %+v", parsed.Events)
+		return
 	}
 	if got, _ := failure.Attributes["upstream_id"].(string); got != "nvidia-nim-prod" {
 		t.Fatalf("routing.failure upstream_id = %q, want nvidia-nim-prod", got)
