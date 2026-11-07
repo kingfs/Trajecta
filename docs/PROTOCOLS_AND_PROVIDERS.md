@@ -178,7 +178,7 @@ trajecta provider probe-report
 
 ## 非目标与未实现
 
-- Anthropic Messages、OpenAI Responses 与 Gemini GenerateContent 之间不做跨协议请求翻译。`pkg/llm.Adapter` 有内部通用形态的 marshal 方法，但代理转发路径不用它们做跨协议转换层。
+- Anthropic Messages、OpenAI Responses 与 Gemini GenerateContent 之间不做跨协议请求翻译。`pkg/llm.Adapter` 有内部通用形态的 marshal 方法，但代理转发路径不用它们做跨协议转换层；`pkg/protocolconvert` 提供直通优先的协议转换库（决策与请求/响应/SSE 转换），转发热路径尚未调用它，见 [协议转换](./PROTOCOL_CONVERSION.md)。
 - `/anthropic/messages` 不会转换成 OpenAI Chat Completions 或 Responses；`/responses` 不会转换成 Anthropic Messages。tool calls、streaming 事件、usage、cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有。
 - provider 特有 tools、reasoning、cache 控制、citations、safety block 与 streaming 事件生命周期没有完整语义等价。
 - 唯一的 Responses 特例发生在同一协议族内部：没有匹配的原生 Responses 上游时，本地 Responses runtime 会把 `/v1/responses` 编排为一次内部 `/v1/chat/completions` 调用，而不是跨协议族翻译。录制、观测与审计细节见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。

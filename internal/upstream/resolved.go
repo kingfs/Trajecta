@@ -11,6 +11,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 const (
@@ -656,6 +657,31 @@ func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string
 		return u.SupportsTokenizeForModel(model)
 	default:
 		return true
+	}
+}
+
+// ProtocolCapabilitiesForModel derives the native wire protocols this
+// upstream serves for one model, in the vocabulary pkg/protocolconvert's
+// Plan consumes. Anthropic channels serve Messages, Google/Vertex channels
+// serve Gemini, and OpenAI-compatible channels serve Chat Completions
+// and/or Responses exactly as SupportsChatCompletionsAPIForModel /
+// SupportsResponsesAPIForModel declare (per-model supports_* overrides win
+// over the channel api_type/capabilities). Serving /v1/responses through the
+// local Responses runtime is deliberately not reported here: it is a
+// translation already, owned by internal/responses, and reporting it as a
+// native Responses capability would make Plan pass a raw Responses request
+// to an upstream that cannot honour it.
+func (u ResolvedUpstream) ProtocolCapabilitiesForModel(model string) protocolconvert.Capabilities {
+	switch u.ProtocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return protocolconvert.Capabilities{Messages: true}
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		return protocolconvert.Capabilities{Gemini: true}
+	default:
+		return protocolconvert.Capabilities{
+			ChatCompletions: u.SupportsChatCompletionsAPIForModel(model),
+			Responses:       u.SupportsResponsesAPIForModel(model),
+		}
 	}
 }
 

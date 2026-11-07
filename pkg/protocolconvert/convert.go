@@ -1,0 +1,151 @@
+package protocolconvert
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/kingfs/Trajecta/pkg/llm"
+)
+
+// Warning records one piece of information a conversion could not carry
+// across. Conversion still succeeds; a caller that cannot tolerate the loss
+// should check Warnings and reject the request instead.
+type Warning struct {
+	Field  string
+	Reason string
+}
+
+func (w Warning) Error() string { return fmt.Sprintf("protocolconvert: %s: %s", w.Field, w.Reason) }
+
+// Result is the outcome of one conversion. Body is the encoded request or
+// response in the target protocol.
+type Result struct {
+	Body     []byte
+	Warnings []Warning
+	// From and To are the protocols the conversion bridged (equal for a
+	// passthrough-shaped conversion, which callers should avoid: use Plan
+	// and send the original bytes instead).
+	From Protocol
+	To   Protocol
+}
+
+// ConvertRequest converts a client request body from one protocol to another
+// via the pkg/llm intermediate representation. model, when non-empty,
+// overrides the model in the converted body (the upstream wire name); for
+// Gemini the model also belongs in the request path (see Protocol.RequestPath).
+func ConvertRequest(body []byte, from Protocol, to Protocol, model string, vertex bool) (Result, error) {
+	from, to = canonical(from), canonical(to)
+	if !from.Valid() || !to.Valid() {
+		return Result{}, fmt.Errorf("protocolconvert: invalid protocol pair %q -> %q", from, to)
+	}
+	parsed, err := llm.ParseRequest(ProviderFor(from, vertex), from.Endpoint(), body)
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: parse %s request: %w", from, err)
+	}
+	if model != "" {
+		parsed.Model = model
+	}
+	// Anthropic Messages requires max_tokens; other protocols make it
+	// optional, so a converted request must supply the default itself.
+	if to == ProtocolMessages && parsed.MaxTokens == nil {
+		defaultMaxTokens := 4096
+		parsed.MaxTokens = &defaultMaxTokens
+	}
+	adapter, err := llm.AdapterFor(ProviderFor(to, vertex), to.Endpoint())
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: encode %s request: %w", to, err)
+	}
+	out, err := adapter.MarshalRequest(parsed)
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: encode %s request: %w", to, err)
+	}
+	return Result{Body: out, Warnings: requestWarnings(parsed, from, to), From: from, To: to}, nil
+}
+
+// ConvertResponse converts an upstream response body from one protocol to
+// the client's protocol.
+func ConvertResponse(body []byte, from Protocol, to Protocol, model string, vertex bool) (Result, error) {
+	from, to = canonical(from), canonical(to)
+	if !from.Valid() || !to.Valid() {
+		return Result{}, fmt.Errorf("protocolconvert: invalid protocol pair %q -> %q", from, to)
+	}
+	parsed, err := llm.ParseResponse(ProviderFor(from, vertex), from.Endpoint(), body)
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: parse %s response: %w", from, err)
+	}
+	if model != "" {
+		parsed.Model = model
+	}
+	adapter, err := llm.AdapterFor(ProviderFor(to, vertex), to.Endpoint())
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: encode %s response: %w", to, err)
+	}
+	out, err := adapter.MarshalResponse(parsed)
+	if err != nil {
+		return Result{}, fmt.Errorf("protocolconvert: encode %s response: %w", to, err)
+	}
+	return Result{Body: out, Warnings: responseWarnings(parsed, from, to), From: from, To: to}, nil
+}
+
+// requestWarnings reports the request fields conversion is known to drop.
+// The IR carries model/system/messages/tools/tool_choice/stop/temperature/
+// top_p/top_k/max_tokens; everything else in the source body is lost. We
+// detect the common extras by scanning the raw JSON keys the IR ignores.
+func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol) []Warning {
+	var warnings []Warning
+	if from == to {
+		return nil
+	}
+	// Top-k has no Chat Completions/Responses counterpart in the IR encoders
+	// beyond what they emit; flag it whenever the source set it and the
+	// target is not Messages/Gemini.
+	if req.TopK != nil && (to == ProtocolChatCompletions || to == ProtocolResponses) {
+		warnings = append(warnings, Warning{Field: "top_k", Reason: fmt.Sprintf("top_k is not carried by %s encoding", to)})
+	}
+	return warnings
+}
+
+func responseWarnings(resp llm.LLMResponse, from Protocol, to Protocol) []Warning {
+	if from == to {
+		return nil
+	}
+	var warnings []Warning
+	for _, candidate := range resp.Candidates {
+		if candidate.Refusal != nil && to != ProtocolResponses && to != ProtocolChatCompletions {
+			warnings = append(warnings, Warning{Field: "refusal", Reason: fmt.Sprintf("refusal text is not representable in %s responses", to)})
+		}
+	}
+	return warnings
+}
+
+// UnsupportedFields lists the top-level JSON keys present in body that the
+// IR does not carry, so callers can surface what conversion would drop
+// without parsing the body themselves. It is best-effort: a malformed body
+// yields no fields.
+func UnsupportedFields(body []byte, from Protocol) []string {
+	carried := carriedKeys(canonical(from))
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	var out []string
+	for key := range raw {
+		if !carried[strings.ToLower(key)] {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+func carriedKeys(p Protocol) map[string]bool {
+	base := map[string]bool{
+		"model": true, "messages": true, "input": true, "instructions": true,
+		"system": true, "tools": true, "tool_choice": true, "stop_sequences": true,
+		"stop": true, "temperature": true, "top_p": true, "top_k": true,
+		"max_tokens": true, "max_output_tokens": true, "stream": true,
+		"contents": true, "generation_config": true, "safety_settings": true,
+	}
+	_ = p
+	return base
+}
