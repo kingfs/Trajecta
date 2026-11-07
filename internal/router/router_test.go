@@ -1685,6 +1685,57 @@ func TestRouterClientRequestErrorDoesNotOpenTarget(t *testing.T) {
 	}
 }
 
+func TestRouterPaymentRequiredOpensModelHealth(t *testing.T) {
+	// A channel whose account is out of balance answers 402 Payment Required.
+	// That is a channel-model failure, not a client mistake: it must open the
+	// per-model breaker so the channel stops being selected, exactly like a 5xx
+	// does for a model only this channel serves.
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"deepseek-flash"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.deepseek.com/v1",
+					ProviderPreset: "deepseek",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"deepseek-flash","messages":[]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false, StatusCode: http.StatusPaymentRequired, DurationMs: 100})
+
+	state, ok := rtr.targets[0].snapshot().ModelHealth["deepseek-flash"]
+	if !ok || state.HealthState != HealthOpen {
+		t.Fatalf("deepseek-flash model health = %+v (present=%v), want open after 402", state, ok)
+	}
+	if _, err := rtr.Select(req); SelectionFailureReason(err) != SelectionFailureAllTargetsOpen {
+		t.Fatalf("Select() after 402 error = %v, want %s", err, SelectionFailureAllTargetsOpen)
+	}
+}
+
 func TestRouterCostAwareSelectionPrefersLowerObservedCost(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

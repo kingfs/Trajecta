@@ -4782,6 +4782,117 @@ func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 	}
 }
 
+func TestHandlerRetryOnUpstreamInsufficientBalance(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	// The primary channel's account is out of money: DeepSeek answers 402
+	// Payment Required ("Insufficient Balance"). That is a channel failure, so
+	// the proxy must try the next channel instead of passing 402 to the client.
+	var primaryCalled bool
+	upstreamPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"message":"成员余额不足","type":"permission_error"}`)
+	}))
+	defer upstreamPrimary.Close()
+
+	var secondaryCalled bool
+	upstreamSecondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl-secondary","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamSecondary.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"deepseek-flash"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamPrimary.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"deepseek-flash"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamSecondary.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions", bytes.NewBufferString(`{"model":"deepseek-flash","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200 (should have fallen back to secondary)", resp.StatusCode)
+	}
+	if !primaryCalled {
+		t.Errorf("primary upstream was not called, expected one 402 attempt")
+	}
+	if !secondaryCalled {
+		t.Fatalf("secondary upstream was not called, expected fallback after primary 402")
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "secondary" {
+		t.Fatalf("SelectedUpstreamID = %q, want secondary (recording should reflect the successful upstream)", parsed.Header.Meta.SelectedUpstreamID)
+	}
+	foundRetry := false
+	for _, event := range parsed.Events {
+		if event.Type != "routing.retry_candidate" {
+			continue
+		}
+		if event.Attributes["status_code"] == float64(http.StatusPaymentRequired) {
+			foundRetry = true
+		}
+	}
+	if !foundRetry {
+		t.Fatalf("no routing.retry_candidate event with status_code 402: %+v", parsed.Events)
+	}
+}
+
 func TestHandlerRetryOnUpstream500(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

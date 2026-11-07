@@ -65,6 +65,61 @@ func TestConfiguredModelAuthorizationIsStrict(t *testing.T) {
 	}
 }
 
+// The model switch is per channel-model, not a global ban: switching
+// deepseek-flash off on a spent channel must leave the model routable through
+// the other channel that still enables it, and switching it off everywhere is
+// the 404 model_not_enabled case.
+func TestDisabledModelFallsThroughToAnotherChannel(t *testing.T) {
+	cfg := &config.Config{Upstreams: []config.UpstreamTargetConfig{
+		{
+			ID: "spent", ConfiguredModelsOnly: true, ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels: []string{"deepseek-flash"}, DisabledModels: []string{"deepseek-flash"},
+			Upstream: config.UpstreamConfig{BaseURL: "https://api.deepseek.com/v1", ProviderPreset: "deepseek"},
+		},
+		{
+			ID: "funded", ConfiguredModelsOnly: true, ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels: []string{"deepseek-flash"},
+			Upstream:     config.UpstreamConfig{BaseURL: "https://relay.example/v1", ProviderPreset: "openai"},
+		},
+	}}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"deepseek-flash"}`))
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v, want the funded channel", err)
+	}
+	if selection.Target.ID != "funded" {
+		t.Fatalf("selected target = %q, want funded", selection.Target.ID)
+	}
+
+	// Disable it on the second channel too: now no channel serves the name.
+	if err := rtr.Reload([]config.UpstreamTargetConfig{
+		{
+			ID: "spent", ConfiguredModelsOnly: true, ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels: []string{"deepseek-flash"}, DisabledModels: []string{"deepseek-flash"},
+			Upstream: config.UpstreamConfig{BaseURL: "https://api.deepseek.com/v1", ProviderPreset: "deepseek"},
+		},
+		{
+			ID: "funded", ConfiguredModelsOnly: true, ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels: []string{"deepseek-flash"}, DisabledModels: []string{"deepseek-flash"},
+			Upstream: config.UpstreamConfig{BaseURL: "https://relay.example/v1", ProviderPreset: "openai"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rtr.Select(req); SelectionFailureReason(err) != SelectionFailureModelNotEnabled {
+		t.Fatalf("Select() after disabling everywhere error = %v, want %s", err, SelectionFailureModelNotEnabled)
+	}
+}
+
 func TestReloadCommitFailurePreservesRuntime(t *testing.T) {
 	rtr, err := New(&config.Config{})
 	if err != nil {

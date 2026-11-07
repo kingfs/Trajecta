@@ -2652,6 +2652,14 @@ func isRetryableStatus(code int) bool {
 	switch code {
 	case http.StatusNotFound: // 404 — model not available on this upstream
 		return true
+	case http.StatusPaymentRequired: // 402 — the channel is out of balance/quota
+		// The account behind this channel cannot pay for the request, but the
+		// same model is usually served by another channel. This is a per-channel
+		// failure, not a client error, so it must fail over instead of being
+		// passed through. It is deliberately not transient: the balance does not
+		// recover within the retry budget, so the retry round ends after every
+		// candidate has been tried once.
+		return true
 	case http.StatusTooManyRequests: // 429 — rate limited on this upstream
 		return true
 	case http.StatusInternalServerError, // 500

@@ -2202,7 +2202,12 @@ func countsAsUpstreamHealthFailure(outcome Outcome) bool {
 	if outcome.StatusCode == 0 {
 		return true
 	}
-	if outcome.StatusCode == http.StatusTooManyRequests {
+	if outcome.StatusCode == http.StatusTooManyRequests || outcome.StatusCode == http.StatusPaymentRequired {
+		// 402 is the OpenAI-family answer for an account that is out of money
+		// (DeepSeek says "Insufficient Balance"). The request may well be valid,
+		// so it is the channel-model pair that is unhealthy: leaving 402 out
+		// would keep a spent channel looking healthy and let it be selected
+		// again on every request.
 		return true
 	}
 	if outcome.StatusCode == http.StatusRequestTimeout ||
