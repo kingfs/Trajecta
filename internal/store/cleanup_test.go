@@ -333,3 +333,110 @@ func TestRequestCleanupPurgeReferencesRemovesCuratedRows(t *testing.T) {
 		t.Fatal("--purge-references left the system_events row behind")
 	}
 }
+
+// A model-kind child exchange carries the same session_id as the entry that
+// owns it, so the summary rebuild must keep the client-visible restriction the
+// per-session rebuild uses. Without it a cleanup run double-counts every model
+// call in request_count, total_tokens and the failure counters.
+func TestRequestCleanupRebuildKeepsSessionSummaryClientVisible(t *testing.T) {
+	st := configTransactionTestStore(t)
+	base := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID: "vis-200", sessionID: "s-mixed", statusCode: 200, recordedAt: base,
+		requestAuditID: "audit-vis", responseID: "resp-vis",
+	})
+	cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID: "child-200", sessionID: "s-mixed", statusCode: 200, exchangeKind: "model",
+		recordedAt: base.Add(time.Second), requestAuditID: "audit-vis", responseID: "resp-vis",
+		parentExchangeID: "entry:resp-vis",
+	})
+	cleanupInsertLog(t, st, cleanupLogSpec{requestID: "vis-404", sessionID: "s-mixed", statusCode: 404, recordedAt: base.Add(2 * time.Second)})
+	if err := st.RebuildSessionSummaries(); err != nil {
+		t.Fatalf("RebuildSessionSummaries() error = %v", err)
+	}
+
+	result, err := st.ApplyRequestCleanup(RequestCleanupFilter{StatusCodes: []int{404}}, RequestCleanupApplyOptions{})
+	if err != nil {
+		t.Fatalf("ApplyRequestCleanup() error = %v", err)
+	}
+	rebuilt := sessionSummaryCounts(t, st, "s-mixed")
+	if err := st.RebuildSessionSummaries(); err != nil {
+		t.Fatalf("RebuildSessionSummaries() (canonical) error = %v", err)
+	}
+	canonical := sessionSummaryCounts(t, st, "s-mixed")
+	if rebuilt != canonical {
+		t.Fatalf("cleanup summary = %+v, canonical rebuild = %+v; the child model exchange was counted", rebuilt, canonical)
+	}
+	if rebuilt.requests != 1 || rebuilt.success != 1 {
+		t.Fatalf("summary = %+v, want the one client-visible 200 request", rebuilt)
+	}
+	if result.RebuiltSessions != 1 || result.RemovedSessionSummaries != 0 {
+		t.Fatalf("rebuild accounting = rebuilt %d removed %d; want 1 and 0", result.RebuiltSessions, result.RemovedSessionSummaries)
+	}
+}
+
+type cleanupSessionCounts struct {
+	requests int
+	success  int
+	failed   int
+}
+
+func sessionSummaryCounts(t *testing.T, st *Store, sessionID string) cleanupSessionCounts {
+	t.Helper()
+	var counts cleanupSessionCounts
+	if err := st.db.QueryRow(
+		`SELECT request_count, success_request, failed_request FROM session_summaries WHERE session_id = ?`,
+		sessionID,
+	).Scan(&counts.requests, &counts.success, &counts.failed); err != nil {
+		t.Fatalf("read session summary %q: %v", sessionID, err)
+	}
+	return counts
+}
+
+// --since/--until bind to the recorded_at text column, so they must use the
+// stored layout. A raw time.Time compares as "2006-01-02 15:04:05 +0000 UTC",
+// which silently widens --since over the whole calendar day and drops the
+// --until day: a destructive command would delete outside the requested window.
+func TestRequestCleanupHonorsSinceAndUntil(t *testing.T) {
+	st := configTransactionTestStore(t)
+	base := time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)
+	cleanupInsertLog(t, st, cleanupLogSpec{requestID: "window-early", sessionID: "s-window", statusCode: 404, recordedAt: base})
+	cleanupInsertLog(t, st, cleanupLogSpec{requestID: "window-late", sessionID: "s-window", statusCode: 404, recordedAt: base.Add(6 * time.Hour)})
+
+	plan, err := st.PlanRequestCleanup(RequestCleanupFilter{
+		StatusCodes: []int{404},
+		Since:       base.Add(3 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("PlanRequestCleanup(since) error = %v", err)
+	}
+	if plan.MatchedRequests != 1 || plan.TraceIDs[0] == "" {
+		t.Fatalf("--since matched %d requests, want only the late one", plan.MatchedRequests)
+	}
+	if got := plan.SampleRequests[0].RecordedAt; !got.Equal(base.Add(6 * time.Hour)) {
+		t.Fatalf("--since kept request recorded at %s, want %s", got, base.Add(6*time.Hour))
+	}
+
+	plan, err = st.PlanRequestCleanup(RequestCleanupFilter{
+		StatusCodes: []int{404},
+		Until:       base.Add(3 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("PlanRequestCleanup(until) error = %v", err)
+	}
+	if plan.MatchedRequests != 1 || !plan.SampleRequests[0].RecordedAt.Equal(base) {
+		t.Fatalf("--until matched %d requests, want only the early one", plan.MatchedRequests)
+	}
+
+	plan, err = st.PlanRequestCleanup(RequestCleanupFilter{
+		StatusCodes: []int{404},
+		Since:       base.Add(3 * time.Hour),
+		Until:       base.Add(3 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("PlanRequestCleanup(window) error = %v", err)
+	}
+	if plan.MatchedRequests != 0 {
+		t.Fatalf("empty window matched %d requests, want 0", plan.MatchedRequests)
+	}
+}

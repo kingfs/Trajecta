@@ -413,13 +413,18 @@ func requestCleanupScopeSQL(filter RequestCleanupFilter) (string, []any, error) 
 		clauses = append(clauses, `selected_upstream_id = ?`)
 		args = append(args, upstreamID)
 	}
+	// recorded_at is stored as a timeLayout string on SQLite, so the bound value
+	// must use the same layout: a raw time.Time binds as "2006-01-02 15:04:05
+	// +0000 UTC" and the text comparison then silently widens --since to the
+	// whole calendar day and drops --until's day. Postgres parses the same
+	// string as a timestamptz, which is how RoutingSummary binds its window.
 	if !filter.Since.IsZero() {
 		clauses = append(clauses, `recorded_at >= ?`)
-		args = append(args, filter.Since.UTC())
+		args = append(args, filter.Since.UTC().Format(timeLayout))
 	}
 	if !filter.Until.IsZero() {
 		clauses = append(clauses, `recorded_at <= ?`)
-		args = append(args, filter.Until.UTC())
+		args = append(args, filter.Until.UTC().Format(timeLayout))
 	}
 	return strings.Join(clauses, " AND "), args, nil
 }
@@ -571,6 +576,11 @@ func requestCleanupDeleteAnalysisJobs(tx *sql.Tx, s *Store, traceIDs []string) (
 // request was just deleted is not re-inserted, so its summary row disappears.
 // Sessions are chunked but never split across chunks: a session appears in
 // exactly one chunk, so its aggregate is always computed from all its rows.
+//
+// The insert keeps the client-visible restriction RebuildSessionSummary uses:
+// a child model exchange carries the same session_id as its entry, so a rebuild
+// without it would count every model call a second time in request_count,
+// total_tokens and the failure counters.
 func (s *Store) rebuildSessionSummariesTx(tx *sql.Tx, sessionIDs []string) (int, int, error) {
 	ids := dedupeNonEmptyStrings(sessionIDs)
 	if len(ids) == 0 {
@@ -588,7 +598,8 @@ func (s *Store) rebuildSessionSummariesTx(tx *sql.Tx, sessionIDs []string) (int,
 		if _, err := s.execTx(tx, `DELETE FROM session_summaries WHERE `+where, args...); err != nil {
 			return rebuilt, removed, fmt.Errorf("clear session summaries: %w", err)
 		}
-		if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(`s.`+where), args...); err != nil {
+		visible := `s.session_id IN (` + placeholders(len(chunk)) + `) AND ` + clientVisibleLogClause("s")
+		if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(visible), args...); err != nil {
 			return rebuilt, removed, fmt.Errorf("rebuild session summaries: %w", err)
 		}
 		var after int
@@ -596,7 +607,9 @@ func (s *Store) rebuildSessionSummariesTx(tx *sql.Tx, sessionIDs []string) (int,
 			return rebuilt, removed, fmt.Errorf("count rebuilt session summaries: %w", err)
 		}
 		rebuilt += after
-		removed += before - after
+		if after < before {
+			removed += before - after
+		}
 	}
 	return rebuilt, removed, nil
 }
