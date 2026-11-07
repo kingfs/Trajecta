@@ -181,7 +181,7 @@ func TestChat(t *testing.T) {
 | Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
 | vLLM | `vllm` | verified |
 
-完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，不在转发热路径上做跨协议翻译；唯一的例外是 `/v1/responses` 可以由本地 runtime 承接。
+完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，默认不在转发热路径上做跨协议翻译；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选时才对非流式 chat/messages/gemini 请求做协议转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
 
 ## 架构一览
 
@@ -265,7 +265,7 @@ trace 详情把一次交换拆成 Routing & Conversation、Protocol、Audit、Pe
 当前版本 `v3.3.6`，MIT 许可（以 [CHANGELOG](./CHANGELOG.md) 为准）。明确不做的事：
 
 - 公网多租户中转、计费 / 充值 / 订阅分发
-- 转发热路径上的跨协议转换（`/v1/responses` 的本地 runtime 是唯一例外）
+- 流式逐帧协议转换，以及多模态/thinking 的协议转换（原生直通与可选的文本/工具转换见 [协议转换](./docs/PROTOCOL_CONVERSION.md)）
 - hosted `file_search` / `code_interpreter` / `computer_use` 的真实执行 lifecycle 与容器级沙箱
 
 这些边界与当前实现的完整对照见 [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md)。

@@ -15,6 +15,21 @@ import (
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
+// protocolConversionRequestError marks a deterministic, client-caused
+// conversion failure (unsupported content, a lossy field, an invalid model
+// name). The proxy answers it with a 4xx instead of the 502 it uses for an
+// upstream failure, and never counts it against the target's health.
+type protocolConversionRequestError struct {
+	err error
+}
+
+func (e *protocolConversionRequestError) Error() string { return e.err.Error() }
+func (e *protocolConversionRequestError) Unwrap() error { return e.err }
+
+func conversionRequestError(format string, args ...any) error {
+	return &protocolConversionRequestError{err: fmt.Errorf(format, args...)}
+}
+
 // protocolConversion is the per-request conversion context: the client
 // protocol, the upstream protocol the selected target was chosen for, and
 // the wire model name. It is non-nil only when conversion is enabled in
@@ -31,8 +46,9 @@ type protocolConversion struct {
 // conversionForSelection decides whether this selection needs conversion.
 // It returns nil for the overwhelmingly common cases: conversion disabled,
 // a non-convertible endpoint, or native passthrough. Correctness rules:
-// streaming requests never convert (PlanForRequest rejects them), and a
-// decision that is not convert leaves every byte untouched.
+// streaming requests never convert (PlanForRequest rejects them), a Responses
+// entrypoint is owned by the local runtime, and a decision that is not convert
+// leaves every byte untouched.
 func (h *Handler) conversionForSelection(r *http.Request, selection *router.Selection, upstreamBodyBytes []byte) (*protocolConversion, error) {
 	if h == nil || h.cfg == nil || !h.cfg.Router.Selection.ProtocolConversion {
 		return nil, nil
@@ -40,24 +56,18 @@ func (h *Handler) conversionForSelection(r *http.Request, selection *router.Sele
 	if selection == nil || selection.Target == nil || r == nil || r.URL == nil {
 		return nil, nil
 	}
-	// A compressed request body cannot be JSON-parsed for conversion.
-	// Passthrough forwards it verbatim and works; conversion must fail
-	// explicitly (and fast — see handler) instead of trying to parse
-	// gzip bytes as JSON.
-	if enc := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding"))); enc != "" && enc != "identity" {
-		return nil, fmt.Errorf("protocol conversion: compressed request body (Content-Encoding: %s) cannot be converted; use a native passthrough target", enc)
-	}
-	// A Gemini client can also ask for SSE via ?alt=sse on the
-	// generateContent surface. The router only sees URL.Path, so it
-	// cannot tell this from a non-streaming request. Refuse conversion
-	// here (native passthrough still works) rather than buffer a stream.
-	if q := r.URL.Query(); strings.EqualFold(q.Get("alt"), "sse") {
-		return nil, nil
-	}
 	client, err := protocolconvert.DetectFromPath(r.URL.Path)
 	if err != nil {
 		// Endpoints without conversion vocabulary (models, embeddings,
 		// tokenize) are never converted.
+		return nil, nil
+	}
+	// /v1/responses is answered by the local Responses runtime, which owns
+	// Codex compatibility, hosted tools and its native-vs-local policy. Running
+	// a second, different translation in the forwarding path would bypass all
+	// of it, so that entrypoint never converts; a chat-only upstream is reached
+	// through the runtime's own Chat Completions orchestration.
+	if client == protocolconvert.ProtocolResponses {
 		return nil, nil
 	}
 	caps := selection.Target.Upstream.ProtocolCapabilitiesForModel(selection.Request.ModelName)
@@ -68,25 +78,47 @@ func (h *Handler) conversionForSelection(r *http.Request, selection *router.Sele
 		Stream: selection.Request.Stream,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 	if !decision.Convert() {
 		return nil, nil
+	}
+	// The checks below only apply when bytes must be translated; a native
+	// passthrough forwards a compressed body or an SSE query verbatim.
+	//
+	// A compressed request body cannot be JSON-parsed for conversion.
+	// Passthrough forwards it verbatim and works; conversion must fail
+	// explicitly instead of trying to parse gzip bytes as JSON.
+	if enc := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding"))); enc != "" && enc != "identity" {
+		return nil, conversionRequestError("protocol conversion: compressed request body (Content-Encoding: %s) cannot be converted; use a native passthrough target", enc)
+	}
+	// A Gemini client can also ask for SSE via ?alt=sse on the
+	// generateContent surface. The router only sees URL.Path, so it cannot
+	// tell this from a non-streaming request. A converting target cannot
+	// deliver SSE, so reject; a native target never reaches this branch.
+	if q := r.URL.Query(); strings.EqualFold(q.Get("alt"), "sse") {
+		return nil, conversionRequestError("protocol conversion: Gemini SSE (?alt=sse) cannot be converted; use a native passthrough target")
 	}
 	wireModel := llm.ModelFromBody(upstreamBodyBytes)
 	if wireModel == "" {
 		wireModel = selection.Request.ModelName
 	}
-	// P1: re-check Plan with the wire model actually used. The router
-	// checked caps with the requested model name; alias rewriting may have
-	// changed it, and OpenAI-compatible per-model supports_* overrides are
-	// keyed by model. If the wire model is not served by any convertible
-	// protocol, do not convert — fall back to native (which will fail
-	// with the upstream's own error) rather than sending a body the
-	// target cannot parse.
+	wireModel = strings.TrimSpace(wireModel)
+	if wireModel == "" {
+		return nil, conversionRequestError("protocol conversion: no model name in the request body; the target protocol needs one")
+	}
+	// Re-check Plan with the wire model actually used. The router checked caps
+	// with the requested model name; alias rewriting may have changed it, and
+	// the per-model supports_* overrides are keyed by model. If the wire model
+	// is not served by any convertible protocol, do not convert — fall back to
+	// native (which will fail with the upstream's own error) rather than
+	// sending a body the target cannot parse.
 	if wireModel != selection.Request.ModelName {
 		if caps2 := selection.Target.Upstream.ProtocolCapabilitiesForModel(wireModel); !caps2.Has(decision.UpstreamProtocol) {
-			return nil, nil
+			// Sending the client-protocol bytes instead would reach an upstream
+			// that does not serve that surface, which is the silent corruption
+			// this conversion path exists to avoid.
+			return nil, conversionRequestError("protocol conversion: upstream model %q is not served over %s by the selected channel; the alias mapping makes the converted request invalid", wireModel, decision.UpstreamProtocol)
 		}
 	}
 	return &protocolConversion{
@@ -151,23 +183,38 @@ func responseConversionEvent(c *protocolConversion, start time.Time) recorder.Re
 }
 
 // convertRequestBody converts the wire request body. The caller passes the
-// client-visible body; the result is what goes upstream. Conversion warnings
-// are recorded on the conversion context for the cassette event.
+// client-visible body; the result is what goes upstream. A warning whose loss
+// changes the answer is a refusal, not a silent degradation.
 func (c *protocolConversion) convertRequestBody(body []byte) ([]byte, error) {
 	result, err := protocolconvert.ConvertRequest(body, c.clientProtocol, c.upstreamProtocol, c.wireModel, c.vertex)
 	if err != nil {
-		return nil, err
+		return nil, &protocolConversionRequestError{err: err}
+	}
+	if fatal := result.FatalWarnings(); len(fatal) > 0 {
+		return nil, &protocolConversionRequestError{err: fmt.Errorf("protocol conversion refused: %s", describeFatalWarnings(fatal))}
 	}
 	c.requestWarnings = result.Warnings
 	return result.Body, nil
 }
 
-// upstreamPath is the path the converted request must be sent to. For
-// Gemini the model travels in the path; the client query string is
-// deliberately not carried over, because query options (beta flags,
-// alt=sse) belong to the client protocol's surface.
-func (c *protocolConversion) upstreamPath() string {
-	return c.upstreamProtocol.RequestPath(c.wireModel, false, c.vertex)
+func describeFatalWarnings(warnings []protocolconvert.Warning) string {
+	parts := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		parts = append(parts, warning.Field)
+	}
+	return fmt.Sprintf("the request carries %s, which the conversion IR cannot carry faithfully; use a native passthrough target", strings.Join(parts, ", "))
+}
+
+// upstreamPath is the path the converted request must be sent to. For Gemini
+// the model travels in the path; the client query string is deliberately not
+// carried over, because query options (beta flags, alt=sse) belong to the
+// client protocol's surface.
+func (c *protocolConversion) upstreamPath() (string, error) {
+	path, err := c.upstreamProtocol.RequestPath(c.wireModel, false, c.vertex)
+	if err != nil {
+		return "", &protocolConversionRequestError{err: err}
+	}
+	return path, nil
 }
 
 // applyConvertedHeaders fixes protocol-scoped headers after a conversion.
@@ -182,12 +229,10 @@ func applyConvertedHeaders(outreq *http.Request, original *http.Request, conv *p
 	switch conv.upstreamProtocol {
 	case protocolconvert.ProtocolMessages:
 		// Messages requires anthropic-version; a Chat/Responses client
-		// never sends it, so supply the default. (ApplyAuthHeaders only
-		// fills it when missing, but that runs after this point.)
+		// never sends it, so supply the default.
 		if hdr.Get("anthropic-version") == "" {
 			hdr.Set("anthropic-version", "2023-06-01")
 		}
-		// anthropic-beta is Messages-scoped: keep it only for Messages.
 		if original.Header.Get("anthropic-beta") != "" {
 			hdr.Set("anthropic-beta", original.Header.Get("anthropic-beta"))
 		}
@@ -213,7 +258,7 @@ func applyConvertedHeaders(outreq *http.Request, original *http.Request, conv *p
 // provider-specific diagnostics, and routing them through the IR would
 // replace a useful upstream error with an empty shell in the client
 // protocol. They reach the client byte for byte, as before conversion
-// existed. An empty successful body (e.g. 204) also passes through: there
+// existed. An empty successful body (e.g., 204) also passes through: there
 // is nothing to translate, and failing the candidate over it would be a
 // spurious 502. Conversion buffers the whole body, so it is capped at
 // maxBytes (the same ceiling the request path uses) instead of growing
@@ -227,6 +272,7 @@ func (c *protocolConversion) convertResponseBody(resp *http.Response, maxBytes i
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("protocol conversion: read upstream response: %w", err)
 	}
 	_ = resp.Body.Close()

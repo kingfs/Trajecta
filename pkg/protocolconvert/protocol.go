@@ -1,7 +1,10 @@
-// Package protocolconvert converts LLM API requests, responses and SSE
-// streams between the four wire protocols Trajecta records: OpenAI Chat
+// Package protocolconvert converts non-streaming LLM API requests and
+// responses between the four wire protocols Trajecta records: OpenAI Chat
 // Completions, OpenAI Responses, Anthropic Messages and Gemini
 // generateContent (Google AI Studio and Vertex share the wire shape).
+// Streaming conversion is deliberately not implemented: it needs a
+// frame-by-frame translator, so streaming requests must use a native
+// passthrough target.
 //
 // The package is intentionally thin: it owns the protocol vocabulary, the
 // passthrough-first routing decision and the conversion entry points, while
@@ -10,13 +13,13 @@
 // mirrors the shape of chaitin/ai-api-protocol-bridge (one IR, one adapter
 // per protocol) without forking a second set of protocol structs.
 //
-// Conversion is lossless only for the fields the IR carries (model, system
+// Conversion is faithful only for the fields the IR carries (model, system
 // prompt, messages with text/tool_use/tool_result content, tools,
 // tool_choice, stop sequences, temperature/top_p/top_k/max_tokens, usage).
 // Protocol-specific extras outside the IR (reasoning effort, presence /
-// frequency penalties, safety settings beyond the IR's, provider options)
-// are dropped; ConvertResult.Warnings reports the lossy combinations the IR
-// cannot carry so a caller can decide to reject instead of silently degrade.
+// frequency penalties, provider options) either change the answer and are
+// rejected as fatal warnings, or are reported as non-fatal warnings so the
+// caller can see the documented loss.
 //
 // The forwarding hot path keeps its current behaviour: a request whose
 // protocol the selected upstream serves natively is passed through byte for
@@ -161,30 +164,65 @@ func DetectFromPath(rawPath string) (Protocol, error) {
 // sent to. For Gemini the model travels in the path; for the other three it
 // stays in the body and model is ignored. stream selects the streaming
 // endpoint variant where one exists.
-func (p Protocol) RequestPath(model string, stream bool, vertex bool) string {
+//
+// The returned path is the surface path the upstream resolver expands (a Vertex
+// base URL adds the project/location/publisher resource). A model name that
+// cannot be placed in a path segment is an error: url.PathEscape does not
+// escape ":", and going through a URL parse turns an escaped ".." segment back
+// into traversal.
+func (p Protocol) RequestPath(model string, stream bool, vertex bool) (string, error) {
 	switch canonical(p) {
 	case ProtocolChatCompletions:
-		return "/v1/chat/completions"
+		return "/v1/chat/completions", nil
 	case ProtocolResponses:
-		return "/v1/responses"
+		return "/v1/responses", nil
 	case ProtocolMessages:
-		return "/v1/messages"
+		return "/v1/messages", nil
 	case ProtocolGemini:
-		// The model travels in the path; escape it so a model name
-		// containing ":" or "/" cannot break the :generateContent suffix
-		// or inject path segments. Publishers/projects prefixes are owned
-		// by the caller's BaseURL, not by this function.
+		if err := ValidateModelName(model); err != nil {
+			return "", err
+		}
 		escaped := url.PathEscape(model)
 		if vertex {
 			if stream {
-				return "/v1/publishers/models/" + escaped + ":streamGenerateContent"
+				return "/v1/publishers/models/" + escaped + ":streamGenerateContent", nil
 			}
-			return "/v1/publishers/models/" + escaped + ":generateContent"
+			return "/v1/publishers/models/" + escaped + ":generateContent", nil
 		}
 		if stream {
-			return "/v1beta/models/" + escaped + ":streamGenerateContent"
+			return "/v1beta/models/" + escaped + ":streamGenerateContent", nil
 		}
-		return "/v1beta/models/" + escaped + ":generateContent"
+		return "/v1beta/models/" + escaped + ":generateContent", nil
 	}
-	return ""
+	return "", fmt.Errorf("protocolconvert: no request path for protocol %q", p)
+}
+
+// ValidateModelName guards a model name that will be placed in a URL path. The
+// character set is the practical intersection of the upstreams' model ids; in
+// particular ":" is rejected because it terminates the Gemini action suffix,
+// and ".." is rejected because it can escape the model segment.
+func ValidateModelName(model string) error {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return fmt.Errorf("protocolconvert: model name is empty")
+	}
+	if trimmed != model {
+		return fmt.Errorf("protocolconvert: model name %q has surrounding whitespace", model)
+	}
+	if len(trimmed) > 256 {
+		return fmt.Errorf("protocolconvert: model name is too long")
+	}
+	if strings.Contains(trimmed, "..") || strings.Contains(trimmed, "//") ||
+		strings.HasPrefix(trimmed, "/") || strings.HasSuffix(trimmed, "/") {
+		return fmt.Errorf("protocolconvert: model name %q is not a valid path segment", model)
+	}
+	for _, r := range trimmed {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '/', r == '@':
+		default:
+			return fmt.Errorf("protocolconvert: model name %q contains unsupported character %q", model, r)
+		}
+	}
+	return nil
 }

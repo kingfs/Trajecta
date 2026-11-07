@@ -1043,7 +1043,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			converted, convErr = conversion.convertRequestBody(wireBodyBytes)
 			if convErr == nil {
 				wireBodyBytes = converted
-				sendPathOverride = conversion.upstreamPath()
+				sendPathOverride, convErr = conversion.upstreamPath()
 			}
 		}
 		if convErr != nil {
@@ -1060,11 +1060,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"error", convErr,
 			)
 			lastErr = convErr
-			h.router.Complete(selection, router.Outcome{
-				Success:    false,
-				StatusCode: 0,
-				Stream:     selection.Request.Stream,
-			})
+			// The failure is local and deterministic (unsupported content or a
+			// lossy field), not an upstream health signal: release the slot
+			// without touching the target's error rate or circuit breaker.
+			h.router.Release(selection)
 			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, convErr.Error(), false))
 			if len(triedIDs) >= roundCandidateCount {
 				break // exhausted this round: report now, do not start a new round
@@ -1252,10 +1251,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// Try remaining candidates of this round; never burn the
 				// retry budget on it.
 				logInfo.Header.Meta.Error = convErr.Error()
-				resp.Body.Close()
+				// convertResponseBody already closed the upstream body.
 				lastErr = convErr
+				// The upstream answered successfully; only the local
+				// translation failed, so this is a success as far as the
+				// target's health and latency are concerned.
 				h.router.Complete(selection, router.Outcome{
-					Success:    false,
+					Success:    true,
 					StatusCode: resp.StatusCode,
 					DurationMs: float64(time.Since(start).Milliseconds()),
 					Stream:     selection.Request.Stream,
@@ -1415,6 +1417,14 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 	// closed by closeLogFile in the retry loop).
 	retryAfter, blockedByHealth := h.transientAvailability(r, bodyBytes)
 	applyTransientAvailabilityHeaders(w, retryAfter, blockedByHealth)
+	var conversionErr *protocolConversionRequestError
+	if errors.As(lastErr, &conversionErr) {
+		if h.recorder != nil {
+			h.recordSelectionFailureWithSelection(r, start, http.StatusBadRequest, lastErr, bodyBytes, retryEvents, selection)
+		}
+		writeProxyError(w, r, http.StatusBadRequest, "protocol_conversion_unsupported", lastErr.Error())
+		return
+	}
 	status := selectionFailureStatus(lastErr)
 	if status == http.StatusNotFound {
 		// Re-selection after a failed attempt found no target for the model (for
@@ -2247,13 +2257,9 @@ func releaseRetryWaitSlot() {
 // It creates a fresh outgoing request (not cloning the original, because http.Request.Clone
 // discards the Body), applies the director logic (URL rewrite, auth headers), and returns
 // the upstream response. The caller is responsible for closing resp.Body.
-func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Target, bodyBytes []byte) (*http.Response, error) {
-	return h.sendUpstreamRequestWithPath(original, target, bodyBytes, "", nil)
-}
-
-// sendUpstreamRequestWithPath is sendUpstreamRequest with an explicit
-// upstream path, used when protocol conversion rewrote the request for a
-// different protocol surface. The client query string is not carried over
+// sendUpstreamRequestWithPath sends a request with an explicit upstream path,
+// used when protocol conversion rewrote the request for a different protocol
+// surface. The client query string is not carried over
 // for converted requests: query options belong to the client protocol.
 // An empty pathOverride preserves the passthrough behaviour exactly.
 // conv, when non-nil, carries the target protocol so protocol-scoped

@@ -116,8 +116,8 @@ func TestConvertRequestChatToGemini(t *testing.T) {
 	if !strings.Contains(string(result.Body), "Hello") {
 		t.Errorf("converted body = %s", result.Body)
 	}
-	if got := ProtocolGemini.RequestPath("gemini-2.5-flash", false, false); got != "/v1beta/models/gemini-2.5-flash:generateContent" {
-		t.Errorf("RequestPath = %q", got)
+	if got, err := ProtocolGemini.RequestPath("gemini-2.5-flash", false, false); err != nil || got != "/v1beta/models/gemini-2.5-flash:generateContent" {
+		t.Errorf("RequestPath = %q, %v", got, err)
 	}
 }
 
@@ -129,23 +129,6 @@ func TestConvertResponseChatToResponses(t *testing.T) {
 	}
 	if !strings.Contains(string(result.Body), "Hello there") || !strings.Contains(string(result.Body), `"object":"response"`) {
 		t.Errorf("converted body = %s", result.Body)
-	}
-}
-
-func TestConvertStreamResponseChatToMessages(t *testing.T) {
-	body := []byte("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\ndata: [DONE]\n\n")
-	result, err := ConvertStreamResponse(body, ProtocolChatCompletions, ProtocolMessages, "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(result.Body)
-	for _, want := range []string{"event: message_start", "event: message_stop", "Hello"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("stream output missing %q:\n%s", want, out)
-		}
-	}
-	if !strings.HasSuffix(out, "\n") {
-		t.Error("stream output should end with newline")
 	}
 }
 
@@ -175,5 +158,11 @@ func TestParseProtocolAliases(t *testing.T) {
 	}
 	if _, err = ParseProtocol("embeddings"); err == nil {
 		t.Error("embeddings should error")
+	}
+}
+
+func TestPlanRejectsUnknownMode(t *testing.T) {
+	if _, err := Plan(ProtocolChatCompletions, Capabilities{Messages: true}, Mode("nope")); err == nil {
+		t.Fatal("an unknown conversion mode must be rejected")
 	}
 }

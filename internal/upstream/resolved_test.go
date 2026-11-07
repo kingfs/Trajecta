@@ -621,6 +621,32 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			path:    "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
 			wantURL: "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
 		},
+		{
+			// Protocol conversion builds the compact surface path; the resolver
+			// must expand it to the real publisher resource.
+			name: "vertex_express_conversion_short_path",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				ModelResource:  "publishers/google/models",
+			},
+			path:    "/v1/publishers/models/gemini-2.5-flash:generateContent",
+			wantURL: "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent",
+		},
+		{
+			// The project profile must not repeat the trailing "/models" when it
+			// expands the same compact path.
+			name: "vertex_project_conversion_short_path",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				Project:        "demo-project",
+				Location:       "us-central1",
+				ModelResource:  "publishers/google/models",
+			},
+			path:    "/v1/publishers/models/gemini-2.5-flash:generateContent",
+			wantURL: "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent",
+		},
 	}
 
 	for _, tt := range tests {

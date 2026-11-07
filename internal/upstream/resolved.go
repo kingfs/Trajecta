@@ -1020,14 +1020,21 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 	if strings.HasPrefix(reqPath, "/v1"+resourceRoot) {
 		return reqPath
 	}
-	if resolved.RoutingProfile == RoutingProfileVertexExpress && strings.HasPrefix(reqPath, "/v1/publishers/") {
-		return reqPath
-	}
+	// A protocol-converted request uses the compact surface
+	// /v1/publishers/models/{model}:{action}; the real resource root (publisher,
+	// project and location) is supplied here. Joining the model suffix onto
+	// resourceRoot must not repeat its trailing "/models".
 	switch llm.NormalizeEndpoint(reqPath) {
-	case "/v1/publishers/models:generateContent":
-		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":generateContent")
-	case "/v1/publishers/models:streamGenerateContent":
-		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":streamGenerateContent")
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+		action := "generateContent"
+		if strings.HasSuffix(reqPath, ":streamGenerateContent") {
+			action = "streamGenerateContent"
+		}
+		model := vertexModelFromShortPath(reqPath)
+		if model == "" {
+			return reqPath
+		}
+		return "/v1" + resourceRoot + "/" + model + ":" + action
 	case "/v1/publishers/models":
 		return "/v1" + resourceRoot
 	default:
@@ -1035,14 +1042,20 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 	}
 }
 
-func suffixAfterModel(reqPath string, fallback string) string {
-	if idx := strings.Index(reqPath, "/models/"); idx >= 0 {
-		rest := reqPath[idx+len("/models/"):]
-		if rest != "" {
-			return "/models/" + rest
-		}
+// vertexModelFromShortPath extracts the model from
+// /v1/publishers/models/{model}:{action}. The model name is validated before it
+// is placed in a path, so the last colon always starts the action suffix.
+func vertexModelFromShortPath(reqPath string) string {
+	const marker = "/models/"
+	idx := strings.Index(reqPath, marker)
+	if idx < 0 {
+		return ""
 	}
-	return "/models/" + fallback
+	rest := reqPath[idx+len(marker):]
+	if colon := strings.LastIndex(rest, ":"); colon >= 0 {
+		rest = rest[:colon]
+	}
+	return strings.TrimSpace(rest)
 }
 
 func deploymentFromBasePath(basePath string) string {

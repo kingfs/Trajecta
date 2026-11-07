@@ -9,11 +9,12 @@ import (
 )
 
 // Warning records one piece of information a conversion could not carry
-// across. Conversion still succeeds; a caller that cannot tolerate the loss
-// should check Warnings and reject the request instead.
+// across. Conversion still succeeds; Fatal marks the combinations the hot path
+// must reject instead of silently degrading the request.
 type Warning struct {
 	Field  string
 	Reason string
+	Fatal  bool
 }
 
 func (w Warning) Error() string { return fmt.Sprintf("protocolconvert: %s: %s", w.Field, w.Reason) }
@@ -30,10 +31,26 @@ type Result struct {
 	To   Protocol
 }
 
+// FatalWarnings returns the warnings a caller must treat as a failed
+// conversion rather than a documented loss.
+func (r Result) FatalWarnings() []Warning {
+	var out []Warning
+	for _, warning := range r.Warnings {
+		if warning.Fatal {
+			out = append(out, warning)
+		}
+	}
+	return out
+}
+
 // ConvertRequest converts a client request body from one protocol to another
 // via the pkg/llm intermediate representation. model, when non-empty,
 // overrides the model in the converted body (the upstream wire name); for
 // Gemini the model also belongs in the request path (see Protocol.RequestPath).
+//
+// Streaming conversion is deliberately not implemented: incrementally
+// delivering a stream requires a frame-by-frame translator, so a streaming
+// request must use a native passthrough target and this function rejects it.
 func ConvertRequest(body []byte, from Protocol, to Protocol, model string, vertex bool) (Result, error) {
 	from, to = canonical(from), canonical(to)
 	if !from.Valid() || !to.Valid() {
@@ -45,12 +62,12 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if from == to {
 		return Result{Body: append([]byte(nil), body...), From: from, To: to}, nil
 	}
-	// Fail loudly instead of silently corrupting what the IR cannot carry.
-	// Multimodal media, encrypted/thinking blocks and opaque signatures
-	// have no IR representation; the pkg/llm adapters would turn them
-	// into prose text or drop them. A caller that needs those shapes
-	// must use a native passthrough target.
-	if field, ok := unsupportedContentField(body); ok {
+	if bodyStreamFlag(body) {
+		return Result{}, fmt.Errorf("protocolconvert: streaming requests cannot be converted; use a native passthrough target")
+	}
+	// Reject content the IR cannot represent instead of letting the adapters
+	// turn it into prose or empty parts.
+	if field, ok := unsupportedContentField(body, from); ok {
 		return Result{}, fmt.Errorf("protocolconvert: %s request carries %q which the conversion IR cannot represent; use a native passthrough target", from, field)
 	}
 	parsed, err := llm.ParseRequest(ProviderFor(from, vertex), from.Endpoint(), body)
@@ -60,11 +77,24 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if model != "" {
 		parsed.Model = model
 	}
+	if parsed.ToolChoice == nil && hasUnparsedToolChoice(body) {
+		return Result{}, fmt.Errorf("protocolconvert: %s request carries a tool_choice shape the conversion IR does not understand", from)
+	}
+	// Chat's newer max_completion_tokens spelling is not carried by the IR, but
+	// it means exactly max_tokens; map it instead of dropping it.
+	if parsed.MaxTokens == nil {
+		if maxTokens := bodyMaxCompletionTokens(body); maxTokens != nil {
+			parsed.MaxTokens = maxTokens
+		}
+	}
 	// Anthropic Messages requires max_tokens; other protocols make it
 	// optional, so a converted request must supply the default itself.
 	if to == ProtocolMessages && parsed.MaxTokens == nil {
 		defaultMaxTokens := 4096
 		parsed.MaxTokens = &defaultMaxTokens
+	}
+	if err := validateToolFlow(parsed, to); err != nil {
+		return Result{}, err
 	}
 	adapter, err := llm.AdapterFor(ProviderFor(to, vertex), to.Endpoint())
 	if err != nil {
@@ -74,39 +104,55 @@ func ConvertRequest(body []byte, from Protocol, to Protocol, model string, verte
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: encode %s request: %w", to, err)
 	}
-	// The IR has no Stream field, but stream is a client-visible behaviour,
-	// not metadata: dropping it would turn a streaming call into a
-	// non-streaming one. Re-inject it from the source body.
-	if stream := bodyStreamFlag(body); stream {
-		out, err = setBodyStreamFlag(out, true)
-		if err != nil {
-			return Result{}, fmt.Errorf("protocolconvert: preserve stream flag: %w", err)
-		}
-	}
 	return Result{Body: out, Warnings: requestWarnings(parsed, from, to, body), From: from, To: to}, nil
 }
 
 func bodyStreamFlag(body []byte) bool {
 	var payload struct {
-		Stream bool `json:"stream"`
+		Stream any `json:"stream"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return false
 	}
-	return payload.Stream
+	switch value := payload.Stream.(type) {
+	case bool:
+		return value
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1", "yes":
+			return true
+		}
+	case float64:
+		return value != 0
+	}
+	return false
 }
 
-func setBodyStreamFlag(body []byte, stream bool) ([]byte, error) {
-	var payload map[string]json.RawMessage
+// hasUnparsedToolChoice reports a tool_choice value the adapters could not map.
+// A missing value, null, the empty string and an empty object all mean "no
+// directive"; anything else must become a ToolChoice or be rejected.
+func hasUnparsedToolChoice(body []byte) bool {
+	var payload struct {
+		ToolChoice json.RawMessage `json:"tool_choice"`
+	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
+		return false
 	}
-	raw, err := json.Marshal(stream)
-	if err != nil {
-		return nil, err
+	trimmed := strings.TrimSpace(string(payload.ToolChoice))
+	return trimmed != "" && trimmed != "null" && trimmed != `""` && trimmed != "{}"
+}
+
+func bodyMaxCompletionTokens(body []byte) *int {
+	var payload struct {
+		MaxCompletionTokens *int `json:"max_completion_tokens"`
 	}
-	payload["stream"] = raw
-	return json.Marshal(payload)
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	if payload.MaxCompletionTokens == nil || *payload.MaxCompletionTokens <= 0 {
+		return nil
+	}
+	return payload.MaxCompletionTokens
 }
 
 // ConvertResponse converts an upstream response body from one protocol to
@@ -126,12 +172,7 @@ func ConvertResponse(body []byte, from Protocol, to Protocol, model string, vert
 	if model != "" {
 		parsed.Model = model
 	}
-	// The IR keeps tool calls in Candidate.ToolCalls, but the Anthropic
-	// encoder only reads tool_use content blocks. Fold them in so a
-	// converted tool call is not silently dropped.
-	if to == ProtocolMessages {
-		foldToolCallsIntoContent(&parsed)
-	}
+	applyFinishReason(&parsed, from, to)
 	adapter, err := llm.AdapterFor(ProviderFor(to, vertex), to.Endpoint())
 	if err != nil {
 		return Result{}, fmt.Errorf("protocolconvert: encode %s response: %w", to, err)
@@ -144,27 +185,38 @@ func ConvertResponse(body []byte, from Protocol, to Protocol, model string, vert
 }
 
 // requestWarnings reports the request fields conversion is known to drop.
-// The IR carries model/system/messages/tools/tool_choice/stop/temperature/
-// top_p/top_k/max_tokens; everything else in the source body is lost. We
-// detect the common extras by scanning the raw JSON keys the IR ignores.
+// Fatal is set for fields whose loss changes the model's answer; the proxy
+// turns those into a 4xx instead of silently degrading the request.
 func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol, body []byte) []Warning {
 	var warnings []Warning
 	if from == to {
 		return nil
 	}
-	// Top-k has no Chat Completions/Responses counterpart in the IR encoders
-	// beyond what they emit; flag it whenever the source set it and the
-	// target is not Messages/Gemini.
 	if req.TopK != nil && (to == ProtocolChatCompletions || to == ProtocolResponses) {
 		warnings = append(warnings, Warning{Field: "top_k", Reason: fmt.Sprintf("top_k is not carried by %s encoding", to)})
 	}
-	// Generic: any top-level key the IR does not carry is lost. Report it so
-	// a caller can reject or log instead of silently degrading (seed,
-	// response_format, reasoning_effort, cache_control, metadata, ...).
-	// Stream is re-injected and model is overridden, so skip both.
+	if len(req.SafetySettings) > 0 && to != ProtocolGemini {
+		warnings = append(warnings, Warning{Field: "safety_settings", Fatal: true, Reason: fmt.Sprintf("safety_settings cannot be enforced by %s; refusing to answer without them", to)})
+	}
+	if (to == ProtocolMessages || to == ProtocolGemini) && hasStrictTool(req.Tools) {
+		warnings = append(warnings, Warning{Field: "tools.strict", Fatal: true, Reason: fmt.Sprintf("%s cannot enforce a strict tool schema; refusing to relax it silently", to)})
+	}
+	fatalFields := fatalRequestFields(body)
+	for _, field := range fatalFields {
+		warnings = append(warnings, Warning{Field: field, Fatal: true, Reason: fmt.Sprintf("%s is not carried by the conversion IR; refusing to silently drop it when converting to %s", field, to)})
+	}
+	// Report every remaining top-level key the IR does not carry. Stream and
+	// model are handled explicitly, and the fatal fields are already named.
+	fatalSet := make(map[string]struct{}, len(fatalFields))
+	for _, field := range fatalFields {
+		fatalSet[strings.ToLower(field)] = struct{}{}
+	}
 	for _, field := range UnsupportedFields(body, from) {
 		lower := strings.ToLower(field)
 		if lower == "stream" || lower == "model" {
+			continue
+		}
+		if _, fatal := fatalSet[lower]; fatal {
 			continue
 		}
 		warnings = append(warnings, Warning{Field: field, Reason: fmt.Sprintf("%s field is not carried by the conversion IR when converting to %s", field, to)})
@@ -172,29 +224,128 @@ func requestWarnings(req llm.LLMRequest, from Protocol, to Protocol, body []byte
 	return warnings
 }
 
-// unsupportedContentField scans a raw request body for content whose IR
-// representation is lossy or absent. It returns the offending type/key when
-// found. Thinking and opaque signatures are included deliberately: they are
-// byte-exact protocol values (see pkg/secretmask/opaque.go) and re-encoding
-// them as text would corrupt them.
-func unsupportedContentField(body []byte) (string, bool) {
-	// Cheap, robust prefilter before a full walk: these bytes cannot appear
-	// in a text-only request without indicating a shape the IR drops.
-	// All needles are quoted/protocol terms so ordinary prose mentioning
-	// "image", "signature" or "thinking" does not trip the filter (in JSON
-	// string content those words are escaped and never appear quoted).
-	needles := []string{"image_url", "input_audio", "file_data", "inlineData", "inline_data", "\"image\"", "\"audio\"", "\"file\"", "\"document\"", "thoughtSignature", "encrypted_content", "redacted_thinking", "\"thinking\"", "\"reasoning\"", "reasoning_content", "\"signature\""}
-	haystack := string(body)
-	for _, needle := range needles {
-		if strings.Contains(haystack, needle) {
-			return needle, true
+// fatalRequestFields reads the semantically significant fields a conversion
+// would drop. A field set to its default value is not a loss, so booleans and
+// numeric penalties are checked against their defaults rather than presence.
+func fatalRequestFields(body []byte) []string {
+	var probe struct {
+		ResponseFormat    json.RawMessage `json:"response_format"`
+		ReasoningEffort   json.RawMessage `json:"reasoning_effort"`
+		Reasoning         json.RawMessage `json:"reasoning"`
+		Thinking          json.RawMessage `json:"thinking"`
+		Seed              *json.Number    `json:"seed"`
+		PresencePenalty   *float64        `json:"presence_penalty"`
+		FrequencyPenalty  *float64        `json:"frequency_penalty"`
+		Logprobs          *bool           `json:"logprobs"`
+		TopLogprobs       *int            `json:"top_logprobs"`
+		ParallelToolCalls *bool           `json:"parallel_tool_calls"`
+		Functions         json.RawMessage `json:"functions"`
+		FunctionCall      json.RawMessage `json:"function_call"`
+		Modalities        []string        `json:"modalities"`
+		Audio             json.RawMessage `json:"audio"`
+		WebSearchOptions  json.RawMessage `json:"web_search_options"`
+		Prediction        json.RawMessage `json:"prediction"`
+		LogitBias         json.RawMessage `json:"logit_bias"`
+		N                 *int            `json:"n"`
+		BestOf            *int            `json:"best_of"`
+		Text              json.RawMessage `json:"text"`
+		Background        *bool           `json:"background"`
+		Truncation        string          `json:"truncation"`
+		Conversation      json.RawMessage `json:"conversation"`
+		Prompt            json.RawMessage `json:"prompt"`
+		MaxToolCalls      *int            `json:"max_tool_calls"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return nil
+	}
+	var fields []string
+	nonEmpty := func(field string, raw json.RawMessage) {
+		trimmed := strings.TrimSpace(string(raw))
+		if trimmed != "" && trimmed != "null" && trimmed != "[]" && trimmed != "{}" {
+			fields = append(fields, field)
 		}
 	}
-	// Gemini function parts are also dropped by the IR adapters.
-	if strings.Contains(haystack, "functionCall") || strings.Contains(haystack, "functionResponse") {
-		return "functionCall/functionResponse", true
+	nonEmpty("response_format", probe.ResponseFormat)
+	nonEmpty("reasoning_effort", probe.ReasoningEffort)
+	nonEmpty("reasoning", probe.Reasoning)
+	nonEmpty("thinking", probe.Thinking)
+	if probe.Seed != nil {
+		fields = append(fields, "seed")
 	}
-	return "", false
+	if probe.PresencePenalty != nil && *probe.PresencePenalty != 0 {
+		fields = append(fields, "presence_penalty")
+	}
+	if probe.FrequencyPenalty != nil && *probe.FrequencyPenalty != 0 {
+		fields = append(fields, "frequency_penalty")
+	}
+	if probe.Logprobs != nil && *probe.Logprobs {
+		fields = append(fields, "logprobs")
+	}
+	if probe.TopLogprobs != nil && *probe.TopLogprobs > 0 {
+		fields = append(fields, "top_logprobs")
+	}
+	if probe.ParallelToolCalls != nil && !*probe.ParallelToolCalls {
+		fields = append(fields, "parallel_tool_calls")
+	}
+	nonEmpty("functions", probe.Functions)
+	nonEmpty("function_call", probe.FunctionCall)
+	for _, modality := range probe.Modalities {
+		if !strings.EqualFold(strings.TrimSpace(modality), "text") {
+			fields = append(fields, "modalities")
+			break
+		}
+	}
+	nonEmpty("audio", probe.Audio)
+	nonEmpty("web_search_options", probe.WebSearchOptions)
+	nonEmpty("prediction", probe.Prediction)
+	nonEmpty("logit_bias", probe.LogitBias)
+	nonEmpty("conversation", probe.Conversation)
+	nonEmpty("prompt", probe.Prompt)
+	if probe.N != nil && *probe.N > 1 {
+		fields = append(fields, "n")
+	}
+	if probe.BestOf != nil && *probe.BestOf > 1 {
+		fields = append(fields, "best_of")
+	}
+	if probe.Background != nil && *probe.Background {
+		fields = append(fields, "background")
+	}
+	if probe.MaxToolCalls != nil && *probe.MaxToolCalls > 0 {
+		fields = append(fields, "max_tool_calls")
+	}
+	if truncation := strings.TrimSpace(probe.Truncation); truncation != "" && !strings.EqualFold(truncation, "disabled") {
+		fields = append(fields, "truncation")
+	}
+	// Responses carries its output format under text.format; the default
+	// {"format":{"type":"text"}} is not a loss. Any other knob (a structured
+	// format, verbosity, ...) changes the output and is fatal.
+	if raw := strings.TrimSpace(string(probe.Text)); raw != "" && raw != "null" && raw != "{}" {
+		var text map[string]json.RawMessage
+		if err := json.Unmarshal(probe.Text, &text); err != nil || len(text) != 1 {
+			fields = append(fields, "text")
+		} else if format, ok := text["format"]; !ok {
+			fields = append(fields, "text")
+		} else {
+			var parsed struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(format, &parsed); err != nil {
+				fields = append(fields, "text.format")
+			} else if kind := strings.TrimSpace(parsed.Type); kind != "" && !strings.EqualFold(kind, "text") {
+				fields = append(fields, "text.format")
+			}
+		}
+	}
+	return fields
+}
+
+func hasStrictTool(tools []llm.LLMTool) bool {
+	for i := range tools {
+		if tools[i].Strict != nil && *tools[i].Strict {
+			return true
+		}
+	}
+	return false
 }
 
 func responseWarnings(resp llm.LLMResponse, from Protocol, to Protocol) []Warning {
@@ -203,51 +354,14 @@ func responseWarnings(resp llm.LLMResponse, from Protocol, to Protocol) []Warnin
 	}
 	var warnings []Warning
 	for _, candidate := range resp.Candidates {
-		if candidate.Refusal != nil && to != ProtocolResponses && to != ProtocolChatCompletions {
-			warnings = append(warnings, Warning{Field: "refusal", Reason: fmt.Sprintf("refusal text is not representable in %s responses", to)})
-		}
-		if len(candidate.ToolCalls) > 0 && to == ProtocolGemini {
-			// The Gemini response encoder emits text parts only; tool calls
-			// do not survive a conversion to Gemini.
-			warnings = append(warnings, Warning{Field: "tool_calls", Reason: "tool calls are not representable in gemini responses"})
+		for _, content := range candidate.Content {
+			if content.Type == "thinking" && content.Text != "" {
+				warnings = append(warnings, Warning{Field: "reasoning", Reason: fmt.Sprintf("reasoning content is not carried to %s", to)})
+				break
+			}
 		}
 	}
 	return warnings
-}
-
-// foldToolCallsIntoContent appends each candidate's tool calls as tool_use
-// content blocks, unless an equivalent block already exists (some parsers
-// duplicate the call in both places).
-func foldToolCallsIntoContent(resp *llm.LLMResponse) {
-	for i := range resp.Candidates {
-		candidate := &resp.Candidates[i]
-		for _, call := range candidate.ToolCalls {
-			exists := false
-			for _, content := range candidate.Content {
-				if content.Type == "tool_use" && content.ToolName == call.Name && content.ToolCallID == call.ID {
-					exists = true
-					break
-				}
-			}
-			if exists {
-				continue
-			}
-			args := call.Args
-			if args == nil && call.ArgsText != "" {
-				var decoded map[string]any
-				if err := json.Unmarshal([]byte(call.ArgsText), &decoded); err == nil {
-					args = decoded
-				}
-			}
-			candidate.Content = append(candidate.Content, llm.LLMContent{
-				Type:       "tool_use",
-				ID:         call.ID,
-				ToolCallID: call.ID,
-				ToolName:   call.Name,
-				ToolArgs:   args,
-			})
-		}
-	}
 }
 
 // UnsupportedFields lists the top-level JSON keys present in body that the
@@ -274,9 +388,58 @@ func carriedKeys(p Protocol) map[string]bool {
 		"model": true, "messages": true, "input": true, "instructions": true,
 		"system": true, "tools": true, "tool_choice": true, "stop_sequences": true,
 		"stop": true, "temperature": true, "top_p": true, "top_k": true,
-		"max_tokens": true, "max_output_tokens": true, "stream": true,
-		"contents": true, "generation_config": true, "safety_settings": true,
+		"max_tokens": true, "max_output_tokens": true, "max_completion_tokens": true,
+		"stream": true, "contents": true, "generationconfig": true,
+		"systeminstruction": true, "safetysettings": true,
+		"toolconfig": true, "tool_config": true, "text": true,
 	}
 	_ = p
 	return base
+}
+
+// validateToolFlow rejects a conversion whose tool calls and tool results the
+// target encoder could not name, instead of dropping them.
+func validateToolFlow(req llm.LLMRequest, to Protocol) error {
+	if to != ProtocolGemini {
+		return nil
+	}
+	names := make(map[string]string)
+	for i := range req.Messages {
+		for j := range req.Messages[i].Content {
+			c := &req.Messages[i].Content[j]
+			if c.Type != "tool_use" {
+				continue
+			}
+			id := strings.TrimSpace(firstNonEmptyString(c.ToolCallID, c.ID))
+			if id != "" && c.ToolName != "" {
+				names[id] = c.ToolName
+			}
+		}
+	}
+	for i := range req.Messages {
+		for j := range req.Messages[i].Content {
+			c := &req.Messages[i].Content[j]
+			if c.Type != "tool_result" {
+				continue
+			}
+			id := strings.TrimSpace(firstNonEmptyString(c.ToolCallID, c.ID))
+			name := strings.TrimSpace(c.ToolName)
+			if name == "" {
+				name = names[id]
+			}
+			if name == "" {
+				return fmt.Errorf("protocolconvert: tool result %q has no tool name; Gemini functionResponse requires one, so the request cannot be converted", id)
+			}
+		}
+	}
+	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

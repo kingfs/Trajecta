@@ -205,7 +205,7 @@ CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe
 ## 非目标与未实现
 
 - 不做多租户计费、团队权限、集中式云管理与订阅转售。
-- 不在代理转发热路径做跨协议翻译；唯一例外是 `/v1/responses` 的本地 Responses runtime。
+- 转发热路径默认不做跨协议翻译；`router.selection.protocol_conversion: true` 时只在没有可用原生候选时对非流式 chat/messages/gemini 请求做转换（原生候选始终优先），`/v1/responses` 仍由本地 Responses runtime 负责，流式不转换。
 - 没有 `POST /api/router/reload`，也无需手动 reload：管理写成功即自动发布新快照。
 - 没有 `POST /api/channels/{id}/enable`、`/disable` 与 `models:bulk-update`；启停走 `PATCH`，批量启停走 `PATCH /api/channels/{id}/models/batch`。
 - 没有 `GET /api/models/{model}/channels`、`GET /api/models/{model}/trends`、`GET /api/channels/{id}/trends`；覆盖与趋势在模型详情与渠道详情响应内返回。

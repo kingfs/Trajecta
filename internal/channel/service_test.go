@@ -1129,7 +1129,7 @@ func TestDetectModelInterfacesOtherFamilies(t *testing.T) {
 			modelResource:  "publishers/google/models",
 			wireModel:      "gemini-2.5-pro",
 			protocol:       "generate_content",
-			wantPathPrefix: "/v1/publishers/models/gemini-2.5-pro:generateContent",
+			wantPathPrefix: "/v1/publishers/google/models/gemini-2.5-pro:generateContent",
 			responseBody:   `{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}`,
 		},
 	} {

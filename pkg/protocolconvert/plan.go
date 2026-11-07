@@ -82,13 +82,12 @@ type PlanRequest struct {
 	Client Protocol
 	Caps   Capabilities
 	Mode   Mode
-	// Stream rejects conversion. Streaming responses are converted by
-	// aggregating the whole stream and re-encoding it (see
-	// ConvertStreamResponse), which destroys incremental delivery and
-	// bounds neither memory nor latency; the correct answer for a streaming
-	// client on a mismatched upstream is a selection failure, not a
-	// silently buffered stream. This is a correctness guardrail, not a
-	// missing feature: passthrough streaming is unaffected.
+	// Stream rejects conversion. Streaming responses need a frame-by-frame
+	// translator; aggregating the whole stream destroys incremental delivery
+	// and bounds neither memory nor latency, so no such converter is shipped.
+	// The correct answer for a streaming client on a mismatched upstream is a
+	// selection failure, not a silently buffered stream. This is a correctness
+	// guardrail, not a missing feature: passthrough streaming is unaffected.
 	Stream bool
 }
 
@@ -117,6 +116,11 @@ func PlanForRequest(req PlanRequest) (Decision, error) {
 func Plan(client Protocol, caps Capabilities, mode Mode) (Decision, error) {
 	if !client.Valid() {
 		return Decision{}, fmt.Errorf("protocolconvert: invalid client protocol %q", client)
+	}
+	switch mode {
+	case "", ModePassthroughPreferred, ModePassthroughOnly:
+	default:
+		return Decision{}, fmt.Errorf("protocolconvert: unknown conversion mode %q", mode)
 	}
 	client = canonical(client)
 	if caps.Has(client) {

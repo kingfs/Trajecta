@@ -172,6 +172,7 @@ Trajecta 不会把 Anthropic Messages 请求转换成 OpenAI-compatible 请求�
 | `nil_request` | 502 | 选择器收到空请求（内部调用路径） |
 | `unknown` | 502 | 选择失败但没有更具体的归因 |
 | `upstream_error` | 502 | 上游返回错误（报文里是最后一次失败的错误文本） |
+| `protocol_conversion_unsupported` | 400 | 已启用协议转换，但请求含有 IR 无法承载的内容（多模态、思考块、`response_format`、`reasoning_effort` 等）；请求在本地被拒绝，未发往上游 |
 | `upstream_transport_error` | 502 | 转发到上游时的传输层错误 |
 | `local_responses_unavailable` | 502 | `/v1/responses` 需要本地 runtime 但它不可用 |
 | `internal_error` | 500 | 代理内部错误（记录 cassette 失败、序列化失败等） |

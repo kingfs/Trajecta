@@ -1118,6 +1118,12 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		}
 		available = append(available, candidate)
 	}
+	// Passthrough is a hard preference, not a cost heuristic: while any native
+	// candidate is healthy and selectable, conversion candidates stay out of
+	// the comparison. Only when every native candidate is unavailable does the
+	// converting fallback take over, which keeps the common case byte-exact and
+	// makes the choice independent of measured latency.
+	available = preferNativeCandidates(available, rawPath, features)
 	decision.markAvailable(available)
 	if len(available) == 0 {
 		reason := SelectionFailureAllTargetsOpen
@@ -1156,7 +1162,7 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 			// busy and the fast one is idle. Let the normal cost comparison
 			// decide, but keep the binding (do not rebind) so sequential
 			// traffic returns to it once it is free again.
-			if picked, pickedScore := r.pick(available, features, rawPath); picked != bound {
+			if picked, pickedScore := r.pick(available, features); picked != bound {
 				selected = picked
 				score = pickedScore
 				decision.withStickyTarget("spill", stickyFingerprint, nil, "", targetAlias(bound, stickyTargetID))
@@ -1167,11 +1173,11 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 			}
 		} else if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil {
 			selected = bound
-			score = r.pickScore(bound, features, rawPath)
-			if best := r.stickyRebalanceTarget(available, bound, features, rawPath); best != nil {
+			score = r.expectedCost(bound, features)
+			if best := r.stickyRebalanceTarget(available, bound, features); best != nil {
 				r.sticky.Bind(stickyKey, best.RouteTargetID)
 				selected = best
-				score = r.pickScore(best, features, rawPath)
+				score = r.expectedCost(best, features)
 				decision.withStickyTarget("rebalance", stickyFingerprint, best, best.ID, targetAlias(bound, stickyTargetID))
 			} else {
 				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
@@ -1183,7 +1189,7 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
-		selected, score = r.pick(available, features, rawPath)
+		selected, score = r.pick(available, features)
 		if !opts.DryRun && stickyKey != "" && !stickyHeld {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
@@ -1226,18 +1232,11 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 // and throw away its prompt cache. The question here is "is this hardware much
 // slower", not "is it busy right now"; load spreading stays with P2C for new
 // sessions.
-func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures, rawPath string) *Target {
+func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures) *Target {
 	if r.stickyMaxCostRatio <= 0 || bound == nil {
 		return nil
 	}
-	// Latency-only comparison (see comment above), with the conversion
-	// penalty folded in: a converting candidate must be that much faster
-	// in raw latency to justify moving the binding, and a converting
-	// bound target is judged at its effective cost too.
 	boundCost := r.targetLatencyCost(bound, req)
-	if !supportsPath(bound, rawPath, req) {
-		boundCost *= conversionCostPenaltyFactor
-	}
 	var best *Target
 	var bestCost float64
 	for _, candidate := range available {
@@ -1245,9 +1244,6 @@ func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req R
 			continue
 		}
 		candidateCost := r.targetLatencyCost(candidate, req)
-		if !supportsPath(candidate, rawPath, req) {
-			candidateCost *= conversionCostPenaltyFactor
-		}
 		if best == nil || candidateCost < bestCost {
 			best, bestCost = candidate, candidateCost
 		}
@@ -1443,31 +1439,12 @@ func (r *Router) Release(selection *Selection) {
 	selection.Target.onRelease(selection.Request)
 }
 
-// conversionCostPenaltyFactor keeps native passthrough ahead of conversion
-// candidates in cost comparisons: conversion adds parse/encode latency and
-// risks field loss, so a converting target must be roughly twice as fast to
-// win. Among converting candidates themselves the penalty is uniform and
-// does not change their relative order.
-const conversionCostPenaltyFactor = 2.0
-
-// pickScore applies the passthrough preference to expectedCost. A target
-// that serves rawPath natively keeps its measured cost; one that would need
-// protocol conversion is penalised. When conversion is disabled every
-// candidate is native and the penalty never applies.
-func (r *Router) pickScore(target *Target, req RequestFeatures, rawPath string) float64 {
-	score := r.expectedCost(target, req)
-	if rawPath != "" && !supportsPath(target, rawPath, req) {
-		score *= conversionCostPenaltyFactor
-	}
-	return score
-}
-
-func (r *Router) pick(candidates []*Target, req RequestFeatures, rawPath string) (*Target, float64) {
+func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float64) {
 	if len(candidates) == 1 || r.policy == PolicyFirstAvailable {
 		best := candidates[0]
-		bestScore := r.pickScore(best, req, rawPath)
+		bestScore := r.expectedCost(best, req)
 		for _, candidate := range candidates[1:] {
-			candidateScore := r.pickScore(candidate, req, rawPath)
+			candidateScore := r.expectedCost(candidate, req)
 			if compareScore(candidate, candidateScore, best, bestScore) < 0 {
 				best = candidate
 				bestScore = candidateScore
@@ -1476,12 +1453,12 @@ func (r *Router) pick(candidates []*Target, req RequestFeatures, rawPath string)
 		return best, bestScore
 	}
 
-	return r.pickCostAware(candidates, req, rawPath)
+	return r.pickCostAware(candidates, req)
 }
 
-func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures, rawPath string) (*Target, float64) {
+func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Target, float64) {
 	if len(candidates) == 1 {
-		return candidates[0], r.pickScore(candidates[0], req, rawPath)
+		return candidates[0], r.expectedCost(candidates[0], req)
 	}
 	// math/rand/v2's package-level functions are safe for concurrent use
 	// (per-P state), which matters because selectTargets holds the router's
@@ -1489,7 +1466,7 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures, rawPat
 	// A shared *rand.Rand here was a data race on the default policy.
 	if rand.Float64() < r.costs.Epsilon {
 		idx := rand.IntN(len(candidates))
-		return candidates[idx], r.pickScore(candidates[idx], req, rawPath)
+		return candidates[idx], r.expectedCost(candidates[idx], req)
 	}
 
 	aIdx := rand.IntN(len(candidates))
@@ -1499,8 +1476,8 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures, rawPat
 	}
 	a := candidates[aIdx]
 	b := candidates[bIdx]
-	scoreA := r.pickScore(a, req, rawPath)
-	scoreB := r.pickScore(b, req, rawPath)
+	scoreA := r.expectedCost(a, req)
+	scoreB := r.expectedCost(b, req)
 	if compareScore(a, scoreA, b, scoreB) <= 0 {
 		return a, scoreA
 	}
@@ -2319,17 +2296,34 @@ func supportsPath(target *Target, rawPath string, features RequestFeatures) bool
 	return target.Upstream.SupportsRawPath(rawPath, features.ModelName)
 }
 
-// supportsPath is the router's eligibility check: native passthrough first,
-// and only when conversion is enabled a target that can serve the request
-// through protocol conversion. The native check runs first and alone when
-// conversion is disabled, so the default path costs one branch.
-func (r *Router) supportsPath(target *Target, rawPath string, features RequestFeatures) bool {
-	enabled := r != nil && r.conversionEnabled
-	return r.supportsPathWithConversion(target, rawPath, features, enabled)
-}
-
 func (r *Router) supportsPathWithConversion(target *Target, rawPath string, features RequestFeatures, allowConversion bool) bool {
 	return convertAwareSupportsPath(target, rawPath, features, allowConversion)
+}
+
+// preferNativeCandidates drops conversion-only candidates while at least one
+// native candidate is available. It is the hard passthrough-first rule; the
+// candidate list it receives has already been filtered for health, exclusions
+// and model support.
+func preferNativeCandidates(available []*Target, rawPath string, features RequestFeatures) []*Target {
+	if len(available) < 2 {
+		return available
+	}
+	native := 0
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			native++
+		}
+	}
+	if native == 0 || native == len(available) {
+		return available
+	}
+	out := make([]*Target, 0, native)
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 // convertAwareSupportsPath is supportsPath plus the optional conversion
@@ -2346,6 +2340,11 @@ func convertAwareSupportsPath(target *Target, rawPath string, features RequestFe
 	if err != nil {
 		// Endpoints with no conversion vocabulary (models, embeddings,
 		// tokenize) keep the native rule only.
+		return false
+	}
+	// The Responses entrypoint is owned by the local Responses runtime; the
+	// forwarding path never converts it (see the proxy's conversion gate).
+	if client == protocolconvert.ProtocolResponses {
 		return false
 	}
 	decision, err := protocolconvert.PlanForRequest(protocolconvert.PlanRequest{
