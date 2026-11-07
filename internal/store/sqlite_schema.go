@@ -143,6 +143,7 @@ var sqliteSchemaStatements = []string{
 			api_key_ciphertext BLOB NULL,
 			api_key_hint TEXT NOT NULL DEFAULT '',
 			headers_json TEXT NOT NULL DEFAULT '{}',
+			proxy_json TEXT NOT NULL DEFAULT '{}',
 			enabled bool NOT NULL DEFAULT true,
 			priority INTEGER NOT NULL DEFAULT 0,
 			weight REAL NOT NULL DEFAULT 1,
@@ -690,6 +691,9 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "client_harness_tags_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "proxy_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("upstream_exchanges", "request_id", "TEXT NULL"); err != nil {

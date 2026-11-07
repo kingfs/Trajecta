@@ -127,8 +127,8 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	if sources.Tools.WebSearch.Provider != configSourceDefault {
 		t.Fatalf("sources.tools.web_search.provider = %q", sources.Tools.WebSearch.Provider)
 	}
-	if sources.Upstreams.Targets != configSourceNotConfigured || sources.Upstreams.Credentials != configSourceNotConfigured {
-		t.Fatalf("sources.upstreams = %+v", sources.Upstreams)
+	if sources.Upstreams.Targets != configSourceDatabase || sources.Upstreams.Credentials != configSourceDatabase {
+		t.Fatalf("sources.upstreams = %+v, want database", sources.Upstreams)
 	}
 }
 
@@ -165,11 +165,6 @@ tools:
     enabled: true
     provider: searxng
     base_url: https://search.example.com/search?api_key=secret-web
-upstreams:
-  - id: primary
-    upstream:
-      base_url: https://api.example.com/v1?token=secret-token
-      api_key: secret-key
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -259,8 +254,6 @@ upstreams:
 		"tools.web_search.enabled":                               sources.Tools.WebSearch.Enabled,
 		"tools.web_search.provider":                              sources.Tools.WebSearch.Provider,
 		"tools.web_search.base_url":                              sources.Tools.WebSearch.BaseURL,
-		"upstreams.targets":                                      sources.Upstreams.Targets,
-		"upstreams.credentials":                                  sources.Upstreams.Credentials,
 	} {
 		if got != configSourceConfigFile {
 			t.Fatalf("sources[%s] = %q, want %q", name, got, configSourceConfigFile)
@@ -276,7 +269,7 @@ upstreams:
 		t.Fatalf("Execute(text) error = %v", err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "sources:") || !strings.Contains(text, "database.dsn=config_file") || !strings.Contains(text, "responses_server.codex_compat.enabled=config_file") || !strings.Contains(text, "upstreams.targets=config_file") {
+	if !strings.Contains(text, "sources:") || !strings.Contains(text, "database.dsn=config_file") || !strings.Contains(text, "responses_server.codex_compat.enabled=config_file") || !strings.Contains(text, "upstreams.targets=database") {
 		t.Fatalf("text output missing source summary: %q", text)
 	}
 	for _, secret := range []string{"secret-db", "secret-web", "secret-token", "secret-key"} {
@@ -308,18 +301,6 @@ func clearConfigInspectSourceEnv(t *testing.T) {
 		"TRAJECTA_TOOLS_WEB_SEARCH_ENABLED",
 		"TRAJECTA_TOOLS_WEB_SEARCH_PROVIDER",
 		"TRAJECTA_TOOLS_WEB_SEARCH_BASE_URL",
-		"TRAJECTA_UPSTREAM_BASE_URL",
-		"TRAJECTA_UPSTREAM_API_KEY",
-		"TRAJECTA_UPSTREAM_PROVIDER_PRESET",
-		"TRAJECTA_UPSTREAM_API_TYPE",
-		"TRAJECTA_UPSTREAM_MODE",
-		"TRAJECTA_UPSTREAM_PROTOCOL_FAMILY",
-		"TRAJECTA_UPSTREAM_ROUTING_PROFILE",
-		"TRAJECTA_UPSTREAM_API_VERSION",
-		"TRAJECTA_UPSTREAM_DEPLOYMENT",
-		"TRAJECTA_UPSTREAM_PROJECT",
-		"TRAJECTA_UPSTREAM_LOCATION",
-		"TRAJECTA_UPSTREAM_MODEL_RESOURCE",
 	} {
 		t.Setenv(name, "")
 	}

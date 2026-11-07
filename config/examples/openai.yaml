@@ -31,27 +31,7 @@ router:
     open_window: 15s
     failure_threshold: 3
 
-upstreams:
-  - id: "openai"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "list_models"
-    static_models: []
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:OPENAI_API_KEY"
-      provider_preset: "openai"
-      protocol_family: ""
-      routing_profile: ""
-      api_version: ""
-      deployment: ""
-      project: ""
-      location: ""
-      model_resource: ""
-      headers: {}
-
+# Channels are configured in the Monitor and stored in the application database.
 debug:
   output_dir: "./logs/openai"
   mask_key: true

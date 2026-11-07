@@ -10,6 +10,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 )
 
@@ -24,8 +25,12 @@ type LLMRequest struct {
 	Messages []LLMMessage `json:"messages,omitempty"`
 	Tools    []LLMTool    `json:"tools,omitempty"`
 
-	ToolChoice string   `json:"tool_choice,omitempty"`
-	StopSeq    []string `json:"stop_sequences,omitempty"`
+	// ToolChoice is the canonical tool-selection directive. The wire spelling
+	// differs per protocol (a string for Chat Completions, an object for
+	// Messages/Responses, functionCallingConfig for Gemini), so the adapters
+	// parse it into this shape and re-encode it for the target.
+	ToolChoice *ToolChoice `json:"tool_choice,omitempty"`
+	StopSeq    []string    `json:"stop_sequences,omitempty"`
 
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
@@ -63,6 +68,10 @@ type LLMTool struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description,omitempty"`
 	Parameters  JSONSchema `json:"parameters,omitempty"`
+	// Strict asks the provider to enforce the schema exactly. Only Chat
+	// Completions and Responses can carry it; conversion to Anthropic/Gemini
+	// rejects a required strict tool instead of silently relaxing it.
+	Strict *bool `json:"strict,omitempty"`
 }
 
 type LLMSafetyConfig struct {
@@ -109,6 +118,97 @@ type LLMRefusal struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
+
+// ToolChoice is the protocol-neutral tool-selection directive carried by the
+// IR. Mode is one of "auto", "none", "required" or "tool"; Name is set only
+// for Mode == "tool". A nil *ToolChoice means the request did not send one.
+type ToolChoice struct {
+	Mode string `json:"mode,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+// ResponseText concatenates every text block of a candidate. The blocks of one
+// assistant turn are one message, so the join is empty rather than a separator:
+// a separator would invent bytes the upstream never sent.
+func (c LLMCandidate) ResponseText() string {
+	var builder strings.Builder
+	for _, content := range c.Content {
+		if content.Type == "text" {
+			builder.WriteString(content.Text)
+		}
+	}
+	return builder.String()
+}
+
+// ResponseToolCalls returns the candidate's tool calls, merging the two places
+// an adapter may have put them: Candidate.ToolCalls (Chat/Responses/Gemini) and
+// "tool_use" content blocks (Anthropic). The merge is deduplicated by call id
+// and name, so an adapter that populated both does not emit the call twice.
+func (c LLMCandidate) ResponseToolCalls() []LLMToolCall {
+	out := make([]LLMToolCall, 0, len(c.ToolCalls))
+	seen := make(map[string]struct{}, len(c.ToolCalls))
+	add := func(call LLMToolCall) {
+		key := call.ID + "\x00" + call.Name
+		if call.ID == "" && call.Name == "" {
+			key = "\x00\x00" + call.ArgsText
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, call)
+	}
+	for _, call := range c.ToolCalls {
+		add(call)
+	}
+	for _, content := range c.Content {
+		if content.Type != "tool_use" {
+			continue
+		}
+		add(LLMToolCall{
+			ID:       firstNonEmpty(content.ToolCallID, content.ID),
+			Type:     "function",
+			Name:     content.ToolName,
+			Args:     content.ToolArgs,
+			ArgsText: marshalCompactString(content.ToolArgs),
+		})
+	}
+	return out
+}
+
+// ToolResultText renders a tool_result block as the plain text every protocol
+// can carry. A string Result is the common case; a {"value": ...} wrapper is
+// what the Anthropic parser produces for a non-object payload.
+func ToolResultText(content LLMContent) string {
+	if content.Text != "" {
+		return content.Text
+	}
+	if content.ToolResult != nil {
+		if value, ok := content.ToolResult["value"]; ok && len(content.ToolResult) == 1 {
+			if text, ok := value.(string); ok {
+				return text
+			}
+		}
+		return marshalCompactString(content.ToolResult)
+	}
+	return ""
+}
+
+// ToolResultValue is the structured form of a tool result, used by the
+// Responses "function_call_output.output" field and the Gemini
+// functionResponse payload: keep an object/array as-is, render scalars as
+// strings.
+func ToolResultValue(content LLMContent) any {
+	if content.ToolResult != nil {
+		if value, ok := content.ToolResult["value"]; ok && len(content.ToolResult) == 1 {
+			return value
+		}
+		return content.ToolResult
+	}
+	return content.Text
+}
+
+func (c LLMContent) isToolUse() bool { return c.Type == "tool_use" }
 
 type LLMUsage struct {
 	InputTokens  int `json:"input_tokens"`

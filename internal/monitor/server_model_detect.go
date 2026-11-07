@@ -104,11 +104,6 @@ func providerModelDetectAPIHandler(st *store.Store, svc *channel.Service, rtr *r
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel_id is required"})
 			return
 		}
-		if service.ReadOnly() {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "upstreams are managed by YAML credentials; edit YAML and restart instead"})
-			return
-		}
-
 		started := time.Now()
 		if _, err := st.GetChannelConfig(req.ChannelID); err != nil {
 			writeChannelLookupError(w, err, "channel not found")

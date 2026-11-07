@@ -408,3 +408,75 @@ func (f *fakeLoader) LoadAppSettingJSON(_ context.Context, _ string, out any) (b
 	*settings = f.value
 	return true, nil
 }
+
+func TestRequestContextOverridesTheProcessPolicy(t *testing.T) {
+	t.Parallel()
+
+	previous := Current()
+	t.Cleanup(func() { _ = Configure(previous) })
+	if err := Configure(DefaultSettings()); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+
+	channelResolver, err := Compile(Settings{Enabled: true, HTTPProxy: "http://channel-proxy.internal:3128"})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://upstream.example/v1/models", nil)
+	req = req.WithContext(WithResolver(req.Context(), channelResolver))
+	got, err := ProxyFunc(req)
+	if err != nil {
+		t.Fatalf("ProxyFunc() error = %v", err)
+	}
+	if got == nil || got.String() != "http://channel-proxy.internal:3128" {
+		t.Fatalf("ProxyFunc() = %v, want the channel override", got)
+	}
+
+	// A disabled channel resolver leaves the context untouched, so the process
+	// policy still applies (which is the direct default in this test).
+	disabled, err := Compile(DefaultSettings())
+	if err != nil {
+		t.Fatalf("Compile(default) error = %v", err)
+	}
+	req = req.WithContext(WithResolver(context.Background(), disabled))
+	if got, _ := ProxyFunc(req); got != nil {
+		t.Fatalf("ProxyFunc() = %v, want direct when the channel policy is disabled", got)
+	}
+}
+
+func TestClientWithAppliesAResolverAndKeepsBaseSettings(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := Compile(Settings{Enabled: true, HTTPProxy: "http://channel-proxy.internal:3128"})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	base := &http.Client{Timeout: 7 * time.Second}
+	client := ClientWith(base, resolver)
+	if client == base {
+		t.Fatal("ClientWith() returned the base client, want a proxied copy")
+	}
+	if client.Timeout != base.Timeout {
+		t.Fatalf("Timeout = %v, want %v", client.Timeout, base.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("Transport = %T, want *http.Transport", client.Transport)
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://upstream.example/v1", nil)
+	got, err := transport.Proxy(req)
+	if err != nil {
+		t.Fatalf("transport.Proxy() error = %v", err)
+	}
+	if got == nil || got.String() != "http://channel-proxy.internal:3128" {
+		t.Fatalf("transport.Proxy() = %v, want the channel proxy", got)
+	}
+
+	disabled, err := Compile(DefaultSettings())
+	if err != nil {
+		t.Fatalf("Compile(default) error = %v", err)
+	}
+	if got := ClientWith(base, disabled); got != base {
+		t.Fatalf("ClientWith(disabled) = %p, want the base client %p", got, base)
+	}
+}

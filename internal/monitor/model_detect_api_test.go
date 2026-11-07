@@ -472,7 +472,7 @@ func TestProviderModelDetectAPIRejectsBadRequests(t *testing.T) {
 	}
 }
 
-func TestProviderModelDetectAPIMapsStoreConfigAndReadOnlyErrors(t *testing.T) {
+func TestProviderModelDetectAPIMapsStoreConfigErrors(t *testing.T) {
 	t.Run("unresolvable channel config is 500", func(t *testing.T) {
 		st := newModelDetectTestStore(t, "https://example.invalid/v1", "chat_completions", "not-a-family", "", "", "{}", []store.ChannelModelRecord{
 			{Model: "m", Source: "manual", Enabled: true},
@@ -481,18 +481,6 @@ func TestProviderModelDetectAPIMapsStoreConfigAndReadOnlyErrors(t *testing.T) {
 		rr := postProviderModelDetect(t, handler, `{"channel_id":"nim"}`)
 		if rr.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("read-only service is 409", func(t *testing.T) {
-		upstreamServer := modelDetectChatAndResponsesUpstream(t, false, nil)
-		st := newModelDetectTestStore(t, upstreamServer.URL+"/v1", "chat_completions", "openai_compatible", "", "", "{}", []store.ChannelModelRecord{
-			{Model: "m", Source: "manual", Enabled: true},
-		})
-		handler := providerModelDetectAPIHandler(st, channel.NewService(st).WithReadOnly(true), nil)
-		rr := postProviderModelDetect(t, handler, `{"channel_id":"nim"}`)
-		if rr.Code != http.StatusConflict {
-			t.Fatalf("status = %d, want 409; body = %s", rr.Code, rr.Body.String())
 		}
 	})
 }

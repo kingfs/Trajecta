@@ -12,12 +12,14 @@ test("real monitor server renders seeded model and channel data", async ({ page 
   await page.goto("/models");
   await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /gpt-5/i })).toBeVisible();
-  await expect(page.getByText("openai-primary").first()).toBeVisible();
+  // The square names the channel the way the operator configured it; the id is
+  // on the detail page's support row.
+  await expect(page.getByText("OpenAI Primary").first()).toBeVisible();
 
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
   await expect(page.getByText("Channel coverage")).toBeVisible();
-  await expect(page.getByRole("link", { name: /openai-primary manual enabled/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /openai-primary manual callable/i })).toBeVisible();
 
   await page.goto("/channels/openai-primary");
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();

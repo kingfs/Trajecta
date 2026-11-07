@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 const (
@@ -88,22 +89,27 @@ func DefaultHealthThresholds() HealthThresholds {
 }
 
 type Router struct {
-	mu               sync.RWMutex
-	reloadMu         sync.Mutex
-	targets          []*Target
-	modelToTargets   map[string][]*Target
-	policy           string
-	openWindow       time.Duration
-	failureThreshold int64
-	refreshInterval  time.Duration
-	discoveryEnabled bool
-	costs            costConfig
-	sticky           *StickyBindingStore
-	stopCh           chan struct{}
-	stopOnce         sync.Once
-	refreshMu        sync.Mutex
-	refreshCond      *sync.Cond
-	refreshing       bool
+	mu                 sync.RWMutex
+	reloadMu           sync.Mutex
+	targets            []*Target
+	modelToTargets     map[string][]*Target
+	policy             string
+	openWindow         time.Duration
+	failureThreshold   int64
+	refreshInterval    time.Duration
+	discoveryEnabled   bool
+	costs              costConfig
+	sticky             *StickyBindingStore
+	stickyMaxCostRatio float64
+	// conversionEnabled lets candidatesForRequest select an upstream that
+	// cannot serve the client's protocol natively, for later conversion by
+	// the proxy. Off by default (config router.selection.protocol_conversion).
+	conversionEnabled bool
+	stopCh            chan struct{}
+	stopOnce          sync.Once
+	refreshMu         sync.Mutex
+	refreshCond       *sync.Cond
+	refreshing        bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -142,12 +148,11 @@ type Target struct {
 	ModelAliases         map[string]string
 	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
-	Upstream             upstream.ResolvedUpstream
-
-	// legacyPassthrough keeps the pre-`upstreams` single-upstream YAML form
-	// working: that form had no way to declare a model list, so an undeclared
-	// name is forwarded. Database-managed channels never set this.
-	legacyPassthrough bool
+	// allowUndeclaredModels is set only for the in-memory single-upstream
+	// projection (no upstreams list). Database-managed channels always declare
+	// their models and stay strict.
+	allowUndeclaredModels bool
+	Upstream              upstream.ResolvedUpstream
 
 	mu                  sync.Mutex
 	inflight            int64
@@ -386,19 +391,32 @@ func New(cfg *config.Config) (*Router, error) {
 	}
 
 	r := &Router{
-		modelToTargets:   make(map[string][]*Target),
-		policy:           normalizePolicy(cfg.Router.Selection.Policy),
-		openWindow:       cfg.Router.Selection.OpenWindow,
-		failureThreshold: cfg.Router.Selection.FailureThreshold,
-		refreshInterval:  cfg.Router.ModelDiscovery.RefreshInterval,
-		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
-		costs:            defaultCostConfig(),
-		sticky:           NewStickyBindingStore(defaultStickyBindingTTL),
-		stopCh:           make(chan struct{}),
+		modelToTargets:     make(map[string][]*Target),
+		policy:             normalizePolicy(cfg.Router.Selection.Policy),
+		openWindow:         cfg.Router.Selection.OpenWindow,
+		failureThreshold:   cfg.Router.Selection.FailureThreshold,
+		refreshInterval:    cfg.Router.ModelDiscovery.RefreshInterval,
+		discoveryEnabled:   cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
+		costs:              defaultCostConfig(),
+		stickyMaxCostRatio: defaultStickyMaxCostRatio,
+		conversionEnabled:  cfg.Router.Selection.ProtocolConversion,
+		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
 	if cfg.Router.Selection.Epsilon > 0 {
 		r.costs.Epsilon = cfg.Router.Selection.Epsilon
+	}
+	// nil means enabled: a deployment that never mentions sticky keeps the
+	// historical behaviour. false is the explicit opt-out, not a missing value.
+	if cfg.Router.Selection.Sticky == nil || *cfg.Router.Selection.Sticky {
+		stickyTTL := cfg.Router.Selection.StickyTTL
+		if stickyTTL <= 0 {
+			stickyTTL = defaultStickyBindingTTL
+		}
+		r.sticky = NewStickyBindingStore(stickyTTL)
+	}
+	if ratio := cfg.Router.Selection.StickyMaxCostRatio; ratio != nil {
+		r.stickyMaxCostRatio = *ratio
 	}
 	if r.openWindow <= 0 {
 		r.openWindow = 15 * time.Second
@@ -417,9 +435,9 @@ func New(cfg *config.Config) (*Router, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.legacySingleUpstream(cfg) {
+	if len(cfg.Upstreams) == 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		for _, target := range targets {
-			target.legacyPassthrough = true
+			target.allowUndeclaredModels = true
 		}
 	}
 	r.targets = targets
@@ -896,6 +914,22 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 }
 
 func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil {
+		return false
+	}
+	return r.hasSelectableCandidateWithBody(req, body, r.conversionEnabled)
+}
+
+// HasSelectableNativeCandidateWithBody reports whether a target can serve
+// this request natively (no protocol conversion). The local Responses
+// runtime uses it for its chat backend check: that runtime forwards a
+// Chat Completions body verbatim and never converts, so a target that could
+// only serve it through protocol conversion is not a usable backend.
+func (r *Router) HasSelectableNativeCandidateWithBody(req *http.Request, body []byte) bool {
+	return r.hasSelectableCandidateWithBody(req, body, false)
+}
+
+func (r *Router) hasSelectableCandidateWithBody(req *http.Request, body []byte, allowConversion bool) bool {
 	if r == nil || req == nil {
 		return false
 	}
@@ -904,7 +938,7 @@ func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) 
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, allowConversion)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.canSelect(now, model) {
@@ -923,7 +957,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	model := features.ModelName
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	candidates := r.candidatesForRequest(rawPath, model, features, false)
+	candidates := r.candidatesForRequestWithConversion(rawPath, model, features, false, false)
 	now := time.Now()
 	for _, candidate := range candidates {
 		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
@@ -994,7 +1028,7 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 		if target == nil {
 			continue
 		}
-		decision := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
+		decision := target.candidateDecision(rawPath, model, now, features, requireNativeResponses, r.conversionEnabled)
 		if !decision.SupportsPath || !decision.SupportsModel || !decision.SupportsTools ||
 			blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 			continue
@@ -1039,11 +1073,12 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		stickyTargetID    string
 		hasStickyBinding  bool
 	)
-	if !opts.DryRun {
+	if !opts.DryRun && r.sticky != nil {
 		// Bind per (session, model): the binding chooses the upstream that keeps a
 		// model's prompt cache warm, so two models on one session must not overwrite
 		// each other's target. The raw session value never leaves this function; the
-		// decision trace only carries its fingerprint.
+		// decision trace only carries its fingerprint. A nil store means the operator
+		// turned affinity off, in which case no sticky state is read or written at all.
 		stickyKey = composeStickyKey(extractStickyKey(req, body), model)
 		stickyFingerprint = stickyKeyFingerprint(stickyKey)
 		stickyTargetID, hasStickyBinding = r.sticky.Lookup(stickyKey)
@@ -1083,6 +1118,12 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		}
 		available = append(available, candidate)
 	}
+	// Passthrough is a hard preference, not a cost heuristic: while any native
+	// candidate is healthy and selectable, conversion candidates stay out of
+	// the comparison. Only when every native candidate is unavailable does the
+	// converting fallback take over, which keeps the common case byte-exact and
+	// makes the choice independent of measured latency.
+	available = preferNativeCandidates(available, rawPath, features)
 	decision.markAvailable(available)
 	if len(available) == 0 {
 		reason := SelectionFailureAllTargetsOpen
@@ -1100,21 +1141,56 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 
 	var selected *Target
 	var score float64
+	stickyTarget := (*Target)(nil)
 	if hasStickyBinding {
-		if stickyTarget := findTargetByRouteTargetID(available, stickyTargetID); stickyTarget != nil {
-			selected = stickyTarget
-			score = r.expectedCost(selected, features)
-			decision.withStickyTarget("hit", stickyFingerprint, stickyTarget, stickyTarget.ID, "")
+		stickyTarget = findTargetByRouteTargetID(candidates, stickyTargetID)
+	}
+	// An exclusion describes this attempt, not the session: the proxy passes the
+	// targets it already tried. Keeping the binding when the excluded target is
+	// the bound one stops a single transient upstream error from rewriting the
+	// conversation onto the fallback for the whole TTL; if the target is really
+	// down, its circuit breaker opens and the normal break/rebind path takes over.
+	stickyHeld := hasStickyBinding && stickyTarget != nil && stringSliceContains(excludeIDs, stickyTarget.ID)
+	switch {
+	case stickyHeld:
+		decision.withStickyTarget("hold", stickyFingerprint, nil, "", targetAlias(stickyTarget, stickyTargetID))
+	case hasStickyBinding:
+		if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil && stickyTargetBusy(bound) && len(available) > 1 {
+			// The bound target is already executing a request. A concurrent
+			// sibling must not queue behind it just to keep the prompt cache:
+			// this is exactly the heterogeneous pair where the slow target is
+			// busy and the fast one is idle. Let the normal cost comparison
+			// decide, but keep the binding (do not rebind) so sequential
+			// traffic returns to it once it is free again.
+			if picked, pickedScore := r.pick(available, features); picked != bound {
+				selected = picked
+				score = pickedScore
+				decision.withStickyTarget("spill", stickyFingerprint, nil, "", targetAlias(bound, stickyTargetID))
+			} else {
+				selected = bound
+				score = pickedScore
+				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
+			}
+		} else if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil {
+			selected = bound
+			score = r.expectedCost(bound, features)
+			if best := r.stickyRebalanceTarget(available, bound, features); best != nil {
+				r.sticky.Bind(stickyKey, best.RouteTargetID)
+				selected = best
+				score = r.expectedCost(best, features)
+				decision.withStickyTarget("rebalance", stickyFingerprint, best, best.ID, targetAlias(bound, stickyTargetID))
+			} else {
+				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
+			}
 		} else {
-			stickyTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
 			decision.withStickyTarget("break", stickyFingerprint, stickyTarget, targetAlias(stickyTarget, stickyTargetID), targetAlias(stickyTarget, stickyTargetID))
 		}
-	} else if stickyKey != "" {
+	case stickyKey != "":
 		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
 		selected, score = r.pick(available, features)
-		if !opts.DryRun && stickyKey != "" {
+		if !opts.DryRun && stickyKey != "" && !stickyHeld {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
 				previousTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
@@ -1141,6 +1217,87 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		Decision:       decision.withSelectedTarget(selected, score),
 		Credential:     credentialDecisionFromTarget(selected),
 	}, nil
+}
+
+// stickyRebalanceTarget reports whether the session's bound target is so much
+// slower than the best alternative that keeping the binding is worse than
+// losing the upstream prompt cache. It answers nil when the check is disabled,
+// there is no alternative, or the bound target is still within the configured
+// factor. The comparison is a strict factor rather than a plain comparison, so
+// an equal pair keeps its binding.
+//
+// The comparison deliberately uses the measured latency part of expectedCost
+// (see targetLatencyCost) rather than the full cost: a momentary queue on the
+// bound target - the inflight terms of the full cost - must not move a session
+// and throw away its prompt cache. The question here is "is this hardware much
+// slower", not "is it busy right now"; load spreading stays with P2C for new
+// sessions.
+func (r *Router) stickyRebalanceTarget(available []*Target, bound *Target, req RequestFeatures) *Target {
+	if r.stickyMaxCostRatio <= 0 || bound == nil {
+		return nil
+	}
+	boundCost := r.targetLatencyCost(bound, req)
+	var best *Target
+	var bestCost float64
+	for _, candidate := range available {
+		if candidate == nil || candidate == bound {
+			continue
+		}
+		candidateCost := r.targetLatencyCost(candidate, req)
+		if best == nil || candidateCost < bestCost {
+			best, bestCost = candidate, candidateCost
+		}
+	}
+	if best == nil || bestCost*r.stickyMaxCostRatio >= boundCost {
+		return nil
+	}
+	return best
+}
+
+// targetLatencyCost is the latency component of expectedCost: measured TTFT and
+// total duration for this request shape, scaled by the target's declared
+// capacity. It is only used to decide whether a sticky binding is worth
+// keeping; the forwarding path keeps using the full expectedCost.
+func (r *Router) targetLatencyCost(target *Target, req RequestFeatures) float64 {
+	target.mu.Lock()
+	ttftFast := target.ttftFastMs
+	ttftSlow := target.ttftSlowMs
+	latencyFast := target.reqLatencyFastMs
+	latencySlow := target.reqLatencySlowMs
+	capacity := math.Max(1, target.Weight*target.CapacityHint)
+	target.mu.Unlock()
+
+	queuePressure := 0.35*norm(ttftFast, 1200) +
+		0.20*maxFloat(0, norm(ttftFast, 1200)-norm(ttftSlow, 1200))
+	decodePressure := 0.35*norm(latencyFast, 4000) +
+		0.25*maxFloat(0, norm(latencyFast, 4000)-norm(latencySlow, 4000))
+	cost := (queuePressure*estimatePrefillCost(req) + decodePressure*estimateDecodeCost(req)) / capacity
+	if cost < r.costs.MinCostFloor {
+		return r.costs.MinCostFloor
+	}
+	return cost
+}
+
+// stickyTargetBusy reports whether the bound target is already executing at
+// least one request. The counter is maintained by onStart/onFinish/onRelease,
+// so a concurrent sibling sees it, while a sequential request after the previous
+// one finished does not.
+func stickyTargetBusy(target *Target) bool {
+	if target == nil {
+		return false
+	}
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return target.inflight > 0
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func findTargetByRouteTargetID(targets []*Target, routeTargetID string) *Target {
@@ -1173,7 +1330,7 @@ func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []s
 	}
 	now := time.Now()
 	for _, target := range r.targets {
-		candidate := target.candidateDecision(rawPath, model, now, features, requireNativeResponses)
+		candidate := target.candidateDecision(rawPath, model, now, features, requireNativeResponses, r.conversionEnabled)
 		if _, excluded := excludeSet[target.ID]; excluded {
 			candidate.Excluded = true
 			candidate.Selectable = false
@@ -1328,10 +1485,14 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 }
 
 func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures, requireNativeResponses bool) []*Target {
+	return r.candidatesForRequestWithConversion(rawPath, model, features, requireNativeResponses, r.conversionEnabled)
+}
+
+func (r *Router) candidatesForRequestWithConversion(rawPath string, model string, features RequestFeatures, requireNativeResponses bool, allowConversion bool) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1345,7 +1506,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
 				continue
 			}
-			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) &&
+			if r.supportsPathWithConversion(target, rawPath, features, allowConversion) && supportsRequestFeatures(target, features) &&
 				!blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
 				candidates = append(candidates, target)
 			}
@@ -1363,14 +1524,10 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		if target.configuredModelsOnly && model != "" {
 			continue
 		}
-		// The legacy single-upstream YAML form keeps its historical passthrough:
-		// it has no model list to declare, and turning it strict would break an
-		// existing deployment silently. New configuration uses `upstreams[]`,
-		// which is strict.
-		if model != "" && !target.legacyPassthrough {
+		if model != "" && !target.allowUndeclaredModels {
 			continue
 		}
-		if !supportsPath(target, rawPath, features) || !supportsRequestFeatures(target, features) {
+		if !r.supportsPathWithConversion(target, rawPath, features, allowConversion) || !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if blockedByNativeResponsesRequirement(target, model, requireNativeResponses) {
@@ -1379,28 +1536,6 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		fallback = append(fallback, target)
 	}
 	return fallback
-}
-
-// legacySingleUpstream reports whether the configuration uses the pre-`upstreams`
-// single `upstream:` block, which has no per-target model list.
-func (r *Router) legacySingleUpstream(cfg *config.Config) bool {
-	return cfg != nil && len(cfg.Upstreams) == 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != ""
-}
-
-// LegacyPassthrough reports whether at least one target accepts undeclared model
-// names because the deployment still uses the legacy single-upstream form.
-func (r *Router) LegacyPassthrough() bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, target := range r.targets {
-		if target.legacyPassthrough {
-			return true
-		}
-	}
-	return false
 }
 
 // noCandidateFailure explains why no target can serve a named model without
@@ -1473,14 +1608,11 @@ func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 	for _, model := range target.UpstreamModelNames {
 		modelSet[strings.ToLower(model)] = struct{}{}
 	}
-	if inferred := inferConfiguredModel(target.Upstream); inferred != "" {
-		modelSet[strings.ToLower(inferred)] = struct{}{}
-	}
 
 	status := "static"
 	var discoverErr error
 	if target.ModelDiscovery != ModelDiscoveryDisabled && target.ModelDiscovery != ModelDiscoveryStaticOnly {
-		discovered, err := upstream.DiscoverModelsResolved(target.Upstream, nil)
+		discovered, err := upstream.DiscoverModelsResolved(target.Upstream, target.Upstream.HTTPClient(nil))
 		if err != nil {
 			discoverErr = err
 			status = "error"
@@ -1786,7 +1918,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	return true
 }
 
-func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures, requireNativeResponses bool) CandidateDecision {
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures, requireNativeResponses bool, conversionEnabled bool) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1810,7 +1942,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		Priority:       t.Priority,
 		Weight:         t.Weight,
 		HealthState:    t.healthState,
-		SupportsPath:   supportsPath(t, rawPath, features),
+		SupportsPath:   convertAwareSupportsPath(t, rawPath, features, conversionEnabled),
 		SupportsModel:  t.supportsModelLocked(model),
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
@@ -1903,10 +2035,8 @@ func (t *Target) supportsModelLocked(model string) bool {
 	if modelKey == "" || modelKey == ModelDiscoveryListModels {
 		return true
 	}
-	if _, ok := t.models[modelKey]; ok {
-		return true
-	}
-	return t.legacyPassthrough
+	_, ok := t.models[modelKey]
+	return ok || t.allowUndeclaredModels
 }
 
 func (t *Target) onStart(req RequestFeatures) {
@@ -2166,6 +2296,66 @@ func supportsPath(target *Target, rawPath string, features RequestFeatures) bool
 	return target.Upstream.SupportsRawPath(rawPath, features.ModelName)
 }
 
+func (r *Router) supportsPathWithConversion(target *Target, rawPath string, features RequestFeatures, allowConversion bool) bool {
+	return convertAwareSupportsPath(target, rawPath, features, allowConversion)
+}
+
+// preferNativeCandidates drops conversion-only candidates while at least one
+// native candidate is available. It is the hard passthrough-first rule; the
+// candidate list it receives has already been filtered for health, exclusions
+// and model support.
+func preferNativeCandidates(available []*Target, rawPath string, features RequestFeatures) []*Target {
+	if len(available) < 2 {
+		return available
+	}
+	native := 0
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			native++
+		}
+	}
+	if native == 0 || native == len(available) {
+		return available
+	}
+	out := make([]*Target, 0, native)
+	for _, target := range available {
+		if supportsPath(target, rawPath, features) {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// convertAwareSupportsPath is supportsPath plus the optional conversion
+// fallback. It is a free function because candidateDecision (a Target
+// method) needs the same answer for the inspector's dry run.
+func convertAwareSupportsPath(target *Target, rawPath string, features RequestFeatures, conversionEnabled bool) bool {
+	if supportsPath(target, rawPath, features) {
+		return true
+	}
+	if !conversionEnabled || target == nil {
+		return false
+	}
+	client, err := protocolconvert.DetectFromPath(rawPath)
+	if err != nil {
+		// Endpoints with no conversion vocabulary (models, embeddings,
+		// tokenize) keep the native rule only.
+		return false
+	}
+	// The Responses entrypoint is owned by the local Responses runtime; the
+	// forwarding path never converts it (see the proxy's conversion gate).
+	if client == protocolconvert.ProtocolResponses {
+		return false
+	}
+	decision, err := protocolconvert.PlanForRequest(protocolconvert.PlanRequest{
+		Client: client,
+		Caps:   target.Upstream.ProtocolCapabilitiesForModel(features.ModelName),
+		Mode:   protocolconvert.ModePassthroughPreferred,
+		Stream: features.Stream,
+	})
+	return err == nil && !decision.Reject()
+}
+
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 	if target == nil {
 		return false
@@ -2205,10 +2395,18 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
+		// A body that cannot be parsed cannot be proven non-streaming.
+		// Treat it as streaming so protocol conversion stays disabled for
+		// it (fail closed): converting an opaque body would either fail
+		// in the adapter or buffer an SSE stream as JSON.
+		features.Stream = true
 		return features
 	}
 	if stream, ok := payload["stream"].(bool); ok {
 		features.Stream = stream
+	}
+	if streamStr, ok := payload["stream"].(string); ok {
+		features.Stream = streamStr == "true" || streamStr == "True" || streamStr == "TRUE" || streamStr == "1"
 	}
 	// Google's generateContent family signals streaming in the request line
 	// (`:streamGenerateContent`), not in the body, and the proxy answers it by streaming: it is
@@ -2272,14 +2470,6 @@ func parseNumber(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func inferConfiguredModel(resolved upstream.ResolvedUpstream) string {
-	model := llm.ModelFromPath("/" + strings.Trim(resolved.ModelResource, "/"))
-	if model != "" {
-		return model
-	}
-	return ""
 }
 
 func readAndRestoreBody(req *http.Request) ([]byte, error) {

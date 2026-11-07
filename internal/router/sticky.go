@@ -15,6 +15,13 @@ import (
 const (
 	defaultStickyBindingTTL = time.Hour
 
+	// defaultStickyMaxCostRatio is how much more expensive the bound target may
+	// be before a session is moved to the cheapest alternative. Two leaves
+	// ordinary jitter and prompt-size variance alone while still breaking a
+	// binding to hardware that is several times slower. Operators can raise,
+	// lower or disable the check with router.selection.sticky_max_cost_ratio.
+	defaultStickyMaxCostRatio = 2.0
+
 	// stickyKeySeparator joins the session value and the model name in one
 	// binding key. It is a control character no client id or model name
 	// contains, so the composed key cannot collide with a bare session value.

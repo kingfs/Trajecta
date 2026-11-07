@@ -75,7 +75,7 @@ token 管理与 Monitor 登录的完整说明见 [Monitor 使用指南](./MONITO
 ### 路由与失败
 
 - `query_routing_decisions`：单条 trace 的路由决策事件；路由语义与候选过滤规则见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)。
-- `query_sticky_routing`：查带 `routing.sticky.*` cassette 事件的 trace；支持 `status`（`hit`、`miss`、`bind`、`break`）、`upstream_id`、`previous_upstream_id`、`sticky_key_fingerprint`。
+- `query_sticky_routing`：查带 `routing.sticky.*` cassette 事件的 trace；支持 `status`（`hit`、`miss`、`bind`、`break`、`hold`、`spill`、`rebalance`）、`upstream_id`、`previous_upstream_id`、`sticky_key_fingerprint`。
 - `query_failures`：从分页 trace 扫描中返回失败请求；过滤项是 `page`、`page_size`、`provider`、`model`、`q`。
 - `summarize_failure_clusters`：按 reason、status、model、provider、endpoint、upstream、route target 聚类失败，并给出 top failures；`limit` 控制每组条数（默认 10）。
 

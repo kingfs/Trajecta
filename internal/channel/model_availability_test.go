@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/store"
 )
 
@@ -379,25 +378,20 @@ func TestBootstrapStaticModelsSurviveSuccessfulSync(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	cfg := &config.Config{Upstreams: []config.UpstreamTargetConfig{
-		{
-			ID:             "pin",
-			ModelDiscovery: "list_models",
-			StaticModels:   []string{"pinned-model"},
-			Upstream: config.UpstreamConfig{
-				BaseURL:        upstreamServer.URL + "/v1",
-				ProviderPreset: "openai",
-			},
-		},
-	}}
-	svc := NewService(st)
-	imported, err := svc.BootstrapFromConfig(cfg)
-	if err != nil {
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "pin",
+		Name:           "pin",
+		BaseURL:        upstreamServer.URL + "/v1",
+		ProviderPreset: "openai",
+		ModelDiscovery: "list_models",
+		Enabled:        true,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if imported != 1 {
-		t.Fatalf("BootstrapFromConfig() = %d, want 1", imported)
+	if _, err := st.UpsertChannelModel("pin", store.ChannelModelRecord{Model: "pinned-model", Source: "static", Enabled: true}); err != nil {
+		t.Fatal(err)
 	}
+	svc := NewService(st)
 
 	enable := true
 	result, err := svc.ProbeWithOptions("pin", ProbeOptions{EnableDiscovered: &enable})

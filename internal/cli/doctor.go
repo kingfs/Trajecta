@@ -17,10 +17,10 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/appdbmigrate"
+	"github.com/kingfs/Trajecta/internal/channel"
 	appconfig "github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
-	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/spf13/cobra"
 )
 
@@ -199,18 +199,6 @@ func buildDoctorConfigSummary(configPath string, cfg *appconfig.Config) doctorCo
 		Tools:           inspect.Tools,
 		ProviderProbe:   inspect.ProviderProbe,
 	}
-	for _, target := range cfg.EffectiveUpstreams() {
-		summary.Upstreams.Targets++
-		enabled := true
-		if target.Enabled != nil {
-			enabled = *target.Enabled
-		}
-		if enabled {
-			summary.Upstreams.EnabledTargets++
-		}
-		summary.Upstreams.Credentials += len(target.EffectiveCredentials())
-		summary.Upstreams.StaticModels += len(target.StaticModels)
-	}
 	return summary
 }
 
@@ -280,23 +268,15 @@ func checkDoctorDatabaseMigration(cfg *appconfig.Config, checkDB bool) doctorChe
 // for models without a native Responses upstream, so a missing backend is a
 // warning: /v1/chat/completions and /v1/messages still work, and so does
 // /v1/responses for natively served models.
-func checkDoctorResponsesServerBackend(cfg *appconfig.Config) doctorCheck {
-	if err := router.ValidateLocalResponsesServerBackendConfig(cfg); err != nil {
-		return doctorCheck{
-			Name:    "responses_server.backend",
-			Status:  doctorStatusWarn,
-			Message: "local Responses execution mode has no enabled OpenAI-compatible chat-completions backend; only natively served Responses models will work",
-			Detail: map[string]any{
-				"error":                err.Error(),
-				"router_config_source": "config-file-only",
-			},
-		}
-	}
+func checkDoctorResponsesServerBackend(_ *appconfig.Config) doctorCheck {
+	// Channels live in the application database, so a config-only doctor run
+	// cannot see whether a chat-completions backend exists. serve evaluates the
+	// database projection after it opens the store and logs a warning there.
 	return doctorCheck{
 		Name:    "responses_server.backend",
 		Status:  doctorStatusPass,
-		Message: "responses server backend is valid",
-		Detail:  map[string]any{"router_config_source": "config-file-only"},
+		Message: "channel routing is database-backed; the local Responses backend is evaluated at serve startup",
+		Detail:  map[string]any{"router_config_source": "application_database"},
 	}
 }
 
@@ -1038,23 +1018,16 @@ func doctorMCPToolServerLabel(idx int, server appconfig.MCPToolServerConfig) str
 	return fmt.Sprintf("servers[%d]", idx)
 }
 
-func checkDoctorProviderConfig(cfg *appconfig.Config) doctorCheck {
-	summary := buildDoctorConfigSummary("", cfg).Upstreams
-	status := doctorStatusPass
-	message := "provider configuration is present"
-	if summary.EnabledTargets == 0 {
-		status = doctorStatusWarn
-		message = "no enabled upstream targets are configured"
-	}
+func checkDoctorProviderConfig(_ *appconfig.Config) doctorCheck {
 	return doctorCheck{
 		Name:    "provider_config.basic_count",
-		Status:  status,
-		Message: message,
+		Status:  doctorStatusPass,
+		Message: "provider channels are stored in the application database",
 		Detail: map[string]any{
-			"targets":         summary.Targets,
-			"enabled_targets": summary.EnabledTargets,
-			"credentials":     summary.Credentials,
-			"static_models":   summary.StaticModels,
+			"source":        "application_database",
+			"targets":       "read_by_serve_and_provider_probe",
+			"credentials":   "sealed_channel_secrets",
+			"static_models": "channel_models",
 		},
 	}
 }
@@ -1104,12 +1077,28 @@ func checkDoctorProviderProbe(cfg *appconfig.Config, probeProviders bool) doctor
 	if !probeProviders {
 		return doctorCheck{Name: "provider_probe.network", Status: doctorStatusPass, Message: "provider network probe skipped", Detail: map[string]any{"enabled": false}}
 	}
-	targets, err := providerProbeTargets(*cfg, "")
+	st, err := appdb.Open(cfg)
 	if err != nil {
 		return doctorCheck{
 			Name:    "provider_probe.network",
 			Status:  doctorStatusWarn,
-			Message: "provider network probe requested but no enabled provider target with base_url is configured",
+			Message: "provider network probe requested but the application database could not be opened",
+			Detail: map[string]any{
+				"enabled":          true,
+				"network_requests": false,
+				"error":            redactDoctorMessage(err.Error()),
+			},
+		}
+	}
+	defer func() { _ = st.Close() }()
+	client := &http.Client{Timeout: 10 * time.Second}
+	svc := channel.NewService(st).WithHTTPClient(client)
+	report, err := svc.ProviderProbeReport(context.Background(), channel.ProviderProbeReportOptions{})
+	if err != nil {
+		return doctorCheck{
+			Name:    "provider_probe.network",
+			Status:  doctorStatusWarn,
+			Message: "provider network probe requested but no enabled channel with base_url is configured",
 			Detail: map[string]any{
 				"enabled":          true,
 				"network_requests": false,
@@ -1118,9 +1107,6 @@ func checkDoctorProviderProbe(cfg *appconfig.Config, probeProviders bool) doctor
 			},
 		}
 	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	report := providerprobe.ProbeBatch(context.Background(), targets, client)
 	report = redactDoctorProviderProbeReport(report)
 	summary := summarizeDoctorProviderProbe(report)
 	status := doctorStatusPass
@@ -1136,6 +1122,7 @@ func checkDoctorProviderProbe(cfg *appconfig.Config, probeProviders bool) doctor
 		Detail: map[string]any{
 			"enabled":          true,
 			"network_requests": true,
+			"source":           "application_database",
 			"summary":          summary,
 			"reports":          report.Reports,
 		},

@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
@@ -775,6 +776,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), monitorVerifier))
+	// The model square is the configuration-facing list: every model an enabled
+	// channel exposes, with its catalogue card. /api/models above stays the
+	// traffic-facing list and is unchanged.
+	mux.HandleFunc("/api/model-square", monitorAuthRequired(modelSquareAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks", monitorAuthRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks/", monitorAuthRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
@@ -1011,6 +1016,10 @@ func outputModalitiesFromCapabilities(features llmspecs.Capability) []string {
 func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, st *store.Store) (providerSetupResponse, error) {
 	baseURL, normalizationWarnings := normalizeSetupBaseURL(ctx, req)
 	req.BaseURL = baseURL
+	proxySettings := netproxy.DefaultSettings()
+	if req.Proxy != nil {
+		proxySettings = req.Proxy.Normalize()
+	}
 	report, probeErr := providerprobe.Probe(ctx, providerprobe.ProbeTarget{
 		ProviderID:              strings.TrimSpace(valueOrExisting(req.ID, req.Name)),
 		BaseURL:                 strings.TrimSpace(req.BaseURL),
@@ -1018,6 +1027,7 @@ func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, s
 		Headers:                 setupPlainHeaders(req.Headers),
 		SpecifiedAPIType:        strings.TrimSpace(req.APIType),
 		SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+		Proxy:                   proxySettings,
 	}, nil)
 	normalizedReq := mergeProviderSetupSuggestions(req.channelUpsertRequest, report)
 	record := channelRecordFromRequest(normalizedReq, store.ChannelConfigRecord{})
@@ -1081,6 +1091,10 @@ func normalizeSetupBaseURL(ctx context.Context, req providerSetupRequest) (strin
 }
 
 func setupModelsReachable(ctx context.Context, req providerSetupRequest, baseURL string) error {
+	proxySettings := netproxy.DefaultSettings()
+	if req.Proxy != nil {
+		proxySettings = req.Proxy.Normalize()
+	}
 	resolved, err := upstream.Resolve(config.UpstreamConfig{
 		BaseURL:        baseURL,
 		ApiKey:         strings.TrimSpace(req.APIKey),
@@ -1088,11 +1102,12 @@ func setupModelsReachable(ctx context.Context, req providerSetupRequest, baseURL
 		ProviderPreset: strings.TrimSpace(req.ProviderPreset),
 		ProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
 		APIType:        strings.TrimSpace(req.APIType),
+		Proxy:          proxySettings,
 	})
 	if err != nil {
 		return err
 	}
-	_, err = upstream.DiscoverModelsResolved(resolved, nil)
+	_, err = upstream.DiscoverModelsResolved(resolved, resolved.HTTPClient(nil))
 	return err
 }
 

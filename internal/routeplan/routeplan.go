@@ -31,6 +31,7 @@ const (
 	UpstreamEndpointChatCompletions  UpstreamEndpoint = "chat_completions"
 	UpstreamEndpointResponses        UpstreamEndpoint = "responses"
 	UpstreamEndpointAnthropicMessage UpstreamEndpoint = "anthropic_messages"
+	UpstreamEndpointGenerateContent  UpstreamEndpoint = "generate_content"
 )
 
 type ResponsesStrategy string
@@ -89,6 +90,16 @@ type RoutePlan struct {
 	Strategy                ResponsesStrategy        `json:"strategy,omitempty"`
 	Reason                  string                   `json:"reason,omitempty"`
 	FallbacksConsidered     []PlanCandidate          `json:"fallbacks_considered,omitempty"`
+	// ProtocolConversion is set when the selected candidate serves the request
+	// only through protocol conversion; UpstreamEndpoint then names the wire
+	// protocol that is actually called.
+	ProtocolConversion *ProtocolConversion `json:"protocol_conversion,omitempty"`
+}
+
+// ProtocolConversion describes a selected passthrough-first conversion.
+type ProtocolConversion struct {
+	ClientProtocol   string `json:"client_protocol,omitempty"`
+	UpstreamProtocol string `json:"upstream_protocol,omitempty"`
 }
 
 type PlanCandidate struct {

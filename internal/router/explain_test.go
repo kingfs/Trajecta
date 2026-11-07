@@ -534,3 +534,57 @@ func TestExplainIsSideEffectFree(t *testing.T) {
 		t.Fatalf("sticky bindings = %d after a real selection, want 1 (the dry run must be what skips the binding)", bindings)
 	}
 }
+
+// TestExplainAnnotatesProtocolConversion pins the inspector's conversion
+// visibility: a Messages entrypoint served by a Chat-only target must name the
+// wire endpoint it will actually call and report the conversion on the plan.
+func TestExplainAnnotatesProtocolConversion(t *testing.T) {
+	cfg := &config.Config{Upstreams: []config.UpstreamTargetConfig{
+		explainTestTarget("chat", 100, "https://chat.example/v1", "chat_completions", "gpt-5"),
+	}}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	cfg.Router.Selection.ProtocolConversion = true
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	explained := rtr.Explain(ExplainRequest{
+		RawPath: "/v1/messages",
+		Body:    []byte(`{"model":"gpt-5","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if explained.Error != "" {
+		t.Fatalf("Explain() error = %q", explained.Error)
+	}
+	plan := explained.Result.Plan
+	if plan.ProtocolConversion == nil {
+		t.Fatalf("plan did not report the conversion: %+v", plan)
+	}
+	if plan.ProtocolConversion.ClientProtocol != "messages" || plan.ProtocolConversion.UpstreamProtocol != "chat_completions" {
+		t.Fatalf("protocol_conversion = %+v", plan.ProtocolConversion)
+	}
+	if plan.UpstreamEndpoint != routeplan.UpstreamEndpointChatCompletions {
+		t.Fatalf("upstream_endpoint = %q, want chat_completions", plan.UpstreamEndpoint)
+	}
+	if plan.ClientEntrypoint != routeplan.EntrypointAnthropicMessage {
+		t.Fatalf("client_entrypoint = %q, want anthropic_messages", plan.ClientEntrypoint)
+	}
+	for _, candidate := range explained.Result.Candidates {
+		if candidate.CandidateID == "chat" && candidate.UpstreamEndpoint != routeplan.UpstreamEndpointChatCompletions {
+			t.Fatalf("candidate upstream_endpoint = %q, want chat_completions", candidate.UpstreamEndpoint)
+		}
+	}
+
+	// A streaming request cannot convert, so the same target must not be
+	// reported as a converted candidate.
+	streaming := rtr.Explain(ExplainRequest{
+		RawPath: "/v1/messages",
+		Body:    []byte(`{"model":"gpt-5","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if streaming.Result.Plan.ProtocolConversion != nil {
+		t.Fatalf("streaming request must not report a conversion: %+v", streaming.Result.Plan)
+	}
+}

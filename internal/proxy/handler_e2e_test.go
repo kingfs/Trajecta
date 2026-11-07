@@ -5827,6 +5827,7 @@ func routePlanAttrsFromPrelude(t *testing.T, parsed *recordfile.ParsedPrelude) m
 	t.Helper()
 	if parsed == nil {
 		t.Fatal("parsed prelude is nil")
+		return nil
 	}
 	for _, event := range parsed.Events {
 		if event.Type == "routing.route_plan" {

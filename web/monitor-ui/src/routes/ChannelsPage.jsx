@@ -41,6 +41,10 @@ const DEFAULT_FORM = {
   priority: 100,
   weight: 1,
   capacity_hint: 1,
+  proxy_enabled: false,
+  proxy_http: "",
+  proxy_https: "",
+  proxy_no_proxy: "",
 };
 
 export function ProvidersPage() {
@@ -531,6 +535,15 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
       <label>{t("providers.priority")}<Input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>{t("providers.weight")}<Input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>{t("providers.capacity")}<Input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
+      <label className="provider-form-check provider-form-wide">{t("providers.networkProxy")}<Switch checked={Boolean(form.proxy_enabled)} onChange={(enabled) => onChange("proxy_enabled", enabled)} label={t("providers.networkProxy")} /></label>
+      <p className="trace-subline provider-form-wide">{t("providers.networkProxyHint")}</p>
+      {form.proxy_enabled ? (
+        <>
+          <label>{t("providers.proxyHTTP")}<Input value={form.proxy_http || ""} onChange={(event) => onChange("proxy_http", event.target.value)} placeholder="http://127.0.0.1:7890" spellCheck={false} /></label>
+          <label>{t("providers.proxyHTTPS")}<Input value={form.proxy_https || ""} onChange={(event) => onChange("proxy_https", event.target.value)} placeholder={form.proxy_http || "http://127.0.0.1:7890"} spellCheck={false} /></label>
+          <label className="provider-form-wide">{t("providers.proxyNoProxy")}<Input value={form.proxy_no_proxy || ""} onChange={(event) => onChange("proxy_no_proxy", event.target.value)} placeholder="localhost, .internal.example.com, 10.0.0.0/8" spellCheck={false} /></label>
+        </>
+      ) : null}
       {includeHeaders ? <label className="provider-form-wide">{t("providers.headers")}<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
     </>
   );
@@ -619,6 +632,10 @@ const SETUP_VALIDATION_FIELDS = new Set([
   "priority",
   "weight",
   "capacity_hint",
+  "proxy_enabled",
+  "proxy_http",
+  "proxy_https",
+  "proxy_no_proxy",
 ]);
 
 export function buildPresetState(presetData, providerPreset, routingProfile) {
@@ -699,8 +716,18 @@ function normalizeProviderPayload(form) {
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
+    proxy: channelProxyPayload(form),
   };
   return payload;
+}
+
+function channelProxyPayload(form = {}) {
+  return {
+    enabled: Boolean(form.proxy_enabled),
+    http_proxy: String(form.proxy_http || "").trim(),
+    https_proxy: String(form.proxy_https || "").trim(),
+    no_proxy: String(form.proxy_no_proxy || "").trim(),
+  };
 }
 
 function setupValidationSignature(form) {
@@ -794,6 +821,12 @@ function providerConfigFormPatch(config = {}) {
       patch[key] = config[key];
     }
   }
+  if (config.proxy) {
+    patch.proxy_enabled = Boolean(config.proxy.enabled);
+    patch.proxy_http = config.proxy.http_proxy || "";
+    patch.proxy_https = config.proxy.https_proxy || "";
+    patch.proxy_no_proxy = config.proxy.no_proxy || "";
+  }
   return patch;
 }
 
@@ -804,6 +837,7 @@ function providerProbePreviewPayload(form) {
     api_key: form.api_key,
     api_type: form.api_type,
     protocol_family: form.protocol_family,
+    proxy: channelProxyPayload(form),
   };
 }
 

@@ -73,7 +73,7 @@ func newManagementMuxWithFunctionExecutorManager(
 	telemetry := cfg.TelemetrySettings()
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
 		Router:                           rtr,
-		ChannelService:                   channel.NewService(traceStore).WithReadOnly(configHasExplicitCredentials(cfg)),
+		ChannelService:                   channel.NewService(traceStore),
 		AuthVerifier:                     verifier,
 		MonitorAuthVerifier:              monitorVerifier,
 		MonitorJWT:                       monitorJWT,

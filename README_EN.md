@@ -38,7 +38,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 | Offline replay | `pkg/replay` implements `http.RoundTripper`; tests need no network and no API key |
 | Stream fidelity | SSE data is stored chunk by chunk and replayed in its original chunk order, with no artificial pacing or timing simulation |
 | Record format | `LLM_PROXY_V3` compact prelude plus raw HTTP bytes; legacy V2 recordings stay readable |
-| Monitor UI | Go-embedded React interface: request list, session grouping, trace detail, routing decisions, audit, model and provider management |
+| Monitor UI | Go-embedded React interface: request list, session grouping, trace detail, routing decisions, audit, an Argus-backed model square and channel management |
 | Client detection | Classifies the client harness behind a request (Claude Code, Codex, Gemini CLI, Cline, Cursor, ...) from headers and URL only (never the body), tags the trace and supports `?harness=` filtering; the classification never rewrites traffic |
 | Trajectory parsing | Cassettes are parsed into an Observation IR that yields findings such as dangerous tool calls and sensitive data |
 | Session export | Export a session's cumulative history as ATIF v1.8 JSONL |
@@ -67,7 +67,7 @@ After signing in, configure upstream URLs and API keys on the `Channels` page, t
 
 ### Option 2: From source
 
-Requires Go 1.25+, [Task](https://taskfile.dev) optional but recommended.
+Requires Go 1.26+, [Task](https://taskfile.dev) optional but recommended.
 
 ```bash
 task build && task run                  # Postgres-first default: config/config.yaml
@@ -181,7 +181,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 | Azure OpenAI | `azure` (v1 and deployment routing) | verified |
 | vLLM | `vllm` | verified |
 
-The complete preset list (25 registry keys, 20 distinct providers after alias deduplication), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The proxy is **protocol-aware pass-through plus recording/parsing**; it does not translate between protocol families in the forwarding hot path. The single exception is `/v1/responses`, which the local runtime can serve.
+The complete preset list (25 registry keys, 20 distinct providers after alias deduplication), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The proxy is **protocol-aware pass-through plus recording/parsing**; by default it does not translate between protocol families in the forwarding hot path. With `router.selection.protocol_conversion` enabled it converts a non-streaming chat/messages/gemini request only when no native candidate is selectable (`/v1/responses` is always served by the local runtime; streaming and multimodal/thinking content are not converted).
 
 ## Architecture
 
@@ -265,7 +265,7 @@ Trace detail splits one exchange into Routing & Conversation, Protocol, Audit, P
 Current release `v3.3.6` (see [CHANGELOG](./CHANGELOG.md)), MIT licensed. Deliberately out of scope:
 
 - public multi-tenant relay, billing, top-up or subscription distribution
-- cross-protocol translation in the forwarding hot path (the local `/v1/responses` runtime is the only exception)
+- frame-by-frame streaming protocol translation, and multimodal/thinking protocol translation (native pass-through and the opt-in text/tool conversion are documented in [Protocol Conversion](./docs/PROTOCOL_CONVERSION.md))
 - real execution lifecycles and container-level sandboxes for hosted `file_search` / `code_interpreter` / `computer_use`
 
 The full comparison of scope and current implementation is in [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md).

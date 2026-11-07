@@ -10,6 +10,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/routeplan"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 // ExplainRequest is a read-only routing question about one prospective request.
@@ -76,7 +77,79 @@ func (r *Router) explainProxyEntrypoint(rawPath string, body []byte, entrypoint 
 	}
 	selection, selErr := r.selectTargetsWith(req, body, nil, selectOptions{DryRun: true})
 	model := requestModel(rawPath, body)
-	return r.explainResultForSelection(entrypoint, routeplan.ExecutionModeProxyPass, endpoint, model, "", selection, selErr)
+	result := r.explainResultForSelection(entrypoint, routeplan.ExecutionModeProxyPass, endpoint, model, "", selection, selErr)
+	return r.annotateProtocolConversion(result, selection, rawPath, extractRequestFeatures(rawPath, body))
+}
+
+// annotateProtocolConversion makes the dry run name the wire protocol a
+// converting candidate would actually be called with, and reports the
+// conversion on the plan. Without it the inspector said "anthopic_messages"
+// for a target that is reached through /v1/chat/completions.
+func (r *Router) annotateProtocolConversion(result ExplainResult, selection *Selection, rawPath string, features RequestFeatures) ExplainResult {
+	client, err := protocolconvert.DetectFromPath(rawPath)
+	if err != nil {
+		return result
+	}
+	r.mu.RLock()
+	targets := make(map[string]*Target, len(r.targets))
+	for _, target := range r.targets {
+		if target != nil {
+			targets[target.ID] = target
+		}
+	}
+	r.mu.RUnlock()
+	for i := range result.Result.Candidates {
+		candidate := &result.Result.Candidates[i]
+		target := targets[candidate.CandidateID]
+		decision, ok := explainConversionForTarget(target, client, rawPath, features)
+		if !ok {
+			continue
+		}
+		if converted := upstreamEndpointForProtocol(decision.UpstreamProtocol); converted != "" {
+			candidate.UpstreamEndpoint = converted
+		}
+		if selection != nil && selection.Target != nil && candidate.CandidateID == selection.Target.ID {
+			result.Result.Plan.UpstreamEndpoint = candidate.UpstreamEndpoint
+			result.Result.Plan.ProtocolConversion = &routeplan.ProtocolConversion{
+				ClientProtocol:   string(decision.ClientProtocol),
+				UpstreamProtocol: string(decision.UpstreamProtocol),
+			}
+		}
+	}
+	return result
+}
+
+func explainConversionForTarget(target *Target, client protocolconvert.Protocol, rawPath string, features RequestFeatures) (protocolconvert.Decision, bool) {
+	if target == nil || client == protocolconvert.ProtocolResponses {
+		return protocolconvert.Decision{}, false
+	}
+	if supportsPath(target, rawPath, features) {
+		return protocolconvert.Decision{}, false
+	}
+	decision, err := protocolconvert.PlanForRequest(protocolconvert.PlanRequest{
+		Client: client,
+		Caps:   target.Upstream.ProtocolCapabilitiesForModel(features.ModelName),
+		Mode:   protocolconvert.ModePassthroughPreferred,
+		Stream: features.Stream,
+	})
+	if err != nil || !decision.Convert() {
+		return protocolconvert.Decision{}, false
+	}
+	return decision, true
+}
+
+func upstreamEndpointForProtocol(protocol protocolconvert.Protocol) routeplan.UpstreamEndpoint {
+	switch protocol {
+	case protocolconvert.ProtocolChatCompletions:
+		return routeplan.UpstreamEndpointChatCompletions
+	case protocolconvert.ProtocolResponses:
+		return routeplan.UpstreamEndpointResponses
+	case protocolconvert.ProtocolMessages:
+		return routeplan.UpstreamEndpointAnthropicMessage
+	case protocolconvert.ProtocolGemini:
+		return routeplan.UpstreamEndpointGenerateContent
+	}
+	return ""
 }
 
 // explainResponses plans the `/v1/responses` entrypoint. It answers the

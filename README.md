@@ -38,7 +38,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 | 离线回放 | `pkg/replay` 实现 `http.RoundTripper`，单元测试无需网络与 API key |
 | 流式保真 | 逐片保存 SSE 数据流；回放按原始分片顺序交付字节，不做限速或时序重放 |
 | 录制格式 | `LLM_PROXY_V3` 紧凑 prelude + 原始 HTTP 字节；继续兼容读取 V2 记录 |
-| Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、模型与服务商管理 |
+| Monitor UI | Go embed 的 React 界面：请求列表、会话聚合、trace 详情、路由决策、审计、带 Argus 元数据的模型广场与渠道管理 |
 | 客户端识别 | 只从请求头与 URL 识别 Claude Code、Codex、Gemini CLI、Cline、Cursor 等客户端 harness（不读 body），给 trace 打标签并支持 `?harness=` 过滤；识别不会改写流量 |
 | 轨迹解析 | 把 cassette 解析成 Observation IR，产出危险工具调用、敏感数据等 findings |
 | 会话轨迹导出 | 把一次 session 的累积历史导出为 ATIF v1.8 JSONL |
@@ -67,7 +67,7 @@ docker compose exec trajecta /app/bin/trajecta \
 
 ### 方式二：从源码运行
 
-需要 Go 1.25+，[Task](https://taskfile.dev) 可选但推荐。
+需要 Go 1.26+，[Task](https://taskfile.dev) 可选但推荐。
 
 ```bash
 task build && task run                  # 默认 Postgres-first 配置：config/config.yaml
@@ -181,7 +181,7 @@ func TestChat(t *testing.T) {
 | Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
 | vLLM | `vllm` | verified |
 
-完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，不在转发热路径上做跨协议翻译；唯一的例外是 `/v1/responses` 可以由本地 runtime 承接。
+完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，默认不在转发热路径上做跨协议翻译；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选时才对非流式 chat/messages/gemini 请求做协议转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
 
 ## 架构一览
 
@@ -265,7 +265,7 @@ trace 详情把一次交换拆成 Routing & Conversation、Protocol、Audit、Pe
 当前版本 `v3.3.6`，MIT 许可（以 [CHANGELOG](./CHANGELOG.md) 为准）。明确不做的事：
 
 - 公网多租户中转、计费 / 充值 / 订阅分发
-- 转发热路径上的跨协议转换（`/v1/responses` 的本地 runtime 是唯一例外）
+- 流式逐帧协议转换，以及多模态/thinking 的协议转换（原生直通与可选的文本/工具转换见 [协议转换](./docs/PROTOCOL_CONVERSION.md)）
 - hosted `file_search` / `code_interpreter` / `computer_use` 的真实执行 lifecycle 与容器级沙箱
 
 这些边界与当前实现的完整对照见 [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md)。

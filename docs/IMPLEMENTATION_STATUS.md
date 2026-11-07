@@ -7,14 +7,14 @@
 Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用的 Postgres 应用库存放结构化状态与观测数据。当前核心闭环已实现：
 
 1. SDK 或 CLI 流量经 gateway 转发。
-2. 代理按协议族选择上游并透传请求（协议感知，不是跨协议转换网关）。
+2. 代理按协议族选择上游并透传请求；开启 `router.selection.protocol_conversion` 后，只在没有可用原生候选时对非流式 chat/messages/gemini 请求做协议转换（协议感知，默认仍是透传代理）。
 3. 原始 HTTP 请求/响应写入 `.http` cassette。
 4. 生产部署用 Postgres 索引请求元数据、路由、会话、渠道/模型配置、Responses state、audit 与派生分析结果。
 5. Monitor Web 展示请求、会话、模型、渠道、路由、事件、发现和分析任务。
 6. MCP 工具向 AI agent 暴露只读排障、trace 查询、失败聚类、系统事件与受控重分析。
 7. `pkg/replay` 在测试中基于 cassette 回放响应，不访问上游网络。
 
-下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages` 与 `/v1/messages/count_tokens`。其中 `/v1/embeddings` 只被分类与追踪，不参与路由：`pkg/llm.AdapterFor` 没有 embeddings 分支，选路因此得到零个候选并报选路失败，`capabilities.embeddings` 也不会被查询；`/v1/messages/count_tokens` 在无匹配上游或上游返回 404 时由代理返回合成计数响应并照常录制。除 `/v1/responses` 的本地 runtime 外，转发热路径不做跨协议请求转换。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
+下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages` 与 `/v1/messages/count_tokens`。其中 `/v1/embeddings` 只被分类与追踪，不参与路由：`pkg/llm.AdapterFor` 没有 embeddings 分支，选路因此得到零个候选并报选路失败，`capabilities.embeddings` 也不会被查询；`/v1/messages/count_tokens` 在无匹配上游或上游返回 404 时由代理返回合成计数响应并照常录制。转发热路径默认不做跨协议请求转换；`router.selection.protocol_conversion: true` 时只在没有可用原生候选时对非流式 chat/messages/gemini 请求做转换，`/v1/responses` 始终交给本地 runtime（详见 [协议转换](./PROTOCOL_CONVERSION.md)）。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
 
 详见 [./README.md](./README.md)、[./ARCHITECTURE.md](./ARCHITECTURE.md)、[./PROTOCOLS_AND_PROVIDERS.md](./PROTOCOLS_AND_PROVIDERS.md)、[./PROXY_USAGE_EXAMPLES.md](./PROXY_USAGE_EXAMPLES.md)。
 
@@ -27,7 +27,7 @@ Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用�
 - `google_genai`：Gemini `generateContent`、`streamGenerateContent`、模型列表。
 - `vertex_native`：Vertex Gemini 的 `generateContent`、`streamGenerateContent` 与模型发现路径。
 
-代理可以识别、记录并把这些协议解析为统一观测结构，但不会在转发热路径中把 Anthropic Messages 转成 OpenAI-compatible，也不会把 Responses 转成 Gemini 或 Claude。
+代理可以识别、记录并把这些协议解析为统一观测结构；默认不在转发热路径中跨协议转换。开启 `router.selection.protocol_conversion` 后，非流式的 chat/messages/gemini 入口可以在没有可用原生候选时转换（工具调用、system、tool_choice 与 stop reason 均有映射），`/v1/responses` 不转换，流式请求与 IR 无法承载的内容会被拒绝。
 
 能力声明与路由约束：upstream/channel 用 `api_type`、`mode`、`protocol_family` 和 `capabilities`（`responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`）描述 API surface。`api_type` 默认按协议族推断（OpenAI-compatible → `chat_completions`，Anthropic → `messages`，Google GenAI / Vertex → `gemini_generate_content`）。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被本地 Responses runtime 的内部 Chat Completions 调用选中；`capabilities.tool_calling: false` 的 target 在请求体包含非空 `tools` 或非空 `functions`（OpenAI 已废弃的同义字段）时不被选中，routing decision trace 标记 `unsupported_tools`。
 
@@ -98,13 +98,13 @@ Codex 兼容性：`tests/fixtures/codex/` 存放离线 fixture，`task test:code
 
 ## 渠道与模型管理
 
-YAML 的 `upstream` / `upstreams` 只是首次 bootstrap 输入。第一次写库会写入应用库 `app_settings` 键 `channels.initialized`；此后数据库拥有路由配置，即使渠道被全部禁用或删除也仍然如此。`GET /api/settings/channels` 返回 `{"initialized": bool}`，其值是 `channel.Service.HasConfiguration()`——`channels.initialized` 标记为真时为 true，标记被 `DELETE /api/settings/channels` 清除后只要数据库中仍存有任意渠道行也仍为 true，因此清除标记后该接口会继续保持 `{"initialized": true}`。
+渠道只从应用数据库读取；YAML 的 `upstream` / `upstreams` 已移除，`config.Load` 遇到这两个键会直接报错。第一次管理写会写入应用库 `app_settings` 键 `channels.initialized`；`GET /api/settings/channels` 返回 `{"initialized": bool}`，其值是 `channel.Service.HasConfiguration()`——`channels.initialized` 标记为真时为 true，标记被 `DELETE /api/settings/channels` 清除后只要数据库中仍存有任意渠道行也仍为 true。
 
-YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Monitor 的渠道、模型和 alias 写操作返回 409。
+不存在 YAML 只读模式；Monitor 的渠道、模型和 alias 写操作始终写数据库。
 
 所有管理写操作（渠道、模型、alias、provider setup 与 probe apply）都在一个 `store.ConfigurationTransaction` 内执行，runtime 路由只在提交成功后才发布。
 
-配置来源与所有权（YAML bootstrap、`channels.initialized` 标记与 409 规则）见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，`ConfigurationTransaction` 的锁顺序、事务范围与后台 refresh 的 best-effort 语义见 [架构与代码地图](./ARCHITECTURE.md)。
+配置来源与所有权（数据库唯一来源、`channels.initialized` 标记）见 [路由、渠道与凭据](./ROUTING_AND_CREDENTIALS.md)，`ConfigurationTransaction` 的锁顺序、事务范围与后台 refresh 的 best-effort 语义见 [架构与代码地图](./ARCHITECTURE.md)。
 
 已实现的配置能力：
 
@@ -115,13 +115,13 @@ YAML 配置包含显式 `credentials` 列表时，渠道保持 YAML 管理，Mon
 - `POST /api/provider-model-detect` 按模型自动识别接口并写回 `channel_models.supports_*`：OpenAI-compatible 探测 chat/responses（并行、强制忽略现有声明），Anthropic 探测 messages，Google/Vertex 探测 generateContent；`ok` 写支持、`endpoint_not_supported`/`model_not_found` 写不支持、不确定结果不写；`overwrite=false` 只补 NULL。网络探测在配置锁外完成，之后一个 `ConfigurationTransaction` 写能力并 reload 路由；不写 `last_probe_at`/`channel_probe_runs`/cassette/logs。渠道/模型 API 返回计算后的 `interfaces`，Monitor 在启用模型时自动补全未声明接口，模型卡与渠道工具栏提供识别动作。
 - `provider probe-apply` 复用同一 channel service 用例。
 - `config inspect` 输出脱敏 effective config，并用 `sources` 摘要标注字段来自 config file、default、effective、empty、derived 或 not_configured。
-- `provider_probe.startup_fill=true` 时 serve 启动只在内存中填补 YAML upstream 缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置、不覆盖显式配置。
+- 渠道 probe 与接口识别由 Monitor/CLI 主动触发；serve 启动不再对 YAML 渠道做 provider probe。
 
 路由与凭据细节见 [./ROUTING_AND_CREDENTIALS.md](./ROUTING_AND_CREDENTIALS.md)。
 
 ## Monitor
 
-Monitor 是 Go embed 的 React/Vite 前端。左侧导航分 监控（Overview、Traces、Events、Audit）、配置（Channels、Models、Connect）、系统（System 仅 admin、About 所有已登录角色）三组，导航底部显示当前版本并链到 About、同时给出仓库链接；Traces 用 tab 区分 Requests/Sessions，Audit 用 tab 区分 Findings/Request lineage/Analysis jobs/Data health，Connect 用 tab 区分 Client setup/API tokens，System 用 tab 区分 Host/Server/Network proxy/Database/Slow queries/Server-side tools。合并掉的旧入口保留重定向并保留查询参数：`/requests` → `/traces`、`/sessions` → `/traces?tab=sessions`、`/analysis` → `/audit?tab=analysis`、`/tokens` → `/connect?tab=tokens`、`/providers*` 与 `/routing` → `/channels`。另有一级入口「渠道」（canonical `/channels`）与 trace／session／channel／model／upstream 详情页；独立 Routing 页已移除，设置/检查器在渠道页，别名在模型页。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
+Monitor 是 Go embed 的 React/Vite 前端。左侧导航分 监控（Overview、Traces、Events、Audit）、配置（Channels、Models、Connect）、系统（System 仅 admin、About 所有已登录角色）三组，导航底部显示当前版本并链到 About、同时给出仓库链接；Traces 用 tab 区分 Requests/Sessions，Audit 用 tab 区分 Findings/Request lineage/Analysis jobs/Data health，Connect 用 tab 区分 Client setup/API tokens，System 用 tab 区分 Host/Server/Network proxy/Database/Slow queries/Server-side tools。合并掉的旧入口保留重定向并保留查询参数：`/requests` → `/traces`、`/sessions` → `/traces?tab=sessions`、`/analysis` → `/audit?tab=analysis`、`/tokens` → `/connect?tab=tokens`、`/providers*` 与 `/routing` → `/channels`。另有一级入口「渠道」（canonical `/channels`）与 trace／session／channel／model／upstream 详情页；独立 Routing 页已移除，设置/检查器在渠道页，别名在模型页。模型页用 tab 区分模型广场（默认，列出所有渠道配置的模型及 Argus 元数据）与实时统计（仅窗口内有流量的模型）；模型详情用 tab 区分概览（模型信息、渠道覆盖、Codex 配置）与实时统计（用量、趋势、渠道用量）。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
 
 Session 详情页提供默认（带上限）与完整流式两种导出（UI 标签 `导出轨迹 (ATIF)` / `完整导出 (NDJSON 流)`），从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`（流式为 `session-<id>.atif.ndjson`）：格式固定为 ATIF-v1.8，默认只重建最早的 500 条 trace 并在响应 `extra` 里给出 `trace_count` / `included_traces` / `truncated` / `trace_cap`，`?full=1` 取消上限，`?stream=1` 走 NDJSON 流式输出；不调用模型、不修改 cassette。接口契约见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
@@ -129,9 +129,9 @@ Session 详情页提供默认（带上限）与完整流式两种导出（UI 标
 
 About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关，不外联）与 `GET /api/version/latest`（仅在点击「检查新版本」后查询项目 releases feed，恒返回 200 并在 `status` 里给出 `update_available`/`up_to_date`/`no_release`/`unknown`/`unavailable`/`disabled`，成功结果缓存 10 分钟、失败不缓存）支撑。页面只列版本、提交、构建时间与标签四项构建事实，发布检查结果在弹窗里给出当前版本与最新版本；`telemetry` 配置与 `/api/about` 的 `telemetry`/`install_id` 字段仍然保留，但 Web UI 不再展示「使用统计」，也不再发送匿名装机上报。详见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
-出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页一节。
+出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。渠道高级选项另有**渠道网络代理**开关（`channel_configs.proxy_json`，`GET/PATCH /api/channels/{id}` 的 `proxy` 字段）：关闭时跟随系统策略，开启后只有该渠道的转发、本地 Responses、tokenize、模型发现与各类 probe 使用渠道自己的 `http_proxy`/`https_proxy`/`no_proxy`，语义与系统页一致。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页与渠道页一节。
 
-主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`（复用 `router.Explain` dry-run，与转发路径同一 planner）、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/provider-model-test`、`/api/provider-model-detect`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
+主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/model-square`、`/api/channels`、`/api/routing/summary`、`/api/routing/inspect`（复用 `router.Explain` dry-run，与转发路径同一 planner）、`/api/routing/exchanges`、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-setup/*`、`/api/provider-model-test`、`/api/provider-model-detect`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 
 使用说明见 [./MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 
@@ -187,7 +187,7 @@ Responses audit 属于部分实现，职责边界如下：
 
 ## 非目标与未实现
 
-- 跨协议请求转换网关：转发热路径不做 OpenAI、Anthropic、Gemini、Vertex 之间的请求互转，唯一例外是 `/v1/responses` 本地 runtime 把 Responses 编排为内部 Chat Completions。
+- 通用跨协议转换网关：热路径的转换是可选的兜底（默认关闭、仅非流式、仅在无原生候选时、仅 chat/messages/gemini 入口），`/v1/responses` 仍由本地 runtime 编排；流式逐帧转换、多模态/thinking/托管工具、以及 `response_format`/`reasoning_effort` 等 IR 不携带的语义字段都不转换（返回 4xx）。
 - 公网多租户 API 分发平台，以及计费、充值、订阅销售。
 - 对上游 Responses provider 的 native semantic interposition：native Responses 只做透传，不做语义改写。
 - ATIF 会话轨迹导出的语义重建范围：只重建 `/responses`（OpenAI Responses generation 及 SSE）的 exchange，其他 endpoint（含 compact）保留源 trace 引用并在 `extra.warnings` 报告 `unsupported_endpoint`，不做因果推断；导出以一次查询得到的请求集合为快照，生成期间新增的请求不进入本次文件。默认与 `?full=1` 在服务端组装完整响应（默认只含最早的 500 条 trace），极大会话应使用 `?stream=1` 流式输出。

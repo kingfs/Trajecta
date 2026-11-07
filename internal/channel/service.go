@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/modelprobe"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
@@ -42,7 +42,6 @@ type Store interface {
 type Service struct {
 	store      Store
 	httpClient *http.Client
-	readOnly   bool
 }
 
 func NewService(st Store) *Service {
@@ -66,14 +65,6 @@ func (s *Service) WithStore(st Store) *Service {
 	next.store = st
 	return &next
 }
-
-func (s *Service) WithReadOnly(readOnly bool) *Service {
-	next := *s
-	next.readOnly = readOnly
-	return &next
-}
-
-func (s *Service) ReadOnly() bool { return s != nil && s.readOnly }
 
 const configurationInitializedKey = "channels.initialized"
 
@@ -147,126 +138,6 @@ type ProviderProbeApplyItem struct {
 	SkippedReason string   `json:"skipped_reason,omitempty"`
 }
 
-// BootstrapFromConfig imports YAML upstreams into the channel store on first
-// startup only. It never writes once the database owns the configuration: the
-// marker is stored by the first import or by the first management write, so a
-// startup that is already initialized stays read-only.
-func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
-	if s == nil || s.store == nil {
-		return 0, errors.New("channel service store is required")
-	}
-	initialized, err := s.HasConfiguration()
-	if err != nil {
-		return 0, err
-	}
-	if initialized {
-		return 0, nil
-	}
-
-	targets := configuredUpstreams(cfg)
-	if hasExplicitCredentials(targets) {
-		return 0, nil
-	}
-	imported := 0
-	seenIDs := map[string]struct{}{}
-	for idx, target := range targets {
-		channelID := stableChannelID(target, idx)
-		if _, ok := seenIDs[channelID]; ok {
-			channelID = fmt.Sprintf("%s-%d", channelID, idx+1)
-		}
-		seenIDs[channelID] = struct{}{}
-
-		enabled := true
-		if target.Enabled != nil {
-			enabled = *target.Enabled
-		}
-		headersJSON := "{}"
-		if len(target.Upstream.Headers) > 0 {
-			data, err := json.Marshal(target.Upstream.Headers)
-			if err != nil {
-				return imported, err
-			}
-			headersJSON = string(data)
-		}
-		capabilitiesJSON, err := marshalCapabilities(target.Upstream.Capabilities)
-		if err != nil {
-			return imported, err
-		}
-		_, err = s.store.UpsertChannelConfig(store.ChannelConfigRecord{
-			ID:               channelID,
-			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
-			Source:           "bootstrap",
-			BaseURL:          target.Upstream.BaseURL,
-			ProviderPreset:   target.Upstream.ProviderPreset,
-			APIType:          target.Upstream.APIType,
-			Mode:             target.Upstream.Mode,
-			CapabilitiesJSON: capabilitiesJSON,
-			ProtocolFamily:   target.Upstream.ProtocolFamily,
-			RoutingProfile:   target.Upstream.RoutingProfile,
-			APIVersion:       target.Upstream.APIVersion,
-			Deployment:       target.Upstream.Deployment,
-			Project:          target.Upstream.Project,
-			Location:         target.Upstream.Location,
-			ModelResource:    target.Upstream.ModelResource,
-			APIKeyCiphertext: []byte(target.Upstream.ApiKey),
-			APIKeyHint:       secretHint(target.Upstream.ApiKey),
-			HeadersJSON:      headersJSON,
-			Enabled:          enabled,
-			Priority:         target.Priority,
-			Weight:           target.Weight,
-			CapacityHint:     target.CapacityHint,
-			ModelDiscovery:   target.ModelDiscovery,
-		})
-		if err != nil {
-			return imported, err
-		}
-
-		models := make([]store.ChannelModelRecord, 0, len(target.StaticModels))
-		for _, model := range normalizeModels(target.StaticModels) {
-			supportsResponses, supportsChatCompletions, supportsEmbeddings :=
-				modelCapabilityColumns(target.Upstream.ModelCapabilities, model)
-			models = append(models, store.ChannelModelRecord{
-				ChannelID:               channelID,
-				Model:                   model,
-				Source:                  "static",
-				Enabled:                 true,
-				SupportsResponses:       supportsResponses,
-				SupportsChatCompletions: supportsChatCompletions,
-				SupportsEmbeddings:      supportsEmbeddings,
-			})
-		}
-		if len(models) > 0 {
-			if err := s.store.ReplaceChannelModels(channelID, models); err != nil {
-				return imported, err
-			}
-		}
-		imported++
-	}
-	return imported, s.MarkConfigurationInitialized()
-}
-
-func configuredUpstreams(cfg *config.Config) []config.UpstreamTargetConfig {
-	if cfg == nil {
-		return nil
-	}
-	if len(cfg.Upstreams) > 0 {
-		return append([]config.UpstreamTargetConfig(nil), cfg.Upstreams...)
-	}
-	if strings.TrimSpace(cfg.Upstream.BaseURL) == "" {
-		return nil
-	}
-	return cfg.EffectiveUpstreams()
-}
-
-func hasExplicitCredentials(targets []config.UpstreamTargetConfig) bool {
-	for _, target := range targets {
-		if target.HasExplicitCredentials() {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("channel service store is required")
@@ -324,6 +195,10 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
 		}
+		proxySettings, err := ChannelProxySettings(channel)
+		if err != nil {
+			return nil, fmt.Errorf("decode proxy for channel %q: %w", channel.ID, err)
+		}
 		enabled := true
 		target := config.UpstreamTargetConfig{
 			ID:                   channel.ID,
@@ -354,6 +229,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				Location:          channel.Location,
 				ModelResource:     channel.ModelResource,
 				Headers:           headers,
+				Proxy:             proxySettings,
 			},
 		}
 		targets = append(targets, target)
@@ -540,8 +416,12 @@ func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (Prob
 	if err != nil {
 		return result, err
 	}
+	probeClient, err := s.httpClientForChannel(channel)
+	if err != nil {
+		return result, err
+	}
 	if options.DetectProvider {
-		providerReport, providerProbeErr := providerprobe.Probe(context.Background(), providerProbeTargetFromChannel(channel), s.httpClient)
+		providerReport, providerProbeErr := providerprobe.Probe(context.Background(), providerProbeTargetFromChannel(channel), probeClient)
 		if providerProbeErr == nil {
 			result.ProviderReport = providerReport
 		}
@@ -550,7 +430,7 @@ func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (Prob
 	if err != nil {
 		return s.finishProbe(result, resolved, nil, err, options)
 	}
-	models, err := upstream.DiscoverModelsResolved(resolved, s.httpClient)
+	models, err := upstream.DiscoverModelsResolved(resolved, probeClient)
 	return s.finishProbe(result, resolved, models, err, options)
 }
 
@@ -854,6 +734,7 @@ func UpstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 		_ = json.Unmarshal([]byte(channel.HeadersJSON), &headers)
 	}
 	capabilities, _ := unmarshalCapabilities(channel.CapabilitiesJSON)
+	proxySettings, _ := ChannelProxySettings(channel)
 	return config.UpstreamConfig{
 		BaseURL:        channel.BaseURL,
 		ApiKey:         string(channel.APIKeyCiphertext),
@@ -869,7 +750,51 @@ func UpstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 		Location:       channel.Location,
 		ModelResource:  channel.ModelResource,
 		Headers:        headers,
+		Proxy:          proxySettings,
 	}
+}
+
+// ChannelProxySettings decodes the channel-level outbound proxy policy stored in
+// channel_configs.proxy_json. A missing or empty value is the default (disabled)
+// policy, which makes the channel follow the process-wide system policy.
+func ChannelProxySettings(channel store.ChannelConfigRecord) (netproxy.Settings, error) {
+	if strings.TrimSpace(channel.ProxyJSON) == "" {
+		return netproxy.DefaultSettings(), nil
+	}
+	var settings netproxy.Settings
+	if err := json.Unmarshal([]byte(channel.ProxyJSON), &settings); err != nil {
+		return netproxy.DefaultSettings(), err
+	}
+	return settings.Normalize(), nil
+}
+
+// ChannelProxyResolver compiles the channel-level policy. A disabled policy
+// returns a disabled resolver rather than nil, so callers can distinguish
+// "configured but off" from a decode error.
+func ChannelProxyResolver(channel store.ChannelConfigRecord) (*netproxy.Resolver, error) {
+	settings, err := ChannelProxySettings(channel)
+	if err != nil {
+		return nil, err
+	}
+	return netproxy.Compile(settings)
+}
+
+// httpClientForChannel returns the client a probe of this channel must use. A
+// channel with its own proxy gets a client whose transport applies that policy;
+// every other channel keeps the service client unchanged.
+func (s *Service) httpClientForChannel(channel store.ChannelConfigRecord) (*http.Client, error) {
+	resolver, err := ChannelProxyResolver(channel)
+	if err != nil {
+		return nil, err
+	}
+	if !resolver.Enabled() {
+		return s.httpClient, nil
+	}
+	base := s.httpClient
+	if base == nil {
+		base = &http.Client{Timeout: 10 * time.Second}
+	}
+	return netproxy.ClientWith(base, resolver), nil
 }
 
 func providerProbeTargetFromChannel(channel store.ChannelConfigRecord) providerprobe.ProbeTarget {
@@ -881,77 +806,8 @@ func providerProbeTargetFromChannel(channel store.ChannelConfigRecord) providerp
 		Headers:                 upstreamCfg.Headers,
 		SpecifiedAPIType:        upstreamCfg.APIType,
 		SpecifiedProtocolFamily: upstreamCfg.ProtocolFamily,
+		Proxy:                   upstreamCfg.Proxy,
 	}
-}
-
-func stableChannelID(target config.UpstreamTargetConfig, idx int) string {
-	if id := strings.TrimSpace(target.ID); id != "" {
-		return slugify(id)
-	}
-	if idx == 0 && strings.TrimSpace(target.Upstream.BaseURL) != "" {
-		return "default"
-	}
-	parts := []string{target.Upstream.ProviderPreset}
-	if parsed, err := url.Parse(target.Upstream.BaseURL); err == nil && parsed.Host != "" {
-		parts = append(parts, parsed.Host)
-	}
-	id := slugify(strings.Join(parts, "-"))
-	if id == "" {
-		return fmt.Sprintf("upstream-%d", idx+1)
-	}
-	return id
-}
-
-func defaultChannelName(id string, providerPreset string) string {
-	if providerPreset = strings.TrimSpace(providerPreset); providerPreset != "" {
-		return providerPreset
-	}
-	return id
-}
-
-func secretHint(secret string) string {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return ""
-	}
-	if len(secret) <= 8 {
-		return secret
-	}
-	return secret[:3] + "..." + secret[len(secret)-4:]
-}
-
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugify(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = slugRe.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-")
-	return value
-}
-
-// modelCapabilityColumns converts the YAML per-model capability overrides into
-// the *int columns the channel model profile stores. Models without an entry
-// keep NULL columns so they fall back to the channel-level capabilities.
-func modelCapabilityColumns(modelCapabilities map[string]config.UpstreamCapabilitiesConfig, model string) (*int, *int, *int) {
-	if len(modelCapabilities) == 0 {
-		return nil, nil, nil
-	}
-	caps, ok := modelCapabilities[strings.ToLower(strings.TrimSpace(model))]
-	if !ok {
-		return nil, nil, nil
-	}
-	return capabilityBoolToInt(caps.Responses), capabilityBoolToInt(caps.ChatCompletions), capabilityBoolToInt(caps.Embeddings)
-}
-
-func capabilityBoolToInt(value *bool) *int {
-	if value == nil {
-		return nil
-	}
-	enabled := 0
-	if *value {
-		enabled = 1
-	}
-	return &enabled
 }
 
 func normalizeModels(models []string) []string {

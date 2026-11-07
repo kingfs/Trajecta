@@ -47,50 +47,7 @@ router:
     enabled: true
     refresh_interval: 10m
 
-upstreams:
-  - id: "baizhi-openai"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "list_models"
-    static_models: ["deepseek-flash"]
-    upstream:
-      base_url: "$env:TRAJECTA_LIVE_CHAT_BASE"
-      api_key: "$env:TRAJECTA_LIVE_API_KEY"
-      provider_preset: "openai"
-      api_type: "chat_completions"
-      mode: "proxy"
-      capabilities:
-        chat_completions: true
-        responses: true
-        models: true
-        tool_calling: true
-      model_capabilities:
-        deepseek-flash:
-          chat_completions: true
-          responses: true
-          tool_calling: true
-
-  - id: "baizhi-anthropic"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "list_models"
-    static_models: ["deepseek-flash"]
-    upstream:
-      base_url: "$env:TRAJECTA_LIVE_MESSAGES_BASE"
-      api_key: "$env:TRAJECTA_LIVE_API_KEY"
-      provider_preset: "anthropic"
-      protocol_family: "anthropic_messages"
-      api_type: "messages"
-      mode: "proxy"
-      capabilities:
-        chat_completions: false
-        models: true
-        tool_calling: true
-
+# Channels are configured in the Monitor and stored in the application database.
 debug:
   output_dir: "$env:TRAJECTA_LIVE_SQLITE_DIR"
   mask_key: true

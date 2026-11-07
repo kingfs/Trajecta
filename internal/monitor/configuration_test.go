@@ -130,21 +130,6 @@ func TestConfigurationConcurrentMutationsKeepLatestSnapshot(t *testing.T) {
 	}
 }
 
-func TestYAMLCredentialsRejectDatabaseMutation(t *testing.T) {
-	st, rtr, svc := configurationFixture(t)
-	rr := configurationRequest(channelDetailAPIHandler(st, rtr, svc.WithReadOnly(true)), http.MethodPatch, "/api/channels/primary", `{"enabled":false}`)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
-	}
-	record, err := st.GetChannelConfig("primary")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !record.Enabled || len(rtr.Targets()) != 1 {
-		t.Fatal("YAML runtime changed through database management")
-	}
-}
-
 func TestModelAliasMutationPublishesRuntimeAndRollsBack(t *testing.T) {
 	st, rtr, svc := configurationFixture(t)
 	mux := http.NewServeMux()

@@ -146,6 +146,7 @@ var (
 		{Name: "api_key_ciphertext", Type: field.TypeBytes, Nullable: true},
 		{Name: "api_key_hint", Type: field.TypeString, Default: ""},
 		{Name: "headers_json", Type: field.TypeString, Default: "{}"},
+		{Name: "proxy_json", Type: field.TypeString, Default: "{}"},
 		{Name: "enabled", Type: field.TypeBool, Default: true},
 		{Name: "priority", Type: field.TypeInt, Default: 0},
 		{Name: "weight", Type: field.TypeFloat64, Default: 1},
@@ -167,7 +168,7 @@ var (
 			{
 				Name:    "channelconfig_enabled_priority",
 				Unique:  false,
-				Columns: []*schema.Column{ChannelConfigsColumns[19], ChannelConfigsColumns[20]},
+				Columns: []*schema.Column{ChannelConfigsColumns[20], ChannelConfigsColumns[21]},
 			},
 			{
 				Name:    "channelconfig_provider_preset",

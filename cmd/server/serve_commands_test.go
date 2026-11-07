@@ -86,15 +86,9 @@ func TestRouterConfigFromChannelsUsesDatabaseTargets(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.Upstream.BaseURL = "https://yaml.example.com/v1"
-	cfg.Upstream.ProviderPreset = "openai"
-
-	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
+	routerCfg, err := routerConfigFromChannels(cfg, channel.NewService(st))
 	if err != nil {
 		t.Fatalf("routerConfigFromChannels() error = %v", err)
-	}
-	if source != "database" {
-		t.Fatalf("source = %q, want database", source)
 	}
 	if len(routerCfg.Upstreams) != 1 || routerCfg.Upstreams[0].ID != "db-channel" {
 		t.Fatalf("routerCfg.Upstreams = %#v", routerCfg.Upstreams)
@@ -104,81 +98,7 @@ func TestRouterConfigFromChannelsUsesDatabaseTargets(t *testing.T) {
 	}
 }
 
-func TestRouterConfigFromChannelsFallsBackToYAML(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	cfg := &config.Config{}
-	cfg.Upstream.BaseURL = "https://yaml.example.com/v1"
-	cfg.Upstream.ProviderPreset = "openai"
-
-	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
-	if err != nil {
-		t.Fatalf("routerConfigFromChannels() error = %v", err)
-	}
-	if source != "yaml" {
-		t.Fatalf("source = %q, want yaml", source)
-	}
-	if routerCfg != cfg {
-		t.Fatalf("routerConfigFromChannels should return original cfg on YAML fallback")
-	}
-}
-
-func TestRouterConfigFromChannelsKeepsYAMLWhenExplicitCredentialsExist(t *testing.T) {
-	st, err := store.New(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
-	}
-	defer st.Close()
-
-	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
-		ID:             "db-channel",
-		Name:           "DB Channel",
-		BaseURL:        "https://db.example.com/v1",
-		ProviderPreset: "openai",
-		HeadersJSON:    "{}",
-		Enabled:        true,
-	}); err != nil {
-		t.Fatalf("UpsertChannelConfig() error = %v", err)
-	}
-
-	cfg := &config.Config{}
-	cfg.Upstreams = []config.UpstreamTargetConfig{
-		{
-			ID: "yaml-channel",
-			Upstream: config.UpstreamConfig{
-				BaseURL:        "https://yaml.example.com/v1",
-				ApiKey:         "$env:OPENAI_TEST_KEY",
-				ProviderPreset: "openai",
-			},
-			Credentials: []config.CredentialConfig{
-				{
-					ID:     "primary",
-					ApiKey: "$env:OPENAI_TEST_KEY",
-				},
-			},
-		},
-	}
-
-	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
-	if err != nil {
-		t.Fatalf("routerConfigFromChannels() error = %v", err)
-	}
-	if source != "yaml" {
-		t.Fatalf("source = %q, want yaml", source)
-	}
-	if routerCfg != cfg {
-		t.Fatalf("routerConfigFromChannels should return original cfg when YAML credentials are explicit")
-	}
-	if got := routerCfg.Upstreams[0].EffectiveCredentials()[0].ID; got != "primary" {
-		t.Fatalf("credential id = %q, want primary", got)
-	}
-}
-
-func TestRunServeLogsActionableInvalidUpstreamConfig(t *testing.T) {
+func TestRunServeRejectsYAMLChannelConfig(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	prev := slog.Default()
@@ -195,11 +115,11 @@ database:
 server:
   port: "8080"
 monitor:
-  port: ""
-upstream:
-  base_url: "https://api.anthropic.com"
-  provider_preset: "anthropic"
-  protocol_family: "google_genai"
+  port: "8081"
+upstreams:
+  - id: primary
+    upstream:
+      base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -212,14 +132,8 @@ debug:
 	if code != 1 {
 		t.Fatalf("runServe() = %d, want 1", code)
 	}
-
 	output := buf.String()
-	for _, want := range []string{
-		"Invalid upstream config",
-		`upstream.provider_preset=`,
-		`anthropic_messages`,
-		`google_genai`,
-	} {
+	for _, want := range []string{"YAML channel configuration is no longer supported", "application database"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("log output = %q, want contain %q", output, want)
 		}
@@ -251,136 +165,6 @@ func TestValidateServeRouterConfigRequiresLocalResponsesServerBackend(t *testing
 	}
 }
 
-func TestStartupProviderProbeDefaultDisabledDoesNotProbe(t *testing.T) {
-	var calls int
-	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		http.NotFound(w, r)
-	}))
-	defer upstreamServer.Close()
-
-	cfg := &config.Config{}
-	cfg.Upstreams = []config.UpstreamTargetConfig{
-		{
-			ID: "local",
-			Upstream: config.UpstreamConfig{
-				BaseURL: upstreamServer.URL + "/api/v1",
-			},
-		},
-	}
-
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
-		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
-	}
-	if calls != 0 {
-		t.Fatalf("startup probe made %d HTTP calls with default config, want 0", calls)
-	}
-	if cfg.Upstreams[0].Upstream.APIType != "" || cfg.Upstreams[0].Upstream.ProtocolFamily != "" {
-		t.Fatalf("upstream config was modified while disabled: %+v", cfg.Upstreams[0].Upstream)
-	}
-}
-
-func TestStartupProviderProbeFillsMissingAPISurface(t *testing.T) {
-	upstreamServer := newOpenAIProbeTestServer(t)
-	defer upstreamServer.Close()
-
-	cfg := &config.Config{}
-	cfg.ProviderProbe.StartupFill = true
-	cfg.Upstreams = []config.UpstreamTargetConfig{
-		{
-			ID: "local",
-			Upstream: config.UpstreamConfig{
-				BaseURL: upstreamServer.URL + "/api/v1",
-			},
-		},
-	}
-
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
-		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
-	}
-	got := cfg.Upstreams[0].Upstream
-	if got.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
-		t.Fatalf("ProtocolFamily = %q, want %q", got.ProtocolFamily, upstream.ProtocolFamilyOpenAICompatible)
-	}
-	if got.APIType != upstream.APITypeResponses {
-		t.Fatalf("APIType = %q, want %q", got.APIType, upstream.APITypeResponses)
-	}
-	if got.Capabilities.Responses == nil || !*got.Capabilities.Responses {
-		t.Fatalf("capabilities.responses = %v, want true", got.Capabilities.Responses)
-	}
-	if got.Capabilities.ChatCompletions == nil || !*got.Capabilities.ChatCompletions {
-		t.Fatalf("capabilities.chat_completions = %v, want true", got.Capabilities.ChatCompletions)
-	}
-	if got.Capabilities.Models == nil || !*got.Capabilities.Models {
-		t.Fatalf("capabilities.models = %v, want true", got.Capabilities.Models)
-	}
-}
-
-func TestStartupProviderProbeFailureDoesNotBlockStartup(t *testing.T) {
-	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
-	}))
-	defer upstreamServer.Close()
-
-	cfg := &config.Config{}
-	cfg.ProviderProbe.StartupFill = true
-	cfg.Upstreams = []config.UpstreamTargetConfig{
-		{
-			ID: "local",
-			Upstream: config.UpstreamConfig{
-				BaseURL: upstreamServer.URL + "/api/v1",
-			},
-		},
-	}
-
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
-		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v, want nil best-effort startup", err)
-	}
-	got := cfg.Upstreams[0].Upstream
-	if got.APIType != "" || got.ProtocolFamily != "" || got.Capabilities.Responses != nil || got.Capabilities.ChatCompletions != nil {
-		t.Fatalf("failed startup probe modified config: %+v", got)
-	}
-}
-
-func TestStartupProviderProbeDoesNotOverrideExplicitAPISurface(t *testing.T) {
-	upstreamServer := newOpenAIProbeTestServer(t)
-	defer upstreamServer.Close()
-
-	responsesDisabled := false
-	cfg := &config.Config{}
-	cfg.ProviderProbe.StartupFill = true
-	cfg.Upstreams = []config.UpstreamTargetConfig{
-		{
-			ID: "local",
-			Upstream: config.UpstreamConfig{
-				BaseURL:        upstreamServer.URL + "/api/v1",
-				APIType:        upstream.APITypeChatCompletions,
-				ProtocolFamily: upstream.ProtocolFamilyAnthropicMessages,
-				Capabilities: config.UpstreamCapabilitiesConfig{
-					Responses: &responsesDisabled,
-				},
-			},
-		},
-	}
-
-	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
-		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
-	}
-	got := cfg.Upstreams[0].Upstream
-	if got.ProtocolFamily != upstream.ProtocolFamilyAnthropicMessages {
-		t.Fatalf("ProtocolFamily = %q, want explicit %q", got.ProtocolFamily, upstream.ProtocolFamilyAnthropicMessages)
-	}
-	if got.APIType != upstream.APITypeChatCompletions {
-		t.Fatalf("APIType = %q, want explicit %q", got.APIType, upstream.APITypeChatCompletions)
-	}
-	if got.Capabilities.Responses == nil || *got.Capabilities.Responses {
-		t.Fatalf("capabilities.responses = %v, want explicit false", got.Capabilities.Responses)
-	}
-	if got.Capabilities.Models == nil || !*got.Capabilities.Models {
-		t.Fatalf("capabilities.models = %v, want missing field filled true", got.Capabilities.Models)
-	}
-}
-
 func TestRunServeRejectsMCPWithoutMonitorPort(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
@@ -399,8 +183,6 @@ monitor:
   port: ""
 mcp:
   enabled: true
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -439,8 +221,6 @@ mcp:
 database:
   driver: "mysql"
   dsn: "mysql://trajecta:secret@mysql:3306/trajecta"
-upstream:
-  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false
@@ -595,7 +375,7 @@ type authTransport struct {
 	Token string
 }
 
-func TestRouterConfigurationKeepsDisabledAndDeletedChannelsAcrossBootstrap(t *testing.T) {
+func TestRouterConfigurationReadsOnlyEnabledDatabaseChannels(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "deleted"}[deleted], func(t *testing.T) {
 			st, err := store.New(t.TempDir())
@@ -603,37 +383,35 @@ func TestRouterConfigurationKeepsDisabledAndDeletedChannelsAcrossBootstrap(t *te
 				t.Fatal(err)
 			}
 			defer st.Close()
-			cfg := &config.Config{Upstream: config.UpstreamConfig{BaseURL: "https://yaml.example.invalid/v1", ProviderPreset: "openai"}}
-			svc := channel.NewService(st)
-			if _, err := svc.BootstrapFromConfig(cfg); err != nil {
+			if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+				ID:             "db-channel",
+				Name:           "DB Channel",
+				BaseURL:        "https://db.example.com/v1",
+				ProviderPreset: "openai",
+				Enabled:        true,
+			}); err != nil {
 				t.Fatal(err)
-			}
-			channels, err := st.ListChannelConfigs()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(channels) != 1 {
-				t.Fatalf("channels=%v", channels)
 			}
 			if deleted {
-				err = st.DeleteChannelConfig(channels[0].ID)
+				if err := st.DeleteChannelConfig("db-channel"); err != nil {
+					t.Fatal(err)
+				}
 			} else {
-				record := channels[0]
+				record, err := st.GetChannelConfig("db-channel")
+				if err != nil {
+					t.Fatal(err)
+				}
 				record.Enabled = false
-				_, err = st.UpsertChannelConfig(record)
+				if _, err := st.UpsertChannelConfig(record); err != nil {
+					t.Fatal(err)
+				}
 			}
+			runtimeCfg, err := routerConfigFromChannels(&config.Config{}, channel.NewService(st))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 0 {
-				t.Fatalf("bootstrap=%d %v", imported, err)
-			}
-			runtimeCfg, source, err := routerConfigFromChannels(cfg, svc)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if source != "database" || len(runtimeCfg.EffectiveUpstreams()) != 0 {
-				t.Fatalf("source=%s targets=%v", source, runtimeCfg.EffectiveUpstreams())
+			if len(runtimeCfg.EffectiveUpstreams()) != 0 {
+				t.Fatalf("targets = %v, want no enabled channel", runtimeCfg.EffectiveUpstreams())
 			}
 		})
 	}

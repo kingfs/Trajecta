@@ -65,6 +65,9 @@ export const apiPaths = {
   },
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
+  // The configuration-facing catalogue: every model an enabled channel
+  // exposes. /api/models above remains the traffic-facing list.
+  modelSquare: "/api/model-square",
   model: (model) => `/api/models/${encodeURIComponent(model)}`,
   modelSpecLookup: (model) => `/api/models/${encodeURIComponent(model)}/spec-lookup`,
   providers: "/api/channels",

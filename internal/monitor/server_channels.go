@@ -66,6 +66,11 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel payload"})
 			return
 		}
+		existingProxy, _ := channel.ChannelProxySettings(existing)
+		if err := normalizeChannelProxySettings(&req, existingProxy); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.ID = channelID
 		record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, existing))
 		if err != nil {
@@ -285,8 +290,16 @@ func enrichModelChannelItemFromRecord(item *modelChannelItem, channelRecord stor
 	if item == nil {
 		return
 	}
+	item.ChannelName = strings.TrimSpace(channelRecord.Name)
 	item.DisplayName = record.DisplayName
 	item.Enabled = record.Enabled
+	item.ChannelEnabled = channelRecord.Enabled
+	item.State = string(channel.ModelAvailability(channelRecord, record))
+	item.Routable = channel.ModelRoutable(channelRecord, record)
+	// Available is what the detail page renders: the channel must be enabled
+	// and the channel-model pair must be routable. Model-level Enabled alone
+	// would show a green tag for a model behind a disabled channel.
+	item.Available = channelRecord.Enabled && item.Routable
 	item.Source = record.Source
 	item.SupportsResponses = capabilityBool(record.SupportsResponses)
 	item.SupportsChatCompletions = capabilityBool(record.SupportsChatCompletions)

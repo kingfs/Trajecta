@@ -9,7 +9,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 - **Provider**：上游公司、公司网关或本地/自托管代理，即 provider preset 描述的对象；「一个上游连接 + 凭据」的正式称呼是渠道（channel），见下。
 - **协议族（`protocol_family`）**：上游 API 请求/响应 schema、认证方式与 endpoint 形态的归类。当前有 4 个：`openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native`。
 - **路由 profile（`routing_profile`）**：同一协议族内的 URL 构造与鉴权差异，例如 Azure、vLLM、Vertex express 与 project/location。
-- **客户端入口（entrypoint）**：Trajecta 暴露给客户端的 URL 形态，只选择客户端 API 形态，不跨协议族翻译。
+- **客户端入口（entrypoint）**：Trajecta 暴露给客户端的 URL 形态，只选择客户端 API 形态，默认不跨协议族翻译（开启 `router.selection.protocol_conversion` 后按 [协议转换](./PROTOCOL_CONVERSION.md) 的规则兜底）。
 - **能力（capability）**：`capabilities.*` 布尔声明，用于按 endpoint 判断某个上游或模型能否服务某类请求。
 
 内部实现与数据库仍沿用 `channel_*` 命名：`channel_configs`、`channel_models`、`/api/channels`。这些是实现细节。Monitor UI 的正式页面是「渠道」`/channels`（API 为 `/api/channels`），`/providers`、`/providers/:id` 只保留到 `/channels` 的旧地址重定向；`provider` 只指上游公司或 provider preset。存储细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
@@ -111,15 +111,15 @@ host 推断的当前规则（按顺序匹配）：`api.deepseek.com` 且未指�
 
 ## Provider 配置来源
 
-YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 语义、显式 `credentials` 的 YAML 管理模式、`store.ConfigurationTransaction` 的写入边界与 `routing.settings` 策略位置，见 [路由与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [Responses 运行时](./RESPONSES_RUNTIME.md)。
+渠道的数据库唯一来源、`channels.initialized` 标记、`store.ConfigurationTransaction` 的写入边界与 `routing.settings` 策略位置，见 [路由与凭据](./ROUTING_AND_CREDENTIALS.md) 与 [Responses 运行时](./RESPONSES_RUNTIME.md)。
 
 ## 能力声明与 protocol_family 映射
 
-- 能力字段为 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`，对应 YAML `upstream.capabilities`（数据库为 channel 的 capabilities JSON）。每个字段都是可选布尔，未声明表示未知。
+- 能力字段为 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`，数据库为 channel 的 capabilities JSON。每个字段都是可选布尔，未声明表示未知。
 - 已声明的能力对对应 surface 是有约束力的：`chat_completions` / `responses` 决定候选能否服务该路径，`tool_calling` 决定带 tools 的请求能否选中该 target（`tools` 与非空 `functions` 同等看待：后者是 OpenAI 已废弃但仍被客户端与上游接受的同义字段），`tokenize` 决定 `/tokenize` 与 `/v1/detokenize` 能否选中该 target；显式 `false` 会把该 target 排除，未声明的字段保持宽松（tokenize 这类没有 `api_type` 可推导的 surface 因此仍然可被选中）。`embeddings` 与 `models` 目前是描述性的：`POST /v1/embeddings` 没有 adapter，因此始终不可路由，`/v1/models` 由代理本地按配置目录回答、不转发给上游。需要特别注意 `/v1/responses`：`capabilities.responses=true` 只表示该渠道的 Responses 入口可由本地 Responses runtime 用 Chat Completions 翻译来服务；**原生 Responses 直通必须显式声明**——模型的 `supports_responses=true`，或渠道 `api_type` 为 `responses`/`responses_native`（或渠道显式没有 Chat Completions backend，此时 responses 只能解释为原生）。
 - `api_type` 的全局合法值为 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`；协议族另有约束：`anthropic_messages` 只接受 `messages`，`google_genai` 与 `vertex_native` 只接受 `gemini_generate_content`，`openai_compatible` 没有额外的 `api_type` 约束。`api_type` 缺失时按协议族取默认值：`anthropic_messages` → `messages`，`google_genai`、`vertex_native` → `gemini_generate_content`，其余 → `chat_completions`。
 - `mode` 的合法值为 `proxy`、`record_only`、`server`、`responses_server`；它只被解析、校验和记录日志，不参与路由，也不再作为渠道表单字段暴露。
-- 按模型覆盖：数据库 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 可编辑，YAML 对应 `upstream.model_capabilities`）对该模型覆盖 channel 级 `api_type`/capabilities；没有声明覆盖的模型回退到 channel 级行为。这使一个 channel 能对部分模型走原生 surface，对另一些模型走其他 surface。
+- 按模型覆盖：数据库 `channel_models.supports_responses` / `supports_chat_completions`（Monitor 可编辑）对该模型覆盖 channel 级 `api_type`/capabilities；没有声明覆盖的模型回退到 channel 级行为。这使一个 channel 能对部分模型走原生 surface，对另一些模型走其他 surface。
 - endpoint 级判定：`/v1/chat/completions` 要求该模型的 Chat Completions 支持；`/v1/responses` 要求原生 Responses 支持或 Chat Completions 支持（后者走本地 Responses runtime）；`/tokenize` 与 `/v1/detokenize` 要求该模型的 tokenize 能力没有显式关闭（`capabilities.tokenize: false` 或 `model_capabilities.<model>.tokenize: false` 时该 target 不参与选择，返回 `no_supporting_target`；客户端可见错误码的完整表见 [代理使用示例](./PROXY_USAGE_EXAMPLES.md#客户端可见的错误码)）。
 - `internal/upstream` 的 capability registry 被 probe endpoint、provider setup/apply 写入与 routing API surface 判断共用，各控制面不维护各自事实源；probe 未探测到的能力不会被自动补出。registry 里没有 tokenize 的 probe spec，因此该能力只来自显式声明。
 
@@ -134,7 +134,7 @@ YAML 与数据库的配置来源与所有权、`channels.initialized` bootstrap 
 
 ## Provider Probe
 
-`provider probe` 是手动诊断命令，用于检查配置中的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
+`provider probe` 是手动诊断命令，用于检查应用数据库中渠道的 upstream endpoint 是否暴露常见 API surface 并给出保守建议：
 
 ```bash
 trajecta --config config.yaml provider probe --id openai-local --format json
@@ -147,7 +147,7 @@ trajecta --config config.yaml provider probe --id openai-local --format json
 - 输出包含建议的 `protocol_family`、`api_type`、capabilities、confidence 与 warnings。confidence 按得分给出：≥5 为 0.9，≥4 为 0.8，≥3 为 0.7，≥1 为 0.45，否则 0。
 - 当显式配置的 `api_type` 或 `protocol_family` 与探测建议不一致时，报告写入 warning，但不改写配置。
 
-`provider probe-report` 是面向 YAML upstream 的只读批量报告；`provider probe-apply` 是面向 managed channel 的写入口，会打开 application store，对已有 channel 运行同类 probe 并只填补缺失字段：
+`provider probe-report` 与 `provider probe` 是只读批量报告，`provider probe-apply` 是写入口；三者都打开 application store，对已有数据库渠道运行 probe。probe-apply 只填补缺失字段：
 
 ```bash
 trajecta --config config.yaml provider probe-apply --id openai-local --format json
@@ -157,15 +157,14 @@ trajecta --config config.yaml provider probe-apply --id openai-local --format js
 
 capability registry 中没有 `vertex_native` 的 probe spec，因此 provider probe 与 `provider probe-apply` 不会给出 `vertex_native` 建议，也不会为 Vertex 上游建议或填补 Vertex 相关字段。
 
-默认启动不执行 provider probe，也不依赖网络。需要明确 opt-in 时配置：
+默认启动不执行 provider probe，也不依赖网络。需要探测时使用 Monitor 的渠道页操作或 CLI：
 
-```yaml
-provider_probe:
-  startup_fill: true
-  timeout: 2s
+```bash
+trajecta provider probe --id <channel-id>
+trajecta provider probe-report
 ```
 
-开启后，serve 启动会对启用的 YAML upstream target 做一次 best-effort probe，并只在内存配置中填补缺失的 `api_type`、`protocol_family` 和未声明的能力布尔；不会写回 YAML。显式配置值不会被覆盖；probe 失败或建议不一致时只记录 warning/log，不阻断服务启动。
+两者都从应用数据库读取渠道，不再读取 YAML `upstreams`；serve 启动不会 probe，也不会回填任何 YAML 配置。
 
 ## 新增 preset 的原则
 
@@ -177,9 +176,13 @@ provider_probe:
 
 只有当请求 schema、响应 schema、stream 事件、usage 或 replay 行为明显不同，才应新增协议族。新增 preset 时用 [开发](./DEVELOPMENT.md) 中的命令矩阵做校验；新增协议族还需补齐官方 schema 快照与流式/非流式 cassette fixture，并保证解析进 Observation IR 时不改变 replay 原始字节。
 
+## 协议转换
+
+协议转换默认关闭：上游必须原生支持客户端实际请求的 endpoint。`pkg/protocolconvert` 提供直通优先的转换库；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选、请求非流式、入口为 chat/messages/gemini 时才启用，`/v1/responses` 始终由本地 Responses runtime 负责。多模态/thinking 与 `response_format`、`reasoning_effort` 等 IR 不携带的字段会以 400 拒绝，详见 [协议转换](./PROTOCOL_CONVERSION.md)。
+
 ## 非目标与未实现
 
-- Anthropic Messages、OpenAI Responses 与 Gemini GenerateContent 之间不做跨协议请求翻译。`pkg/llm.Adapter` 有内部通用形态的 marshal 方法，但代理转发路径不用它们做跨协议转换层。
-- `/anthropic/messages` 不会转换成 OpenAI Chat Completions 或 Responses；`/responses` 不会转换成 Anthropic Messages。tool calls、streaming 事件、usage、cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有。
+- 流式逐帧转换与多模态/thinking 转换：流式请求和 IR 无法承载的内容不会被转换，必须使用原生直通上游。
+- 默认情况下 `/v1/messages` 不会转换成 OpenAI Chat Completions 或 Responses，`/v1/responses` 也不会转换成 Anthropic Messages；开启协议转换后，chat/messages/gemini 入口按 [协议转换](./PROTOCOL_CONVERSION.md) 的矩阵生效，`/v1/responses` 仍不转换。cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有（IR 不携带的字段会拒绝或记 warning）。
 - provider 特有 tools、reasoning、cache 控制、citations、safety block 与 streaming 事件生命周期没有完整语义等价。
 - 唯一的 Responses 特例发生在同一协议族内部：没有匹配的原生 Responses 上游时，本地 Responses runtime 会把 `/v1/responses` 编排为一次内部 `/v1/chat/completions` 调用，而不是跨协议族翻译。录制、观测与审计细节见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。

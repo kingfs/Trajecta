@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 const (
@@ -103,6 +105,10 @@ type ResolvedUpstream struct {
 	Location          string
 	ModelResource     string
 	Headers           map[string]string
+	// Proxy is the channel-level outbound proxy policy, compiled once at
+	// resolution time. A nil or disabled resolver means the process-wide system
+	// policy applies.
+	Proxy *netproxy.Resolver
 }
 
 type StartupDiagnostics struct {
@@ -138,6 +144,11 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		ModelResource:     strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
 		Headers:           cloneStringMap(cfg.Headers),
 	}
+	proxyResolver, err := netproxy.Compile(cfg.Proxy)
+	if err != nil {
+		return ResolvedUpstream{}, fmt.Errorf("upstream.proxy: %w", err)
+	}
+	resolved.Proxy = proxyResolver
 	applyHostProviderDefaults(&resolved, parsed)
 	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
 		return ResolvedUpstream{}, err
@@ -302,6 +313,13 @@ func PresetSupportMatrix() map[string]ProviderPresetSpec {
 		out[key] = value
 	}
 	return out
+}
+
+// HTTPClient returns base (or a default client when base is nil) carrying this
+// upstream's channel-level proxy policy. A disabled channel policy returns base
+// unchanged, so the process-wide system policy still applies.
+func (u ResolvedUpstream) HTTPClient(base *http.Client) *http.Client {
+	return netproxy.ClientWith(base, u.Proxy)
 }
 
 func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
@@ -642,6 +660,31 @@ func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string
 	}
 }
 
+// ProtocolCapabilitiesForModel derives the native wire protocols this
+// upstream serves for one model, in the vocabulary pkg/protocolconvert's
+// Plan consumes. Anthropic channels serve Messages, Google/Vertex channels
+// serve Gemini, and OpenAI-compatible channels serve Chat Completions
+// and/or Responses exactly as SupportsChatCompletionsAPIForModel /
+// SupportsResponsesAPIForModel declare (per-model supports_* overrides win
+// over the channel api_type/capabilities). Serving /v1/responses through the
+// local Responses runtime is deliberately not reported here: it is a
+// translation already, owned by internal/responses, and reporting it as a
+// native Responses capability would make Plan pass a raw Responses request
+// to an upstream that cannot honour it.
+func (u ResolvedUpstream) ProtocolCapabilitiesForModel(model string) protocolconvert.Capabilities {
+	switch u.ProtocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return protocolconvert.Capabilities{Messages: true}
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		return protocolconvert.Capabilities{Gemini: true}
+	default:
+		return protocolconvert.Capabilities{
+			ChatCompletions: u.SupportsChatCompletionsAPIForModel(model),
+			Responses:       u.SupportsResponsesAPIForModel(model),
+		}
+	}
+}
+
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	spec, ok := providerPresetRegistry[resolved.ProviderPreset]
 	if !ok {
@@ -977,14 +1020,21 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 	if strings.HasPrefix(reqPath, "/v1"+resourceRoot) {
 		return reqPath
 	}
-	if resolved.RoutingProfile == RoutingProfileVertexExpress && strings.HasPrefix(reqPath, "/v1/publishers/") {
-		return reqPath
-	}
+	// A protocol-converted request uses the compact surface
+	// /v1/publishers/models/{model}:{action}; the real resource root (publisher,
+	// project and location) is supplied here. Joining the model suffix onto
+	// resourceRoot must not repeat its trailing "/models".
 	switch llm.NormalizeEndpoint(reqPath) {
-	case "/v1/publishers/models:generateContent":
-		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":generateContent")
-	case "/v1/publishers/models:streamGenerateContent":
-		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":streamGenerateContent")
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+		action := "generateContent"
+		if strings.HasSuffix(reqPath, ":streamGenerateContent") {
+			action = "streamGenerateContent"
+		}
+		model := vertexModelFromShortPath(reqPath)
+		if model == "" {
+			return reqPath
+		}
+		return "/v1" + resourceRoot + "/" + model + ":" + action
 	case "/v1/publishers/models":
 		return "/v1" + resourceRoot
 	default:
@@ -992,14 +1042,20 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 	}
 }
 
-func suffixAfterModel(reqPath string, fallback string) string {
-	if idx := strings.Index(reqPath, "/models/"); idx >= 0 {
-		rest := reqPath[idx+len("/models/"):]
-		if rest != "" {
-			return "/models/" + rest
-		}
+// vertexModelFromShortPath extracts the model from
+// /v1/publishers/models/{model}:{action}. The model name is validated before it
+// is placed in a path, so the last colon always starts the action suffix.
+func vertexModelFromShortPath(reqPath string) string {
+	const marker = "/models/"
+	idx := strings.Index(reqPath, marker)
+	if idx < 0 {
+		return ""
 	}
-	return "/models/" + fallback
+	rest := reqPath[idx+len(marker):]
+	if colon := strings.LastIndex(rest, ":"); colon >= 0 {
+		rest = rest[:colon]
+	}
+	return strings.TrimSpace(rest)
 }
 
 func deploymentFromBasePath(basePath string) string {

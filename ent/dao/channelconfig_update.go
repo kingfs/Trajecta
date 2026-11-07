@@ -280,6 +280,20 @@ func (_u *ChannelConfigUpdate) SetNillableHeadersJSON(v *string) *ChannelConfigU
 	return _u
 }
 
+// SetProxyJSON sets the "proxy_json" field.
+func (_u *ChannelConfigUpdate) SetProxyJSON(v string) *ChannelConfigUpdate {
+	_u.mutation.SetProxyJSON(v)
+	return _u
+}
+
+// SetNillableProxyJSON sets the "proxy_json" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillableProxyJSON(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetProxyJSON(*v)
+	}
+	return _u
+}
+
 // SetEnabled sets the "enabled" field.
 func (_u *ChannelConfigUpdate) SetEnabled(v bool) *ChannelConfigUpdate {
 	_u.mutation.SetEnabled(v)
@@ -582,6 +596,9 @@ func (_u *ChannelConfigUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	}
 	if value, ok := _u.mutation.HeadersJSON(); ok {
 		_spec.SetField(channelconfig.FieldHeadersJSON, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProxyJSON(); ok {
+		_spec.SetField(channelconfig.FieldProxyJSON, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(channelconfig.FieldEnabled, field.TypeBool, value)
@@ -898,6 +915,20 @@ func (_u *ChannelConfigUpdateOne) SetHeadersJSON(v string) *ChannelConfigUpdateO
 func (_u *ChannelConfigUpdateOne) SetNillableHeadersJSON(v *string) *ChannelConfigUpdateOne {
 	if v != nil {
 		_u.SetHeadersJSON(*v)
+	}
+	return _u
+}
+
+// SetProxyJSON sets the "proxy_json" field.
+func (_u *ChannelConfigUpdateOne) SetProxyJSON(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetProxyJSON(v)
+	return _u
+}
+
+// SetNillableProxyJSON sets the "proxy_json" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillableProxyJSON(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetProxyJSON(*v)
 	}
 	return _u
 }
@@ -1234,6 +1265,9 @@ func (_u *ChannelConfigUpdateOne) sqlSave(ctx context.Context) (_node *ChannelCo
 	}
 	if value, ok := _u.mutation.HeadersJSON(); ok {
 		_spec.SetField(channelconfig.FieldHeadersJSON, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProxyJSON(); ok {
+		_spec.SetField(channelconfig.FieldProxyJSON, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Enabled(); ok {
 		_spec.SetField(channelconfig.FieldEnabled, field.TypeBool, value)

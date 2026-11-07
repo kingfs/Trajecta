@@ -220,10 +220,13 @@ export function buildUpstreamLink(upstreamID, windowValue = "today", modelValue 
   return query ? `/upstreams/${encodeURIComponent(upstreamID)}?${query}` : `/upstreams/${encodeURIComponent(upstreamID)}`;
 }
 
-export function buildModelLink(model, windowValue = "today") {
+export function buildModelLink(model, windowValue = "today", tab = "") {
   const params = new URLSearchParams();
   if (windowValue && windowValue !== "today") {
     params.set("window", windowValue);
+  }
+  if (tab) {
+    params.set("tab", tab);
   }
   const query = params.toString();
   return query ? `/models/${encodeURIComponent(model)}?${query}` : `/models/${encodeURIComponent(model)}`;

@@ -23,7 +23,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 
 顶层目录与包职责：
 
-- `cmd/server`：服务端二进制入口与 `serve` 装配。`main.go` 只通过 `run` 退出，`root.go` 只接线 `serve`、`version`、`completion` 与 `--config`/`--format`——除 `serve` 外不再承载运维子命令。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配，`provider_startup_probe.go` 提供启动期 provider probe 辅助。
+- `cmd/server`：服务端二进制入口与 `serve` 装配。`main.go` 只通过 `run` 退出，`root.go` 只接线 `serve`、`version`、`completion` 与 `--config`/`--format`——除 `serve` 外不再承载运维子命令。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配。
 - `cmd/trajecta`：运维 CLI 入口。除既有的 `upgrade`、`layout`、`version` 外，还通过 `internal/cli` 暴露全部不需要代理进程的运维命令组：`analyze`、`audit`、`auth`、`config`、`db`、`doctor`、`migrate`、`models`、`provider`、`schema`、`tools`。`root.go` 用 viper 绑定 `--config`/`--format` 后交给 `internal/cli.Register`。
 - `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`doctor.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
 - `internal/appdb`：按配置打开 application database 的共用入口——驱动规范化、迁移模式判定、`MigrateUp`/`OptimizeIndexes`、`Open`/`Initialize` 与 auth store 打开；serve 启动与 trajecta 的 `db`/`auth`/`audit`/`analyze` 都走这里。
@@ -32,13 +32,13 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/harness`：只从请求头与 URL 识别发请求的客户端 harness（不读 body）（Claude Code、Codex CLI、Cline、Cursor 等），产出 trace 标签；只读旁路，不改变请求、响应或发往上游的字节。规则、置信度与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。
 - `internal/upstream`：上游解析、协议族、能力/路由 profile 与鉴权/URL 规则。
-- `internal/channel`：渠道（provider）配置与 probe 用例、legacy YAML bootstrap、runtime targets。
+- `internal/channel`：渠道（provider）配置与 probe 用例、runtime targets；渠道只来自应用数据库，没有 YAML bootstrap。
 - `internal/responses`：本地 Responses 运行时及其子系统——`runtime`（编排与 state store）、`httpapi`（HTTP handler）、`chatclient`（内部 Chat Completions client）、`audit`（审计查询与写入）、`functionexec`（本地函数执行器）、`tools`（hosted tools：`hosted`、`mcp`、`websearch`）、`protocol`（类型定义）、`codexfixtures`（Codex 兼容 fixture）。
 - `internal/router`：多上游选择、健康、重试、sticky、决策记录与路由快照发布。
 - `internal/routeplan`：Inspector 与转发路径共享的路由 DTO/词汇、`responses_strategy` 常量，以及唯一的 `DecideResponses` 执行模式决策；它**不再包含 planner**，候选过滤/健康/选择由 `internal/router` 的 `Explain` dry-run 与热路径共用。
 - `internal/appdbmigrate`：应用 Postgres checked-in migration 的加载与应用。
 - `internal/monitor`：Monitor API 与内嵌 React UI（`go:embed ui/dist/*`）。
-- `internal/netproxy`：出站代理策略（`app_settings` 键 `network.proxy`）。按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换策略；进程启动时读库并安装 `http.DefaultTransport`，透传路径的 transport 直接把 `Proxy` 指向它，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页一节。
+- `internal/netproxy`：出站代理策略。系统级策略存于 `app_settings` 键 `network.proxy`，渠道级策略存于 `channel_configs.proxy_json`；两者都按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换系统策略。进程启动时读库并安装 `http.DefaultTransport`；渠道策略随 `upstream.Resolve` 编译进 `ResolvedUpstream.Proxy`，转发路径通过请求 context 覆盖共享 transport 的代理决策，probe/发现/本地 Responses/tokenize 则用渠道 resolver 包装各自的 client，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页与渠道页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
 - `internal/resources`：从 Observation IR 的模型工具调用中提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引；工具结果、消息正文与代码内容不参与。
@@ -48,14 +48,16 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/trajectory`：从客户端可见的 Responses cassette 重建 ATIF-v1.8 会话轨迹（不调用模型、不修改 cassette）；`scripts/validate_atif.py` 与 `scripts/atif_tests` 用固定版本官方模型做离线格式校验。
 - `internal/providerprobe`：provider 能力探测。
 - `internal/modelprobe`：按模型、按协议的最小请求连通性测试（chat/responses/messages/generateContent），把结果分类成 `ok`/`auth_failed`/`model_not_found`/`endpoint_not_supported` 等并给出可执行建议；只读，不写 store、不写 cassette、不经过 router。Monitor 的 `POST /api/provider-model-test` 与模型卡按钮使用它。
+- `internal/modelinfo`：模型广场与模型详情页的静态模型元数据，来自编译进二进制的 [Argus](https://github.com/kingfs/Argus) 注册表（供应商、系列、中英文描述、上下文/最大输出、能力位、标签、官网/模型卡链接）；`Lookup` 先按 ID/别名精确匹配，再依次尝试去掉路由前缀、点分厂商命名空间、日期/修订后缀与数字间连字符改写，未命中就返回空而不做模糊猜测。查询是内存 map 读取，不访问网络；`GET /api/model-square` 与 `GET /api/models/{model}` 的 `facts` 字段使用它。
 - `internal/evals`：基于 replay 的确定性 eval 基线执行（HTTP 状态、TTFT/token 预算、tool-call 校验等）。
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
 - `internal/auth`：认证 user/token 与 JWT。
-- `internal/config`：YAML/env 配置装载（含 legacy bootstrap 输入）。
+- `internal/config`：YAML/env 配置装载；`upstream` / `upstreams` 不是 YAML 键，加载时会被明确拒绝。
 - `internal/limit`：请求限流；`internal/redaction`：URL 与敏感参数脱敏；`internal/chaos`：配置驱动的故障注入（`action` 取 `delay`/`error`，大小写不敏感；`rate` 必须在 0.0~1.0，`status_code` 必须是 0 或 100~999，否则 `Load` 报错而不让规则静默失效或让 `WriteHeader` panic）。
 - `pkg/recordfile`：V2/V3 cassette 解析与写入。
 - `pkg/replay`：测试回放 transport。
-- `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`。
+- `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`；其 marshal 方法也供 `pkg/protocolconvert` 做请求/响应编码。
+- `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径仅在 `router.selection.protocol_conversion: true` 且没有可用原生候选时使用。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
 - `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号与手机号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类；PEM 私钥块由 `pem.go` 从 DFA 命中的头行原生扩展到配对 footer（标签必须一致，反向引用无法用 DFA 表达），不新增 DFA 状态。vault 的 `real -> fake` 映射由 `internal/store` 的 bbolt 文件持久化（默认开启），启动默认加载全部、首次遇到未知真值时回查，因此假值跨重启与上下文压缩保持稳定；正数 `load_limit` 可限制启动内存并形成识别窗口。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
@@ -84,10 +86,11 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 
 ## 协议边界
 
-当前是协议族感知的透传代理，不是跨协议转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
+当前是协议族感知的透传代理，默认不是跨协议转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
 
-- `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native` 在转发热路径中互不转换；上游必须支持 client 实际请求的 endpoint（例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游）。
-- `pkg/llm`/`pkg/observe` 可以把不同协议归一化为统一摘要与 Observation IR，但这不等于可以无损转发到另一个协议。
+- 默认情况下 `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native` 在转发热路径中互不转换；上游必须支持 client 实际请求的 endpoint（例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游）。
+- 开启 `router.selection.protocol_conversion` 后，只有当本轮没有可用原生候选、请求非流式、入口为 chat/messages/gemini 时，`pkg/protocolconvert` 才会把请求/响应转换到目标协议；原生候选始终优先，`/v1/responses` 不参与转换。流式、多模态/thinking、以及 IR 不携带的语义字段不被转换。
+- `pkg/llm`/`pkg/observe` 可以把不同协议归一化为统一摘要与 Observation IR；`pkg/protocolconvert` 只在 IR 明确承载的字段上做转换，其余字段默认拒绝而不是猜测。
 - proxy 无条件接受 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`。
 
 `/v1/responses` 是唯一例外，按请求在 native 与本地 runtime 之间二选一：
@@ -95,7 +98,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 - native：匹配到支持 Responses 的上游时直接透传。
 - 本地 runtime：把请求编排为一次内部上游 `/v1/chat/completions` 调用（`responses_server` 执行模式）。该模式始终可用且没有配置开关；旧的 `responses_server.enabled` 与 `TRAJECTA_RESPONSES_ENABLED` 已移除。本地 runtime 延迟构建，构建失败只影响触发该次构建的请求，不阻塞启动。
 - 策略存于 application DB 的 `app_settings` 键 `routing.settings`，经 `GET`/`PATCH /api/settings/routing` 读写，不是 YAML 键；取值为 `auto`、`prefer_native`、`prefer_local_server`、`native_only`、`local_server_only`。
-- native 与 local 的选择按模型解析而非按渠道：`channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 可编辑）覆盖渠道级 `api_type`/`capabilities`，未声明值的模型回落到渠道级行为；YAML 侧对应 `upstream.model_capabilities`。
+- native 与 local 的选择按模型解析而非按渠道：`channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 可编辑）覆盖渠道级 `api_type`/`capabilities`，未声明值的模型回落到渠道级行为；数据库侧对应 `channel_models.supports_*`。
 
 本地 Responses 运行时的编排、审计与 hosted tools 细节见 [Responses 运行时](./RESPONSES_RUNTIME.md)。
 
@@ -152,7 +155,7 @@ Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个
 
 `ConfigurationTransaction` 串行化管理配置写入：全程持有进程级配置锁、upstream 写锁与单个 SQL 事务，提交成功后才发布路由快照。router 不再写 `upstream_targets` / `upstream_models`（它们只是旧运行时快照与兼容投影），刷新结果只更新内存快照，因此一次配置提交之后不会再被后台刷新用旧数据覆盖。
 
-渠道配置的 DB 优先规则：YAML `upstream`/`upstreams` 只是首次 bootstrap 输入；首次数据库写入记录 `app_settings` 键 `channels.initialized`，此后 DB 是路由配置来源，即使全部渠道停用或删除也不回退 YAML。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 仅清除标记（只有在 DB 中确实没有渠道时，下次启动才会重新导入）。带显式 `credentials` 列表的 YAML 配置保持 YAML 管理，并拒绝 Monitor 的渠道/模型/别名写入（返回 409）。
+渠道配置只来自应用数据库：YAML 的 `upstream` / `upstreams` 已移除，`config.Load` 遇到这两个键会报错并提示在 Monitor 配置。`GET /api/settings/channels` 返回 `channel.Service.HasConfiguration()`：`channels.initialized` 标记为真，或 DB 中已存在任意渠道行，都报告 `{"initialized": true}`；`DELETE /api/settings/channels` 只清除标记，不再触发任何重新导入。不存在 YAML 只读模式，Monitor 的渠道/模型/别名写操作始终走 `ConfigurationTransaction`。
 
 ## 事实源边界
 
