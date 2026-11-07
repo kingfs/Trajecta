@@ -70,6 +70,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 | `db migrate status` | 迁移可见性 | 默认只读配置（不连库）；加 `--check-db` 才读库：Postgres 读 `schema_migrations` 的 version/dirty，SQLite 以只读方式报告 `app_schema_status` 与必需表是否齐全 |
 | `db migrate optimize-indexes` | Postgres 索引优化 | 仅 Postgres 生效，应用非事务性 `CREATE INDEX CONCURRENTLY`；支持 `--dry-run`，SQLite 报 not applicable |
 | `db summary rebuild sessions` | 派生汇总重建 | 从 logs 重建 `session_summaries`；支持 `--session-id`、`--dry-run` |
+| `db cleanup requests` | 按 HTTP 状态删录制与派生数据 | 默认 dry-run，`--apply` 才写库；`--status` / `--failed` / `--trace-id` 至少给一个；删除匹配的 `logs` 行（含其 `exchange_kind='model'` 子 exchange）、`upstream_exchanges`、按 trace 的派生行与对应 cassette，并按 session 重建 `session_summaries`；`--keep-cassettes` 只清库，`--purge-references` 才会动 `dataset_examples` / `scores` / `system_events` |
 | `db secret status` / `export` / `rotate` | 本地 channel secret 加密密钥 | `rotate` 必须显式 `--yes`；`export` 支持 `--out` |
 | `db secret-mapping stats` / `list` / `delete` / `prune` / `compact` | 本地 bbolt 遮蔽映射文件（不是 application DB 表） | 必须在 serve 停止后运行（bbolt 排他锁）；写命令默认 dry-run，`--apply` 才落盘；`stats`/`list`/`delete`/`prune` 经 `appdb.Open` 打开 application DB（受 `auto_migrate` 影响），`compact` 只做原始字节复制、不连库；`--purge-audits` 会删 `credential_mask_audits` 行但不动 `system_events` |
 | `auth migrate up` / `down` / `status` | 认证表 | 见下一节 |
@@ -198,9 +199,12 @@ trajecta analyze session --session-id <id>
 trajecta analyze batch --all --limit 1000    # 或 --trace-id/--request-id/--session-id/过滤器
 trajecta analyze refresh --all
 trajecta db summary rebuild sessions [--session-id <id>]
+trajecta db cleanup requests --status 404 [--apply] [--keep-cassettes]
 ```
 
 `db summary rebuild` 当前只有 `sessions` 一个子命令（从 `logs` 重建 `session_summaries`，支持 `--session-id` 与 `--dry-run`）；`overview` 子命令已移除，`overview_metric_*` 两张表也不再被读写（Postgres 由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP，新库不会建表；SQLite 启动 schema 早已不再创建）。
+
+`db cleanup requests` 用来清掉误报或探活产生的错误请求（例如模型未启用时的 404），并同步修掉它们的派生统计。选择器是 `--status <code>`（可重复或逗号分隔）、`--failed`（所有非 2xx，或 2xx 但记了 `error_text`）或 `--trace-id <id>`，至少给一个；`--session-id` / `--model` / `--endpoint` / `--upstream` / `--since` / `--until` / `--limit` 只做收窄。状态选择只匹配 client-visible 的 `logs` 行（`exchange_kind` 为 `''` / `entry` / `proxy`），命中的请求会连同它的 `exchange_kind='model'` 子 exchange 一起删；显式 `--trace-id` 则绕过这个限制，可直接删一条子 exchange。`--apply` 在同一个事务里删除 `upstream_exchanges`、`trace_observations`、`trace_findings`、`trace_resources`、`credential_mask_audits`、`credential_mask_event_states`、`analysis_runs`、`parse_jobs`、`target_type='trace'` 的 `analysis_jobs` 与孤立的 `resources` 目录行，随后按受影响 session 重建 `session_summaries`（最后一个可见请求被删掉的 session 汇总行会一起消失）。cassette 文件是唯一事实源，删除它才不会被下一次 `Store.Sync` 重新索引回来，所以 `--apply` 默认同时删除对应的 `.http`（带输出目录包含性与 `.http` 后缀校验）；`--keep-cassettes` 只清库。`--purge-references` 还会删除指向这些 trace 的 `dataset_examples` / `scores` / `system_events`（默认保留，`system_events` 与 `db secret-mapping prune --purge-audits` 的取舍一致）；无论是否清理，报告里的 `reference_counts` 都会给出这三张表仍指向被删 trace 的行数，未加 `--purge-references` 时还会带一条 warning。注意 `--purge-references` 只删行，不重算 `eval_runs` 的 `trace_count` / `score_count`（那属于 `eval_runs` 自身的一致性，需要另行重建）。`request_audits` / `execution_events` / `tool_call_audits` / `responses` 是 Responses runtime 的持久化审计与状态，不按 trace 派生，本命令不动它们。写库前建议先停 `serve`，SQLite 在运行中可能因文件锁失败。
 
 `analyze batch` 支持 `--repair-usage`、`--reparse`、`--scan`、`--enqueue`、`--rewrite-cassette`、`--workers`、`--limit` 以及 `--provider` / `--model` / `--status` / `--observation` 等过滤器；`analyze refresh` 固定执行 reparse + scan（没有 `--reparse` / `--scan` 开关），另支持 `--repair-usage`、`--rewrite-cassette`、`--enqueue`、`--workers`、`--limit` 与同样的过滤器。对历史 cassette 的 usage repair 默认只修 DB 指标，只有显式传 `--rewrite-cassette` 才会重写 V3 prelude。
 
