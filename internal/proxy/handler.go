@@ -1252,7 +1252,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// what replay parses. A response that cannot be translated is a
 		// candidate failure, never a wrong-protocol body for the client.
 		if conversion != nil {
-			convertedResp, convErr := conversion.convertResponseBody(resp)
+			convertedResp, convErr := conversion.convertResponseBody(resp, h.maxRequestBodyBytes())
 			if convErr != nil {
 				logInfo.Header.Meta.Error = convErr.Error()
 				resp.Body.Close()

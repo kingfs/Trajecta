@@ -1140,7 +1140,7 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 			// busy and the fast one is idle. Let the normal cost comparison
 			// decide, but keep the binding (do not rebind) so sequential
 			// traffic returns to it once it is free again.
-			if picked, pickedScore := r.pick(available, features); picked != bound {
+			if picked, pickedScore := r.pick(available, features, rawPath); picked != bound {
 				selected = picked
 				score = pickedScore
 				decision.withStickyTarget("spill", stickyFingerprint, nil, "", targetAlias(bound, stickyTargetID))
@@ -1167,7 +1167,7 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
-		selected, score = r.pick(available, features)
+		selected, score = r.pick(available, features, rawPath)
 		if !opts.DryRun && stickyKey != "" && !stickyHeld {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
@@ -1417,12 +1417,31 @@ func (r *Router) Release(selection *Selection) {
 	selection.Target.onRelease(selection.Request)
 }
 
-func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float64) {
+// conversionCostPenaltyFactor keeps native passthrough ahead of conversion
+// candidates in cost comparisons: conversion adds parse/encode latency and
+// risks field loss, so a converting target must be roughly twice as fast to
+// win. Among converting candidates themselves the penalty is uniform and
+// does not change their relative order.
+const conversionCostPenaltyFactor = 2.0
+
+// pickScore applies the passthrough preference to expectedCost. A target
+// that serves rawPath natively keeps its measured cost; one that would need
+// protocol conversion is penalised. When conversion is disabled every
+// candidate is native and the penalty never applies.
+func (r *Router) pickScore(target *Target, req RequestFeatures, rawPath string) float64 {
+	score := r.expectedCost(target, req)
+	if rawPath != "" && !supportsPath(target, rawPath, req) {
+		score *= conversionCostPenaltyFactor
+	}
+	return score
+}
+
+func (r *Router) pick(candidates []*Target, req RequestFeatures, rawPath string) (*Target, float64) {
 	if len(candidates) == 1 || r.policy == PolicyFirstAvailable {
 		best := candidates[0]
-		bestScore := r.expectedCost(best, req)
+		bestScore := r.pickScore(best, req, rawPath)
 		for _, candidate := range candidates[1:] {
-			candidateScore := r.expectedCost(candidate, req)
+			candidateScore := r.pickScore(candidate, req, rawPath)
 			if compareScore(candidate, candidateScore, best, bestScore) < 0 {
 				best = candidate
 				bestScore = candidateScore
@@ -1431,12 +1450,12 @@ func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float
 		return best, bestScore
 	}
 
-	return r.pickCostAware(candidates, req)
+	return r.pickCostAware(candidates, req, rawPath)
 }
 
-func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Target, float64) {
+func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures, rawPath string) (*Target, float64) {
 	if len(candidates) == 1 {
-		return candidates[0], r.expectedCost(candidates[0], req)
+		return candidates[0], r.pickScore(candidates[0], req, rawPath)
 	}
 	// math/rand/v2's package-level functions are safe for concurrent use
 	// (per-P state), which matters because selectTargets holds the router's
@@ -1444,7 +1463,7 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	// A shared *rand.Rand here was a data race on the default policy.
 	if rand.Float64() < r.costs.Epsilon {
 		idx := rand.IntN(len(candidates))
-		return candidates[idx], r.expectedCost(candidates[idx], req)
+		return candidates[idx], r.pickScore(candidates[idx], req, rawPath)
 	}
 
 	aIdx := rand.IntN(len(candidates))
@@ -1454,8 +1473,8 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	}
 	a := candidates[aIdx]
 	b := candidates[bIdx]
-	scoreA := r.expectedCost(a, req)
-	scoreB := r.expectedCost(b, req)
+	scoreA := r.pickScore(a, req, rawPath)
+	scoreB := r.pickScore(b, req, rawPath)
 	if compareScore(a, scoreA, b, scoreB) <= 0 {
 		return a, scoreA
 	}

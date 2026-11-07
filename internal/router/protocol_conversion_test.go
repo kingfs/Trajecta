@@ -60,3 +60,28 @@ func TestConvertAwareSupportsPath(t *testing.T) {
 		t.Error("/v1/models eligibility should follow the native rule")
 	}
 }
+
+func TestPickScorePenalizesConversionCandidates(t *testing.T) {
+	r := &Router{policy: PolicyFirstAvailable, costs: defaultCostConfig()}
+	chatTarget := &Target{Upstream: upstream.ResolvedUpstream{
+		ProtocolFamily: upstream.ProtocolFamilyOpenAICompatible,
+		APIType:        upstream.APITypeChatCompletions,
+	}}
+	features := RequestFeatures{ModelName: "m"}
+
+	nativeScore := r.pickScore(chatTarget, features, "/v1/chat/completions")
+	convertScore := r.pickScore(chatTarget, features, "/v1/messages")
+	if convertScore != nativeScore*conversionCostPenaltyFactor {
+		t.Errorf("convert score = %v, want %v * %v", convertScore, nativeScore, conversionCostPenaltyFactor)
+	}
+	// pick must prefer the native candidate even though both are eligible
+	// under conversion and their measured costs are equal.
+	anthropicTarget := &Target{Upstream: upstream.ResolvedUpstream{
+		ProtocolFamily: upstream.ProtocolFamilyAnthropicMessages,
+		APIType:        upstream.APITypeMessages,
+	}}
+	picked, _ := r.pick([]*Target{chatTarget, anthropicTarget}, features, "/v1/chat/completions")
+	if picked != chatTarget {
+		t.Error("pick should prefer the native chat target over the anthropic (convert) target at equal cost")
+	}
+}

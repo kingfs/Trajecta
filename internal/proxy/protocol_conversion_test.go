@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
 
 func TestHandlerConvertsMessagesToChatWhenEnabled(t *testing.T) {
@@ -186,6 +187,49 @@ func TestHandlerRejectsMessagesWhenConversionDisabled(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("resp.StatusCode = %d, want 502 (no supporting target without conversion)", resp.StatusCode)
+	}
+}
+
+func TestConvertResponseBodyEmptyAndOversized(t *testing.T) {
+	conversion := &protocolConversion{
+		clientProtocol:   protocolconvert.ProtocolMessages,
+		upstreamProtocol: protocolconvert.ProtocolChatCompletions,
+		wireModel:        "m",
+	}
+	// Empty 2xx body passes through unconverted instead of failing.
+	emptyResp := &http.Response{
+		StatusCode: http.StatusNoContent,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader("")),
+	}
+	out, err := conversion.convertResponseBody(emptyResp, 1<<20)
+	if err != nil {
+		t.Fatalf("empty body: %v", err)
+	}
+	if out != emptyResp {
+		t.Error("empty body response should pass through unchanged")
+	}
+	// Body over the cap fails the candidate instead of buffering unboundedly.
+	bigResp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", 100))),
+	}
+	if _, err := conversion.convertResponseBody(bigResp, 10); err == nil {
+		t.Error("oversized body should error")
+	}
+	// Error responses pass through unconverted.
+	errResp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"error":"upstream boom"}`)),
+	}
+	out, err = conversion.convertResponseBody(errResp, 1<<20)
+	if err != nil {
+		t.Fatalf("error response: %v", err)
+	}
+	if out != errResp {
+		t.Error("error response should pass through unconverted")
 	}
 }
 

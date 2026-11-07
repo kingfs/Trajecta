@@ -125,16 +125,30 @@ func (c *protocolConversion) upstreamPath() string {
 // provider-specific diagnostics, and routing them through the IR would
 // replace a useful upstream error with an empty shell in the client
 // protocol. They reach the client byte for byte, as before conversion
-// existed.
-func (c *protocolConversion) convertResponseBody(resp *http.Response) (*http.Response, error) {
+// existed. An empty successful body (e.g. 204) also passes through: there
+// is nothing to translate, and failing the candidate over it would be a
+// spurious 502. Conversion buffers the whole body, so it is capped at
+// maxBytes (the same ceiling the request path uses) instead of growing
+// without bound.
+func (c *protocolConversion) convertResponseBody(resp *http.Response, maxBytes int64) (*http.Response, error) {
 	if resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return resp, nil
 	}
-	body, err := io.ReadAll(resp.Body)
+	if maxBytes <= 0 {
+		maxBytes = 64 << 20
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("protocol conversion: read upstream response: %w", err)
 	}
 	_ = resp.Body.Close()
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("protocol conversion: upstream response exceeds %d bytes", maxBytes)
+	}
+	if len(body) == 0 {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
 	result, err := protocolconvert.ConvertResponse(body, c.upstreamProtocol, c.clientProtocol, c.wireModel, c.vertex)
 	if err != nil {
 		return nil, fmt.Errorf("protocol conversion: convert %s response to %s: %w", c.upstreamProtocol, c.clientProtocol, err)
