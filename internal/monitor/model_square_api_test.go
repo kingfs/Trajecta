@@ -65,6 +65,9 @@ func TestModelSquareListsEnabledModelsWithEveryChannel(t *testing.T) {
 	if !gpt.Available || gpt.ChannelCount != 3 || gpt.AvailableChannelCount != 2 {
 		t.Fatalf("gpt-4o square item = %+v", gpt)
 	}
+	if len(gpt.Protocols) != 1 || gpt.Protocols[0] != "chat_completions" {
+		t.Fatalf("gpt-4o protocols = %v", gpt.Protocols)
+	}
 	if gpt.Facts == nil || gpt.Facts.Provider == "" {
 		t.Fatalf("gpt-4o facts = %+v", gpt.Facts)
 	}

@@ -37,13 +37,17 @@ type modelSquareSummary struct {
 }
 
 type modelSquareItem struct {
-	Model                 string               `json:"model"`
-	DisplayName           string               `json:"display_name,omitempty"`
-	Available             bool                 `json:"available"`
-	ChannelCount          int                  `json:"channel_count"`
-	AvailableChannelCount int                  `json:"available_channel_count"`
-	Channels              []modelSquareChannel `json:"channels"`
-	Facts                 *modelinfo.Facts     `json:"facts,omitempty"`
+	Model                 string `json:"model"`
+	DisplayName           string `json:"display_name,omitempty"`
+	Available             bool   `json:"available"`
+	ChannelCount          int    `json:"channel_count"`
+	AvailableChannelCount int    `json:"available_channel_count"`
+	// Protocols is the union of the wire surfaces offered by the channels
+	// that can serve this model now (or, when none can, by every declared
+	// channel). The per-channel Interfaces remain the source facts.
+	Protocols []string             `json:"protocols,omitempty"`
+	Channels  []modelSquareChannel `json:"channels"`
+	Facts     *modelinfo.Facts     `json:"facts,omitempty"`
 }
 
 type modelSquareChannel struct {
@@ -61,6 +65,46 @@ type modelSquareChannel struct {
 	Interfaces     channel.ModelInterfaces `json:"interfaces"`
 	ContextWindow  *int                    `json:"context_window,omitempty"`
 	MaxOutput      *int                    `json:"max_output_tokens,omitempty"`
+}
+
+// modelSquareProtocols folds the per-channel interface facts into the
+// protocol badges shown on a model card. Available channels are preferred; a
+// model with no available channel still reports what its configured channels
+// declare, so scope=all is useful for planning.
+func modelSquareProtocols(channels []modelSquareChannel) []string {
+	add := func(set map[string]bool, interfaces channel.ModelInterfaces) {
+		if interfaces.ChatCompletions || interfaces.ResponsesViaChat {
+			set["chat_completions"] = true
+		}
+		if interfaces.NativeResponses {
+			set["responses"] = true
+		}
+		if interfaces.Messages {
+			set["messages"] = true
+		}
+		if interfaces.GenerateContent {
+			set["gemini"] = true
+		}
+	}
+	available := make(map[string]bool)
+	all := make(map[string]bool)
+	for _, entry := range channels {
+		add(all, entry.Interfaces)
+		if entry.Available {
+			add(available, entry.Interfaces)
+		}
+	}
+	set := available
+	if len(set) == 0 {
+		set = all
+	}
+	out := make([]string, 0, len(set))
+	for _, protocol := range []string{"chat_completions", "responses", "messages", "gemini"} {
+		if set[protocol] {
+			out = append(out, protocol)
+		}
+	}
+	return out
 }
 
 const (
@@ -161,6 +205,7 @@ func modelSquareAPIHandler(st *store.Store) http.HandlerFunc {
 				}
 			}
 			item.Available = item.AvailableChannelCount > 0
+			item.Protocols = modelSquareProtocols(item.Channels)
 			sort.Slice(item.Channels, func(i, j int) bool {
 				if item.Channels[i].Available != item.Channels[j].Available {
 					return item.Channels[i].Available
