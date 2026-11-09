@@ -15,7 +15,7 @@
 | M08 | 路由引擎 | [`M08-route.md`](./M08-route.md) | `pkg/route` | M01 | Landed (P2) |
 | M09 | Harness 与 Session | [`M09-identity.md`](./M09-identity.md) | `pkg/harness`、`pkg/session` | 无 | Landed (P2) |
 | M10 | Gateway 流水线 | [`M10-gateway.md`](./M10-gateway.md) | `internal/gateway` | M02–M09 | 部分（Body 已落地） |
-| M11 | 渠道控制面 | `M11-channel-control-plane.md` | `internal/channel`、`internal/store` | M07、M08 | 待创建 |
+| M11 | 渠道控制面 | [`M11-channel-control-plane.md`](./M11-channel-control-plane.md) | `internal/channel`、`internal/store` | M07、M08 | 部分（catalog/base-url/square badge） |
 | M12 | 审计与证据 | [`M12-audit.md`](./M12-audit.md) | `internal/audit`、`pkg/xir/audit` | M01–M06 | 部分（audit projection 已落地） |
 | M13 | Monitor 与模型广场 | `M13-monitor.md` | `internal/monitor`、`web/monitor-ui` | M07、M08、M11 | 待创建 |
 | M14 | 兼容与清理 | `M14-compat-cleanup.md` | 全仓库 | M10–M13 | 待创建 |
