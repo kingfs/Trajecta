@@ -106,3 +106,7 @@ export GOCACHE=/tmp/trajecta-gocache
 go test ./pkg/usage ./pkg/xir/... ./pkg/detect ./pkg/upstream ./pkg/route ./pkg/session
 go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 ```
+
+## 集成验证
+
+最近一次构建、全量测试、race、vet 与前端单测记录见 [VERIFICATION.md](./VERIFICATION.md)。
