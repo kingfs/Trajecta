@@ -65,6 +65,7 @@ type Loss struct { Field string; Kind LossKind; Reason string; Fatal bool; From,
 type Capabilities struct { ChatCompletions, Responses, Messages, Gemini bool }; func (c Capabilities) Has(p Protocol) bool; func (c Capabilities) Protocols() []Protocol
 type Envelope struct { Model string; Stream, Tools, StructuredOutput bool; MaxTokens float64; PreviousResponseID, PromptCacheKey, ConversationID, SessionID string }
 func ParseEnvelope(raw []byte) (Envelope, error)
+func RewriteModel(raw []byte, model string) ([]byte, bool, error)
 // StreamEvent、StreamDecoder、StreamEncoder 定义在 types.go，M04 描述其契约。
 
 package wire
