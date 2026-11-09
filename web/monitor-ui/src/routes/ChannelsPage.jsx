@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -58,6 +58,12 @@ export function ProvidersPage() {
   params.set("window", windowValue);
   const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
+  // The create form starts on the default preset (openai). Fill its endpoint
+  // once the preset payload arrives, but never overwrite a URL the operator
+  // typed or deliberately cleared.
+  useEffect(() => {
+    setForm((current) => (current.base_url.trim() ? current : normalizePresetSelection(current, presets.data, "provider_preset")));
+  }, [presets.data]);
   const items = providers.data?.items || [];
   const totals = useMemo(() => summarizeProviders(items), [items]);
   const chartItems = useMemo(() => buildProviderTrendItems(items), [items]);
