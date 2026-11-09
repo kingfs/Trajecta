@@ -55,7 +55,7 @@
 - `internal/monitor`：创建渠道时，若只给 preset + key 而未填 base URL，从 `pkg/upstream` 选择匹配协议的默认端点；显式 base URL 优先。
 - `internal/proxy`：新增 opt-in `protocol_conversion_engine=xir`，请求/响应转换可走 `pkg/xir/convert`；默认仍是 legacy，避免行为变化。
 - `pkg/xir`：12 对最小跨协议请求转换矩阵通过；wire parser fuzz 约 99 万次执行无失败。
-- 全仓 `go test ./...` 通过；XIR stream/audit、detect/secretmask 适配测试通过。
+- 全仓 `go test ./...` 通过；XIR stream/audit、detect/secretmask 适配测试通过（stream 覆盖率 88.6%，audit 82.9%）。
 
 ## 模块文档
 
@@ -71,6 +71,7 @@ M01–M09 与 M12（audit 投影部分）已按模板落地，索引见 `design/
 - `4386d54` feat(monitor): expose priority mode and harden XIR tests
 - `0b55533` docs: add M01-M09 module designs and align contracts
 - `6485507` feat(proxy): add opt-in XIR conversion engine
+- `a9ffce1` feat(xir): add SSE primitives, audit projection and secretmask adapter
 
 ## 验证结果
 
