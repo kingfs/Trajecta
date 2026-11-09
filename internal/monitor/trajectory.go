@@ -227,6 +227,31 @@ func trajectoryCache(st *store.Store) *trajectory.Cache {
 	return trajectory.NewCache(filepath.Join(dir, trajectory.DefaultCacheDirName))
 }
 
+// handleTraceTrajectory exports one trace as a one-step ATIF trajectory. The
+// session export remains the primary view; this is the per-trace evidence
+// escape hatch for a single cassette.
+func handleTraceTrajectory(w http.ResponseWriter, r *http.Request, entry store.LogEntry) {
+	exchange := readTrajectoryExchange(entry)
+	sessionID := strings.TrimSpace(entry.SessionID)
+	if sessionID == "" {
+		sessionID = entry.ID
+	}
+	result, err := buildSessionTrajectory(r.Context(), sessionID, entry.SessionSource, []trajectory.Exchange{exchange})
+	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Unable to serialize trajectory"})
+		return
+	}
+	writeTrajectoryBody(w, sessionID, data, len(data)+1, ".atif.jsonl")
+}
+
 func writeTrajectoryBody(w http.ResponseWriter, sessionID string, data []byte, contentLength int, extension string) {
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": trajectoryFilename(sessionID, extension)}))

@@ -229,7 +229,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 - `events`：运行时事件收据变化（侧边栏未读角标与事件页）；
 - `system`：主机、进程与数据库采样到期，这是唯一真正周期性的读数，由服务端定时器产生，且只在有标签页停在系统页时采样，多个标签页共用一份。
 
-单条记录的详情读不注册主题：`/api/traces/<id>` 及其 `raw`、`observation`、`xir`、`findings`、`resources`、`performance` 子资源（`xir` 另含 `detections`：节点文本的规则/偏移/置信度，不含明文值），以及 `/api/sessions/<id>`、`/api/models/<id>`、`/api/channels/<id>`、`/api/upstreams/<id>`，都是已录制内容的快照。cassette 是详情的事实源，页面打开后不会因为别的请求被录制而变化；把它们挂在 `traffic` 前缀下会让每次录制都重新读取详情和五个子资源（其中 observation 还要现场重解析 cassette），读者看到的就是一个反复出现的「加载中」。这些页面只由它们自己的写操作（重解析、重分析、修复统计）显式失效并重取。列表和聚合读仍然按主题实时更新。
+单条记录的详情读不注册主题：`/api/traces/<id>` 及其 `raw`、`observation`、`xir`、`trajectory`、`findings`、`resources`、`performance` 子资源（`xir` 另含 `detections`：节点文本的规则/偏移/置信度，不含明文值），以及 `/api/sessions/<id>`、`/api/models/<id>`、`/api/channels/<id>`、`/api/upstreams/<id>`，都是已录制内容的快照。cassette 是详情的事实源，页面打开后不会因为别的请求被录制而变化；把它们挂在 `traffic` 前缀下会让每次录制都重新读取详情和五个子资源（其中 observation 还要现场重解析 cassette），读者看到的就是一个反复出现的「加载中」。这些页面只由它们自己的写操作（重解析、重分析、修复统计）显式失效并重取。列表和聚合读仍然按主题实时更新。
 
 侧边栏底部那一行里用一个图标显示这条连接的状态（连接中 / 已连接 / 断开重连中），与版本号和仓库图标同行，鼠标悬停给出文字说明；连接失败时浏览器控制台会打印一次端点与重试间隔。断线后前端按指数退避自动重连，最长 5 分钟一次，不需要手动刷新页面。
 

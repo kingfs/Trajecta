@@ -2087,6 +2087,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceObservation(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "xir" && r.Method == http.MethodGet:
 			handleTraceXIR(w, r, absPath, entry)
+		case len(parts) == 2 && parts[1] == "trajectory" && r.Method == http.MethodGet:
+			handleTraceTrajectory(w, r, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:
