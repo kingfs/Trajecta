@@ -22,7 +22,7 @@
 ## 2. 当前实现与约束
 
 - 代码：[`pkg/xir/audit/audit.go`](../../pkg/xir/audit/audit.go)、[`internal/audit/inspect.go`](../../internal/audit/inspect.go)；测试 `audit_test.go`、`inspect_test.go`。
-- `internal/audit` 已把 cassette（V2/V3）解析为 XIR 并生成投影；`GET /api/traces/<id>/xir` 暴露该投影。streaming response 只解码 request 侧，响应侧留给 XIR stream 层。
+- `internal/audit` 已把 cassette（V2/V3）解析为 XIR 并生成投影；`GET /api/traces/<id>/xir` 暴露该投影。Chat Completions 的 SSE 响应会按 chunk 装配为完整 `xir.Response`（文本、reasoning、tool calls、usage、finish reason）；其他协议的流式响应仍只解码 request 侧并返回 warning。
 - 输入是 `*xir.Request` / `*xir.Response`；不重新解析协议，不读 cassette。
 - 节点 ID：`sha1(section|path|protocolType|index)[:16]`，前缀 `node_`；同一 payload 独立解析结果稳定。
 - `SpanStart`/`SpanEnd` 来自语义值携带的 `*wire.Node`；没有 ref 时为 0。
@@ -136,7 +136,7 @@ internal/observeworker / trajectory ──uses──▶ pkg/xir/audit
 
 ## 11. 待做
 
-- [x] cassette → XIR → audit 的 `internal/audit` 服务（非流式响应；stream 只解码 request）。
+- [x] cassette → XIR → audit 的 `internal/audit` 服务（非流式；Chat SSE 装配；其他协议流式仅 request）。
 - [ ] 与 `pkg/observe` 的差分（节点、工具调用、usage）。
 - [ ] findings 迁移与 evidence path 持久化。
 - [ ] ATIF 从 audit/XIR 导出。

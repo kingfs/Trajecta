@@ -30,6 +30,7 @@ type Result struct {
 	Operation   xir.Operation
 	Streaming   bool
 	Observation *audit.Observation
+	Warnings    []string
 }
 
 // Inspector decodes and projects cassettes. The zero value uses the default
@@ -86,7 +87,16 @@ func (i *Inspector) InspectBytes(ctx context.Context, content []byte) (*Result, 
 	}
 	streaming := parsed.Header.Layout.IsStream || looksLikeSSE(resBody)
 	var response *xir.Response
-	if !streaming && len(resBody) > 0 {
+	var warnings []string
+	if streaming && protocol == xir.ProtocolChatCompletions && len(resBody) > 0 {
+		response, err = decodeChatStream(ctx, resBody)
+		if err != nil {
+			warnings = append(warnings, "stream decode: "+err.Error())
+			response = nil
+		}
+	} else if streaming {
+		warnings = append(warnings, "streaming response is not decoded for "+string(protocol))
+	} else if len(resBody) > 0 {
 		resDoc, err := xir.ParseDocument(protocol, operation, resBody)
 		if err != nil {
 			return nil, fmt.Errorf("audit: parse %s response: %w", protocol, err)
@@ -102,6 +112,7 @@ func (i *Inspector) InspectBytes(ctx context.Context, content []byte) (*Result, 
 		Operation:   operation,
 		Streaming:   streaming,
 		Observation: audit.Build(protocol, operation, request, response),
+		Warnings:    warnings,
 	}, nil
 }
 

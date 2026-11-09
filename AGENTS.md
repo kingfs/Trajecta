@@ -32,7 +32,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Postgres application migrations: `internal/appdbmigrate`; legacy V2 cassette upgrade and index rebuild: `internal/migrate`
 - Monitor UI: `internal/monitor`; MCP tool surface: `internal/mcpserver`
 - Semantic parsing and findings: Observation IR types and protocol parsers in `pkg/observe`, the cassette-backed parse worker in `internal/observeworker`, deterministic detectors in `internal/analyzer`
-- Reanalysis and session aggregation: `internal/reanalysis`, `internal/sessionanalysis`; cassette-backed XIR audit projection and `GET /api/traces/<id>/xir`: `internal/audit` (uses `pkg/xir/audit`; on-demand, not persisted)
+- Reanalysis and session aggregation: `internal/reanalysis`, `internal/sessionanalysis`; cassette-backed XIR audit projection and `GET /api/traces/<id>/xir`: `internal/audit` (uses `pkg/xir/audit` and `pkg/xir/stream`; Chat SSE is assembled, other stream protocols return request-side only; on-demand, not persisted)
 - Session trajectory rebuild (ATIF-v1.8) from client-visible Responses cassettes, plus the offline official-model validator under `scripts/atif_tests/`, `scripts/atif_vendor/` and `scripts/validate_atif.py`: `internal/trajectory`
 - Auth (users, tokens, JWT): `internal/auth`; YAML/env configuration loading: `internal/config`; secret redaction: `internal/redaction`; fault injection: `internal/chaos`; replay-based deterministic eval harness: `internal/evals`
 - Replay transport for tests: `pkg/replay`

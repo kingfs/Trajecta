@@ -49,7 +49,7 @@
 ## 已接入 core
 
 - `internal/router`：路由特征读取改用 `pkg/xir.ParseEnvelope`，一次 span 扫描替代原来的 `map[string]any` 解析；model/stream/tools/response_format/max tokens/Gemini 路径语义保持。
-- `internal/audit`：cassette 按需解析为 XIR 并调用 `pkg/xir/audit`；`GET /api/traces/<id>/xir` 已暴露投影。
+- `internal/audit`：cassette 按需解析为 XIR 并调用 `pkg/xir/audit`；`GET /api/traces/<id>/xir` 已暴露投影；Chat SSE 响应会装配为完整响应，其他流式协议只解码 request 并返回 warning。
 - `internal/proxy`：model alias 改写改用 `xir.RewriteModel`，stream chat 的 `stream_options.include_usage` 注入改用 `xir.EnsureStreamIncludeUsage`；两者只 patch 目标 span，保留键顺序、空白、未知字段和数字字面量。
 - `internal/router`：`router.selection.priority_mode` 默认 `compat`，支持 `strict`；decision trace 记录 `priority_mode`/`selected_tier`；兼容性测试覆盖。
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。

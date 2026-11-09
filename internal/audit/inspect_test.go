@@ -52,8 +52,14 @@ func TestInspectStreamCassetteKeepsRequestOnly(t *testing.T) {
 	if result.Observation == nil || len(result.Observation.Request.Messages) == 0 {
 		t.Fatalf("request side not decoded: %+v", result.Observation)
 	}
-	if len(result.Observation.Response.Parts) != 0 {
-		t.Fatalf("streamed response should not be decoded as a whole: %+v", result.Observation.Response)
+	if len(result.Observation.Response.Parts) == 0 {
+		t.Fatalf("chat stream response not assembled: %+v", result.Observation.Response)
+	}
+	if result.Observation.Response.Parts[0].Text != "AI小助手" {
+		t.Fatalf("response text = %q", result.Observation.Response.Parts[0].Text)
+	}
+	if result.Observation.Usage == nil || result.Observation.Usage.TotalTokens == 0 {
+		t.Fatalf("usage = %+v", result.Observation.Usage)
 	}
 }
 
