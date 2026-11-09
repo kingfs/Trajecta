@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	auditpkg "github.com/kingfs/Trajecta/internal/audit"
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
@@ -2083,6 +2084,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
 			handleTraceObservation(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "xir" && r.Method == http.MethodGet:
+			handleTraceXIR(w, r, absPath, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:
@@ -2205,6 +2208,28 @@ func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.St
 		ResponseTree: observationNodeViewsFromTree(observation.Response.Nodes, 0),
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleTraceXIR returns the Exchange IR audit projection of one cassette.
+// The projection is derived on demand from the raw exchange; it is not
+// persisted and does not replace the existing Observation view.
+func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entry store.LogEntry) {
+	result, err := auditpkg.New().InspectFile(r.Context(), absPath)
+	if err != nil {
+		if errors.Is(err, auditpkg.ErrUnsupportedProtocol) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":          entry.ID,
+		"protocol":    result.Protocol,
+		"operation":   result.Operation,
+		"streaming":   result.Streaming,
+		"observation": result.Observation,
+	})
 }
 
 func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {

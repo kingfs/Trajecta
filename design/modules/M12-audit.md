@@ -6,7 +6,7 @@
 | --- | --- |
 | 模块 ID | M12 |
 | 模块名 | 审计与证据 |
-| 归属 | `pkg/xir/audit`（已落地投影）；`internal/audit`、cassette 最小化、ATIF 待做 |
+| 归属 | `pkg/xir/audit`（投影）、`internal/audit`（cassette inspector）；cassette 最小化、ATIF 待做 |
 | 状态 | 部分落地 (P2) |
 | 依赖模块 | M01–M06 |
 | 被依赖模块 | 计划由 M10/M13 使用 |
@@ -21,7 +21,8 @@
 
 ## 2. 当前实现与约束
 
-- 代码：[`pkg/xir/audit/audit.go`](../../pkg/xir/audit/audit.go)；测试 `audit_test.go`。
+- 代码：[`pkg/xir/audit/audit.go`](../../pkg/xir/audit/audit.go)、[`internal/audit/inspect.go`](../../internal/audit/inspect.go)；测试 `audit_test.go`、`inspect_test.go`。
+- `internal/audit` 已把 cassette（V2/V3）解析为 XIR 并生成投影；`GET /api/traces/<id>/xir` 暴露该投影。streaming response 只解码 request 侧，响应侧留给 XIR stream 层。
 - 输入是 `*xir.Request` / `*xir.Response`；不重新解析协议，不读 cassette。
 - 节点 ID：`sha1(section|path|protocolType|index)[:16]`，前缀 `node_`；同一 payload 独立解析结果稳定。
 - `SpanStart`/`SpanEnd` 来自语义值携带的 `*wire.Node`；没有 ref 时为 0。
@@ -76,7 +77,7 @@ func EvidencePath(traceID string, node Node) string
 
 ## 4. `internal` 集成
 
-当前无 runtime 调用方。计划：
+已有一个 runtime 调用方（Monitor 的 trace XIR 子资源）。计划：
 
 ```text
 internal/audit ──uses──▶ pkg/xir/audit
@@ -135,7 +136,7 @@ internal/observeworker / trajectory ──uses──▶ pkg/xir/audit
 
 ## 11. 待做
 
-- [ ] cassette → XIR → audit 的 `internal/audit` 服务。
+- [x] cassette → XIR → audit 的 `internal/audit` 服务（非流式响应；stream 只解码 request）。
 - [ ] 与 `pkg/observe` 的差分（节点、工具调用、usage）。
 - [ ] findings 迁移与 evidence path 持久化。
 - [ ] ATIF 从 audit/XIR 导出。
