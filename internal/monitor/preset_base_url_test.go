@@ -1,0 +1,57 @@
+package monitor
+
+import (
+	"testing"
+
+	"github.com/kingfs/Trajecta/internal/store"
+)
+
+func TestDefaultPresetBaseURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		preset  string
+		family  string
+		apiType string
+		want    string
+	}{
+		{name: "openai chat", preset: "openai", want: "https://api.openai.com/v1"},
+		{name: "openai responses", preset: "openai", apiType: "responses", want: "https://api.openai.com/v1"},
+		{name: "anthropic messages", preset: "anthropic", want: "https://api.anthropic.com"},
+		{name: "deepseek chat", preset: "deepseek", want: "https://api.deepseek.com/v1"},
+		{name: "deepseek messages", preset: "deepseek", apiType: "messages", want: "https://api.deepseek.com/anthropic"},
+		{name: "openrouter messages", preset: "openrouter", family: "anthropic_messages", want: "https://openrouter.ai/api"},
+		{name: "google gemini", preset: "google", family: "google_genai", want: "https://generativelanguage.googleapis.com/v1beta"},
+		{name: "azure has no universal endpoint", preset: "azure", want: ""},
+		{name: "custom", preset: "", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := defaultPresetBaseURL(tc.preset, tc.family, tc.apiType); got != tc.want {
+				t.Fatalf("defaultPresetBaseURL(%q,%q,%q) = %q, want %q", tc.preset, tc.family, tc.apiType, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestChannelRecordFromRequestFillsPresetBaseURL(t *testing.T) {
+	record := channelRecordFromRequest(channelUpsertRequest{
+		Name:           "OpenAI",
+		ProviderPreset: "openai",
+	}, storeChannelRecordForTest())
+	if record.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("BaseURL = %q, want preset endpoint", record.BaseURL)
+	}
+
+	record = channelRecordFromRequest(channelUpsertRequest{
+		Name:           "Custom",
+		BaseURL:        "https://custom.invalid/v1",
+		ProviderPreset: "openai",
+	}, storeChannelRecordForTest())
+	if record.BaseURL != "https://custom.invalid/v1" {
+		t.Fatalf("explicit BaseURL = %q, want override", record.BaseURL)
+	}
+}
+
+func storeChannelRecordForTest() store.ChannelConfigRecord {
+	return store.ChannelConfigRecord{}
+}

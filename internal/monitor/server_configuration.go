@@ -18,6 +18,8 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
+	pkgupstream "github.com/kingfs/Trajecta/pkg/upstream"
+	"github.com/kingfs/Trajecta/pkg/xir"
 	llmspecs "github.com/kingfs/go-llm-specs"
 )
 
@@ -1574,7 +1576,55 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ModelDiscovery) != "" {
 		record.ModelDiscovery = strings.TrimSpace(req.ModelDiscovery)
 	}
+	// A preset already knows its endpoints. Let "preset + API key" create a
+	// channel without making the operator retype the base URL; an explicit
+	// base_url still wins, and a custom channel (no preset) keeps the old
+	// requirement.
+	if strings.TrimSpace(record.BaseURL) == "" {
+		record.BaseURL = defaultPresetBaseURL(record.ProviderPreset, record.ProtocolFamily, record.APIType)
+	}
 	return record
+}
+
+// defaultPresetBaseURL resolves the base URL for a known provider preset. It
+// maps the channel's declared protocol surface to the matching preset endpoint
+// and falls back to the preset's canonical order. It returns "" for a custom
+// channel or a preset without a universal endpoint (Azure, Vertex).
+func defaultPresetBaseURL(presetID, protocolFamily, apiType string) string {
+	preset, ok := pkgupstream.LookupPreset(presetID)
+	if !ok || len(preset.Endpoints) == 0 {
+		return ""
+	}
+	want := xir.Protocol("")
+	switch strings.ToLower(strings.TrimSpace(apiType)) {
+	case "messages":
+		want = xir.ProtocolMessages
+	case "gemini_generate_content":
+		want = xir.ProtocolGemini
+	case "responses", "responses_native":
+		want = xir.ProtocolResponses
+	case "chat_completions":
+		want = xir.ProtocolChatCompletions
+	}
+	if want == "" {
+		switch strings.ToLower(strings.TrimSpace(protocolFamily)) {
+		case "anthropic_messages":
+			want = xir.ProtocolMessages
+		case "google_genai", "vertex_native":
+			want = xir.ProtocolGemini
+		default:
+			want = xir.ProtocolChatCompletions
+		}
+	}
+	if endpoint := strings.TrimSpace(preset.Endpoints[want]); endpoint != "" {
+		return endpoint
+	}
+	for _, protocol := range []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages, xir.ProtocolGemini} {
+		if endpoint := strings.TrimSpace(preset.Endpoints[protocol]); endpoint != "" {
+			return endpoint
+		}
+	}
+	return ""
 }
 
 func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, modelCount int, enabledModelCount int) channelItem {
