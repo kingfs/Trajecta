@@ -194,6 +194,35 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
       setValidatedSignature("");
     }
   };
+
+  const applyCatalogPreset = (item) => {
+    const protocols = Array.isArray(item?.protocols) ? item.protocols : [];
+    const apiType = protocols.includes("chat_completions")
+      ? "chat_completions"
+      : protocols.includes("responses")
+        ? "responses"
+        : protocols.includes("messages")
+          ? "messages"
+          : protocols.includes("gemini")
+            ? "gemini_generate_content"
+            : "chat_completions";
+    const protocolFamily = apiType === "messages"
+      ? "anthropic_messages"
+      : apiType === "gemini_generate_content"
+        ? "google_genai"
+        : "openai_compatible";
+    const endpoint = item?.endpoints?.[apiType] || item?.endpoints?.chat_completions || "";
+    formVersion.current += 1;
+    setForm((current) => ({
+      ...current,
+      provider_preset: presetState.options.includes(item.id) ? item.id : current.provider_preset,
+      api_type: apiType,
+      protocol_family: protocolFamily,
+      base_url: endpoint || current.base_url,
+    }));
+    setSetupResult(null);
+    setValidatedSignature("");
+  };
   const detectProvider = useWriteMutation({
     mutationFn: () => postJSON(apiPaths.providerProbePreview, providerProbePreviewPayload(form)),
     error: "providers.probeFailed",
