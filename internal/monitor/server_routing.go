@@ -72,6 +72,7 @@ type routingSettingsView struct {
 	ResponsesStrategy string    `json:"responses_strategy"`
 	SelectionPolicy   string    `json:"selection_policy"`
 	PriorityMode      string    `json:"priority_mode"`
+	PlanEngine        string    `json:"plan_engine"`
 	RoutePlanLogLevel string    `json:"route_plan_log_level,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
@@ -154,6 +155,10 @@ func routingSettingsAPIHandler(st *store.Store, rtr *router.Router) http.Handler
 			}
 			if rtr != nil {
 				if err := rtr.SetPriorityMode(settings.PriorityMode); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+					return
+				}
+				if err := rtr.SetPlanEngine(settings.PlanEngine); err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 					return
 				}
@@ -265,6 +270,7 @@ func defaultRoutingSettings() routingSettingsView {
 		ResponsesStrategy: "auto",
 		SelectionPolicy:   router.PolicyP2C,
 		PriorityMode:      "compat",
+		PlanEngine:        "legacy",
 		RoutePlanLogLevel: "normal",
 	}
 }
@@ -298,6 +304,9 @@ func mergeRoutingSettings(base routingSettingsView, patch routingSettingsView) r
 	if strings.TrimSpace(patch.PriorityMode) != "" {
 		base.PriorityMode = strings.TrimSpace(patch.PriorityMode)
 	}
+	if strings.TrimSpace(patch.PlanEngine) != "" {
+		base.PlanEngine = strings.TrimSpace(patch.PlanEngine)
+	}
 	if strings.TrimSpace(patch.RoutePlanLogLevel) != "" {
 		base.RoutePlanLogLevel = strings.TrimSpace(patch.RoutePlanLogLevel)
 	}
@@ -322,6 +331,11 @@ func validateRoutingSettings(settings routingSettingsView) error {
 	case "", "compat", "strict":
 	default:
 		return fmt.Errorf("unsupported priority_mode %q", settings.PriorityMode)
+	}
+	switch settings.PlanEngine {
+	case "", "legacy", "route":
+	default:
+		return fmt.Errorf("unsupported plan_engine %q", settings.PlanEngine)
 	}
 	switch settings.RoutePlanLogLevel {
 	case "", "normal", "verbose":

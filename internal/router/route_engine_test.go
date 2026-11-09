@@ -46,3 +46,19 @@ func TestNormalizePlanEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestSetPlanEngineHotAppliesAndRejectsUnknown(t *testing.T) {
+	r := &Router{}
+	if err := r.SetPlanEngine("route"); err != nil {
+		t.Fatal(err)
+	}
+	if r.planEngine != "route" {
+		t.Fatalf("planEngine = %q", r.planEngine)
+	}
+	if err := r.SetPlanEngine("nope"); err == nil {
+		t.Fatal("unknown plan engine was accepted")
+	}
+	if r.planEngine != "route" {
+		t.Fatalf("failed set mutated planEngine: %q", r.planEngine)
+	}
+}

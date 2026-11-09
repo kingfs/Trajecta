@@ -55,7 +55,7 @@
 - `internal/recorder`：`trace.minimal_cassette` prelude 只保留 raw exchange + 解析/布局元数据，DB 仍用完整 header；仓库默认配置开启，旧配置保持完整；proxy e2e 验证配置能到达最终 prelude。
 - `internal/monitor`：模型广场卡片展示协议 badge；minimal prelude 的 trace 详情仍从 raw 生成 request/response 时间线；新增单 trace ATIF 导出 `GET /api/traces/<id>/trajectory`；`GET /api/catalog/providers`，暴露 `pkg/upstream` 的 provider preset（endpoints/auth/plans/models，无密钥）；旧 `GET /api/provider-presets` 也带 endpoints/protocols，创建表单自动填 base URL，并可通过“浏览内置目录”选择 preset。前端 `ui/dist` 已重新构建。
 - `internal/upstream`：渠道 `capabilities.endpoints` 支持 per-protocol base URL；proxy 按 path/conversion 协议选择 endpoint；渠道 API 顶层 `endpoints` 与 Monitor 高级选项可编辑，产物已重建。
-- `internal/router`：新增 opt-in `router.selection.plan_engine=route`，候选过滤仍由 router 完成，最终排序交给 `pkg/route.Plan`；默认 `legacy` 保持兼容。
+- `internal/router`：新增 opt-in `router.selection.plan_engine=route`，候选过滤仍由 router 完成，最终排序交给 `pkg/route.Plan`；默认 `legacy` 保持兼容；`PATCH /api/settings/routing` 与 Monitor 设置面板可热切换。
 - `internal/proxy`：model alias 改写改用 `xir.RewriteModel`，stream chat 的 `stream_options.include_usage` 注入改用 `xir.EnsureStreamIncludeUsage`；两者只 patch 目标 span，保留键顺序、空白、未知字段和数字字面量。
 - `internal/router`：`router.selection.priority_mode` 默认 `compat`，支持 `strict`；decision trace 记录 `priority_mode`/`selected_tier`；兼容性测试覆盖。
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。

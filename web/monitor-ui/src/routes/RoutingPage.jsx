@@ -32,7 +32,7 @@ import { formatCount } from "../lib/monitor";
 
 export function RoutingSettingsPanel() {
   const { t } = useI18n();
-  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", priority_mode: "compat" });
+  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", priority_mode: "compat", plan_engine: "legacy" });
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
@@ -98,6 +98,16 @@ export function RoutingSettingsPanel() {
             <SelectContent>
               <SelectItem value="compat">{t("routing.priorityCompat")}</SelectItem>
               <SelectItem value="strict">{t("routing.priorityStrict")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="filter-label">
+          {t("routing.planEngine")}
+          <Select value={settings.plan_engine || "legacy"} onValueChange={(next) => update("plan_engine", next)}>
+            <SelectTrigger aria-label={t("routing.planEngine")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="legacy">{t("routing.planLegacy")}</SelectItem>
+              <SelectItem value="route">{t("routing.planRoute")}</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -170,6 +180,16 @@ export function RatesAlertsPanel() {
               <SelectItem value="warning">warning</SelectItem>
               <SelectItem value="error">error</SelectItem>
               <SelectItem value="critical">critical</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="filter-label">
+          {t("routing.planEngine")}
+          <Select value={settings.plan_engine || "legacy"} onValueChange={(next) => update("plan_engine", next)}>
+            <SelectTrigger aria-label={t("routing.planEngine")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="legacy">{t("routing.planLegacy")}</SelectItem>
+              <SelectItem value="route">{t("routing.planRoute")}</SelectItem>
             </SelectContent>
           </Select>
         </label>

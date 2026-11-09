@@ -1316,6 +1316,25 @@ func (r *Router) SetPriorityMode(mode string) error {
 	return nil
 }
 
+// SetPlanEngine hot-applies the candidate ranking engine.
+func (r *Router) SetPlanEngine(engine string) error {
+	if r == nil {
+		return errors.New("router is nil")
+	}
+	raw := strings.ToLower(strings.TrimSpace(engine))
+	switch raw {
+	case "", "legacy":
+		raw = "legacy"
+	case "route":
+	default:
+		return fmt.Errorf("unsupported plan_engine %q; use legacy or route", engine)
+	}
+	r.mu.Lock()
+	r.planEngine = raw
+	r.mu.Unlock()
+	return nil
+}
+
 // normalizePriorityMode maps an empty or unknown value to the historical
 // compat behaviour. Config validation rejects unknown values at load time;
 // this helper keeps programmatic construction safe.
