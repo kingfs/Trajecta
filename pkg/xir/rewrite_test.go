@@ -42,3 +42,69 @@ func TestRewriteModelEscapesValue(t *testing.T) {
 		t.Fatalf("value not escaped: %s", got)
 	}
 }
+
+func TestEnsureStreamIncludeUsage(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    string
+		changed bool
+	}{
+		{
+			name:    "missing options",
+			raw:     `{"model":"m","stream":true,"seed":123456789012345678901}`,
+			want:    `{"model":"m","stream":true,"seed":123456789012345678901,"stream_options":{"include_usage":true}}`,
+			changed: true,
+		},
+		{
+			name:    "empty object",
+			raw:     `{ "stream" : true }`,
+			want:    `{ "stream" : true ,"stream_options":{"include_usage":true}}`,
+			changed: true,
+		},
+		{
+			name:    "existing options missing key",
+			raw:     `{"stream":true,"stream_options":{"foo":1}}`,
+			want:    `{"stream":true,"stream_options":{"foo":1,"include_usage":true}}`,
+			changed: true,
+		},
+		{
+			name:    "false include usage",
+			raw:     `{"stream":true,"stream_options":{"include_usage":false}}`,
+			want:    `{"stream":true,"stream_options":{"include_usage":true}}`,
+			changed: true,
+		},
+		{
+			name:    "already true",
+			raw:     `{"stream":true,"stream_options":{"include_usage":true}}`,
+			want:    `{"stream":true,"stream_options":{"include_usage":true}}`,
+			changed: false,
+		},
+		{
+			name:    "not streaming",
+			raw:     `{"stream":false}`,
+			want:    `{"stream":false}`,
+			changed: false,
+		},
+		{
+			name:    "non-object",
+			raw:     `[]`,
+			want:    `[]`,
+			changed: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed, err := EnsureStreamIncludeUsage([]byte(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed != tc.changed {
+				t.Fatalf("changed = %v, want %v", changed, tc.changed)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}

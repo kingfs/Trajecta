@@ -66,6 +66,7 @@ type Capabilities struct { ChatCompletions, Responses, Messages, Gemini bool }; 
 type Envelope struct { Model string; Stream, Tools, StructuredOutput bool; MaxTokens float64; PreviousResponseID, PromptCacheKey, ConversationID, SessionID string }
 func ParseEnvelope(raw []byte) (Envelope, error)
 func RewriteModel(raw []byte, model string) ([]byte, bool, error)
+func EnsureStreamIncludeUsage(raw []byte) ([]byte, bool, error)
 // StreamEvent、StreamDecoder、StreamEncoder 定义在 types.go，M04 描述其契约。
 
 package wire
