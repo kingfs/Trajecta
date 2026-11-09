@@ -2239,20 +2239,16 @@ func (h *Handler) writeUpstreamResponse(
 	// sniffer rather than around it: UsageSniffer writes the bytes it read into
 	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
 	// the recorded response while the client saw the real values.
-	responseBody := gateway.NewResponseBody(resp.Body)
-	var secretRestorer *secretmask.Restorer
-	if h.secretVault != nil {
-		secretRestorer = secretmask.NewRestorer(resp.Body, h.secretVault)
-		responseBody.SetClient(secretRestorer)
-	}
-	resp.Body = &UsageSniffer{
-		Source:   responseBody.ClientReader(),
+	responsePipeline := gateway.NewResponsePipeline(gateway.ResponsePipelineOptions{
+		Upstream: resp.Body,
+		Vault:    h.secretVault,
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,
 		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
 		Events:   &logInfo.Events,
-	}
+	})
+	resp.Body = responsePipeline.Reader()
 
 	// Copy response headers to client.
 	for key, vals := range resp.Header {
@@ -2276,8 +2272,8 @@ func (h *Handler) writeUpstreamResponse(
 
 	// Close the sniffer so Finalize() runs before we call UpdateLogFile.
 	resp.Body.Close()
-	if secretRestorer != nil && secretRestorer.Restored() > 0 {
-		logInfo.Events = append(logInfo.Events, secretRestoredEvent(secretRestorer.Restored(), start))
+	if restored := responsePipeline.Restored(); restored > 0 {
+		logInfo.Events = append(logInfo.Events, secretRestoredEvent(restored, start))
 	}
 
 	// Finalize metrics and log (equivalent to old defer block).
