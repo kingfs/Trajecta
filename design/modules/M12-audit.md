@@ -23,6 +23,7 @@
 
 - 代码：[`pkg/xir/audit/audit.go`](../../pkg/xir/audit/audit.go)、[`internal/audit/inspect.go`](../../internal/audit/inspect.go)；测试 `audit_test.go`、`inspect_test.go`。
 - `internal/audit` 已把 cassette（V2/V3）解析为 XIR 并生成投影；`GET /api/traces/<id>/xir` 暴露该投影。Chat Completions 的 SSE 响应会按 chunk 装配为完整 `xir.Response`（文本、reasoning、tool calls、usage、finish reason）；其他协议的流式响应仍只解码 request 侧并返回 warning。
+- 投影节点文本再经 `pkg/detect` 的 `secretmask` scanner 扫描，返回 `detections`（section/path/rule/start/end/confidence，不含匹配值）。这是 advisory 视图，不写 findings 表。
 - 输入是 `*xir.Request` / `*xir.Response`；不重新解析协议，不读 cassette。
 - 节点 ID：`sha1(section|path|protocolType|index)[:16]`，前缀 `node_`；同一 payload 独立解析结果稳定。
 - `SpanStart`/`SpanEnd` 来自语义值携带的 `*wire.Node`；没有 ref 时为 0。

@@ -30,7 +30,10 @@ type Result struct {
 	Operation   xir.Operation
 	Streaming   bool
 	Observation *audit.Observation
-	Warnings    []string
+	// Detections are advisory sensitive-value spans from pkg/detect. They never
+	// carry the matched value; the cassette remains the evidence source.
+	Detections []Detection
+	Warnings   []string
 }
 
 // Inspector decodes and projects cassettes. The zero value uses the default
@@ -106,14 +109,21 @@ func (i *Inspector) InspectBytes(ctx context.Context, content []byte) (*Result, 
 			return nil, fmt.Errorf("audit: decode %s response: %w", protocol, err)
 		}
 	}
-	return &Result{
+	result := &Result{
 		Header:      parsed.Header,
 		Protocol:    protocol,
 		Operation:   operation,
 		Streaming:   streaming,
 		Observation: audit.Build(protocol, operation, request, response),
 		Warnings:    warnings,
-	}, nil
+	}
+	detections, detectErr := detectObservation(ctx, result.Observation)
+	if detectErr != nil {
+		result.Warnings = append(result.Warnings, "detect: "+detectErr.Error())
+	} else {
+		result.Detections = detections
+	}
+	return result, nil
 }
 
 func protocolFor(header recordfile.RecordHeader) (xir.Protocol, xir.Operation, bool) {

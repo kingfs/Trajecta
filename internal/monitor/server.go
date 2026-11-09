@@ -2230,6 +2230,7 @@ func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entr
 		"operation":   result.Operation,
 		"streaming":   result.Streaming,
 		"warnings":    result.Warnings,
+		"detections":  result.Detections,
 		"observation": result.Observation,
 	})
 }
