@@ -72,7 +72,7 @@ POST /api/provider-model-detect
 
 - [ ] `channel_configs` 增加 `endpoints_json`/`protocols_json`，支持一个渠道多协议多 base。
 - [ ] `channel_models` 增加 per-model `protocols_json`/`wire_names_json`。
-- [x] preset 端点接入创建表单的 base URL 自动填充；完整 gallery/多协议编辑待做。
+- [x] `GET /api/catalog/providers` 接入创建弹窗的“浏览内置目录”；选中条目填入 endpoint/协议。多协议编辑与 OAuth 仍待做。
 - [ ] OAuth driver：`AuthDriver` 实现、`channel_credentials` 表、auth start/callback/status API（当前只预留）。
 - [ ] 模型广场卡片直接启用/禁用渠道模型。
 - [ ] 清理旧 `internal/upstream` preset 注册表或把它桥接到 `pkg/upstream`。

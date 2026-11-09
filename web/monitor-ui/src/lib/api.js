@@ -98,6 +98,7 @@ export const apiPaths = {
   providerSetupValidate: "/api/provider-setup/validate",
   providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",
+  providerCatalog: "/api/catalog/providers",
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",

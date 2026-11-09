@@ -58,6 +58,7 @@ export function ProvidersPage() {
   params.set("window", windowValue);
   const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
+  const catalog = useJSON(apiPaths.providerCatalog, []);
   // The create form starts on the default preset (openai). Fill its endpoint
   // once the preset payload arrives, but never overwrite a URL the operator
   // typed or deliberately cleared.
@@ -305,6 +306,18 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
             </Select>
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} /></label>
+          <details className="provider-form-wide">
+            <summary>{t("providers.catalogBrowse")}</summary>
+            <p className="trace-subline">{t("providers.catalogHint")}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+              {(catalog.data?.items || []).map((item) => (
+                <Button key={item.id} variant="ghost" type="button" onClick={() => applyCatalogPreset(item)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, height: "auto", padding: "8px 10px" }}>
+                  <strong>{item.name || item.id}</strong>
+                  <span className="trace-subline">{(item.protocols || []).join(" · ")}</span>
+                </Button>
+              ))}
+            </div>
+          </details>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
           <label className="provider-form-check">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
         </div>

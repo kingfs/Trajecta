@@ -181,6 +181,8 @@ export default {
   "providers.name": "名称",
   "providers.preset": "渠道预设",
   "providers.baseURL": "Base URL",
+  "providers.catalogBrowse": "浏览内置目录",
+  "providers.catalogHint": "点击渠道即可填入 endpoint 与协议。",
   "providers.baseURLHint": "留空使用 preset 默认",
   "providers.apiKey": "API key",
   "providers.detect": "探测渠道",

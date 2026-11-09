@@ -181,6 +181,8 @@ export default {
   "providers.name": "Name",
   "providers.preset": "Channel preset",
   "providers.baseURL": "Base URL",
+  "providers.catalogBrowse": "Browse built-in catalog",
+  "providers.catalogHint": "Click a provider to fill its endpoint and protocol.",
   "providers.baseURLHint": "Preset default when empty",
   "providers.apiKey": "API key",
   "providers.detect": "Detect channel",
