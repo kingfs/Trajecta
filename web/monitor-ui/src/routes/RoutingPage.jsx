@@ -32,7 +32,7 @@ import { formatCount } from "../lib/monitor";
 
 export function RoutingSettingsPanel() {
   const { t } = useI18n();
-  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c" });
+  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", priority_mode: "compat" });
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
@@ -88,6 +88,16 @@ export function RoutingSettingsPanel() {
             <SelectContent>
               <SelectItem value="p2c">p2c</SelectItem>
               <SelectItem value="first_available">first_available</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="filter-label">
+          {t("routing.priorityMode")}
+          <Select value={settings.priority_mode || "compat"} onValueChange={(next) => update("priority_mode", next)}>
+            <SelectTrigger aria-label={t("routing.priorityMode")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="compat">{t("routing.priorityCompat")}</SelectItem>
+              <SelectItem value="strict">{t("routing.priorityStrict")}</SelectItem>
             </SelectContent>
           </Select>
         </label>
