@@ -32,6 +32,7 @@
 - [`internal/gateway/response_body.go`](../../internal/gateway/response_body.go)：`ResponseBody{Upstream,Client}`；proxy 把 `secretmask.Restorer` 装在 client 侧，`UsageSniffer` 读 client 流，保持“cassette 记录还原后字节”的既有契约。
 - [`internal/gateway/usage_sniffer.go`](../../internal/gateway/usage_sniffer.go)：响应流 tee/计数/usage pipeline/录制写入从 proxy 移入 gateway；proxy 保留类型别名以兼容现有测试。
 - [`internal/gateway/response_pipeline.go`](../../internal/gateway/response_pipeline.go)：固定 `upstream → [Restorer] → UsageSniffer → client` 顺序，并暴露 `Reader`/`Close`/`Restored`；proxy 不再手工拼 restorer + sniffer。
+- [`internal/gateway/response_transform.go`](../../internal/gateway/response_transform.go)：`ResponseTransform` 负责响应缓冲上限、非 2xx/空 body 直通、转换调用和 JSON header 重写；proxy 的 `protocolConversion` 只实现 `ResponseConverter`。
 - `internal/proxy/handler.go` 的重试循环现在只构造 `RequestTransform`（`ConverterFor` 闭包调用 `conversionForSelection`），然后使用结果：
   - recorder 用 `RecordBody`；
   - send 用 `Body.WireBytes()`；
@@ -64,6 +65,6 @@
 
 - [x] 把 alias/conversion/mask 的调用顺序抽成 `RequestTransform`，由 gateway 单测覆盖。
 - [ ] 把 `recordBody`/wire 的语义进一步固化为 `Body{Client,Record,Wire}` 或 `RecordBody()`。
-- [x] 响应侧 `ResponseBody`、`UsageSniffer`、`ResponsePipeline` 已落地；响应侧 convert 阶段仍待做。
+- [x] 响应侧 `ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform` 已落地。
 - [ ] 把本地 Responses runtime 作为 `ModeLocal` 接入同一请求阶段。
 - [ ] 删除 `handler.go` 中重复的 body 变量与转换上下文。

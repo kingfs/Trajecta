@@ -1,9 +1,7 @@
 package proxy
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -287,51 +285,27 @@ func applyConvertedHeaders(outreq *http.Request, original *http.Request, conv *p
 // maxBytes (the same ceiling the request path uses) instead of growing
 // without bound.
 func (c *protocolConversion) convertResponseBody(resp *http.Response, maxBytes int64) (*http.Response, error) {
-	if resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, nil
-	}
-	if maxBytes <= 0 {
-		maxBytes = 64 << 20
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	converted, _, err := (gateway.ResponseTransform{Converter: c, MaxBytes: maxBytes}).Apply(resp)
 	if err != nil {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("protocol conversion: read upstream response: %w", err)
+		return nil, err
 	}
-	_ = resp.Body.Close()
-	if int64(len(body)) > maxBytes {
-		return nil, fmt.Errorf("protocol conversion: upstream response exceeds %d bytes", maxBytes)
-	}
-	if len(body) == 0 {
-		resp.Body = io.NopCloser(bytes.NewReader(body))
-		return resp, nil
-	}
+	return converted, nil
+}
+
+// ConvertResponse implements gateway.ResponseConverter. The engine choice and
+// loss ledger stay here; the response envelope/buffering lives in gateway.
+func (c *protocolConversion) ConvertResponse(body []byte) ([]byte, []protocolconvert.Warning, error) {
 	if c.engine == "xir" {
 		converted, warnings, err := c.convertResponseBodyXIR(body)
-		if err != nil {
-			return nil, err
-		}
 		c.responseWarnings = warnings
-		resp.Body = io.NopCloser(bytes.NewReader(converted))
-		resp.ContentLength = int64(len(converted))
-		if resp.Header != nil {
-			resp.Header.Set("Content-Type", "application/json")
-			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(converted)))
-			resp.Header.Del("Content-Encoding")
-		}
-		return resp, nil
+		return converted, warnings, err
 	}
 	result, err := protocolconvert.ConvertResponse(body, c.upstreamProtocol, c.clientProtocol, c.wireModel, c.vertex)
 	if err != nil {
-		return nil, fmt.Errorf("protocol conversion: convert %s response to %s: %w", c.upstreamProtocol, c.clientProtocol, err)
+		return nil, nil, fmt.Errorf("protocol conversion: convert %s response to %s: %w", c.upstreamProtocol, c.clientProtocol, err)
 	}
 	c.responseWarnings = result.Warnings
-	resp.Body = io.NopCloser(bytes.NewReader(result.Body))
-	resp.ContentLength = int64(len(result.Body))
-	if resp.Header != nil {
-		resp.Header.Set("Content-Type", "application/json")
-		resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(result.Body)))
-		resp.Header.Del("Content-Encoding")
-	}
-	return resp, nil
+	return result.Body, result.Warnings, nil
 }
+
+var _ gateway.ResponseConverter = (*protocolConversion)(nil)
