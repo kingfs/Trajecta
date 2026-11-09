@@ -247,55 +247,9 @@ func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]
 }
 
 // UsageSniffer 纯粹的嗅探器，不再做估算
-type UsageSniffer struct {
-	Source   io.ReadCloser
-	File     io.Writer
-	Count    *int64
-	Usage    *recorder.UsageInfo
-	Pipeline *llm.ResponsePipeline
-	Events   *[]recorder.RecordEvent
-	Start    time.Time
-	TTFTMs   *int64
-}
-
-func (s *UsageSniffer) Read(p []byte) (n int, err error) {
-	n, err = s.Source.Read(p)
-	if n > 0 {
-		if s.TTFTMs != nil && *s.TTFTMs <= 0 && !s.Start.IsZero() {
-			*s.TTFTMs = time.Since(s.Start).Milliseconds()
-		}
-		data := p[:n]
-
-		// 1. 写入日志文件并计数
-		if s.File != nil {
-			if written, wErr := s.File.Write(data); wErr == nil {
-				*s.Count += int64(written)
-			}
-		}
-
-		if s.Pipeline != nil {
-			s.Pipeline.Feed(data)
-			if usage, ok := s.Pipeline.Usage(); ok && s.Usage != nil {
-				*s.Usage = recorder.UsageInfo(usage)
-			}
-		}
-	}
-	return
-}
-
-func (s *UsageSniffer) Close() error {
-	if s.Pipeline != nil {
-		s.Pipeline.Finalize()
-		if usage, ok := s.Pipeline.Usage(); ok && s.Usage != nil {
-			*s.Usage = recorder.UsageInfo(usage)
-		}
-		if s.Events != nil {
-			events := s.Pipeline.Events()
-			*s.Events = append(*s.Events, events...)
-		}
-	}
-	return s.Source.Close()
-}
+// UsageSniffer is the gateway response-body tee. It is aliased here so the
+// forwarding code and its tests can keep using the package-local name.
+type UsageSniffer = gateway.UsageSniffer
 
 // InstrumentedResponseWriter 保持不变
 type InstrumentedResponseWriter struct {
