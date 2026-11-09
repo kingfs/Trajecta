@@ -25,6 +25,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/chaos"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/limit"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/recorder"
@@ -965,26 +966,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
-		upstreamBodyBytes := bodyBytes
-		if rewrittenBody, rewritten := rewriteRequestModelAlias(bodyBytes, selection); rewritten {
-			upstreamBodyBytes = rewrittenBody
+		attemptBody := gateway.NewBody(bodyBytes)
+		if rewrittenBody, rewritten := rewriteRequestModelAlias(attemptBody.WireBytes(), selection); rewritten {
+			attemptBody.SetWire(rewrittenBody)
 		}
+		// The cassette keeps the bytes the client-visible request resolved to:
+		// alias-rewritten, but before conversion and masking. The upstream wire
+		// is transformed separately on attemptBody.
+		recordBody := attemptBody.WireBytes()
 
 		// Protocol conversion (opt-in via router.selection.protocol_conversion):
 		// the router may have selected a target that cannot serve the client's
-		// protocol natively. The cassette keeps upstreamBodyBytes, the
-		// client-visible bytes; only the wire bytes and the upstream path
-		// change. Streaming requests never carry a conversion (the router
-		// excludes them), and passthrough selections leave both untouched, so
-		// the default path costs one nil check.
-		wireBodyBytes := upstreamBodyBytes
+		// protocol natively. Streaming requests never carry a conversion (the
+		// router excludes them), and passthrough selections leave both untouched,
+		// so the default path costs one nil check.
 		sendPathOverride := ""
-		conversion, convErr := h.conversionForSelection(r, selection, upstreamBodyBytes)
+		conversion, convErr := h.conversionForSelection(r, selection, attemptBody.WireBytes())
 		if convErr == nil && conversion != nil {
 			var converted []byte
-			converted, convErr = conversion.convertRequestBody(wireBodyBytes)
+			converted, convErr = conversion.convertRequestBody(attemptBody.WireBytes())
 			if convErr == nil {
-				wireBodyBytes = converted
+				attemptBody.SetWire(converted)
 				sendPathOverride, convErr = conversion.upstreamPath()
 			}
 		}
@@ -1018,11 +1020,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// real values, while the upstream only ever receives stand-ins. The bytes
 		// handed to the router above are deliberately left alone, so routing keys,
 		// fingerprints and every failure cassette are unaffected.
-		sendBodyBytes := wireBodyBytes
+		sendBodyBytes := attemptBody.WireBytes()
 		var maskedEvents []secretmask.MaskEvent
 		if h.secretVault != nil {
 			if masked, events := h.secretVault.Mask(sendBodyBytes); len(events) > 0 {
 				sendBodyBytes = masked
+				attemptBody.SetWire(masked)
 				maskedEvents = events
 			}
 		}
@@ -1035,7 +1038,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingPolicy:                  h.routerPolicy(),
 			RoutingScore:                   selection.Score,
 			RoutingCandidateCount:          selection.CandidateCount,
-		}, upstreamBodyBytes)
+		}, recordBody)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)
 			h.router.Complete(selection, router.Outcome{

@@ -28,6 +28,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`doctor.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
 - `internal/appdb`：按配置打开 application database 的共用入口——驱动规范化、迁移模式判定、`MigrateUp`/`OptimizeIndexes`、`Open`/`Initialize` 与 auth store 打开；serve 启动与 trajecta 的 `db`/`auth`/`audit`/`analyze` 都走这里。
 - `internal/proxy`：反向代理与 `/v1/responses` 入口，负责鉴权、转发、响应截获与协议感知透传调整。
+- `internal/gateway`：转发 core 的协议无关类型；当前有 `Body{Client,Wire}`，保证 cassette/record 字节与上游 wire 字节不混用。
 - `internal/recorder`：cassette 写入与 metadata finalization；在写 prelude 前调用 `pkg/harness` 对客户端做一次只读分类。
 - `pkg/harness`：只从请求头与 URL 识别发请求的客户端 harness（不读 body）（Claude Code、Codex CLI、Cline、Cursor 等），产出 trace 标签；只读旁路，不改变请求、响应或发往上游的字节。规则、置信度与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。
