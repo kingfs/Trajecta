@@ -6,7 +6,7 @@
 | --- | --- |
 | 模块 ID | M04 |
 | 模块名 | 协议转换与流式 |
-| 归属 | `pkg/xir/convert`；`pkg/xir/stream` **未创建**，流式只有 `pkg/xir` 中的接口 |
+| 归属 | `pkg/xir/convert`（非流式转换）、`pkg/xir/stream`（SSE 帧与事件装配） |
 | 状态 | Landed (P2)，范围仅非流式 hub 转换 |
 | 依赖模块 | M01、M02；M03（stream Point 定义，convert 本身不 import hook） |
 | 被依赖模块 | 未来 `internal/gateway`（M10） |
@@ -24,7 +24,7 @@
 
 ### 1.2 非目标
 
-- **不实现流式转换**。没有 `pkg/xir/stream`；`StreamDecoder`/`StreamEncoder` 只是 `pkg/xir/types.go` 的接口，convert 对跨协议流式一律拒绝。
+- **不实现跨协议流式转换**。`pkg/xir/stream` 提供 SSE 帧编解码与 `xir.StreamEvent` 装配，但 convert 对跨协议流式一律拒绝。
 - 不做上游/渠道选择、健康检查、重试或路由策略（`pkg/route`/M08）。
 - 不持久化 loss、不写 cassette/DB，不实现 adaptive unfit memory。
 - 不承诺携带所有 stateful/opaque 字段；不能表达时按 fatal loss 处理。
@@ -34,7 +34,7 @@
 - [`convert.go`](../../pkg/xir/convert/convert.go)：`ConvertRequest`/`ConvertResponse`、`Policy`、`Options`、`Result`。
 - [`errors.go`](../../pkg/xir/convert/errors.go)：三个 sentinel 与三个结构化错误；[`losses.go`](../../pkg/xir/convert/losses.go)：损失判定；[`normalize.go`](../../pkg/xir/convert/normalize.go)：目标协议清理/角色重排。
 - 测试：`convert_test.go` 覆盖同协议直通（含非 JSON、`Stream:true`）、多条跨协议路径、stateful 拒绝、流式拒绝、三种 policy、缺 codec。
-- **没有 `pkg/xir/stream` 包，也没有任何流式转换代码**；`xir.StreamEvent` 等类型未被 convert 使用。
+- `pkg/xir/stream` 只有 SSE 帧/装配原语，没有协议事件映射或跨协议转换；convert 不 import 它。
 - 当前没有 `internal` 包 import `pkg/xir/convert`；转发路径仍使用 `pkg/protocolconvert`（`router.selection.protocol_conversion` 默认关闭）。
 - 约束：同协议直通必须保持原 slice；跨协议只接受非流式 JSON；未接入前不改变现有转发行为。
 
@@ -194,13 +194,13 @@ type FatalLossError struct { Losses []xir.Loss } // Unwrap -> ErrFatalLoss
 
 - 新增包，无 DB 迁移/文件格式变化；不改变 `pkg/protocolconvert` 的现有行为。
 - 无 feature flag；回滚删除调用方 import 即可。
-- 旧 `pkg/protocolconvert` 在 M10 差分通过前保留；`pkg/xir/stream` 需另行设计，不复用旧流式转换器。
+- 旧 `pkg/protocolconvert` 在 M10 差分通过前保留；`pkg/xir/stream` 的 SSE 原语可供未来的逐帧转换使用，但不复用旧聚合式转换器。
 
 ## 13. 开放问题
 
 | 问题 | 影响 | 建议 | 需要谁决定 |
 | --- | --- | --- | --- |
-| 流式转换未实现，`pkg/xir/stream` 不存在 | 跨协议 SSE 无法转换 | 先定状态机/终止帧/usage 契约，再实现 M04 扩展 | M04/M10 owner |
+| 跨协议流式转换未实现 | 跨协议 SSE 无法转换；`pkg/xir/stream` 只提供帧/装配原语 | 先定协议状态机/终止帧/usage 契约，再实现 M04 扩展 | M04/M10 owner |
 | loss 不持久化 | 无法解释历史转换 | gateway 接入时写入 DB | M10/M12 owner |
 | `Options.Vertex`/`ToOperation` 无效果、Gemini model 不在 body | 目标形状/模型可能错 | 实现或删除；Gemini 用 URL 参数 | M02/M04 owner |
 | 无 adaptive unfit memory | 上游拒绝字段后仍会重试 | 在渠道/模型维度记录并规避 | M08/M10 owner |

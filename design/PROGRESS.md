@@ -37,7 +37,10 @@
 | 四协议 codec | `pkg/xir/codec/{chat,responses,messages,gemini}` |
 | Hook 框架 | `pkg/xir/hook` |
 | 转换 hub | `pkg/xir/convert` |
-| 检测框架 | `pkg/detect` |
+| SSE 帧/装配 | `pkg/xir/stream` |
+| 审计投影 | `pkg/xir/audit` |
+| secretmask 检测适配 | `pkg/detect/secretmask` |
+| 检测框架 | `pkg/detect`、`pkg/detect/secretmask` |
 | 上游 preset/auth | `pkg/upstream` |
 | 路由决策 | `pkg/route` |
 | 会话信号 | `pkg/session` |
@@ -52,11 +55,11 @@
 - `internal/monitor`：创建渠道时，若只给 preset + key 而未填 base URL，从 `pkg/upstream` 选择匹配协议的默认端点；显式 base URL 优先。
 - `internal/proxy`：新增 opt-in `protocol_conversion_engine=xir`，请求/响应转换可走 `pkg/xir/convert`；默认仍是 legacy，避免行为变化。
 - `pkg/xir`：12 对最小跨协议请求转换矩阵通过；wire parser fuzz 约 99 万次执行无失败。
-- 全仓 `go test ./...` 通过。
+- 全仓 `go test ./...` 通过；XIR stream/audit、detect/secretmask 适配测试通过。
 
 ## 模块文档
 
-M01–M09 已按模板落地，索引见 `design/modules/README.md`。M10–M14 仍待创建。
+M01–M09 与 M12（audit 投影部分）已按模板落地，索引见 `design/modules/README.md`。M10、M11、M13、M14 仍待创建。
 
 ## 最近提交
 

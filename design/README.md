@@ -48,7 +48,7 @@
 | M01 | Exchange IR 基础 | `pkg/xir/wire`、`pkg/xir` | span JSON、Document、Node、Edit、Request/Response schema | Landed (P1) |
 | M02 | 协议 Codec | `pkg/xir/codec/*` | chat/responses/messages/gemini 的 decode/encode | Landed (P2) |
 | M03 | Hook 框架 | `pkg/xir/hook` | Point、Hook、Event、Result、Plan、Registry | Landed (P2) |
-| M04 | 协议转换与流式 | `pkg/xir/convert`（`pkg/xir/stream` 未创建） | loss ledger、非流式转换器、流式接口（`pkg/xir`） | Landed (P2, non-streaming) |
+| M04 | 协议转换与流式 | `pkg/xir/convert`、`pkg/xir/stream` | loss ledger、非流式转换器、SSE 帧/装配 | Landed (P2) |
 | M05 | 检测与敏感信息 | `pkg/detect`、`pkg/secretmask` | Scanner、Match、DFA 适配、opaque span | Landed (P1) |
 | M06 | Usage 与成本 | `pkg/usage` | 统一 Usage、合并、归一化（无 Cost API） | Landed (P1) |
 | M07 | 上游目录与认证 | `pkg/upstream` | preset、endpoint、auth spec、模型发现 | Landed (P2) |
@@ -56,7 +56,7 @@
 | M09 | Harness 与 Session | `pkg/harness`、`pkg/session` | 客户端识别、会话信号、fingerprint | Landed (P2) |
 | M10 | Gateway 流水线 | `internal/gateway` | 热路径阶段、Body、重试、录制接线 | 待设计 |
 | M11 | 渠道控制面 | `internal/channel`、`internal/store` | 渠道/模型 CRUD、probe、配置事务、API | 待设计 |
-| M12 | 审计与证据 | `internal/audit`、`pkg/xir/audit` | 重解析、findings、ATIF、cassette 最小化 | 待设计 |
+| M12 | 审计与证据 | `internal/audit`、`pkg/xir/audit` | 审计投影已落地；重解析、findings、ATIF、cassette 最小化待做 | 进行中 |
 | M13 | Monitor 与模型广场 | `internal/monitor`、`web/monitor-ui` | 渠道向导、模型广场、路由解释 | 待设计 |
 | M14 | 兼容与清理 | 全仓库 | 旧包 facade、feature flag、删除死代码 | 待设计 |
 

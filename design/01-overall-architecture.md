@@ -252,9 +252,10 @@ HTTP request
 | `pkg/xir/codec/*` | 各协议 decode/encode | `Codec`、`DecodeOptions`、`EncodeOptions` | `pkg/xir` |
 | `pkg/xir/hook` | Hook 契约与计划 | `Hook`、`Event`、`Result`、`Point`、`Plan`、`Registry` | `pkg/xir` |
 | `pkg/xir/convert` | 语义转换与 loss ledger | `Convert`、`LossPolicy`、`Loss` | `pkg/xir` |
-| `pkg/xir`（流式接口） | 流式事件接口；实现待后续 | `StreamEvent`、`StreamDecoder`、`StreamEncoder` | `pkg/xir` |
-| `pkg/xir/audit` | 审计投影 | `Observation`、`BuildObservation` | `pkg/xir` |
+| `pkg/xir/stream` | SSE 帧编解码与事件装配 | `Frame`、`Decoder`、`Encoder`、`Assembler` | `pkg/xir`、`pkg/usage` |
+| `pkg/xir/audit` | 审计投影 | `Observation`、`Build`、`BuildObservation`、`EvidencePath` | `pkg/xir`、`pkg/usage` |
 | `pkg/detect` | 通用检测框架 | `Scanner`、`Match`、`Span`、`Engine` | 无 |
+| `pkg/detect/secretmask` | `pkg/detect` 的 secretmask 适配 | `Scanner` | `pkg/detect`、`pkg/secretmask` |
 | `pkg/secretmask` | 凭据/PII 形状识别与保形假值 | `Vault`、`Scanner`、`MaskEvent` | 无（由 internal 适配 `detect.Scanner`） |
 | `pkg/usage` | 统一 usage、合并、归一化 | `Usage`、`Merge`、`Add`、`Normalize` | 无 |
 | `pkg/upstream` | provider preset、endpoint、auth、模型发现 | `Preset`、`Resolve`、`BuildURL`、`ApplyAuth`、`DiscoverModels` | `pkg/xir` |

@@ -5,7 +5,7 @@
 | --- | --- |
 | 模块 ID | M05 |
 | 模块名 | 检测与敏感信息 |
-| 归属 | `pkg/detect`（`pkg/secretmask` 是未来规则来源，尚未适配） |
+| 归属 | `pkg/detect`、`pkg/detect/secretmask`（适配 `pkg/secretmask`） |
 | 状态 | Landed (P1) |
 | 依赖模块 | 无（仅标准库） |
 | 被依赖模块 | 当前无；计划由 M03 Hook、M10 Gateway 使用 |
@@ -21,7 +21,7 @@
 - 代码：[`pkg/detect/detect.go`](../../pkg/detect/detect.go)、[`pkg/detect/match.go`](../../pkg/detect/match.go)；测试 `detect_test.go`、`match_test.go`。随 `feat(pkg): add XIR and reusable capability packages` 落地。
 - `Engine` 零值可用；`New` 静默跳过 nil、空名和重名 scanner，`Register` 才返回可分类错误。
 - `Scan` 规范化：非法/越界 match 丢弃（不 clamp）；match 必须完整落在一个声明 span 内，否则丢弃；声明 span 本身 clamp 进 `Raw`；置信度 clamp 到 `[0,1]`；按 `(start, end, rule)` 稳定排序去重。
-- 已知限制：`pkg/secretmask` 不是 `detect.Scanner`，`internal/proxy` 仍走自己的检测/遮蔽路径；本包没有 `internal/*` 调用方，无 benchmark/fuzz。
+- 适配：`pkg/detect/secretmask` 已把 `secretmask.Detector` 包装成 `detect.Scanner`；`internal/proxy` 仍走自己的检测/遮蔽路径，尚无 runtime Hook 调用方；本包无 benchmark/fuzz。
 
 ## 3. 对外契约（`pkg`）
 ### 3.1 包结构
@@ -80,7 +80,7 @@ func MergeMatches(a, b []Match) []Match
 
 ```text
 internal/gateway ──uses──▶ pkg/detect（经 Hook 计划）
-pkg/secretmask    ──adapt──▶ detect.Scanner
+pkg/detect/secretmask ──adapt──▶ detect.Scanner
 ```
 
 显式构造 `detect.New(...)`/`Register`，不用全局 registry。规则应声明 lane，热 lane 只挂线性、有预算的 scanner。本包无配置、无 feature flag；scanner 错误使整次扫描失败，上层决定 fail-open（记录并继续）或 fail-closed（阻断）。
@@ -140,17 +140,17 @@ pkg/secretmask    ──adapt──▶ detect.Scanner
 `GOCACHE=/tmp/trajecta-gocache go test ./pkg/detect` 通过（Go 1.26.9，`ok` 约 0.005s）。覆盖零值 Engine、注册顺序、非法/重复注册、越界与越 scope 丢弃、scope clamp、排序去重、置信度 clamp、scanner 错误、nil context、并发 Scan/Register、`MergeMatches` 不别名输入。无 fuzz/benchmark。
 
 ### 11.2 集成测试
-无；尚未与 `pkg/secretmask`、`pkg/xir` 或 `internal/*` 联调，全部离线。
+`pkg/detect/secretmask` 已联调；尚未与 `pkg/xir` Hook 或 `internal/*` 运行时联调，全部离线。
 
 ### 11.3 差分测试
-不适用（新框架无旧实现），接入 `pkg/secretmask` 后应对比现有 DFA 的 match 集合。
+`pkg/detect/secretmask` 的测试覆盖了命中、scope 过滤和 offset；与现有 DFA 的完整 match 集合仍可在 M10 接入时做差分。
 
 ### 11.4 验收标准
 - [x] 公开 API 有 Go doc，离线测试通过；尚无外部 example test。
 - [ ] benchmark 达到预算（未接入热路径）。
 - [x] 失败语义有测试（scanner error、非法 match）。
 - [x] 文件/DB/内存边界明确，不写 cassette/DB。
-- [ ] 与 `pkg/secretmask` 的适配完成（未实现）。
+- [x] 与 `pkg/secretmask` 的适配完成（`pkg/detect/secretmask`）。
 - [x] 文档同步（本文）。
 
 ## 12. 迁移、兼容、回滚
@@ -159,14 +159,14 @@ pkg/secretmask    ──adapt──▶ detect.Scanner
 ## 13. 开放问题
 | 问题 | 影响 | 建议 | 需要谁决定 |
 | --- | --- | --- | --- |
-| 谁提供 `secretmask` 适配器？ | 能否进入热路径 | 在 `pkg/secretmask` 加薄 `Scanner`，不搬 DFA | M03/M10 负责人 |
+| `secretmask` 适配器何时进入热路径？ | 能否进入热路径 | 由 M03 Hook/M10 决定，不在本包 | M03/M10 负责人 |
 | 规则 ID 是否需要命名空间？ | 去重与审计 | 约定 `<package>/<rule>` | 架构 |
 | 是否支持 scanner 超时预算？ | 热路径稳定性 | Hook 框架按 lane 执行，本包保持无状态 | M03 |
 | `Value` 是否必须由 scanner 填？ | 审计证据完整性 | 保持可选，需要时从 `Raw` 切片 | 调用方 |
 
 ## 14. 实施拆分
 1. 已完成：类型、Engine、规范化、单元测试。
-2. 下一步：`pkg/secretmask` 适配 `detect.Scanner`，并做行为差分测试。
+2. 下一步：在 M03 Hook/M10 中接入 `pkg/detect/secretmask`，并做行为差分测试。
 3. 下一步：M03 声明 lane/point/预算，M10 在 gateway 显式构造 Engine。
 4. 清理：确认 `internal/proxy` 无重复检测后删除旧适配。
 
