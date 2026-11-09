@@ -45,6 +45,7 @@
 
 ## 已接入 core
 
+- `internal/router`：路由特征读取改用 `pkg/xir.ParseEnvelope`，一次 span 扫描替代原来的 `map[string]any` 解析；model/stream/tools/response_format/max tokens/Gemini 路径语义保持。
 - `internal/router`：`router.selection.priority_mode` 默认 `compat`，支持 `strict`；decision trace 记录 `priority_mode`/`selected_tier`；兼容性测试覆盖。
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。
 - `internal/monitor`：`/api/settings/routing` 增加 `priority_mode`，PATCH 后热更新 router。

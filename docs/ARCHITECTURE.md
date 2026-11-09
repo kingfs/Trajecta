@@ -59,7 +59,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`；其 marshal 方法也供 `pkg/protocolconvert` 做请求/响应编码。
 - `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径仅在 `router.selection.protocol_conversion: true` 且没有可用原生候选时使用。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
-- `pkg/xir`：Trajecta 2.0 的 Exchange IR（wire/semantic/audit 三视图）；`pkg/xir/wire` 是无损 span JSON 与 patch，`pkg/xir/codec/{chat,responses,messages,gemini}` 是四协议 codec，`pkg/xir/hook` 是 Hook 契约，`pkg/xir/convert` 是转换 hub。当前是新增能力包，尚未替换热路径的 `pkg/llm`/`pkg/protocolconvert`。
+- `pkg/xir`：Trajecta 2.0 的 Exchange IR（wire/semantic/audit 三视图）；`pkg/xir/wire` 是无损 span JSON 与 patch，`pkg/xir/codec/{chat,responses,messages,gemini}` 是四协议 codec，`pkg/xir/hook` 是 Hook 契约，`pkg/xir/convert` 是转换 hub。当前 `internal/router` 已通过 `pkg/xir.ParseEnvelope` 读取路由特征；其余转发/录制路径仍是 `pkg/llm`/`pkg/protocolconvert` 的事实源，尚未整体替换。
 - `pkg/usage`：协议中立的 usage 模型与非零合并规则；供 XIR 与后续 Hook 使用。
 - `pkg/detect`：通用 span 扫描框架（Scanner/Match/Engine），不包含具体凭据规则。
 - `pkg/upstream`：可复用的 provider preset/endpoint/auth/模型发现包；当前 `internal/upstream` 仍是运行时事实源。

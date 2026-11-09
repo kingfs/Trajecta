@@ -3,7 +3,6 @@ package router
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
+	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 const (
@@ -2476,11 +2476,14 @@ func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 }
 
 func requestModel(rawPath string, body []byte) string {
-	if parsed, err := llm.ParseRequestForPath(rawPath, "", body); err == nil && strings.TrimSpace(parsed.Model) != "" {
-		return strings.TrimSpace(parsed.Model)
-	}
+	// The model in a Gemini/Vertex path is authoritative; a body model is the
+	// normal case everywhere else. Reading the body through the span-preserving
+	// envelope avoids the full adapter decode the router used to do here.
 	if inferred := llm.ModelFromPath(rawPath); inferred != "" {
 		return inferred
+	}
+	if env, err := xir.ParseEnvelope(body); err == nil && strings.TrimSpace(env.Model) != "" {
+		return strings.TrimSpace(env.Model)
 	}
 	if llm.NormalizeEndpoint(rawPath) == "/v1/models" {
 		return "list_models"
@@ -2502,8 +2505,8 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	if len(body) == 0 {
 		return features
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	env, err := xir.ParseEnvelope(body)
+	if err != nil {
 		// A body that cannot be parsed cannot be proven non-streaming.
 		// Treat it as streaming so protocol conversion stays disabled for
 		// it (fail closed): converting an opaque body would either fail
@@ -2511,11 +2514,11 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 		features.Stream = true
 		return features
 	}
-	if stream, ok := payload["stream"].(bool); ok {
-		features.Stream = stream
-	}
-	if streamStr, ok := payload["stream"].(string); ok {
-		features.Stream = streamStr == "true" || streamStr == "True" || streamStr == "TRUE" || streamStr == "1"
+	features.Stream = env.Stream
+	features.HasTools = env.Tools
+	features.HasStructuredOutput = env.StructuredOutput
+	if env.MaxTokens > 0 {
+		features.MaxTokens = env.MaxTokens
 	}
 	// Google's generateContent family signals streaming in the request line
 	// (`:streamGenerateContent`), not in the body, and the proxy answers it by streaming: it is
@@ -2528,57 +2531,7 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 			features.Stream = true
 		}
 	}
-	if tools, ok := payload["tools"].([]any); ok && len(tools) > 0 {
-		features.HasTools = true
-	}
-	// OpenAI's deprecated `functions` field still reaches the proxy from older SDKs and is
-	// still accepted by providers, and it asks the model for exactly the tool calling the
-	// `tools` field asks for. Reading only `tools` made a target declared
-	// `capabilities.tool_calling: false` a routing candidate for such a request: the request
-	// was forwarded and the declaration was silently not honoured. An empty list asks for
-	// nothing, so it leaves the feature unset, the same way an empty `tools` list does.
-	if !features.HasTools {
-		if functions, ok := payload["functions"].([]any); ok && len(functions) > 0 {
-			features.HasTools = true
-		}
-	}
-	if _, ok := payload["response_format"]; ok {
-		features.HasStructuredOutput = true
-	}
-	maxTokensSet := false
-	for _, key := range []string{"max_output_tokens", "max_completion_tokens", "max_tokens"} {
-		if value, ok := parseNumber(payload[key]); ok && value > 0 {
-			features.MaxTokens = value
-			maxTokensSet = true
-			break
-		}
-	}
-	// The Google generateContent family carries the output cap at
-	// `generationConfig.maxOutputTokens` (pkg/llm.GeminiGenerationConfig). The cap feeds the
-	// decode-cost estimate, so missing it costed every Gemini request at the 512-token default
-	// and could route it by a cost it does not have. The top-level OpenAI and Anthropic keys
-	// stay authoritative when a body carries both.
-	if !maxTokensSet {
-		if generationConfig, ok := payload["generationConfig"].(map[string]any); ok {
-			if value, ok := parseNumber(generationConfig["maxOutputTokens"]); ok && value > 0 {
-				features.MaxTokens = value
-			}
-		}
-	}
 	return features
-}
-
-func parseNumber(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	default:
-		return 0, false
-	}
 }
 
 func readAndRestoreBody(req *http.Request) ([]byte, error) {
