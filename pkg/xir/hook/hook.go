@@ -112,18 +112,19 @@ func (r *Result) merge(other Result) {
 // The representation pointers are nil unless the caller decoded that view:
 // Doc/Node for the wire view, Request/Response/Part for the semantic view.
 type Event struct {
-	Lane     Lane
-	Point    Point
-	Protocol xir.Protocol
-	Doc      *xir.Document
-	Request  *xir.Request
-	Response *xir.Response
-	Part     *xir.Part
-	Node     *wire.Node
-	Path     string
-	Span     wire.Span
-	Text     string
-	Meta     map[string]string
+	Lane      Lane
+	Point     Point
+	Protocol  xir.Protocol
+	Operation xir.Operation
+	Doc       *xir.Document
+	Request   *xir.Request
+	Response  *xir.Response
+	Part      *xir.Part
+	Node      *wire.Node
+	Path      string
+	Span      wire.Span
+	Text      string
+	Meta      map[string]string
 }
 
 // Hook is one pluggable operation. Implementations must be stateless and safe

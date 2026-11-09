@@ -5,15 +5,15 @@
 
 | ID | 模块 | 计划文档 | 归属 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| M01 | Exchange IR 基础 | `M01-xir-foundation.md` | `pkg/xir`、`pkg/xir/wire` | 无 | 待创建 |
-| M02 | 协议 Codec | `M02-xir-codecs.md` | `pkg/xir/codec/*` | M01、M06 | 待创建 |
-| M03 | Hook 框架 | `M03-xir-hooks.md` | `pkg/xir/hook` | M01、M02 | 待创建 |
-| M04 | 协议转换与流式 | `M04-xir-convert-stream.md` | `pkg/xir/convert`、`pkg/xir/stream` | M02、M03 | 待创建 |
-| M05 | 检测与敏感信息 | `M05-detect.md` | `pkg/detect`、`pkg/secretmask` | M01 | 待创建 |
-| M06 | Usage 与成本 | `M06-usage.md` | `pkg/usage` | 无 | 待创建 |
-| M07 | 上游目录与认证 | `M07-upstream.md` | `pkg/upstream` | M01、M06 | 待创建 |
-| M08 | 路由引擎 | `M08-route.md` | `pkg/route` | M01、M07 | 待创建 |
-| M09 | Harness 与 Session | `M09-identity.md` | `pkg/harness`、`pkg/session` | M01 | 待创建 |
+| M01 | Exchange IR 基础 | [`M01-xir-foundation.md`](./M01-xir-foundation.md) | `pkg/xir`、`pkg/xir/wire` | `pkg/usage`（仅类型） | Landed (P1) |
+| M02 | 协议 Codec | [`M02-xir-codecs.md`](./M02-xir-codecs.md) | `pkg/xir/codec/*` | M01、M06 | Landed (P2) |
+| M03 | Hook 框架 | [`M03-xir-hooks.md`](./M03-xir-hooks.md) | `pkg/xir/hook` | M01、M02 | Landed (P2) |
+| M04 | 协议转换与流式 | [`M04-xir-convert-stream.md`](./M04-xir-convert-stream.md) | `pkg/xir/convert`（`pkg/xir/stream` 未创建） | M02、M03 | Landed (P2) |
+| M05 | 检测与敏感信息 | [`M05-detect.md`](./M05-detect.md) | `pkg/detect`、`pkg/secretmask` | M01 | Landed (P1) |
+| M06 | Usage 与成本 | [`M06-usage.md`](./M06-usage.md) | `pkg/usage` | 无 | Landed (P1) |
+| M07 | 上游目录与认证 | [`M07-upstream.md`](./M07-upstream.md) | `pkg/upstream` | M01、M06 | Landed (P2) |
+| M08 | 路由引擎 | [`M08-route.md`](./M08-route.md) | `pkg/route` | M01 | Landed (P2) |
+| M09 | Harness 与 Session | [`M09-identity.md`](./M09-identity.md) | `pkg/harness`、`pkg/session` | 无 | Landed (P2) |
 | M10 | Gateway 流水线 | `M10-gateway.md` | `internal/gateway` | M02–M09 | 待创建 |
 | M11 | 渠道控制面 | `M11-channel-control-plane.md` | `internal/channel`、`internal/store` | M07、M08 | 待创建 |
 | M12 | 审计与证据 | `M12-audit.md` | `internal/audit`、`pkg/xir/audit` | M01–M06 | 待创建 |

@@ -15,11 +15,11 @@
 | --- | --- | --- |
 | P0 | 设计文档、worktree、基线测试 | 完成 |
 | P1 | `pkg/usage`、`pkg/xir` 类型、`pkg/xir/wire` | 完成 |
-| P2 | 四协议 codec、hook、convert | 完成（待提交） |
-| P3 | `pkg/detect`、`pkg/upstream`、`pkg/route`、`pkg/session` | 完成（待提交） |
-| P4 | `pkg/harness` 迁移、`priority_mode=compat` 接入 | 完成（待提交） |
-| P5 | `internal/gateway`/proxy 接入、集成测试 | 待开始 |
-| P6 | 合并 main、清理与文档同步 | 待开始 |
+| P2 | 四协议 codec、hook、convert | 完成，已合并 main |
+| P3 | `pkg/detect`、`pkg/upstream`、`pkg/route`、`pkg/session` | 完成，已合并 main |
+| P4 | `pkg/harness` 迁移、`priority_mode=compat` 接入 | 完成，已合并 main |
+| P5 | core 接入、集成测试 | 部分完成：XIR envelope、preset base URL、priority_mode/session/harness 已接入；gateway 拆分未开始 |
+| P6 | 合并 main、清理与文档同步 | 进行中：M01–M09 文档已落地，旧包清理未开始 |
 
 ## 已落地
 
@@ -48,16 +48,23 @@
 - `internal/router`：路由特征读取改用 `pkg/xir.ParseEnvelope`，一次 span 扫描替代原来的 `map[string]any` 解析；model/stream/tools/response_format/max tokens/Gemini 路径语义保持。
 - `internal/router`：`router.selection.priority_mode` 默认 `compat`，支持 `strict`；decision trace 记录 `priority_mode`/`selected_tier`；兼容性测试覆盖。
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。
-- `internal/monitor`：`/api/settings/routing` 增加 `priority_mode`，PATCH 后热更新 router。
+- `internal/monitor`：`/api/settings/routing` 增加 `priority_mode`，PATCH 后热更新 router；UI 增加在 `RoutingSettingsPanel` 中的选择器。
+- `internal/monitor`：创建渠道时，若只给 preset + key 而未填 base URL，从 `pkg/upstream` 选择匹配协议的默认端点；显式 base URL 优先。
+- `pkg/xir`：12 对最小跨协议请求转换矩阵通过；wire parser fuzz 约 99 万次执行无失败。
+- 全仓 `go test ./...` 通过。
+
+## 模块文档
+
+M01–M09 已按模板落地，索引见 `design/modules/README.md`。M10–M14 仍待创建。
 
 ## 待办
 
-- `internal/proxy`/`internal/gateway`：用 XIR envelope/wire 替换重复解析（先 feature flag），并保持字节/cassette/replay 一致。
-- 渠道控制面：把 `pkg/upstream` 的 preset/endpoint/auth 接到创建渠道流程；多协议模型与模型广场。
+- `internal/proxy`/`internal/gateway`：继续把 XIR wire/Hook 接到请求变换与响应流；当前只接入了路由 envelope。
+- 渠道控制面完整化：多协议 `channel_models`、模型广场、OAuth driver（接口已预留）。
 - 审计路径：`pkg/xir/audit` 投影、findings、ATIF；cassette 最小 meta（按 design/02）。
-- 模块文档：M01–M14 按模板补齐，至少先补 M01/M02/M03/M06/M07/M08。
-- 集成测试：四协议 codec 往返、router 兼容、proxy 字节保真、cassette/replay、race。
-- 每阶段结束：`gofmt`、`go test`、`go vet`，提交并合并 `main`。
+- 流式：`StreamDecoder/StreamEncoder` 实现与流式协议转换（当前明确拒绝）。
+- 集成测试：proxy 字节保真、cassette/replay 差分、race、benchmark 门槛。
+- 清理：`pkg/llm`/`pkg/protocolconvert` 的迁移评估；不急于删除。
 
 ## 验证命令
 

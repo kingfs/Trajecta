@@ -99,9 +99,10 @@ func Merge(a, b Usage) Usage {
 	}
 	out.Estimated = a.Estimated || b.Estimated
 
-	// A later total without input/output detail is a provider total for the
-	// whole request; keep it. Only recompute when detail exists, so a merged
-	// snapshot cannot silently shrink a reported total.
+	// A provider total without input/output detail is kept. When detail
+	// exists, the total is derived from the merged input/output counters:
+	// streaming chunks often repeat a stale total, and a derived total is the
+	// one the final counters support.
 	if out.InputTokens != 0 || out.OutputTokens != 0 {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}

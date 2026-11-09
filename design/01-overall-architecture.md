@@ -252,15 +252,15 @@ HTTP request
 | `pkg/xir/codec/*` | 各协议 decode/encode | `Codec`、`DecodeOptions`、`EncodeOptions` | `pkg/xir` |
 | `pkg/xir/hook` | Hook 契约与计划 | `Hook`、`Event`、`Result`、`Point`、`Plan`、`Registry` | `pkg/xir` |
 | `pkg/xir/convert` | 语义转换与 loss ledger | `Convert`、`LossPolicy`、`Loss` | `pkg/xir` |
-| `pkg/xir/stream` | 流式事件编解码 | `StreamDecoder`、`StreamEncoder`、`Assembler` | `pkg/xir` |
+| `pkg/xir`（流式接口） | 流式事件接口；实现待后续 | `StreamEvent`、`StreamDecoder`、`StreamEncoder` | `pkg/xir` |
 | `pkg/xir/audit` | 审计投影 | `Observation`、`BuildObservation` | `pkg/xir` |
 | `pkg/detect` | 通用检测框架 | `Scanner`、`Match`、`Span`、`Engine` | 无 |
 | `pkg/secretmask` | 凭据/PII 形状识别与保形假值 | `Vault`、`Scanner`、`MaskEvent` | 无（由 internal 适配 `detect.Scanner`） |
-| `pkg/usage` | 统一 usage、合并、成本 | `Usage`、`Merge`、`Cost` | 无 |
+| `pkg/usage` | 统一 usage、合并、归一化 | `Usage`、`Merge`、`Add`、`Normalize` | 无 |
 | `pkg/upstream` | provider preset、endpoint、auth、模型发现 | `Preset`、`Resolve`、`BuildURL`、`ApplyAuth`、`DiscoverModels` | `pkg/xir` |
-| `pkg/route` | 路由算法 | `Request`、`Candidate`、`Plan`、`Policy`、`Select`、`Explain` | `pkg/xir`、`pkg/upstream` |
-| `pkg/harness` | 客户端 harness 识别 | `Detect`、`Result` | 无 |
-| `pkg/session` | 会话信号提取与 fingerprint | `Resolve`、`SessionRef` | `pkg/xir/wire`（可选） |
+| `pkg/route` | 路由算法 | `Request`、`Candidate`、`PlanResult`、`Policy`、`Plan`、`Explain` | `pkg/xir` |
+| `pkg/harness` | 客户端 harness 识别 | `Detect`、`Detection` | 无 |
+| `pkg/session` | 会话信号提取与 fingerprint | `Resolve`、`Ref` | 无 |
 | `pkg/modelinfo` | 模型静态元数据 | `Lookup`、`Facts` | Argus |
 | `pkg/recordfile` | cassette 格式 | 现有 API | 无 |
 | `pkg/replay` | 测试回放 | 现有 API | 无 |
@@ -268,7 +268,7 @@ HTTP request
 说明：
 
 - `pkg/upstream` 是纯解析/构造，不持久化渠道。数据库渠道由 `internal/channel` 负责。
-- `pkg/route` 是纯决策，不持有健康状态。健康、亲和、快照由 `internal/router` 注入。
+- `pkg/route` 是纯决策，不持有健康状态。健康、亲和、快照由调用方注入；当前线上选择仍由 `internal/router` 执行，迁移计划见 M08/M10。
 - `pkg/harness` 只读 headers/path；`pkg/session` 只提取信号，不决定路由。
 - `pkg/modelinfo` 是 Argus 的薄包装，保持内存查询。
 
@@ -278,7 +278,7 @@ HTTP request
 | --- | --- |
 | `internal/gateway` | 热路径编排：Body、转换、重试、上游调用、录制接线、本地 Responses 接入 |
 | `internal/channel` | 数据库渠道/模型服务、probe、模型同步、配置投影 |
-| `internal/router` | 运行时快照、健康、熔断、affinity 状态；调用 `pkg/route` |
+| `internal/router` | 运行时快照、健康、熔断、affinity 状态；当前仍执行线上选择，计划迁到 `pkg/route` |
 | `internal/store` | Postgres/SQLite schema、查询、事务、派生状态 |
 | `internal/credential` | 凭据加密、OAuth 流程、refresh、状态 |
 | `internal/hooks` | 配置绑定、Trajecta 专属 Hook、内置 Hook 注册 |
@@ -317,12 +317,11 @@ IR 与上层能力：
   pkg/xir/codec/*      → pkg/xir
   pkg/xir/hook         → pkg/xir
   pkg/xir/convert      → pkg/xir
-  pkg/xir/stream       → pkg/xir
   pkg/xir/audit        → pkg/xir
 
-  pkg/session          → pkg/xir/wire（可选）
+  pkg/session          → 无
   pkg/upstream         → pkg/xir
-  pkg/route            → pkg/xir, pkg/upstream
+  pkg/route            → pkg/xir
 
 编排：
   internal/*           → pkg/* 和 internal/*
@@ -463,7 +462,7 @@ type Document struct {
 
 - 单次线性扫描；
 - 不构造 `map[string]any`；
-- 不复制字符串，除非显式 `DecodeString`；
+- 当前解析时 eager 解码字符串；后续可改为惰性 `DecodeString` 以降低分配。
 - 保留未知字段和顺序；
 - 容忍重复 key、尾随空白；
 - 对非法 JSON 返回带偏移的错误。
@@ -520,7 +519,7 @@ type Request struct {
     ToolChoice ToolChoice
     Params     Params
     State      StateRefs
-    Extensions map[Protocol]json.RawMessage
+    Extensions map[string]json.RawMessage // key 是协议名，如 "responses"
 }
 
 type Message struct {
@@ -1064,10 +1063,10 @@ routing:
 
 - `previous_response_id`、`conversation` 等服务端状态；
 - 只允许绑定过的 target；
-- 不可用时：本地 Responses 能重建则走 local，否则返回 `session_upstream_unavailable`；
+- 不可用时：`pkg/route` 直接返回 `session_upstream_unavailable`；调用方可在 planner 之前决定是否改用本地 Responses runtime（该回退尚未实现）；
 - 不静默换上游。
 
-会话识别统一到 `internal/identity`（底层用 `pkg/harness` + `pkg/session`）：
+会话识别统一到 `pkg/session`（`internal/router` 已使用；`pkg/harness` 由 recorder 用于客户端分类）：
 
 ```go
 type SessionRef struct {
@@ -1435,7 +1434,7 @@ Event
 值得借鉴：
 
 1. **`Sealed` 是一等字段**：Anthropic 的 `redacted_thinking`、Responses 的 reasoning item 以原始字节保存，只由签名它的协议重建。跨协议时降级为无文本的 reasoning，不伪造签名。
-2. **协议原生字段显式保留**：`Include`、`ClientMetadata`、`Text`、`Metadata`、`GenConfig`、`ImageConfig`、`AccessPrograms` 等不是"厂商怪癖"，而是链路保真所必需。XIR 用 `Extensions map[Protocol]json.RawMessage` 表达同类需求，避免把每个厂商字段塞进根结构体。
+2. **协议原生字段显式保留**：`Include`、`ClientMetadata`、`Text`、`Metadata`、`GenConfig`、`ImageConfig`、`AccessPrograms` 等不是"厂商怪癖"，而是链路保真所必需。XIR 用 `Extensions map[string]json.RawMessage` 表达同类需求，避免把每个厂商字段塞进根结构体。
 3. **流式是事件流，不是聚合结果**：`KToolStart` / `KToolArgs` / `KSealed` / `KAlive` 等事件让逐帧转换和 keepalive 成为可能。
 4. **usage 合并是显式规则**：非零覆盖、缓存读写拆分、Anthropic 的 prompt 总数不含 cache；XIR 的 `pkg/usage` 应保留这些语义。
 5. **native-first 的候选判断**：`relayable = from ∈ usable(model)`，强制转换只发生在有明确理由的少数场景。
