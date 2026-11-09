@@ -44,6 +44,15 @@ const (
 // ErrSecretMappingStoreClosed is returned by an append that races shutdown.
 var ErrSecretMappingStoreClosed = errors.New("secret mapping store is closed")
 
+// secretMappingRequest is one item in the writer's queue: either a pair to
+// append or a barrier whose closure means every append queued before it has been
+// committed. The barrier exists for live deletion: a delete must not race an
+// append that is still sitting in the batch buffer, or the row comes back.
+type secretMappingRequest struct {
+	mapping *secretmask.Mapping
+	flush   chan struct{}
+}
+
 // SecretMappingStore is the bbolt-backed durable side of a secretmask.Vault.
 //
 // It is an embedded key-value store rather than a table in the application
@@ -72,10 +81,11 @@ type SecretMappingStore struct {
 	// old key, which is the documented boundary.
 	owner *Store
 
-	sendMu sync.RWMutex
-	closed bool
-	queue  chan secretmask.Mapping
-	done   chan struct{}
+	sendMu  sync.RWMutex
+	closed  bool
+	queue   chan secretMappingRequest
+	flushCh chan chan struct{}
+	done    chan struct{}
 
 	closeOnce sync.Once
 	closeErr  error
@@ -121,10 +131,11 @@ func openSecretMappingStore(path string, owner *Store) (*SecretMappingStore, err
 		return nil, fmt.Errorf("initialize secret mapping store: %w", err)
 	}
 	s := &SecretMappingStore{
-		db:    db,
-		owner: owner,
-		queue: make(chan secretmask.Mapping, secretMappingQueueSize),
-		done:  make(chan struct{}),
+		db:      db,
+		owner:   owner,
+		queue:   make(chan secretMappingRequest, secretMappingQueueSize),
+		flushCh: make(chan chan struct{}),
+		done:    make(chan struct{}),
 	}
 	go s.run()
 	return s, nil
@@ -247,11 +258,36 @@ func (s *SecretMappingStore) AppendMapping(m secretmask.Mapping) error {
 		return ErrSecretMappingStoreClosed
 	}
 	select {
-	case s.queue <- m:
+	case s.queue <- secretMappingRequest{mapping: &m}:
 		return nil
 	default:
 		return s.writeMappings([]secretmask.Mapping{m})
 	}
+}
+
+// Flush waits until every pair queued before the call has been committed. It is
+// the barrier the live delete path takes before removing a row: an append that
+// is still in the batch buffer would otherwise recreate the pair after the
+// delete.
+//
+// The caller must have serialized new appends for the value it is about to
+// delete; the barrier orders the queue, it does not freeze the store. Holding
+// sendMu.RLock while waiting is what keeps Close from closing the queue under a
+// flush request, and the writer is still running because Close cannot take the
+// write lock.
+func (s *SecretMappingStore) Flush() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	s.sendMu.RLock()
+	defer s.sendMu.RUnlock()
+	if s.closed {
+		return ErrSecretMappingStoreClosed
+	}
+	done := make(chan struct{})
+	s.flushCh <- done
+	<-done
+	return s.lastWriteError()
 }
 
 // Close stops the writer after flushing everything queued, then closes the file.
@@ -283,26 +319,50 @@ func (s *SecretMappingStore) run() {
 	ticker := time.NewTicker(secretMappingBatchDelay)
 	defer ticker.Stop()
 	batch := make([]secretmask.Mapping, 0, secretMappingBatchSize)
-	flush := func() {
+	flushBatch := func() {
 		if len(batch) == 0 {
 			return
 		}
 		_ = s.writeMappings(batch)
 		batch = batch[:0]
 	}
+	appendRequest := func(req secretMappingRequest) {
+		if req.mapping == nil {
+			return
+		}
+		batch = append(batch, *req.mapping)
+		if len(batch) >= secretMappingBatchSize {
+			flushBatch()
+		}
+	}
 	for {
 		select {
-		case m, ok := <-s.queue:
+		case req, ok := <-s.queue:
 			if !ok {
-				flush()
+				flushBatch()
 				return
 			}
-			batch = append(batch, m)
-			if len(batch) >= secretMappingBatchSize {
-				flush()
+			appendRequest(req)
+		case done := <-s.flushCh:
+			// A barrier must cover every append that was enqueued before it. The
+			// select above may have picked the barrier while an append was still
+			// waiting in the channel, so drain what is already queued first.
+		drain:
+			for {
+				select {
+				case req, ok := <-s.queue:
+					if !ok {
+						break drain
+					}
+					appendRequest(req)
+				default:
+					break drain
+				}
 			}
+			flushBatch()
+			close(done)
 		case <-ticker.C:
-			flush()
+			flushBatch()
 		}
 	}
 }

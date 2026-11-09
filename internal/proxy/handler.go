@@ -2616,6 +2616,17 @@ func (h *Handler) FinalizeRecordings(ctx context.Context) error {
 	return h.recorder.Close(ctx)
 }
 
+// SecretVault returns the process-wide credential vault, or nil when secret
+// masking is off. The Monitor uses it to list and prune the live mapping store
+// without opening the bbolt file a second time, which bbolt would refuse while
+// this process holds it.
+func (h *Handler) SecretVault() *secretmask.Vault {
+	if h == nil {
+		return nil
+	}
+	return h.secretVault
+}
+
 // Close releases the handler's process-wide resources. Today that is the secret
 // mapping store, whose pending appends must be flushed before the process exits
 // or the next start renders a different fake for a value the model already saw.

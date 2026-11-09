@@ -5,6 +5,7 @@ import { FindingsPanel } from "./quality/FindingsPanel";
 import { LineagePanel } from "./quality/LineagePanel";
 import { AnalysisPanel } from "./quality/AnalysisPanel";
 import { DataHealthPanel } from "./quality/DataHealthPanel";
+import { SecretMappingsPanel } from "./quality/SecretMappingsPanel";
 import { useI18n } from "../lib/i18n";
 
 // The audit page used to be three unrelated things stacked in one scroll: a
@@ -25,6 +26,10 @@ export function QualityPage() {
       defaultTab={lineageRequested ? "lineage" : "findings"}
       tabs={[
         { id: "findings", label: t("quality.tabFindings"), element: <FindingsPanel /> },
+        // The mapping table is a global store, not a window of traffic. It sits
+        // beside the findings because a false positive is discovered there, but
+        // it also lists values whose trace has already been pruned.
+        { id: "mappings", label: t("quality.tabMappings"), element: <SecretMappingsPanel /> },
         { id: "lineage", label: t("quality.tabLineage"), element: <LineagePanel /> },
         { id: "analysis", label: t("quality.tabAnalysis"), element: <AnalysisPanel /> },
         // Data health is pipeline state, not a traffic window, so it carries no

@@ -32,6 +32,11 @@ export const apiPaths = {
   // masked value next to the stand-in that replaced it; the event feed
   // deliberately carries neither.
   secretMasks: "/api/secret-masks",
+  // The global real-to-stand-in mapping file. Separate from the per-trace audit
+  // above: these pairs are not tied to one recording, and a row can be deleted
+  // while the proxy runs.
+  secretMappings: "/api/secret-mappings",
+  secretMapping: (seq) => `/api/secret-mappings/${encodeURIComponent(seq)}`,
   responsesAuditTrace: "/api/responses/audit/trace",
   responsesFunctionExecutors: "/api/responses/function-executors",
   analysis: "/api/analysis",

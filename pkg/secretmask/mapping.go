@@ -50,3 +50,46 @@ type MappingStore interface {
 	AppendMapping(m Mapping) error
 	Close() error
 }
+
+// MappingRow is one recorded pair as an administrative read surface sees it.
+//
+// Seq is the store's insertion sequence; it is what the Monitor page uses as the
+// row identity so a delete request does not have to carry the real value back in
+// a URL. DecodeError is set when the row exists but its value cannot be read
+// with the current local key; such a row is still listed so an operator can see
+// it, but it holds no pair to display or compare.
+type MappingRow struct {
+	Seq         uint64
+	Real        string
+	Fake        string
+	Encrypted   bool
+	DecodeError string
+}
+
+// MappingAdminStats summarises the durable mapping store for an operator-facing
+// page. It is deliberately a subset of the store's own statistics: the Monitor
+// cares about the file, how many pairs it holds and whether any row is
+// unreadable, not about bucket layout details.
+type MappingAdminStats struct {
+	Path           string
+	FileSizeBytes  int64
+	EntryCount     int
+	EncryptedRows  int
+	PlaintextRows  int
+	UnreadableRows int
+}
+
+// MappingStoreAdmin is the optional administrative extension of MappingStore.
+//
+// The hot path only needs the four methods above; a store that also implements
+// this interface can be listed and pruned while the proxy is running. The Vault
+// exposes it through MappingAdmin and coordinates deletion with its in-memory
+// tables, so a deleted pair stops being recognized without a restart.
+type MappingStoreAdmin interface {
+	IterateMappingRows(newestFirst bool, fn func(MappingRow) error) error
+	DeleteMappingRowBySeq(seq uint64) (MappingRow, bool, error)
+	MappingRowStats() (MappingAdminStats, error)
+	// Flush commits pairs still sitting in an asynchronous append queue, so a
+	// listing taken right after masking sees the pair the proxy just rendered.
+	Flush() error
+}

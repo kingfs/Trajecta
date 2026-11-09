@@ -29,6 +29,21 @@ func newManagementMuxWithFunctionExecutorManager(
 	functionExecutorManager *functionexec.Manager,
 	authStore ...*auth.Store,
 ) *http.ServeMux {
+	return newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, nil, authStore...)
+}
+
+// newManagementMuxWithSecretMappings is the serve-time constructor. The secret
+// mapping admin is the proxy handler's live vault, which does not exist in the
+// test callers of the function above; a nil value is a valid answer and makes
+// the mapping endpoints report that the store is unavailable.
+func newManagementMuxWithSecretMappings(
+	traceStore *store.Store,
+	rtr *router.Router,
+	cfg *config.Config,
+	functionExecutorManager *functionexec.Manager,
+	secretMappings monitor.SecretMappingAdmin,
+	authStore ...*auth.Store,
+) *http.ServeMux {
 	mux := http.NewServeMux()
 	var authStorePtr *auth.Store
 	var verifier auth.TokenVerifier
@@ -82,6 +97,7 @@ func newManagementMuxWithFunctionExecutorManager(
 		ResponsesFunctionExecutors:       functionExecutorConfig,
 		ResponsesFunctionExecutorStore:   traceStore,
 		ResponsesFunctionExecutorManager: functionExecutorManager,
+		SecretMappings:                   secretMappings,
 		Location:                         cfg.MonitorLocation(),
 		DebugPprofEnabled:                cfg.DebugPprofEnabled(),
 		About: monitor.AboutOptions{

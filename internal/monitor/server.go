@@ -30,6 +30,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/secretmask"
 	llmspecs "github.com/kingfs/go-llm-specs"
 )
 
@@ -446,6 +447,10 @@ type RouteOptions struct {
 	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
 	ResponsesFunctionExecutorStore   *store.Store
 	ResponsesFunctionExecutorManager *functionexec.Manager
+	// SecretMappings is the proxy process's live vault. It is nil when secret
+	// masking or the durable mapping store is off, and the mapping page reports
+	// that instead of pretending the store is empty.
+	SecretMappings SecretMappingAdmin
 	// Location anchors the day-based windows and the calendar buckets. A nil
 	// value keeps whatever SetDisplayLocation was last given, which defaults to
 	// Asia/Shanghai.
@@ -460,6 +465,17 @@ type RouteOptions struct {
 	// renders. A zero value is a valid, quiet answer - a version-less dev build
 	// with the release check and the install ping off.
 	About AboutOptions
+}
+
+// SecretMappingAdmin is the live administrative surface of the proxy's secret
+// mapping store. The concrete implementation is *secretmask.Vault; the interface
+// keeps the Monitor from depending on the proxy package and makes a nil value a
+// clear "masking or the durable store is off" signal.
+type SecretMappingAdmin interface {
+	ListMappings(newestFirst bool, fn func(secretmask.MappingRow) error) error
+	DeleteMappingBySeq(seq uint64) (secretmask.MappingRow, bool, error)
+	MappingStats() (secretmask.MappingAdminStats, error)
+	FlushMappings() error
 }
 
 // AboutOptions is what the About page and the release check read.
@@ -783,6 +799,11 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks", monitorAuthRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks/", monitorAuthRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
+	// The global real-to-stand-in mapping file behind 质量 → 遮蔽映射. Unlike the
+	// audit rows above, these pairs are not tied to one trace; they are what the
+	// vault consults before rendering a new fake.
+	mux.HandleFunc("/api/secret-mappings", monitorAuthRequired(secretMappingListAPIHandler(opt.SecretMappings), monitorVerifier))
+	mux.HandleFunc("/api/secret-mappings/", monitorAuthRequired(secretMappingDeleteAPIHandler(opt.SecretMappings), monitorVerifier))
 	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))

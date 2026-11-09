@@ -87,13 +87,19 @@ secret_masking:
 - **启动加载。** 默认加载全部（`load_limit: 0`）且不淘汰，已记录的假值不会被挤出内存；正数只加载最新 N 条（按插入序号倒序取），用启动内存换识别窗口。内存里没有的真值在首次遇到时先按 `by_real` 查文件：这就是「映射已淘汰/不在窗口内，但真值再次出现时仍得到原假值」的保证。查文件只发生在首次遇到某个真值，已命中的值走内存。
 - **假值识别。** 加载进内存的假值同时进入 `byFake`，`Mask` 遇到完全相同的假值时跳过。于是一个假值跨重启、跨上下文压缩都保持不变，不会被再遮蔽成第二个假值。
 - **文件只增不减。** bbolt 不把释放的页归还给文件系统；按真值去重意味着增长上限是「见过的不同敏感值数」，不是请求数。需要缩小文件时停进程后重建；直接删文件会丢映射，旧假值不再被识别。运行中直接 `cp` 也可能拿到不一致的页，备份应在进程停止时做或用文件系统快照。
-- **清理工具。** `trajecta db secret-mapping` 在服务停止后查看与清理这个文件（`stats` / `list` / `delete` / `prune` / `compact`），详见下一节。删除一个映射不会改变历史 cassette 与审计行，但那个旧假值之后不再被识别：模型上下文里还带着它时，会被当成一个新值重新遮蔽。
+- **清理工具。** `trajecta db secret-mapping` 在服务停止后查看与清理这个文件（`stats` / `list` / `delete` / `prune` / `compact`），详见下一节。运行中的 serve 也可以通过 Monitor 的「质量 → 遮蔽映射」标签页查看和删除（见下下节），那条路径直接使用进程内已打开的 bbolt 句柄，因此不需要停进程。删除一个映射不会改变历史 cassette 与审计行，但那个旧假值之后不再被识别：模型上下文里还带着它时，会被当成一个新值重新遮蔽。
+
+### 运行中的映射管理（Monitor）
+
+`GET /api/secret-mappings` 返回运行中进程持有的整张映射表，而不只是 Vault 已加载进内存的窗口：`load_limit` 为正数时，文件里比窗口更旧的条目也会出现在页面上。返回字段包含插入序号 `seq`、明文 `real`/`fake`、两侧长度、该行是否加密以及无法解密时的 `decode_error`；`store` 段给出文件路径、大小与行数统计。查询参数为 `q`（匹配真值或假值）、`page`、`page_size`，按插入序号倒序，因此刚刚渲染的新值排在最前。读取前会先排空异步 append 队列，避免页面在映射刚写入时短暂显示为空。
+
+`DELETE /api/secret-mappings/{seq}` 在一个操作里做两件事：先从 bbolt 删除该行，再从 Vault 的 `byReal` / `byFake` / 还原索引与 `order` 中移除同一对值。第二步是「实时生效」的关键：已命中的真值在 `fakeFor` 里先查内存，只删文件的话，运行中的进程仍会继续使用旧假值直到重启。删除路径持有创建锁，因此与「查文件 + 渲染新值」的慢路径互斥，不会出现半删除状态；删除前先 flush 写入队列，避免一条仍在批量缓冲中的 append 在删除之后把行写回来。删除不是抑制规则：下一次请求再次命中同一个真值时，Vault 仍会渲染并记录一条新映射。CLI 的 `delete`/`prune` 仍然要求先停 serve，因为它要自己打开 bbolt 文件；Monitor 这条路径不适用该限制。
 
 ### 映射文件的清理（`trajecta db secret-mapping`）
 
 `{{output_dir}}/secret_mask_mappings.db` 是整个 output_dir 共用的一份 bbolt 映射：键是真实值（`by_real` 用本地密钥对真值做 HMAC），值是本地密钥封存的 `{real, fake}` 对，另加插入序号；文件里没有 session/trace、偏移或检测时间，也不按 trace 分区。按 trace 记录「哪次请求替换了哪些值」的是 application DB 的 `credential_mask_audits` 表，两者用途不同：审计表是逐次记录，映射文件只用于重启后复用与识别假值。
 
-运行中的 serve 持有 bbolt 排他锁，所以清理前必须先停 serve；命令不会静默失败，会报明确的「stop serve first」。所有写命令默认 dry-run，只有 `--apply` 才落盘；`--config/-c` 与 `--format json` 对所有子命令可用。dry-run 的承诺是「不改映射行」：为了读取真值，命令仍会以读写方式打开 bbolt（可能更新文件元页），`stats`/`list`/`delete`/`prune` 还要打开 application DB（`auto_migrate` 生效时可能触发迁移），只有 `compact` 不打开数据库。
+运行中的 serve 持有 bbolt 排他锁，所以这条 CLI 清理路径必须先停 serve；命令不会静默失败，会报明确的「stop serve first」。需要在不重启的情况下删除一条误报映射时，用 Monitor 的「质量 → 遮蔽映射」页面。所有写命令默认 dry-run，只有 `--apply` 才落盘；`--config/-c` 与 `--format json` 对所有子命令可用。dry-run 的承诺是「不改映射行」：为了读取真值，命令仍会以读写方式打开 bbolt（可能更新文件元页），`stats`/`list`/`delete`/`prune` 还要打开 application DB（`auto_migrate` 生效时可能触发迁移），只有 `compact` 不打开数据库。
 
 | 子命令 | 作用 |
 | --- | --- |
@@ -246,7 +252,7 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 
 只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，cassette 只记原始请求体，回填与重建索引的路径没有接入映射文件，所以它们**不写**这张表。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。
 
-开启 `mapping_store` 时还有第四份持久化副本：`{{output_dir}}/secret_mask_mappings.db` 按**真值**去重保存同一对值。它不是审计记录——没有 trace、偏移与命中时间，只用于启动加载、假值识别和真值复用；审计读取面不读它，删掉它不影响已有 trace，只影响后续重启能否复用旧假值。它也不按 session 或 trace 分区：整个 `output_dir` 只有一份文件，真值是唯一的键，同一个值在哪条 trace、哪个会话里出现都映射到同一条记录。按 trace 的「哪次请求被改了哪些值」在 `credential_mask_audits` 表里，两者用途不同。清理见「映射文件的清理」一节的 `trajecta db secret-mapping`。
+开启 `mapping_store` 时还有第四份持久化副本：`{{output_dir}}/secret_mask_mappings.db` 按**真值**去重保存同一对值。它不是审计记录——没有 trace、偏移与命中时间，只用于启动加载、假值识别和真值复用；审计读取面不读它，删掉它不影响已有 trace，只影响后续重启能否复用旧假值。它也不按 session 或 trace 分区：整个 `output_dir` 只有一份文件，真值是唯一的键，同一个值在哪条 trace、哪个会话里出现都映射到同一条记录。按 trace 的「哪次请求被改了哪些值」在 `credential_mask_audits` 表里，两者用途不同。清理见「运行中的映射管理（Monitor）」与「映射文件的清理」两节。
 
 **3. 事件中心一条通知。** `source: "secretmask"`、`category: "credential_masked"`、`severity: "warning"`，**每条规则一条**，指纹固定为 `secretmask:rule:<rule>`，重复命中累加 `occurrence_count`、把 `trace_id` 指向最近一次。它刻意不复述真值与假值，只把 `rule`、`vendor`、`kind`、长度、偏移和 `trace_id` 放进 `details_json`，因为这条记录会推给每个 Monitor 会话并长期保留；真值去审计表取。按规则聚合而不是按 trace 聚合，是为了让这张表像既有的 `routing_failure` 一样有界。身份证与手机号替换走同一条通知与 `secretmask:rule:<rule>` 指纹，只是 `rule`/`kind` 不同（`pii.chinese_id`/`national_id`、`pii.cn_mobile`/`mobile`）；两个读入口都按 `kind` 原样显示，不区分凭据与个人数据。
 
@@ -262,6 +268,7 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 
 - `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；`window` 不传时不按时间过滤——这个接口的两个读入口都按 `trace_id` 取某一次录制的替换，读的是录制事实而不是读取时刻，默认 `today` 会把当天之前的 trace 全部藏掉；显式传入才生效。返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。
 - `GET /api/secret-masks/{id}`：单条。
+- `GET /api/secret-mappings`：运行中的全局映射文件（真值 → 假值），`q` / `page` / `page_size`；`DELETE /api/secret-mappings/{seq}` 同时删除文件行与内存映射。两接口与 `/api/secret-masks` 一样只要求登录 Monitor，不额外要求 admin。
 - MCP 工具 `list_credential_masks`：同参数，返回同样的字段。
 - Monitor UI 两个入口都读这个接口：事件页的事件详情在 `category: credential_masked` 时就地列出该规则的替换对（并保留 `details_json` 作为原始证据），trace 详情的「审计」标签页在发现项之上先列出这条请求里所有被替换的凭据；从事件详情点进 trace 会直接落在「审计」标签页，因为答案在那里。两个入口都把真值与假值分行完整打印，并给出偏移、长度、置信度与 `storage_mode`。
 
@@ -269,7 +276,7 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 
 ## 已知边界
 
-- **审计表与映射文件都是凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。`secret_mask_mappings.db` 同样保存真值与假值，只是按真值去重、只存 `real`/`fake`，不含 trace、偏移与检测时间。两者都应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把审计表读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
+- **审计表与映射文件都是凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。`secret_mask_mappings.db` 同样保存真值与假值，只是按真值去重、只存 `real`/`fake`，不含 trace、偏移与检测时间。两者都应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把审计表读出来，`GET /api/secret-mappings` 会把映射文件读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
 - **PEM 私钥块只在完整时改写。** 找不到同标签的 `-----END ...-----`（截断粘贴）、footer 与 header 标签不一致、或正文里出现 base64/空白/JSON 转义之外的字节时，块不成立，只剩头行上报、一个字节都不改。因此「只贴了一部分私钥」「header 与 END 被拼错」仍然会漏；老式 `Proc-Type: 4,ENCRYPTED` 头（正文前有 `:`/`,` 行）也不在块内，只上报头行。PuTTY `.ppk`、`---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----`（4 个横线）与 base64 套壳（kubeconfig `client-key-data`、K8s Secret）需要各自的规则，当前不覆盖。公钥与证书按设计不匹配。
 - **私钥假值不可用。** 块级假值的正文仍是 base64 形状，但解码后不是有效私钥（`ssh-keygen` 会报错）。依赖「模型先用假值解析/校验 key」的流程会失败；本地工具拿到的是还原后的真值（除 provider 托管工具）。
 - **升级前的旧假值不在文件里。** 首次启用持久化（或从没有映射文件的版本升级）时，之前进程渲染的假值没有记录；它们第一次回到请求里仍会被再遮蔽一次，之后该对关系才会被记录。要避免这一次，只能在升级时清空上游上下文或重新开始会话。

@@ -15,6 +15,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/proxy"
@@ -190,19 +191,6 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 
-	var managementSrv *http.Server
-	if cfg.Monitor.Port != "" {
-		mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
-		managementSrv = newManagementHTTPServer(cfg, mux)
-		go func(srv *http.Server) {
-			addr := srv.Addr
-			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("Monitor server failed", "error", err)
-			}
-		}(managementSrv)
-	}
-
 	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore, functionExecutorManager)
 	if err != nil {
 		slog.Error("Failed to create proxy handler", "error", err)
@@ -216,6 +204,26 @@ func runServeWithConfig(configPath string) int {
 			slog.Warn("Secret mapping store did not close cleanly", "error", err)
 		}
 	}()
+
+	// The management server is built after the proxy handler because the
+	// 质量 → 遮蔽映射 page reads the vault the handler owns: bbolt holds an
+	// exclusive lock, so the Monitor cannot open the mapping file itself.
+	var managementSrv *http.Server
+	if cfg.Monitor.Port != "" {
+		var secretMappings monitor.SecretMappingAdmin
+		if vault := handler.SecretVault(); vault != nil && vault.MappingAdmin() != nil {
+			secretMappings = vault
+		}
+		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, authStore)
+		managementSrv = newManagementHTTPServer(cfg, mux)
+		go func(srv *http.Server) {
+			addr := srv.Addr
+			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("Monitor server failed", "error", err)
+			}
+		}(managementSrv)
+	}
 
 	// The periodic walk is a reconciliation backstop, not the normal path: a
 	// cassette is indexed when it is written, and Sync only has to catch files
