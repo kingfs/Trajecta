@@ -52,7 +52,7 @@
 - `internal/audit`：cassette 按需解析为 XIR 并调用 `pkg/xir/audit`；`GET /api/traces/<id>/xir` 已暴露投影；Chat SSE 响应会装配为完整响应，其他流式协议只解码 request 并返回 warning；节点文本经 `pkg/detect` 返回不含值的 `detections`。
 - `internal/gateway`：`Body{Client,Wire}`、`RequestTransform`、`ResponseBody{Upstream,Client}`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform` 已落地；请求侧 alias → conversion → masking、响应侧 Restorer → Sniffer、转换/header 重写固定在 gateway。
 - `internal/monitor`：模型广场条目新增 `protocols`（可用渠道 interfaces 的并集），用于协议 badge；`priority_mode` UI 已加入。
-- `internal/recorder`：新增 opt-in `trace.minimal_cassette`，prelude 只保留 raw exchange + 解析/布局元数据，DB 仍用完整 header；默认关闭；proxy e2e 验证配置能到达最终 prelude。
+- `internal/recorder`：`trace.minimal_cassette` prelude 只保留 raw exchange + 解析/布局元数据，DB 仍用完整 header；仓库默认配置开启，旧配置保持完整；proxy e2e 验证配置能到达最终 prelude。
 - `internal/monitor`：新增单 trace ATIF 导出 `GET /api/traces/<id>/trajectory`；`GET /api/catalog/providers`，暴露 `pkg/upstream` 的 provider preset（endpoints/auth/plans/models，无密钥）；旧 `GET /api/provider-presets` 也带 endpoints/protocols，创建表单自动填 base URL，并可通过“浏览内置目录”选择 preset。前端 `ui/dist` 已重新构建。
 - `internal/upstream`：渠道 `capabilities.endpoints` 支持 per-protocol base URL；proxy 按 path/conversion 协议选择 endpoint；渠道 API 顶层 `endpoints` 与 Monitor 高级选项可编辑，产物已重建。
 - `internal/router`：新增 opt-in `router.selection.plan_engine=route`，候选过滤仍由 router 完成，最终排序交给 `pkg/route.Plan`；默认 `legacy` 保持兼容。

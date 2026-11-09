@@ -65,7 +65,7 @@ The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions
 The byte layout is owned by `docs/ARCHITECTURE.md:102-117` (section `## 录制格式`). Binding invariants:
 
 - writers emit V3 only, unless a migration task explicitly says otherwise
-- `trace.minimal_cassette: true` is an opt-in prelude shape: raw HTTP + layout/identity only, no events; the database index keeps the full header and the raw exchange remains the source of truth. Default false.
+- `trace.minimal_cassette` is a prelude shape switch: raw HTTP + layout/identity only, no events; the database index keeps the full header and the raw exchange remains the source of truth. The tracked `config/config.yaml` enables it; a config without the key (older deployment) keeps the full prelude.
 - readers must continue to support legacy `LLM_PROXY_V2` files with a fixed 2KB JSON header block
 - readers must also treat the pre-rename prelude magic `# llm-tracelab/v3` as V3; writers only emit `# trajecta/v3`
 - `LLM_PROXY_V3` stays the stable format identifier for the meta-header `version` value and is deliberately not renamed

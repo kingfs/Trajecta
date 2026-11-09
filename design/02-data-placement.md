@@ -17,7 +17,7 @@ Trajecta 的数据分三类，边界必须清晰：
 因此：
 
 - **不引入 Cassette V4 的双段格式**。继续使用 V3：magic + 一行 meta + 可选 event + 原始 request + 原始 response。
-- **默认保留完整 prelude（兼容）**；新增 opt-in `trace.minimal_cassette: true`：写最小 meta、不写 event，routing/usage/harness/摘要仍进 DB。
+- **仓库默认开启 `trace.minimal_cassette`**：写最小 meta、不写 event，routing/usage/harness/摘要仍进 DB；未写该键的旧配置仍保留完整 prelude。
 - **目标态默认不写 event**。路由、usage、harness、mask、conversion 摘要全部进 DB；只保留极少数"不写就无法解释原始字节"的异常标记。
 - **默认只在最终 exchange 上创建 cassette**。失败重试只记 DB，不产生文件；成功/最终失败才写一个文件。
 - **不把上游 wire 字节默认写进文件**。需要精确取证时，用 opt-in 的 wire capture（sidecar），默认关闭。

@@ -59,10 +59,11 @@ trace:
   # appeared while the process was down; on a large install each pass re-reads
   # every prelude, which is why the default is half an hour rather than minutes.
   sync_interval: 30m
-  # Opt-in: write only the raw HTTP exchange plus parse/layout metadata into the
+  # Write only the raw HTTP exchange plus parse/layout metadata into the
   # cassette; routing, harness, usage and timeline events stay in the database.
-  # Default false preserves the full prelude.
-  minimal_cassette: false
+  # This is the tracked default. A config file without the key (or an older
+  # deployment) keeps the full prelude, so the switch stays backward compatible.
+  minimal_cassette: true
 
 # The local Responses execution mode is always available: /v1/responses is
 # served by a native Responses upstream when one serves the model, and by the

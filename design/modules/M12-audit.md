@@ -142,7 +142,7 @@ internal/observeworker / trajectory ──uses──▶ pkg/xir/audit
 - [ ] 与 `pkg/observe` 的差分（节点、工具调用、usage）。
 - [ ] findings 迁移与 evidence path 持久化。
 - [ ] ATIF 从 audit/XIR 导出。
-- [x] cassette 最小 meta 的 opt-in 写入（`trace.minimal_cassette`，默认 false）；默认切换与旧 event 读取清理待做。
+- [x] cassette 最小 meta 写入（`trace.minimal_cassette`）；仓库默认配置已开启，旧配置/未写键仍为完整 prelude。旧 event 读取路径清理待做。
 - [ ] 大 payload 裁剪策略。
 
 ## 12. 回滚

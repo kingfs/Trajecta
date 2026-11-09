@@ -126,7 +126,7 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 
 读取端继续支持 legacy `LLM_PROXY_V2`（固定 2KB JSON header block），并把改名前的 prelude magic `# llm-tracelab/v3` 同样识别为 V3；写入端只产出 `# trajecta/v3`。`LLM_PROXY_V3` 这个 meta header `version` 值是稳定的格式标识，刻意不随项目改名。cassette 保持人类可读；修改格式时先改 `pkg/recordfile`，再同步 recorder、monitor、replay。
 
-`trace.minimal_cassette: true` 是 opt-in 的最小 prelude 模式：meta 只保留 `version`/`layout`/identity/endpoint/model/time/status 等解析所需字段，不写 event；routing/harness/usage 仍由 recorder 的完整 `LogInfo.Header` 写入 DB。默认 false，保留现有完整 prelude。
+`trace.minimal_cassette` 是最小 prelude 模式；仓库跟踪的 `config/config.yaml` 默认开启，未写该键的旧配置保持完整 prelude：meta 只保留 `version`/`layout`/identity/endpoint/model/time/status 等解析所需字段，不写 event；routing/harness/usage 仍由 recorder 的完整 `LogInfo.Header` 写入 DB。默认 false，保留现有完整 prelude。
 
 ## 存储边界
 
