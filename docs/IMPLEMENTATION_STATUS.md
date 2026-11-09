@@ -200,3 +200,30 @@ Responses audit 属于部分实现，职责边界如下：
 - SQLite 到 Postgres 的自动数据迁移；SQLite 只保留为 startup-schema fallback。
 - 更完整的批量 provider onboarding 与自动修复策略。
 - 更深层的 analytics 查询，以及独立 auth namespace 之外的额外迁移能力。
+
+## Trajecta 2.0 能力包与接入点
+
+以下能力已经落地为可外部引用的 `pkg/*`，不依赖 `internal/*`：
+
+- `pkg/xir`：协议无关 Exchange IR，含 span-preserving wire、四个协议 codec、hook、convert、SSE stream、audit projection；
+- `pkg/usage`：canonical usage 与 Merge/Add/Normalize；
+- `pkg/detect`：通用 span scanner 框架，`pkg/detect/secretmask` 适配凭据/PII detector；
+- `pkg/upstream`：20 个 provider preset、每协议 endpoint、auth spec、OAuth 预留类型、模型发现；
+- `pkg/route`：纯 route planner，支持 native/local/convert、compat/strict priority、affinity 与候选解释；
+- `pkg/session`：session 信号解析与 fingerprint；
+- `pkg/harness`：客户端 harness 只读分类。
+
+已接入的 core 路径：
+
+- router：`xir.ParseEnvelope` 读取请求 envelope；`pkg/session` 解析 sticky；`pkg/route` 可通过 `router.selection.plan_engine=route` 参与最终排序（默认 `legacy`，`priority_mode=compat` 不变）；
+- proxy/gateway：`Body{Client,Record,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform`；
+- upstream：`capabilities.endpoints` 按协议选择 base URL，`BuildURLForProtocol` 在 conversion 后显式选择；
+- audit：cassette → `pkg/xir/audit` → `GET /api/traces/<id>/xir`，Chat SSE 装配，`pkg/detect` advisory `detections`（不含明文值），单 trace ATIF；
+- recorder：`trace.minimal_cassette` 仓库默认开启，raw HTTP + layout/identity 入 cassette，routing/harness/usage 留 DB。
+
+明确的边界/未完成：
+
+- 跨协议 streaming conversion 仍是 non-goal；只有非流式 conversion；
+- OAuth 只有类型/接口预留，没有网络流程与凭据表；
+- per-model 多协议 wire name 尚未建模；
+- `plan_engine=route` 尚未设为默认，需继续对比后再决定。
