@@ -218,3 +218,12 @@ CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe
 - 没有渠道导入/导出能力。
 - `model_catalog` 只由探测与人工写回填充，没有独立的目录管理页面或 API。
 - `POST /api/settings/channels` 不存在；该端点只有 `GET` 与 `DELETE`。
+
+## 选路规划引擎
+
+`router.selection.plan_engine` 选择候选排序实现：
+
+- `legacy`（默认）：现有 router 成本比较，保持历史行为；
+- `route`：候选仍由 router 过滤（模型、协议、健康、转换、sticky），最终排序交给 `pkg/route.Plan`，并遵循 `priority_mode` 的 compat/strict 语义。
+
+`route` 是 opt-in 的比较阶段；候选过滤、执行状态、sticky 绑定仍由 `internal/router` 拥有。

@@ -109,11 +109,14 @@ type Router struct {
 	// tie-breaker. Off by default: existing installations keep the historical
 	// cost-first behaviour (priority_mode=compat).
 	strictPriority bool
-	stopCh         chan struct{}
-	stopOnce       sync.Once
-	refreshMu      sync.Mutex
-	refreshCond    *sync.Cond
-	refreshing     bool
+	// planEngine selects the final candidate ranking implementation: legacy
+	// (router cost) or route (pkg/route.Plan). Empty is legacy.
+	planEngine  string
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	refreshMu   sync.Mutex
+	refreshCond *sync.Cond
+	refreshing  bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -298,6 +301,7 @@ type RequestFeatures struct {
 	EstPromptTokens     float64
 	MaxTokens           float64
 	Stream              bool
+	Protocol            xir.Protocol
 	HasTools            bool
 	HasStructuredOutput bool
 }
@@ -407,6 +411,7 @@ func New(cfg *config.Config) (*Router, error) {
 		stickyMaxCostRatio: defaultStickyMaxCostRatio,
 		conversionEnabled:  cfg.Router.Selection.ProtocolConversion,
 		strictPriority:     normalizePriorityMode(cfg.Router.Selection.PriorityMode) == "strict",
+		planEngine:         normalizePlanEngine(cfg.Router.Selection.PlanEngine),
 		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
@@ -1544,6 +1549,11 @@ func (r *Router) Release(selection *Selection) {
 }
 
 func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float64) {
+	if r.planEngine == "route" {
+		if picked, score, ok := r.pickRoute(candidates, req); ok {
+			return picked, score
+		}
+	}
 	if len(candidates) == 1 || r.policy == PolicyFirstAvailable {
 		best := candidates[0]
 		bestScore := r.expectedCost(best, req)
@@ -2501,6 +2511,9 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 		RequestBytes:    int64(len(body)),
 		EstPromptTokens: maxFloat(float64(len(body))/4.0, 1),
 		MaxTokens:       256,
+	}
+	if protocol, err := protocolconvert.DetectFromPath(rawPath); err == nil {
+		features.Protocol = xir.Protocol(protocol)
 	}
 	if len(body) == 0 {
 		return features

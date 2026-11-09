@@ -1,6 +1,10 @@
 package router
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kingfs/Trajecta/pkg/xir"
+)
 
 func TestExtractRequestFeaturesFromEnvelope(t *testing.T) {
 	body := []byte(`{
@@ -20,12 +24,18 @@ func TestExtractRequestFeaturesFromEnvelope(t *testing.T) {
 	if features.MaxTokens != 256 {
 		t.Fatalf("MaxTokens = %v, want 256", features.MaxTokens)
 	}
+	if features.Protocol != xir.ProtocolResponses {
+		t.Fatalf("Protocol = %q, want responses", features.Protocol)
+	}
 }
 
 func TestExtractRequestFeaturesLegacyFunctions(t *testing.T) {
 	features := extractRequestFeatures("/v1/chat/completions", []byte(`{"model":"m","functions":[{"name":"f"}]}`))
 	if !features.HasTools {
 		t.Fatal("legacy functions were not treated as tools")
+	}
+	if features.Protocol != xir.ProtocolChatCompletions {
+		t.Fatalf("Protocol = %q, want chat_completions", features.Protocol)
 	}
 }
 

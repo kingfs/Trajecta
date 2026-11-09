@@ -301,6 +301,12 @@ type RouterConfig struct {
 		// tiers are reached only through failover. Strict is a deliberate
 		// behaviour change; keep compat unless the operator asks for it.
 		PriorityMode string `yaml:"priority_mode"`
+		// PlanEngine selects the candidate ranking implementation.
+		//
+		// "legacy" (default) uses the router's cost/xor of health and priority.
+		// "route" ranks the already-filtered candidates with pkg/route.Plan;
+		// it is opt-in while the pure planner is compared with the live path.
+		PlanEngine string `yaml:"plan_engine"`
 	} `yaml:"selection"`
 }
 
@@ -847,6 +853,13 @@ func validateRouterEnums(cfg *Config) error {
 		case "compat", "strict":
 		default:
 			return fmt.Errorf("router.selection.priority_mode %q is not supported; use compat or strict", value)
+		}
+	}
+	if value := strings.TrimSpace(cfg.Router.Selection.PlanEngine); value != "" {
+		switch strings.ToLower(value) {
+		case "legacy", "route":
+		default:
+			return fmt.Errorf("router.selection.plan_engine %q is not supported; use legacy or route", value)
 		}
 	}
 	if value := strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine); value != "" {
