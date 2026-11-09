@@ -2095,6 +2095,7 @@ func TestChannelManagementAPI(t *testing.T) {
 		"api_type":"chat_completions",
 		"mode":"responses_server",
 		"capabilities":{"responses":false,"chat_completions":true,"tool_calling":true},
+		"endpoints":{"messages":"https://messages.example.com"},
 		"api_key":"sk-secret-value",
 		"headers":{"Authorization":"Bearer hidden","X-Test":"visible"},
 		"enabled":true,
@@ -2118,6 +2119,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if created.APIKeyHint == "" || created.Headers["Authorization"] != "***" || created.Headers["X-Test"] != "visible" {
 		t.Fatalf("created channel redaction = %+v", created)
+	}
+	if created.Endpoints["messages"] != "https://messages.example.com" {
+		t.Fatalf("created channel endpoints = %+v", created.Endpoints)
 	}
 	if created.SecretStorageMode != "encrypted-local" {
 		t.Fatalf("created.SecretStorageMode = %q, want encrypted-local", created.SecretStorageMode)

@@ -158,6 +158,7 @@ type channelItem struct {
 	APIType           string               `json:"api_type"`
 	Mode              string               `json:"mode"`
 	Capabilities      upstreamCapabilities `json:"capabilities,omitempty"`
+	Endpoints         map[string]string    `json:"endpoints,omitempty"`
 	ProtocolFamily    string               `json:"protocol_family"`
 	RoutingProfile    string               `json:"routing_profile"`
 	APIVersion        string               `json:"api_version,omitempty"`
@@ -336,6 +337,7 @@ type channelUpsertRequest struct {
 	APIType        string                             `json:"api_type"`
 	Mode           string                             `json:"mode"`
 	Capabilities   *config.UpstreamCapabilitiesConfig `json:"capabilities"`
+	Endpoints      map[string]string                  `json:"endpoints"`
 	ProtocolFamily string                             `json:"protocol_family"`
 	RoutingProfile string                             `json:"routing_profile"`
 	APIVersion     string                             `json:"api_version"`
@@ -834,6 +836,7 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 		APIType:           record.APIType,
 		Mode:              record.Mode,
 		Capabilities:      capabilities,
+		Endpoints:         capabilities.Endpoints,
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,
@@ -1553,6 +1556,16 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 			record.CapabilitiesJSON = string(data)
 		}
 	}
+	if req.Endpoints != nil {
+		capabilities := upstreamCapabilities{}
+		if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+			_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+		}
+		capabilities.Endpoints = req.Endpoints
+		if data, err := json.Marshal(capabilities); err == nil {
+			record.CapabilitiesJSON = string(data)
+		}
+	}
 	if strings.TrimSpace(req.ProtocolFamily) != "" {
 		record.ProtocolFamily = strings.TrimSpace(req.ProtocolFamily)
 	}
@@ -1671,6 +1684,7 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		APIType:           record.APIType,
 		Mode:              record.Mode,
 		Capabilities:      capabilities,
+		Endpoints:         capabilities.Endpoints,
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,

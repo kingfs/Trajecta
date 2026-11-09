@@ -45,6 +45,7 @@ const DEFAULT_FORM = {
   proxy_http: "",
   proxy_https: "",
   proxy_no_proxy: "",
+  endpoints: {},
 };
 
 export function ProvidersPage() {
@@ -547,6 +548,8 @@ function Metric({ label, value, detail = "" }) {
   );
 }
 
+const ENDPOINT_PROTOCOLS = ["chat_completions", "responses", "messages", "gemini"];
+
 export function ProviderAdvancedFields({ form, presetState, onChange, includeHeaders = false }) {
   const { t } = useI18n();
   return (
@@ -580,6 +583,12 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
       {presetState.needsProject ? <label>{t("providers.project")}<Input value={form.project || ""} onChange={(event) => onChange("project", event.target.value)} placeholder="my-gcp-project" /></label> : null}
       {presetState.needsLocation ? <label>{t("providers.location")}<Input value={form.location || ""} onChange={(event) => onChange("location", event.target.value)} placeholder="us-central1" /></label> : null}
       {presetState.needsModelResource ? <label className="provider-form-wide">{t("providers.modelResource")}<Input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
+      <p className="trace-subline provider-form-wide">{t("providers.endpointsHint")}</p>
+      {ENDPOINT_PROTOCOLS.map((protocol) => (
+        <label key={protocol}>{t(`providers.endpoint.${protocol}`)}
+          <Input value={form.endpoints?.[protocol] || ""} onChange={(event) => onChange("endpoints", { ...(form.endpoints || {}), [protocol]: event.target.value })} placeholder="https://..." spellCheck={false} />
+        </label>
+      ))}
       <label>{t("providers.priority")}<Input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>{t("providers.weight")}<Input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>{t("providers.capacity")}<Input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
@@ -684,6 +693,7 @@ const SETUP_VALIDATION_FIELDS = new Set([
   "proxy_http",
   "proxy_https",
   "proxy_no_proxy",
+  "endpoints",
 ]);
 
 export function buildPresetState(presetData, providerPreset, routingProfile) {
@@ -787,9 +797,21 @@ function normalizeProviderPayload(form) {
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
+    endpoints: normalizedEndpoints(form.endpoints),
     proxy: channelProxyPayload(form),
   };
   return payload;
+}
+
+function normalizedEndpoints(value) {
+  const out = {};
+  for (const protocol of ENDPOINT_PROTOCOLS) {
+    const endpoint = String(value?.[protocol] || "").trim();
+    if (endpoint) {
+      out[protocol] = endpoint;
+    }
+  }
+  return out;
 }
 
 function channelProxyPayload(form = {}) {

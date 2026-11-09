@@ -954,6 +954,7 @@ function emptyEditForm() {
     proxy_http: "",
     proxy_https: "",
     proxy_no_proxy: "",
+    endpoints: {},
   };
 }
 
@@ -980,6 +981,7 @@ function editFormFromProvider(provider = {}) {
     proxy_http: provider.proxy?.http_proxy || "",
     proxy_https: provider.proxy?.https_proxy || "",
     proxy_no_proxy: provider.proxy?.no_proxy || "",
+    endpoints: provider.capabilities?.endpoints || provider.endpoints || {},
   };
 }
 
@@ -999,6 +1001,7 @@ function providerPayloadFromForm(form) {
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
+    endpoints: form.endpoints || {},
     headers: parseHeadersText(form.headers_text),
     proxy: {
       enabled: Boolean(form.proxy_enabled),

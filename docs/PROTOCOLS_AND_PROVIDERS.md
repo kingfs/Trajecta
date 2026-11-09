@@ -195,4 +195,4 @@ trajecta provider probe-report
 {"endpoints":{"messages":"https://api.deepseek.com/anthropic","gemini":"https://generativelanguage.googleapis.com"}}
 ```
 
-未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；当前 Monitor 表单还不编辑它，普通编辑会保留已有值。
+未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；渠道 API 另有顶层 `endpoints`，Monitor 高级选项可逐协议编辑。
