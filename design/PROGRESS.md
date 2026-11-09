@@ -58,6 +58,25 @@
 
 M01–M09 已按模板落地，索引见 `design/modules/README.md`。M10–M14 仍待创建。
 
+## 最近提交
+
+- `323422f` feat(pkg): add XIR and reusable capability packages
+- `5284105` refactor(harness): move client classifier to pkg/harness
+- `bf5a281` feat(routing): add priority_mode compat/strict and session resolver
+- `12ac40d` feat(channels): fill base URL from a known provider preset
+- `c009b15` perf(routing): read routing features through the XIR envelope
+- `4386d54` feat(monitor): expose priority mode and harden XIR tests
+- `0b55533` docs: add M01-M09 module designs and align contracts
+- `6485507` feat(proxy): add opt-in XIR conversion engine
+
+## 验证结果
+
+- `go test ./...`：通过（含 internal/proxy、monitor、store、router、pkg/xir/*）。
+- `go build ./cmd/server ./cmd/trajecta`：通过。
+- wire parser fuzz：约 99 万次执行，无失败。
+- 12 对最小跨协议请求转换矩阵：通过。
+- `priority_mode` compat/strict 与 native-beats-convert：通过。
+
 ## 待办
 
 - `internal/proxy`/`internal/gateway`：继续把 XIR wire/Hook 接到请求变换与响应流；当前只接入了路由 envelope。
