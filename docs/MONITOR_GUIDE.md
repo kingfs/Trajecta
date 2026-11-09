@@ -229,7 +229,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 - `events`：运行时事件收据变化（侧边栏未读角标与事件页）；
 - `system`：主机、进程与数据库采样到期，这是唯一真正周期性的读数，由服务端定时器产生，且只在有标签页停在系统页时采样，多个标签页共用一份。
 
-单条记录的详情读不注册主题：启用 `trace.minimal_cassette` 后 cassette prelude 不写 event，trace 详情的时间线事件可能为空；routing/usage 仍来自数据库索引，raw 请求/响应字节仍完整。
+单条记录的详情读不注册主题：启用 `trace.minimal_cassette` 后 cassette prelude 不写 event；trace 详情仍从 raw 请求/响应生成 request/response 两段时间线，但没有其他 event。routing/usage 仍来自数据库索引，raw 字节完整。
 
 `/api/traces/<id>` 及其 `raw`、`observation`、`xir`、`trajectory`、`findings`、`resources`、`performance` 子资源（`xir` 另含 `detections`：节点文本的规则/偏移/置信度，不含明文值），以及 `/api/sessions/<id>`、`/api/models/<id>`、`/api/channels/<id>`、`/api/upstreams/<id>`，都是已录制内容的快照。cassette 是详情的事实源，页面打开后不会因为别的请求被录制而变化；把它们挂在 `traffic` 前缀下会让每次录制都重新读取详情和五个子资源（其中 observation 还要现场重解析 cassette），读者看到的就是一个反复出现的「加载中」。这些页面只由它们自己的写操作（重解析、重分析、修复统计）显式失效并重取。列表和聚合读仍然按主题实时更新。
 

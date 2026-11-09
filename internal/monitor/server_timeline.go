@@ -597,7 +597,14 @@ func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
 	}
 	events := filterTimelineEvents(parsed.Events)
 	if len(events) == 0 {
-		return []recordEventView{}
+		// Minimal cassettes intentionally omit the event stream. The raw
+		// request/response are still parsed, so synthesize the two structural
+		// events the timeline needs instead of returning an empty view.
+		when := parsed.Header.Meta.Time
+		events = []recordfile.RecordEvent{
+			{Type: "request", Time: when},
+			{Type: "response", Time: when.Add(time.Duration(parsed.Header.Meta.DurationMs) * time.Millisecond)},
+		}
 	}
 	views := toEventViewsFromRecord(events)
 	for idx, event := range events {
