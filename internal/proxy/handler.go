@@ -2277,14 +2277,14 @@ func (h *Handler) writeUpstreamResponse(
 	// sniffer rather than around it: UsageSniffer writes the bytes it read into
 	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
 	// the recorded response while the client saw the real values.
-	respBody := resp.Body
+	responseBody := gateway.NewResponseBody(resp.Body)
 	var secretRestorer *secretmask.Restorer
 	if h.secretVault != nil {
 		secretRestorer = secretmask.NewRestorer(resp.Body, h.secretVault)
-		respBody = secretRestorer
+		responseBody.SetClient(secretRestorer)
 	}
 	resp.Body = &UsageSniffer{
-		Source:   respBody,
+		Source:   responseBody.ClientReader(),
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,

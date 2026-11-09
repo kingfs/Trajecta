@@ -6,7 +6,7 @@
 | --- | --- |
 | 模块 ID | M10 |
 | 模块名 | Gateway 流水线 |
-| 归属 | `internal/gateway`（Body、RequestTransform 已落地）；`internal/proxy` 响应侧/阶段拆分待迁移 |
+| 归属 | `internal/gateway`（Body、RequestTransform、ResponseBody 已落地）；`internal/proxy` 响应 transform/阶段拆分待迁移 |
 | 状态 | 部分落地 (P2) |
 | 依赖模块 | M02–M09 |
 | 被依赖模块 | 计划由 `internal/proxy` 使用 |
@@ -29,6 +29,7 @@
   - `Changed` 表示是否发生改写。
 - [`internal/gateway/transform.go`](../../internal/gateway/transform.go)：`RequestTransform` 固定顺序
   `alias -> record body -> conversion -> masking -> wire body`，返回 `Body`、`RecordBody`、`WireBody`、converter、path override、warnings、mask events。
+- [`internal/gateway/response_body.go`](../../internal/gateway/response_body.go)：`ResponseBody{Upstream,Client}`；proxy 把 `secretmask.Restorer` 装在 client 侧，`UsageSniffer` 读 client 流，保持“cassette 记录还原后字节”的既有契约。
 - `internal/proxy/handler.go` 的重试循环现在只构造 `RequestTransform`（`ConverterFor` 闭包调用 `conversionForSelection`），然后使用结果：
   - recorder 用 `RecordBody`；
   - send 用 `Body.WireBytes()`；
@@ -61,6 +62,6 @@
 
 - [x] 把 alias/conversion/mask 的调用顺序抽成 `RequestTransform`，由 gateway 单测覆盖。
 - [ ] 把 `recordBody`/wire 的语义进一步固化为 `Body{Client,Record,Wire}` 或 `RecordBody()`。
-- [ ] 响应侧 `Upstream`/`Client` Body，接入 restore/usage/convert/record 顺序。
+- [x] 响应侧 `ResponseBody{Upstream,Client}` 类型已落地；完整 restore/usage/convert/record 阶段仍待抽成 `ResponseTransform`。
 - [ ] 把本地 Responses runtime 作为 `ModeLocal` 接入同一请求阶段。
 - [ ] 删除 `handler.go` 中重复的 body 变量与转换上下文。
