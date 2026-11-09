@@ -6,7 +6,7 @@
 | --- | --- |
 | 模块 ID | M10 |
 | 模块名 | Gateway 流水线 |
-| 归属 | `internal/gateway`（Body 已落地）；`internal/proxy` 剩余编排待迁移 |
+| 归属 | `internal/gateway`（Body、RequestTransform 已落地）；`internal/proxy` 响应侧/阶段拆分待迁移 |
 | 状态 | 部分落地 (P2) |
 | 依赖模块 | M02–M09 |
 | 被依赖模块 | 计划由 `internal/proxy` 使用 |
@@ -27,13 +27,12 @@
   - `SetWire` 在 wire 等于 Client 时恢复直通；
   - `WireBytes` 返回实际发往上游的字节；
   - `Changed` 表示是否发生改写。
-- `internal/proxy/handler.go` 的重试循环现在：
-  1. `attemptBody := gateway.NewBody(bodyBytes)`；
-  2. alias 改写写回 `attemptBody`；
-  3. `recordBody := attemptBody.WireBytes()`（alias 后、conversion/mask 前）；
-  4. conversion 写回 `attemptBody`；
-  5. mask 写回 `attemptBody`；
-  6. recorder 用 `recordBody`，send 用 `attemptBody.WireBytes()`。
+- [`internal/gateway/transform.go`](../../internal/gateway/transform.go)：`RequestTransform` 固定顺序
+  `alias -> record body -> conversion -> masking -> wire body`，返回 `Body`、`RecordBody`、`WireBody`、converter、path override、warnings、mask events。
+- `internal/proxy/handler.go` 的重试循环现在只构造 `RequestTransform`（`ConverterFor` 闭包调用 `conversionForSelection`），然后使用结果：
+  - recorder 用 `RecordBody`；
+  - send 用 `Body.WireBytes()`；
+  - conversion event 用 `Converter`（type assert 回 `*protocolConversion`）。
 - 行为保持：cassette 仍记录 alias 后、conversion/mask 前的 body；mask 仍只作用于上游 wire。
 
 ## 3. 数据放置
@@ -60,8 +59,8 @@
 
 ## 6. 待做
 
-- [ ] 把 alias/stream-options/conversion/mask 的调用顺序抽成 `RequestTransform`，由 gateway 单测覆盖。
-- [ ] 把 `recordBody`/wire 的语义固化为 `Body{Client,Record,Wire}` 或 `RecordBody()`，消除调用方自己保存中间 slice。
+- [x] 把 alias/conversion/mask 的调用顺序抽成 `RequestTransform`，由 gateway 单测覆盖。
+- [ ] 把 `recordBody`/wire 的语义进一步固化为 `Body{Client,Record,Wire}` 或 `RecordBody()`。
 - [ ] 响应侧 `Upstream`/`Client` Body，接入 restore/usage/convert/record 顺序。
 - [ ] 把本地 Responses runtime 作为 `ModeLocal` 接入同一请求阶段。
 - [ ] 删除 `handler.go` 中重复的 body 变量与转换上下文。

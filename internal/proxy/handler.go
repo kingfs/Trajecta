@@ -966,29 +966,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
-		attemptBody := gateway.NewBody(bodyBytes)
-		if rewrittenBody, rewritten := rewriteRequestModelAlias(attemptBody.WireBytes(), selection); rewritten {
-			attemptBody.SetWire(rewrittenBody)
+		// The request-side order lives in gateway: alias -> record body ->
+		// conversion -> masking -> wire body. The cassette records the
+		// post-alias, pre-conversion/pre-mask body.
+		var masker gateway.Masker
+		if h.secretVault != nil {
+			masker = h.secretVault
 		}
-		// The cassette keeps the bytes the client-visible request resolved to:
-		// alias-rewritten, but before conversion and masking. The upstream wire
-		// is transformed separately on attemptBody.
-		recordBody := attemptBody.WireBytes()
-
-		// Protocol conversion (opt-in via router.selection.protocol_conversion):
-		// the router may have selected a target that cannot serve the client's
-		// protocol natively. Streaming requests never carry a conversion (the
-		// router excludes them), and passthrough selections leave both untouched,
-		// so the default path costs one nil check.
-		sendPathOverride := ""
-		conversion, convErr := h.conversionForSelection(r, selection, attemptBody.WireBytes())
-		if convErr == nil && conversion != nil {
-			var converted []byte
-			converted, convErr = conversion.convertRequestBody(attemptBody.WireBytes())
-			if convErr == nil {
-				attemptBody.SetWire(converted)
-				sendPathOverride, convErr = conversion.upstreamPath()
-			}
+		transform := gateway.RequestTransform{
+			RequestedModel: selection.Request.ModelName,
+			UpstreamModel:  selection.Target.ResolveModelAlias(selection.Request.ModelName),
+			ConverterFor: func(record []byte) (gateway.Converter, error) {
+				conv, err := h.conversionForSelection(r, selection, record)
+				if err != nil || conv == nil {
+					return nil, err
+				}
+				return conv, nil
+			},
+			Masker: masker,
+		}
+		transformResult, convErr := transform.Apply(bodyBytes)
+		recordBody := transformResult.RecordBody
+		sendBodyBytes := transformResult.Body.WireBytes()
+		sendPathOverride := transformResult.PathOverride
+		maskedEvents := transformResult.MaskEvents
+		var conversion *protocolConversion
+		if transformResult.Converter != nil {
+			conversion, _ = transformResult.Converter.(*protocolConversion)
 		}
 		if convErr != nil {
 			// A request we cannot translate is deterministic: every other
@@ -1013,21 +1017,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break // exhausted this round: report now, do not start a new round
 			}
 			continue
-		}
-
-		// Masking splits the recorded body from the body sent upstream: the cassette
-		// keeps the original bytes, so replay and a human reading a trace see the
-		// real values, while the upstream only ever receives stand-ins. The bytes
-		// handed to the router above are deliberately left alone, so routing keys,
-		// fingerprints and every failure cassette are unaffected.
-		sendBodyBytes := attemptBody.WireBytes()
-		var maskedEvents []secretmask.MaskEvent
-		if h.secretVault != nil {
-			if masked, events := h.secretVault.Mask(sendBodyBytes); len(events) > 0 {
-				sendBodyBytes = masked
-				attemptBody.SetWire(masked)
-				maskedEvents = events
-			}
 		}
 
 		// 准备日志

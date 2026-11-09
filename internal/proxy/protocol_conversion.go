@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/upstream"
@@ -131,6 +132,17 @@ func (h *Handler) conversionForSelection(r *http.Request, selection *router.Sele
 		engine:           h.conversionEngine,
 	}, nil
 }
+
+// ConvertRequest implements gateway.Converter.
+func (c *protocolConversion) ConvertRequest(body []byte) ([]byte, []protocolconvert.Warning, error) {
+	converted, err := c.convertRequestBody(body)
+	return converted, append([]protocolconvert.Warning(nil), c.requestWarnings...), err
+}
+
+// UpstreamPath implements gateway.Converter.
+func (c *protocolConversion) UpstreamPath() (string, error) { return c.upstreamPath() }
+
+var _ gateway.Converter = (*protocolConversion)(nil)
 
 func isVertexTarget(target *router.Target) bool {
 	if target == nil {
