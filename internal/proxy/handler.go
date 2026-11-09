@@ -602,12 +602,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		}
 		runtimeOptions = append(runtimeOptions, responsesruntime.WithFunctionToolExecutorRegistry(functionExecutorManager.Registry()))
 		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
-			router:        rtr,
-			recorder:      rec,
-			routingPolicy: routerPolicy(rtr),
-			auditor:       upstreamExchangeRecorder,
-			events:        executionEventRecorder,
-			secretVault:   secretVault,
+			router:          rtr,
+			recorder:        rec,
+			routingPolicy:   routerPolicy(rtr),
+			auditor:         upstreamExchangeRecorder,
+			events:          executionEventRecorder,
+			secretVault:     secretVault,
+			minimalCassette: cfg.Trace.MinimalCassette,
 		}, responseStore, runtimeOptions...)
 		return httpapi.NewHandler(
 			rt,
@@ -1027,6 +1028,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingPolicy:                  h.routerPolicy(),
 			RoutingScore:                   selection.Score,
 			RoutingCandidateCount:          selection.CandidateCount,
+			MinimalCassette:                h.cfg.Trace.MinimalCassette,
 		}, recordBody)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)
@@ -2385,7 +2387,8 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	responseBody = append(responseBody, '\n')
 
 	opts := recorder.PrepareOptions{
-		RoutingPolicy: h.routerPolicy(),
+		RoutingPolicy:   h.routerPolicy(),
+		MinimalCassette: h.cfg.Trace.MinimalCassette,
 	}
 	if selection != nil && selection.Target != nil {
 		opts.SiteURL = selection.Target.Upstream.BaseURL
@@ -2797,7 +2800,8 @@ func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request
 	}
 
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
-		RoutingPolicy: h.routerPolicy(),
+		RoutingPolicy:   h.routerPolicy(),
+		MinimalCassette: h.cfg.Trace.MinimalCassette,
 	}, requestBody)
 	if err != nil {
 		slog.Error("Failed to prepare synthetic model-info log file", "err", err)
@@ -2896,6 +2900,7 @@ func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statu
 		options.SelectedUpstreamID = attempted.ID
 		options.SelectedUpstreamProviderPreset = attempted.Upstream.ProviderPreset
 	}
+	options.MinimalCassette = h.cfg.Trace.MinimalCassette
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, options, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare selection-failure log file", "err", err)
@@ -3118,7 +3123,8 @@ func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time,
 		return
 	}
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
-		RoutingPolicy: h.routerPolicy(),
+		RoutingPolicy:   h.routerPolicy(),
+		MinimalCassette: h.cfg.Trace.MinimalCassette,
 	}, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare limit-rejection log file", "err", err)

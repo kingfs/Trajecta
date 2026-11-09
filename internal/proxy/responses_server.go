@@ -31,13 +31,14 @@ const (
 )
 
 type responsesChatCompletionsAdapter struct {
-	router        *router.Router
-	recorder      *recorder.Recorder
-	routingPolicy string
-	httpClient    *http.Client
-	auditor       responsesaudit.UpstreamExchangeRecorder
-	events        responsesaudit.ExecutionEventRecorder
-	secretVault   *secretmask.Vault
+	router          *router.Router
+	recorder        *recorder.Recorder
+	routingPolicy   string
+	httpClient      *http.Client
+	auditor         responsesaudit.UpstreamExchangeRecorder
+	events          responsesaudit.ExecutionEventRecorder
+	secretVault     *secretmask.Vault
+	minimalCassette bool
 }
 
 var _ runtime.ChatCompletionsClient = (*responsesChatCompletionsAdapter)(nil)
@@ -117,6 +118,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		RoutingPolicy:                  a.routingPolicy,
 		RoutingScore:                   selection.Score,
 		RoutingCandidateCount:          selection.CandidateCount,
+		MinimalCassette:                a.minimalCassette,
 	}
 	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
 		prepareOpts.ExchangeKind = metadata.ExchangeKind
@@ -451,9 +453,10 @@ func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []by
 
 	startedAt := time.Now()
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
-		SiteURL:      "http://trajecta.local",
-		ExchangeKind: "entry",
-		ExchangeRole: "client_request",
+		SiteURL:         "http://trajecta.local",
+		ExchangeKind:    "entry",
+		ExchangeRole:    "client_request",
+		MinimalCassette: h.cfg.Trace.MinimalCassette,
 	}, body)
 	if err != nil {
 		return nil, err

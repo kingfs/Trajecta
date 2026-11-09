@@ -122,6 +122,11 @@ type Config struct {
 
 	Trace struct {
 		OutputDir string `yaml:"output_dir"`
+		// MinimalCassette writes only the raw HTTP exchange plus the layout and
+		// minimal identity/route metadata needed to parse it. Routing details,
+		// harness labels, usage and timeline events stay in the application
+		// database; the cassette remains the byte-level evidence.
+		MinimalCassette bool `yaml:"minimal_cassette"`
 		// SyncInterval is how often the trace index is reconciled against the
 		// cassette tree. The startup sweep is what recovers recordings whose
 		// finalisation was lost, so this only bounds how long an out-of-band

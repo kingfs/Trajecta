@@ -17,7 +17,8 @@ Trajecta 的数据分三类，边界必须清晰：
 因此：
 
 - **不引入 Cassette V4 的双段格式**。继续使用 V3：magic + 一行 meta + 可选 event + 原始 request + 原始 response。
-- **默认不写 event**。路由、usage、harness、mask、conversion 摘要全部进 DB；只保留极少数"不写就无法解释原始字节"的异常标记。
+- **默认保留完整 prelude（兼容）**；新增 opt-in `trace.minimal_cassette: true`：写最小 meta、不写 event，routing/usage/harness/摘要仍进 DB。
+- **目标态默认不写 event**。路由、usage、harness、mask、conversion 摘要全部进 DB；只保留极少数"不写就无法解释原始字节"的异常标记。
 - **默认只在最终 exchange 上创建 cassette**。失败重试只记 DB，不产生文件；成功/最终失败才写一个文件。
 - **不把上游 wire 字节默认写进文件**。需要精确取证时，用 opt-in 的 wire capture（sidecar），默认关闭。
 - **路由信息不进 cassette**。它属于 DB 的 `logs` / `route_attempts` / `route_decisions`。
@@ -68,10 +69,10 @@ V3 保持不变：
 
 注意：cassette 不是唯一的文件。`secret_mask_mappings.db` 是本地 bbolt 状态文件，存 mask 映射和抑制名单，不是 per-trace 原始证据；它不属于 cassette 格式。
 
-默认：
+默认（当前兼容行为）：
 
-- 0 条 `# event:`；
-- meta 只含解析/关联必需的字段；
+- 保留现有完整 meta 和 event；
+- `trace.minimal_cassette: true` 时：0 条 `# event:`，meta 只含解析/关联必需字段；
 - request/response 是原始字节，不做 JSON 美化、不截断（除非达到配置上限，并标记 truncated）。
 
 ### 3.2 最小 meta
@@ -260,7 +261,17 @@ expires_at, created_at
 - 硬亲和、凭据、配置不能只放内存；
 - 内存缓存必须有上限和过期。
 
-## 6. 为什么不做 Cassette V4
+## 6. 最小 cassette 的落地状态
+
+`internal/recorder` 已支持 `trace.minimal_cassette`（默认 false）：
+
+- prelude 使用 `minimalCassetteHeader`：保留 `version`、`layout`、`trace_id`/`exchange_*`/`time`/`model`/`provider`/`operation`/`endpoint`/`url`/`method`/`status_code`/`content_length`，去掉 routing/harness/client_ip/duration/usage；
+- 不写 timeline/event；
+- DB 索引仍用完整 `LogInfo.Header`，因此列表/统计不丢；
+- 默认关闭，避免 Monitor 旧的 event 读取路径突然失去数据；
+- 迁移完成后可把默认改为 true，并删除旧 event 读取。
+
+## 7. 为什么不做 Cassette V4
 
 最初提出 V4 的理由是：mask/convert 后，客户端看到的字节和上游收到的字节不同，想在一个文件里同时保存两份。
 
@@ -274,7 +285,7 @@ expires_at, created_at
 
 因此：**V3 继续，meta 最小化，event 默认关闭，wire 用 opt-in sidecar。** 如果未来出现必须默认保存 wire 的合规需求，再单独评估，不现在引入。
 
-## 7. 审计如何以文件为核心
+## 8. 审计如何以文件为核心
 
 ```text
 打开 trace
@@ -291,7 +302,7 @@ expires_at, created_at
 - 没有 DB 时，仍可单独解析 raw 文件，只是丢失路由/session 上下文；
 - 没有文件时，DB 索引不能替代原始证据。
 
-## 8. 兼容与迁移
+## 9. 兼容与迁移
 
 - 读取端继续支持 V3/V2 和旧 event；写入端只写 V3。
 - 读取端必须在 meta 字段缺失时从 raw request 推导 `method`/`url`/`model`/`endpoint` 等，不能假设旧字段一定存在。
@@ -304,7 +315,7 @@ expires_at, created_at
 - 文件命名改为 `trace_id.http`；旧文件继续按路径读取。
 - `.tmp` 清理任务在 serve 启动时运行。
 
-## 9. 开放问题
+## 10. 开放问题
 
 | 问题 | 建议 |
 | --- | --- |

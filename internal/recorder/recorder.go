@@ -36,6 +36,10 @@ type LogInfo struct {
 	Header RecordHeader
 	Events []RecordEvent
 
+	// MinimalCassette omits derived routing/harness/usage/timeline data from
+	// the prelude while the full LogInfo.Header still feeds the database index.
+	MinimalCassette bool
+
 	// MaskAudit carries the credential replacements of this exchange, with the
 	// original and the stand-in, for the credential mask audit table.
 	//
@@ -62,6 +66,7 @@ type PrepareOptions struct {
 	SequenceIndex                  int
 	TraceID                        string
 	ResponseID                     string
+	MinimalCassette                bool
 }
 
 type Recorder struct {
@@ -355,10 +360,11 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 	}
 
 	return &LogInfo{
-		File:   f,
-		Path:   logPath,
-		Header: header,
-		Events: events,
+		File:            f,
+		Path:            logPath,
+		Header:          header,
+		Events:          events,
+		MinimalCassette: opts.MinimalCassette,
 	}, nil
 }
 
@@ -496,6 +502,41 @@ func eventStringAttr(attrs map[string]interface{}, key string) string {
 	}
 }
 
+// minimalCassetteHeader keeps the identity/layout metadata a reader needs to
+// find and parse the raw exchange, and drops routing/harness/usage/error
+// duplication that the database already indexes. The full Header is still used
+// for the index row; this copy is only what the cassette prelude serializes.
+func minimalCassetteHeader(header RecordHeader) RecordHeader {
+	meta := header.Meta
+	meta.ClientIP = ""
+	meta.SelectedUpstreamID = ""
+	meta.SelectedUpstreamBaseURL = ""
+	meta.SelectedUpstreamProviderPreset = ""
+	meta.RoutingPolicy = ""
+	meta.RoutingScore = 0
+	meta.RoutingCandidateCount = 0
+	meta.RoutingFailureReason = ""
+	meta.RouteTargetID = ""
+	meta.ChannelID = ""
+	meta.CredentialID = ""
+	meta.StickyStatus = ""
+	meta.StickyPreviousUpstreamID = ""
+	meta.ClientHarness = ""
+	meta.ClientHarnessName = ""
+	meta.ClientHarnessVersion = ""
+	meta.ClientHarnessKind = ""
+	meta.ClientHarnessConfidence = ""
+	meta.ClientHarnessTags = nil
+	meta.DurationMs = 0
+	meta.TTFTMs = 0
+	meta.Error = ""
+	return RecordHeader{
+		Version: header.Version,
+		Meta:    meta,
+		Layout:  header.Layout,
+	}
+}
+
 func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	if info.File == nil {
 		return nil
@@ -511,7 +552,13 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	// both built from, so deriving it here keeps the write path and the
 	// `Sync` re-index of the same file in agreement without a second parser.
 	ApplyRoutingDetailFromEvents(events, &info.Header.Meta)
-	prelude, err := recordfile.MarshalPrelude(info.Header, events)
+	preludeHeader := info.Header
+	preludeEvents := events
+	if info.MinimalCassette {
+		preludeHeader = minimalCassetteHeader(info.Header)
+		preludeEvents = nil
+	}
+	prelude, err := recordfile.MarshalPrelude(preludeHeader, preludeEvents)
 	if err != nil {
 		return err
 	}

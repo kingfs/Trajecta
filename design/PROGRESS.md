@@ -52,6 +52,7 @@
 - `internal/audit`：cassette 按需解析为 XIR 并调用 `pkg/xir/audit`；`GET /api/traces/<id>/xir` 已暴露投影；Chat SSE 响应会装配为完整响应，其他流式协议只解码 request 并返回 warning。
 - `internal/gateway`：`Body{Client,Wire}` 与 `RequestTransform` 已落地并接入 proxy 主循环；alias → conversion → masking 的顺序固定在 gateway，recorder 用 record body，send 用 wire body。
 - `internal/monitor`：模型广场条目新增 `protocols`（可用渠道 interfaces 的并集），用于协议 badge；`priority_mode` UI 已加入。
+- `internal/recorder`：新增 opt-in `trace.minimal_cassette`，prelude 只保留 raw exchange + 解析/布局元数据，DB 仍用完整 header；默认关闭。
 - `internal/proxy`：model alias 改写改用 `xir.RewriteModel`，stream chat 的 `stream_options.include_usage` 注入改用 `xir.EnsureStreamIncludeUsage`；两者只 patch 目标 span，保留键顺序、空白、未知字段和数字字面量。
 - `internal/router`：`router.selection.priority_mode` 默认 `compat`，支持 `strict`；decision trace 记录 `priority_mode`/`selected_tier`；兼容性测试覆盖。
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。
