@@ -114,3 +114,25 @@ func TestBodyRewritesLeaveNonObjectBodiesAlone(t *testing.T) {
 		}
 	}
 }
+
+// TestRewriteRequestModelAliasPreservesFormatting pins that the alias rewrite
+// patches the model string in place instead of re-encoding the object: key
+// order, whitespace and unknown fields survive byte for byte.
+func TestRewriteRequestModelAliasPreservesFormatting(t *testing.T) {
+	selection := &router.Selection{
+		Target: &router.Target{
+			ID:           "channel-a",
+			ModelAliases: map[string]string{"fast-alias": "gpt-5-turbo"},
+		},
+		Request: router.RequestFeatures{ModelName: "fast-alias"},
+	}
+	body := "{\n  \"model\" : \"fast-alias\",\n  \"unknown\": {\"n\": 1}\n}"
+	got, rewritten := rewriteRequestModelAlias([]byte(body), selection)
+	if !rewritten {
+		t.Fatal("alias not rewritten")
+	}
+	want := strings.Replace(body, `"fast-alias"`, `"gpt-5-turbo"`, 1)
+	if string(got) != want {
+		t.Fatalf("rewrite changed more than the model string:\n got %q\nwant %q", got, want)
+	}
+}

@@ -41,6 +41,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 type aggregatedModelListResponse struct {
@@ -292,16 +293,8 @@ func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]
 	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
 		return bodyBytes, false
 	}
-	payload, ok := decodeJSONObject(bodyBytes)
-	if !ok {
-		return bodyBytes, false
-	}
-	if _, ok := payload["model"]; !ok {
-		return bodyBytes, false
-	}
-	payload["model"] = upstreamModel
-	rewritten, err := json.Marshal(payload)
-	if err != nil {
+	rewritten, ok, err := xir.RewriteModel(bodyBytes, upstreamModel)
+	if err != nil || !ok {
 		return bodyBytes, false
 	}
 	return rewritten, true
