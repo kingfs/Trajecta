@@ -276,6 +276,15 @@ type RouterConfig struct {
 		// preserves the historical behaviour exactly. Streaming requests
 		// never convert; they require a native passthrough upstream.
 		ProtocolConversion bool `yaml:"protocol_conversion"`
+		// PriorityMode controls how Target.Priority is interpreted.
+		//
+		// "compat" (the default, and the only behaviour existing installations
+		// have ever had) compares every candidate by measured cost/health and
+		// uses Priority only as a tie-breaker. "strict" treats Priority as a
+		// tier: the highest tier with a selectable candidate wins and lower
+		// tiers are reached only through failover. Strict is a deliberate
+		// behaviour change; keep compat unless the operator asks for it.
+		PriorityMode string `yaml:"priority_mode"`
 	} `yaml:"selection"`
 }
 
@@ -815,6 +824,13 @@ func validateRouterEnums(cfg *Config) error {
 	if value := strings.TrimSpace(cfg.Router.Selection.Policy); value != "" {
 		if _, ok := validSelectionPolicies[strings.ToLower(value)]; !ok {
 			return fmt.Errorf("router.selection.policy %q is not supported; use one of p2c, first_available", value)
+		}
+	}
+	if value := strings.TrimSpace(cfg.Router.Selection.PriorityMode); value != "" {
+		switch strings.ToLower(value) {
+		case "compat", "strict":
+		default:
+			return fmt.Errorf("router.selection.priority_mode %q is not supported; use compat or strict", value)
 		}
 	}
 	return nil

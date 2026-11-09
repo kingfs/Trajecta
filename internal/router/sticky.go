@@ -1,15 +1,15 @@
 package router
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kingfs/Trajecta/pkg/session"
 )
 
 const (
@@ -158,40 +158,18 @@ func (s *StickyBindingStore) Bind(key string, targetID string) {
 	}
 }
 
-// stickyHeaderSources are the request headers consulted for a session id, in
-// priority order. Each one is a real client convention: OpenAI/Codex SDKs and
-// Claude Code disagree on the name, and a proxy that only read `Session_id`
-// silently gave no affinity to every other client.
-var stickyHeaderSources = []string{
-	"Session_id",
-	"X-Session-Id",
-	"Session-Id",
-	"X-Conversation-Id",
-	"X-Claude-Code-Session-Id",
-}
-
 // extractStickyKey resolves the client's session identifier from the request.
 //
-// It reads a small, ordered set of headers first and falls back to the body.
-// The value is client-supplied and identifies a conversation, so it must never
-// be written to a log line, a cassette, or the application database: diagnostics
-// use stickyKeyFingerprint instead.
+// The signal set lives in pkg/session so the router, the recorder and audit
+// consumers cannot drift on which headers or body fields name a conversation.
+// The value is client-supplied, so it must never be written to a log line, a
+// cassette, or the application database; diagnostics use
+// stickyKeyFingerprint instead.
 func extractStickyKey(req *http.Request, body []byte) string {
 	if req == nil {
 		return extractStickyKeyFromBody(body)
 	}
-	for _, header := range stickyHeaderSources {
-		if key := strings.TrimSpace(req.Header.Get(header)); key != "" {
-			return key
-		}
-	}
-	if key := stickyWindowPrefix(req.Header.Get("X-Codex-Window-Id")); key != "" {
-		return key
-	}
-	if key := stickySessionIDFromJSON([]byte(req.Header.Get("X-Codex-Turn-Metadata"))); key != "" {
-		return key
-	}
-	return extractStickyKeyFromBody(body)
+	return session.Resolve(req.Header, body).Key
 }
 
 // composeStickyKey binds one session per model: `session + "\x1f" + model`.
@@ -228,66 +206,8 @@ func stickyKeyFingerprint(key string) string {
 	return fmt.Sprintf("sha256:%x", sum[:8])
 }
 
-func stickyWindowPrefix(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	prefix, _, ok := strings.Cut(raw, ":")
-	if !ok {
-		return raw
-	}
-	return strings.TrimSpace(prefix)
-}
-
-// stickySessionIDFromJSON reads `{"session_id": ...}` from a header value or a
-// raw body field. It returns "" for empty or malformed input instead of failing
-// the request: a session hint is an optimisation, never a requirement.
-func stickySessionIDFromJSON(raw []byte) string {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return ""
-	}
-	var payload struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(payload.SessionID)
-}
-
-// extractStickyKeyFromBody decodes the request body once and returns the first
-// session-ish field it carries. The order matches how the client protocols
-// chain a conversation: the Responses API's previous response, then the Chat
-// Completions prompt-cache key, then the common metadata/conversation/session
-// fields. metadata is kept raw so a non-object metadata field cannot make the
-// whole body unreadable and lose the other fallbacks.
+// extractStickyKeyFromBody resolves a session from the body alone. It is kept
+// as a small wrapper for tests and callers that have no request headers.
 func extractStickyKeyFromBody(body []byte) string {
-	body = bytes.TrimSpace(body)
-	if len(body) == 0 {
-		return ""
-	}
-	var payload struct {
-		PreviousResponseID string          `json:"previous_response_id"`
-		PromptCacheKey     string          `json:"prompt_cache_key"`
-		Metadata           json.RawMessage `json:"metadata"`
-		ConversationID     string          `json:"conversation_id"`
-		SessionID          string          `json:"session_id"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	for _, candidate := range []string{
-		payload.PreviousResponseID,
-		payload.PromptCacheKey,
-		stickySessionIDFromJSON(payload.Metadata),
-		payload.ConversationID,
-		payload.SessionID,
-	} {
-		if key := strings.TrimSpace(candidate); key != "" {
-			return key
-		}
-	}
-	return ""
+	return session.Resolve(nil, body).Key
 }

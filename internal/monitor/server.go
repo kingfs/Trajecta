@@ -131,7 +131,7 @@ type traceListItem struct {
 	Provider         string    `json:"provider"`
 	SelectedUpstream string    `json:"selected_upstream_id,omitempty"`
 	SelectedPreset   string    `json:"selected_upstream_provider_preset,omitempty"`
-	// The client harness that produced the request, derived by internal/harness
+	// The client harness that produced the request, derived by pkg/harness
 	// at record time. The canonical id is what the list filters on; the rest is
 	// display detail. They are omitted when empty so a legacy trace without a
 	// classification renders exactly as before.
@@ -778,7 +778,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
 	// The proxy URL may carry credentials and changing it moves every outbound
 	// request, so this is admin-only like the rest of the system surface.

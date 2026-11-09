@@ -5739,7 +5739,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	}
 	defer st.Close()
 
-	handler := routingSettingsAPIHandler(st)
+	handler := routingSettingsAPIHandler(st, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/settings/routing", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -5750,11 +5750,11 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode GET response: %v", err)
 	}
-	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C {
+	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C || got.PriorityMode != "compat" {
 		t.Fatalf("default settings = %+v", got)
 	}
 
-	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available"}`))
+	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available","priority_mode":"strict"}`))
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -5764,7 +5764,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode PATCH response: %v", err)
 	}
-	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable {
+	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable || got.PriorityMode != "strict" {
 		t.Fatalf("patched settings = %+v", got)
 	}
 }

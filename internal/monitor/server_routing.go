@@ -71,6 +71,7 @@ type routingFailureBucketItem struct {
 type routingSettingsView struct {
 	ResponsesStrategy string    `json:"responses_strategy"`
 	SelectionPolicy   string    `json:"selection_policy"`
+	PriorityMode      string    `json:"priority_mode"`
 	RoutePlanLogLevel string    `json:"route_plan_log_level,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
@@ -116,7 +117,7 @@ func routingSummaryAPIHandler(st *store.Store) http.HandlerFunc {
 
 const routingSettingsKey = "routing.settings"
 
-func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
+func routingSettingsAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
@@ -150,6 +151,12 @@ func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
 			if err := st.SaveAppSettingJSON(r.Context(), routingSettingsKey, settings); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
+			}
+			if rtr != nil {
+				if err := rtr.SetPriorityMode(settings.PriorityMode); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+					return
+				}
 			}
 			writeJSON(w, http.StatusOK, settings)
 		default:
@@ -257,6 +264,7 @@ func defaultRoutingSettings() routingSettingsView {
 		// local server. See docs/RESPONSES_RUNTIME.md.
 		ResponsesStrategy: "auto",
 		SelectionPolicy:   router.PolicyP2C,
+		PriorityMode:      "compat",
 		RoutePlanLogLevel: "normal",
 	}
 }
@@ -287,6 +295,9 @@ func mergeRoutingSettings(base routingSettingsView, patch routingSettingsView) r
 	if strings.TrimSpace(patch.SelectionPolicy) != "" {
 		base.SelectionPolicy = strings.TrimSpace(patch.SelectionPolicy)
 	}
+	if strings.TrimSpace(patch.PriorityMode) != "" {
+		base.PriorityMode = strings.TrimSpace(patch.PriorityMode)
+	}
 	if strings.TrimSpace(patch.RoutePlanLogLevel) != "" {
 		base.RoutePlanLogLevel = strings.TrimSpace(patch.RoutePlanLogLevel)
 	}
@@ -306,6 +317,11 @@ func validateRoutingSettings(settings routingSettingsView) error {
 	case router.PolicyP2C, router.PolicyFirstAvailable:
 	default:
 		return fmt.Errorf("unsupported selection_policy %q", settings.SelectionPolicy)
+	}
+	switch settings.PriorityMode {
+	case "", "compat", "strict":
+	default:
+		return fmt.Errorf("unsupported priority_mode %q", settings.PriorityMode)
 	}
 	switch settings.RoutePlanLogLevel {
 	case "", "normal", "verbose":

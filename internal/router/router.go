@@ -105,11 +105,15 @@ type Router struct {
 	// cannot serve the client's protocol natively, for later conversion by
 	// the proxy. Off by default (config router.selection.protocol_conversion).
 	conversionEnabled bool
-	stopCh            chan struct{}
-	stopOnce          sync.Once
-	refreshMu         sync.Mutex
-	refreshCond       *sync.Cond
-	refreshing        bool
+	// strictPriority interprets Target.Priority as a tier instead of a
+	// tie-breaker. Off by default: existing installations keep the historical
+	// cost-first behaviour (priority_mode=compat).
+	strictPriority bool
+	stopCh         chan struct{}
+	stopOnce       sync.Once
+	refreshMu      sync.Mutex
+	refreshCond    *sync.Cond
+	refreshing     bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -302,6 +306,8 @@ type DecisionTrace struct {
 	ModelName              string              `json:"model_name,omitempty"`
 	Endpoint               string              `json:"endpoint,omitempty"`
 	Policy                 string              `json:"policy,omitempty"`
+	PriorityMode           string              `json:"priority_mode,omitempty"`
+	SelectedTier           int                 `json:"selected_tier,omitempty"`
 	ExcludedIDs            []string            `json:"excluded_ids,omitempty"`
 	Candidates             []CandidateDecision `json:"candidates,omitempty"`
 	AvailableCount         int                 `json:"available_count"`
@@ -400,6 +406,7 @@ func New(cfg *config.Config) (*Router, error) {
 		costs:              defaultCostConfig(),
 		stickyMaxCostRatio: defaultStickyMaxCostRatio,
 		conversionEnabled:  cfg.Router.Selection.ProtocolConversion,
+		strictPriority:     normalizePriorityMode(cfg.Router.Selection.PriorityMode) == "strict",
 		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
@@ -1139,11 +1146,31 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		}
 	}
 
+	// The candidate count stays the number of selectable candidates across
+	// every tier. The proxy uses it to decide when a retry round is exhausted;
+	// shrinking it to the winning tier would make a single-target top tier end
+	// the round instead of failing over to the next tier in the same round.
+	selectionPool := available
+	if r.strictPriority {
+		selectionPool = highestPriorityTier(available)
+	}
+	if len(selectionPool) == 0 {
+		selectionPool = available
+	}
+
 	var selected *Target
 	var score float64
 	stickyTarget := (*Target)(nil)
 	if hasStickyBinding {
 		stickyTarget = findTargetByRouteTargetID(candidates, stickyTargetID)
+		// In strict mode soft affinity is scoped to the winning tier. A
+		// binding on a lower tier must not override a recovered primary; the
+		// request rebinds to the tier that actually wins. Hard affinity is
+		// handled by the planner's stateful path, not here.
+		if r.strictPriority && findTargetByRouteTargetID(selectionPool, stickyTargetID) == nil {
+			hasStickyBinding = false
+			stickyTarget = nil
+		}
 	}
 	// An exclusion describes this attempt, not the session: the proxy passes the
 	// targets it already tried. Keeping the binding when the excluded target is
@@ -1155,14 +1182,14 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 	case stickyHeld:
 		decision.withStickyTarget("hold", stickyFingerprint, nil, "", targetAlias(stickyTarget, stickyTargetID))
 	case hasStickyBinding:
-		if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil && stickyTargetBusy(bound) && len(available) > 1 {
+		if bound := findTargetByRouteTargetID(selectionPool, stickyTargetID); bound != nil && stickyTargetBusy(bound) && len(selectionPool) > 1 {
 			// The bound target is already executing a request. A concurrent
 			// sibling must not queue behind it just to keep the prompt cache:
 			// this is exactly the heterogeneous pair where the slow target is
 			// busy and the fast one is idle. Let the normal cost comparison
 			// decide, but keep the binding (do not rebind) so sequential
 			// traffic returns to it once it is free again.
-			if picked, pickedScore := r.pick(available, features); picked != bound {
+			if picked, pickedScore := r.pick(selectionPool, features); picked != bound {
 				selected = picked
 				score = pickedScore
 				decision.withStickyTarget("spill", stickyFingerprint, nil, "", targetAlias(bound, stickyTargetID))
@@ -1171,10 +1198,10 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 				score = pickedScore
 				decision.withStickyTarget("hit", stickyFingerprint, bound, bound.ID, "")
 			}
-		} else if bound := findTargetByRouteTargetID(available, stickyTargetID); bound != nil {
+		} else if bound := findTargetByRouteTargetID(selectionPool, stickyTargetID); bound != nil {
 			selected = bound
 			score = r.expectedCost(bound, features)
-			if best := r.stickyRebalanceTarget(available, bound, features); best != nil {
+			if best := r.stickyRebalanceTarget(selectionPool, bound, features); best != nil {
 				r.sticky.Bind(stickyKey, best.RouteTargetID)
 				selected = best
 				score = r.expectedCost(best, features)
@@ -1189,7 +1216,7 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		decision.withSticky("miss", stickyFingerprint, "", "")
 	}
 	if selected == nil {
-		selected, score = r.pick(available, features)
+		selected, score = r.pick(selectionPool, features)
 		if !opts.DryRun && stickyKey != "" && !stickyHeld {
 			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
@@ -1208,15 +1235,92 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 	for _, candidate := range available {
 		candidateIDs = append(candidateIDs, candidate.ID)
 	}
+	decision = decision.withSelectedTarget(selected, score)
+	decision.SelectedTier = selected.Priority
+	decision.PriorityMode = r.priorityMode()
 	return &Selection{
 		Target:         selected,
 		Score:          score,
 		CandidateCount: len(available),
 		Candidates:     candidateIDs,
 		Request:        features,
-		Decision:       decision.withSelectedTarget(selected, score),
+		Decision:       decision,
 		Credential:     credentialDecisionFromTarget(selected),
 	}, nil
+}
+
+// highestPriorityTier returns the targets in the highest priority tier.
+// Callers pass a non-empty selectable list.
+func highestPriorityTier(candidates []*Target) []*Target {
+	if len(candidates) == 0 {
+		return nil
+	}
+	max := candidates[0].Priority
+	for _, candidate := range candidates[1:] {
+		if candidate.Priority > max {
+			max = candidate.Priority
+		}
+	}
+	out := make([]*Target, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Priority == max {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+// priorityMode is the normalized mode used in decision traces. Callers inside
+// the selection read path already hold r.mu.
+func (r *Router) priorityMode() string {
+	if r != nil && r.strictPriority {
+		return "strict"
+	}
+	return "compat"
+}
+
+// PriorityMode returns the live priority interpretation ("compat" or "strict").
+func (r *Router) PriorityMode() string {
+	if r == nil {
+		return "compat"
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.priorityMode()
+}
+
+// SetPriorityMode changes how Target.Priority is interpreted while the router
+// is running. The empty value means compat; an unknown value is rejected
+// rather than silently changing routing. The change is visible to the next
+// selection; in-flight selections keep the snapshot they started with.
+func (r *Router) SetPriorityMode(mode string) error {
+	if r == nil {
+		return errors.New("router is nil")
+	}
+	raw := strings.ToLower(strings.TrimSpace(mode))
+	switch raw {
+	case "", "compat":
+		raw = "compat"
+	case "strict":
+	default:
+		return fmt.Errorf("unsupported priority_mode %q; use compat or strict", mode)
+	}
+	r.mu.Lock()
+	r.strictPriority = raw == "strict"
+	r.mu.Unlock()
+	return nil
+}
+
+// normalizePriorityMode maps an empty or unknown value to the historical
+// compat behaviour. Config validation rejects unknown values at load time;
+// this helper keeps programmatic construction safe.
+func normalizePriorityMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "strict":
+		return "strict"
+	default:
+		return "compat"
+	}
 }
 
 // stickyRebalanceTarget reports whether the session's bound target is so much
