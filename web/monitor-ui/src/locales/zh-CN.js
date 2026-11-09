@@ -412,6 +412,7 @@ export default {
   "models.squareUnavailable": "不可调用",
   "models.squareChannelCount": "{count} 个渠道",
   "models.squareChannelSupport": "渠道支持",
+  "models.squareProtocols": "协议",
   "models.squareCapabilities": "模型能力",
   "models.squareConfigured": "已配置模型",
   "models.squareUnknown": "未知",

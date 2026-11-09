@@ -26,7 +26,7 @@
 - 创建渠道时若 `base_url` 为空且 preset 已知，`defaultPresetBaseURL` 按 `api_type`/`protocol_family` 选择 endpoint（OpenAI、Anthropic、DeepSeek、OpenRouter、Google 等）。
 - `GET /api/catalog/providers`：只读返回 `pkg/upstream.Presets()` 的 id/name/kind/endpoints/protocols/auth/plans/models/headers/docs，不包含任何 credential。
 - `GET /api/provider-presets`（旧形状）现在也带 `endpoints`/`protocols`（当旧 preset id 与 catalog 匹配时）；创建渠道表单选中 preset 后按 `api_type` 自动填 `base_url`，留空时后端仍用 `defaultPresetBaseURL` 兜底。
-- 模型广场：`GET /api/model-square` 已有每渠道 `interfaces`、`protocols` badge、`channel_count`/`available_channel_count`。
+- 模型广场：`GET /api/model-square` 已有每渠道 `interfaces`、顶层 `protocols`，卡片展示协议 badge、`channel_count`/`available_channel_count`。
 - 模型启用/禁用：`PATCH /api/channels/{id}/models/{model}` 与 batch，提交后 reload。
 
 ## 3. 对外契约

@@ -412,6 +412,7 @@ export default {
   "models.squareUnavailable": "Unavailable",
   "models.squareChannelCount": "{count} channels",
   "models.squareChannelSupport": "Channel support",
+  "models.squareProtocols": "Protocols",
   "models.squareCapabilities": "Capabilities",
   "models.squareConfigured": "Configured model",
   "models.squareUnknown": "unknown",

@@ -192,6 +192,7 @@ function ModelSquareCard({ item, windowValue }) {
   const titleID = useId();
   const facts = item.facts || null;
   const channels = item.channels || [];
+  const protocols = Array.isArray(item.protocols) ? item.protocols : [];
   const title = modelDisplayName(item, facts);
   const description = modelDescription(facts, language);
   const contextWindow = modelContextWindow(facts, channels);
@@ -245,6 +246,12 @@ function ModelSquareCard({ item, windowValue }) {
           <SquareMetric label={t("models.squareMaxOutput")} value={maxOutput ? formatTokenCount(maxOutput) : t("models.squareUnknown")} />
           <SquareMetric label={t("models.squareProviders")} value={providers ? formatCount(providers) : t("models.squareUnknown")} />
         </div>
+
+        {protocols.length ? (
+          <div className="model-square-capabilities" aria-label={t("models.squareProtocols")}>
+            {protocols.map((protocol) => <InlineTag key={protocol} tone="accent">{protocol}</InlineTag>)}
+          </div>
+        ) : null}
 
         {capabilities.length ? (
           <div className="model-square-capabilities" aria-label={t("models.squareCapabilities")}>
