@@ -181,6 +181,12 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if byID["openai"].ProtocolFamily != "openai_compatible" || byID["openai"].RoutingProfile != "openai_default" {
 		t.Fatalf("openai preset = %+v", byID["openai"])
 	}
+	if byID["openai"].Endpoints["chat_completions"] != "https://api.openai.com/v1" || byID["openai"].Endpoints["responses"] == "" {
+		t.Fatalf("openai preset endpoints = %+v", byID["openai"].Endpoints)
+	}
+	if got := strings.Join(byID["openai"].Protocols, ","); got != "chat_completions,responses" {
+		t.Fatalf("openai preset protocols = %q", got)
+	}
 	if got := strings.Join(byID["azure_openai"].AllowedProfiles, ","); !strings.Contains(got, "azure_openai_v1") || !strings.Contains(got, "azure_openai_deployment") {
 		t.Fatalf("azure_openai allowed profiles = %q", got)
 	}

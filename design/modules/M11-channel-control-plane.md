@@ -25,6 +25,7 @@
 - 旧 preset 注册表仍提供 `protocol_family`/`routing_profile`；`pkg/upstream` 提供新的 20 个 provider preset，含每协议 endpoint、auth、plan 变体、模型发现。
 - 创建渠道时若 `base_url` 为空且 preset 已知，`defaultPresetBaseURL` 按 `api_type`/`protocol_family` 选择 endpoint（OpenAI、Anthropic、DeepSeek、OpenRouter、Google 等）。
 - `GET /api/catalog/providers`：只读返回 `pkg/upstream.Presets()` 的 id/name/kind/endpoints/protocols/auth/plans/models/headers/docs，不包含任何 credential。
+- `GET /api/provider-presets`（旧形状）现在也带 `endpoints`/`protocols`（当旧 preset id 与 catalog 匹配时）；创建渠道表单选中 preset 后按 `api_type` 自动填 `base_url`，留空时后端仍用 `defaultPresetBaseURL` 兜底。
 - 模型广场：`GET /api/model-square` 已有每渠道 `interfaces`、`protocols` badge、`channel_count`/`available_channel_count`。
 - 模型启用/禁用：`PATCH /api/channels/{id}/models/{model}` 与 batch，提交后 reload。
 
@@ -71,7 +72,7 @@ POST /api/provider-model-detect
 
 - [ ] `channel_configs` 增加 `endpoints_json`/`protocols_json`，支持一个渠道多协议多 base。
 - [ ] `channel_models` 增加 per-model `protocols_json`/`wire_names_json`。
-- [ ] `GET /api/catalog/providers` 接入 UI 的 preset gallery。
+- [x] preset 端点接入创建表单的 base URL 自动填充；完整 gallery/多协议编辑待做。
 - [ ] OAuth driver：`AuthDriver` 实现、`channel_credentials` 表、auth start/callback/status API（当前只预留）。
 - [ ] 模型广场卡片直接启用/禁用渠道模型。
 - [ ] 清理旧 `internal/upstream` preset 注册表或把它桥接到 `pkg/upstream`。

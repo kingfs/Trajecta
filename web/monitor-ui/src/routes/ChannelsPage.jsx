@@ -298,7 +298,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
               </SelectContent>
             </Select>
           </label>
-          <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
           <label className="provider-form-check">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
         </div>
@@ -671,12 +671,35 @@ export function normalizePresetSelection(form, presetData, changedKey) {
   const spec = (presetData?.presets || []).find((item) => item.id === form.provider_preset) || {};
   const allowedProfiles = Array.isArray(spec.allowed_profiles) ? spec.allowed_profiles : [];
   const protocolFamily = spec.protocol_family || form.protocol_family || "";
+  const apiType = defaultAPITypeForProtocolFamily(protocolFamily);
+  const endpoint = presetEndpointForAPIType(spec.endpoints, apiType);
   return {
     ...form,
-    api_type: defaultAPITypeForProtocolFamily(protocolFamily),
+    api_type: apiType,
     protocol_family: protocolFamily,
     routing_profile: spec.routing_profile || allowedProfiles[0] || form.routing_profile || "",
+    // A catalog-matched preset carries the per-protocol endpoint. Filling it
+    // here keeps the create form one click, while an unmatched/custom preset
+    // leaves the operator's URL untouched.
+    base_url: endpoint || form.base_url,
   };
+}
+
+function presetEndpointForAPIType(endpoints, apiType) {
+  if (!endpoints || typeof endpoints !== "object") {
+    return "";
+  }
+  switch (apiType) {
+    case "responses":
+    case "responses_native":
+      return endpoints.responses || endpoints.chat_completions || "";
+    case "messages":
+      return endpoints.messages || "";
+    case "gemini_generate_content":
+      return endpoints.gemini || "";
+    default:
+      return endpoints.chat_completions || endpoints.responses || "";
+  }
 }
 
 function defaultAPITypeForProtocolFamily(protocolFamily) {

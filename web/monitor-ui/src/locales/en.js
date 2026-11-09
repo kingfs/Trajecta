@@ -181,6 +181,7 @@ export default {
   "providers.name": "Name",
   "providers.preset": "Channel preset",
   "providers.baseURL": "Base URL",
+  "providers.baseURLHint": "Preset default when empty",
   "providers.apiKey": "API key",
   "providers.detect": "Detect channel",
   "providers.detecting": "Detecting",

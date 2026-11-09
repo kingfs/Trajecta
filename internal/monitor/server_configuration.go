@@ -35,6 +35,11 @@ type providerPresetItem struct {
 	RoutingProfile  string   `json:"routing_profile"`
 	SupportLevel    string   `json:"support_level"`
 	AllowedProfiles []string `json:"allowed_profiles"`
+	// Endpoints/Protocols come from pkg/upstream when the legacy preset id
+	// matches a compiled catalog id. They let the create form fill the base URL
+	// from the chosen preset; an unmatched id simply omits them.
+	Endpoints map[string]string `json:"endpoints,omitempty"`
+	Protocols []string          `json:"protocols,omitempty"`
 }
 
 type providerPresetFormDefaults struct {
@@ -665,13 +670,18 @@ func providerPresetAPIHandler() http.HandlerFunc {
 			spec := matrix[id]
 			allowed := append([]string(nil), spec.AllowedProfiles...)
 			sort.Strings(allowed)
-			items = append(items, providerPresetItem{
+			item := providerPresetItem{
 				ID:              id,
 				ProtocolFamily:  spec.ProtocolFamily,
 				RoutingProfile:  spec.RoutingProfile,
 				SupportLevel:    spec.SupportLevel,
 				AllowedProfiles: allowed,
-			})
+			}
+			if catalog, ok := pkgupstream.LookupPreset(id); ok {
+				item.Endpoints = protocolEndpoints(catalog.Endpoints)
+				item.Protocols = protocolNames(catalog.Endpoints)
+			}
+			items = append(items, item)
 		}
 		writeJSON(w, http.StatusOK, providerPresetResponse{
 			Items:   ids,
