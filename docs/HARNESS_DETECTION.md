@@ -1,6 +1,6 @@
 # 客户端 Harness 识别
 
-Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能来自 Claude Code，也可能来自一次 curl 或单测。为了在 trace 列表里把「Claude Code 发出的请求」和「测试套件发出的请求」分开，录制路径会从请求本身推断客户端 harness（`internal/harness`），并把结论写成 trace 标签。
+Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能来自 Claude Code，也可能来自一次 curl 或单测。为了在 trace 列表里把「Claude Code 发出的请求」和「测试套件发出的请求」分开，录制路径会从请求本身推断客户端 harness（`pkg/harness`），并把结论写成 trace 标签。
 
 识别是**只读旁路**：它不修改请求头、请求体或发往上游的字节，也不改变响应；结果只进入 cassette prelude、trace 索引与 Monitor 展示。它也不是安全边界——所有厂商都允许用户自定义 User-Agent 或 header（`ANTHROPIC_CUSTOM_HEADERS`、`GEMINI_CLI_CUSTOM_HEADERS`、`LITELLM_USER_AGENT`、`CODEX_INTERNAL_ORIGINATOR_OVERRIDE`），因此标签描述的是「这段流量看起来是谁」，而不是「证明是谁」。
 
@@ -28,7 +28,7 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 已识别的产品
 
-下表列出当前 `internal/harness/catalog.go` 的规则。产品信号来自各 harness 自己发布的代码。
+下表列出当前 `pkg/harness/catalog.go` 的规则。产品信号来自各 harness 自己发布的代码。
 
 | `client_harness` | 显示名 | 类型 | 主要信号 |
 | --- | --- | --- | --- |
@@ -98,10 +98,10 @@ Trajecta 记录的是 HTTP 交换本身，一个 `POST /v1/messages` 既可能�
 
 ## 扩展方式
 
-新增一个 harness：在 `internal/harness/catalog.go` 按「具体 → 泛化」的顺序加一条 `rule`（只用头与 URL 信号），在 `detect_test.go` 补至少一个真实请求头形状的用例。不要为了让识别命中而修改录制或转发路径，不要把 header 值写进 `Evidence`，不要重新引入 body 扫描。
+新增一个 harness：在 `pkg/harness/catalog.go` 按「具体 → 泛化」的顺序加一条 `rule`（只用头与 URL 信号），在 `detect_test.go` 补至少一个真实请求头形状的用例。不要为了让识别命中而修改录制或转发路径，不要把 header 值写进 `Evidence`，不要重新引入 body 扫描。
 
 ## 测试
 
-- `internal/harness/detect_test.go`：各产品 header/path 指纹、body 无关性（提示词不参与判定）、SDK-only 标签、未知请求、产品 token 边界（`continuedev` 不是 `continue`）、空格形式 UA（`codex-cli 0.153.4`）、Qwen 伪装的已知落点、规则顺序契约、证据不含原文。
+- `pkg/harness/detect_test.go`：各产品 header/path 指纹、body 无关性（提示词不参与判定）、SDK-only 标签、未知请求、产品 token 边界（`continuedev` 不是 `continue`）、空格形式 UA（`codex-cli 0.153.4`）、Qwen 伪装的已知落点、规则顺序契约、证据不含原文。
 - `internal/recorder/recorder_test.go`：meta 字段与 `harness.detected` 事件写入、model child 跳过、SDK-only 不写事件。
 - `internal/store` / `internal/monitor`：字段 round-trip、`?harness=` 过滤、列表 JSON 暴露。

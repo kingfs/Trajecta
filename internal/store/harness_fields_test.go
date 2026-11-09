@@ -10,7 +10,7 @@ import (
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
-// The client-harness classification is derived by internal/harness and written
+// The client-harness classification is derived by pkg/harness and written
 // as a `harness.detected` prelude event; these columns are its indexed mirror.
 // The round trip is what the Monitor list depends on: the write path must store
 // the fields and the tag list, the read path must return them, and the harness

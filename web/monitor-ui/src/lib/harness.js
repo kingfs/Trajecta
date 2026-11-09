@@ -19,7 +19,7 @@
 const REDUNDANT_TAG_PREFIXES = new Set(["harness", "kind"]);
 
 // The canonical harness ids the backend can emit, mirrored from
-// `internal/harness/catalog.go`. The traffic filter is an exact match on this
+// `pkg/harness/catalog.go`. The traffic filter is an exact match on this
 // vocabulary, so the input offers it as suggestions; a free-typed value still
 // works when the backend learns a new id first. Keep this list in sync when
 // a rule is added or renamed.

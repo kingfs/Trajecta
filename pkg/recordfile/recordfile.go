@@ -118,7 +118,7 @@ type MetaData struct {
 	StickyStatus             string `json:"sticky_status,omitempty"`
 	StickyPreviousUpstreamID string `json:"sticky_previous_upstream_id,omitempty"`
 	// The client-side harness that produced this request, derived from the
-	// request head only - headers and URL path - by internal/harness; the body is
+	// request head only - headers and URL path - by pkg/harness; the body is
 	// never read. This is a classification of the traffic, never a rewrite of
 	// it: the recorded request and the request sent upstream are untouched. The
 	// canonical id (`claude-code`, `codex-cli`, ...) is what the Monitor filters

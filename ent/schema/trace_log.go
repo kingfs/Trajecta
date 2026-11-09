@@ -77,7 +77,7 @@ func (TraceLog) Fields() []ent.Field {
 		field.String("sticky_previous_upstream_id").Default(""),
 		// The client harness classification mirrors the `harness.detected`
 		// cassette event so the Monitor can filter the list without opening
-		// every cassette. internal/harness produces it from the request head
+		// every cassette. pkg/harness produces it from the request head
 		// (headers and URL path) only, never the body; the columns are an index of
 		// that event, and a cassette
 		// recorded before the detection existed simply carries the defaults.

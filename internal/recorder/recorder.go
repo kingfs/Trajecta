@@ -15,10 +15,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kingfs/Trajecta/internal/harness"
 	"github.com/kingfs/Trajecta/internal/redaction"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/harness"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )

@@ -379,7 +379,7 @@ type ListFilter struct {
 	Endpoint         string
 	SelectedUpstream string
 	// Harness is the canonical client-harness id (for example `claude-code`)
-	// recorded by internal/harness. The filter is an exact, case-insensitive
+	// recorded by pkg/harness. The filter is an exact, case-insensitive
 	// match because the id is a controlled vocabulary, not free text: the UI
 	// sends one value from its harness facet.
 	Harness           string

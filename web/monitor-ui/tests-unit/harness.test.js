@@ -206,7 +206,7 @@ function readBackend(relativePath) {
 }
 
 function catalogIDs() {
-  const source = readBackend("internal/harness/catalog.go");
+  const source = readBackend("pkg/harness/catalog.go");
   return [...source.matchAll(/^\s*id:\s+"([^"]+)",$/gm)].map((match) => match[1]);
 }
 
@@ -218,7 +218,7 @@ describe("backend vocabulary parity", () => {
   });
 
   it("every capability the backend emits has a label mapping", () => {
-    const source = readBackend("internal/harness/signals.go");
+    const source = readBackend("pkg/harness/signals.go");
     const capabilities = [...source.matchAll(/caps = append\(caps, "([^"]+)"\)/g)].map((match) => match[1]);
     assert.ok(capabilities.includes("streaming") && capabilities.includes("responses-api"), `parsed capabilities: ${capabilities}`);
     // The translate function only resolves keys the module knows; a raw suffix

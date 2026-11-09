@@ -28,8 +28,8 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`doctor.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
 - `internal/appdb`：按配置打开 application database 的共用入口——驱动规范化、迁移模式判定、`MigrateUp`/`OptimizeIndexes`、`Open`/`Initialize` 与 auth store 打开；serve 启动与 trajecta 的 `db`/`auth`/`audit`/`analyze` 都走这里。
 - `internal/proxy`：反向代理与 `/v1/responses` 入口，负责鉴权、转发、响应截获与协议感知透传调整。
-- `internal/recorder`：cassette 写入与 metadata finalization；在写 prelude 前调用 `internal/harness` 对客户端做一次只读分类。
-- `internal/harness`：只从请求头与 URL 识别发请求的客户端 harness（不读 body）（Claude Code、Codex CLI、Cline、Cursor 等），产出 trace 标签；只读旁路，不改变请求、响应或发往上游的字节。规则、置信度与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
+- `internal/recorder`：cassette 写入与 metadata finalization；在写 prelude 前调用 `pkg/harness` 对客户端做一次只读分类。
+- `pkg/harness`：只从请求头与 URL 识别发请求的客户端 harness（不读 body）（Claude Code、Codex CLI、Cline、Cursor 等），产出 trace 标签；只读旁路，不改变请求、响应或发往上游的字节。规则、置信度与已知误判见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
 - `internal/store`：application DB（Postgres/SQLite）schema 初始化、索引、查询与派生状态，并拥有 `ConfigurationTransaction`；`output_dir.go` 的 `Store.OutputDir()` 暴露配置的 `trace.output_dir`，供读路径缓存（会话轨迹缓存）与 cassette 放在同一目录而不新增配置项。
 - `internal/upstream`：上游解析、协议族、能力/路由 profile 与鉴权/URL 规则。
 - `internal/channel`：渠道（provider）配置与 probe 用例、runtime targets；渠道只来自应用数据库，没有 YAML bootstrap。
@@ -59,6 +59,12 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`；其 marshal 方法也供 `pkg/protocolconvert` 做请求/响应编码。
 - `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径仅在 `router.selection.protocol_conversion: true` 且没有可用原生候选时使用。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
+- `pkg/xir`：Trajecta 2.0 的 Exchange IR（wire/semantic/audit 三视图）；`pkg/xir/wire` 是无损 span JSON 与 patch，`pkg/xir/codec/{chat,responses,messages,gemini}` 是四协议 codec，`pkg/xir/hook` 是 Hook 契约，`pkg/xir/convert` 是转换 hub。当前是新增能力包，尚未替换热路径的 `pkg/llm`/`pkg/protocolconvert`。
+- `pkg/usage`：协议中立的 usage 模型与非零合并规则；供 XIR 与后续 Hook 使用。
+- `pkg/detect`：通用 span 扫描框架（Scanner/Match/Engine），不包含具体凭据规则。
+- `pkg/upstream`：可复用的 provider preset/endpoint/auth/模型发现包；当前 `internal/upstream` 仍是运行时事实源。
+- `pkg/route`：纯路由决策包（native/local/convert、compat/strict priority、亲和、失败分类）；当前 `internal/router` 仍是热路径事实源。
+- `pkg/session`：会话信号解析与 fingerprint，已用于 `internal/router` 的 sticky key。
 - `pkg/secretmask`：凭据与个人数据（当前为中国居民身份证号与手机号）形状识别与保形假值遮蔽——Ragel 编译的 DFA（`rules.rl` 是唯一模式来源）、规则元数据表、离线校验器、上下文评分与可逆假值 vault；生成的 `rules_ragel.go` 已提交且不手工编辑。数字类形状共用一条粗规则 `digit_run`，由 `scan.go` 的 `digitClasses` 细分类；PEM 私钥块由 `pem.go` 从 DFA 命中的头行原生扩展到配对 footer（标签必须一致，反向引用无法用 DFA 表达），不新增 DFA 状态。vault 的 `real -> fake` 映射由 `internal/store` 的 bbolt 文件持久化（默认开启），启动默认加载全部、首次遇到未知真值时回查，因此假值跨重启与上下文压缩保持稳定；正数 `load_limit` 可限制启动内存并形成识别窗口。
 - `ent/schema` 与 `ent/postgres-migrations`：ent 表结构定义与 checked-in Postgres migration。
 - `web/monitor-ui`：Monitor 前端源码（React + Vite 8，Tailwind v4 + Radix primitives，TanStack Query 管服务端状态，Playwright 与 `node --test` 测试）。样式令牌由 `src/styles/tokens.css`（生成的 OKLCH 调色板）提供，`vite build` 的产物写入 `internal/monitor/ui/dist`。
