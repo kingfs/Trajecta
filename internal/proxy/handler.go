@@ -2209,7 +2209,15 @@ func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *ro
 		clientPath = pathOverride
 	}
 
-	fullURL, err := target.Upstream.BuildURL(clientPath)
+	var (
+		fullURL string
+		err     error
+	)
+	if conv != nil {
+		fullURL, err = target.Upstream.BuildURLForProtocol(string(conv.upstreamProtocol), clientPath)
+	} else {
+		fullURL, err = target.Upstream.BuildURL(clientPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("build target URL: %w", err)
 	}

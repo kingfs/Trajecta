@@ -186,3 +186,13 @@ trajecta provider probe-report
 - 默认情况下 `/v1/messages` 不会转换成 OpenAI Chat Completions 或 Responses，`/v1/responses` 也不会转换成 Anthropic Messages；开启协议转换后，chat/messages/gemini 入口按 [协议转换](./PROTOCOL_CONVERSION.md) 的矩阵生效，`/v1/responses` 仍不转换。cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有（IR 不携带的字段会拒绝或记 warning）。
 - provider 特有 tools、reasoning、cache 控制、citations、safety block 与 streaming 事件生命周期没有完整语义等价。
 - 唯一的 Responses 特例发生在同一协议族内部：没有匹配的原生 Responses 上游时，本地 Responses runtime 会把 `/v1/responses` 编排为一次内部 `/v1/chat/completions` 调用，而不是跨协议族翻译。录制、观测与审计细节见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。
+
+## 每协议 endpoint
+
+渠道的 `capabilities.endpoints` 可选地按 wire protocol 覆盖 base URL：
+
+```json
+{"endpoints":{"messages":"https://api.deepseek.com/anthropic","gemini":"https://generativelanguage.googleapis.com"}}
+```
+
+未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；当前 Monitor 表单还不编辑它，普通编辑会保留已有值。

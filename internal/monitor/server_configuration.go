@@ -1539,7 +1539,17 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	record.APIType = valueOrExisting(req.APIType, record.APIType)
 	record.Mode = valueOrExisting(req.Mode, record.Mode)
 	if req.Capabilities != nil {
-		if data, err := json.Marshal(req.Capabilities); err == nil {
+		capabilities := *req.Capabilities
+		// The current form does not edit per-protocol endpoints yet. Preserve
+		// them across an ordinary channel edit instead of silently dropping an
+		// API-only setting; an explicit future clear flag can override this.
+		if len(capabilities.Endpoints) == 0 && strings.TrimSpace(record.CapabilitiesJSON) != "" {
+			existing := upstreamCapabilities{}
+			if json.Unmarshal([]byte(record.CapabilitiesJSON), &existing) == nil {
+				capabilities.Endpoints = existing.Endpoints
+			}
+		}
+		if data, err := json.Marshal(capabilities); err == nil {
 			record.CapabilitiesJSON = string(data)
 		}
 	}

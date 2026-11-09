@@ -97,14 +97,17 @@ type ResolvedUpstream struct {
 	Mode              string
 	Capabilities      config.UpstreamCapabilitiesConfig
 	ModelCapabilities map[string]config.UpstreamCapabilitiesConfig
-	ProtocolFamily    string
-	RoutingProfile    string
-	APIVersion        string
-	Deployment        string
-	Project           string
-	Location          string
-	ModelResource     string
-	Headers           map[string]string
+	// Endpoints are the normalized per-protocol base URL overrides. An empty
+	// or missing entry means BaseURL.
+	Endpoints      map[string]string
+	ProtocolFamily string
+	RoutingProfile string
+	APIVersion     string
+	Deployment     string
+	Project        string
+	Location       string
+	ModelResource  string
+	Headers        map[string]string
 	// Proxy is the channel-level outbound proxy policy, compiled once at
 	// resolution time. A nil or disabled resolver means the process-wide system
 	// policy applies.
@@ -135,6 +138,7 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		Mode:              normalizeSlug(cfg.Mode),
 		Capabilities:      cfg.Capabilities,
 		ModelCapabilities: normalizeModelCapabilities(cfg.ModelCapabilities),
+		Endpoints:         normalizeEndpoints(cfg.Capabilities.Endpoints),
 		ProtocolFamily:    normalizeSlug(cfg.ProtocolFamily),
 		RoutingProfile:    normalizeSlug(cfg.RoutingProfile),
 		APIVersion:        strings.TrimSpace(cfg.APIVersion),
@@ -323,7 +327,42 @@ func (u ResolvedUpstream) HTTPClient(base *http.Client) *http.Client {
 }
 
 func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
-	target, err := url.Parse(u.BaseURL)
+	baseURL := u.BaseURL
+	family := u.ProtocolFamily
+	if protocol, err := protocolconvert.DetectFromPath(clientPath); err == nil {
+		if endpoint := u.Endpoints[string(protocol)]; endpoint != "" {
+			baseURL = endpoint
+			family = protocolFamilyFor(string(protocol), u.ProtocolFamily)
+		}
+	}
+	return u.buildURL(baseURL, clientPath, family)
+}
+
+// BuildURLForProtocol is BuildURL with an explicit upstream protocol. The
+// forwarding path uses it after conversion, where the client path no longer
+// names the target protocol.
+func (u ResolvedUpstream) BuildURLForProtocol(protocol string, clientPath string) (string, error) {
+	protocol = strings.TrimSpace(protocol)
+	baseURL := u.BaseURL
+	if endpoint := u.Endpoints[protocol]; endpoint != "" {
+		baseURL = endpoint
+	}
+	return u.buildURL(baseURL, clientPath, protocolFamilyFor(protocol, u.ProtocolFamily))
+}
+
+func protocolFamilyFor(protocol, fallback string) string {
+	switch protocol {
+	case "messages":
+		return ProtocolFamilyAnthropicMessages
+	case "gemini", "generate_content":
+		return ProtocolFamilyGoogleGenAI
+	default:
+		return fallback
+	}
+}
+
+func (u ResolvedUpstream) buildURL(baseURL, clientPath, family string) (string, error) {
+	target, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
@@ -331,7 +370,9 @@ func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	target.Path = joinRequestPath(target, clientURL.Path, u)
+	joinResolved := u
+	joinResolved.ProtocolFamily = family
+	target.Path = joinRequestPath(target, clientURL.Path, joinResolved)
 	target.RawPath = target.Path
 	if clientURL.RawQuery != "" {
 		target.RawQuery = clientURL.RawQuery
@@ -797,6 +838,24 @@ func cloneStringMap(input map[string]string) map[string]string {
 
 // normalizeModelCapabilities lowercases and trims the per-model capability keys
 // so lookups by client-facing model name or alias are case-insensitive.
+func normalizeEndpoints(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func normalizeModelCapabilities(input map[string]config.UpstreamCapabilitiesConfig) map[string]config.UpstreamCapabilitiesConfig {
 	if len(input) == 0 {
 		return nil
