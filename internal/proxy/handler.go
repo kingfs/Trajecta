@@ -441,6 +441,9 @@ type Handler struct {
 	// and response bodies. It is nil when secret_masking is off, which is the
 	// only check each call site makes.
 	secretVault *secretmask.Vault
+	// conversionEngine selects the protocol conversion implementation:
+	// "legacy" (default) or "xir".
+	conversionEngine string
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -687,6 +690,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		responsesPath:    responsesPath,
 		responsesBuilder: buildLocalResponses,
 		secretVault:      secretVault,
+		conversionEngine: strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
 	}, nil
 }
 

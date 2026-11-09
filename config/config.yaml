@@ -128,11 +128,15 @@ router:
     sticky_max_cost_ratio: 2.0
     # Opt-in protocol conversion: when true, the router may fall back to an
     # upstream that cannot serve the client's protocol natively, and the proxy
-    # converts the request/response between protocols (pkg/protocolconvert).
+    # converts the request/response between protocols,
+    # selected by protocol_conversion_engine.
     # Default false: native passthrough only. A selectable native candidate
     # always wins; streaming requests and the /v1/responses entrypoint never
     # convert, and content the IR cannot carry is rejected with 400.
     protocol_conversion: false
+    # legacy (default) uses pkg/protocolconvert's pkg/llm adapters; xir uses
+    # the Exchange IR hub (pkg/xir/convert). Both are non-streaming only.
+    protocol_conversion_engine: legacy
 
 debug:
   output_dir: "./data/traces"

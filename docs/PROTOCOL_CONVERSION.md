@@ -2,6 +2,8 @@
 
 Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致时，请求字节原样转发，不做任何转换。协议转换是**可选兜底**（`router.selection.protocol_conversion: true`，默认关闭）：只有上游无法原生承接客户端协议时，才把请求/响应在四种协议之间翻译。
 
+转换引擎由 `router.selection.protocol_conversion_engine` 选择：`legacy`（默认，`pkg/protocolconvert` 的 `pkg/llm` adapter 路径）或 `xir`（`pkg/xir/convert` 的 Exchange IR hub）。两条路径都只处理非流式请求；`xir` 引擎的 loss 会映射到现有的 `protocol_conversion`/`protocol_conversion_response` cassette 事件。未知引擎值在 `config.Load` 时拒绝。
+
 | 协议 | 客户端入口 | 上游路径 |
 | --- | --- | --- |
 | `chat_completions` | `/v1/chat/completions` | `/v1/chat/completions` |

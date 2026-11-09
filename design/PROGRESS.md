@@ -50,6 +50,7 @@
 - `internal/router` sticky：改用 `pkg/session` 解析会话信号，保持原有 header 优先级。
 - `internal/monitor`：`/api/settings/routing` 增加 `priority_mode`，PATCH 后热更新 router；UI 增加在 `RoutingSettingsPanel` 中的选择器。
 - `internal/monitor`：创建渠道时，若只给 preset + key 而未填 base URL，从 `pkg/upstream` 选择匹配协议的默认端点；显式 base URL 优先。
+- `internal/proxy`：新增 opt-in `protocol_conversion_engine=xir`，请求/响应转换可走 `pkg/xir/convert`；默认仍是 legacy，避免行为变化。
 - `pkg/xir`：12 对最小跨协议请求转换矩阵通过；wire parser fuzz 约 99 万次执行无失败。
 - 全仓 `go test ./...` 通过。
 

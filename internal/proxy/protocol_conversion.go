@@ -39,6 +39,8 @@ type protocolConversion struct {
 	upstreamProtocol protocolconvert.Protocol
 	wireModel        string
 	vertex           bool
+	// engine selects pkg/protocolconvert (legacy) or pkg/xir/convert (xir).
+	engine           string
 	requestWarnings  []protocolconvert.Warning
 	responseWarnings []protocolconvert.Warning
 }
@@ -126,6 +128,7 @@ func (h *Handler) conversionForSelection(r *http.Request, selection *router.Sele
 		upstreamProtocol: decision.UpstreamProtocol,
 		wireModel:        wireModel,
 		vertex:           isVertexTarget(selection.Target),
+		engine:           h.conversionEngine,
 	}, nil
 }
 
@@ -186,6 +189,14 @@ func responseConversionEvent(c *protocolConversion, start time.Time) recorder.Re
 // client-visible body; the result is what goes upstream. A warning whose loss
 // changes the answer is a refusal, not a silent degradation.
 func (c *protocolConversion) convertRequestBody(body []byte) ([]byte, error) {
+	if c.engine == "xir" {
+		converted, warnings, err := c.convertRequestBodyXIR(body)
+		if err != nil {
+			return nil, err
+		}
+		c.requestWarnings = warnings
+		return converted, nil
+	}
 	result, err := protocolconvert.ConvertRequest(body, c.clientProtocol, c.upstreamProtocol, c.wireModel, c.vertex)
 	if err != nil {
 		return nil, &protocolConversionRequestError{err: err}
@@ -281,6 +292,21 @@ func (c *protocolConversion) convertResponseBody(resp *http.Response, maxBytes i
 	}
 	if len(body) == 0 {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+	if c.engine == "xir" {
+		converted, warnings, err := c.convertResponseBodyXIR(body)
+		if err != nil {
+			return nil, err
+		}
+		c.responseWarnings = warnings
+		resp.Body = io.NopCloser(bytes.NewReader(converted))
+		resp.ContentLength = int64(len(converted))
+		if resp.Header != nil {
+			resp.Header.Set("Content-Type", "application/json")
+			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(converted)))
+			resp.Header.Del("Content-Encoding")
+		}
 		return resp, nil
 	}
 	result, err := protocolconvert.ConvertResponse(body, c.upstreamProtocol, c.clientProtocol, c.wireModel, c.vertex)

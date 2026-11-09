@@ -276,6 +276,12 @@ type RouterConfig struct {
 		// preserves the historical behaviour exactly. Streaming requests
 		// never convert; they require a native passthrough upstream.
 		ProtocolConversion bool `yaml:"protocol_conversion"`
+		// ProtocolConversionEngine selects the conversion implementation.
+		// "legacy" (default) uses pkg/protocolconvert's pkg/llm adapters;
+		// "xir" uses the Exchange IR hub (pkg/xir/convert) and is opt-in
+		// while the two engines are compared. Streaming conversion remains
+		// unsupported by both.
+		ProtocolConversionEngine string `yaml:"protocol_conversion_engine"`
 		// PriorityMode controls how Target.Priority is interpreted.
 		//
 		// "compat" (the default, and the only behaviour existing installations
@@ -831,6 +837,13 @@ func validateRouterEnums(cfg *Config) error {
 		case "compat", "strict":
 		default:
 			return fmt.Errorf("router.selection.priority_mode %q is not supported; use compat or strict", value)
+		}
+	}
+	if value := strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine); value != "" {
+		switch strings.ToLower(value) {
+		case "legacy", "xir":
+		default:
+			return fmt.Errorf("router.selection.protocol_conversion_engine %q is not supported; use legacy or xir", value)
 		}
 	}
 	return nil
