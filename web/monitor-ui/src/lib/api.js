@@ -37,6 +37,10 @@ export const apiPaths = {
   // while the proxy runs.
   secretMappings: "/api/secret-mappings",
   secretMapping: (seq) => `/api/secret-mappings/${encodeURIComponent(seq)}`,
+  // The false-positive list consulted before a replacement is rendered. Unlike
+  // a mapping delete, an entry here stops the rule from masking the value.
+  secretSuppressions: "/api/secret-suppressions",
+  secretSuppression: (id) => `/api/secret-suppressions/${encodeURIComponent(id)}`,
   responsesAuditTrace: "/api/responses/audit/trace",
   responsesFunctionExecutors: "/api/responses/function-executors",
   analysis: "/api/analysis",

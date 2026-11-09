@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { ShieldOff, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -9,7 +9,7 @@ import { Pager } from "../../components/common/Pager";
 import { DetailMetaPill, InlineTag } from "../../components/common/Badges";
 import { useJSON } from "../../hooks/useJSON";
 import { useRefresh } from "../../hooks/useRefresh";
-import { apiPaths, apiURL, deleteJSON } from "../../lib/api";
+import { apiPaths, apiURL, deleteJSON, postJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { useWriteMutation } from "../../lib/mutations";
 import { setOrDeleteParam } from "../../lib/monitor";
@@ -75,7 +75,20 @@ export function SecretMappingsPanel() {
     error: "quality.mappings.deleteError",
     onSuccess: () => refresh(),
   });
+  const suppressMapping = useWriteMutation({
+    mutationFn: (item) =>
+      postJSON(apiPaths.secretSuppressions, {
+        rule: "",
+        real: item.real,
+        reason: t("quality.mappings.suppressReason"),
+      }),
+    success: "quality.mappings.suppressed",
+    error: "quality.mappings.suppressError",
+    onSuccess: () => refresh(),
+  });
   const busySeq = removeMapping.isPending ? removeMapping.variables : null;
+  const suppressingSeq = suppressMapping.isPending ? suppressMapping.variables?.seq : null;
+  const rowBusy = (seq) => busySeq === seq || suppressingSeq === seq;
 
   const applySearch = (event) => {
     event.preventDefault();
@@ -103,6 +116,11 @@ export function SecretMappingsPanel() {
   const confirmDelete = (item) => {
     if (window.confirm(t("quality.mappings.deleteConfirm", { seq: item.seq }))) {
       removeMapping.mutate(item.seq);
+    }
+  };
+  const confirmSuppress = (item) => {
+    if (window.confirm(t("quality.mappings.suppressConfirm"))) {
+      suppressMapping.mutate(item);
     }
   };
 
@@ -202,10 +220,21 @@ export function SecretMappingsPanel() {
                     <InlineTag tone="gold">{t("quality.mappings.plaintext")}</InlineTag>
                   )}
                   {item.decode_error ? <InlineTag tone="danger">{t("quality.mappings.unreadableTag")}</InlineTag> : null}
+                  {!item.decode_error ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={rowBusy(item.seq)}
+                      onClick={() => confirmSuppress(item)}
+                    >
+                      <ShieldOff size={13} aria-hidden="true" />
+                      <span>{t("quality.mappings.suppress")}</span>
+                    </Button>
+                  ) : null}
                   <Button
                     variant="danger"
                     size="sm"
-                    disabled={busySeq === item.seq}
+                    disabled={rowBusy(item.seq)}
                     onClick={() => confirmDelete(item)}
                   >
                     <Trash2 size={13} aria-hidden="true" />

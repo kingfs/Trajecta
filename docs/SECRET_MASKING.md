@@ -95,6 +95,24 @@ secret_masking:
 
 `DELETE /api/secret-mappings/{seq}` 在一个操作里做两件事：先从 bbolt 删除该行，再从 Vault 的 `byReal` / `byFake` / 还原索引与 `order` 中移除同一对值。第二步是「实时生效」的关键：已命中的真值在 `fakeFor` 里先查内存，只删文件的话，运行中的进程仍会继续使用旧假值直到重启。删除路径持有创建锁，因此与「查文件 + 渲染新值」的慢路径互斥，不会出现半删除状态；删除前先 flush 写入队列，避免一条仍在批量缓冲中的 append 在删除之后把行写回来。删除不是抑制规则：下一次请求再次命中同一个真值时，Vault 仍会渲染并记录一条新映射。CLI 的 `delete`/`prune` 仍然要求先停 serve，因为它要自己打开 bbolt 文件；Monitor 这条路径不适用该限制。
 
+### 抑制名单（误报）
+
+抑制名单回答的是另一个问题：「这个规则在这个值上是误报，以后不要再替换」。它不能靠删除映射实现——映射只是已渲染过的记录，规则仍会再次命中并写回一条新映射。抑制项因此单独保存，并在 `Mask` 的候选循环里、`fakeFor` 之前生效：命中的 finding 直接被跳过，不生成假值、不写映射、不产生 `secret.masked` 事件，也不写 `credential_mask_audits`。
+
+存储沿用同一个 `{{output_dir}}/secret_mask_mappings.db`，新增两个追加式 bucket（旧文件打开时自动创建，版本号仍为 1）：
+
+| bucket | 键 | 值 |
+| --- | --- | --- |
+| `suppressed` | 插入序号（8 字节大端） | 本地密钥封存的 JSON `{rule, real, reason, created_at}` |
+| `suppressed_by_pair` | `HMAC(本地密钥, "suppression/v1" + length(rule) + rule + length(real) + real)` | 插入序号，用于按 `(rule, real)` 去重 |
+
+- **规则作用域。** 键是 `(rule, real)`，不是单独的真值：同一段文本在另一条规则下可能是真凭据。`rule` 为空（UI 显示「全部规则」）表示该真值在所有规则下都抑制；`*` 在写入时归一化为空。规则名必须在可屏蔽规则表里，`access.url` / `access.local_path` 这类 `ReportOnly` 规则会被拒绝，因为抑制一个永不替换的规则没有意义。
+- **精确匹配。** 只按完整真值匹配，不做子串、大小写折叠或模糊匹配；需要覆盖多个值就添加多条。值上限 8192 字节，备注上限 1024 字节，避免把整段文档写进映射文件。
+- **实时生效。** `POST /api/secret-suppressions` 先写 bbolt，成功后才更新 Vault 内存中的抑制集合（copy-on-write，`Mask` 每次取一次快照）；`DELETE /api/secret-suppressions/{id}` 先删 bbolt 行与 `suppressed_by_pair` 索引，再移除内存项。删除后下一次命中恢复替换，已有的映射会被复用，因此假值不会因为一次抑制/解除而改变。
+- **不影响历史。** 新增抑制不会删除已有映射、历史审计行或事件通知；它只改变后续请求是否替换。移除抑制也不会删除映射。
+- **启动加载。** `NewVaultWithStore` 在加载映射后加载全部抑制项；无法用当前本地密钥解密的行会跳过并打日志，但仍出现在 `GET /api/secret-suppressions` 里（带 `decode_error`），可以按 ID 删除。
+- **管理面。** `GET /api/secret-suppressions` 分页返回 `id`、`rule`、`real`、`reason`、`created_at`、`decode_error` 与可屏蔽规则名列表；`POST` 接收 `{rule, real, reason}`；`DELETE /api/secret-suppressions/{id}` 删除一条。Monitor 的「质量 → 抑制名单」提供新增、搜索与移除；「遮蔽映射」页每行的「抑制」按钮等价于以空规则添加一条，用于一键把误报值从所有规则下摘掉。`trajecta db secret-mapping compact` 会连同这两个 bucket 一起重建，不会在压缩时丢掉抑制项。
+
 ### 映射文件的清理（`trajecta db secret-mapping`）
 
 `{{output_dir}}/secret_mask_mappings.db` 是整个 output_dir 共用的一份 bbolt 映射：键是真实值（`by_real` 用本地密钥对真值做 HMAC），值是本地密钥封存的 `{real, fake}` 对，另加插入序号；文件里没有 session/trace、偏移或检测时间，也不按 trace 分区。按 trace 记录「哪次请求替换了哪些值」的是 application DB 的 `credential_mask_audits` 表，两者用途不同：审计表是逐次记录，映射文件只用于重启后复用与识别假值。
@@ -269,6 +287,7 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 - `GET /api/secret-masks`：分页列表，筛选参数 `trace_id`、`rule`、`window`（与事件中心同一套时间窗词汇）、`page`、`page_size`；`window` 不传时不按时间过滤——这个接口的两个读入口都按 `trace_id` 取某一次录制的替换，读的是录制事实而不是读取时刻，默认 `today` 会把当天之前的 trace 全部藏掉；显式传入才生效。返回值已解密，`storage_mode` 说明落盘形态，`event_index` 是这次替换在该次交换里的序号（同一 trace 的多行按它排序，因为表本身的排序键是检测时刻加随机 uuid）。
 - `GET /api/secret-masks/{id}`：单条。
 - `GET /api/secret-mappings`：运行中的全局映射文件（真值 → 假值），`q` / `page` / `page_size`；`DELETE /api/secret-mappings/{seq}` 同时删除文件行与内存映射。两接口与 `/api/secret-masks` 一样只要求登录 Monitor，不额外要求 admin。
+- `GET` / `POST /api/secret-suppressions` 与 `DELETE /api/secret-suppressions/{id}`：抑制名单的读取、新增与移除；规则留空表示全部规则。与映射接口同样只要求登录 Monitor，不额外要求 admin。
 - MCP 工具 `list_credential_masks`：同参数，返回同样的字段。
 - Monitor UI 两个入口都读这个接口：事件页的事件详情在 `category: credential_masked` 时就地列出该规则的替换对（并保留 `details_json` 作为原始证据），trace 详情的「审计」标签页在发现项之上先列出这条请求里所有被替换的凭据；从事件详情点进 trace 会直接落在「审计」标签页，因为答案在那里。两个入口都把真值与假值分行完整打印，并给出偏移、长度、置信度与 `storage_mode`。
 
@@ -276,7 +295,7 @@ API 的 trace 范围统一使用 query 参数，与 `GET /api/secret-masks?trace
 
 ## 已知边界
 
-- **审计表与映射文件都是凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。`secret_mask_mappings.db` 同样保存真值与假值，只是按真值去重、只存 `real`/`fake`，不含 trace、偏移与检测时间。两者都应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把审计表读出来，`GET /api/secret-mappings` 会把映射文件读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
+- **审计表与映射文件都是凭据与个人数据存储。** 收起真值是为了给审计看，代价是 `credential_mask_audits` 里躺着真值（身份证号、手机号同样如此）：有本地密钥时是 `tlsec:v1:` 信封，没有时是明文（逐行记 `storage_mode`）。`secret_mask_mappings.db` 同样保存真值与假值，只是按真值去重、只存 `real`/`fake`，不含 trace、偏移与检测时间。两者都应当按 cassette 目录的级别对待，而不是按日志；`GET /api/secret-masks` 与 MCP `list_credential_masks` 会把审计表读出来，`GET /api/secret-mappings` 与 `GET /api/secret-suppressions` 会把映射文件和抑制名单读出来，任何能访问 Monitor 的账号都能看到。需要缩短留存时按 `detected_at` 手工删除；删行不影响 replay 与 trace 详情。
 - **PEM 私钥块只在完整时改写。** 找不到同标签的 `-----END ...-----`（截断粘贴）、footer 与 header 标签不一致、或正文里出现 base64/空白/JSON 转义之外的字节时，块不成立，只剩头行上报、一个字节都不改。因此「只贴了一部分私钥」「header 与 END 被拼错」仍然会漏；老式 `Proc-Type: 4,ENCRYPTED` 头（正文前有 `:`/`,` 行）也不在块内，只上报头行。PuTTY `.ppk`、`---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----`（4 个横线）与 base64 套壳（kubeconfig `client-key-data`、K8s Secret）需要各自的规则，当前不覆盖。公钥与证书按设计不匹配。
 - **私钥假值不可用。** 块级假值的正文仍是 base64 形状，但解码后不是有效私钥（`ssh-keygen` 会报错）。依赖「模型先用假值解析/校验 key」的流程会失败；本地工具拿到的是还原后的真值（除 provider 托管工具）。
 - **升级前的旧假值不在文件里。** 首次启用持久化（或从没有映射文件的版本升级）时，之前进程渲染的假值没有记录；它们第一次回到请求里仍会被再遮蔽一次，之后该对关系才会被记录。要避免这一次，只能在升级时清空上游上下文或重新开始会话。

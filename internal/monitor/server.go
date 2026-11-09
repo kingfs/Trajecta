@@ -451,6 +451,9 @@ type RouteOptions struct {
 	// masking or the durable mapping store is off, and the mapping page reports
 	// that instead of pretending the store is empty.
 	SecretMappings SecretMappingAdmin
+	// SecretSuppressions is the same vault's false-positive list. It is nil for
+	// the same configurations, and the suppression page reports that state.
+	SecretSuppressions SecretSuppressionAdmin
 	// Location anchors the day-based windows and the calendar buckets. A nil
 	// value keeps whatever SetDisplayLocation was last given, which defaults to
 	// Asia/Shanghai.
@@ -476,6 +479,15 @@ type SecretMappingAdmin interface {
 	DeleteMappingBySeq(seq uint64) (secretmask.MappingRow, bool, error)
 	MappingStats() (secretmask.MappingAdminStats, error)
 	FlushMappings() error
+}
+
+// SecretSuppressionAdmin is the live false-positive list. The concrete
+// implementation is also *secretmask.Vault; keeping it separate from
+// SecretMappingAdmin lets a caller supply one without the other in tests.
+type SecretSuppressionAdmin interface {
+	ListSuppressions(newestFirst bool, fn func(secretmask.Suppression) error) error
+	AddSuppression(rule, real, reason string) (secretmask.Suppression, error)
+	DeleteSuppression(id uint64) (secretmask.Suppression, bool, error)
 }
 
 // AboutOptions is what the About page and the release check read.
@@ -804,6 +816,11 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// vault consults before rendering a new fake.
 	mux.HandleFunc("/api/secret-mappings", monitorAuthRequired(secretMappingListAPIHandler(opt.SecretMappings), monitorVerifier))
 	mux.HandleFunc("/api/secret-mappings/", monitorAuthRequired(secretMappingDeleteAPIHandler(opt.SecretMappings), monitorVerifier))
+	// The false-positive list consulted before a replacement is rendered. It is
+	// policy, not an audit: an entry stops masking, and removing it re-enables
+	// the rule the next time the value appears.
+	mux.HandleFunc("/api/secret-suppressions", monitorAuthRequired(secretSuppressionAPIHandler(opt.SecretSuppressions), monitorVerifier))
+	mux.HandleFunc("/api/secret-suppressions/", monitorAuthRequired(secretSuppressionDeleteAPIHandler(opt.SecretSuppressions), monitorVerifier))
 	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))

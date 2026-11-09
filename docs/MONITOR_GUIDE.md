@@ -143,11 +143,13 @@ Trajecta 自身的事件收件箱：
 
 #### 质量 `/audit`
 
-五个标签页：发现项、遮蔽映射、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
+六个标签页：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
 
 **发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，25 条/页；服务端返回过滤后的 `total` 并用 `page`/`limit` 分页，页码输入可直接跳转；每条发现项给出可读的定位（`$.input[4] · #5`）并直接跳到对应 trace 会话中的那一步（`?node=`），另有入口进入该 trace 的审计页与协议页。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 
-**遮蔽映射**（`GET /api/secret-mappings`）：列出全局 bbolt 映射文件 `secret_mask_mappings.db` 里的真值与假值对。它不是某条 trace 的审计记录：所有请求、所有会话共用一张表，因此即使产生误报的 trace 已被清理，映射仍然可见。页面按 `q` 过滤真值或假值、25 条/页、新值在前，顶部显示文件路径、大小、总行数、加密/明文/不可读行数；每行打印完整真值与假值、长度、插入序号与加密状态。`DELETE /api/secret-mappings/{seq}` 会同时删除 bbolt 行和运行中 Vault 的内存映射，因此不需要重启（命令行 `trajecta db secret-mapping delete` 仍要求先停 serve）。删除不是抑制规则：同一条规则再次命中同一个真值时，代理仍会重新渲染并记录一条新映射。映射文件未启用（`secret_masking.enabled` 或 `secret_masking.mapping_store.enabled` 为 false）时页面给出配置提示。
+**遮蔽映射**（`GET /api/secret-mappings`）：列出全局 bbolt 映射文件 `secret_mask_mappings.db` 里的真值与假值对。它不是某条 trace 的审计记录：所有请求、所有会话共用一张表，因此即使产生误报的 trace 已被清理，映射仍然可见。页面按 `q` 过滤真值或假值、25 条/页、新值在前，顶部显示文件路径、大小、总行数、加密/明文/不可读行数；每行打印完整真值与假值、长度、插入序号与加密状态。`DELETE /api/secret-mappings/{seq}` 会同时删除 bbolt 行和运行中 Vault 的内存映射，因此不需要重启（命令行 `trajecta db secret-mapping delete` 仍要求先停 serve）。删除不是抑制规则：同一条规则再次命中同一个真值时，代理仍会重新渲染并记录一条新映射；要阻止再次替换，请用行内的「抑制」把该值加入抑制名单（全部规则）。映射文件未启用（`secret_masking.enabled` 或 `secret_masking.mapping_store.enabled` 为 false）时页面给出配置提示。
+
+**抑制名单**（`GET` / `POST /api/secret-suppressions`，`DELETE /api/secret-suppressions/{id}`）：记录被判定为误报的 `(规则, 真值)` 对。规则留空表示全部规则；匹配是对完整真值的精确匹配，不做子串或模糊匹配。命中抑制项的 finding 不会生成假值、映射、`secret.masked` 事件或 `credential_mask_audits` 行；移除抑制后，下一次命中恢复替换。页面顶部可新增（规则输入带全部可屏蔽规则的下拉建议，排除只上报的 `access.*`）、搜索规则/真值/备注、分页与移除；每行保留规则、真值、备注、创建时间与序号，便于后续据此调整识别算法。已存在的映射与历史审计行不受新增抑制影响：抑制只作用于后续请求。
 
 **请求链路**：输入 `response_id` 或 `request_audit_id` 加载本地 Responses runtime 的 request audit、execution events 与 upstream exchanges（`GET /api/responses/audit/trace`）。
 
@@ -158,7 +160,7 @@ Trajecta 自身的事件收件箱：
 
 **数据健康**：派生数据管道的健康度——已解析/未解析 trace、解析队列深度与失败的分析任务数，未解析项可跳到按 `observation=unparsed` 过滤的流量列表。数据由实时 socket 推送。这一项原先挤在概览页，但它是解析管道的属性，与「最近一小时的流量」无关，所以它没有时间窗口控件，统计覆盖全部已索引 trace，并只向 `GET /api/overview` 请求 `sections=health`。
 
-整个页面调用的接口只有 `GET /api/findings`、`GET /api/secret-mappings`、`DELETE /api/secret-mappings/{seq}`、`GET /api/responses/audit/trace`、`GET /api/analysis/*` 和概览/事件摘要接口；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。server-side function executor 状态面板已移到「系统 → 服务端工具」。
+整个页面调用的接口只有 `GET /api/findings`、`GET /api/secret-mappings`、`DELETE /api/secret-mappings/{seq}`、`GET`/`POST /api/secret-suppressions`、`DELETE /api/secret-suppressions/{id}`、`GET /api/responses/audit/trace`、`GET /api/analysis/*` 和概览/事件摘要接口；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。server-side function executor 状态面板已移到「系统 → 服务端工具」。
 
 ### 配置
 

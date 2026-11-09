@@ -27,8 +27,17 @@ const (
 	secretMappingBucket      = "mappings"
 	secretMappingIndexBucket = "by_real"
 
+	// The suppression list is additive: older files simply lack these buckets
+	// and get them created on open. The store version stays 1 because the
+	// mapping layout itself did not change.
+	secretSuppressionBucket      = "suppressed"
+	secretSuppressionIndexBucket = "suppressed_by_pair"
+
 	secretMappingVersionKey = "version"
 	secretMappingSeqKey     = "next_seq"
+	// secretSuppressionSeqKey is a second sequence in the same meta bucket, so
+	// suppression IDs never collide with mapping sequences.
+	secretSuppressionSeqKey = "suppression_next_seq"
 	secretMappingVersion    = 1
 
 	// secretMappingQueueSize bounds the pending appends. A request that adds a
@@ -142,12 +151,25 @@ func openSecretMappingStore(path string, owner *Store) (*SecretMappingStore, err
 }
 
 func initSecretMappingBuckets(tx *bolt.Tx) error {
-	for _, name := range []string{secretMappingMetaBucket, secretMappingBucket, secretMappingIndexBucket} {
+	for _, name := range []string{
+		secretMappingMetaBucket,
+		secretMappingBucket,
+		secretMappingIndexBucket,
+		secretSuppressionBucket,
+		secretSuppressionIndexBucket,
+	} {
 		if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 			return err
 		}
 	}
 	meta := tx.Bucket([]byte(secretMappingMetaBucket))
+	// An existing v1 file predates the suppression list. Initialising the
+	// sequence here upgrades it in place without a versioned migration.
+	if meta.Get([]byte(secretSuppressionSeqKey)) == nil {
+		if err := meta.Put([]byte(secretSuppressionSeqKey), seqKey(0)); err != nil {
+			return err
+		}
+	}
 	if raw := meta.Get([]byte(secretMappingVersionKey)); raw != nil {
 		if len(raw) != 4 || binary.BigEndian.Uint32(raw) != secretMappingVersion {
 			return fmt.Errorf("unsupported secret mapping store version %x", raw)

@@ -6,12 +6,15 @@ import { LineagePanel } from "./quality/LineagePanel";
 import { AnalysisPanel } from "./quality/AnalysisPanel";
 import { DataHealthPanel } from "./quality/DataHealthPanel";
 import { SecretMappingsPanel } from "./quality/SecretMappingsPanel";
+import { SecretSuppressionsPanel } from "./quality/SecretSuppressionsPanel";
 import { useI18n } from "../lib/i18n";
 
 // The audit page used to be three unrelated things stacked in one scroll: a
 // deterministic findings list, a Responses-lineage lookup tool, and a
-// server-side tool configuration form. The first two are what "quality" means
-// here; the configuration form moved to 系统 → 服务端工具.
+// server-side tool configuration form. Quality now means the findings, the
+// global masking map and its false-positive suppression list, the lineage
+// lookup, the analysis queue and derived-data health; the configuration form
+// moved to 系统 → 服务端工具.
 export function QualityPage() {
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
@@ -30,6 +33,9 @@ export function QualityPage() {
         // beside the findings because a false positive is discovered there, but
         // it also lists values whose trace has already been pruned.
         { id: "mappings", label: t("quality.tabMappings"), element: <SecretMappingsPanel /> },
+        // Suppressions are the policy half of the same store: a mapping row can
+        // be recorded and still be suppressed from future masking.
+        { id: "suppressions", label: t("quality.tabSuppressions"), element: <SecretSuppressionsPanel /> },
         { id: "lineage", label: t("quality.tabLineage"), element: <LineagePanel /> },
         { id: "analysis", label: t("quality.tabAnalysis"), element: <AnalysisPanel /> },
         // Data health is pipeline state, not a traffic window, so it carries no

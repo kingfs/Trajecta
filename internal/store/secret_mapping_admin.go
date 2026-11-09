@@ -489,7 +489,13 @@ func CompactSecretMappingFile(path string) (SecretMappingCompactResult, error) {
 func copySecretMappingFile(source, target *bolt.DB, result *SecretMappingCompactResult) error {
 	return source.View(func(src *bolt.Tx) error {
 		return target.Update(func(dst *bolt.Tx) error {
-			for _, name := range []string{secretMappingMetaBucket, secretMappingBucket, secretMappingIndexBucket} {
+			for _, name := range []string{
+				secretMappingMetaBucket,
+				secretMappingBucket,
+				secretMappingIndexBucket,
+				secretSuppressionBucket,
+				secretSuppressionIndexBucket,
+			} {
 				if _, err := dst.CreateBucketIfNotExists([]byte(name)); err != nil {
 					return err
 				}
@@ -523,7 +529,13 @@ func copySecretMappingFile(source, target *bolt.DB, result *SecretMappingCompact
 			if err := copyBucket(secretMappingBucket, &result.Entries); err != nil {
 				return err
 			}
-			return copyBucket(secretMappingIndexBucket, &result.IndexEntries)
+			if err := copyBucket(secretMappingIndexBucket, &result.IndexEntries); err != nil {
+				return err
+			}
+			if err := copyBucket(secretSuppressionBucket, nil); err != nil {
+				return err
+			}
+			return copyBucket(secretSuppressionIndexBucket, nil)
 		})
 	})
 }

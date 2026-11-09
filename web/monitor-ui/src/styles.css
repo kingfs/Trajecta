@@ -4264,3 +4264,24 @@ a:focus-visible {
 .system-table .system-row {
   min-width: 660px;
 }
+
+/* The suppression add form is three labelled fields plus its submit button;
+   it needs its own grid rather than the single-line filter bar. */
+.suppression-form-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(240px, 1.6fr) minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.suppression-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .suppression-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

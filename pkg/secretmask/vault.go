@@ -67,6 +67,10 @@ type Vault struct {
 	firstFit [256]bool
 	fakeLen  int
 	order    []string
+	// suppressions is the in-memory false-positive set, keyed by rule and real
+	// value. It is replaced copy-on-write under mu, so Mask can snapshot the map
+	// once and check findings without taking the lock per candidate.
+	suppressions map[string]struct{}
 
 	// store is the durable side of the mapping, nil when the vault is purely
 	// in-memory. It is consulted only when a real value is not already in
@@ -98,11 +102,12 @@ func NewVault(seed []byte) *Vault {
 	cp := make([]byte, len(seed))
 	copy(cp, seed)
 	return &Vault{
-		seed:     cp,
-		capacity: DefaultVaultCapacity,
-		byReal:   make(map[string]string),
-		byFake:   make(map[string]string),
-		index:    make(map[byte][]fakeEntry),
+		seed:         cp,
+		capacity:     DefaultVaultCapacity,
+		byReal:       make(map[string]string),
+		byFake:       make(map[string]string),
+		index:        make(map[byte][]fakeEntry),
+		suppressions: make(map[string]struct{}),
 	}
 }
 
@@ -134,6 +139,14 @@ func NewVaultWithStore(seed []byte, store MappingStore, limit int) (*Vault, erro
 		return nil, err
 	}
 	v.store = store
+	if suppressionStore, ok := store.(SuppressionStore); ok {
+		suppressions, err := suppressionStore.LoadSuppressions()
+		if err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		v.loadSuppressions(suppressions)
+	}
 	if limit == 0 {
 		// Load-all is also no-evict: evicting a loaded pair after
 		// DefaultVaultCapacity new values would silently reopen the window the
@@ -304,6 +317,7 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 	}
 	v.mu.RLock()
 	alreadyFake := len(v.byFake) != 0
+	suppressions := v.suppressions
 	v.mu.RUnlock()
 
 	var usable []Finding
@@ -317,6 +331,14 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 			continue
 		}
 		if alreadyFake && v.isFake(src[f.Start:f.End]) {
+			continue
+		}
+		// A suppression records a reviewer's decision that this rule/value pair
+		// is a false positive. It skips the replacement entirely: no stand-in is
+		// rendered, no mapping is written and no audit row or event is produced.
+		// Check it before the lazy JSON walk so a body whose only candidates are
+		// suppressed does not pay for opaque-span discovery.
+		if suppressionHit(suppressions, ruleTable[f.ID].Name, src[f.Start:f.End]) {
 			continue
 		}
 		if !opaqueSpansKnown {

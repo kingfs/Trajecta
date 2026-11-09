@@ -206,15 +206,18 @@ func runServeWithConfig(configPath string) int {
 	}()
 
 	// The management server is built after the proxy handler because the
-	// 质量 → 遮蔽映射 page reads the vault the handler owns: bbolt holds an
-	// exclusive lock, so the Monitor cannot open the mapping file itself.
+	// 质量 → 遮蔽映射 / 抑制名单 pages read the vault the handler owns: bbolt
+	// holds an exclusive lock, so the Monitor cannot open the mapping file
+	// itself.
 	var managementSrv *http.Server
 	if cfg.Monitor.Port != "" {
 		var secretMappings monitor.SecretMappingAdmin
+		var secretSuppressions monitor.SecretSuppressionAdmin
 		if vault := handler.SecretVault(); vault != nil && vault.MappingAdmin() != nil {
 			secretMappings = vault
+			secretSuppressions = vault
 		}
-		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, authStore)
+		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, authStore)
 		managementSrv = newManagementHTTPServer(cfg, mux)
 		go func(srv *http.Server) {
 			addr := srv.Addr

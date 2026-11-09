@@ -563,3 +563,15 @@ func Rules() []Rule {
 	}
 	return out
 }
+
+// RuleByName returns the metadata for a stable rule name. The lookup is linear
+// because rule names are only resolved on administrative writes and listings,
+// never on the mask path.
+func RuleByName(name string) (Rule, bool) {
+	for _, rule := range ruleTable[RuleUnknown+1:] {
+		if rule.Name == name {
+			return rule, true
+		}
+	}
+	return Rule{}, false
+}
