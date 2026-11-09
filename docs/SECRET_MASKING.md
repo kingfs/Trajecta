@@ -223,7 +223,7 @@ secret_masking:
 
 请求侧是「记录原始、发送假值」的拆分，两侧都不复用同一个切片：
 
-- 透传路径：`internal/proxy/handler.go`。`recordBody`（别名改写后、conversion/mask 前）交给 cassette，`attemptBody.WireBytes()`（conversion/mask 后）交给上游。交给路由器、指纹与失败 cassette 的 `bodyBytes` **不被改动**。
+- 透传路径：`internal/proxy/handler.go`。`recordBody`（别名改写后、conversion/mask 前）交给 cassette，`transformResult.Body.WireBytes()`（conversion/mask 后）交给上游。交给路由器、指纹与失败 cassette 的 `bodyBytes` **不被改动**。
 - 本地 Responses 路径：`internal/proxy/responses_server.go`。`buildResponsesServerChatRequest` 收到遮蔽后的体，`PrepareLogFileWithOptionsAndBody` 的第三个参数仍是原始体。
 
 请求体如果带着上一进程记录的假值（模型上下文、压缩后的历史、客户端存下来的转写），`Mask` 会在 `byFake` 里认出它并原样保留。这正是持久化映射解决的二次替换：没有它，新进程会把这个假值当成新的身份证号/手机号/凭据再渲染一次，上游看到第二个假值，而本机再也对不上第一个。

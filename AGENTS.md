@@ -83,7 +83,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:102-117` (section `## 录制�
   request length from the body slice it is handed, so a length-changing replacement desynchronises both
   silently, and a prefix change breaks every tool that validates on shape. The cassette records the original
   body by design while the upstream receives the stand-in, so the two must never be collapsed back into one
-  variable: `internal/proxy/handler.go` keeps `recordBody` for the recorder and `attemptBody.WireBytes()` for the
+  variable: `internal/proxy/handler.go` keeps `recordBody` for the recorder and `transformResult.Body.WireBytes()` for the
   wire, and `internal/proxy/responses_server.go` passes the stand-in to `buildResponsesServerChatRequest` and
   the original as the third argument of `PrepareLogFileWithOptionsAndBody`. On the response side the restorer
   goes underneath `UsageSniffer`, never around it, because the sniffer writes the bytes it read into the
