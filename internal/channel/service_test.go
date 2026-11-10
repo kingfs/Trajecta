@@ -1342,3 +1342,42 @@ func TestChannelProxySettingsFlowThroughRuntimeTargets(t *testing.T) {
 		t.Fatalf("runtime target proxy = %+v, want the stored policy", targets[0].Upstream.Proxy)
 	}
 }
+
+func TestRuntimeTargetsProjectsPerProtocolWireNames(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID: "multi", Name: "multi", BaseURL: "https://multi.example.com/v1",
+		ProviderPreset: "openai", HeadersJSON: "{}", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceChannelModels("multi", []store.ChannelModelRecord{{
+		Model: "gpt-5.5", Source: "manual", Enabled: true, UpstreamModel: "wire-default",
+		ProtocolsJSON: `{"chat_completions":{"enabled":true,"wire_model":"wire-chat"},"messages":{"enabled":true,"wire_model":"wire-msg"}}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v", targets)
+	}
+	target := targets[0]
+	if target.ProtocolModelAliases["chat_completions"]["gpt-5.5"] != "wire-chat" {
+		t.Fatalf("chat alias = %+v", target.ProtocolModelAliases)
+	}
+	if target.ProtocolModelAliases["messages"]["gpt-5.5"] != "wire-msg" {
+		t.Fatalf("messages alias = %+v", target.ProtocolModelAliases)
+	}
+	for _, want := range []string{"wire-default", "wire-chat", "wire-msg"} {
+		if !slices.Contains(target.UpstreamModelNames, want) {
+			t.Fatalf("UpstreamModelNames = %v, missing %q", target.UpstreamModelNames, want)
+		}
+	}
+}

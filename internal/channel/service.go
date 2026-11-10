@@ -177,6 +177,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				if upstreamModel != "" {
 					upstreamModelNames = append(upstreamModelNames, upstreamModel)
 				}
+				upstreamModelNames = append(upstreamModelNames, channelModelProtocolWireNames(model)...)
 			} else {
 				disabledModels = append(disabledModels, model.Model)
 				if upstreamModel != "" {
@@ -185,6 +186,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			}
 		}
 		models = enabledModels
+		protocolAliases := channelModelProtocolAliases(models)
 		headers := map[string]string{}
 		if strings.TrimSpace(channel.HeadersJSON) != "" {
 			if err := json.Unmarshal([]byte(channel.HeadersJSON), &headers); err != nil {
@@ -210,6 +212,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			ModelDiscovery:       channel.ModelDiscovery,
 			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
 			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
+			ProtocolModelAliases: protocolAliases,
 			ConfiguredModelsOnly: true,
 			DisabledModels:       disabledModels,
 			UpstreamModelNames:   upstreamModelNames,
@@ -932,6 +935,58 @@ func channelModelNamesWithAliases(models []store.ChannelModelRecord, aliases []s
 		out = append(out, aliasName)
 	}
 	return normalizeModels(out)
+}
+
+type channelModelProtocol struct {
+	Enabled   bool   `json:"enabled"`
+	WireModel string `json:"wire_model"`
+}
+
+func decodeChannelModelProtocols(raw string) map[string]channelModelProtocol {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	out := map[string]channelModelProtocol{}
+	if json.Unmarshal([]byte(raw), &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func channelModelProtocolAliases(models []store.ChannelModelRecord) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, model := range models {
+		name := strings.ToLower(strings.TrimSpace(model.Model))
+		if name == "" {
+			continue
+		}
+		for protocol, entry := range decodeChannelModelProtocols(model.ProtocolsJSON) {
+			protocol = strings.ToLower(strings.TrimSpace(protocol))
+			wire := strings.TrimSpace(entry.WireModel)
+			if protocol == "" || !entry.Enabled || wire == "" {
+				continue
+			}
+			if out[protocol] == nil {
+				out[protocol] = map[string]string{}
+			}
+			out[protocol][name] = wire
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func channelModelProtocolWireNames(model store.ChannelModelRecord) []string {
+	var out []string
+	for _, entry := range decodeChannelModelProtocols(model.ProtocolsJSON) {
+		if entry.Enabled && strings.TrimSpace(entry.WireModel) != "" {
+			out = append(out, strings.TrimSpace(entry.WireModel))
+		}
+	}
+	return out
 }
 
 func channelModelAliases(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]string {

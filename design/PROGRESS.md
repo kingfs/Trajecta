@@ -115,4 +115,4 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 
 - `pkg/upstream`：新增 `qwen_coding` / `qwen_coding_intl` / `qwen_token_plan` / `qwen_token_plan_intl` / `zai_coding` / `zhipu_coding` / `kimi_coding` 官方套餐预设；`provider-presets` 返回显示名、notes 与 no_list，创建表单按名称展示并提示 key/endpoint/手动模型限制；plan 元数据收敛为一张表；Qwen/GLM Anthropic 入口有独立 `*_anthropic` 预设；Qwen 为 `sk-sp-` API key + 专用 endpoint，GLM 为各平台 API key + coding endpoint；Qwen key 前缀在渠道创建时校验；渠道卡片显示 Coding Plan 标记与具体 plan 名称。
 
-- `internal/store`/`internal/monitor`：`channel_models.protocols_json` 与模型 API `protocols` 读写已落地；旧 `upstream_model` 保留，router 按协议选 wire name 待接。
+- `internal/store`/`internal/monitor`/`internal/channel`/`internal/router`：`channel_models.protocols_json`、模型 API `protocols`、target per-protocol aliases 与 proxy 按协议 wire name 已落地；旧 `upstream_model` 仍作 fallback，UI 编辑待做。

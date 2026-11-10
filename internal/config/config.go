@@ -224,16 +224,20 @@ type UpstreamTargetConfig struct {
 	ID string `yaml:"id"`
 	// Name is the human display name of the channel this target was projected
 	// from (empty for YAML targets). It is never read from YAML.
-	Name                 string            `yaml:"-"`
-	Enabled              *bool             `yaml:"enabled"`
-	Priority             int               `yaml:"priority"`
-	Weight               float64           `yaml:"weight"`
-	CapacityHint         float64           `yaml:"capacity_hint"`
-	ModelDiscovery       string            `yaml:"model_discovery"`
-	StaticModels         []string          `yaml:"static_models"`
-	ModelAliases         map[string]string `yaml:"-"`
-	ConfiguredModelsOnly bool              `yaml:"-"`
-	DisabledModels       []string          `yaml:"-"`
+	Name           string            `yaml:"-"`
+	Enabled        *bool             `yaml:"enabled"`
+	Priority       int               `yaml:"priority"`
+	Weight         float64           `yaml:"weight"`
+	CapacityHint   float64           `yaml:"capacity_hint"`
+	ModelDiscovery string            `yaml:"model_discovery"`
+	StaticModels   []string          `yaml:"static_models"`
+	ModelAliases   map[string]string `yaml:"-"`
+	// ProtocolModelAliases maps a wire protocol to its client-model -> wire-model
+	// aliases. It is populated from channel_models.protocols_json; ModelAliases
+	// remains the protocol-agnostic fallback.
+	ProtocolModelAliases map[string]map[string]string `yaml:"-"`
+	ConfiguredModelsOnly bool                         `yaml:"-"`
+	DisabledModels       []string                     `yaml:"-"`
 	// UpstreamModelNames are the wire names a channel model maps to
 	// (`channel_models.upstream_model`). They are routable in addition to the
 	// client-facing names, because the local Responses runtime rewrites the

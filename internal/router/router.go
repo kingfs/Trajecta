@@ -153,6 +153,7 @@ type Target struct {
 	// routable but not listed by /v1/models.
 	UpstreamModelNames   []string
 	ModelAliases         map[string]string
+	ProtocolModelAliases map[string]map[string]string
 	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
 	// allowUndeclaredModels is set only for the in-memory single-upstream
@@ -531,6 +532,7 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		ModelDiscovery:       normalizeDiscoveryMode(targetCfg.ModelDiscovery),
 		StaticModels:         normalizeModels(targetCfg.StaticModels),
 		ModelAliases:         normalizeModelAliases(targetCfg.ModelAliases),
+		ProtocolModelAliases: normalizeProtocolModelAliases(targetCfg.ProtocolModelAliases),
 		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
 		disabledModels:       modelSet(targetCfg.DisabledModels),
 		Upstream:             resolved,
@@ -565,6 +567,49 @@ func (t *Target) ResolveModelAlias(model string) string {
 		return ""
 	}
 	return t.ModelAliases[strings.ToLower(strings.TrimSpace(model))]
+}
+
+// ResolveModelAliasForProtocol prefers the per-protocol wire name and falls
+// back to the protocol-agnostic ModelAliases/upstream_model mapping.
+func (t *Target) ResolveModelAliasForProtocol(model, protocol string) string {
+	if t == nil {
+		return ""
+	}
+	key := strings.ToLower(strings.TrimSpace(model))
+	if aliases := t.ProtocolModelAliases[strings.ToLower(strings.TrimSpace(protocol))]; aliases != nil {
+		if wire := aliases[key]; wire != "" {
+			return wire
+		}
+	}
+	return t.ResolveModelAlias(model)
+}
+
+func normalizeProtocolModelAliases(in map[string]map[string]string) map[string]map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(in))
+	for protocol, aliases := range in {
+		key := strings.ToLower(strings.TrimSpace(protocol))
+		if key == "" || len(aliases) == 0 {
+			continue
+		}
+		normalized := make(map[string]string, len(aliases))
+		for model, wire := range aliases {
+			model = strings.ToLower(strings.TrimSpace(model))
+			wire = strings.TrimSpace(wire)
+			if model != "" && wire != "" {
+				normalized[model] = wire
+			}
+		}
+		if len(normalized) > 0 {
+			out[key] = normalized
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func appendTarget(targets *[]*Target, seenIDs map[string]struct{}, target *Target) error {

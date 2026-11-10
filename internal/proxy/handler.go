@@ -235,7 +235,7 @@ func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]
 	if requestedModel == "" {
 		return bodyBytes, false
 	}
-	upstreamModel := selection.Target.ResolveModelAlias(requestedModel)
+	upstreamModel := selection.Target.ResolveModelAliasForProtocol(requestedModel, string(selection.Request.Protocol))
 	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
 		return bodyBytes, false
 	}
@@ -930,7 +930,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		transform := gateway.RequestTransform{
 			RequestedModel: selection.Request.ModelName,
-			UpstreamModel:  selection.Target.ResolveModelAlias(selection.Request.ModelName),
+			UpstreamModel:  selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)),
 			ConverterFor: func(record []byte) (gateway.Converter, error) {
 				conv, err := h.conversionForSelection(r, selection, record)
 				if err != nil || conv == nil {

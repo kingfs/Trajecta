@@ -72,7 +72,7 @@ POST /api/provider-model-detect
 
 - [x] 渠道级 per-protocol base URL：复用 `capabilities.endpoints`（无需新表），proxy 按请求协议选择；
 - [x] 渠道 API 顶层 `endpoints` 与高级选项里的每协议输入；
-- [x] `channel_models.protocols_json` 与模型 API `protocols` 读写已落地；router 按协议选择 wire name、UI 编辑仍待做。
+- [x] `channel_models.protocols_json`、模型 API `protocols`、channel→target 投影、router 按协议 wire name 已落地；UI 编辑仍待做。
 - [ ] `channel_models` 增加 per-model `protocols_json`/`wire_names_json`。
 - [x] `GET /api/catalog/providers` 接入创建弹窗的“浏览内置目录”；选中条目填入 endpoint/协议。多协议编辑与 OAuth 仍待做。
 - [ ] OAuth driver：`AuthDriver` 实现、`channel_credentials` 表、auth start/callback/status API（当前只预留）。
