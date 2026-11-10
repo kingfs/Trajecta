@@ -228,22 +228,14 @@ func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 }
 
 func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]byte, bool) {
-	if len(bodyBytes) == 0 || selection == nil || selection.Target == nil {
+	if selection == nil || selection.Target == nil {
 		return bodyBytes, false
 	}
-	requestedModel := strings.TrimSpace(selection.Request.ModelName)
-	if requestedModel == "" {
-		return bodyBytes, false
-	}
-	upstreamModel := selection.Target.ResolveModelAliasForProtocol(requestedModel, string(selection.Request.Protocol))
-	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
-		return bodyBytes, false
-	}
-	rewritten, ok, err := xir.RewriteModel(bodyBytes, upstreamModel)
-	if err != nil || !ok {
-		return bodyBytes, false
-	}
-	return rewritten, true
+	return gateway.RewriteModelAlias(
+		bodyBytes,
+		selection.Request.ModelName,
+		selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)),
+	)
 }
 
 // UsageSniffer 纯粹的嗅探器，不再做估算

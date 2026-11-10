@@ -18,7 +18,7 @@
 - `protocol_conversion_engine=legacy` 默认；`xir` opt-in；
 - `trace.minimal_cassette` 仓库默认开启，旧配置保持完整 prelude；
 - 旧 preset 矩阵与新 `pkg/upstream` catalog 桥接；
-- gateway 请求/响应核心从 proxy 抽出，proxy 保留类型别名兼容测试。
+- gateway 请求/响应核心从 proxy 抽出，proxy 保留类型别名兼容测试；alias rewrite 原语已移入 gateway；catalog→运行时 preset 一致性测试防止注册表漂移。
 
 ## 2. 待做
 
