@@ -24,7 +24,7 @@ func BenchmarkRouterSelectStaticCatalog(b *testing.B) {
 			},
 		})
 	}
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 
 	rtr, err := New(cfg)
 	if err != nil {

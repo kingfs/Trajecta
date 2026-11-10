@@ -500,7 +500,9 @@ func (u ResolvedUpstream) ApplyAuthHeaders(header http.Header) {
 		spec.Header = "api-key"
 	case RoutingProfileAnthropicDefault:
 		spec.Header = "x-api-key"
-	case RoutingProfileGoogleAIStudio:
+	case RoutingProfileGoogleAIStudio, RoutingProfileVertexExpress:
+		// Vertex Express is Google's API-key surface; project/location Vertex
+		// keeps the default Bearer for an OAuth access token.
 		spec.Header = "x-goog-api-key"
 	default:
 		spec.Header = "Authorization"
@@ -1170,6 +1172,9 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 			return basePath + stripOpenAIVersionPrefix(reqPath)
 		}
 	}
+	if resolved.ProtocolFamily == ProtocolFamilyGoogleGenAI {
+		return joinGoogleRequestPath(basePath, reqPath)
+	}
 	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
 		trimmedReqPath := stripOpenAIVersionPrefix(reqPath)
 		if resolved.RoutingProfile == RoutingProfileVLLMOpenAI {
@@ -1221,7 +1226,8 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 	// project and location) is supplied here. Joining the model suffix onto
 	// resourceRoot must not repeat its trailing "/models".
 	switch llm.NormalizeEndpoint(reqPath) {
-	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent",
+		"/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
 		action := "generateContent"
 		if strings.HasSuffix(reqPath, ":streamGenerateContent") {
 			action = "streamGenerateContent"
@@ -1231,7 +1237,7 @@ func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
 			return reqPath
 		}
 		return "/v1" + resourceRoot + "/" + model + ":" + action
-	case "/v1/publishers/models":
+	case "/v1/publishers/models", "/v1beta/models":
 		return "/v1" + resourceRoot
 	default:
 		return path.Join("/v1", resourceRoot, strings.TrimPrefix(reqPath, "/v1/"))
@@ -1252,6 +1258,80 @@ func vertexModelFromShortPath(reqPath string) string {
 		rest = rest[:colon]
 	}
 	return strings.TrimSpace(rest)
+}
+
+// joinGoogleRequestPath folds a version segment that is already part of the
+// endpoint base. The Google preset endpoint is .../v1beta while clients call
+// /v1beta/models/..., so a plain path.Join produced /v1beta/v1beta/models/....
+// The rule mirrors pkg/upstream's catalog join: drop the client's leading
+// version only when the base ends with it or already carries a version.
+func joinGoogleRequestPath(basePath, reqPath string) string {
+	clientSegments := splitVersionPath(reqPath)
+	baseSegments := splitVersionPath(basePath)
+	if len(clientSegments) > 1 && isVersionPathSegment(clientSegments[0]) {
+		baseLast := ""
+		if len(baseSegments) > 0 {
+			baseLast = baseSegments[len(baseSegments)-1]
+		}
+		if baseLast == clientSegments[0] || hasVersionPathSegment(baseSegments) {
+			reqPath = "/" + strings.Join(clientSegments[1:], "/")
+		}
+	}
+	return path.Join(basePath, reqPath)
+}
+
+func splitVersionPath(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, "/")
+	out := parts[:0]
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func hasVersionPathSegment(segments []string) bool {
+	for _, segment := range segments {
+		if isVersionPathSegment(segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVersionPathSegment(segment string) bool {
+	if len(segment) < 2 || segment[0] != 'v' {
+		return false
+	}
+	i := 1
+	for i < len(segment) && segment[i] >= '0' && segment[i] <= '9' {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
+	rest := segment[i:]
+	switch {
+	case rest == "":
+		return true
+	case strings.HasPrefix(rest, "alpha"):
+		rest = rest[len("alpha"):]
+	case strings.HasPrefix(rest, "beta"):
+		rest = rest[len("beta"):]
+	}
+	if rest == "" {
+		return true
+	}
+	for _, ch := range rest {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func deploymentFromBasePath(basePath string) string {

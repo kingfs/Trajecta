@@ -17,6 +17,7 @@ func TestApplyAuthHeadersProfiles(t *testing.T) {
 		{"azure", RoutingProfileAzureOpenAIV1, "api-key", "sk-test"},
 		{"anthropic", RoutingProfileAnthropicDefault, "x-api-key", "sk-test"},
 		{"google", RoutingProfileGoogleAIStudio, "x-goog-api-key", "sk-test"},
+		{"vertex express", RoutingProfileVertexExpress, "x-goog-api-key", "sk-test"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

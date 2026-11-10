@@ -87,9 +87,13 @@ type RoutePlan struct {
 	SelectedRouteTargetID   string                   `json:"selected_route_target_id,omitempty"`
 	SelectedChannelID       string                   `json:"selected_channel_id,omitempty"`
 	UpstreamModel           string                   `json:"upstream_model,omitempty"`
-	Strategy                ResponsesStrategy        `json:"strategy,omitempty"`
-	Reason                  string                   `json:"reason,omitempty"`
-	FallbacksConsidered     []PlanCandidate          `json:"fallbacks_considered,omitempty"`
+	// PriorityMode and SelectedTier expose how the router interpreted
+	// channel priority for this decision (compat vs strict).
+	PriorityMode        string            `json:"priority_mode,omitempty"`
+	SelectedTier        int               `json:"selected_tier,omitempty"`
+	Strategy            ResponsesStrategy `json:"strategy,omitempty"`
+	Reason              string            `json:"reason,omitempty"`
+	FallbacksConsidered []PlanCandidate   `json:"fallbacks_considered,omitempty"`
 	// ProtocolConversion is set when the selected candidate serves the request
 	// only through protocol conversion; UpstreamEndpoint then names the wire
 	// protocol that is actually called.

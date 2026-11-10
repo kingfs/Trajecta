@@ -213,6 +213,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
 			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
 			ProtocolModelAliases: protocolAliases,
+			ModelWireNames:       channelModelWireNames(models),
 			ConfiguredModelsOnly: true,
 			DisabledModels:       disabledModels,
 			UpstreamModelNames:   upstreamModelNames,
@@ -989,6 +990,24 @@ func channelModelProtocolAliases(models []store.ChannelModelRecord) map[string]m
 				out[protocol] = map[string]string{}
 			}
 			out[protocol][name] = wire
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// channelModelWireNames maps each enabled model to its channel row's
+// upstream_model. It is the protocol-agnostic wire fallback the router applies
+// after a per-protocol wire_model and before the client-facing model name.
+func channelModelWireNames(models []store.ChannelModelRecord) map[string]string {
+	out := make(map[string]string, len(models))
+	for _, model := range models {
+		name := strings.ToLower(strings.TrimSpace(model.Model))
+		wire := strings.TrimSpace(model.UpstreamModel)
+		if name != "" && wire != "" {
+			out[name] = wire
 		}
 	}
 	if len(out) == 0 {

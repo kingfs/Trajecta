@@ -1375,6 +1375,9 @@ func TestRuntimeTargetsProjectsPerProtocolWireNames(t *testing.T) {
 	if target.ProtocolModelAliases["messages"]["gpt-5.5"] != "wire-msg" {
 		t.Fatalf("messages alias = %+v", target.ProtocolModelAliases)
 	}
+	if target.ModelWireNames["gpt-5.5"] != "wire-default" {
+		t.Fatalf("upstream_model projection = %+v", target.ModelWireNames)
+	}
 	for _, want := range []string{"wire-default", "wire-chat", "wire-msg"} {
 		if !slices.Contains(target.UpstreamModelNames, want) {
 			t.Fatalf("UpstreamModelNames = %v, missing %q", target.UpstreamModelNames, want)

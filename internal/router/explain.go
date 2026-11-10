@@ -287,9 +287,13 @@ func (r *Router) explainResultForSelection(entrypoint routeplan.ClientEntrypoint
 		plan.SelectedCandidateID = selection.Target.ID
 		plan.SelectedRouteTargetID = selection.Target.RouteTargetID
 		plan.SelectedChannelID = selection.Target.ChannelID
-		plan.UpstreamModel = selection.Target.ResolveModelAlias(model)
+		plan.UpstreamModel = selection.Target.ResolveModelAliasForProtocol(model, protocolForUpstreamEndpoint(endpoint))
 		if strings.TrimSpace(plan.UpstreamModel) == "" {
 			plan.UpstreamModel = model
+		}
+		if selection.Decision != nil {
+			plan.PriorityMode = selection.Decision.PriorityMode
+			plan.SelectedTier = selection.Decision.SelectedTier
 		}
 		plan.Reason = routeplan.ReasonSelected
 		return ExplainResult{Result: routeplan.Result{Plan: plan, Candidates: candidates}}
@@ -300,6 +304,23 @@ func (r *Router) explainResultForSelection(entrypoint routeplan.ClientEntrypoint
 		errorText = selErr.Error()
 	}
 	return ExplainResult{Result: routeplan.Result{Plan: plan, Candidates: candidates}, Error: errorText}
+}
+
+// protocolForUpstreamEndpoint names the wire protocol a target is called with,
+// so the dry run resolves the same per-protocol wire model as forwarding.
+func protocolForUpstreamEndpoint(endpoint routeplan.UpstreamEndpoint) string {
+	switch endpoint {
+	case routeplan.UpstreamEndpointChatCompletions:
+		return "chat_completions"
+	case routeplan.UpstreamEndpointAnthropicMessage:
+		return "messages"
+	case routeplan.UpstreamEndpointResponses:
+		return "responses"
+	case routeplan.UpstreamEndpointGenerateContent:
+		return "gemini"
+	default:
+		return ""
+	}
 }
 
 // explainResolvedModelCandidates reports the model names this request actually

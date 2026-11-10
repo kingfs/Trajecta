@@ -65,7 +65,7 @@ func TestLoadAcceptsFiniteNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v, want the documented finite values to load", err)
 	}
-	if cfg.Router.Selection.Epsilon != 0 || len(cfg.Chaos.Rules) != 1 || cfg.Chaos.Rules[0].Rate != 0.5 {
+	if cfg.Router.Selection.Epsilon == nil || *cfg.Router.Selection.Epsilon != 0 || len(cfg.Chaos.Rules) != 1 || cfg.Chaos.Rules[0].Rate != 0.5 {
 		t.Fatalf("loaded finite values = %+v / %+v", cfg.Router.Selection, cfg.Chaos.Rules)
 	}
 }

@@ -232,6 +232,10 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		value, ok := rawFields[key]
 		return ok && strings.TrimSpace(string(value)) == "null"
 	}
+	if req.Protocols != nil && len(*req.Protocols) > 0 {
+		merged := mergeChannelModelProtocols(st, channelID, model, *req.Protocols)
+		req.Protocols = &merged
+	}
 	record, err := st.UpdateChannelModelProfile(channelID, model, store.ChannelModelProfilePatch{
 		DisplayName:                  req.DisplayName,
 		Enabled:                      req.Enabled,
@@ -261,6 +265,31 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		return
 	}
 	writeJSON(w, http.StatusOK, channelModelItemFor(st, channelID, record))
+}
+
+// mergeChannelModelProtocols applies a PATCH's protocol entries on top of the
+// stored map instead of replacing it. The UI always sends every row it shows,
+// but an API caller that patches one protocol must not silently drop the
+// others; removing a protocol is expressed by enabled=false, not by omission.
+func mergeChannelModelProtocols(st *store.Store, channelID, model string, patch map[string]channelModelProtocol) map[string]channelModelProtocol {
+	merged := make(map[string]channelModelProtocol, len(patch))
+	if st != nil {
+		if models, err := st.ListChannelModels(channelID, false); err == nil {
+			for _, record := range models {
+				if !strings.EqualFold(strings.TrimSpace(record.Model), strings.TrimSpace(model)) {
+					continue
+				}
+				for protocol, entry := range decodeChannelModelProtocols(record.ProtocolsJSON) {
+					merged[protocol] = entry
+				}
+				break
+			}
+		}
+	}
+	for protocol, entry := range patch {
+		merged[strings.ToLower(strings.TrimSpace(protocol))] = entry
+	}
+	return merged
 }
 
 // channelModelItemFor answers with the state of one model after a write, so the
