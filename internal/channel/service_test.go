@@ -1390,9 +1390,12 @@ func TestPerModelProtocolsDriveInterfacesAndCapabilities(t *testing.T) {
 	}
 	model := store.ChannelModelRecord{
 		Model: "gpt-5", Enabled: true,
-		ProtocolsJSON: `{"messages":{"enabled":true},"gemini":{"enabled":false}}`,
+		ProtocolsJSON: `{"chat_completions":{"enabled":false},"messages":{"enabled":true},"gemini":{"enabled":false}}`,
 	}
 	interfaces := EffectiveModelInterfaces(channel, model)
+	if interfaces.ChatCompletions {
+		t.Fatalf("ChatCompletions should be disabled: %+v", interfaces)
+	}
 	if !interfaces.Messages {
 		t.Fatalf("Messages interface = %+v", interfaces)
 	}
@@ -1400,6 +1403,9 @@ func TestPerModelProtocolsDriveInterfacesAndCapabilities(t *testing.T) {
 		t.Fatalf("GenerateContent interface should be disabled: %+v", interfaces)
 	}
 	caps := ChannelModelCapabilities([]store.ChannelModelRecord{model}, nil, "multi")
+	if enabled := caps["gpt-5"].ChatCompletions; enabled == nil || *enabled {
+		t.Fatalf("chat capability = %+v", caps)
+	}
 	if enabled := caps["gpt-5"].Messages; enabled == nil || !*enabled {
 		t.Fatalf("capabilities = %+v", caps)
 	}

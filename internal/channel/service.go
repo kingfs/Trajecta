@@ -888,6 +888,14 @@ func channelModelCapabilityConfig(model store.ChannelModelRecord) (config.Upstre
 		Embeddings:      capabilityIntToBool(model.SupportsEmbeddings),
 	}
 	if protocols := decodeChannelModelProtocols(model.ProtocolsJSON); len(protocols) > 0 {
+		if entry, ok := protocols["chat_completions"]; ok {
+			enabled := entry.Enabled
+			caps.ChatCompletions = &enabled
+		}
+		if entry, ok := protocols["responses"]; ok {
+			enabled := entry.Enabled
+			caps.Responses = &enabled
+		}
 		if entry, ok := protocols["messages"]; ok {
 			enabled := entry.Enabled
 			caps.Messages = &enabled
@@ -1290,6 +1298,14 @@ func EffectiveModelInterfaces(channel store.ChannelConfigRecord, model store.Cha
 		ChatCompletions: capabilityIntToBool(model.SupportsChatCompletions),
 	}
 	if protocols := decodeChannelModelProtocols(model.ProtocolsJSON); len(protocols) > 0 {
+		if entry, ok := protocols["chat_completions"]; ok {
+			enabled := entry.Enabled
+			overrides.ChatCompletions = &enabled
+		}
+		if entry, ok := protocols["responses"]; ok {
+			enabled := entry.Enabled
+			overrides.Responses = &enabled
+		}
 		if entry, ok := protocols["messages"]; ok {
 			enabled := entry.Enabled
 			overrides.Messages = &enabled

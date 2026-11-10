@@ -174,7 +174,7 @@ Trajecta 自身的事件收件箱：
 
 卡片的模型信息来自编译进二进制的 [Argus](https://github.com/kingfs/Argus) 静态模型库（`internal/modelinfo`），不访问网络：供应商、系列、中英文描述、上下文/最大输出、能力位、标签、官网与模型卡链接。匹配是保守的“可用则用”策略：精确 ID/别名优先，其次才是去掉路由前缀（`azure/gpt-4o`）、点分厂商命名空间（`us.anthropic.claude-…`）、日期/修订后缀（`-20240620-v1:0`）、`-latest` 与 `:free` 之类标签，最后把数字间的连字符改写为点（`claude-3-5-sonnet` → `claude-3.5-sonnet`）。没有匹配就不显示元数据，绝不猜一个别的模型；卡片仍会展示渠道自己声明的上下文窗口与最大输出。未匹配的卡片带“未收录”标记，详情页也会说明原因。
 
-**模型协议 wire name**：渠道详情里的模型卡可展开「协议」，按 `chat_completions` / `responses` / `messages` / `gemini` 设置 wire model 与启用状态；留空回退到模型名，旧渠道不受影响。
+**模型协议 wire name**：渠道详情里的模型卡可展开「协议」，按 `chat_completions` / `responses` / `messages` / `gemini` 设置 wire model 与启用状态；启用状态会覆盖模型原有 supports 声明，留空/无条目则回退到旧行为。
 
 **实时统计**保留原来的按窗口聚合：模型覆盖哪些渠道，以及请求数、错误数、Token、RPM/TPM 与趋势。它只显示窗口内真正有请求的模型——没有流量的模型属于广场，不再因为“有配置但没调用”而混进统计。窗口选择器只在这个标签页的页头出现，广场没有时间维度。
 
