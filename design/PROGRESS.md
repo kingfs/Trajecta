@@ -118,3 +118,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 - `internal/store`/`internal/monitor`/`internal/channel`/`internal/router`/`internal/upstream`：`channel_models.protocols_json`、模型 API `protocols`、target per-protocol aliases、proxy 按协议 wire name、per-model chat/responses/messages/gemini 能力与模型卡 protocols 编辑已落地。
 
 - `internal/upstream`/`pkg/upstream`：新增 catalog→运行时 preset 一致性测试与自动补齐，补齐 minimax/mistral/ollama/zai/zhipu 的运行时 spec；alias rewrite 原语移入 `internal/gateway`。
+
+- `internal/gateway`：`UsageSniffer` 现在同时产出 canonical `pkg/usage.Usage` 与 cassette/DB 投影 `recorder.UsageInfo`，proxy/local Responses 两个入口都接入。

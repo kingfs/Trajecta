@@ -451,12 +451,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 
 		// 4. 劫持 Body
 		resp.Body = &UsageSniffer{
-			Source:   resp.Body,
-			File:     logInfo.File,
-			Count:    &logInfo.Header.Layout.ResBodyLen,
-			Usage:    &logInfo.Header.Usage,
-			Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-			Events:   &logInfo.Events,
+			Source:      resp.Body,
+			File:        logInfo.File,
+			Count:       &logInfo.Header.Layout.ResBodyLen,
+			Usage:       &logInfo.Usage,
+			RecordUsage: &logInfo.Header.Usage,
+			Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+			Events:      &logInfo.Events,
 		}
 		return nil
 	}
@@ -2232,13 +2233,14 @@ func (h *Handler) writeUpstreamResponse(
 	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
 	// the recorded response while the client saw the real values.
 	responsePipeline := gateway.NewResponsePipeline(gateway.ResponsePipelineOptions{
-		Upstream: resp.Body,
-		Vault:    h.secretVault,
-		File:     logInfo.File,
-		Count:    &logInfo.Header.Layout.ResBodyLen,
-		Usage:    &logInfo.Header.Usage,
-		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-		Events:   &logInfo.Events,
+		Upstream:    resp.Body,
+		Vault:       h.secretVault,
+		File:        logInfo.File,
+		Count:       &logInfo.Header.Layout.ResBodyLen,
+		Usage:       &logInfo.Usage,
+		RecordUsage: &logInfo.Header.Usage,
+		Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+		Events:      &logInfo.Events,
 	})
 	resp.Body = responsePipeline.Reader()
 

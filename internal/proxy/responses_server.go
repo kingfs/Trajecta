@@ -797,14 +797,15 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 		respBody = restorer
 	}
 	return &UsageSniffer{
-		Source:   respBody,
-		File:     logInfo.File,
-		Count:    &logInfo.Header.Layout.ResBodyLen,
-		Usage:    &logInfo.Header.Usage,
-		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-		Events:   &logInfo.Events,
-		Start:    startedAt,
-		TTFTMs:   &logInfo.Header.Meta.TTFTMs,
+		Source:      respBody,
+		File:        logInfo.File,
+		Count:       &logInfo.Header.Layout.ResBodyLen,
+		Usage:       &logInfo.Usage,
+		RecordUsage: &logInfo.Header.Usage,
+		Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+		Events:      &logInfo.Events,
+		Start:       startedAt,
+		TTFTMs:      &logInfo.Header.Meta.TTFTMs,
 	}, isStream, restorer, nil
 }
 

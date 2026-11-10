@@ -7,6 +7,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/usage"
 )
 
 // ResponsePipelineOptions configures one response-side pipeline.
@@ -17,13 +18,14 @@ type ResponsePipelineOptions struct {
 	// client read.
 	Vault *secretmask.Vault
 
-	File     io.Writer
-	Count    *int64
-	Usage    *recorder.UsageInfo
-	Pipeline *llm.ResponsePipeline
-	Events   *[]recorder.RecordEvent
-	Start    time.Time
-	TTFTMs   *int64
+	File        io.Writer
+	Count       *int64
+	Usage       *usage.Usage
+	RecordUsage *recorder.UsageInfo
+	Pipeline    *llm.ResponsePipeline
+	Events      *[]recorder.RecordEvent
+	Start       time.Time
+	TTFTMs      *int64
 }
 
 // ResponsePipeline is the fixed response-side order:
@@ -50,14 +52,15 @@ func NewResponsePipeline(opts ResponsePipelineOptions) *ResponsePipeline {
 		body.SetClient(restorer)
 	}
 	sniffer := &UsageSniffer{
-		Source:   body.ClientReader(),
-		File:     opts.File,
-		Count:    opts.Count,
-		Usage:    opts.Usage,
-		Pipeline: opts.Pipeline,
-		Events:   opts.Events,
-		Start:    opts.Start,
-		TTFTMs:   opts.TTFTMs,
+		Source:      body.ClientReader(),
+		File:        opts.File,
+		Count:       opts.Count,
+		Usage:       opts.Usage,
+		RecordUsage: opts.RecordUsage,
+		Pipeline:    opts.Pipeline,
+		Events:      opts.Events,
+		Start:       opts.Start,
+		TTFTMs:      opts.TTFTMs,
 	}
 	return &ResponsePipeline{body: body, sniffer: sniffer, restorer: restorer}
 }

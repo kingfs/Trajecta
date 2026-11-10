@@ -216,7 +216,7 @@ Responses audit 属于部分实现，职责边界如下：
 已接入的 core 路径：
 
 - router：`xir.ParseEnvelope` 读取请求 envelope；`pkg/session` 解析 sticky；`pkg/route` 可通过 `router.selection.plan_engine=route` 参与最终排序（默认 `legacy`，`priority_mode=compat` 不变）；
-- proxy/gateway：`Body{Client,Record,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform`；
+- proxy/gateway：`Body{Client,Record,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`（canonical `pkg/usage` + recorder 投影）、`ResponsePipeline`、`ResponseTransform`；
 - upstream：`capabilities.endpoints` 按协议选择 base URL，`BuildURLForProtocol` 在 conversion 后显式选择；
 - audit：cassette → `pkg/xir/audit` → `GET /api/traces/<id>/xir`，Chat SSE 装配，`pkg/detect` advisory `detections`（不含明文值），单 trace ATIF；
 - recorder：`trace.minimal_cassette` 仓库默认开启，raw HTTP + layout/identity 入 cassette，routing/harness/usage 留 DB。

@@ -65,6 +65,6 @@
 
 - [x] 把 alias/conversion/mask 的调用顺序抽成 `RequestTransform`，由 gateway 单测覆盖。
 - [ ] 把 `recordBody`/wire 的语义进一步固化为 `Body{Client,Record,Wire}` 或 `RecordBody()`。
-- [x] 响应侧 `ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform` 已落地。
+- [x] 响应侧 `ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform` 已落地；`UsageSniffer` 同时产出 canonical `pkg/usage` 与 recorder 投影。
 - [ ] 把本地 Responses runtime 作为 `ModeLocal` 接入同一请求阶段。
 - [ ] 删除 `handler.go` 中重复的 body 变量与转换上下文。

@@ -19,10 +19,11 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
+	usagepkg "github.com/kingfs/Trajecta/pkg/usage"
 )
 
 func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
-	var usage recorder.UsageInfo
+	var usage usagepkg.Usage
 	sniffer := UsageSniffer{
 		Source:   nopReadCloser{Reader: bytes.NewBufferString(`data: {"type":"response.completed","response":{"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}` + "\n")},
 		Usage:    &usage,
@@ -34,8 +35,8 @@ func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 		t.Fatalf("Read() error = %v", err)
 	}
 
-	if usage.PromptTokens != 7048 || usage.CompletionTokens != 28 || usage.TotalTokens != 7076 {
-		t.Fatalf("usage = %+v, want prompt=7048 completion=28 total=7076", usage)
+	if usage.InputTokens != 7048 || usage.OutputTokens != 28 || usage.TotalTokens != 7076 {
+		t.Fatalf("usage = %+v, want input=7048 output=28 total=7076", usage)
 	}
 }
 
@@ -197,7 +198,7 @@ func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 }
 
 func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
-	var usage recorder.UsageInfo
+	var usage usagepkg.Usage
 	sniffer := UsageSniffer{
 		Source:   nopReadCloser{},
 		Usage:    &usage,
@@ -209,8 +210,8 @@ func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	if usage.PromptTokens != 10 || usage.CompletionTokens != 4 || usage.TotalTokens != 14 {
-		t.Fatalf("usage = %+v, want prompt=10 completion=4 total=14", usage)
+	if usage.InputTokens != 10 || usage.OutputTokens != 4 || usage.TotalTokens != 14 {
+		t.Fatalf("usage = %+v, want input=10 output=4 total=14", usage)
 	}
 }
 

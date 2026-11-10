@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/Trajecta/pkg/harness"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
+	"github.com/kingfs/Trajecta/pkg/usage"
 )
 
 type PromptTokenDetails = recordfile.PromptTokenDetails
@@ -35,6 +36,10 @@ type LogInfo struct {
 	Path   string
 	Header RecordHeader
 	Events []RecordEvent
+
+	// Usage is the canonical usage snapshot for the exchange. Header.Usage is
+	// the cassette/DB projection; new consumers should read this field.
+	Usage usage.Usage
 
 	// MinimalCassette omits derived routing/harness/usage/timeline data from
 	// the prelude while the full LogInfo.Header still feeds the database index.
