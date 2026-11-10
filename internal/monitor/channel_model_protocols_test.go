@@ -48,3 +48,35 @@ func TestChannelModelProtocolsRoundTrip(t *testing.T) {
 		t.Fatalf("stored protocols = %+v", records)
 	}
 }
+
+func TestChannelDetailIncludesModelProtocols(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID: "c", Name: "C", BaseURL: "https://example.invalid/v1", ProviderPreset: "openai",
+		APIType: "chat_completions", ProtocolFamily: "openai_compatible", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertChannelModel("c", store.ChannelModelRecord{
+		Model: "m", Source: "manual", Enabled: true,
+		ProtocolsJSON: `{"messages":{"enabled":true,"wire_model":"wire-msg"}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/channels/c", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var item channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &item); err != nil {
+		t.Fatal(err)
+	}
+	if len(item.ModelsUsage) != 1 || item.ModelsUsage[0].Protocols["messages"].WireModel != "wire-msg" {
+		t.Fatalf("models_usage = %+v", item.ModelsUsage)
+	}
+}

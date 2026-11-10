@@ -80,3 +80,5 @@
 - 跨协议流式转换未实现；
 - OAuth 未实现，保持官方 API key；
 - 浏览器 E2E 未纳入本次自动化。
+
+- `/data/gateway-test` 真实环境验证与问题记录见 [`GATEWAY_TEST_REPORT.md`](./GATEWAY_TEST_REPORT.md)。

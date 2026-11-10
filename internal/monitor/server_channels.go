@@ -332,6 +332,7 @@ func enrichModelChannelItemFromRecord(item *modelChannelItem, channelRecord stor
 	item.MaxOutputTokens = record.MaxOutputTokens
 	item.CompactHistoryItemThreshold = record.CompactHistoryItemThreshold
 	item.UpstreamModel = record.UpstreamModel
+	item.Protocols = decodeChannelModelProtocols(record.ProtocolsJSON)
 	item.ProfileSource = record.ProfileSource
 	item.ProfileAdoptionStatus = record.ProfileAdoptionStatus
 	item.InputModalities = decodeStringList(record.InputModalitiesJSON)
@@ -371,6 +372,7 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelRecor
 			}
 			if record, ok := byModel[model.Model]; ok {
 				row.Interfaces = channel.EffectiveModelInterfaces(channelRecord, record)
+				row.Protocols = decodeChannelModelProtocols(record.ProtocolsJSON)
 				state := channel.ModelAvailability(channelRecord, record)
 				row.State = string(state)
 				row.Routable = channel.ModelRoutable(channelRecord, record)

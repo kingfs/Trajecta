@@ -455,6 +455,8 @@ export function ProviderDetailPage() {
                     onDetect={() => runModelDetect(model.model)}
                     onDisableResponses={() => runDisableResponses(model.model)}
                     onDelete={() => confirmDeleteModel(model.model)}
+                    onSaveProtocols={(protocols) => saveModelProtocols.mutate({ model: model.model, protocols })}
+                    savingProtocols={saveModelProtocols.isPending}
                   />
                 )) : <EmptyState title={t("channelDetail.noModels")} detail={t("channelDetail.noModelsDetail")} compact />}
               </div>
@@ -709,10 +711,17 @@ function ModelProtocolEditor({ item, onSave, saving }) {
   const [draft, setDraft] = useState(item.protocols || {});
   useEffect(() => setDraft(item.protocols || {}), [item.protocols]);
   const update = (protocol, key, value) => {
-    setDraft((current) => ({
-      ...current,
-      [protocol]: { ...(current[protocol] || { enabled: false, wire_model: "" }), [key]: value },
-    }));
+    setDraft((current) => {
+      const existing = current[protocol] || { enabled: false, wire_model: "" };
+      const next = { ...existing, [key]: value };
+      // Typing a wire model for an inherited protocol is an explicit opt-in;
+      // otherwise the row would save as disabled and silently drop the
+      // protocol the operator just configured.
+      if (!current[protocol] && key === "wire_model" && String(value).trim() !== "") {
+        next.enabled = true;
+      }
+      return { ...current, [protocol]: next };
+    });
   };
   return (
     <div className="provider-model-protocols">
