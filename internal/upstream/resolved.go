@@ -461,35 +461,30 @@ func (u ResolvedUpstream) buildURL(baseURL, clientPath, family string) (string, 
 }
 
 func (u ResolvedUpstream) ApplyAuthHeaders(header http.Header) {
-	if header == nil || u.APIKey == "" {
-		applyStaticHeaders(header, u.Headers)
+	if header == nil {
 		return
 	}
+	spec := pkgupstream.AuthSpec{Mode: pkgupstream.AuthModeAPIKey}
 	switch u.RoutingProfile {
 	case RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy:
-		header.Del("Authorization")
-		header.Del("x-api-key")
-		header.Set("api-key", u.APIKey)
+		spec.Header = "api-key"
 	case RoutingProfileAnthropicDefault:
-		header.Del("Authorization")
-		header.Del("api-key")
-		header.Del("x-goog-api-key")
-		header.Set("x-api-key", u.APIKey)
-		if u.APIVersion != "" && header.Get("anthropic-version") == "" {
-			header.Set("anthropic-version", u.APIVersion)
-		}
+		spec.Header = "x-api-key"
 	case RoutingProfileGoogleAIStudio:
-		header.Del("Authorization")
-		header.Del("api-key")
-		header.Del("x-api-key")
-		header.Set("x-goog-api-key", u.APIKey)
+		spec.Header = "x-goog-api-key"
 	default:
-		header.Del("api-key")
-		header.Del("x-api-key")
-		header.Del("x-goog-api-key")
-		header.Set("Authorization", "Bearer "+u.APIKey)
+		spec.Header = "Authorization"
+		spec.Scheme = "Bearer"
 	}
-	applyStaticHeaders(header, u.Headers)
+	if u.APIKey == "" {
+		spec.Mode = pkgupstream.AuthModeNone
+	}
+	resolved := pkgupstream.Resolved{Auth: spec, Headers: u.Headers}
+	req := &http.Request{Header: header}
+	_ = resolved.ApplyAuth(pkgupstream.Credential{APIKey: u.APIKey}, req)
+	if u.RoutingProfile == RoutingProfileAnthropicDefault && u.APIVersion != "" && header.Get("anthropic-version") == "" {
+		header.Set("anthropic-version", u.APIVersion)
+	}
 }
 
 func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {

@@ -124,3 +124,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 - `internal/proxy`：移除 package-local `UsageSniffer` 别名与 alias wrapper，转发路径直接使用 `internal/gateway` 类型/函数。
 
 - `internal/monitor`：trace findings API 合并持久化 analyzer findings 与按需 XIR `detections`，XIR 项标记 `source=xir` 且不含明文值。
+
+- `internal/upstream`：`ApplyAuthHeaders` 委托 `pkg/upstream.ApplyAuth`，内部只保留 Azure/Anthropic/Google 的 header/scheme 选择与 Anthropic version 兼容。

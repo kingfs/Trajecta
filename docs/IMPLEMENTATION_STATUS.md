@@ -227,3 +227,5 @@ Responses audit 属于部分实现，职责边界如下：
 - OAuth 只有类型/接口预留，没有网络流程与凭据表；
 - per-model 多协议 wire name 尚未建模；
 - `plan_engine=route` 尚未设为默认，需继续对比后再决定。
+
+- `internal/upstream` 的鉴权头构造已委托 `pkg/upstream.ApplyAuth`；URL/path 构造仍在 internal，Azure/Vertex 特例保留。
