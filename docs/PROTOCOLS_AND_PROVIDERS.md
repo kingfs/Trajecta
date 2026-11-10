@@ -206,8 +206,12 @@ trajecta provider probe-report
 | --- | --- | --- | --- |
 | `qwen_coding` | 中国 | `https://coding.dashscope.aliyuncs.com/v1` | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
 | `qwen_coding_intl` | 国际 | `https://coding-intl.dashscope.aliyuncs.com/v1` | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
+| `qwen_coding_anthropic` | 中国，仅 Anthropic | - | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
+| `qwen_coding_intl_anthropic` | 国际，仅 Anthropic | - | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
 | `zai_coding` | Z.ai | `https://api.z.ai/api/coding/paas/v4` | `https://api.z.ai/api/anthropic` |
+| `zai_coding_anthropic` | Z.ai，仅 Anthropic | - | `https://api.z.ai/api/anthropic` |
 | `zhipu_coding` | 智谱 BigModel | `https://open.bigmodel.cn/api/coding/paas/v4` | `https://open.bigmodel.cn/api/anthropic` |
+| `zhipu_coding_anthropic` | 智谱，仅 Anthropic | - | `https://open.bigmodel.cn/api/anthropic` |
 | `kimi_coding` | Kimi Code | -（仅 Anthropic Messages） | `https://api.kimi.ai/coding` |
 | `qwen_token_plan` | 中国 | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic` |
 | `qwen_token_plan_intl` | 新加坡 | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic` |

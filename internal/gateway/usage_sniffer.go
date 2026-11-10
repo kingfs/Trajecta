@@ -28,6 +28,9 @@ type UsageSniffer struct {
 }
 
 func (s *UsageSniffer) Read(p []byte) (n int, err error) {
+	if s == nil || s.Source == nil {
+		return 0, io.ErrClosedPipe
+	}
 	n, err = s.Source.Read(p)
 	if n > 0 {
 		if s.TTFTMs != nil && *s.TTFTMs <= 0 && !s.Start.IsZero() {
@@ -35,7 +38,7 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 		}
 		data := p[:n]
 		if s.File != nil {
-			if written, wErr := s.File.Write(data); wErr == nil {
+			if written, wErr := s.File.Write(data); wErr == nil && s.Count != nil {
 				*s.Count += int64(written)
 			}
 		}
@@ -50,6 +53,9 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 }
 
 func (s *UsageSniffer) Close() error {
+	if s == nil {
+		return nil
+	}
 	if s.Pipeline != nil {
 		s.Pipeline.Finalize()
 		if usage, ok := s.Pipeline.Usage(); ok && s.Usage != nil {
@@ -59,6 +65,9 @@ func (s *UsageSniffer) Close() error {
 			events := s.Pipeline.Events()
 			*s.Events = append(*s.Events, events...)
 		}
+	}
+	if s.Source == nil {
+		return nil
 	}
 	return s.Source.Close()
 }

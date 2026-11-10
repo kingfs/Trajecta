@@ -17,7 +17,7 @@ func TestBuiltinPresets(t *testing.T) {
 		"openai", "anthropic", "deepseek", "openrouter", "google",
 		"moonshot", "zhipu", "zai", "minimax", "xai", "groq", "mistral",
 		"together", "fireworks", "cerebras", "github", "azure", "vertex",
-		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "qwen_token_plan", "qwen_token_plan_intl", "zai_coding", "zhipu_coding", "kimi_coding",
+		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "qwen_coding_anthropic", "qwen_coding_intl_anthropic", "qwen_token_plan", "qwen_token_plan_intl", "zai_coding", "zai_coding_anthropic", "zhipu_coding", "zhipu_coding_anthropic", "kimi_coding",
 	}
 	byID := make(map[string]Preset, len(presets))
 	for _, preset := range presets {
@@ -322,6 +322,30 @@ func TestCodingPlanPresetsUseDedicatedEndpoints(t *testing.T) {
 			if got := preset.Endpoints[xir.ProtocolMessages]; got != "https://api.kimi.ai/coding" {
 				t.Fatalf("kimi messages endpoint = %q", got)
 			}
+		}
+		if preset.Auth.Mode != AuthModeAPIKey || preset.Auth.Scheme != "Bearer" {
+			t.Fatalf("%s auth = %+v", tc.id, preset.Auth)
+		}
+	}
+}
+
+func TestAnthropicCodingPlanPresets(t *testing.T) {
+	cases := []struct {
+		id       string
+		messages string
+	}{
+		{"qwen_coding_anthropic", "https://coding.dashscope.aliyuncs.com/apps/anthropic"},
+		{"qwen_coding_intl_anthropic", "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"},
+		{"zai_coding_anthropic", "https://api.z.ai/api/anthropic"},
+		{"zhipu_coding_anthropic", "https://open.bigmodel.cn/api/anthropic"},
+	}
+	for _, tc := range cases {
+		preset, ok := LookupPreset(tc.id)
+		if !ok {
+			t.Fatalf("LookupPreset(%q) not found", tc.id)
+		}
+		if got := preset.Endpoints[xir.ProtocolMessages]; got != tc.messages {
+			t.Fatalf("%s messages endpoint = %q, want %q", tc.id, got, tc.messages)
 		}
 		if preset.Auth.Mode != AuthModeAPIKey || preset.Auth.Scheme != "Bearer" {
 			t.Fatalf("%s auth = %+v", tc.id, preset.Auth)

@@ -196,6 +196,9 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if byID["qwen_coding"].Endpoints["chat_completions"] != "https://coding.dashscope.aliyuncs.com/v1" {
 		t.Fatalf("qwen_coding preset = %+v", byID["qwen_coding"])
 	}
+	if byID["qwen_coding_anthropic"].ProtocolFamily != "anthropic_messages" || byID["qwen_coding_anthropic"].Endpoints["messages"] != "https://coding.dashscope.aliyuncs.com/apps/anthropic" {
+		t.Fatalf("qwen_coding_anthropic preset = %+v", byID["qwen_coding_anthropic"])
+	}
 	if byID["qwen_token_plan"].Endpoints["chat_completions"] != "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("qwen_token_plan preset = %+v", byID["qwen_token_plan"])
 	}

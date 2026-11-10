@@ -54,3 +54,20 @@ func TestResponsePipelineRestoresClientBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUsageSnifferWithoutCountOrSourceIsSafe(t *testing.T) {
+	sniffer := &UsageSniffer{Source: io.NopCloser(bytes.NewReader([]byte("x"))), File: &bytes.Buffer{}}
+	if _, err := io.ReadAll(sniffer); err != nil {
+		t.Fatal(err)
+	}
+	if err := sniffer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var nilSniffer *UsageSniffer
+	if _, err := nilSniffer.Read(make([]byte, 1)); err == nil {
+		t.Fatal("nil sniffer read did not error")
+	}
+	if err := nilSniffer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
