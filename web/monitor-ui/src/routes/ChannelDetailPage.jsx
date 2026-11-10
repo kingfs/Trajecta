@@ -146,6 +146,13 @@ export function ProviderDetailPage() {
     },
   });
 
+  const saveModelProtocols = useWriteMutation({
+    mutationFn: ({ model, protocols }) => patchJSON(apiPaths.providerModel(effectiveProviderID, model), { protocols }),
+    success: "channelDetail.testSaved",
+    error: "channelDetail.updateModelError",
+    onSuccess: reload,
+  });
+
   // The explicit per-model detect button overwrites the stored interfaces.
   const detectModel = useWriteMutation({
     mutationFn: ({ model }) => postJSON(apiPaths.providerModelDetect, buildModelDetectPayload({ channelID: effectiveProviderID, model, overwrite: true })),
@@ -621,6 +628,8 @@ function ProviderModelRow({
   onDetect,
   onDisableResponses,
   onDelete,
+  onSaveProtocols,
+  savingProtocols,
 }) {
   const { t } = useI18n();
   const summary = item.summary || {};
@@ -671,6 +680,7 @@ function ProviderModelRow({
         {item.enabled && !providerEnabled ? <InlineTag tone="gold">{t("channelDetail.blockedProviderDisabled")}</InlineTag> : null}
       </div>
       <InterfaceChipRow chips={interfaceChipsOrUnknown(item.interfaces)} />
+      <ModelProtocolEditor item={item} onSave={onSaveProtocols} saving={savingProtocols} />
       {detecting ? <ModelTestPending labelKey="channelDetail.detecting" /> : detectResult ? <ModelDetectResult result={detectResult} /> : null}
       {testing ? <ModelTestPending /> : testResult ? (
         <ModelTestResult result={testResult} disabling={disablingResponses} onDisableResponses={onDisableResponses} />
@@ -682,6 +692,51 @@ function ProviderModelRow({
         <Metric label="rpm" value={formatCount(summary.current_rpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_rpm ?? 0) })} />
         <Metric label="tpm" value={formatCount(summary.current_tpm ?? 0)} detail={t("overview.rateAvgDetail", { avg: formatRateAvg(summary.avg_tpm ?? 0) })} />
       </div>
+    </div>
+  );
+}
+
+const MODEL_PROTOCOLS = [
+  ["chat_completions", "channels.interfaceChat"],
+  ["responses", "channels.interfaceNativeResponses"],
+  ["messages", "channels.interfaceMessages"],
+  ["gemini", "channels.interfaceGenerate"],
+];
+
+function ModelProtocolEditor({ item, onSave, saving }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(item.protocols || {});
+  useEffect(() => setDraft(item.protocols || {}), [item.protocols]);
+  const update = (protocol, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      [protocol]: { ...(current[protocol] || { enabled: false, wire_model: "" }), [key]: value },
+    }));
+  };
+  return (
+    <div className="provider-model-protocols">
+      <Button variant="ghost" size="sm" type="button" onClick={() => setOpen((value) => !value)}>
+        {open ? t("common.hide") : t("channelDetail.protocols")}
+      </Button>
+      {open ? (
+        <div className="provider-form">
+          <p className="trace-subline provider-form-wide">{t("channelDetail.protocolsHint")}</p>
+          {MODEL_PROTOCOLS.map(([protocol, labelKey]) => {
+            const entry = draft[protocol] || { enabled: false, wire_model: "" };
+            return (
+              <div className="provider-form-wide" key={protocol} style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr auto", gap: 8, alignItems: "center" }}>
+                <span>{t(labelKey)}</span>
+                <Input value={entry.wire_model || ""} onChange={(event) => update(protocol, "wire_model", event.target.value)} placeholder={t("channelDetail.protocolWireModel")} />
+                <Switch checked={Boolean(entry.enabled)} onChange={(enabled) => update(protocol, "enabled", enabled)} label={`${t(labelKey)} enabled`} />
+              </div>
+            );
+          })}
+          <div className="provider-form-actions provider-form-wide">
+            <Button variant="primary" type="button" disabled={saving} onClick={() => onSave(draft)}>{saving ? t("common.saving") : t("common.save")}</Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
