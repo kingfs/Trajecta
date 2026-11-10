@@ -4335,12 +4335,16 @@ a:focus-visible {
   max-width: 280px;
 }
 
+.provider-catalog-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .provider-catalog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 8px;
-  max-height: 300px;
-  overflow: auto;
   padding: 2px;
 }
 
@@ -4429,4 +4433,22 @@ a:focus-visible {
   .provider-selected-summary {
     grid-template-columns: 1fr;
   }
+}
+
+/* Catalog cards: rows must grow with wrapped protocol labels; the old fixed
+   66px row let a long card overflow into the next row. */
+.provider-catalog-grid {
+  align-items: start;
+  grid-auto-rows: minmax(66px, auto);
+}
+
+.provider-catalog-card {
+  align-self: start;
+  min-width: 0;
+  height: auto;
+  overflow: hidden;
+}
+
+.provider-catalog-card span {
+  overflow-wrap: anywhere;
 }

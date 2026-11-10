@@ -439,7 +439,8 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                   </div>
                   <Input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder={t("providers.searchProviders")} aria-label={t("providers.searchProviders")} />
                 </div>
-                <div className="provider-catalog-grid">
+                <div className="provider-catalog-scroll">
+                  <div className="provider-catalog-grid">
                   {filteredCatalog.map((item) => (
                     <button
                       key={item.id}
@@ -450,10 +451,10 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                     >
                       <strong>{item.name || item.id}</strong>
                       <span>{protocolLabels(item.protocols, t).join(" · ") || "—"}</span>
-                      {item.models?.no_list ? <span className="trace-subline">{t("providers.noModelListHint")}</span> : null}
                     </button>
                   ))}
                   {!filteredCatalog.length ? <p className="trace-subline provider-form-wide">{t("providers.catalogEmpty")}</p> : null}
+                  </div>
                 </div>
               </div>
               {selectedCatalogItem ? (
@@ -462,6 +463,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                     <p className="eyebrow">{t("providers.selectedProvider")}</p>
                     <strong>{selectedCatalogItem.name || selectedCatalogItem.id}</strong>
                     <p className="trace-subline">{selectedPreset?.notes || selectedCatalogItem.notes || ""}</p>
+                    {selectedCatalogItem.models?.no_list ? <p className="trace-subline">{t("providers.noModelListHint")}</p> : null}
                   </div>
                   <div className="provider-endpoint-summary">
                     <span>{t("providers.baseURL")}</span>
@@ -481,13 +483,14 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
               <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="My provider" /></label>
               <label>{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.example.com/v1" spellCheck={false} /></label>
               <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={t("providers.optional")} /></label>
-              <label>{t("providers.protocol")}
+              <label>{t("providers.protocolFamily")}
                 <Select value={form.protocol_family} onValueChange={(next) => updateForm("protocol_family", next)}>
-                  <SelectTrigger aria-label={t("providers.protocol")} className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label={t("providers.protocolFamily")} className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                <span className="trace-subline">{t("providers.protocolFamilyHint")}</span>
               </label>
               <fieldset className="provider-interface-fieldset provider-form-wide">
                 <legend>{t("providers.supportedInterfaces")}</legend>
@@ -515,7 +518,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
           {advancedOpen ? (
             <div className="provider-form provider-form-modal">
               {mode === "official" ? <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} spellCheck={false} /></label> : null}
-              <ProviderAdvancedFields form={form} presetState={customRoutingState} onChange={updateForm} includeHeaders={false} />
+              <ProviderAdvancedFields form={form} presetState={customRoutingState} onChange={updateForm} includeHeaders={false} showProtocolSelectors={mode === "official"} />
             </div>
           ) : null}
           <DialogFooter>
@@ -731,26 +734,30 @@ function Metric({ label, value, detail = "" }) {
 
 const ENDPOINT_PROTOCOLS = ["chat_completions", "responses", "messages", "gemini"];
 
-export function ProviderAdvancedFields({ form, presetState, onChange, includeHeaders = false }) {
+export function ProviderAdvancedFields({ form, presetState, onChange, includeHeaders = false, showProtocolSelectors = true }) {
   const { t } = useI18n();
   return (
     <>
-      <label>{t("providers.apiType")}
-        <Select value={form.api_type || "chat_completions"} onValueChange={(next) => onChange("api_type", next)}>
-          <SelectTrigger aria-label={t("providers.apiType")} className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {API_TYPE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </label>
-      <label>{t("providers.protocol")}
-        <Select value={form.protocol_family || ""} onValueChange={(next) => onChange("protocol_family", next)}>
-          <SelectTrigger aria-label={t("providers.protocol")} className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </label>
+      {showProtocolSelectors ? (
+        <>
+          <label>{t("providers.apiType")}
+            <Select value={form.api_type || "chat_completions"} onValueChange={(next) => onChange("api_type", next)}>
+              <SelectTrigger aria-label={t("providers.apiType")} className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {API_TYPE_OPTIONS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+          <label>{t("providers.protocol")}
+            <Select value={form.protocol_family || ""} onValueChange={(next) => onChange("protocol_family", next)}>
+              <SelectTrigger aria-label={t("providers.protocol")} className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </label>
+        </>
+      ) : null}
       <label>{t("providers.routingProfile")}
         <Select value={form.routing_profile || ""} onValueChange={(next) => onChange("routing_profile", next)}>
           <SelectTrigger aria-label={t("providers.routingProfile")} className="w-full"><SelectValue /></SelectTrigger>

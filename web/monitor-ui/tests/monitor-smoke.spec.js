@@ -428,6 +428,13 @@ test("channel management renders and supports core actions", async ({ page }) =>
   // The official tab lists the built-in providers directly; clicking one fills
   // the endpoint from the catalog, so only the key and optional models remain.
   const createDialog = page.locator(".provider-create-modal");
+  await expect(createDialog.locator(".provider-catalog-card")).toHaveCount(3);
+  // A wrapped protocol list must grow the card, not spill into the next grid
+  // row. The catalog used to clip these cards to a fixed 66px row.
+  const clippedCard = await createDialog.locator(".provider-catalog-card").evaluateAll((cards) =>
+    cards.some((card) => card.scrollHeight > card.clientHeight + 1),
+  );
+  expect(clippedCard).toBe(false);
   await page.locator(".provider-catalog-card").filter({ hasText: "OpenAI" }).first().click();
   await expect(createDialog.getByText("Selected provider")).toBeVisible();
   await expect(createDialog.locator("code", { hasText: "https://api.openai.example/v1" })).toBeVisible();
@@ -1722,6 +1729,29 @@ function providerCatalogPayload() {
           responses: "https://api.openai.example/v1",
         },
         notes: "Official OpenAI-compatible endpoint.",
+      },
+      {
+        id: "deepseek",
+        name: "DeepSeek",
+        kind: "vendor",
+        protocols: ["chat_completions", "responses", "messages"],
+        endpoints: {
+          chat_completions: "https://api.deepseek.example/v1",
+          responses: "https://api.deepseek.example/v1",
+          messages: "https://api.deepseek.example/anthropic",
+        },
+      },
+      {
+        id: "github_models",
+        name: "GitHub Models",
+        kind: "vendor",
+        protocols: ["chat_completions", "responses", "messages", "gemini"],
+        endpoints: {
+          chat_completions: "https://models.github.example/inference",
+          responses: "https://models.github.example/inference",
+          messages: "https://models.github.example/anthropic",
+          gemini: "https://models.github.example/gemini",
+        },
       },
     ],
   };

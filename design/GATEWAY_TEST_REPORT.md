@@ -366,7 +366,8 @@
 ### 8.3 复测
 
 - Go：`TestChannelCreateAcceptsModels`（事务内创建 2 个启用模型）+ 全量 `go test ./...` 69 包通过。
-- Playwright：新增「two-mode create form」「custom channel create sends manual protocols and models」两条用例；全量 **216 passed / 0 failed / 4 skipped**。
+- Playwright：新增「two-mode create form」「custom channel create sends manual protocols and models」两条用例，另加 catalog 卡片不得裁切/溢出的断言；全量 **216 passed / 0 failed / 4 skipped**。
+- 真实环境追加检查：官方目录卡片按内容自动增高（协议标签换行时行高 66→99px，下一行从 554 开始，不再重叠）；自定义渠道默认只保留「协议族」单选项并在高级选项隐藏重复的 API 类型/协议两个下拉，协议多选仍是唯一的接口选择入口。
 - 真实环境（修复后镜像）：
   - 官方 OpenAI：UI 选中卡片 → Base URL 自动为 `https://api.openai.com/v1`，创建后 `provider_preset=openai`、`model_count=1`，模型为 enabled；
   - 自定义：`provider_preset=""`、Base URL `http://mock-upstream:39099/v1`、协议 chat+messages、2 个模型全部 enabled；随后 `/v1/chat/completions` 与 `/v1/messages` 均 200，mock 收到对应路径；
