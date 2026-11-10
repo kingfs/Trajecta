@@ -217,6 +217,11 @@ type channelModelsResponse struct {
 	RefreshedAt time.Time          `json:"refreshed_at"`
 }
 
+type channelModelProtocol struct {
+	Enabled   bool   `json:"enabled"`
+	WireModel string `json:"wire_model,omitempty"`
+}
+
 type channelModelItem struct {
 	Model       string `json:"model"`
 	DisplayName string `json:"display_name,omitempty"`
@@ -231,18 +236,19 @@ type channelModelItem struct {
 	SupportsEmbeddings      *bool  `json:"supports_embeddings,omitempty"`
 	// Interfaces is the computed effective API surface of this model (model override
 	// wins over channel capability/api_type), not just the raw override columns.
-	Interfaces                  channel.ModelInterfaces `json:"interfaces"`
-	ContextWindow               *int                    `json:"context_window,omitempty"`
-	MaxOutputTokens             *int                    `json:"max_output_tokens,omitempty"`
-	CompactHistoryItemThreshold *int                    `json:"compact_history_item_threshold,omitempty"`
-	UpstreamModel               string                  `json:"upstream_model,omitempty"`
-	ProfileSource               string                  `json:"profile_source,omitempty"`
-	ProfileAdoptionStatus       string                  `json:"profile_adoption_status,omitempty"`
-	InputModalities             []string                `json:"input_modalities,omitempty"`
-	OutputModalities            []string                `json:"output_modalities,omitempty"`
-	FirstSeenAt                 time.Time               `json:"first_seen_at"`
-	LastSeenAt                  time.Time               `json:"last_seen_at"`
-	LastProbeAt                 time.Time               `json:"last_probe_at,omitempty"`
+	Interfaces                  channel.ModelInterfaces         `json:"interfaces"`
+	ContextWindow               *int                            `json:"context_window,omitempty"`
+	MaxOutputTokens             *int                            `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int                            `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string                          `json:"upstream_model,omitempty"`
+	Protocols                   map[string]channelModelProtocol `json:"protocols,omitempty"`
+	ProfileSource               string                          `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string                          `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string                        `json:"input_modalities,omitempty"`
+	OutputModalities            []string                        `json:"output_modalities,omitempty"`
+	FirstSeenAt                 time.Time                       `json:"first_seen_at"`
+	LastSeenAt                  time.Time                       `json:"last_seen_at"`
+	LastProbeAt                 time.Time                       `json:"last_probe_at,omitempty"`
 }
 
 type modelSpecLookupResponse struct {
@@ -369,17 +375,18 @@ type channelHeaderUpdate struct {
 type upstreamCapabilities = config.UpstreamCapabilitiesConfig
 
 type channelModelPatchRequest struct {
-	DisplayName                 *string `json:"display_name"`
-	Enabled                     *bool   `json:"enabled"`
-	SupportsResponses           *bool   `json:"supports_responses"`
-	SupportsChatCompletions     *bool   `json:"supports_chat_completions"`
-	SupportsEmbeddings          *bool   `json:"supports_embeddings"`
-	ContextWindow               *int    `json:"context_window"`
-	MaxOutputTokens             *int    `json:"max_output_tokens"`
-	CompactHistoryItemThreshold *int    `json:"compact_history_item_threshold"`
-	UpstreamModel               *string `json:"upstream_model"`
-	ProfileSource               *string `json:"profile_source"`
-	ProfileAdoptionStatus       *string `json:"profile_adoption_status"`
+	DisplayName                 *string                          `json:"display_name"`
+	Enabled                     *bool                            `json:"enabled"`
+	SupportsResponses           *bool                            `json:"supports_responses"`
+	SupportsChatCompletions     *bool                            `json:"supports_chat_completions"`
+	SupportsEmbeddings          *bool                            `json:"supports_embeddings"`
+	ContextWindow               *int                             `json:"context_window"`
+	MaxOutputTokens             *int                             `json:"max_output_tokens"`
+	CompactHistoryItemThreshold *int                             `json:"compact_history_item_threshold"`
+	UpstreamModel               *string                          `json:"upstream_model"`
+	ProfileSource               *string                          `json:"profile_source"`
+	ProfileAdoptionStatus       *string                          `json:"profile_adoption_status"`
+	Protocols                   *map[string]channelModelProtocol `json:"protocols"`
 }
 
 type channelModelBatchPatchRequest struct {
@@ -471,29 +478,30 @@ type modelDetailResponse struct {
 }
 
 type modelChannelItem struct {
-	ChannelID                   string                  `json:"channel_id"`
-	ChannelName                 string                  `json:"channel_name,omitempty"`
-	Model                       string                  `json:"model"`
-	DisplayName                 string                  `json:"display_name,omitempty"`
-	Enabled                     bool                    `json:"enabled"`
-	ChannelEnabled              bool                    `json:"channel_enabled"`
-	Available                   bool                    `json:"available"`
-	State                       string                  `json:"state"`
-	Routable                    bool                    `json:"routable"`
-	Source                      string                  `json:"source"`
-	SupportsResponses           *bool                   `json:"supports_responses,omitempty"`
-	SupportsChatCompletions     *bool                   `json:"supports_chat_completions,omitempty"`
-	SupportsEmbeddings          *bool                   `json:"supports_embeddings,omitempty"`
-	Interfaces                  channel.ModelInterfaces `json:"interfaces"`
-	ContextWindow               *int                    `json:"context_window,omitempty"`
-	MaxOutputTokens             *int                    `json:"max_output_tokens,omitempty"`
-	CompactHistoryItemThreshold *int                    `json:"compact_history_item_threshold,omitempty"`
-	UpstreamModel               string                  `json:"upstream_model,omitempty"`
-	ProfileSource               string                  `json:"profile_source,omitempty"`
-	ProfileAdoptionStatus       string                  `json:"profile_adoption_status,omitempty"`
-	InputModalities             []string                `json:"input_modalities,omitempty"`
-	OutputModalities            []string                `json:"output_modalities,omitempty"`
-	Summary                     usageSummaryView        `json:"summary"`
+	ChannelID                   string                          `json:"channel_id"`
+	ChannelName                 string                          `json:"channel_name,omitempty"`
+	Model                       string                          `json:"model"`
+	DisplayName                 string                          `json:"display_name,omitempty"`
+	Enabled                     bool                            `json:"enabled"`
+	ChannelEnabled              bool                            `json:"channel_enabled"`
+	Available                   bool                            `json:"available"`
+	State                       string                          `json:"state"`
+	Routable                    bool                            `json:"routable"`
+	Source                      string                          `json:"source"`
+	SupportsResponses           *bool                           `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool                           `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool                           `json:"supports_embeddings,omitempty"`
+	Interfaces                  channel.ModelInterfaces         `json:"interfaces"`
+	ContextWindow               *int                            `json:"context_window,omitempty"`
+	MaxOutputTokens             *int                            `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int                            `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string                          `json:"upstream_model,omitempty"`
+	Protocols                   map[string]channelModelProtocol `json:"protocols,omitempty"`
+	ProfileSource               string                          `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string                          `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string                        `json:"input_modalities,omitempty"`
+	OutputModalities            []string                        `json:"output_modalities,omitempty"`
+	Summary                     usageSummaryView                `json:"summary"`
 }
 
 func modelListAPIHandler(st *store.Store) http.HandlerFunc {
@@ -1345,7 +1353,23 @@ func channelModelRecordFromPatch(model string, req channelModelPatchRequest) sto
 	if req.ProfileAdoptionStatus != nil {
 		record.ProfileAdoptionStatus = strings.TrimSpace(*req.ProfileAdoptionStatus)
 	}
+	if req.Protocols != nil {
+		data, _ := json.Marshal(*req.Protocols)
+		record.ProtocolsJSON = string(data)
+	}
 	return record
+}
+
+func decodeChannelModelProtocols(raw string) map[string]channelModelProtocol {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	out := map[string]channelModelProtocol{}
+	if json.Unmarshal([]byte(raw), &out) != nil || len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.ModelAliasRecord) store.ModelAliasRecord {
@@ -1752,6 +1776,7 @@ func channelModelItemFromRecord(channelRecord store.ChannelConfigRecord, record 
 		MaxOutputTokens:             record.MaxOutputTokens,
 		CompactHistoryItemThreshold: record.CompactHistoryItemThreshold,
 		UpstreamModel:               record.UpstreamModel,
+		Protocols:                   decodeChannelModelProtocols(record.ProtocolsJSON),
 		ProfileSource:               record.ProfileSource,
 		ProfileAdoptionStatus:       record.ProfileAdoptionStatus,
 		InputModalities:             decodeStringList(record.InputModalitiesJSON),

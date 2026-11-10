@@ -244,6 +244,20 @@ func (_c *ChannelModelCreate) SetNillableRawModelJSON(v *string) *ChannelModelCr
 	return _c
 }
 
+// SetProtocolsJSON sets the "protocols_json" field.
+func (_c *ChannelModelCreate) SetProtocolsJSON(v string) *ChannelModelCreate {
+	_c.mutation.SetProtocolsJSON(v)
+	return _c
+}
+
+// SetNillableProtocolsJSON sets the "protocols_json" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableProtocolsJSON(v *string) *ChannelModelCreate {
+	if v != nil {
+		_c.SetProtocolsJSON(*v)
+	}
+	return _c
+}
+
 // SetFirstSeenAt sets the "first_seen_at" field.
 func (_c *ChannelModelCreate) SetFirstSeenAt(v time.Time) *ChannelModelCreate {
 	_c.mutation.SetFirstSeenAt(v)
@@ -357,6 +371,10 @@ func (_c *ChannelModelCreate) defaults() {
 		v := channelmodel.DefaultRawModelJSON
 		_c.mutation.SetRawModelJSON(v)
 	}
+	if _, ok := _c.mutation.ProtocolsJSON(); !ok {
+		v := channelmodel.DefaultProtocolsJSON
+		_c.mutation.SetProtocolsJSON(v)
+	}
 	if _, ok := _c.mutation.FirstSeenAt(); !ok {
 		v := channelmodel.DefaultFirstSeenAt()
 		_c.mutation.SetFirstSeenAt(v)
@@ -411,6 +429,9 @@ func (_c *ChannelModelCreate) check() error {
 	}
 	if _, ok := _c.mutation.RawModelJSON(); !ok {
 		return &ValidationError{Name: "raw_model_json", err: errors.New(`dao: missing required field "ChannelModel.raw_model_json"`)}
+	}
+	if _, ok := _c.mutation.ProtocolsJSON(); !ok {
+		return &ValidationError{Name: "protocols_json", err: errors.New(`dao: missing required field "ChannelModel.protocols_json"`)}
 	}
 	if _, ok := _c.mutation.FirstSeenAt(); !ok {
 		return &ValidationError{Name: "first_seen_at", err: errors.New(`dao: missing required field "ChannelModel.first_seen_at"`)}
@@ -513,6 +534,10 @@ func (_c *ChannelModelCreate) createSpec() (*ChannelModel, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.RawModelJSON(); ok {
 		_spec.SetField(channelmodel.FieldRawModelJSON, field.TypeString, value)
 		_node.RawModelJSON = value
+	}
+	if value, ok := _c.mutation.ProtocolsJSON(); ok {
+		_spec.SetField(channelmodel.FieldProtocolsJSON, field.TypeString, value)
+		_node.ProtocolsJSON = value
 	}
 	if value, ok := _c.mutation.FirstSeenAt(); ok {
 		_spec.SetField(channelmodel.FieldFirstSeenAt, field.TypeTime, value)
@@ -851,6 +876,18 @@ func (u *ChannelModelUpsert) SetRawModelJSON(v string) *ChannelModelUpsert {
 // UpdateRawModelJSON sets the "raw_model_json" field to the value that was provided on create.
 func (u *ChannelModelUpsert) UpdateRawModelJSON() *ChannelModelUpsert {
 	u.SetExcluded(channelmodel.FieldRawModelJSON)
+	return u
+}
+
+// SetProtocolsJSON sets the "protocols_json" field.
+func (u *ChannelModelUpsert) SetProtocolsJSON(v string) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldProtocolsJSON, v)
+	return u
+}
+
+// UpdateProtocolsJSON sets the "protocols_json" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateProtocolsJSON() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldProtocolsJSON)
 	return u
 }
 
@@ -1255,6 +1292,20 @@ func (u *ChannelModelUpsertOne) SetRawModelJSON(v string) *ChannelModelUpsertOne
 func (u *ChannelModelUpsertOne) UpdateRawModelJSON() *ChannelModelUpsertOne {
 	return u.Update(func(s *ChannelModelUpsert) {
 		s.UpdateRawModelJSON()
+	})
+}
+
+// SetProtocolsJSON sets the "protocols_json" field.
+func (u *ChannelModelUpsertOne) SetProtocolsJSON(v string) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProtocolsJSON(v)
+	})
+}
+
+// UpdateProtocolsJSON sets the "protocols_json" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateProtocolsJSON() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProtocolsJSON()
 	})
 }
 
@@ -1830,6 +1881,20 @@ func (u *ChannelModelUpsertBulk) SetRawModelJSON(v string) *ChannelModelUpsertBu
 func (u *ChannelModelUpsertBulk) UpdateRawModelJSON() *ChannelModelUpsertBulk {
 	return u.Update(func(s *ChannelModelUpsert) {
 		s.UpdateRawModelJSON()
+	})
+}
+
+// SetProtocolsJSON sets the "protocols_json" field.
+func (u *ChannelModelUpsertBulk) SetProtocolsJSON(v string) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProtocolsJSON(v)
+	})
+}
+
+// UpdateProtocolsJSON sets the "protocols_json" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateProtocolsJSON() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProtocolsJSON()
 	})
 }
 

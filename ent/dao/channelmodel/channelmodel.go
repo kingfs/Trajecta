@@ -47,6 +47,8 @@ const (
 	FieldOutputModalitiesJSON = "output_modalities_json"
 	// FieldRawModelJSON holds the string denoting the raw_model_json field in the database.
 	FieldRawModelJSON = "raw_model_json"
+	// FieldProtocolsJSON holds the string denoting the protocols_json field in the database.
+	FieldProtocolsJSON = "protocols_json"
 	// FieldFirstSeenAt holds the string denoting the first_seen_at field in the database.
 	FieldFirstSeenAt = "first_seen_at"
 	// FieldLastSeenAt holds the string denoting the last_seen_at field in the database.
@@ -77,6 +79,7 @@ var Columns = []string{
 	FieldInputModalitiesJSON,
 	FieldOutputModalitiesJSON,
 	FieldRawModelJSON,
+	FieldProtocolsJSON,
 	FieldFirstSeenAt,
 	FieldLastSeenAt,
 	FieldLastProbeAt,
@@ -115,6 +118,8 @@ var (
 	DefaultOutputModalitiesJSON string
 	// DefaultRawModelJSON holds the default value on creation for the "raw_model_json" field.
 	DefaultRawModelJSON string
+	// DefaultProtocolsJSON holds the default value on creation for the "protocols_json" field.
+	DefaultProtocolsJSON string
 	// DefaultFirstSeenAt holds the default value on creation for the "first_seen_at" field.
 	DefaultFirstSeenAt func() time.Time
 	// DefaultLastSeenAt holds the default value on creation for the "last_seen_at" field.
@@ -212,6 +217,11 @@ func ByOutputModalitiesJSON(opts ...sql.OrderTermOption) OrderOption {
 // ByRawModelJSON orders the results by the raw_model_json field.
 func ByRawModelJSON(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRawModelJSON, opts...).ToFunc()
+}
+
+// ByProtocolsJSON orders the results by the protocols_json field.
+func ByProtocolsJSON(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProtocolsJSON, opts...).ToFunc()
 }
 
 // ByFirstSeenAt orders the results by the first_seen_at field.

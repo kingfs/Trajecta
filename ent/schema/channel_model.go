@@ -37,6 +37,7 @@ func (ChannelModel) Fields() []ent.Field {
 		field.String("input_modalities_json").Default("[]"),
 		field.String("output_modalities_json").Default("[]"),
 		field.String("raw_model_json").Default("{}"),
+		field.String("protocols_json").Default("{}"),
 		field.Time("first_seen_at").Default(time.Now),
 		field.Time("last_seen_at").Default(time.Now),
 		field.Time("last_probe_at").Optional().Nillable(),

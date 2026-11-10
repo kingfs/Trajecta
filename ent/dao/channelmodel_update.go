@@ -346,6 +346,20 @@ func (_u *ChannelModelUpdate) SetNillableRawModelJSON(v *string) *ChannelModelUp
 	return _u
 }
 
+// SetProtocolsJSON sets the "protocols_json" field.
+func (_u *ChannelModelUpdate) SetProtocolsJSON(v string) *ChannelModelUpdate {
+	_u.mutation.SetProtocolsJSON(v)
+	return _u
+}
+
+// SetNillableProtocolsJSON sets the "protocols_json" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableProtocolsJSON(v *string) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetProtocolsJSON(*v)
+	}
+	return _u
+}
+
 // SetFirstSeenAt sets the "first_seen_at" field.
 func (_u *ChannelModelUpdate) SetFirstSeenAt(v time.Time) *ChannelModelUpdate {
 	_u.mutation.SetFirstSeenAt(v)
@@ -545,6 +559,9 @@ func (_u *ChannelModelUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.RawModelJSON(); ok {
 		_spec.SetField(channelmodel.FieldRawModelJSON, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProtocolsJSON(); ok {
+		_spec.SetField(channelmodel.FieldProtocolsJSON, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.FirstSeenAt(); ok {
 		_spec.SetField(channelmodel.FieldFirstSeenAt, field.TypeTime, value)
@@ -898,6 +915,20 @@ func (_u *ChannelModelUpdateOne) SetNillableRawModelJSON(v *string) *ChannelMode
 	return _u
 }
 
+// SetProtocolsJSON sets the "protocols_json" field.
+func (_u *ChannelModelUpdateOne) SetProtocolsJSON(v string) *ChannelModelUpdateOne {
+	_u.mutation.SetProtocolsJSON(v)
+	return _u
+}
+
+// SetNillableProtocolsJSON sets the "protocols_json" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableProtocolsJSON(v *string) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetProtocolsJSON(*v)
+	}
+	return _u
+}
+
 // SetFirstSeenAt sets the "first_seen_at" field.
 func (_u *ChannelModelUpdateOne) SetFirstSeenAt(v time.Time) *ChannelModelUpdateOne {
 	_u.mutation.SetFirstSeenAt(v)
@@ -1127,6 +1158,9 @@ func (_u *ChannelModelUpdateOne) sqlSave(ctx context.Context) (_node *ChannelMod
 	}
 	if value, ok := _u.mutation.RawModelJSON(); ok {
 		_spec.SetField(channelmodel.FieldRawModelJSON, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProtocolsJSON(); ok {
+		_spec.SetField(channelmodel.FieldProtocolsJSON, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.FirstSeenAt(); ok {
 		_spec.SetField(channelmodel.FieldFirstSeenAt, field.TypeTime, value)

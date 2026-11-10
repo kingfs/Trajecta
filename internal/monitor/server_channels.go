@@ -247,6 +247,7 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		UpstreamModel:                req.UpstreamModel,
 		ProfileSource:                req.ProfileSource,
 		ProfileAdoptionStatus:        req.ProfileAdoptionStatus,
+		ProtocolsJSON:                protocolsJSONPatch(req.Protocols),
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		record, err = st.UpsertChannelModel(channelID, channelModelRecordFromPatch(model, req))
@@ -264,6 +265,18 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 
 // channelModelItemFor answers with the state of one model after a write, so the
 // UI never has to guess whether the switch just took effect.
+func protocolsJSONPatch(protocols *map[string]channelModelProtocol) *string {
+	if protocols == nil {
+		return nil
+	}
+	data, err := json.Marshal(*protocols)
+	if err != nil {
+		return nil
+	}
+	value := string(data)
+	return &value
+}
+
 func channelModelItemFor(st *store.Store, channelID string, record store.ChannelModelRecord) channelModelItem {
 	channelRecord, err := st.GetChannelConfig(channelID)
 	if err != nil {

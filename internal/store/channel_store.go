@@ -73,6 +73,7 @@ type ChannelModelRecord struct {
 	InputModalitiesJSON         string
 	OutputModalitiesJSON        string
 	RawModelJSON                string
+	ProtocolsJSON               string
 	FirstSeenAt                 time.Time
 	LastSeenAt                  time.Time
 	LastProbeAt                 time.Time
@@ -98,6 +99,7 @@ type ChannelModelProfilePatch struct {
 	UpstreamModel                *string
 	ProfileSource                *string
 	ProfileAdoptionStatus        *string
+	ProtocolsJSON                *string
 }
 
 type ChannelProbeRunRecord struct {
@@ -417,6 +419,7 @@ func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRec
 			SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 			SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 			SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+			SetProtocolsJSON(defaultJSON(record.ProtocolsJSON, "{}")).
 			SetFirstSeenAt(firstSeenAt.UTC()).
 			SetLastSeenAt(lastSeenAt.UTC())
 		if !record.LastProbeAt.IsZero() {
@@ -473,6 +476,7 @@ func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) 
 		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+		SetProtocolsJSON(defaultJSON(record.ProtocolsJSON, "{}")).
 		SetFirstSeenAt(record.FirstSeenAt.UTC()).
 		SetLastSeenAt(record.LastSeenAt.UTC())
 	if !record.LastProbeAt.IsZero() {
@@ -669,6 +673,7 @@ func channelModelCreateBuilder(client *dao.Client, channelID string, record Chan
 		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+		SetProtocolsJSON(defaultJSON(record.ProtocolsJSON, "{}")).
 		SetFirstSeenAt(record.FirstSeenAt.UTC()).
 		SetLastSeenAt(record.LastSeenAt.UTC())
 	return create
@@ -750,6 +755,9 @@ func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch 
 	}
 	if patch.ProfileAdoptionStatus != nil {
 		update.SetProfileAdoptionStatus(strings.TrimSpace(*patch.ProfileAdoptionStatus))
+	}
+	if patch.ProtocolsJSON != nil {
+		update.SetProtocolsJSON(defaultJSON(*patch.ProtocolsJSON, "{}"))
 	}
 	if _, err := update.Save(context.Background()); err != nil {
 		return ChannelModelRecord{}, err
@@ -1282,6 +1290,7 @@ func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 		InputModalitiesJSON:   row.InputModalitiesJSON,
 		OutputModalitiesJSON:  row.OutputModalitiesJSON,
 		RawModelJSON:          row.RawModelJSON,
+		ProtocolsJSON:         row.ProtocolsJSON,
 		FirstSeenAt:           row.FirstSeenAt,
 		LastSeenAt:            row.LastSeenAt,
 	}

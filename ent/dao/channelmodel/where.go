@@ -139,6 +139,11 @@ func RawModelJSON(v string) predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldEQ(FieldRawModelJSON, v))
 }
 
+// ProtocolsJSON applies equality check predicate on the "protocols_json" field. It's identical to ProtocolsJSONEQ.
+func ProtocolsJSON(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProtocolsJSON, v))
+}
+
 // FirstSeenAt applies equality check predicate on the "first_seen_at" field. It's identical to FirstSeenAtEQ.
 func FirstSeenAt(v time.Time) predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldEQ(FieldFirstSeenAt, v))
@@ -1112,6 +1117,71 @@ func RawModelJSONEqualFold(v string) predicate.ChannelModel {
 // RawModelJSONContainsFold applies the ContainsFold predicate on the "raw_model_json" field.
 func RawModelJSONContainsFold(v string) predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldContainsFold(FieldRawModelJSON, v))
+}
+
+// ProtocolsJSONEQ applies the EQ predicate on the "protocols_json" field.
+func ProtocolsJSONEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONNEQ applies the NEQ predicate on the "protocols_json" field.
+func ProtocolsJSONNEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONIn applies the In predicate on the "protocols_json" field.
+func ProtocolsJSONIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldProtocolsJSON, vs...))
+}
+
+// ProtocolsJSONNotIn applies the NotIn predicate on the "protocols_json" field.
+func ProtocolsJSONNotIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldProtocolsJSON, vs...))
+}
+
+// ProtocolsJSONGT applies the GT predicate on the "protocols_json" field.
+func ProtocolsJSONGT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONGTE applies the GTE predicate on the "protocols_json" field.
+func ProtocolsJSONGTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONLT applies the LT predicate on the "protocols_json" field.
+func ProtocolsJSONLT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONLTE applies the LTE predicate on the "protocols_json" field.
+func ProtocolsJSONLTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONContains applies the Contains predicate on the "protocols_json" field.
+func ProtocolsJSONContains(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContains(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONHasPrefix applies the HasPrefix predicate on the "protocols_json" field.
+func ProtocolsJSONHasPrefix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasPrefix(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONHasSuffix applies the HasSuffix predicate on the "protocols_json" field.
+func ProtocolsJSONHasSuffix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasSuffix(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONEqualFold applies the EqualFold predicate on the "protocols_json" field.
+func ProtocolsJSONEqualFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEqualFold(FieldProtocolsJSON, v))
+}
+
+// ProtocolsJSONContainsFold applies the ContainsFold predicate on the "protocols_json" field.
+func ProtocolsJSONContainsFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContainsFold(FieldProtocolsJSON, v))
 }
 
 // FirstSeenAtEQ applies the EQ predicate on the "first_seen_at" field.

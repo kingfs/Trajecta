@@ -197,6 +197,7 @@ var (
 		{Name: "input_modalities_json", Type: field.TypeString, Default: "[]"},
 		{Name: "output_modalities_json", Type: field.TypeString, Default: "[]"},
 		{Name: "raw_model_json", Type: field.TypeString, Default: "{}"},
+		{Name: "protocols_json", Type: field.TypeString, Default: "{}"},
 		{Name: "first_seen_at", Type: field.TypeTime},
 		{Name: "last_seen_at", Type: field.TypeTime},
 		{Name: "last_probe_at", Type: field.TypeTime, Nullable: true},

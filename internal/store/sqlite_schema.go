@@ -178,6 +178,7 @@ var sqliteSchemaStatements = []string{
 			input_modalities_json TEXT NOT NULL DEFAULT '[]',
 			output_modalities_json TEXT NOT NULL DEFAULT '[]',
 			raw_model_json TEXT NOT NULL DEFAULT '{}',
+			protocols_json TEXT NOT NULL DEFAULT '{}',
 			first_seen_at datetime NOT NULL,
 			last_seen_at datetime NOT NULL,
 			last_probe_at datetime NULL
@@ -772,6 +773,9 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 		return err
 	}
 	if err := s.ensureColumn("channel_models", "profile_adoption_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "protocols_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.ensureSessionSummariesSchema(); err != nil {

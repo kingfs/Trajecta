@@ -4826,6 +4826,7 @@ type ChannelModelMutation struct {
 	input_modalities_json             *string
 	output_modalities_json            *string
 	raw_model_json                    *string
+	protocols_json                    *string
 	first_seen_at                     *time.Time
 	last_seen_at                      *time.Time
 	last_probe_at                     *time.Time
@@ -5749,6 +5750,42 @@ func (m *ChannelModelMutation) ResetRawModelJSON() {
 	m.raw_model_json = nil
 }
 
+// SetProtocolsJSON sets the "protocols_json" field.
+func (m *ChannelModelMutation) SetProtocolsJSON(s string) {
+	m.protocols_json = &s
+}
+
+// ProtocolsJSON returns the value of the "protocols_json" field in the mutation.
+func (m *ChannelModelMutation) ProtocolsJSON() (r string, exists bool) {
+	v := m.protocols_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProtocolsJSON returns the old "protocols_json" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldProtocolsJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProtocolsJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProtocolsJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProtocolsJSON: %w", err)
+	}
+	return oldValue.ProtocolsJSON, nil
+}
+
+// ResetProtocolsJSON resets all changes to the "protocols_json" field.
+func (m *ChannelModelMutation) ResetProtocolsJSON() {
+	m.protocols_json = nil
+}
+
 // SetFirstSeenAt sets the "first_seen_at" field.
 func (m *ChannelModelMutation) SetFirstSeenAt(t time.Time) {
 	m.first_seen_at = &t
@@ -5904,7 +5941,7 @@ func (m *ChannelModelMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelModelMutation) Fields() []string {
-	fields := make([]string, 0, 20)
+	fields := make([]string, 0, 21)
 	if m.channel_id != nil {
 		fields = append(fields, channelmodel.FieldChannelID)
 	}
@@ -5955,6 +5992,9 @@ func (m *ChannelModelMutation) Fields() []string {
 	}
 	if m.raw_model_json != nil {
 		fields = append(fields, channelmodel.FieldRawModelJSON)
+	}
+	if m.protocols_json != nil {
+		fields = append(fields, channelmodel.FieldProtocolsJSON)
 	}
 	if m.first_seen_at != nil {
 		fields = append(fields, channelmodel.FieldFirstSeenAt)
@@ -6007,6 +6047,8 @@ func (m *ChannelModelMutation) Field(name string) (ent.Value, bool) {
 		return m.OutputModalitiesJSON()
 	case channelmodel.FieldRawModelJSON:
 		return m.RawModelJSON()
+	case channelmodel.FieldProtocolsJSON:
+		return m.ProtocolsJSON()
 	case channelmodel.FieldFirstSeenAt:
 		return m.FirstSeenAt()
 	case channelmodel.FieldLastSeenAt:
@@ -6056,6 +6098,8 @@ func (m *ChannelModelMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldOutputModalitiesJSON(ctx)
 	case channelmodel.FieldRawModelJSON:
 		return m.OldRawModelJSON(ctx)
+	case channelmodel.FieldProtocolsJSON:
+		return m.OldProtocolsJSON(ctx)
 	case channelmodel.FieldFirstSeenAt:
 		return m.OldFirstSeenAt(ctx)
 	case channelmodel.FieldLastSeenAt:
@@ -6189,6 +6233,13 @@ func (m *ChannelModelMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRawModelJSON(v)
+		return nil
+	case channelmodel.FieldProtocolsJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProtocolsJSON(v)
 		return nil
 	case channelmodel.FieldFirstSeenAt:
 		v, ok := value.(time.Time)
@@ -6430,6 +6481,9 @@ func (m *ChannelModelMutation) ResetField(name string) error {
 		return nil
 	case channelmodel.FieldRawModelJSON:
 		m.ResetRawModelJSON()
+		return nil
+	case channelmodel.FieldProtocolsJSON:
+		m.ResetProtocolsJSON()
 		return nil
 	case channelmodel.FieldFirstSeenAt:
 		m.ResetFirstSeenAt()

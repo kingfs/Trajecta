@@ -183,6 +183,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			channelmodel.FieldInputModalitiesJSON:         {Type: field.TypeString, Column: channelmodel.FieldInputModalitiesJSON},
 			channelmodel.FieldOutputModalitiesJSON:        {Type: field.TypeString, Column: channelmodel.FieldOutputModalitiesJSON},
 			channelmodel.FieldRawModelJSON:                {Type: field.TypeString, Column: channelmodel.FieldRawModelJSON},
+			channelmodel.FieldProtocolsJSON:               {Type: field.TypeString, Column: channelmodel.FieldProtocolsJSON},
 			channelmodel.FieldFirstSeenAt:                 {Type: field.TypeTime, Column: channelmodel.FieldFirstSeenAt},
 			channelmodel.FieldLastSeenAt:                  {Type: field.TypeTime, Column: channelmodel.FieldLastSeenAt},
 			channelmodel.FieldLastProbeAt:                 {Type: field.TypeTime, Column: channelmodel.FieldLastProbeAt},
@@ -1412,6 +1413,11 @@ func (f *ChannelModelFilter) WhereOutputModalitiesJSON(p entql.StringP) {
 // WhereRawModelJSON applies the entql string predicate on the raw_model_json field.
 func (f *ChannelModelFilter) WhereRawModelJSON(p entql.StringP) {
 	f.Where(p.Field(channelmodel.FieldRawModelJSON))
+}
+
+// WhereProtocolsJSON applies the entql string predicate on the protocols_json field.
+func (f *ChannelModelFilter) WhereProtocolsJSON(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldProtocolsJSON))
 }
 
 // WhereFirstSeenAt applies the entql time.Time predicate on the first_seen_at field.

@@ -51,6 +51,8 @@ type ChannelModel struct {
 	OutputModalitiesJSON string `json:"output_modalities_json,omitempty"`
 	// RawModelJSON holds the value of the "raw_model_json" field.
 	RawModelJSON string `json:"raw_model_json,omitempty"`
+	// ProtocolsJSON holds the value of the "protocols_json" field.
+	ProtocolsJSON string `json:"protocols_json,omitempty"`
 	// FirstSeenAt holds the value of the "first_seen_at" field.
 	FirstSeenAt time.Time `json:"first_seen_at,omitempty"`
 	// LastSeenAt holds the value of the "last_seen_at" field.
@@ -69,7 +71,7 @@ func (*ChannelModel) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case channelmodel.FieldID, channelmodel.FieldSupportsResponses, channelmodel.FieldSupportsChatCompletions, channelmodel.FieldSupportsEmbeddings, channelmodel.FieldContextWindow, channelmodel.FieldMaxOutputTokens, channelmodel.FieldCompactHistoryItemThreshold:
 			values[i] = new(sql.NullInt64)
-		case channelmodel.FieldChannelID, channelmodel.FieldModel, channelmodel.FieldDisplayName, channelmodel.FieldSource, channelmodel.FieldUpstreamModel, channelmodel.FieldProfileSource, channelmodel.FieldProfileAdoptionStatus, channelmodel.FieldInputModalitiesJSON, channelmodel.FieldOutputModalitiesJSON, channelmodel.FieldRawModelJSON:
+		case channelmodel.FieldChannelID, channelmodel.FieldModel, channelmodel.FieldDisplayName, channelmodel.FieldSource, channelmodel.FieldUpstreamModel, channelmodel.FieldProfileSource, channelmodel.FieldProfileAdoptionStatus, channelmodel.FieldInputModalitiesJSON, channelmodel.FieldOutputModalitiesJSON, channelmodel.FieldRawModelJSON, channelmodel.FieldProtocolsJSON:
 			values[i] = new(sql.NullString)
 		case channelmodel.FieldFirstSeenAt, channelmodel.FieldLastSeenAt, channelmodel.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -202,6 +204,12 @@ func (_m *ChannelModel) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.RawModelJSON = value.String
 			}
+		case channelmodel.FieldProtocolsJSON:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field protocols_json", values[i])
+			} else if value.Valid {
+				_m.ProtocolsJSON = value.String
+			}
 		case channelmodel.FieldFirstSeenAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field first_seen_at", values[i])
@@ -319,6 +327,9 @@ func (_m *ChannelModel) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("raw_model_json=")
 	builder.WriteString(_m.RawModelJSON)
+	builder.WriteString(", ")
+	builder.WriteString("protocols_json=")
+	builder.WriteString(_m.ProtocolsJSON)
 	builder.WriteString(", ")
 	builder.WriteString("first_seen_at=")
 	builder.WriteString(_m.FirstSeenAt.Format(time.ANSIC))

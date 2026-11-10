@@ -318,12 +318,16 @@ func init() {
 	channelmodelDescRawModelJSON := channelmodelFields[16].Descriptor()
 	// channelmodel.DefaultRawModelJSON holds the default value on creation for the raw_model_json field.
 	channelmodel.DefaultRawModelJSON = channelmodelDescRawModelJSON.Default.(string)
+	// channelmodelDescProtocolsJSON is the schema descriptor for protocols_json field.
+	channelmodelDescProtocolsJSON := channelmodelFields[17].Descriptor()
+	// channelmodel.DefaultProtocolsJSON holds the default value on creation for the protocols_json field.
+	channelmodel.DefaultProtocolsJSON = channelmodelDescProtocolsJSON.Default.(string)
 	// channelmodelDescFirstSeenAt is the schema descriptor for first_seen_at field.
-	channelmodelDescFirstSeenAt := channelmodelFields[17].Descriptor()
+	channelmodelDescFirstSeenAt := channelmodelFields[18].Descriptor()
 	// channelmodel.DefaultFirstSeenAt holds the default value on creation for the first_seen_at field.
 	channelmodel.DefaultFirstSeenAt = channelmodelDescFirstSeenAt.Default.(func() time.Time)
 	// channelmodelDescLastSeenAt is the schema descriptor for last_seen_at field.
-	channelmodelDescLastSeenAt := channelmodelFields[18].Descriptor()
+	channelmodelDescLastSeenAt := channelmodelFields[19].Descriptor()
 	// channelmodel.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
 	channelmodel.DefaultLastSeenAt = channelmodelDescLastSeenAt.Default.(func() time.Time)
 	channelproberunFields := schema.ChannelProbeRun{}.Fields()
