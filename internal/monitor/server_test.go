@@ -187,6 +187,9 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if got := strings.Join(byID["openai"].Protocols, ","); got != "chat_completions,responses" {
 		t.Fatalf("openai preset protocols = %q", got)
 	}
+	if byID["qwen_coding"].Name != "Qwen Coding Plan (China)" {
+		t.Fatalf("qwen_coding name = %q", byID["qwen_coding"].Name)
+	}
 	if byID["qwen_coding"].Endpoints["chat_completions"] != "https://coding.dashscope.aliyuncs.com/v1" {
 		t.Fatalf("qwen_coding preset = %+v", byID["qwen_coding"])
 	}

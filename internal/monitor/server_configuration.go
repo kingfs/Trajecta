@@ -31,6 +31,7 @@ type providerPresetResponse struct {
 
 type providerPresetItem struct {
 	ID              string   `json:"id"`
+	Name            string   `json:"name,omitempty"`
 	ProtocolFamily  string   `json:"protocol_family"`
 	RoutingProfile  string   `json:"routing_profile"`
 	SupportLevel    string   `json:"support_level"`
@@ -675,12 +676,16 @@ func providerPresetAPIHandler() http.HandlerFunc {
 			sort.Strings(allowed)
 			item := providerPresetItem{
 				ID:              id,
+				Name:            id,
 				ProtocolFamily:  spec.ProtocolFamily,
 				RoutingProfile:  spec.RoutingProfile,
 				SupportLevel:    spec.SupportLevel,
 				AllowedProfiles: allowed,
 			}
 			if catalog, ok := pkgupstream.LookupPreset(id); ok {
+				if catalog.Name != "" {
+					item.Name = catalog.Name
+				}
 				item.Endpoints = protocolEndpoints(catalog.Endpoints)
 				item.Protocols = protocolNames(catalog.Endpoints)
 			}

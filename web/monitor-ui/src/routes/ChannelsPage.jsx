@@ -331,7 +331,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
             <Select value={form.provider_preset} onValueChange={(next) => updateForm("provider_preset", next)}>
               <SelectTrigger aria-label={t("providers.preset")} className="w-full"><SelectValue placeholder={presetState.options[0] || ""} /></SelectTrigger>
               <SelectContent>
-                {presetState.options.map((preset) => <SelectItem key={preset} value={preset}>{preset}</SelectItem>)}
+                {presetState.options.map((preset) => <SelectItem key={preset} value={preset}>{presetState.labels?.[preset] || preset}</SelectItem>)}
               </SelectContent>
             </Select>
           </label>
@@ -702,6 +702,7 @@ export function buildPresetState(presetData, providerPreset, routingProfile) {
   const byID = new Map(presets.map((item) => [item.id, item]));
   const fallbackOptions = ["openai", "openrouter", "anthropic", "google_genai", "azure_openai", "vertex", "vllm"];
   const options = (Array.isArray(presetData?.items) && presetData.items.length ? presetData.items : fallbackOptions).slice().sort();
+  const labels = Object.fromEntries((Array.isArray(presetData?.presets) ? presetData.presets : []).map((item) => [item.id, item.name || item.id]));
   const spec = byID.get(providerPreset) || {};
   const defaultProtocolOptions = presetData?.defaults?.protocol_families || ["openai_compatible", "anthropic_messages", "google_genai", "vertex_native"];
   const defaultRoutingOptions = presetData?.defaults?.routing_profiles || ["openai_default", "azure_openai_v1", "azure_openai_deployment", "vllm_openai", "anthropic_default", "google_ai_studio", "vertex_express", "vertex_project_location"];
@@ -711,6 +712,7 @@ export function buildPresetState(presetData, providerPreset, routingProfile) {
   const effectiveProfile = routingProfile || spec.routing_profile || routingOptions[0] || "";
   return {
     options,
+    labels,
     spec,
     protocolOptions,
     routingOptions,
