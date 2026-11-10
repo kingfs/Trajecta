@@ -1763,7 +1763,7 @@ func TestRouterCostAwareSelectionPrefersLowerObservedCost(t *testing.T) {
 			},
 		},
 	}
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 
 	rtr, err := New(cfg)
 	if err != nil {
@@ -1832,7 +1832,7 @@ func TestRouterCostAwareSelectionAvoidsDegradedTarget(t *testing.T) {
 			},
 		},
 	}
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 
 	rtr, err := New(cfg)
 	if err != nil {
@@ -1915,7 +1915,7 @@ func TestRouterSelectReturnsStructuredAllTargetsOpenError(t *testing.T) {
 	}
 	cfg.Router.Selection.FailureThreshold = 1
 	cfg.Router.Selection.OpenWindow = time.Minute
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 
 	rtr, err := New(cfg)
 	if err != nil {

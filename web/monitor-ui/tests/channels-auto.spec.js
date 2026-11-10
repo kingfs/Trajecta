@@ -195,6 +195,9 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels" && method === "GET") {
       return route.fulfill({ json: channelListPayload() });
     }
+    if (path === "/api/channels" && method === "POST") {
+      return route.fulfill({ json: channelDetailPayload() });
+    }
     if (path === "/api/channels/openai-primary" && method === "GET") {
       return route.fulfill({ json: channelDetailPayload() });
     }
@@ -234,7 +237,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("channels use channel terminology and a simplified create form", async ({ page }) => {
+test("channels use channel terminology and a two-mode create form", async ({ page }) => {
   await page.goto("/channels");
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Channels", exact: true }).first()).toBeVisible();
@@ -242,18 +245,60 @@ test("channels use channel terminology and a simplified create form", async ({ p
 
   await page.getByRole("button", { name: "New channel" }).click();
   await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
-  await expect(page.getByLabel("Name")).toBeVisible();
-  await expect(page.getByLabel("Base URL")).toBeVisible();
-  await expect(page.getByLabel("API key")).toBeVisible();
-  await expect(page.getByRole("switch", { name: "Enabled" })).toBeVisible();
-  // Interfaces are detected per model, so the form has no manual capability,
-  // mode or discovery controls - not in the primary form and not in advanced.
-  await expect(page.getByText("Model interfaces are detected automatically; enabling a model probes Chat Completions and Responses.")).toBeVisible();
-  await page.getByRole("button", { name: "Advanced options" }).click();
-  await expect(page.getByLabel("API mode")).toHaveCount(0);
-  await expect(page.getByLabel("Model discovery")).toHaveCount(0);
-  await expect(page.getByLabel("Responses API")).toHaveCount(0);
-  await expect(page.getByLabel("Chat Completions", { exact: true })).toHaveCount(0);
+  const dialog = page.locator(".provider-create-modal");
+  // Two explicit modes: a built-in provider whose endpoint is already known,
+  // and a fully custom channel whose base URL and protocols the operator sets.
+  await expect(page.getByRole("tab", { name: "Official providers" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Custom channel" })).toBeVisible();
+  await expect(dialog.getByLabel("Name")).toBeVisible();
+  await expect(dialog.getByLabel("API key")).toBeVisible();
+  await expect(dialog.getByRole("switch", { name: "Enabled" })).toBeVisible();
+  await expect(dialog.getByLabel("Models")).toBeVisible();
+  await expect(page.getByText("Pick a built-in provider. Its endpoint is already known; you only need the API key.")).toBeVisible();
+  // The official mode does not ask for a URL in the primary form; the catalog
+  // supplies it and Advanced options can override it.
+  await expect(dialog.getByLabel("Base URL")).toHaveCount(0);
+
+  await dialog.getByRole("tab", { name: "Custom channel" }).click();
+  await expect(dialog.getByRole("tab", { name: "Custom channel" })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByLabel("Base URL")).toBeVisible();
+  await expect(dialog.getByLabel("API key")).toBeVisible();
+  await expect(dialog.getByRole("group", { name: "Supported protocols" })).toBeVisible();
+  await expect(dialog.getByLabel("Chat Completions")).toBeVisible();
+  await expect(dialog.getByLabel("Responses")).toBeVisible();
+  await expect(dialog.getByLabel("Anthropic Messages")).toBeVisible();
+  await expect(dialog.getByLabel("Gemini generateContent")).toBeVisible();
+  await expect(dialog.getByLabel("Models")).toBeVisible();
+  await expect(dialog.getByRole("switch", { name: "Enabled" })).toBeVisible();
+});
+
+test("custom channel create sends manual protocols and models", async ({ page }) => {
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "New channel" }).click();
+  const dialog = page.locator(".provider-create-modal");
+  await dialog.getByRole("tab", { name: "Custom channel" }).click();
+  await dialog.getByLabel("Name").fill("My custom provider");
+  await dialog.getByLabel("Base URL").fill("https://custom.example/v1");
+  await dialog.getByLabel("API key").fill("sk-custom");
+  // Start from Chat only; switch to Anthropic Messages to prove the manual
+  // protocol selection reaches the create payload.
+  await dialog.getByLabel("Chat Completions").uncheck();
+  await dialog.getByLabel("Anthropic Messages").check();
+  await dialog.getByLabel("Models").fill("custom-a\ncustom-b");
+  const requestPromise = page.waitForRequest(
+    (request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/channels",
+  );
+  await dialog.getByRole("button", { name: "Create channel" }).click();
+  const body = (await requestPromise).postDataJSON();
+  expect(body.provider_preset).toBe("");
+  expect(body.base_url).toBe("https://custom.example/v1");
+  expect(body.api_key).toBe("sk-custom");
+  expect(body.protocol_family).toBe("openai_compatible");
+  expect(body.api_type).toBe("messages");
+  expect(body.models).toEqual(["custom-a", "custom-b"]);
+  expect(body.capabilities.messages).toBe(true);
+  expect(body.capabilities.chat_completions).toBe(false);
+  await expect(page).toHaveURL(/channels\/openai-primary/);
 });
 
 test("channel detail shows interface chips, detects one model and auto-detects on enable", async ({ page }) => {

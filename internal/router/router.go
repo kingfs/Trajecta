@@ -154,6 +154,10 @@ type Target struct {
 	UpstreamModelNames   []string
 	ModelAliases         map[string]string
 	ProtocolModelAliases map[string]map[string]string
+	// ModelWireNames maps a canonical (client-facing) model to the channel
+	// row's upstream_model. It is the fallback after a protocol-specific
+	// wire_model and before the model name itself.
+	ModelWireNames       map[string]string
 	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
 	// allowUndeclaredModels is set only for the in-memory single-upstream
@@ -416,8 +420,12 @@ func New(cfg *config.Config) (*Router, error) {
 		stopCh:             make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
-	if cfg.Router.Selection.Epsilon > 0 {
-		r.costs.Epsilon = cfg.Router.Selection.Epsilon
+	// nil means "use the 0.02 default"; an explicit zero disables cost
+	// exploration. A pointer is required here: a plain float64 could not tell
+	// "omitted" from "set to zero", which made the deterministic selection
+	// tests flaky at a 2% exploration rate.
+	if cfg.Router.Selection.Epsilon != nil {
+		r.costs.Epsilon = *cfg.Router.Selection.Epsilon
 	}
 	// nil means enabled: a deployment that never mentions sticky keeps the
 	// historical behaviour. false is the explicit opt-out, not a missing value.
@@ -533,6 +541,7 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		StaticModels:         normalizeModels(targetCfg.StaticModels),
 		ModelAliases:         normalizeModelAliases(targetCfg.ModelAliases),
 		ProtocolModelAliases: normalizeProtocolModelAliases(targetCfg.ProtocolModelAliases),
+		ModelWireNames:       normalizeModelWireNames(targetCfg.ModelWireNames),
 		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
 		disabledModels:       modelSet(targetCfg.DisabledModels),
 		Upstream:             resolved,
@@ -563,25 +572,83 @@ func (t *Target) DisplayName() string {
 }
 
 func (t *Target) ResolveModelAlias(model string) string {
-	if t == nil || len(t.ModelAliases) == 0 {
+	if t == nil {
 		return ""
 	}
-	return t.ModelAliases[strings.ToLower(strings.TrimSpace(model))]
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key == "" {
+		return ""
+	}
+	if alias := t.ModelAliases[key]; alias != "" {
+		return alias
+	}
+	return t.ModelWireNames[key]
 }
 
-// ResolveModelAliasForProtocol prefers the per-protocol wire name and falls
-// back to the protocol-agnostic ModelAliases/upstream_model mapping.
+// ResolveModelAliasForProtocol resolves the model name that must be sent to
+// the upstream for one wire protocol. The precedence is deliberate:
+//
+//  1. a protocol entry that names a wire_model for the requested model;
+//  2. a model_alias expansion (request -> canonical model), followed by that
+//     canonical model's protocol wire_model;
+//  3. the canonical row's upstream_model;
+//  4. the alias target itself (so an alias with no wire mapping still reaches
+//     the upstream under the target's name).
+//
+// An empty result means the bytes stay untouched.
 func (t *Target) ResolveModelAliasForProtocol(model, protocol string) string {
 	if t == nil {
 		return ""
 	}
 	key := strings.ToLower(strings.TrimSpace(model))
-	if aliases := t.ProtocolModelAliases[strings.ToLower(strings.TrimSpace(protocol))]; aliases != nil {
-		if wire := aliases[key]; wire != "" {
+	if key == "" {
+		return ""
+	}
+	protocolKey := strings.ToLower(strings.TrimSpace(protocol))
+	if wire := t.protocolWire(protocolKey, key); wire != "" {
+		return wire
+	}
+	canonical := key
+	if alias := t.ModelAliases[key]; alias != "" {
+		canonical = strings.ToLower(strings.TrimSpace(alias))
+	}
+	if canonical != "" && canonical != key {
+		if wire := t.protocolWire(protocolKey, canonical); wire != "" {
 			return wire
 		}
 	}
-	return t.ResolveModelAlias(model)
+	if wire := t.ModelWireNames[canonical]; wire != "" {
+		return wire
+	}
+	if canonical != key {
+		return canonical
+	}
+	return ""
+}
+
+func (t *Target) protocolWire(protocol, model string) string {
+	if protocol == "" || len(t.ProtocolModelAliases) == 0 {
+		return ""
+	}
+	return t.ProtocolModelAliases[protocol][model]
+}
+
+func normalizeModelWireNames(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for model, wire := range in {
+		model = strings.ToLower(strings.TrimSpace(model))
+		wire = strings.TrimSpace(wire)
+		if model != "" && wire != "" {
+			out[model] = wire
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeProtocolModelAliases(in map[string]map[string]string) map[string]map[string]string {

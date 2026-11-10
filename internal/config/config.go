@@ -238,8 +238,12 @@ type UpstreamTargetConfig struct {
 	// aliases. It is populated from channel_models.protocols_json; ModelAliases
 	// remains the protocol-agnostic fallback.
 	ProtocolModelAliases map[string]map[string]string `yaml:"-"`
-	ConfiguredModelsOnly bool                         `yaml:"-"`
-	DisabledModels       []string                     `yaml:"-"`
+	// ModelWireNames maps a client-facing model to its channel_models
+	// upstream_model wire name. It is the protocol-agnostic fallback used when
+	// a protocol entry has no wire_model of its own.
+	ModelWireNames       map[string]string `yaml:"-"`
+	ConfiguredModelsOnly bool              `yaml:"-"`
+	DisabledModels       []string          `yaml:"-"`
 	// UpstreamModelNames are the wire names a channel model maps to
 	// (`channel_models.upstream_model`). They are routable in addition to the
 	// client-facing names, because the local Responses runtime rewrites the
@@ -269,7 +273,7 @@ type RouterConfig struct {
 	} `yaml:"model_discovery"`
 	Selection struct {
 		Policy           string        `yaml:"policy"`
-		Epsilon          float64       `yaml:"epsilon"`
+		Epsilon          *float64      `yaml:"epsilon"`
 		OpenWindow       time.Duration `yaml:"open_window"`
 		FailureThreshold int64         `yaml:"failure_threshold"`
 		// Sticky keeps one (session, model) on one route target so the upstream
@@ -860,6 +864,9 @@ func validateRouterEnums(cfg *Config) error {
 		default:
 			return fmt.Errorf("router.selection.priority_mode %q is not supported; use compat or strict", value)
 		}
+	}
+	if epsilon := cfg.Router.Selection.Epsilon; epsilon != nil && (*epsilon < 0 || *epsilon > 1) {
+		return fmt.Errorf("router.selection.epsilon %v must be between 0 and 1", *epsilon)
 	}
 	if value := strings.TrimSpace(cfg.Router.Selection.PlanEngine); value != "" {
 		switch strings.ToLower(value) {

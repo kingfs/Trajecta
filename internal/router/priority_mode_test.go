@@ -37,7 +37,7 @@ func priorityModeConfig(mode string) *config.Config {
 			},
 		},
 	}
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 	cfg.Router.Selection.PriorityMode = mode
 	return cfg
 }
@@ -143,7 +143,7 @@ func TestNativeBeatsHigherPriorityConversion(t *testing.T) {
 			},
 		},
 	}
-	cfg.Router.Selection.Epsilon = 0
+	cfg.Router.Selection.Epsilon = float64Ptr(0)
 	cfg.Router.Selection.PriorityMode = "strict"
 	cfg.Router.Selection.ProtocolConversion = true
 	rtr := priorityModeRouter(t, cfg)
@@ -188,5 +188,29 @@ func TestSetPriorityModeAtRuntime(t *testing.T) {
 	}
 	if got := rtr.PriorityMode(); got != "compat" {
 		t.Fatalf("PriorityMode = %q, want compat", got)
+	}
+}
+
+func TestNewHonorsExplicitZeroEpsilon(t *testing.T) {
+	rtr := priorityModeRouter(t, priorityModeConfig(""))
+	if rtr.costs.Epsilon != 0 {
+		t.Fatalf("costs.Epsilon = %v, want explicit zero", rtr.costs.Epsilon)
+	}
+}
+
+func TestExplainExposesPriorityModeAndSelectedTier(t *testing.T) {
+	rtr := priorityModeRouter(t, priorityModeConfig("strict"))
+	result := rtr.Explain(ExplainRequest{
+		RawPath: "/v1/chat/completions",
+		Body:    []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`),
+	})
+	if result.Error != "" {
+		t.Fatalf("Explain error = %q", result.Error)
+	}
+	if result.Result.Plan.PriorityMode != "strict" {
+		t.Fatalf("PriorityMode = %q, want strict", result.Result.Plan.PriorityMode)
+	}
+	if result.Result.Plan.SelectedTier != 100 {
+		t.Fatalf("SelectedTier = %d, want 100", result.Result.Plan.SelectedTier)
 	}
 }

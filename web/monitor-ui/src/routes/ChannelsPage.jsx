@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -60,12 +60,6 @@ export function ProvidersPage() {
   const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
   const catalog = useJSON(apiPaths.providerCatalog, []);
-  // The create form starts on the default preset (openai). Fill its endpoint
-  // once the preset payload arrives, but never overwrite a URL the operator
-  // typed or deliberately cleared.
-  useEffect(() => {
-    setForm((current) => (current.base_url.trim() ? current : normalizePresetSelection(current, presets.data, "provider_preset")));
-  }, [presets.data]);
   const items = providers.data?.items || [];
   const totals = useMemo(() => summarizeProviders(items), [items]);
   const chartItems = useMemo(() => buildProviderTrendItems(items), [items]);
@@ -132,6 +126,7 @@ export function ProvidersPage() {
       {formOpen ? (
         <CreateProviderDialog
           presetData={presets.data}
+          catalog={catalog}
           onClose={() => setFormOpen(false)}
           onCreated={(item) => {
             setFormOpen(false);
@@ -172,58 +167,195 @@ function ProviderProbeBatchRow({ row }) {
   );
 }
 
-function CreateProviderDialog({ presetData, onClose, onCreated }) {
+const FAMILY_INTERFACES = {
+  openai_compatible: { chat_completions: true, responses: false, messages: false, gemini: false },
+  anthropic_messages: { chat_completions: false, responses: false, messages: true, gemini: false },
+  google_genai: { chat_completions: false, responses: false, messages: false, gemini: true },
+  vertex_native: { chat_completions: false, responses: false, messages: false, gemini: true },
+};
+
+const FAMILY_ROUTING = {
+  openai_compatible: "openai_default",
+  anthropic_messages: "anthropic_default",
+  google_genai: "google_ai_studio",
+  vertex_native: "vertex_express",
+};
+
+const INTERFACE_OPTIONS = [
+  ["chat_completions", "providers.interfaceChat"],
+  ["responses", "providers.interfaceResponses"],
+  ["messages", "providers.interfaceMessages"],
+  ["gemini", "providers.interfaceGemini"],
+];
+
+function protocolLabels(protocols, t) {
+  const labels = {
+    chat_completions: t("providers.interfaceChat"),
+    responses: t("providers.interfaceResponses"),
+    messages: t("providers.interfaceMessages"),
+    gemini: t("providers.interfaceGemini"),
+  };
+  return (protocols || []).map((protocol) => labels[protocol] || protocol);
+}
+
+function familyInterfaces(family) {
+  return { ...(FAMILY_INTERFACES[family] || FAMILY_INTERFACES.openai_compatible) };
+}
+
+function primaryAPIType(interfaces) {
+  if (interfaces?.chat_completions) return "chat_completions";
+  if (interfaces?.responses) return "responses";
+  if (interfaces?.messages) return "messages";
+  if (interfaces?.gemini) return "gemini_generate_content";
+  return "";
+}
+
+function interfacesFromProtocols(protocols) {
+  const out = { chat_completions: false, responses: false, messages: false, gemini: false };
+  for (const protocol of protocols || []) {
+    if (protocol in out) out[protocol] = true;
+  }
+  return out;
+}
+
+function capabilitiesFromInterfaces(interfaces = {}) {
+  return {
+    chat_completions: Boolean(interfaces.chat_completions),
+    responses: Boolean(interfaces.responses),
+    messages: Boolean(interfaces.messages),
+    gemini_generate_content: Boolean(interfaces.gemini),
+  };
+}
+
+function splitModelList(value) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of String(value || "").split(/[\n,]/)) {
+    const model = raw.trim();
+    if (!model || seen.has(model.toLowerCase())) continue;
+    seen.add(model.toLowerCase());
+    out.push(model);
+  }
+  return out;
+}
+
+function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   const { t } = useI18n();
-  const [form, setForm] = useState(DEFAULT_FORM);
+  const [mode, setMode] = useState("official");
+  const [form, setForm] = useState(() => ({ ...DEFAULT_FORM, interfaces: familyInterfaces("openai_compatible") }));
+  const [selectedCatalogID, setSelectedCatalogID] = useState("");
+  const [catalogQuery, setCatalogQuery] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [probeReport, setProbeReport] = useState(null);
-  const [setupResult, setSetupResult] = useState(null);
-  const [validatedSignature, setValidatedSignature] = useState("");
-  const formVersion = useRef(0);
-  // Validation numbers the form it was asked about, because the answer is only
-  // about a form that has not changed since.
-  const validationVersion = useRef(0);
-  const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
-  const currentSetupSignature = setupValidationSignature(form);
-  const setupStale = Boolean(setupResult && validatedSignature !== currentSetupSignature);
-  const setupStatus = buildSetupStatus(setupResult, setupStale, form, t);
-  const updateForm = (key, value, options = {}) => {
-    formVersion.current += 1;
-    setForm((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
-    if (!options.keepSetupResult && SETUP_VALIDATION_FIELDS.has(key)) {
-      setSetupResult(null);
-      setValidatedSignature("");
+
+  const presetsByID = useMemo(() => {
+    const map = new Map();
+    for (const preset of presetData?.presets || []) {
+      map.set(preset.id, preset);
     }
+    return map;
+  }, [presetData]);
+  const catalogItems = useMemo(() => (Array.isArray(catalog?.data?.items) ? catalog.data.items : []), [catalog]);
+  const filteredCatalog = useMemo(() => {
+    const query = catalogQuery.trim().toLowerCase();
+    if (!query) return catalogItems;
+    return catalogItems.filter((item) => {
+      const text = [item.id, item.name, ...(item.protocols || [])].join(" ").toLowerCase();
+      return text.includes(query);
+    });
+  }, [catalogItems, catalogQuery]);
+  const selectedCatalogItem = catalogItems.find((item) => item.id === selectedCatalogID) || null;
+  const selectedPreset = presetsByID.get(selectedCatalogID) || null;
+  const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
+  const customRoutingState = {
+    ...presetState,
+    routingOptions: [FAMILY_ROUTING[form.protocol_family] || "", ...presetState.routingOptions].filter((value, index, all) => value && all.indexOf(value) === index),
+  };
+
+  const updateForm = (key, value) => {
+    setForm((current) => {
+      if (key === "protocol_family" && mode === "custom") {
+        const family = value;
+        return {
+          ...current,
+          protocol_family: family,
+          api_type: defaultAPITypeForProtocolFamily(family),
+          routing_profile: FAMILY_ROUTING[family] || current.routing_profile,
+          model_resource: family === "vertex_native" && !current.model_resource ? "publishers/google/models" : current.model_resource,
+          interfaces: familyInterfaces(family),
+        };
+      }
+      return normalizePresetSelection({ ...current, [key]: value }, presetData, key);
+    });
+  };
+
+  const toggleInterface = (key, checked) => {
+    setForm((current) => {
+      const interfaces = { ...(current.interfaces || {}), [key]: checked };
+      return { ...current, interfaces, api_type: primaryAPIType(interfaces) || current.api_type };
+    });
+  };
+
+  const changeMode = (next) => {
+    setMode(next);
+    setProbeReport(null);
+    if (next === "custom") {
+      setSelectedCatalogID("");
+      setForm((current) => ({
+        ...current,
+        provider_preset: "",
+        base_url: "",
+        endpoints: {},
+        api_type: "chat_completions",
+        protocol_family: "openai_compatible",
+        routing_profile: FAMILY_ROUTING.openai_compatible,
+        interfaces: familyInterfaces("openai_compatible"),
+      }));
+      return;
+    }
+    setForm((current) => ({ ...current, provider_preset: "", base_url: "", endpoints: {} }));
   };
 
   const applyCatalogPreset = (item) => {
-    const protocols = Array.isArray(item?.protocols) ? item.protocols : [];
-    const apiType = protocols.includes("chat_completions")
+    const spec = presetsByID.get(item.id) || {};
+    const protocols = item.protocols || spec.protocols || [];
+    const endpoints = item.endpoints || {};
+    const primaryProtocol = protocols.includes("chat_completions")
       ? "chat_completions"
       : protocols.includes("responses")
         ? "responses"
         : protocols.includes("messages")
           ? "messages"
           : protocols.includes("gemini")
-            ? "gemini_generate_content"
+            ? "gemini"
             : "chat_completions";
-    const protocolFamily = apiType === "messages"
-      ? "anthropic_messages"
-      : apiType === "gemini_generate_content"
-        ? "google_genai"
-        : "openai_compatible";
-    const endpoint = item?.endpoints?.[apiType] || item?.endpoints?.chat_completions || "";
-    formVersion.current += 1;
+    const family = spec.protocol_family
+      || (primaryProtocol === "messages" ? "anthropic_messages" : primaryProtocol === "gemini" ? "google_genai" : "openai_compatible");
+    const apiType = primaryProtocol === "messages"
+      ? "messages"
+      : primaryProtocol === "gemini"
+        ? "gemini_generate_content"
+        : primaryProtocol === "responses"
+          ? "responses"
+          : "chat_completions";
+    const baseURL = endpoints[primaryProtocol] || endpoints.chat_completions || endpoints.responses || endpoints.messages || endpoints.gemini || "";
+    const interfaces = interfacesFromProtocols(protocols);
+    setSelectedCatalogID(item.id);
+    setProbeReport(null);
     setForm((current) => ({
       ...current,
-      provider_preset: presetState.options.includes(item.id) ? item.id : current.provider_preset,
+      name: item.name || item.id,
+      provider_preset: item.id,
       api_type: apiType,
-      protocol_family: protocolFamily,
-      base_url: endpoint || current.base_url,
+      protocol_family: family,
+      routing_profile: spec.routing_profile || (Array.isArray(spec.allowed_profiles) ? spec.allowed_profiles[0] : "") || FAMILY_ROUTING[family] || current.routing_profile,
+      base_url: baseURL,
+      endpoints: { ...endpoints },
+      model_resource: family === "vertex_native" && !current.model_resource ? "publishers/google/models" : current.model_resource,
+      interfaces,
     }));
-    setSetupResult(null);
-    setValidatedSignature("");
   };
+
   const detectProvider = useWriteMutation({
     mutationFn: () => postJSON(apiPaths.providerProbePreview, providerProbePreviewPayload(form)),
     error: "providers.probeFailed",
@@ -232,81 +364,47 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
       setAdvancedOpen(true);
     },
     onError: (err) => {
-      // A refused probe can still carry a report worth showing.
       if (err.payload?.status) {
         setProbeReport(err.payload);
       }
     },
   });
   const applyProbeSuggestions = () => {
-    formVersion.current += 1;
-    setForm((current) => ({
-      ...current,
-      ...providerProbeSuggestionPayload(current, probeReport),
-    }));
-    setSetupResult(null);
-    setValidatedSignature("");
-  };
-  const applySetupConfig = (normalized = {}) => {
+    const report = probeReport || {};
     setForm((current) => {
-      const next = {
+      const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
+      const interfaces = capabilities.length
+        ? {
+            chat_completions: capabilities.includes("chat_completions"),
+            responses: capabilities.includes("responses"),
+            messages: capabilities.includes("messages"),
+            gemini: capabilities.includes("gemini") || capabilities.includes("generate_content"),
+          }
+        : current.interfaces;
+      return {
         ...current,
-        ...providerConfigFormPatch(normalized),
-        api_key: current.api_key,
+        api_type: report.suggested_api_type || current.api_type,
+        protocol_family: report.suggested_protocol_family || current.protocol_family,
+        interfaces,
       };
-      setValidatedSignature(setupValidationSignature(next));
-      return next;
     });
   };
-  // "Stale" is not a failure: the form moved on while the answer was in flight,
-  // so the answer describes something the reader is no longer looking at. It is
-  // the message for the toast either way, which is why the error option decides
-  // it rather than a second toast being raised from onError.
-  const setupIsStale = () => validationVersion.current !== formVersion.current;
 
-  const validateSetup = useWriteMutation({
-    mutationFn: () => {
-      validationVersion.current = formVersion.current;
-      setSetupResult(null);
-      setValidatedSignature("");
-      return postJSON(apiPaths.providerSetupValidate, normalizeProviderPayload(form));
-    },
-    error: (err) => (setupIsStale() ? t("providers.validationStaleReason") : err?.message || t("providers.validationStaleReason")),
-    onSuccess: (result) => {
-      if (setupIsStale()) {
-        toast.warning(t("providers.validationStaleReason"));
-        return;
-      }
-      setSetupResult(result);
-      setProbeReport(result.probe || null);
-      applySetupConfig(result.normalized_config);
-      setAdvancedOpen(true);
-    },
-    onError: (err) => {
-      if (setupIsStale()) {
-        return;
-      }
-      if (err.payload?.normalized_config) {
-        setSetupResult(err.payload);
-        setProbeReport(err.payload.probe || null);
-        applySetupConfig(err.payload.normalized_config);
-        setAdvancedOpen(true);
-      }
-    },
-  });
-
-  // `canApply` is a gate in front of the request, not a response to one, so it
-  // reports itself and nothing is sent.
   const createProvider = useWriteMutation({
-    mutationFn: () => postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form)),
-    error: "providers.validateRequiredReason",
-    onSuccess: (result) => onCreated(result.channel),
+    mutationFn: () => postJSON(apiPaths.providers, createChannelPayload(form, mode, selectedCatalogID)),
+    error: "providers.createFailed",
+    onSuccess: (result) => onCreated(result),
   });
+
+  const anyInterface = Object.values(form.interfaces || {}).some(Boolean);
+  const canCreate = mode === "official"
+    ? Boolean(selectedCatalogID && form.name.trim() && form.base_url.trim())
+    : Boolean(form.name.trim() && form.base_url.trim() && form.protocol_family && anyInterface);
 
   const submit = (event) => {
     event.preventDefault();
-    if (!setupStatus.canApply) {
-      toast.warning(setupStatus.reason);
+    if (!canCreate) {
+      toast.warning(t("providers.createMissingFields"));
       return;
     }
     createProvider.mutate();
@@ -325,55 +423,135 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
               <Button variant="default" size="icon" type="button" aria-label={t("common.close")}>x</Button>
             </DialogClose>
           </DialogHeader>
-          <div className="provider-form provider-form-modal">
-            <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
-          <label>{t("providers.preset")}
-            <Select value={form.provider_preset} onValueChange={(next) => updateForm("provider_preset", next)}>
-              <SelectTrigger aria-label={t("providers.preset")} className="w-full"><SelectValue placeholder={presetState.options[0] || ""} /></SelectTrigger>
-              <SelectContent>
-                {presetState.options.map((preset) => <SelectItem key={preset} value={preset}>{presetState.labels?.[preset] || preset}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} /></label>
-          {presetState.spec?.notes ? <p className="trace-subline provider-form-wide">{presetState.spec.notes}</p> : null}
-          {presetState.spec?.no_list ? <p className="trace-subline provider-form-wide">{t("providers.noModelListHint")}</p> : null}
-          <details className="provider-form-wide">
-            <summary>{t("providers.catalogBrowse")}</summary>
-            <p className="trace-subline">{t("providers.catalogHint")}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
-              {(catalog.data?.items || []).map((item) => (
-                <Button key={item.id} variant="ghost" type="button" onClick={() => applyCatalogPreset(item)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, height: "auto", padding: "8px 10px" }}>
-                  <strong>{item.name || item.id}</strong>
-                  <span className="trace-subline">{(item.protocols || []).join(" · ")}</span>
-                </Button>
-              ))}
-            </div>
-          </details>
-          <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
-          <label className="provider-form-check">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
-        </div>
-        <p className="trace-subline"><strong>{t("channels.autoDetect")}</strong> · {t("channels.autoDetectHint")}</p>
-        <div className="provider-form-actions">
-          <Button variant="ghost" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</Button>
-          <Button variant="primary" type="button" onClick={() => validateSetup.mutate()} disabled={validateSetup.isPending || !form.base_url.trim()}>{validateSetup.isPending ? t("providers.validating") : t("providers.validate")}</Button>
-          <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
-        </div>
-        {setupResult ? <ProviderSetupStatusPanel result={setupResult} status={setupStatus} /> : <p className="trace-subline">{t("providers.validateBeforeCreate")}</p>}
-        {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
-        {advancedOpen ? (
-          <div className="provider-form provider-form-modal">
-            <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
+          <div className="provider-mode-tabs" role="tablist" aria-label={t("providers.create")}>
+            <button type="button" role="tab" aria-selected={mode === "official"} className={mode === "official" ? "provider-mode-tab is-active" : "provider-mode-tab"} onClick={() => changeMode("official")}>{t("providers.modeOfficial")}</button>
+            <button type="button" role="tab" aria-selected={mode === "custom"} className={mode === "custom" ? "provider-mode-tab is-active" : "provider-mode-tab"} onClick={() => changeMode("custom")}>{t("providers.modeCustom")}</button>
           </div>
-        ) : null}
+          {mode === "official" ? (
+            <div className="provider-form provider-form-modal">
+              <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
+              <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
+              <div className="provider-form-wide provider-catalog-panel">
+                <div className="provider-catalog-head">
+                  <div>
+                    <strong>{t("providers.selectProvider")}</strong>
+                    <p className="trace-subline">{t("providers.modeOfficialHint")}</p>
+                  </div>
+                  <Input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder={t("providers.searchProviders")} aria-label={t("providers.searchProviders")} />
+                </div>
+                <div className="provider-catalog-grid">
+                  {filteredCatalog.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={selectedCatalogID === item.id}
+                      className={selectedCatalogID === item.id ? "provider-catalog-card is-selected" : "provider-catalog-card"}
+                      onClick={() => applyCatalogPreset(item)}
+                    >
+                      <strong>{item.name || item.id}</strong>
+                      <span>{protocolLabels(item.protocols, t).join(" · ") || "—"}</span>
+                      {item.models?.no_list ? <span className="trace-subline">{t("providers.noModelListHint")}</span> : null}
+                    </button>
+                  ))}
+                  {!filteredCatalog.length ? <p className="trace-subline provider-form-wide">{t("providers.catalogEmpty")}</p> : null}
+                </div>
+              </div>
+              {selectedCatalogItem ? (
+                <div className="provider-form-wide provider-selected-summary">
+                  <div>
+                    <p className="eyebrow">{t("providers.selectedProvider")}</p>
+                    <strong>{selectedCatalogItem.name || selectedCatalogItem.id}</strong>
+                    <p className="trace-subline">{selectedPreset?.notes || selectedCatalogItem.notes || ""}</p>
+                  </div>
+                  <div className="provider-endpoint-summary">
+                    <span>{t("providers.baseURL")}</span>
+                    <code>{form.base_url || t("providers.baseURLHint")}</code>
+                    <span className="trace-subline">{t("providers.officialEndpointHint")}</span>
+                  </div>
+                </div>
+              ) : <p className="trace-subline provider-form-wide">{t("providers.selectProviderHint")}</p>}
+              <label className="provider-form-wide">{t("providers.models")}
+                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder="gpt-5&#10;gpt-5-mini" spellCheck={false} />
+                <span className="trace-subline">{t("providers.modelsHint")}</span>
+              </label>
+              <label className="provider-form-check provider-form-wide">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
+            </div>
+          ) : (
+            <div className="provider-form provider-form-modal">
+              <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="My provider" /></label>
+              <label>{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.example.com/v1" spellCheck={false} /></label>
+              <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={t("providers.optional")} /></label>
+              <label>{t("providers.protocol")}
+                <Select value={form.protocol_family} onValueChange={(next) => updateForm("protocol_family", next)}>
+                  <SelectTrigger aria-label={t("providers.protocol")} className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </label>
+              <fieldset className="provider-interface-fieldset provider-form-wide">
+                <legend>{t("providers.supportedInterfaces")}</legend>
+                <div className="provider-interface-grid">
+                  {INTERFACE_OPTIONS.map(([key, labelKey]) => (
+                    <label className="checkbox-row" key={key}>
+                      <input type="checkbox" checked={Boolean(form.interfaces?.[key])} onChange={(event) => toggleInterface(key, event.target.checked)} />
+                      {t(labelKey)}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="provider-form-wide">{t("providers.models")}
+                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder="model-a&#10;model-b" spellCheck={false} />
+                <span className="trace-subline">{t("providers.modelsHint")}</span>
+              </label>
+              <label className="provider-form-check provider-form-wide">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
+            </div>
+          )}
+          <div className="provider-form-actions">
+            <Button variant="ghost" type="button" onClick={() => detectProvider.mutate()} disabled={detectProvider.isPending || !form.base_url.trim()}>{detectProvider.isPending ? t("providers.detecting") : t("providers.detect")}</Button>
+            <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
+          </div>
+          {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
+          {advancedOpen ? (
+            <div className="provider-form provider-form-modal">
+              {mode === "official" ? <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} spellCheck={false} /></label> : null}
+              <ProviderAdvancedFields form={form} presetState={customRoutingState} onChange={updateForm} includeHeaders={false} />
+            </div>
+          ) : null}
           <DialogFooter>
             <Button variant="ghost" type="button" onClick={onClose}>{t("providers.cancel")}</Button>
-            <Button variant="primary" type="submit" disabled={createProvider.isPending || !setupStatus.canApply}>{createProvider.isPending ? t("providers.creating") : t("providers.create")}</Button>
+            <Button variant="primary" type="submit" disabled={createProvider.isPending || !canCreate}>{createProvider.isPending ? t("providers.creating") : t("providers.create")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
+}
+
+function createChannelPayload(form, mode, selectedCatalogID) {
+  return {
+    name: form.name,
+    base_url: form.base_url,
+    provider_preset: mode === "official" ? selectedCatalogID : "",
+    api_type: form.api_type,
+    protocol_family: form.protocol_family,
+    routing_profile: form.routing_profile,
+    api_version: form.api_version,
+    deployment: form.deployment,
+    project: form.project,
+    location: form.location,
+    model_resource: form.model_resource,
+    api_key: form.api_key,
+    enabled: form.enabled,
+    priority: Number(form.priority || 0),
+    weight: Number(form.weight || 1),
+    capacity_hint: Number(form.capacity_hint || 1),
+    endpoints: normalizedEndpoints(form.endpoints),
+    proxy: channelProxyPayload(form),
+    capabilities: capabilitiesFromInterfaces(form.interfaces),
+    models: splitModelList(form.models),
+    model_discovery: mode === "custom" ? "disabled" : undefined,
+  };
 }
 
 function ProviderCard({ item, windowValue, onRefresh }) {
@@ -609,35 +787,6 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
   );
 }
 
-function ProviderSetupStatusPanel({ result, status }) {
-  const { t } = useI18n();
-  const normalized = result?.normalized_config || {};
-  const probe = result?.probe || {};
-  const warnings = Array.isArray(probe.warnings) ? probe.warnings : [];
-  const secret = result?.secret || {};
-  return (
-    <div className="provider-probe-card">
-      <div className="provider-probe-card-head">
-        <div>
-          <p className="eyebrow">{t("providers.setupValidation")}</p>
-          <h3>{status.title}</h3>
-        </div>
-        <div className="trace-tag-group">
-          <InlineTag tone={status.tone}>{status.label}</InlineTag>
-          {probe.status ? <InlineTag tone={probe.status === "detected" ? "green" : probe.status === "error" ? "danger" : "gold"}>{probe.status}</InlineTag> : null}
-        </div>
-      </div>
-      <div className="detail-meta-strip">
-        <Metric label={t("providers.apiType")} value={normalized.api_type || "-"} />
-        <Metric label={t("providers.protocol")} value={normalized.protocol_family || "-"} />
-        <Metric label={t("providers.secret")} value={secret.api_key_hint ? `stored as ${secret.api_key_hint}` : secret.secret_storage_mode || "-"} />
-      </div>
-      <p className="trace-subline">{status.reason}</p>
-      {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
-    </div>
-  );
-}
-
 function ProviderProbeSuggestionPanel({ report, onApply }) {
   const { t } = useI18n();
   const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
@@ -784,30 +933,6 @@ function uniqueSorted(values) {
 
 // The write payload names its fields instead of spreading the form: a payload
 // that spread the form would keep re-sending the retired channel-level fields.
-function normalizeProviderPayload(form) {
-  const payload = {
-    name: form.name,
-    base_url: form.base_url,
-    provider_preset: form.provider_preset,
-    api_type: form.api_type,
-    protocol_family: form.protocol_family,
-    routing_profile: form.routing_profile,
-    api_version: form.api_version,
-    deployment: form.deployment,
-    project: form.project,
-    location: form.location,
-    model_resource: form.model_resource,
-    api_key: form.api_key,
-    enabled: form.enabled,
-    priority: Number(form.priority || 0),
-    weight: Number(form.weight || 1),
-    capacity_hint: Number(form.capacity_hint || 1),
-    endpoints: normalizedEndpoints(form.endpoints),
-    proxy: channelProxyPayload(form),
-  };
-  return payload;
-}
-
 function normalizedEndpoints(value) {
   const out = {};
   for (const protocol of ENDPOINT_PROTOCOLS) {
@@ -826,106 +951,6 @@ function channelProxyPayload(form = {}) {
     https_proxy: String(form.proxy_https || "").trim(),
     no_proxy: String(form.proxy_no_proxy || "").trim(),
   };
-}
-
-function setupValidationSignature(form) {
-  const payload = normalizeProviderPayload(form);
-  const apiKey = payload.api_key || "";
-  delete payload.api_key;
-  payload.api_key_present = apiKey.trim() !== "";
-  payload.api_key_length = apiKey.length;
-  return JSON.stringify(payload);
-}
-
-function buildSetupStatus(result, stale, form, t) {
-  const explicitSurface = Boolean((form.api_type || "").trim() && (form.protocol_family || "").trim());
-  if (!result) {
-    if (explicitSurface) {
-      return {
-        canApply: true,
-        title: t("providers.readyExplicit"),
-        label: t("providers.manual"),
-        tone: "gold",
-        reason: t("providers.readyExplicitReason"),
-      };
-    }
-    return {
-      canApply: false,
-      title: t("providers.notValidated"),
-      label: t("providers.required"),
-      tone: "gold",
-      reason: t("providers.validateRequiredReason"),
-    };
-  }
-  if (stale) {
-    return {
-      canApply: false,
-      title: t("providers.validationStale"),
-      label: t("providers.stale"),
-      tone: "gold",
-      reason: t("providers.validationStaleReason"),
-    };
-  }
-  const detected = result.probe?.status === "detected";
-  const normalized = result.normalized_config || {};
-  const explicitOrNormalizedSurface = Boolean((form.api_type || normalized.api_type || "").trim() && (form.protocol_family || normalized.protocol_family || "").trim());
-  if (detected) {
-    return {
-      canApply: true,
-      title: t("providers.readyCreate"),
-      label: t("providers.detectedLabel"),
-      tone: "green",
-      reason: t("providers.readyCreateReason"),
-    };
-  }
-  if (explicitOrNormalizedSurface) {
-    return {
-      canApply: true,
-      title: t("providers.readyExplicit"),
-      label: t("providers.explicit"),
-      tone: "gold",
-      reason: t("providers.probeExplicitReason"),
-    };
-  }
-  return {
-    canApply: false,
-    title: t("providers.needsProtocol"),
-    label: t("providers.blocked"),
-    tone: "danger",
-    reason: t("providers.needsProtocolReason"),
-  };
-}
-
-function providerConfigFormPatch(config = {}) {
-  const patch = {};
-  for (const key of [
-    "name",
-    "base_url",
-    "provider_preset",
-    "api_type",
-    "protocol_family",
-    "routing_profile",
-    "api_version",
-    "deployment",
-    "project",
-    "location",
-    "model_resource",
-    "enabled",
-    "priority",
-    "weight",
-    "capacity_hint",
-  ]) {
-    if (config[key] !== undefined && config[key] !== null) {
-      patch[key] = config[key];
-    }
-  }
-  if (config.proxy) {
-    patch.proxy_enabled = Boolean(config.proxy.enabled);
-    patch.proxy_http = config.proxy.http_proxy || "";
-    patch.proxy_https = config.proxy.https_proxy || "";
-    patch.proxy_no_proxy = config.proxy.no_proxy || "";
-  }
-  return patch;
 }
 
 function providerProbePreviewPayload(form) {

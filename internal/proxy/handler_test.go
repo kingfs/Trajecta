@@ -465,6 +465,8 @@ func TestRoutingDecisionEventsIncludeCredentialFields(t *testing.T) {
 		SelectedChannelID:      "channel-a",
 		SelectedCredentialID:   "cred-1",
 		SelectedCredentialHint: "acct-1234",
+		PriorityMode:           "strict",
+		SelectedTier:           100,
 		Candidates: []router.CandidateDecision{{
 			ID:                   "route-channel-a-cred-1",
 			RouteTargetID:        "channel-a:cred-1",
@@ -493,6 +495,9 @@ func TestRoutingDecisionEventsIncludeCredentialFields(t *testing.T) {
 	selected := eventAttrsByType(t, events, "routing.selected")
 	if selected["route_target_id"] != "channel-a:cred-1" || selected["channel_id"] != "channel-a" || selected["credential_id"] != "cred-1" || selected["credential_hint"] != "acct-1234" {
 		t.Fatalf("selected attrs missing credential fields: %+v", selected)
+	}
+	if selected["priority_mode"] != "strict" || selected["selected_tier"] != 100 {
+		t.Fatalf("selected attrs missing priority trace fields: %+v", selected)
 	}
 	sticky := eventAttrsByType(t, events, "routing.sticky.hit")
 	if sticky["route_target_id"] != "channel-a:cred-1" || sticky["channel_id"] != "channel-a" || sticky["credential_id"] != "cred-1" {

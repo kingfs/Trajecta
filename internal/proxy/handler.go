@@ -811,6 +811,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Keep the client's original path for path-carried model rewrites: a retry
+	// may select another target with a different wire model, and the previous
+	// attempt already rewrote r.URL.Path.
+	clientPath := r.URL.Path
 	// 重试循环：优先快速尝试候选上游目标；所有候选短时不可用时，在
 	// 30s 预算内做指数退避后重新选择，避免把短暂上游抖动直接暴露成 502。
 	for {
@@ -880,6 +884,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
+		// Gemini and Vertex carry the model in the path instead of the body.
+		// Rewrite that segment before the recorder writes the request line and
+		// before the upstream call, so the wire model is the one the target
+		// actually serves. chat/messages/responses keep the body rewrite in
+		// RequestTransform below.
+		upstreamModel := selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol))
+		if strings.EqualFold(string(selection.Request.Protocol), "gemini") {
+			if rewritten, ok := gateway.RewriteModelPath(clientPath, selection.Request.ModelName, upstreamModel); ok {
+				cloned := *r
+				clonedURL := *r.URL
+				clonedURL.Path = rewritten
+				clonedURL.RawPath = ""
+				cloned.URL = &clonedURL
+				r = &cloned
+			}
+		}
 		// The request-side order lives in gateway: alias -> record body ->
 		// conversion -> masking -> wire body. The cassette records the
 		// post-alias, pre-conversion/pre-mask body.
@@ -889,7 +909,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		transform := gateway.RequestTransform{
 			RequestedModel: selection.Request.ModelName,
-			UpstreamModel:  selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)),
+			UpstreamModel:  upstreamModel,
 			ConverterFor: func(record []byte) (gateway.Converter, error) {
 				conv, err := h.conversionForSelection(r, selection, record)
 				if err != nil || conv == nil {
@@ -1732,6 +1752,8 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		attrs := map[string]interface{}{
 			"upstream_id":   decision.SelectedID,
 			"routing_score": decision.SelectedScore,
+			"priority_mode": decision.PriorityMode,
+			"selected_tier": decision.SelectedTier,
 		}
 		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
 			RouteTargetID:  decision.SelectedRouteTargetID,
@@ -1832,6 +1854,10 @@ func routePlanEventForSelection(r *http.Request, selection *router.Selection, ev
 		}
 		if selection.Decision != nil {
 			attrs["candidate_summary"] = routePlanCandidateSummary(selection.Decision.Candidates)
+			if selection.Decision.PriorityMode != "" {
+				attrs["priority_mode"] = selection.Decision.PriorityMode
+			}
+			attrs["selected_tier"] = selection.Decision.SelectedTier
 		}
 	}
 	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
@@ -1849,6 +1875,10 @@ func routePlanEventForDecision(r *http.Request, bodyBytes []byte, decision *rout
 		attrs["upstream_model"] = decision.ModelName
 		attrs["upstream_endpoint"] = decision.Endpoint
 		attrs["candidate_summary"] = routePlanCandidateSummary(decision.Candidates)
+		if decision.PriorityMode != "" {
+			attrs["priority_mode"] = decision.PriorityMode
+		}
+		attrs["selected_tier"] = decision.SelectedTier
 		if failureReason == "" {
 			failureReason = decision.FailureReason
 		}
@@ -1884,7 +1914,7 @@ func upstreamModelForSelection(selection *router.Selection) string {
 	}
 	requestedModel := strings.TrimSpace(selection.Request.ModelName)
 	if selection.Target != nil {
-		if upstreamModel := selection.Target.ResolveModelAlias(requestedModel); upstreamModel != "" {
+		if upstreamModel := selection.Target.ResolveModelAliasForProtocol(requestedModel, string(selection.Request.Protocol)); upstreamModel != "" {
 			return upstreamModel
 		}
 	}

@@ -4298,10 +4298,12 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 
 	var gotPath string
 	var gotAuthorization string
+	var gotAPIKey string
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuthorization = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-goog-api-key")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"hello from vertex"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":6,"totalTokenCount":10}}`)
 	}))
@@ -4343,8 +4345,11 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 	if gotPath != "/v1/publishers/google/models/gemini-2.5-flash:generateContent" {
 		t.Fatalf("upstream path = %q, want /v1/publishers/google/models/gemini-2.5-flash:generateContent", gotPath)
 	}
-	if gotAuthorization != "Bearer vertex-secret" {
-		t.Fatalf("Authorization = %q, want Bearer vertex-secret", gotAuthorization)
+	if gotAPIKey != "vertex-secret" {
+		t.Fatalf("x-goog-api-key = %q, want vertex-secret", gotAPIKey)
+	}
+	if gotAuthorization != "" {
+		t.Fatalf("Authorization = %q, want empty for Vertex Express API-key auth", gotAuthorization)
 	}
 
 	recordPath := findRecordedHTTP(t, outputDir)

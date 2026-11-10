@@ -125,8 +125,18 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/models/gpt-5") {
       return route.fulfill({ json: modelDetailPayload() });
     }
-    if (path === "/api/channels") {
+    if (path === "/api/channels" && method === "GET") {
       return route.fulfill({ json: channelListPayload() });
+    }
+    if (path === "/api/channels" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.provider_preset).toBe("openai");
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_key).toBe("sk-test-secret");
+      expect(body.models).toEqual(["gpt-5"]);
+      expect(body.capabilities.chat_completions).toBe(true);
+      expect(body.capabilities.responses).toBe(true);
+      return route.fulfill({ json: channelDetailPayload() });
     }
     if (path === "/api/provider-probe" && method === "POST") {
       const body = route.request().postDataJSON();
@@ -178,6 +188,9 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/provider-presets") {
       return route.fulfill({ json: providerPresetPayload() });
+    }
+    if (path === "/api/catalog/providers") {
+      return route.fulfill({ json: providerCatalogPayload() });
     }
     if (path === "/api/channels/openai-primary" && method === "GET") {
       return route.fulfill({ json: channelDetailPayload() });
@@ -411,36 +424,19 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await page.getByRole("button", { name: "New channel" }).click();
   await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
-  await expect(page.getByLabel("Channel preset")).toHaveText("openai");
-  // The form starts from an explicit API type + protocol family surface, which
-  // is allowed to be created without a validation round-trip.
-  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
-  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
-  await page.getByLabel("API key").fill("sk-test-secret");
-  await page.getByRole("button", { name: "Detect channel" }).click();
-  await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
-  await page.getByRole("button", { name: "Apply suggestions" }).click();
-  // These three are listboxes now, so what they show is the option's label
-  // rather than the DOM value a native select carried. The raw API mode control
-  // is gone: the console derives the execution mode from the API surface.
-  await expect(page.getByLabel("API type")).toHaveText("Chat Completions");
-  await expect(page.getByLabel("protocol")).toHaveText("openai_compatible");
-  await expect(page.getByLabel("Routing profile")).toHaveText("openai_default");
-  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
-  await page.getByRole("button", { name: "Validate setup" }).click();
-  await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
-  await expect(page.getByText("stored as sk-...cret")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
-  // Editing a validation-relevant field drops the previous validation result.
-  await page.getByLabel("Base URL").fill("https://api.openai.example/v1/");
-  await expect(page.getByText("Validate setup before creating the channel.")).toBeVisible();
-  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
-  await page.getByRole("button", { name: "Validate setup" }).click();
+  await expect(page.getByRole("tab", { name: "Official providers" })).toHaveAttribute("aria-selected", "true");
+  // The official tab lists the built-in providers directly; clicking one fills
+  // the endpoint from the catalog, so only the key and optional models remain.
+  const createDialog = page.locator(".provider-create-modal");
+  await page.locator(".provider-catalog-card").filter({ hasText: "OpenAI" }).first().click();
+  await expect(createDialog.getByText("Selected provider")).toBeVisible();
+  await expect(createDialog.locator("code", { hasText: "https://api.openai.example/v1" })).toBeVisible();
+  await createDialog.getByLabel("API key").fill("sk-test-secret");
+  await createDialog.getByLabel("Models").fill("gpt-5");
   await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();
   await page.getByRole("button", { name: "Create channel" }).click();
   await expect(page.getByRole("heading", { name: "Create channel" })).toBeHidden();
 
-  // The console names the canonical channel address; /providers only redirects.
   await expect(page).toHaveURL(/channels\/openai-primary/);
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
@@ -1710,6 +1706,24 @@ function providerPresetPayload() {
       routing_profiles: ["openai_default", "azure_openai_v1", "azure_openai_deployment", "vllm_openai", "anthropic_default", "google_ai_studio", "vertex_express", "vertex_project_location"],
       model_discovery: ["list_models", "disabled"],
     },
+  };
+}
+
+function providerCatalogPayload() {
+  return {
+    items: [
+      {
+        id: "openai",
+        name: "OpenAI",
+        kind: "vendor",
+        protocols: ["chat_completions", "responses"],
+        endpoints: {
+          chat_completions: "https://api.openai.example/v1",
+          responses: "https://api.openai.example/v1",
+        },
+        notes: "Official OpenAI-compatible endpoint.",
+      },
+    ],
   };
 }
 

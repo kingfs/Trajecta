@@ -742,8 +742,8 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	}
 	headers = http.Header{}
 	resolved.ApplyAuthHeaders(headers)
-	if got := headers.Get("Authorization"); got != "Bearer vertex-secret" {
-		t.Fatalf("Authorization = %q, want Bearer vertex-secret", got)
+	if got := headers.Get("x-goog-api-key"); got != "vertex-secret" {
+		t.Fatalf("x-goog-api-key = %q, want vertex-secret", got)
 	}
 }
 
