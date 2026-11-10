@@ -83,10 +83,14 @@ var providerPresetRegistry = map[string]ProviderPresetSpec{
 	"openai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"openrouter":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"perplexity":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"qwen_coding":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"qwen_coding_intl": {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"together":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"vllm":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileVLLMOpenAI}},
 	"vertex":           {ProtocolFamily: ProtocolFamilyVertexNative, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileVertexExpress, RoutingProfileVertexProject}},
 	"xai":              {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"zai_coding":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"zhipu_coding":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 }
 
 type ResolvedUpstream struct {

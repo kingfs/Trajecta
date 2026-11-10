@@ -17,7 +17,7 @@ func TestBuiltinPresets(t *testing.T) {
 		"openai", "anthropic", "deepseek", "openrouter", "google",
 		"moonshot", "zhipu", "zai", "minimax", "xai", "groq", "mistral",
 		"together", "fireworks", "cerebras", "github", "azure", "vertex",
-		"vllm", "ollama",
+		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "zai_coding", "zhipu_coding",
 	}
 	byID := make(map[string]Preset, len(presets))
 	for _, preset := range presets {
@@ -289,5 +289,29 @@ func assertAbsoluteHTTPURL(t *testing.T, label string, raw string) {
 	}
 	if parsed.Path != "" && parsed.Path != "/" && parsed.Path[len(parsed.Path)-1] == '/' {
 		t.Errorf("%s: %q has a trailing slash", label, raw)
+	}
+}
+
+func TestCodingPlanPresetsUseDedicatedEndpoints(t *testing.T) {
+	cases := []struct {
+		id   string
+		chat string
+	}{
+		{"qwen_coding", "https://coding.dashscope.aliyuncs.com/v1"},
+		{"qwen_coding_intl", "https://coding-intl.dashscope.aliyuncs.com/v1"},
+		{"zai_coding", "https://api.z.ai/api/coding/paas/v4"},
+		{"zhipu_coding", "https://open.bigmodel.cn/api/coding/paas/v4"},
+	}
+	for _, tc := range cases {
+		preset, ok := LookupPreset(tc.id)
+		if !ok {
+			t.Fatalf("LookupPreset(%q) not found", tc.id)
+		}
+		if got := preset.Endpoints[xir.ProtocolChatCompletions]; got != tc.chat {
+			t.Fatalf("%s chat endpoint = %q, want %q", tc.id, got, tc.chat)
+		}
+		if preset.Auth.Mode != AuthModeAPIKey || preset.Auth.Scheme != "Bearer" {
+			t.Fatalf("%s auth = %+v", tc.id, preset.Auth)
+		}
 	}
 }

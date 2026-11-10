@@ -112,3 +112,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 最近一次构建、全量测试、race、vet 与前端单测记录见 [VERIFICATION.md](./VERIFICATION.md)。
 
 当前事实基线中的 2.0 能力包与接入点已同步到 `docs/IMPLEMENTATION_STATUS.md`。
+
+- `pkg/upstream`：新增 `qwen_coding` / `qwen_coding_intl` / `zai_coding` / `zhipu_coding` 官方 coding-plan 预设；Qwen 为 `sk-sp-` API key + 专用 endpoint，GLM 为各平台 API key + coding endpoint。

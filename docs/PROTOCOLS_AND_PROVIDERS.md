@@ -196,3 +196,19 @@ trajecta provider probe-report
 ```
 
 未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；渠道 API 另有顶层 `endpoints`，Monitor 高级选项可逐协议编辑。
+
+
+## Coding Plan 预设
+
+当前内置以下专用 coding-plan 预设（均为 API key 鉴权，endpoint 与普通按量 endpoint 隔离）：
+
+| 预设 | 区域 | Chat endpoint | Anthropic endpoint |
+| --- | --- | --- | --- |
+| `qwen_coding` | 中国 | `https://coding.dashscope.aliyuncs.com/v1` | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
+| `qwen_coding_intl` | 国际 | `https://coding-intl.dashscope.aliyuncs.com/v1` | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
+| `zai_coding` | Z.ai | `https://api.z.ai/api/coding/paas/v4` | `https://api.z.ai/api/anthropic` |
+| `zhipu_coding` | 智谱 BigModel | `https://open.bigmodel.cn/api/coding/paas/v4` | `https://open.bigmodel.cn/api/anthropic` |
+
+Qwen Coding Plan 使用 `sk-sp-` 前缀的专用 key，和普通 DashScope key 不可混用。GLM Coding Plan 使用对应平台的 API key；coding endpoint 才会消耗套餐额度。
+
+**关于 OAuth**：Qwen 当前公开文档已把 Qwen OAuth 从 `/auth` 选项移除，官方 coding plan 走专用 API key；Z.ai 的 ZCode OAuth 是桌面客户端流程，BigModel 的 OAuth 也只接受桌面回调，均不是稳定的公开第三方 API。Trajecta 先接入官方 API key 路径，不实现逆向/客户端专用 OAuth。
