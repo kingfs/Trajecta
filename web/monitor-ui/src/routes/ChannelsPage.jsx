@@ -60,12 +60,6 @@ export function ProvidersPage() {
   const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue]);
   const presets = useJSON(apiPaths.providerPresets, []);
   const catalog = useJSON(apiPaths.providerCatalog, []);
-  // The create form starts on the default preset (openai). Fill its endpoint
-  // once the preset payload arrives, but never overwrite a URL the operator
-  // typed or deliberately cleared.
-  useEffect(() => {
-    setForm((current) => (current.base_url.trim() ? current : normalizePresetSelection(current, presets.data, "provider_preset")));
-  }, [presets.data]);
   const items = providers.data?.items || [];
   const totals = useMemo(() => summarizeProviders(items), [items]);
   const chartItems = useMemo(() => buildProviderTrendItems(items), [items]);
@@ -132,6 +126,7 @@ export function ProvidersPage() {
       {formOpen ? (
         <CreateProviderDialog
           presetData={presets.data}
+          catalog={catalog}
           onClose={() => setFormOpen(false)}
           onCreated={(item) => {
             setFormOpen(false);
@@ -172,7 +167,7 @@ function ProviderProbeBatchRow({ row }) {
   );
 }
 
-function CreateProviderDialog({ presetData, onClose, onCreated }) {
+function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   const { t } = useI18n();
   const [form, setForm] = useState(DEFAULT_FORM);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -184,6 +179,13 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   // about a form that has not changed since.
   const validationVersion = useRef(0);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
+  // Fill the default preset endpoint once the payload arrives, but never
+  // overwrite a URL the operator typed or deliberately cleared. This lives in
+  // the dialog because `setForm` belongs to this component; placing it in the
+  // page made `/channels` throw "setForm is not defined" on mount.
+  useEffect(() => {
+    setForm((current) => (current.base_url.trim() ? current : normalizePresetSelection(current, presetData, "provider_preset")));
+  }, [presetData]);
   const currentSetupSignature = setupValidationSignature(form);
   const setupStale = Boolean(setupResult && validatedSignature !== currentSetupSignature);
   const setupStatus = buildSetupStatus(setupResult, setupStale, form, t);
