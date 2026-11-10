@@ -7,7 +7,7 @@
 | 模块 ID | M04 |
 | 模块名 | 协议转换与流式 |
 | 归属 | `pkg/xir/convert`（非流式转换）、`pkg/xir/stream`（SSE 帧与事件装配） |
-| 状态 | Landed (P2)，范围仅非流式 hub 转换 |
+| 状态 | Landed (P2)，范围仅非流式 hub 转换；流式转换评估见 `design/STREAMING_CONVERSION_ASSESSMENT.md` |
 | 依赖模块 | M01、M02；M03（stream Point 定义，convert 本身不 import hook） |
 | 被依赖模块 | 未来 `internal/gateway`（M10） |
 | 目标版本 | Trajecta 2.0 |

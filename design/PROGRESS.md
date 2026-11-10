@@ -132,3 +132,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 - `internal/gateway`：Chat Completions 的 `stream_options.include_usage` 注入移入 gateway，proxy 不再保留本地 helper。
 
 - `internal/gateway`：跨协议转换后的协议头策略（anthropic-version/beta、Gemini key、Content-Type）移入 gateway，proxy 只保留转换决策与引擎选择。
+
+- 跨协议流式转换完成立项评估（`design/STREAMING_CONVERSION_ASSESSMENT.md`）：2.0 保持 non-goal，新增全协议对拒绝测试。

@@ -376,3 +376,23 @@ func hasLoss(losses []xir.Loss, field string, fatal bool) bool {
 	}
 	return false
 }
+
+func TestStreamingConversionRejectedForEveryProtocolPair(t *testing.T) {
+	protocols := []xir.Protocol{
+		xir.ProtocolChatCompletions,
+		xir.ProtocolResponses,
+		xir.ProtocolMessages,
+		xir.ProtocolGemini,
+	}
+	for _, from := range protocols {
+		for _, to := range protocols {
+			if from == to {
+				continue
+			}
+			_, err := ConvertRequest(context.Background(), []byte(`{"model":"m","stream":true}`), from, to, Options{Stream: true})
+			if !errors.Is(err, ErrStreamingConversion) {
+				t.Fatalf("%s -> %s: err = %v, want ErrStreamingConversion", from, to, err)
+			}
+		}
+	}
+}

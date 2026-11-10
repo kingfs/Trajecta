@@ -223,7 +223,7 @@ Responses audit 属于部分实现，职责边界如下：
 
 明确的边界/未完成：
 
-- 跨协议 streaming conversion 仍是 non-goal；只有非流式 conversion；
+- 跨协议 streaming conversion 仍是 non-goal；只有非流式 conversion；评估见 `design/STREAMING_CONVERSION_ASSESSMENT.md`；
 - OAuth 只有类型/接口预留，没有网络流程与凭据表；
 - per-model 多协议 wire name 尚未建模；
 - `plan_engine=route` 尚未设为默认，需继续对比后再决定。
