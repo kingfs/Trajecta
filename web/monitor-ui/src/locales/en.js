@@ -171,6 +171,7 @@ export default {
   "providers.fillable": "{count} fillable",
   "providers.apiType": "api type",
   "providers.protocol": "protocol",
+  "providers.codingPlan": "Coding Plan",
   "providers.capabilities": "capabilities",
   "providers.missing": "missing",
   "providers.set": "set",

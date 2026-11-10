@@ -168,7 +168,7 @@ Trajecta 自身的事件收件箱：
 
 模型页按两个问题拆成同一路由下的两个标签页，默认落在**模型广场**，`?tab=usage` 是**实时统计**。
 
-**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；**创建渠道**时选中 provider preset 会自动填入该协议的 endpoint；预设列表包含 Qwen Coding Plan（中国/国际）与 GLM Coding Plan（Z.ai/智谱），它们使用各自的专用 coding endpoint 和 API key。（来自 `GET /api/provider-presets` 的新 `endpoints` 字段，或 `GET /api/catalog/providers` 的完整目录）；Base URL 留空时后端按 `api_type`/`protocol_family` 选择 preset 默认 endpoint，因此自定义渠道仍可手填。
+**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；**创建渠道**时选中 provider preset 会自动填入该协议的 endpoint；预设列表包含 Qwen Coding Plan（中国/国际）、GLM Coding Plan（Z.ai/智谱）与 Kimi Code；渠道卡片会显示 `Coding Plan` 标记，它们使用各自的专用 coding endpoint 和 API key。（来自 `GET /api/provider-presets` 的新 `endpoints` 字段，或 `GET /api/catalog/providers` 的完整目录）；Base URL 留空时后端按 `api_type`/`protocol_family` 选择 preset 默认 endpoint，因此自定义渠道仍可手填。
 
 **模型广场**回答“当前平台能调用哪些模型”。数据来自 `GET /api/model-square`：按小写模型名聚合 `channel_models`，每个模型一张卡，卡上展示可用渠道的协议 badge（chat_completions / responses / messages / gemini），并列出声明该模型的所有渠道（渠道名 + 可用/停用圆点，芯片的 tooltip 给出渠道 ID、上游模型名与状态），并给出声明该模型的渠道总数。可调用 = 渠道本身启用、且该 channel-model 对路由可用（`channel.ModelRoutable`，即模型启用且未被最近一次成功同步判定为 removed）；默认只显示至少有一个可调用渠道的模型，分段控件切到“全部已配置”后连未启用、仅挂在停用渠道上或上游已移除的模型也会出现，便于对照配置。搜索覆盖模型名、显示名、渠道名、渠道 ID，以及 Argus 元数据中的模型名、供应商和描述；广场使用 `square_q` / `square_page`，与实时统计的 `q` / `page` 分开保存，切换标签页不会把一种列表的过滤条件带到另一种列表。卡片按可调用优先、可调用渠道数、渠道数、模型名排序，24 个/页；头部四张读数卡分别是模型数、可调用模型数、可用渠道数和已匹配元数据数。
 

@@ -187,6 +187,15 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if got := strings.Join(byID["openai"].Protocols, ","); got != "chat_completions,responses" {
 		t.Fatalf("openai preset protocols = %q", got)
 	}
+	if byID["qwen_coding"].Endpoints["chat_completions"] != "https://coding.dashscope.aliyuncs.com/v1" {
+		t.Fatalf("qwen_coding preset = %+v", byID["qwen_coding"])
+	}
+	if byID["zai_coding"].Endpoints["chat_completions"] != "https://api.z.ai/api/coding/paas/v4" {
+		t.Fatalf("zai_coding preset = %+v", byID["zai_coding"])
+	}
+	if byID["kimi_coding"].ProtocolFamily != "anthropic_messages" || byID["kimi_coding"].Endpoints["messages"] != "https://api.kimi.ai/coding" {
+		t.Fatalf("kimi_coding preset = %+v", byID["kimi_coding"])
+	}
 	if got := strings.Join(byID["azure_openai"].AllowedProfiles, ","); !strings.Contains(got, "azure_openai_v1") || !strings.Contains(got, "azure_openai_deployment") {
 		t.Fatalf("azure_openai allowed profiles = %q", got)
 	}

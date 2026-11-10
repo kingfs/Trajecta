@@ -409,6 +409,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           <h2>{item.name || item.id}</h2>
         </div>
         <div className="trace-tag-group">
+          {item.coding_plan ? <InlineTag tone="accent">{t("providers.codingPlan")}</InlineTag> : null}
           <Switch checked={Boolean(item.enabled)} onChange={(enabled) => setEnabled.mutate(enabled)} disabled={saving} label={`${item.name || item.id} enabled`} />
           <Button variant="default" size="icon" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
             <DeleteIcon />

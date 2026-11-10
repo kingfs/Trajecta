@@ -113,4 +113,4 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 
 当前事实基线中的 2.0 能力包与接入点已同步到 `docs/IMPLEMENTATION_STATUS.md`。
 
-- `pkg/upstream`：新增 `qwen_coding` / `qwen_coding_intl` / `zai_coding` / `zhipu_coding` / `kimi_coding` 官方 coding-plan 预设；Qwen 为 `sk-sp-` API key + 专用 endpoint，GLM 为各平台 API key + coding endpoint；Qwen key 前缀在渠道创建时校验。
+- `pkg/upstream`：新增 `qwen_coding` / `qwen_coding_intl` / `zai_coding` / `zhipu_coding` / `kimi_coding` 官方 coding-plan 预设；Qwen 为 `sk-sp-` API key + 专用 endpoint，GLM 为各平台 API key + coding endpoint；Qwen key 前缀在渠道创建时校验；渠道卡片显示 Coding Plan 标记。

@@ -45,4 +45,7 @@ func TestChannelCreateRejectsWrongQwenCodingPlanKey(t *testing.T) {
 	if created.BaseURL != "https://coding.dashscope.aliyuncs.com/v1" {
 		t.Fatalf("base URL = %q", created.BaseURL)
 	}
+	if !created.CodingPlan {
+		t.Fatal("coding plan flag was not set")
+	}
 }

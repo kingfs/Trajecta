@@ -171,6 +171,7 @@ export default {
   "providers.fillable": "{count} 可填充",
   "providers.apiType": "API 类型",
   "providers.protocol": "协议",
+  "providers.codingPlan": "Coding Plan",
   "providers.capabilities": "能力",
   "providers.missing": "缺失",
   "providers.set": "已设置",

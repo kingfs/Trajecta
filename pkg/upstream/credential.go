@@ -22,3 +22,12 @@ func ValidateCodingPlanCredential(presetID, apiKey string) error {
 	}
 	return nil
 }
+
+// IsCodingPlanPreset reports whether id names a dedicated coding-plan preset.
+func IsCodingPlanPreset(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "qwen_coding", "qwen_coding_intl", "zai_coding", "zhipu_coding", "kimi_coding":
+		return true
+	}
+	return false
+}
