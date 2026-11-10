@@ -17,7 +17,7 @@ func TestBuiltinPresets(t *testing.T) {
 		"openai", "anthropic", "deepseek", "openrouter", "google",
 		"moonshot", "zhipu", "zai", "minimax", "xai", "groq", "mistral",
 		"together", "fireworks", "cerebras", "github", "azure", "vertex",
-		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "zai_coding", "zhipu_coding",
+		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "zai_coding", "zhipu_coding", "kimi_coding",
 	}
 	byID := make(map[string]Preset, len(presets))
 	for _, preset := range presets {
@@ -302,13 +302,24 @@ func TestCodingPlanPresetsUseDedicatedEndpoints(t *testing.T) {
 		{"zai_coding", "https://api.z.ai/api/coding/paas/v4"},
 		{"zhipu_coding", "https://open.bigmodel.cn/api/coding/paas/v4"},
 	}
+	cases = append(cases, struct {
+		id   string
+		chat string
+	}{"kimi_coding", ""})
 	for _, tc := range cases {
 		preset, ok := LookupPreset(tc.id)
 		if !ok {
 			t.Fatalf("LookupPreset(%q) not found", tc.id)
 		}
-		if got := preset.Endpoints[xir.ProtocolChatCompletions]; got != tc.chat {
-			t.Fatalf("%s chat endpoint = %q, want %q", tc.id, got, tc.chat)
+		if tc.chat != "" {
+			if got := preset.Endpoints[xir.ProtocolChatCompletions]; got != tc.chat {
+				t.Fatalf("%s chat endpoint = %q, want %q", tc.id, got, tc.chat)
+			}
+		}
+		if tc.id == "kimi_coding" {
+			if got := preset.Endpoints[xir.ProtocolMessages]; got != "https://api.kimi.ai/coding" {
+				t.Fatalf("kimi messages endpoint = %q", got)
+			}
 		}
 		if preset.Auth.Mode != AuthModeAPIKey || preset.Auth.Scheme != "Bearer" {
 			t.Fatalf("%s auth = %+v", tc.id, preset.Auth)

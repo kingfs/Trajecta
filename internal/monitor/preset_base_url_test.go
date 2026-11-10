@@ -24,6 +24,7 @@ func TestDefaultPresetBaseURL(t *testing.T) {
 		{name: "qwen coding intl", preset: "qwen_coding_intl", want: "https://coding-intl.dashscope.aliyuncs.com/v1"},
 		{name: "zai coding", preset: "zai_coding", want: "https://api.z.ai/api/coding/paas/v4"},
 		{name: "zhipu coding", preset: "zhipu_coding", want: "https://open.bigmodel.cn/api/coding/paas/v4"},
+		{name: "kimi coding", preset: "kimi_coding", family: "anthropic_messages", apiType: "messages", want: "https://api.kimi.ai/coding"},
 		{name: "google gemini", preset: "google", family: "google_genai", want: "https://generativelanguage.googleapis.com/v1beta"},
 		{name: "azure has no universal endpoint", preset: "azure", want: ""},
 		{name: "custom", preset: "", want: ""},

@@ -11,6 +11,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
+	pkgupstream "github.com/kingfs/Trajecta/pkg/upstream"
 	"io"
 	"net/http"
 	"strings"
@@ -72,7 +73,12 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			return
 		}
 		req.ID = channelID
-		record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, existing))
+		record := channelRecordFromRequest(req, existing)
+		if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, req.APIKey); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		record, err = st.UpsertChannelConfig(record)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

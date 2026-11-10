@@ -78,6 +78,7 @@ var providerPresetRegistry = map[string]ProviderPresetSpec{
 	"google_genai":     {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
 	"gemini":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
 	"hugging_face":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"kimi_coding":      {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
 	"moonshot":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"nvidia_nim":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"openai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},

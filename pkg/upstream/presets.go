@@ -144,6 +144,19 @@ var builtinPresets = []Preset{
 		Notes:   "Both Chat Completions and Responses are mounted under /openai/v1.",
 	},
 	{
+		ID:   "kimi_coding",
+		Name: "Kimi Code",
+		Kind: KindVendor,
+		Endpoints: map[xir.Protocol]string{
+			xir.ProtocolMessages: "https://api.kimi.ai/coding",
+		},
+		Auth:    bearerAuth(),
+		Models:  ModelSource{NoList: true},
+		DocsURL: "https://platform.kimi.com/docs",
+		KeysURL: "https://platform.kimi.com/console",
+		Notes:   "Kimi Code membership uses the Anthropic-compatible coding endpoint. This is separate from the Moonshot open-platform API key.",
+	},
+	{
 		ID:   "minimax",
 		Name: "MiniMax",
 		Kind: KindVendor,

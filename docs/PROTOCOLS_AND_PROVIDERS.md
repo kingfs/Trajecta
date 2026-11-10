@@ -208,7 +208,8 @@ trajecta provider probe-report
 | `qwen_coding_intl` | 国际 | `https://coding-intl.dashscope.aliyuncs.com/v1` | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
 | `zai_coding` | Z.ai | `https://api.z.ai/api/coding/paas/v4` | `https://api.z.ai/api/anthropic` |
 | `zhipu_coding` | 智谱 BigModel | `https://open.bigmodel.cn/api/coding/paas/v4` | `https://open.bigmodel.cn/api/anthropic` |
+| `kimi_coding` | Kimi Code | -（仅 Anthropic Messages） | `https://api.kimi.ai/coding` |
 
-Qwen Coding Plan 使用 `sk-sp-` 前缀的专用 key，和普通 DashScope key 不可混用。GLM Coding Plan 使用对应平台的 API key；coding endpoint 才会消耗套餐额度。
+Qwen Coding Plan 使用 `sk-sp-` 前缀的专用 key，和普通 DashScope key 不可混用；渠道创建时会拒绝非 `sk-sp-` key。GLM Coding Plan 使用对应平台的 API key；coding endpoint 才会消耗套餐额度。
 
 **关于 OAuth**：Qwen 当前公开文档已把 Qwen OAuth 从 `/auth` 选项移除，官方 coding plan 走专用 API key；Z.ai 的 ZCode OAuth 是桌面客户端流程，BigModel 的 OAuth 也只接受桌面回调，均不是稳定的公开第三方 API。Trajecta 先接入官方 API key 路径，不实现逆向/客户端专用 OAuth。
