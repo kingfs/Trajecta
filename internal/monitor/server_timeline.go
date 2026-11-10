@@ -591,21 +591,28 @@ func overviewTimelineViews(items []store.OverviewTimelineItem) []overviewTimelin
 	return out
 }
 
+// timelineEvents returns the cassette events, or the two structural events a
+// minimal cassette omits so request/response views still have a timeline.
+func timelineEvents(parsed *ParsedData) []recordfile.RecordEvent {
+	if parsed == nil {
+		return nil
+	}
+	events := filterTimelineEvents(parsed.Events)
+	if len(events) > 0 {
+		return events
+	}
+	when := parsed.Header.Meta.Time
+	return []recordfile.RecordEvent{
+		{Type: "request", Time: when},
+		{Type: "response", Time: when.Add(time.Duration(parsed.Header.Meta.DurationMs) * time.Millisecond)},
+	}
+}
+
 func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
 	if parsed == nil {
 		return []recordEventView{}
 	}
-	events := filterTimelineEvents(parsed.Events)
-	if len(events) == 0 {
-		// Minimal cassettes intentionally omit the event stream. The raw
-		// request/response are still parsed, so synthesize the two structural
-		// events the timeline needs instead of returning an empty view.
-		when := parsed.Header.Meta.Time
-		events = []recordfile.RecordEvent{
-			{Type: "request", Time: when},
-			{Type: "response", Time: when.Add(time.Duration(parsed.Header.Meta.DurationMs) * time.Millisecond)},
-		}
-	}
+	events := timelineEvents(parsed)
 	views := toEventViewsFromRecord(events)
 	for idx, event := range events {
 		var items []timelineItemView

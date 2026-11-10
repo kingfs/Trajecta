@@ -1027,11 +1027,16 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			if err := pkgupstream.ValidateCodingPlanCredential(req.ProviderPreset, req.APIKey); err != nil {
+			record := channelRecordFromRequest(req, store.ChannelConfigRecord{})
+			key := req.APIKey
+			if strings.TrimSpace(key) == "" {
+				key = string(record.APIKeyCiphertext)
+			}
+			if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, key); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, store.ChannelConfigRecord{}))
+			record, err := st.UpsertChannelConfig(record)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return

@@ -74,7 +74,11 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 		}
 		req.ID = channelID
 		record := channelRecordFromRequest(req, existing)
-		if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, req.APIKey); err != nil {
+		key := req.APIKey
+		if strings.TrimSpace(key) == "" {
+			key = string(record.APIKeyCiphertext)
+		}
+		if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, key); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}

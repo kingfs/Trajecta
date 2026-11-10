@@ -52,3 +52,35 @@ func TestChannelCreateRejectsWrongQwenCodingPlanKey(t *testing.T) {
 		t.Fatalf("plan name = %q", created.PlanName)
 	}
 }
+
+func TestChannelPatchValidatesExistingCodingPlanKey(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	create := `{"name":"Qwen Coding","provider_preset":"qwen_coding","api_type":"chat_completions","protocol_family":"openai_compatible","api_key":"sk-sp-test"}`
+	rr := httptest.NewRecorder()
+	channelListCreateAPIHandler(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/channels", strings.NewReader(create)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var created channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	// No new key: the existing sk-sp- key must be validated, not skipped.
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodPatch, "/api/channels/"+created.ID, strings.NewReader(`{"name":"Qwen Coding 2"}`)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch without key status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodPatch, "/api/channels/"+created.ID, strings.NewReader(`{"api_key":"sk-standard"}`)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("patch bad key status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}

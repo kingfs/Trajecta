@@ -16,6 +16,9 @@ func TestBuildTimelineEventViewsFallsBackToRawSections(t *testing.T) {
 		ChatMessages: []ChatMessage{{Role: "user", Content: "hi"}},
 		AIContent:    "hello",
 	}
+	if events := timelineEvents(parsed); len(events) != 2 || events[0].Type != "request" || events[1].Type != "response" {
+		t.Fatalf("timelineEvents = %+v", events)
+	}
 	views := buildTimelineEventViews(parsed)
 	if len(views) != 2 {
 		t.Fatalf("views = %+v", views)

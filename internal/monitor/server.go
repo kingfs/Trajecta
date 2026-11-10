@@ -2388,7 +2388,7 @@ func handleTraceRaw(w http.ResponseWriter, absPath string, entry store.LogEntry)
 			Layout:  parsed.Header.Layout,
 			Usage:   parsed.Header.Usage,
 		},
-		Events: toEventViewsFromRecord(parsed.Events),
+		Events: toEventViewsFromRecord(timelineEvents(parsed)),
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
