@@ -42,7 +42,6 @@ import (
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
-	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 type aggregatedModelListResponse struct {
@@ -201,30 +200,13 @@ func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	bodyBytes = injectStreamOptions(req, bodyBytes)
+	bodyBytes = gateway.InjectStreamOptions(req, bodyBytes)
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	req.ContentLength = int64(len(bodyBytes))
 	if len(bodyBytes) > 0 {
 		req.Header.Set("Content-Length", fmt.Sprint(len(bodyBytes)))
 	}
 	return bodyBytes, nil
-}
-
-func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
-	// Only POST JSON Chat Completions requests are eligible. The rewrite itself
-	// is a byte patch: it adds or replaces stream_options.include_usage and
-	// leaves every other byte of the client body untouched.
-	if req.Method != http.MethodPost || !strings.Contains(req.Header.Get("Content-Type"), "application/json") {
-		return bodyBytes
-	}
-	if llm.NormalizeEndpoint(req.URL.Path) != "/v1/chat/completions" {
-		return bodyBytes
-	}
-	rewritten, changed, err := xir.EnsureStreamIncludeUsage(bodyBytes)
-	if err != nil || !changed {
-		return bodyBytes
-	}
-	return rewritten
 }
 
 // InstrumentedResponseWriter 保持不变

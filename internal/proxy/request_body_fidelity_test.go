@@ -36,7 +36,7 @@ func TestInjectStreamOptionsPreservesTheClientsNumbers(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	got := string(injectStreamOptions(req, []byte(fidelityBody)))
+	got := string(gateway.InjectStreamOptions(req, []byte(fidelityBody)))
 
 	for _, literal := range []string{
 		"9007199254740993",
@@ -110,7 +110,7 @@ func TestBodyRewritesLeaveNonObjectBodiesAlone(t *testing.T) {
 		`not json at all`,
 		``,
 	} {
-		if got := string(injectStreamOptions(req, []byte(body))); got != body {
+		if got := string(gateway.InjectStreamOptions(req, []byte(body))); got != body {
 			t.Fatalf("injectStreamOptions rewrote %q into %q", body, got)
 		}
 	}
