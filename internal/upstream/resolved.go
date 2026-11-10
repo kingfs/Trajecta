@@ -402,11 +402,41 @@ func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
 // names the target protocol.
 func (u ResolvedUpstream) BuildURLForProtocol(protocol string, clientPath string) (string, error) {
 	protocol = strings.TrimSpace(protocol)
+	if u.delegateURLToCatalog(protocol, clientPath) {
+		baseURL := u.BaseURL
+		if endpoint := u.Endpoints[protocol]; endpoint != "" {
+			baseURL = endpoint
+		}
+		resolved := pkgupstream.Resolved{
+			Endpoints: map[xir.Protocol]string{xir.Protocol(protocol): baseURL},
+		}
+		return resolved.BuildURL(xir.Protocol(protocol), clientPath)
+	}
 	baseURL := u.BaseURL
 	if endpoint := u.Endpoints[protocol]; endpoint != "" {
 		baseURL = endpoint
 	}
 	return u.buildURL(baseURL, clientPath, protocolFamilyFor(protocol, u.ProtocolFamily))
+}
+
+func (u ResolvedUpstream) delegateURLToCatalog(protocol, clientPath string) bool {
+	if u.ProtocolFamily != ProtocolFamilyOpenAICompatible {
+		return false
+	}
+	switch u.RoutingProfile {
+	case RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy,
+		RoutingProfileVertexExpress, RoutingProfileVertexProject:
+		return false
+	}
+	parsed := xir.Protocol(protocol)
+	if !parsed.Valid() {
+		return false
+	}
+	switch llm.NormalizeEndpoint(clientPath) {
+	case "/tokenize", "/detokenize":
+		return false
+	}
+	return true
 }
 
 func protocolFamilyFor(protocol, fallback string) string {

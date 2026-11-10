@@ -126,3 +126,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 - `internal/monitor`：trace findings API 合并持久化 analyzer findings 与按需 XIR `detections`，XIR 项标记 `source=xir` 且不含明文值。
 
 - `internal/upstream`：`ApplyAuthHeaders` 委托 `pkg/upstream.ApplyAuth`，内部只保留 Azure/Anthropic/Google 的 header/scheme 选择与 Anthropic version 兼容。
+
+- `internal/upstream`：普通 OpenAI-compatible `BuildURLForProtocol` 委托 `pkg/upstream.Resolved.BuildURL`，Azure/Vertex 与 tokenize/detokenize 保留内部路径；新增 URL parity/边界测试。

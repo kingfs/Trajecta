@@ -18,7 +18,7 @@
 - `protocol_conversion_engine=legacy` 默认；`xir` opt-in；
 - `trace.minimal_cassette` 仓库默认开启，旧配置保持完整 prelude；
 - 旧 preset 矩阵与新 `pkg/upstream` catalog 桥接；
-- gateway 请求/响应核心从 proxy 抽出，proxy 不再保留 package-local `UsageSniffer` 别名/alias wrapper，直接使用 gateway；alias rewrite 原语已移入 gateway；internal upstream 的 auth header 构造已委托 `pkg/upstream.ApplyAuth`；catalog→运行时 preset 一致性测试与自动补齐防止注册表漂移；未来 pkg preset 自动获得运行时默认 spec。
+- gateway 请求/响应核心从 proxy 抽出，proxy 不再保留 package-local `UsageSniffer` 别名/alias wrapper，直接使用 gateway；alias rewrite 原语已移入 gateway；internal upstream 的 auth header 构造已委托 `pkg/upstream.ApplyAuth`；普通 OpenAI-compatible URL/path 构造已委托 `pkg/upstream.Resolved.BuildURL`，Azure/Vertex/tokenize 保留内部逻辑；catalog→运行时 preset 一致性测试与自动补齐防止注册表漂移；未来 pkg preset 自动获得运行时默认 spec。
 
 ## 2. 待做
 

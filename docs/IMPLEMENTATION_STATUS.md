@@ -228,4 +228,4 @@ Responses audit 属于部分实现，职责边界如下：
 - per-model 多协议 wire name 尚未建模；
 - `plan_engine=route` 尚未设为默认，需继续对比后再决定。
 
-- `internal/upstream` 的鉴权头构造已委托 `pkg/upstream.ApplyAuth`；URL/path 构造仍在 internal，Azure/Vertex 特例保留。
+- `internal/upstream` 的鉴权头构造已委托 `pkg/upstream.ApplyAuth`；普通 OpenAI-compatible URL/path 构造委托 `pkg/upstream.Resolved.BuildURL`，Azure/Vertex 与 tokenize 特例保留。
