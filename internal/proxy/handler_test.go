@@ -14,6 +14,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/internal/redaction"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -24,7 +25,7 @@ import (
 
 func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 	var usage usagepkg.Usage
-	sniffer := UsageSniffer{
+	sniffer := gateway.UsageSniffer{
 		Source:   nopReadCloser{Reader: bytes.NewBufferString(`data: {"type":"response.completed","response":{"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}` + "\n")},
 		Usage:    &usage,
 		Pipeline: llm.NewResponsePipeline(llm.ProviderOpenAICompatible, "/v1/responses", true),
@@ -199,7 +200,7 @@ func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 
 func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	var usage usagepkg.Usage
-	sniffer := UsageSniffer{
+	sniffer := gateway.UsageSniffer{
 		Source:   nopReadCloser{},
 		Usage:    &usage,
 		Pipeline: llm.NewResponsePipeline(llm.ProviderOpenAICompatible, "/v1/responses", false),
@@ -218,7 +219,7 @@ func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 func TestUsageSnifferRecordsTTFTFromFirstSourceBytes(t *testing.T) {
 	var ttft int64
 	start := time.Now().Add(-25 * time.Millisecond)
-	sniffer := UsageSniffer{
+	sniffer := gateway.UsageSniffer{
 		Source: nopReadCloser{Reader: bytes.NewBufferString(`{"id":"chatcmpl_ttft"}`)},
 		Start:  start,
 		TTFTMs: &ttft,

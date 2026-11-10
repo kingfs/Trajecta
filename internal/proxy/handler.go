@@ -227,22 +227,6 @@ func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 	return rewritten
 }
 
-func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]byte, bool) {
-	if selection == nil || selection.Target == nil {
-		return bodyBytes, false
-	}
-	return gateway.RewriteModelAlias(
-		bodyBytes,
-		selection.Request.ModelName,
-		selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)),
-	)
-}
-
-// UsageSniffer 纯粹的嗅探器，不再做估算
-// UsageSniffer is the gateway response-body tee. It is aliased here so the
-// forwarding code and its tests can keep using the package-local name.
-type UsageSniffer = gateway.UsageSniffer
-
 // InstrumentedResponseWriter 保持不变
 type InstrumentedResponseWriter struct {
 	w            http.ResponseWriter
@@ -450,7 +434,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		}
 
 		// 4. 劫持 Body
-		resp.Body = &UsageSniffer{
+		resp.Body = &gateway.UsageSniffer{
 			Source:      resp.Body,
 			File:        logInfo.File,
 			Count:       &logInfo.Header.Layout.ResBodyLen,

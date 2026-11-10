@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/router"
 )
 
@@ -78,7 +79,7 @@ func TestRewriteRequestModelAliasPreservesTheClientsNumbers(t *testing.T) {
 	}
 
 	body := strings.Replace(fidelityBody, `"model":"gpt-5"`, `"model":"fast-alias"`, 1)
-	got, rewritten := rewriteRequestModelAlias([]byte(body), selection)
+	got, rewritten := gateway.RewriteModelAlias([]byte(body), selection.Request.ModelName, selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)))
 	if !rewritten {
 		t.Fatal("the alias was not rewritten at all")
 	}
@@ -127,7 +128,7 @@ func TestRewriteRequestModelAliasPreservesFormatting(t *testing.T) {
 		Request: router.RequestFeatures{ModelName: "fast-alias"},
 	}
 	body := "{\n  \"model\" : \"fast-alias\",\n  \"unknown\": {\"n\": 1}\n}"
-	got, rewritten := rewriteRequestModelAlias([]byte(body), selection)
+	got, rewritten := gateway.RewriteModelAlias([]byte(body), selection.Request.ModelName, selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)))
 	if !rewritten {
 		t.Fatal("alias not rewritten")
 	}

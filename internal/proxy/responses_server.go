@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/recorder"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
@@ -75,7 +76,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, err
 	}
-	if rewrittenBody, rewritten := rewriteRequestModelAlias(body, selection); rewritten {
+	if rewrittenBody, rewritten := gateway.RewriteModelAlias(body, selection.Request.ModelName, selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol))); rewritten {
 		body = rewrittenBody
 	}
 
@@ -774,7 +775,7 @@ func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *ht
 	return chatResp, isStream, nil
 }
 
-func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) (*UsageSniffer, bool, *secretmask.Restorer, error) {
+func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time, vault *secretmask.Vault) (*gateway.UsageSniffer, bool, *secretmask.Restorer, error) {
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
 		return nil, false, nil, fmt.Errorf("write chat completion response separator: %w", err)
 	}
@@ -796,7 +797,7 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 		restorer = secretmask.NewRestorer(resp.Body, vault)
 		respBody = restorer
 	}
-	return &UsageSniffer{
+	return &gateway.UsageSniffer{
 		Source:      respBody,
 		File:        logInfo.File,
 		Count:       &logInfo.Header.Layout.ResBodyLen,
