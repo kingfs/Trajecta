@@ -162,6 +162,7 @@ type channelItem struct {
 	Capabilities      upstreamCapabilities `json:"capabilities,omitempty"`
 	Endpoints         map[string]string    `json:"endpoints,omitempty"`
 	CodingPlan        bool                 `json:"coding_plan,omitempty"`
+	PlanName          string               `json:"plan_name,omitempty"`
 	ProtocolFamily    string               `json:"protocol_family"`
 	RoutingProfile    string               `json:"routing_profile"`
 	APIVersion        string               `json:"api_version,omitempty"`
@@ -846,6 +847,7 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 		Capabilities:      capabilities,
 		Endpoints:         capabilities.Endpoints,
 		CodingPlan:        pkgupstream.IsCodingPlanPreset(record.ProviderPreset),
+		PlanName:          pkgupstream.PlanNameForPreset(record.ProviderPreset),
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,
@@ -1699,6 +1701,7 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		Capabilities:      capabilities,
 		Endpoints:         capabilities.Endpoints,
 		CodingPlan:        pkgupstream.IsCodingPlanPreset(record.ProviderPreset),
+		PlanName:          pkgupstream.PlanNameForPreset(record.ProviderPreset),
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,

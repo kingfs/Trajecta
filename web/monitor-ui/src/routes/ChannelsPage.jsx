@@ -406,7 +406,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
     <Link className="upstream-card" to={buildProviderLink(item.id, windowValue)}>
       <div className="upstream-card-head">
         <div>
-          <p className="eyebrow">{item.provider_preset || "custom"}</p>
+          <p className="eyebrow">{item.plan_name || item.provider_preset || "custom"}</p>
           <h2>{item.name || item.id}</h2>
         </div>
         <div className="trace-tag-group">

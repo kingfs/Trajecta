@@ -31,3 +31,25 @@ func IsCodingPlanPreset(id string) bool {
 	}
 	return false
 }
+
+// PlanNameForPreset returns the human name of a dedicated plan preset, or "".
+func PlanNameForPreset(id string) string {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "qwen_coding":
+		return "Qwen Coding Plan (China)"
+	case "qwen_coding_intl":
+		return "Qwen Coding Plan (International)"
+	case "qwen_token_plan":
+		return "Qwen Token Plan (China)"
+	case "qwen_token_plan_intl":
+		return "Qwen Token Plan (International)"
+	case "zai_coding":
+		return "Z.ai GLM Coding Plan"
+	case "zhipu_coding":
+		return "Zhipu GLM Coding Plan"
+	case "kimi_coding":
+		return "Kimi Code"
+	default:
+		return ""
+	}
+}

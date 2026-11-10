@@ -48,4 +48,7 @@ func TestChannelCreateRejectsWrongQwenCodingPlanKey(t *testing.T) {
 	if !created.CodingPlan {
 		t.Fatal("coding plan flag was not set")
 	}
+	if created.PlanName != "Qwen Coding Plan (China)" {
+		t.Fatalf("plan name = %q", created.PlanName)
+	}
 }
