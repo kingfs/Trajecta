@@ -54,11 +54,11 @@
 | M07 | 上游目录与认证 | `pkg/upstream` | preset、endpoint、auth spec、模型发现 | Landed (P2) |
 | M08 | 路由引擎 | `pkg/route` | PlanResult、候选、优先级、亲和、失败分类 | Landed (P2) |
 | M09 | Harness 与 Session | `pkg/harness`、`pkg/session` | 客户端识别、会话信号、fingerprint | Landed (P2) |
-| M10 | Gateway 流水线 | `internal/gateway` | Body 已落地；阶段拆分待做 | 部分 |
-| M11 | 渠道控制面 | `internal/channel`、`internal/store` | 渠道/模型 CRUD、probe、配置事务、catalog API | 部分 |
-| M12 | 审计与证据 | `internal/audit`、`pkg/xir/audit` | 审计投影已落地；重解析、findings、ATIF、cassette 最小化待做 | 进行中 |
-| M13 | Monitor 与模型广场 | `internal/monitor`、`web/monitor-ui` | 渠道向导、模型广场、路由解释 | 待设计 |
-| M14 | 兼容与清理 | 全仓库 | 旧包 facade、feature flag、删除死代码 | 待设计 |
+| M10 | Gateway 流水线 | `internal/gateway` | 请求/响应核心已落地 | 已落地 |
+| M11 | 渠道控制面 | `internal/channel`、`internal/store` | 渠道/模型 CRUD、catalog、per-protocol endpoints | 已落地 |
+| M12 | 审计与证据 | `internal/audit`、`pkg/xir/audit` | XIR audit、SSE、detections、ATIF、minimal cassette | 已落地 |
+| M13 | Monitor 与模型广场 | `internal/monitor`、`web/monitor-ui` | 渠道向导、模型广场、路由解释 | 部分 |
+| M14 | 兼容与清理 | 全仓库 | feature flag、旧路径清理、E2E | 部分 |
 
 ## 5. 推进方式
 

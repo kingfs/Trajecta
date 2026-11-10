@@ -18,8 +18,8 @@
 | P2 | 四协议 codec、hook、convert | 完成，已合并 main |
 | P3 | `pkg/detect`、`pkg/upstream`、`pkg/route`、`pkg/session` | 完成，已合并 main |
 | P4 | `pkg/harness` 迁移、`priority_mode=compat` 接入 | 完成，已合并 main |
-| P5 | core 接入、集成测试 | 部分完成：XIR envelope、preset base URL、priority_mode/session/harness 已接入；gateway 拆分未开始 |
-| P6 | 合并 main、清理与文档同步 | 进行中：M01–M09 文档已落地，旧包清理未开始 |
+| P5 | core 接入、集成测试 | 完成：XIR envelope、gateway、preset/per-protocol endpoint、priority/session/harness、coding plan 已接入 |
+| P6 | 合并 main、清理与文档同步 | 进行中：M01–M14 文档已落地；旧 event/双轨路径清理与 E2E 待做 |
 
 ## 已落地
 
@@ -67,7 +67,7 @@
 
 ## 模块文档
 
-M01–M09 与 M12（audit 投影部分）已按模板落地，索引见 `design/modules/README.md`。M10、M11、M13、M14 仍待创建。
+M01–M14 文档均已创建，索引见 [`design/modules/README.md`](./modules/README.md)。
 
 ## 最近提交
 
