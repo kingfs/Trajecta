@@ -365,19 +365,22 @@ type findingListResponse struct {
 }
 
 type findingView struct {
-	ID              string    `json:"id"`
-	TraceID         string    `json:"trace_id"`
-	Category        string    `json:"category"`
-	Severity        string    `json:"severity"`
-	Confidence      float64   `json:"confidence"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description,omitempty"`
-	EvidencePath    string    `json:"evidence_path"`
-	EvidenceExcerpt string    `json:"evidence_excerpt,omitempty"`
-	NodeID          string    `json:"node_id,omitempty"`
-	Detector        string    `json:"detector"`
-	DetectorVersion string    `json:"detector_version"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string  `json:"id"`
+	TraceID         string  `json:"trace_id"`
+	Category        string  `json:"category"`
+	Severity        string  `json:"severity"`
+	Confidence      float64 `json:"confidence"`
+	Title           string  `json:"title"`
+	Description     string  `json:"description,omitempty"`
+	EvidencePath    string  `json:"evidence_path"`
+	EvidenceExcerpt string  `json:"evidence_excerpt,omitempty"`
+	NodeID          string  `json:"node_id,omitempty"`
+	Detector        string  `json:"detector"`
+	DetectorVersion string  `json:"detector_version"`
+	// Source distinguishes the persisted analyzer finding from an advisory
+	// XIR/detect item surfaced on the same read path.
+	Source    string    `json:"source,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type observationSummaryView struct {
@@ -2251,6 +2254,7 @@ func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store
 	for _, finding := range findings {
 		items = append(items, findingViewFromObservation(finding))
 	}
+	items = append(items, xirFindings(entry, items, filter)...)
 	writeJSON(w, http.StatusOK, findingListResponse{
 		ID:       entry.ID,
 		Items:    items,
@@ -2554,7 +2558,70 @@ func findingViewFromObservation(finding observe.Finding) findingView {
 		NodeID:          finding.NodeID,
 		Detector:        finding.Detector,
 		DetectorVersion: finding.DetectorVersion,
+		Source:          "analyzer",
 		CreatedAt:       finding.CreatedAt,
+	}
+}
+
+// xirFindings surfaces the on-demand XIR/detect detections that the persisted
+// analyzer pass did not already record. They are advisory and never carry the
+// matched value; the source field keeps the two planes distinguishable.
+func xirFindings(entry store.LogEntry, existing []findingView, filter store.FindingFilter) []findingView {
+	if strings.TrimSpace(entry.LogPath) == "" {
+		return nil
+	}
+	result, err := auditpkg.New().InspectFile(context.Background(), entry.LogPath)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(existing))
+	for _, item := range existing {
+		seen[item.EvidencePath+"\x00"+item.Title] = struct{}{}
+	}
+	out := make([]findingView, 0, len(result.Detections))
+	for _, detection := range result.Detections {
+		item := xirDetectionFinding(entry.ID, entry.Header.Meta.Time, detection)
+		if filter.Category != "" && item.Category != filter.Category {
+			continue
+		}
+		if filter.Severity != "" && item.Severity != filter.Severity {
+			continue
+		}
+		key := item.EvidencePath + "\x00" + item.Title
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func xirDetectionFinding(traceID string, when time.Time, detection auditpkg.Detection) findingView {
+	severity := "low"
+	switch {
+	case detection.Confidence >= 0.9:
+		severity = "high"
+	case detection.Confidence >= 0.7:
+		severity = "medium"
+	}
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	return findingView{
+		ID:              "xir:" + detection.Rule + ":" + detection.Path + ":" + strconv.Itoa(detection.Start),
+		TraceID:         traceID,
+		Category:        "secret_leak",
+		Severity:        severity,
+		Confidence:      detection.Confidence,
+		Title:           "Sensitive data: " + detection.Rule,
+		Description:     "Advisory XIR detection; the matched value is not included.",
+		EvidencePath:    detection.Path,
+		NodeID:          detection.Path,
+		Detector:        "pkg/detect/secretmask",
+		DetectorVersion: "xir",
+		Source:          "xir",
+		CreatedAt:       when,
 	}
 }
 

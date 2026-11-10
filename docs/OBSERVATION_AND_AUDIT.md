@@ -324,3 +324,8 @@ CLI 入口（`internal/cli/analyze.go`）：`analyze reparse`、`analyze scan`�
 - `pkg/replay` 只回放单个 `.http`，不读取数据库，也不编排 entry 与多个 model cassette。
 - 重分析链路不改写 V2 cassette；legacy V2→V3 的格式升级由 `migrate` / `trajecta upgrade cassettes` 单独完成。V3 cassette 只在 `analyze repair-usage --rewrite-cassette`（或 `analyze batch --repair-usage --rewrite-cassette`）下重写 prelude 的 usage，raw payload 不变。缺失 taxonomy 只在读取与查询时推断。
 - auth 失败发生在入口 handler 外层时不产生 entry cassette。
+
+
+## Trace findings 与 XIR detections
+
+`GET /api/traces/<id>/findings` 先返回持久化的 analyzer findings，再按需解析 cassette 的 XIR audit 投影，把 `pkg/detect` 的 advisory detections 合并进同一列表。XIR 项标记 `source: "xir"`、`category: "secret_leak"`，只包含规则/路径/区间/置信度，不返回匹配到的明文值；同一路径与规则的重复项会被跳过。
