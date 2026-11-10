@@ -317,7 +317,7 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 - `/` 重定向到 `/overview`。
 - 合并掉的旧地址全部保留重定向，并且**保留原有查询参数**：`/requests` → `/traces`，`/sessions` → `/traces?tab=sessions`，`/analysis` → `/audit?tab=analysis`，`/tokens` → `/connect?tab=tokens`。
 - `/channels`、`/channels/:channelID` 是渠道列表/详情；`/providers`、`/providers/:providerID` 和 `/routing` 都重定向到对应渠道地址（保留查询参数）。
-- `GET /api/catalog/providers` 返回编译进 `pkg/upstream` 的内置 provider preset（每协议 endpoint、auth、plan、模型发现信息，不含密钥）；创建渠道弹窗会在 preset 下方展示该 provider 的 `notes`（例如 Qwen 必须使用 `sk-sp-` key、Token Plan 与 Coding Plan 隔离）；“浏览内置目录”直接使用该接口；旧的 `GET /api/provider-presets` 仍用于表单的 protocol/routing 默认值。
+- `GET /api/catalog/providers` 返回编译进 `pkg/upstream` 的内置 provider preset（每协议 endpoint、auth、plan、模型发现信息，不含密钥）；创建渠道弹窗会在 preset 下方展示该 provider 的 `notes`（例如 Qwen 必须使用 `sk-sp-` key、Token Plan 与 Coding Plan 隔离）和 `no_list` 提示（无模型列表接口时需创建后手动添加模型）；“浏览内置目录”直接使用该接口；旧的 `GET /api/provider-presets` 仍用于表单的 protocol/routing 默认值。
 - 详情路由：`/traces/:traceID`、`/sessions/:sessionID`、`/models/:model`、`/channels/:channelID`、`/upstreams/:upstreamID`。
 - 未匹配的路径重定向到 `/overview`。
 

@@ -1,9 +1,37 @@
 package upstream
 
 import (
-	"errors"
+	"fmt"
 	"strings"
 )
+
+// planPresetMeta is the single source of truth for presets that represent a
+// specific plan (coding plan, token plan). Keeping it here means adding a plan
+// preset does not require three parallel switches.
+type planPresetMeta struct {
+	Name      string
+	Coding    bool
+	KeyPrefix string
+}
+
+var planPresetMetadata = map[string]planPresetMeta{
+	"qwen_coding":                {Name: "Qwen Coding Plan (China)", Coding: true, KeyPrefix: "sk-sp-"},
+	"qwen_coding_intl":           {Name: "Qwen Coding Plan (International)", Coding: true, KeyPrefix: "sk-sp-"},
+	"qwen_coding_anthropic":      {Name: "Qwen Coding Plan (China, Anthropic)", Coding: true, KeyPrefix: "sk-sp-"},
+	"qwen_coding_intl_anthropic": {Name: "Qwen Coding Plan (International, Anthropic)", Coding: true, KeyPrefix: "sk-sp-"},
+	"qwen_token_plan":            {Name: "Qwen Token Plan (China)", KeyPrefix: "sk-sp-"},
+	"qwen_token_plan_intl":       {Name: "Qwen Token Plan (International)", KeyPrefix: "sk-sp-"},
+	"zai_coding":                 {Name: "Z.ai GLM Coding Plan", Coding: true},
+	"zai_coding_anthropic":       {Name: "Z.ai GLM Coding Plan (Anthropic)", Coding: true},
+	"zhipu_coding":               {Name: "Zhipu GLM Coding Plan", Coding: true},
+	"zhipu_coding_anthropic":     {Name: "Zhipu GLM Coding Plan (Anthropic)", Coding: true},
+	"kimi_coding":                {Name: "Kimi Code", Coding: true},
+}
+
+func planPresetMetaFor(id string) (planPresetMeta, bool) {
+	meta, ok := planPresetMetadata[strings.ToLower(strings.TrimSpace(id))]
+	return meta, ok
+}
 
 // ValidateCodingPlanCredential rejects a credential that is clearly for the
 // wrong surface. The check is deliberately narrow: it only knows facts the
@@ -14,50 +42,37 @@ func ValidateCodingPlanCredential(presetID, apiKey string) error {
 	if key == "" {
 		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(presetID)) {
-	case "qwen_coding", "qwen_coding_intl", "qwen_coding_anthropic", "qwen_coding_intl_anthropic", "qwen_token_plan", "qwen_token_plan_intl":
-		if !strings.HasPrefix(key, "sk-sp-") {
-			return errors.New("Qwen Coding Plan requires a dedicated sk-sp- API key; a standard sk- DashScope key uses dashscope.aliyuncs.com instead")
-		}
+	meta, ok := planPresetMetaFor(presetID)
+	if !ok || meta.KeyPrefix == "" {
+		return nil
+	}
+	if !strings.HasPrefix(key, meta.KeyPrefix) {
+		return fmt.Errorf("%s requires a dedicated %s API key", meta.Name, meta.KeyPrefix)
 	}
 	return nil
 }
 
 // IsCodingPlanPreset reports whether id names a dedicated coding-plan preset.
 func IsCodingPlanPreset(id string) bool {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "qwen_coding", "qwen_coding_intl", "qwen_coding_anthropic", "qwen_coding_intl_anthropic", "zai_coding", "zai_coding_anthropic", "zhipu_coding", "zhipu_coding_anthropic", "kimi_coding":
-		return true
-	}
-	return false
+	meta, ok := planPresetMetaFor(id)
+	return ok && meta.Coding
 }
 
 // PlanNameForPreset returns the human name of a dedicated plan preset, or "".
 func PlanNameForPreset(id string) string {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "qwen_coding":
-		return "Qwen Coding Plan (China)"
-	case "qwen_coding_intl":
-		return "Qwen Coding Plan (International)"
-	case "qwen_coding_anthropic":
-		return "Qwen Coding Plan (China, Anthropic)"
-	case "qwen_coding_intl_anthropic":
-		return "Qwen Coding Plan (International, Anthropic)"
-	case "zai_coding_anthropic":
-		return "Z.ai GLM Coding Plan (Anthropic)"
-	case "zhipu_coding_anthropic":
-		return "Zhipu GLM Coding Plan (Anthropic)"
-	case "qwen_token_plan":
-		return "Qwen Token Plan (China)"
-	case "qwen_token_plan_intl":
-		return "Qwen Token Plan (International)"
-	case "zai_coding":
-		return "Z.ai GLM Coding Plan"
-	case "zhipu_coding":
-		return "Zhipu GLM Coding Plan"
-	case "kimi_coding":
-		return "Kimi Code"
-	default:
+	meta, ok := planPresetMetaFor(id)
+	if !ok {
 		return ""
 	}
+	return meta.Name
+}
+
+// PlanPresetIDs returns the plan preset IDs in sorted order. It is used by
+// tests and by callers that need to validate the metadata table.
+func PlanPresetIDs() []string {
+	out := make([]string, 0, len(planPresetMetadata))
+	for id := range planPresetMetadata {
+		out = append(out, id)
+	}
+	return out
 }

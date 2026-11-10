@@ -42,6 +42,7 @@ type providerPresetItem struct {
 	Endpoints map[string]string `json:"endpoints,omitempty"`
 	Protocols []string          `json:"protocols,omitempty"`
 	Notes     string            `json:"notes,omitempty"`
+	NoList    bool              `json:"no_list,omitempty"`
 }
 
 type providerPresetFormDefaults struct {
@@ -691,6 +692,7 @@ func providerPresetAPIHandler() http.HandlerFunc {
 				item.Endpoints = protocolEndpoints(catalog.Endpoints)
 				item.Protocols = protocolNames(catalog.Endpoints)
 				item.Notes = catalog.Notes
+				item.NoList = catalog.Models.NoList
 			}
 			items = append(items, item)
 		}

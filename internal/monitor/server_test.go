@@ -190,6 +190,9 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if byID["qwen_coding"].Name != "Qwen Coding Plan (China)" {
 		t.Fatalf("qwen_coding name = %q", byID["qwen_coding"].Name)
 	}
+	if !byID["qwen_coding"].NoList {
+		t.Fatalf("qwen_coding should not advertise a model list")
+	}
 	if !strings.Contains(byID["qwen_coding"].Notes, "sk-sp-") {
 		t.Fatalf("qwen_coding notes = %q", byID["qwen_coding"].Notes)
 	}

@@ -22,3 +22,14 @@ func TestValidateCodingPlanCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPlanPresetMetadataMatchesPresets(t *testing.T) {
+	for _, id := range PlanPresetIDs() {
+		if _, ok := LookupPreset(id); !ok {
+			t.Fatalf("plan metadata %q has no preset", id)
+		}
+		if PlanNameForPreset(id) == "" {
+			t.Fatalf("plan %q has no display name", id)
+		}
+	}
+}

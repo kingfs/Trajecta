@@ -171,6 +171,7 @@ export default {
   "providers.fillable": "{count} fillable",
   "providers.apiType": "api type",
   "providers.protocol": "protocol",
+  "providers.noModelListHint": "This preset has no model-list endpoint. Add models manually in the channel detail after creation.",
   "providers.codingPlan": "Coding Plan",
   "providers.capabilities": "capabilities",
   "providers.missing": "missing",

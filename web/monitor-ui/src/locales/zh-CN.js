@@ -171,6 +171,7 @@ export default {
   "providers.fillable": "{count} 可填充",
   "providers.apiType": "API 类型",
   "providers.protocol": "协议",
+  "providers.noModelListHint": "该 preset 没有模型列表接口。创建后需在渠道详情中手动添加模型。",
   "providers.codingPlan": "Coding Plan",
   "providers.capabilities": "能力",
   "providers.missing": "缺失",
