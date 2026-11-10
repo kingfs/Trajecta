@@ -242,37 +242,6 @@ func (c *protocolConversion) upstreamPath() (string, error) {
 // Authorization is handled separately by ApplyAuthHeaders (target profile),
 // but version/beta/key headers belong to the client protocol's surface and
 // must not leak, nor be missing, on the new surface.
-func applyConvertedHeaders(outreq *http.Request, original *http.Request, conv *protocolConversion) {
-	if outreq == nil || conv == nil {
-		return
-	}
-	hdr := outreq.Header
-	switch conv.upstreamProtocol {
-	case protocolconvert.ProtocolMessages:
-		// Messages requires anthropic-version; a Chat/Responses client
-		// never sends it, so supply the default.
-		if hdr.Get("anthropic-version") == "" {
-			hdr.Set("anthropic-version", "2023-06-01")
-		}
-		if original.Header.Get("anthropic-beta") != "" {
-			hdr.Set("anthropic-beta", original.Header.Get("anthropic-beta"))
-		}
-	default:
-		// Anthropic-scoped headers must not leak to other protocols.
-		hdr.Del("anthropic-version")
-		hdr.Del("anthropic-beta")
-	}
-	if conv.upstreamProtocol == protocolconvert.ProtocolGemini {
-		// Gemini clients authenticate via ?key= in the query, which the
-		// conversion drops with the rest of the query string. Forward it
-		// as the header form so a header-only gateway still authenticates.
-		if key := original.URL.Query().Get("key"); key != "" && hdr.Get("x-goog-api-key") == "" {
-			hdr.Set("x-goog-api-key", key)
-		}
-	}
-	// The converted body is always JSON.
-	hdr.Set("Content-Type", "application/json")
-}
 
 // convertResponseBody converts a successful upstream response back to the
 // client protocol. Error responses are never converted: their bodies are

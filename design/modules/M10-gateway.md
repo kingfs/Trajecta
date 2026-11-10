@@ -68,3 +68,5 @@
 - [x] 响应侧 `ResponseBody`、`UsageSniffer`、`ResponsePipeline`、`ResponseTransform` 已落地；`UsageSniffer` 同时产出 canonical `pkg/usage` 与 recorder 投影；`InjectStreamOptions` 也已收进 gateway。
 - [ ] 把本地 Responses runtime 作为 `ModeLocal` 接入同一请求阶段。
 - [ ] 删除 `handler.go` 中重复的 body 变量与转换上下文。
+
+- `internal/gateway/conversion_headers.go`：跨协议转换后的 Anthropic version/beta 清理、Gemini `key` 转 `x-goog-api-key`、Content-Type 固定由 gateway 负责。

@@ -130,3 +130,5 @@ go test ./internal/router ./internal/proxy ./pkg/recordfile ./pkg/replay
 - `internal/upstream`：普通 OpenAI-compatible `BuildURLForProtocol` 委托 `pkg/upstream.Resolved.BuildURL`，Azure/Vertex 与 tokenize/detokenize 保留内部路径；新增 URL parity/边界测试。
 
 - `internal/gateway`：Chat Completions 的 `stream_options.include_usage` 注入移入 gateway，proxy 不再保留本地 helper。
+
+- `internal/gateway`：跨协议转换后的协议头策略（anthropic-version/beta、Gemini key、Content-Type）移入 gateway，proxy 只保留转换决策与引擎选择。

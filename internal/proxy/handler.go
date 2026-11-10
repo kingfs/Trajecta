@@ -2157,7 +2157,7 @@ func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *ro
 		}
 	}
 	if conv != nil && pathOverride != "" {
-		applyConvertedHeaders(outreq, original, conv)
+		gateway.ApplyConvertedHeaders(outreq, original, conv.upstreamProtocol)
 	}
 
 	target.Upstream.ApplyAuthHeaders(outreq.Header)
