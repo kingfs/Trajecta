@@ -24,7 +24,7 @@ func TestResponsePipelineTeesClientBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "hello" || string(written.Bytes()) != "hello" || count != 5 {
+	if string(got) != "hello" || written.String() != "hello" || count != 5 {
 		t.Fatalf("got=%q written=%q count=%d", got, written.String(), count)
 	}
 	if err := pipeline.Close(); err != nil {

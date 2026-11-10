@@ -949,15 +949,6 @@ func inferDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	}
 }
 
-func applyStaticHeaders(header http.Header, values map[string]string) {
-	for key, value := range values {
-		if strings.TrimSpace(key) == "" || value == "" {
-			continue
-		}
-		header.Set(key, value)
-	}
-}
-
 func cloneStringMap(input map[string]string) map[string]string {
 	if len(input) == 0 {
 		return nil
