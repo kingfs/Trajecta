@@ -190,6 +190,9 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if byID["qwen_coding"].Name != "Qwen Coding Plan (China)" {
 		t.Fatalf("qwen_coding name = %q", byID["qwen_coding"].Name)
 	}
+	if !strings.Contains(byID["qwen_coding"].Notes, "sk-sp-") {
+		t.Fatalf("qwen_coding notes = %q", byID["qwen_coding"].Notes)
+	}
 	if byID["qwen_coding"].Endpoints["chat_completions"] != "https://coding.dashscope.aliyuncs.com/v1" {
 		t.Fatalf("qwen_coding preset = %+v", byID["qwen_coding"])
 	}

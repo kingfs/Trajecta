@@ -41,6 +41,7 @@ type providerPresetItem struct {
 	// from the chosen preset; an unmatched id simply omits them.
 	Endpoints map[string]string `json:"endpoints,omitempty"`
 	Protocols []string          `json:"protocols,omitempty"`
+	Notes     string            `json:"notes,omitempty"`
 }
 
 type providerPresetFormDefaults struct {
@@ -688,6 +689,7 @@ func providerPresetAPIHandler() http.HandlerFunc {
 				}
 				item.Endpoints = protocolEndpoints(catalog.Endpoints)
 				item.Protocols = protocolNames(catalog.Endpoints)
+				item.Notes = catalog.Notes
 			}
 			items = append(items, item)
 		}

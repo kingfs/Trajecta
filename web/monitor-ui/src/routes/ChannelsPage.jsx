@@ -336,6 +336,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
             </Select>
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder={t("providers.baseURLHint")} /></label>
+          {presetState.spec?.notes ? <p className="trace-subline provider-form-wide">{presetState.spec.notes}</p> : null}
           <details className="provider-form-wide">
             <summary>{t("providers.catalogBrowse")}</summary>
             <p className="trace-subline">{t("providers.catalogHint")}</p>
