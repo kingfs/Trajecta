@@ -190,6 +190,9 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	if byID["qwen_coding"].Endpoints["chat_completions"] != "https://coding.dashscope.aliyuncs.com/v1" {
 		t.Fatalf("qwen_coding preset = %+v", byID["qwen_coding"])
 	}
+	if byID["qwen_token_plan"].Endpoints["chat_completions"] != "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1" {
+		t.Fatalf("qwen_token_plan preset = %+v", byID["qwen_token_plan"])
+	}
 	if byID["zai_coding"].Endpoints["chat_completions"] != "https://api.z.ai/api/coding/paas/v4" {
 		t.Fatalf("zai_coding preset = %+v", byID["zai_coding"])
 	}

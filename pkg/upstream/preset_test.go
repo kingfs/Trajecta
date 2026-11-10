@@ -17,7 +17,7 @@ func TestBuiltinPresets(t *testing.T) {
 		"openai", "anthropic", "deepseek", "openrouter", "google",
 		"moonshot", "zhipu", "zai", "minimax", "xai", "groq", "mistral",
 		"together", "fireworks", "cerebras", "github", "azure", "vertex",
-		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "zai_coding", "zhipu_coding", "kimi_coding",
+		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "qwen_token_plan", "qwen_token_plan_intl", "zai_coding", "zhipu_coding", "kimi_coding",
 	}
 	byID := make(map[string]Preset, len(presets))
 	for _, preset := range presets {
@@ -299,6 +299,8 @@ func TestCodingPlanPresetsUseDedicatedEndpoints(t *testing.T) {
 	}{
 		{"qwen_coding", "https://coding.dashscope.aliyuncs.com/v1"},
 		{"qwen_coding_intl", "https://coding-intl.dashscope.aliyuncs.com/v1"},
+		{"qwen_token_plan", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
+		{"qwen_token_plan_intl", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
 		{"zai_coding", "https://api.z.ai/api/coding/paas/v4"},
 		{"zhipu_coding", "https://open.bigmodel.cn/api/coding/paas/v4"},
 	}

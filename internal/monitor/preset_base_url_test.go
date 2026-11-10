@@ -22,6 +22,8 @@ func TestDefaultPresetBaseURL(t *testing.T) {
 		{name: "openrouter messages", preset: "openrouter", family: "anthropic_messages", want: "https://openrouter.ai/api"},
 		{name: "qwen coding", preset: "qwen_coding", want: "https://coding.dashscope.aliyuncs.com/v1"},
 		{name: "qwen coding intl", preset: "qwen_coding_intl", want: "https://coding-intl.dashscope.aliyuncs.com/v1"},
+		{name: "qwen token plan", preset: "qwen_token_plan", want: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
+		{name: "qwen token plan intl", preset: "qwen_token_plan_intl", want: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
 		{name: "zai coding", preset: "zai_coding", want: "https://api.z.ai/api/coding/paas/v4"},
 		{name: "zhipu coding", preset: "zhipu_coding", want: "https://open.bigmodel.cn/api/coding/paas/v4"},
 		{name: "kimi coding", preset: "kimi_coding", family: "anthropic_messages", apiType: "messages", want: "https://api.kimi.ai/coding"},
