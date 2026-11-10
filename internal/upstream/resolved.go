@@ -532,6 +532,10 @@ func (u ResolvedUpstream) Capability(name string) (bool, bool) {
 		return capabilityValue(u.Capabilities.Models)
 	case CapabilityTokenize:
 		return capabilityValue(u.Capabilities.Tokenize)
+	case CapabilityMessages:
+		return capabilityValue(u.Capabilities.Messages)
+	case CapabilityGenerateContent:
+		return capabilityValue(u.Capabilities.GenerateContent)
 	default:
 		return false, false
 	}
@@ -630,6 +634,10 @@ func (u ResolvedUpstream) ModelCapability(model string, name string) (bool, bool
 		return capabilityValue(caps.Models)
 	case CapabilityTokenize:
 		return capabilityValue(caps.Tokenize)
+	case CapabilityMessages:
+		return capabilityValue(caps.Messages)
+	case CapabilityGenerateContent:
+		return capabilityValue(caps.GenerateContent)
 	default:
 		return false, false
 	}
@@ -712,6 +720,45 @@ func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string
 	}
 }
 
+// SupportsMessagesAPI reports whether this upstream serves the Anthropic
+// Messages surface. The protocol family is the channel default; an explicit
+// capability can add or remove it for a per-model multi-protocol channel.
+func (u ResolvedUpstream) SupportsMessagesAPI() bool {
+	if u.ProtocolFamily == ProtocolFamilyAnthropicMessages {
+		enabled, configured := u.Capability(CapabilityMessages)
+		return !configured || enabled
+	}
+	enabled, configured := u.Capability(CapabilityMessages)
+	return configured && enabled
+}
+
+// SupportsMessagesAPIForModel resolves Messages support for one model.
+func (u ResolvedUpstream) SupportsMessagesAPIForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityMessages); configured {
+		return enabled
+	}
+	return u.SupportsMessagesAPI()
+}
+
+// SupportsGenerateContentAPI reports whether this upstream serves the Gemini
+// generateContent surface.
+func (u ResolvedUpstream) SupportsGenerateContentAPI() bool {
+	if u.ProtocolFamily == ProtocolFamilyGoogleGenAI || u.ProtocolFamily == ProtocolFamilyVertexNative {
+		enabled, configured := u.Capability(CapabilityGenerateContent)
+		return !configured || enabled
+	}
+	enabled, configured := u.Capability(CapabilityGenerateContent)
+	return configured && enabled
+}
+
+// SupportsGenerateContentAPIForModel resolves Gemini support for one model.
+func (u ResolvedUpstream) SupportsGenerateContentAPIForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityGenerateContent); configured {
+		return enabled
+	}
+	return u.SupportsGenerateContentAPI()
+}
+
 // ProtocolCapabilitiesForModel derives the native wire protocols this
 // upstream serves for one model, in the vocabulary pkg/protocolconvert's
 // Plan consumes. Anthropic channels serve Messages, Google/Vertex channels
@@ -733,6 +780,8 @@ func (u ResolvedUpstream) ProtocolCapabilitiesForModel(model string) protocolcon
 		return protocolconvert.Capabilities{
 			ChatCompletions: u.SupportsChatCompletionsAPIForModel(model),
 			Responses:       u.SupportsResponsesAPIForModel(model),
+			Messages:        u.SupportsMessagesAPIForModel(model),
+			Gemini:          u.SupportsGenerateContentAPIForModel(model),
 		}
 	}
 }
@@ -939,7 +988,8 @@ func (u ResolvedUpstream) SupportsNativeResponsesPath(model string) bool {
 
 func (u ResolvedUpstream) SupportsRawPath(rawPath string, model string) bool {
 	semantics := llm.ClassifyPath(rawPath, "")
-	if !SupportsProtocolFamily(u.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
+	if !SupportsProtocolFamily(u.ProtocolFamily, semantics.Provider, semantics.Endpoint) &&
+		!u.supportsProtocolFamilyForModel(semantics.Provider, semantics.Endpoint, model) {
 		return false
 	}
 	if !u.SupportsEndpointForModel(semantics.Endpoint, model) {
@@ -947,6 +997,18 @@ func (u ResolvedUpstream) SupportsRawPath(rawPath string, model string) bool {
 	}
 	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
+}
+
+func (u ResolvedUpstream) supportsProtocolFamilyForModel(provider, endpoint, model string) bool {
+	switch endpoint {
+	case "/v1/messages":
+		return u.SupportsMessagesAPIForModel(model) && provider == llm.ProviderAnthropic
+	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent",
+		"/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+		return u.SupportsGenerateContentAPIForModel(model)
+	default:
+		return false
+	}
 }
 
 func defaultAPITypeForProtocolFamily(protocolFamily string) string {

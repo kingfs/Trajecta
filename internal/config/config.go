@@ -213,6 +213,8 @@ type UpstreamCapabilitiesConfig struct {
 	Embeddings      *bool `yaml:"embeddings" json:"embeddings,omitempty"`
 	Models          *bool `yaml:"models" json:"models,omitempty"`
 	Tokenize        *bool `yaml:"tokenize" json:"tokenize,omitempty"`
+	Messages        *bool `yaml:"messages" json:"messages,omitempty"`
+	GenerateContent *bool `yaml:"gemini_generate_content" json:"gemini_generate_content,omitempty"`
 	// Endpoints optionally overrides the channel base URL per wire protocol
 	// (chat_completions, responses, messages, gemini). A channel that serves
 	// more than one protocol at different paths/domains sets only the entries

@@ -887,7 +887,17 @@ func channelModelCapabilityConfig(model store.ChannelModelRecord) (config.Upstre
 		ChatCompletions: capabilityIntToBool(model.SupportsChatCompletions),
 		Embeddings:      capabilityIntToBool(model.SupportsEmbeddings),
 	}
-	if caps.Responses == nil && caps.ChatCompletions == nil && caps.Embeddings == nil {
+	if protocols := decodeChannelModelProtocols(model.ProtocolsJSON); len(protocols) > 0 {
+		if entry, ok := protocols["messages"]; ok {
+			enabled := entry.Enabled
+			caps.Messages = &enabled
+		}
+		if entry, ok := protocols["gemini"]; ok {
+			enabled := entry.Enabled
+			caps.GenerateContent = &enabled
+		}
+	}
+	if caps.Responses == nil && caps.ChatCompletions == nil && caps.Embeddings == nil && caps.Messages == nil && caps.GenerateContent == nil {
 		return config.UpstreamCapabilitiesConfig{}, false
 	}
 	return caps, true
@@ -1279,7 +1289,17 @@ func EffectiveModelInterfaces(channel store.ChannelConfigRecord, model store.Cha
 		Responses:       capabilityIntToBool(model.SupportsResponses),
 		ChatCompletions: capabilityIntToBool(model.SupportsChatCompletions),
 	}
-	if overrides.Responses != nil || overrides.ChatCompletions != nil {
+	if protocols := decodeChannelModelProtocols(model.ProtocolsJSON); len(protocols) > 0 {
+		if entry, ok := protocols["messages"]; ok {
+			enabled := entry.Enabled
+			overrides.Messages = &enabled
+		}
+		if entry, ok := protocols["gemini"]; ok {
+			enabled := entry.Enabled
+			overrides.GenerateContent = &enabled
+		}
+	}
+	if overrides.Responses != nil || overrides.ChatCompletions != nil || overrides.Messages != nil || overrides.GenerateContent != nil {
 		cfg.ModelCapabilities = map[string]config.UpstreamCapabilitiesConfig{
 			strings.ToLower(strings.TrimSpace(model.Model)): overrides,
 		}
@@ -1300,12 +1320,8 @@ func EffectiveModelInterfaces(channel store.ChannelConfigRecord, model store.Cha
 	out.ChatCompletions = resolved.SupportsChatCompletionsAPIForModel(model.Model)
 	out.NativeResponses = resolved.SupportsNativeResponsesPath(model.Model)
 	out.ResponsesViaChat = out.ChatCompletions && !out.NativeResponses
-	switch resolved.ProtocolFamily {
-	case upstream.ProtocolFamilyAnthropicMessages:
-		out.Messages = true
-	case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
-		out.GenerateContent = true
-	}
+	out.Messages = resolved.SupportsMessagesAPIForModel(model.Model)
+	out.GenerateContent = resolved.SupportsGenerateContentAPIForModel(model.Model)
 	return out
 }
 

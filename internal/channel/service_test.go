@@ -1381,3 +1381,29 @@ func TestRuntimeTargetsProjectsPerProtocolWireNames(t *testing.T) {
 		}
 	}
 }
+
+func TestPerModelProtocolsDriveInterfacesAndCapabilities(t *testing.T) {
+	channel := store.ChannelConfigRecord{
+		ID: "multi", BaseURL: "https://multi.example.com/v1",
+		ProviderPreset: "openai", APIType: "chat_completions",
+		ProtocolFamily: "openai_compatible", Enabled: true,
+	}
+	model := store.ChannelModelRecord{
+		Model: "gpt-5", Enabled: true,
+		ProtocolsJSON: `{"messages":{"enabled":true},"gemini":{"enabled":false}}`,
+	}
+	interfaces := EffectiveModelInterfaces(channel, model)
+	if !interfaces.Messages {
+		t.Fatalf("Messages interface = %+v", interfaces)
+	}
+	if interfaces.GenerateContent {
+		t.Fatalf("GenerateContent interface should be disabled: %+v", interfaces)
+	}
+	caps := ChannelModelCapabilities([]store.ChannelModelRecord{model}, nil, "multi")
+	if enabled := caps["gpt-5"].Messages; enabled == nil || !*enabled {
+		t.Fatalf("capabilities = %+v", caps)
+	}
+	if enabled := caps["gpt-5"].GenerateContent; enabled == nil || *enabled {
+		t.Fatalf("gemini capability = %+v", caps)
+	}
+}
