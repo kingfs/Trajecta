@@ -168,7 +168,12 @@ Trajecta 自身的事件收件箱：
 
 模型页按两个问题拆成同一路由下的两个标签页，默认落在**模型广场**，`?tab=usage` 是**实时统计**。
 
-**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；**创建渠道**时选中 provider preset 会自动填入该协议的 endpoint；预设列表使用 preset 的显示名，包含 Qwen Coding Plan（中国/国际）、Qwen Token Plan（中国/国际）、GLM Coding Plan（Z.ai/智谱）与 Kimi Code；渠道卡片会显示 `Coding Plan` 标记和具体 plan 名称，它们使用各自的专用 coding endpoint 和 API key。（来自 `GET /api/provider-presets` 的新 `endpoints` 字段，或 `GET /api/catalog/providers` 的完整目录）；Base URL 留空时后端按 `api_type`/`protocol_family` 选择 preset 默认 endpoint，因此自定义渠道仍可手填。
+**创建渠道**弹窗分为两个标签页：
+
+- **官方渠道**直接列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。填写 API key 和可选模型列表即可创建；Qwen Coding/Token Plan 的 `sk-sp-` key 校验仍在创建时执行。卡片展示 preset 的 `notes` 与 `no_list` 提示（无模型列表接口时需创建后手动添加模型），并沿用 `GET /api/provider-presets` 的 protocol/routing 默认值。
+- **自定义渠道**面向不在内置目录里的上游：手填名称、Base URL、API key（可选）、协议族、支持的协议（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选会写入渠道级 `capabilities`，并决定默认 `api_type`，路由配置、每协议 `endpoints`、代理等仍在「高级选项」中。创建请求走 `POST /api/channels`，`models` 数组会在同一事务内写成启用的 `channel_models` 行。
+
+**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；官方渠道由目录预填，自定义渠道可自由填写。渠道卡片会显示 `Coding Plan` 标记和具体 plan 名称，它们使用各自的专用 coding endpoint 和 API key。
 
 **模型广场**回答“当前平台能调用哪些模型”。数据来自 `GET /api/model-square`：按小写模型名聚合 `channel_models`，每个模型一张卡，卡上展示可用渠道的协议 badge（chat_completions / responses / messages / gemini），并列出声明该模型的所有渠道（渠道名 + 可用/停用圆点，芯片的 tooltip 给出渠道 ID、上游模型名与状态），并给出声明该模型的渠道总数。可调用 = 渠道本身启用、且该 channel-model 对路由可用（`channel.ModelRoutable`，即模型启用且未被最近一次成功同步判定为 removed）；默认只显示至少有一个可调用渠道的模型，分段控件切到“全部已配置”后连未启用、仅挂在停用渠道上或上游已移除的模型也会出现，便于对照配置。搜索覆盖模型名、显示名、渠道名、渠道 ID，以及 Argus 元数据中的模型名、供应商和描述；广场使用 `square_q` / `square_page`，与实时统计的 `q` / `page` 分开保存，切换标签页不会把一种列表的过滤条件带到另一种列表。卡片按可调用优先、可调用渠道数、渠道数、模型名排序，24 个/页；头部四张读数卡分别是模型数、可调用模型数、可用渠道数和已匹配元数据数。
 
@@ -319,7 +324,7 @@ Web UI 已经不再展示「使用统计」，也不再发送匿名装机上报�
 - `/` 重定向到 `/overview`。
 - 合并掉的旧地址全部保留重定向，并且**保留原有查询参数**：`/requests` → `/traces`，`/sessions` → `/traces?tab=sessions`，`/analysis` → `/audit?tab=analysis`，`/tokens` → `/connect?tab=tokens`。
 - `/channels`、`/channels/:channelID` 是渠道列表/详情；`/providers`、`/providers/:providerID` 和 `/routing` 都重定向到对应渠道地址（保留查询参数）。
-- `GET /api/catalog/providers` 返回编译进 `pkg/upstream` 的内置 provider preset（每协议 endpoint、auth、plan、模型发现信息，不含密钥）；创建渠道弹窗会在 preset 下方展示该 provider 的 `notes`（例如 Qwen 必须使用 `sk-sp-` key、Token Plan 与 Coding Plan 隔离）和 `no_list` 提示（无模型列表接口时需创建后手动添加模型）；“浏览内置目录”直接使用该接口；旧的 `GET /api/provider-presets` 仍用于表单的 protocol/routing 默认值。
+- `GET /api/catalog/providers` 返回编译进 `pkg/upstream` 的内置 provider preset（每协议 endpoint、auth、plan、模型发现信息，不含密钥）；创建渠道弹窗的「官方渠道」标签直接渲染该目录，点击 provider 即可选中并填入 endpoint/协议，API key 与模型仍可填写；选中项展示该 provider 的 `notes`（例如 Qwen 必须使用 `sk-sp-` key、Token Plan 与 Coding Plan 隔离）和 `no_list` 提示；「自定义渠道」标签不依赖该目录，手填 Base URL/key/协议/模型；旧的 `GET /api/provider-presets` 仍用于表单的 protocol/routing 默认值。
 - 详情路由：`/traces/:traceID`、`/sessions/:sessionID`、`/models/:model`、`/channels/:channelID`、`/upstreams/:upstreamID`。
 - 未匹配的路径重定向到 `/overview`。
 

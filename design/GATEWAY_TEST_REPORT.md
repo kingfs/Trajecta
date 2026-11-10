@@ -15,9 +15,10 @@
 - 修复分支：`fix/gateway-test-round2`，提交 `d9797bc`（UI 阻断）与 `a637fe1`（后端语义/协议）；
 - 修复后镜像：`trajecta:fix-round2`，仍部署在 `/data/gateway-test`（`:28080/28081`），未触碰 `/data/gateway`；
 - 构建、`go vet`、全量单测、全量 `-race` 全部通过；
-- Playwright mock 套件从 **194 passed / 20 failed** 变为 **214 passed / 0 failed / 4 skipped**；
+- Playwright mock 套件从 **194 passed / 20 failed** 变为 **216 passed / 0 failed / 4 skipped**；
 - 第一轮 API 矩阵（64 项）从 **58/64** 变为 **64/64**；第二批（35 项）从 **34/35** 变为 **35/35**；
 - 真实浏览器复测：登录、渠道列表、路由设置面板、新建渠道弹窗、渠道详情、协议编辑保存/刷新、模型广场均通过；
+- 渠道创建追加官方/自定义双 tab：官方目录点击即创建（URL 不再必填）、自定义可手填 Base URL/key/协议/模型；见第 8 节；
 - 3.10（压缩体转换返回 502 而非 400）保留为已知边界，原因见第 5.3 节；其余问题全部修复。
 
 ### 0.1 根因与修复一览
@@ -297,7 +298,7 @@
 | `go vet ./...` | 通过 | 通过 |
 | `go test -count=1 ./...` | 69 包 ok | 69 包 ok |
 | `go test -race -count=1 ./...` | 第 1 次 1 个非确定性失败 | **69 包 ok，无 DATA RACE**；重跑稳定 |
-| Playwright（mock，218 用例） | 194 passed / **20 failed** / 4 skipped | **214 passed / 0 failed / 4 skipped** |
+| Playwright（mock，220 用例） | 194 passed / **20 failed** / 4 skipped | **216 passed / 0 failed / 4 skipped** |
 | 第一轮 API 矩阵（64 项） | 58 passed / 6 failed | **64 passed / 0 failed** |
 | 第二批（35 项） | 34 passed / 1 failed | **35 passed / 0 failed** |
 | 真实浏览器 UI | `/channels` 崩溃 | 登录、列表、路由设置、新建弹窗、详情、协议编辑/刷新、模型广场全部通过 |
@@ -342,7 +343,42 @@
 4. 评估是否把 `plan_engine=route` 默认化（当前仍 opt-in；本轮未改）。
 5. 长期看，给 `ChannelsPage.jsx` 这类大文件补 `.jsx` 类型检查或 lint，避免“只在真实浏览器才暴露”的引用错误再次进入主干。
 
-## 8. 证据索引
+## 8. 渠道创建模式改造（本轮追加）
+
+### 8.1 背景
+
+旧弹窗以 provider preset 为中心：预设下拉、Base URL 是主表单字段，且没有“自定义”入口；内置目录藏在 `<details>` 里，创建后模型要等进入详情再逐个添加。用户要求：
+
+- 官方渠道直接展示内置目录，点击即可配置 API key，不再手填/改动 URL（URL 保留为高级覆盖项）；
+- 自定义渠道完全自由配置 Base URL、key、模型与支持的协议；
+- 当前无法创建真正的自定义渠道（`provider_preset` 始终是 openai 等内置值）。
+
+### 8.2 实现
+
+- 弹窗改为两个 tab：**官方渠道** / **自定义渠道**。
+  - 官方：直接渲染 `GET /api/catalog/providers` 的 31 张卡片（可搜索）；点击后自动填 `provider_preset`、`api_type`、`protocol_family`、`routing_profile`、每协议 `endpoints`、Base URL 和接口勾选；主表单不再要求 Base URL，只在「高级选项」允许覆盖；填写 API key 与可选模型即可创建。
+  - 自定义：手填名称、Base URL、API key（可选）、协议族、协议勾选（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选映射为渠道 `capabilities` 并决定默认 `api_type`；路由配置、每协议 endpoint、代理仍在高级选项。
+- 创建改走 `POST /api/channels`，不再强制 provider-setup 校验/探测（检测按钮仍保留，可选）。
+- 后端 `channelUpsertRequest` 新增 `models []string`；`POST /api/channels` 在同一事务内创建启用 `channel_models` 行，失败回滚；官方和自定义都可带模型。
+- 官方 Catalog 选中后 `base_url` 与 `endpoints` 都来自目录；对 Azure/Vertex 这类没有通用 endpoint 的 preset，Base URL 留空并在高级选项中填写（Vertex 自动补 `model_resource=publishers/google/models`）。
+
+### 8.3 复测
+
+- Go：`TestChannelCreateAcceptsModels`（事务内创建 2 个启用模型）+ 全量 `go test ./...` 69 包通过。
+- Playwright：新增「two-mode create form」「custom channel create sends manual protocols and models」两条用例；全量 **216 passed / 0 failed / 4 skipped**。
+- 真实环境（修复后镜像）：
+  - 官方 OpenAI：UI 选中卡片 → Base URL 自动为 `https://api.openai.com/v1`，创建后 `provider_preset=openai`、`model_count=1`，模型为 enabled；
+  - 自定义：`provider_preset=""`、Base URL `http://mock-upstream:39099/v1`、协议 chat+messages、2 个模型全部 enabled；随后 `/v1/chat/completions` 与 `/v1/messages` 均 200，mock 收到对应路径；
+  - 测试后渠道已删除，环境恢复。
+
+### 8.4 相关文件
+
+- `web/monitor-ui/src/routes/ChannelsPage.jsx`（弹窗重写、catalog 卡片、tab、模型/协议字段）
+- `web/monitor-ui/src/locales/{en,zh-CN}.js`、`web/monitor-ui/src/styles.css`
+- `internal/monitor/server_configuration.go`（`Models` + 事务内创建）
+- `web/monitor-ui/tests/{channels-auto,monitor-smoke}.spec.js`
+
+## 9. 证据索引
 
 | 内容 | 路径 |
 | --- | --- |
@@ -350,10 +386,10 @@
 | 第二批（35 项，修复前） | `.scratch/gateway-test/extra-results.json`、`extra-run4.log` |
 | 修复后 API 结果（64/64） | `.scratch/gateway-test/functional-fix-run.log` |
 | 修复后第二批（35/35） | `.scratch/gateway-test/extra-fix-run.log` |
-| Go 全量测试 / vet / race（修复后） | `.scratch/gateway-test/gotest-fix.log`、`govet-fix.log`、`race-fix.log` |
+| Go 全量测试 / vet / race（修复后） | `.scratch/gateway-test/gotest-tabs-final2.log`、`govet-tabs.log`、`race-tabs2.log` |
 | 第一轮 Go/race | `.scratch/gateway-test/gotest-all.log`、`race-key.log`、`race-all.log`、`race-all-2.log` |
 | 数据库迁移 | `.scratch/gateway-test/db/REPORT.md` |
 | 前端构建/单测/typecheck/Playwright（HEAD） | `.scratch/gateway-test/frontend/REPORT.md` 及其日志 |
-| Playwright（修复后全量） | `.scratch/gateway-test/ui/playwright-fix-round2.log` |
-| 真实浏览器 UI 证据 | `.scratch/gateway-test/ui/02-channels.png`、`03-channel-detail.png`、`12-protocol-editor.png`、`20-create-dialog.png` |
+| Playwright（修复后全量） | `.scratch/gateway-test/ui/playwright-tabs2.log`、`playwright-fix-round2.log` |
+| 真实浏览器 UI 证据 | `.scratch/gateway-test/ui/02-channels.png`、`03-channel-detail.png`、`12-protocol-editor.png`、`20-create-dialog.png`、`30-official-created.png`、`31-custom-created.png` |
 | UI 修复补丁（保留作历史 diff） | `.scratch/gateway-test/patches/channels-page-fix.patch` |

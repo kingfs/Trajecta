@@ -364,6 +364,10 @@ type channelUpsertRequest struct {
 	Weight         *float64                           `json:"weight"`
 	CapacityHint   *float64                           `json:"capacity_hint"`
 	ModelDiscovery string                             `json:"model_discovery"`
+	// Models are optional at create time: a custom channel with no discovery
+	// endpoint can declare its model list in the same request. They become
+	// enabled manual channel_models rows in the same transaction.
+	Models []string `json:"models"`
 }
 
 type channelHeaderUpdate struct {
@@ -1051,11 +1055,26 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
+			createdModels := normalizeModelList(req.Models)
+			for _, model := range createdModels {
+				if _, err := st.UpsertChannelModel(record.ID, store.ChannelModelRecord{
+					Model:       model,
+					DisplayName: model,
+					Source:      "manual",
+					Enabled:     true,
+				}); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+					return
+				}
+			}
 			if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, 0, 0))
+			models, _ := st.ListChannelModels(record.ID, false)
+			item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, record.ID))
+			item.Interfaces = channelInterfaceNames(record, models)
+			writeJSON(w, http.StatusOK, item)
 		default:
 			http.NotFound(w, r)
 		}

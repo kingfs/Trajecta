@@ -109,11 +109,12 @@
 | `go test -count=1 ./...` | 通过（69 包 ok，0 FAIL） |
 | `go test -race -count=1 ./...` | **通过**（69 包 ok，无 DATA RACE） |
 | 前端 `vite build` / 243 单测 | 通过；dist 已随修复更新 |
-| Playwright（修复后） | **214 passed / 0 failed / 4 skipped** |
-| 真实浏览器 UI | 列表、路由设置、新建弹窗、详情、协议编辑/刷新、模型广场全部通过 |
+| Playwright（修复后） | **216 passed / 0 failed / 4 skipped**（含新增的官方/自定义创建用例） |
+| 真实浏览器 UI | 列表、路由设置、新建弹窗、详情、协议编辑/刷新、模型广场全部通过；官方/自定义渠道创建均成功并清理 |
 | API 矩阵（第一轮 64 项） | **64/64 通过** |
 | API 矩阵（第二批 35 项） | **35/35 通过** |
 | 转换（legacy/xir） | messages/gemini→chat、原生优先、流式拒绝、fatal 400、alias+wire 通过 |
+| 渠道创建 | 官方目录点击即填 endpoint（URL 仅高级覆盖）；自定义 Base URL/key/协议/模型可手填；`POST /api/channels` 的 `models` 同事务创建 |
 | DB 迁移 | 未改 schema；上一轮 DB 报告继续有效 |
 
 保留：压缩请求体的转换错误仍返回 502（fail-closed 的 streaming 推断先于转换判定），见报告 5.3；不阻塞交付。

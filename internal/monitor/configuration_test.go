@@ -220,3 +220,32 @@ func TestChannelBootstrapSettingsReportAndResetTheMarker(t *testing.T) {
 		t.Fatalf("POST status=%d body=%s, want 404", rr.Code, rr.Body)
 	}
 }
+
+func TestChannelCreateAcceptsModels(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	body := `{"name":"custom","base_url":"https://example.invalid/v1","api_type":"chat_completions","protocol_family":"openai_compatible","models":["model-a","model-b"]}`
+	response := configurationRequest(channelListCreateAPIHandler(st, nil, nil), http.MethodPost, "/api/channels", body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil || len(channels) != 1 {
+		t.Fatalf("channels=%v err=%v", channels, err)
+	}
+	models, err := st.ListChannelModels(channels[0].ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models=%+v, want 2", models)
+	}
+	for _, model := range models {
+		if !model.Enabled || model.Source != "manual" {
+			t.Fatalf("model=%+v, want enabled manual", model)
+		}
+	}
+}
