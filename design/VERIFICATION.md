@@ -82,3 +82,41 @@
 - 浏览器 E2E 未纳入本次自动化。
 
 - `/data/gateway-test` 真实环境验证与问题记录见 [`GATEWAY_TEST_REPORT.md`](./GATEWAY_TEST_REPORT.md)。
+
+## 2026-11-10 第二轮：a26655b 全面环境回归与修复
+
+环境：`/data/gateway-test`（proxy `:28080` / monitor `:28081` / Postgres 17 `:25432`）。
+第一轮基线：`main` @ `a26655b`；修复分支：`fix/gateway-test-round2` @ `d9797bc` + `a637fe1`。
+完整报告：[`GATEWAY_TEST_REPORT.md`](./GATEWAY_TEST_REPORT.md)。
+
+### 第一轮发现（修复前）
+
+| 检查 | 结果 |
+| --- | --- |
+| `go build` / `go vet` / `gofmt` / `go test ./...` | 通过（69 包 ok） |
+| `go test -race ./...` | 第一次 1 个路由器成本测试的非确定性失败；第二次通过 |
+| 前端 build / 243 单测 / typecheck | 通过；typecheck 不覆盖 JSX |
+| Playwright（HEAD） | **失败**：194 passed / 20 failed，全部由 `/channels` 的 `setForm is not defined` 引起 |
+| DB 迁移（fresh/upgrade/down/SQLite/atlas.sum） | 全部通过 |
+| 渠道/preset、per-model、四协议代理、路由、转换、审计 | 核心通过；发现 UI 阻断、Gemini URL/wire、Vertex Express auth、`upstream_model`、alias+wire、protocols 局部 PATCH、decision trace 字段、epsilon 语义问题 |
+
+### 修复后复测
+
+| 检查 | 结果 |
+| --- | --- |
+| `go build ./cmd/server ./cmd/trajecta` | 通过（镜像 `trajecta:fix-round2`） |
+| `go vet ./...` / `gofmt -l` | 通过 / 无输出 |
+| `go test -count=1 ./...` | 通过（69 包 ok，0 FAIL） |
+| `go test -race -count=1 ./...` | **通过**（69 包 ok，无 DATA RACE） |
+| 前端 `vite build` / 243 单测 | 通过；dist 已随修复更新 |
+| Playwright（修复后） | **214 passed / 0 failed / 4 skipped** |
+| 真实浏览器 UI | 列表、路由设置、新建弹窗、详情、协议编辑/刷新、模型广场全部通过 |
+| API 矩阵（第一轮 64 项） | **64/64 通过** |
+| API 矩阵（第二批 35 项） | **35/35 通过** |
+| 转换（legacy/xir） | messages/gemini→chat、原生优先、流式拒绝、fatal 400、alias+wire 通过 |
+| DB 迁移 | 未改 schema；上一轮 DB 报告继续有效 |
+
+保留：压缩请求体的转换错误仍返回 502（fail-closed 的 streaming 推断先于转换判定），见报告 5.3；不阻塞交付。
+UI typecheck 仍不覆盖 JSX，建议把 Playwright mock 套件纳入 CI。
+
+判定：第一轮发现的问题已修复并复测；核心 2.0 能力达到预期。

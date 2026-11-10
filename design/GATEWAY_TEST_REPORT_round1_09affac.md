@@ -1,7 +1,10 @@
-# `/data/gateway-test` 环境测试报告
+# `/data/gateway-test` 环境测试报告（第一轮 / 09affac）
 
-> 日期：2026-11-10  
-> 代码：`main` @ `09affac` + 本轮修复  
+> 这是第一轮（`09affac`）环境记录，保留作历史对照。
+> 第二轮全面测试（`a26655b`）见 [GATEWAY_TEST_REPORT.md](./GATEWAY_TEST_REPORT.md)。
+
+> 日期：2026-11-10
+> 代码：`main` @ `09affac` + 本轮修复
 > 环境：`/data/gateway-test`，独立 compose project `gateway-test`
 
 ## 1. 环境与隔离
