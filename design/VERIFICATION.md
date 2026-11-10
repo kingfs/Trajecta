@@ -30,3 +30,23 @@
 - OAuth driver 的实际网络流程；
 - per-model 多协议 wire name；
 - `plan_engine=route` 尚未设为默认。
+
+## 2026-11-10 代码问题修复
+
+| 修复 | 验证 |
+| --- | --- |
+| `UsageSniffer` nil source/count 安全 | gateway 单测 + race |
+| Qwen/GLM Anthropic coding-plan 预设 | preset endpoint/base URL/API 测试 |
+| PATCH 渠道校验已有 coding-plan key | `TestChannelPatchValidatesExistingCodingPlanKey` |
+| minimal cassette raw/detail 共享时间线 fallback | timeline 单测 |
+| plan 元数据收敛为单表 | `TestPlanPresetMetadataMatchesPresets` |
+| preset `no_list` 提示 | provider-presets API 测试 + UI build/单测 |
+
+验证命令：
+
+- `go build ./cmd/server ./cmd/trajecta`
+- `go test ./...`
+- `go vet ./internal/gateway ./internal/monitor ./internal/upstream ./pkg/upstream`
+- `go test -race ./internal/gateway ./internal/upstream ./pkg/upstream`
+- `go test -race ./internal/monitor`
+- 前端 `vite build` + 243 个单元测试
