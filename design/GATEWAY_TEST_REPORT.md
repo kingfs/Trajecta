@@ -2,7 +2,7 @@
 
 > 日期：2026-11-10（Asia/Shanghai）
 > 第一轮被测代码：`main` @ `a26655b7bb21a6c0113781d5210f487fc0ae3ee6`
-> 修复分支：`fix/gateway-test-round2` @ `d9797bc` + `a637fe1`
+> 修复分支：`fix/gateway-test-round2` @ `d9797bc` + `a637fe1` + `d683bd4`
 > 第一轮镜像：`trajecta:test-a26655b`；修复后镜像：`trajecta:fix-round2`
 > 环境：独立 compose project `gateway-test`；proxy `:28080`、monitor `:28081`、Postgres 17 `:25432`
 > 上游：`gateway-test` 网络内 `mock-upstream:39099`（本轮重建的可控 mock，仅测试用，不属于产品代码）
@@ -287,8 +287,9 @@
 | --- | --- |
 | `d9797bc` | `fix(monitor): repair the channels page and its create dialog`：把 preset 预填 effect 移入 `CreateProviderDialog`，把 `catalog` 作为 prop 传入，重建 dist |
 | `a637fe1` | `fix(gateway): make per-model wire resolution consistent`：`ModelWireNames` + 两阶段 resolver、原生 Gemini/Vertex path 重写、`/v1beta` 折叠、Vertex Express auth、protocols 合并、priority trace 字段、epsilon 显式 0 |
+| `d683bd4` | `feat(monitor): add official and custom channel creation modes`：官方目录/自定义双 tab、`POST /api/channels` 的 `models` 事务创建、UI/测试/文档 |
 
-分支：`fix/gateway-test-round2`。部署镜像：`trajecta:fix-round2`。
+分支：`fix/gateway-test-round2`。部署镜像：`trajecta:fix-round2`（版本 `2.0-fix-round3`，commit `d683bd4`）。
 
 ### 5.2 复测结果
 

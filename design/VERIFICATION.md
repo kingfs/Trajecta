@@ -86,7 +86,7 @@
 ## 2026-11-10 第二轮：a26655b 全面环境回归与修复
 
 环境：`/data/gateway-test`（proxy `:28080` / monitor `:28081` / Postgres 17 `:25432`）。
-第一轮基线：`main` @ `a26655b`；修复分支：`fix/gateway-test-round2` @ `d9797bc` + `a637fe1`。
+第一轮基线：`main` @ `a26655b`；修复分支：`fix/gateway-test-round2` @ `d9797bc` + `a637fe1` + `d683bd4`。
 完整报告：[`GATEWAY_TEST_REPORT.md`](./GATEWAY_TEST_REPORT.md)。
 
 ### 第一轮发现（修复前）
