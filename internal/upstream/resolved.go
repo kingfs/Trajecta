@@ -12,6 +12,8 @@ import (
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
+	pkgupstream "github.com/kingfs/Trajecta/pkg/upstream"
+	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 const (
@@ -102,7 +104,48 @@ var providerPresetRegistry = map[string]ProviderPresetSpec{
 	"zai_coding":                 {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"zai_coding_anthropic":       {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
 	"zhipu_coding":               {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
-	"zhipu_coding_anthropic":     {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
+}
+
+// catalogSpec derives the runtime default for a catalog preset that the
+// explicit registry does not name. It keeps new pkg/upstream presets usable
+// without a second hand-maintained table; explicit entries still win.
+func catalogSpec(preset pkgupstream.Preset) ProviderPresetSpec {
+	hasChat := preset.Endpoints[xir.ProtocolChatCompletions] != ""
+	hasResponses := preset.Endpoints[xir.ProtocolResponses] != ""
+	hasMessages := preset.Endpoints[xir.ProtocolMessages] != ""
+	hasGemini := preset.Endpoints[xir.ProtocolGemini] != ""
+	switch {
+	case hasMessages && !hasChat && !hasResponses:
+		return ProviderPresetSpec{
+			ProtocolFamily:  ProtocolFamilyAnthropicMessages,
+			RoutingProfile:  RoutingProfileAnthropicDefault,
+			SupportLevel:    "compatible",
+			AllowedProfiles: []string{RoutingProfileAnthropicDefault},
+		}
+	case hasGemini && !hasChat && !hasResponses:
+		return ProviderPresetSpec{
+			ProtocolFamily:  ProtocolFamilyGoogleGenAI,
+			RoutingProfile:  RoutingProfileGoogleAIStudio,
+			SupportLevel:    "compatible",
+			AllowedProfiles: []string{RoutingProfileGoogleAIStudio},
+		}
+	default:
+		return ProviderPresetSpec{
+			ProtocolFamily:  ProtocolFamilyOpenAICompatible,
+			RoutingProfile:  RoutingProfileOpenAIDefault,
+			SupportLevel:    "compatible",
+			AllowedProfiles: []string{RoutingProfileOpenAIDefault},
+		}
+	}
+}
+
+func init() {
+	for _, preset := range pkgupstream.Presets() {
+		if _, ok := providerPresetRegistry[preset.ID]; ok {
+			continue
+		}
+		providerPresetRegistry[preset.ID] = catalogSpec(preset)
+	}
 }
 
 type ResolvedUpstream struct {
