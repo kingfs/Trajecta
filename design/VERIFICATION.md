@@ -50,3 +50,33 @@
 - `go test -race ./internal/gateway ./internal/upstream ./pkg/upstream`
 - `go test -race ./internal/monitor`
 - 前端 `vite build` + 243 个单元测试
+
+## 2026-11-10 核心功能收尾验收
+
+| 项 | 结果 |
+| --- | --- |
+| per-model protocols / wire name / UI | 通过（schema/store/API/channel/router/proxy/UI + 单测） |
+| gateway 单轨化 | 通过（Body/Transform/Pipeline/alias/stream options/conversion headers/canonical usage） |
+| upstream 单轨化 | 通过（catalog 自动补齐、auth header、普通 URL 委托 pkg；Azure/Vertex/tokenize 保留） |
+| findings 统一 | 通过（analyzer findings + XIR detections 合并，`source=xir` 无明文） |
+| 流式转换评估 | 完成，2.0 保持 non-goal；12 个协议对显式拒绝测试 |
+| 旧路径清理 | gateway/proxy 别名和未使用 helper 已删除 |
+| CLI 测试数据竞争 | 修复（测试 root 不再写包级 runtime） |
+
+验证矩阵：
+
+- `go build ./cmd/server ./cmd/trajecta`：通过
+- `go vet ./...`：通过
+- `go test -race ./...`：通过（exit 0，无 DATA RACE）
+- `golangci-lint`（gateway/upstream/channel/pkg/upstream）：0 issues
+- 前端 `vite build`：通过
+- 前端 `node --test tests-unit/**/*.test.js`：243 passed
+
+保留的行为决策/非目标：
+
+- `plan_engine=route` 仍 opt-in，未做默认化；
+- Azure/Vertex/tokenize 的 URL 逻辑仍在 internal；
+- `protocolConversion` 的决策/引擎选择仍在 proxy；
+- 跨协议流式转换未实现；
+- OAuth 未实现，保持官方 API key；
+- 浏览器 E2E 未纳入本次自动化。
