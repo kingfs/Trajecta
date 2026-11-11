@@ -582,8 +582,10 @@ func (s *importState) handleLogs(body io.Reader, size int64) error {
 		// does not treat the imported file as new.
 		s.desiredFiles[targetEntry] = desiredFile{modTimeNs: src.ModTimeNs}
 
-		var existingTraceID any
-		err = s.view.TransferQueryRow(s.ctx, `SELECT trace_id FROM logs WHERE path = ?`, src.Path).Scan(&existingTraceID)
+		var existingTraceID, existingModTime, existingSize any
+		err = s.view.TransferQueryRow(s.ctx,
+			`SELECT trace_id, mod_time_ns, file_size FROM logs WHERE path = ?`, src.Path).
+			Scan(&existingTraceID, &existingModTime, &existingSize)
 		if err == nil {
 			existing := anyString(existingTraceID)
 			if existing != src.TraceID {
@@ -598,8 +600,47 @@ func (s *importState) handleLogs(body io.Reader, size int64) error {
 				s.result.warn("cassette path %s already indexed under trace %s (source trace %s); skipped", src.Path, existing, src.TraceID)
 				return nil
 			}
-			rep.SkippedUnchanged++
-			return nil
+			if anyInt64(existingModTime) == src.ModTimeNs && anyInt64(existingSize) == src.FileSize {
+				rep.SkippedUnchanged++
+				return nil
+			}
+			// The cassette changed since the first import (re-recorded, or the
+			// bundle is newer): refresh the indexed row, keeping its trace id.
+			rep.Updated++
+			if !s.apply {
+				return nil
+			}
+			return s.exec(`
+				UPDATE logs SET
+					mod_time_ns = ?, file_size = ?, version = ?, request_id = ?, recorded_at = ?,
+					model = ?, provider = ?, operation = ?, endpoint = ?, url = ?, method = ?,
+					status_code = ?, duration_ms = ?, ttft_ms = ?, client_ip = ?, content_length = ?, error_text = ?,
+					prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?,
+					req_header_len = ?, req_body_len = ?, res_header_len = ?, res_body_len = ?, is_stream = ?,
+					session_id = ?, session_source = ?, window_id = ?, client_request_id = ?,
+					request_audit_id = ?, response_id = ?,
+					exchange_id = ?, exchange_kind = ?, exchange_role = ?, parent_exchange_id = ?, sequence_index = ?,
+					selected_upstream_id = ?, selected_upstream_base_url = ?, selected_upstream_provider_preset = ?,
+					routing_policy = ?, routing_score = ?, routing_candidate_count = ?, routing_failure_reason = ?,
+					route_target_id = ?, channel_id = ?, credential_id = ?, sticky_status = ?, sticky_previous_upstream_id = ?,
+					client_harness = ?, client_harness_name = ?, client_harness_version = ?, client_harness_kind = ?,
+					client_harness_confidence = ?, client_harness_tags_json = ?
+				WHERE path = ? AND trace_id = ?`,
+				src.ModTimeNs, src.FileSize, src.Version, src.RequestID, src.RecordedAt,
+				src.Model, src.Provider, src.Operation, src.Endpoint, src.URL, src.Method,
+				src.StatusCode, src.DurationMs, src.TTFTMs, src.ClientIP, src.ContentLength, src.ErrorText,
+				src.PromptTokens, src.CompletionTokens, src.TotalTokens, src.CachedTokens,
+				src.ReqHeaderLen, src.ReqBodyLen, src.ResHeaderLen, src.ResBodyLen, src.IsStream,
+				src.SessionID, src.SessionSource, src.WindowID, src.ClientRequestID,
+				src.RequestAuditID, src.ResponseID,
+				src.ExchangeID, src.ExchangeKind, src.ExchangeRole, src.ParentExchangeID, src.SequenceIndex,
+				src.SelectedUpstreamID, src.SelectedUpstreamBaseURL, src.SelectedUpstreamProviderPreset,
+				src.RoutingPolicy, src.RoutingScore, src.RoutingCandidateCount, src.RoutingFailureReason,
+				src.RouteTargetID, src.ChannelID, src.CredentialID, src.StickyStatus, src.StickyPreviousUpstreamID,
+				src.ClientHarness, src.ClientHarnessName, src.ClientHarnessVersion, src.ClientHarnessKind,
+				src.ClientHarnessConfidence, orElseJSON(src.ClientHarnessTagsJSON, "[]"),
+				src.Path, src.TraceID,
+			)
 		}
 		rep.Inserted++
 		if !s.apply {

@@ -393,3 +393,52 @@ func targetDir(t *testing.T, st *store.Store) string {
 	t.Helper()
 	return st.OutputDir()
 }
+
+func TestImportUpdatesChangedLogRow(t *testing.T) {
+	source := newFixture(t)
+	bundle := filepath.Join(t.TempDir(), "update.tar.gz")
+	if _, err := Export(context.Background(), source.store, source.dir, ExportOptions{
+		Since:    ptrTime(source.recordedAt.Add(-time.Hour)),
+		Until:    ptrTime(source.recordedAt.Add(time.Hour)),
+		Out:      bundle,
+		Password: "pw",
+	}); err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+	target := newTargetStore(t)
+	if _, err := Import(context.Background(), target, targetDir(t, target), ImportOptions{
+		Bundle: bundle, Password: "pw", Apply: true,
+	}); err != nil {
+		t.Fatalf("Import() error = %v", err)
+	}
+
+	// Simulate a stale index row: the cassette on disk is newer than what the
+	// row claims, which is what a re-recorded or re-exported trace looks like.
+	if _, err := target.TransferExec(context.Background(), `UPDATE logs SET mod_time_ns = 1, file_size = 1`); err != nil {
+		t.Fatalf("poke logs: %v", err)
+	}
+
+	res, err := Import(context.Background(), target, targetDir(t, target), ImportOptions{
+		Bundle: bundle, Password: "pw", Apply: true,
+	})
+	if err != nil {
+		t.Fatalf("second Import() error = %v", err)
+	}
+	var logs *TableImportReport
+	for i := range res.Tables {
+		if res.Tables[i].Name == "logs" {
+			logs = &res.Tables[i]
+		}
+	}
+	if logs == nil || logs.Updated != 2 {
+		t.Fatalf("logs report = %+v, want 2 updated rows", logs)
+	}
+	var modTime int64
+	if err := target.TransferQueryRow(context.Background(),
+		`SELECT mod_time_ns FROM logs WHERE path LIKE ?`, "%a.http").Scan(&modTime); err != nil {
+		t.Fatalf("read logs mod_time_ns: %v", err)
+	}
+	if modTime == 1 {
+		t.Fatal("changed log row was not refreshed")
+	}
+}

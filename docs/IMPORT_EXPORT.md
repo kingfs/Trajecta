@@ -111,7 +111,8 @@ cassettes/<相对路径>.http           # 位于最后，流式复制
 
 | 情况 | 行为 |
 | --- | --- |
-| `logs.path` 已存在且 `trace_id` 相同 | 跳过（已导入） |
+| `logs.path` 已存在且 `trace_id` 相同、`mod_time_ns`/`file_size` 也相同 | 跳过（已导入） |
+| `logs.path` 已存在且 `trace_id` 相同但 mtime/size 变化 | 更新该索引行（保留 `trace_id`），并按新 mtime 覆盖 cassette |
 | `logs.path` 已存在但 `trace_id` 不同 | 跳过该 trace 并把 trace_id 关联的派生/审计行一起跳过，报告里给 warning |
 | `upstream_exchanges.id` / `request_audits.id` 等已存在 | 跳过 |
 | `system_events.fingerprint` 已存在 | 合并时间戳；仅当源事件更新时才累加 `occurrence_count`，保留目标已读/已解决状态 |
