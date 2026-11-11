@@ -27,6 +27,8 @@ type ChannelConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 	// ProviderPreset holds the value of the "provider_preset" field.
 	ProviderPreset string `json:"provider_preset,omitempty"`
+	// Plan holds the value of the "plan" field.
+	Plan string `json:"plan,omitempty"`
 	// APIType holds the value of the "api_type" field.
 	APIType string `json:"api_type,omitempty"`
 	// Mode holds the value of the "mode" field.
@@ -93,7 +95,7 @@ func (*ChannelConfig) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case channelconfig.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldAPIType, channelconfig.FieldMode, channelconfig.FieldCapabilitiesJSON, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldProxyJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
+		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldPlan, channelconfig.FieldAPIType, channelconfig.FieldMode, channelconfig.FieldCapabilitiesJSON, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldProxyJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
 			values[i] = new(sql.NullString)
 		case channelconfig.FieldCreatedAt, channelconfig.FieldUpdatedAt, channelconfig.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -147,6 +149,12 @@ func (_m *ChannelConfig) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field provider_preset", values[i])
 			} else if value.Valid {
 				_m.ProviderPreset = value.String
+			}
+		case channelconfig.FieldPlan:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field plan", values[i])
+			} else if value.Valid {
+				_m.Plan = value.String
 			}
 		case channelconfig.FieldAPIType:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -349,6 +357,9 @@ func (_m *ChannelConfig) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("provider_preset=")
 	builder.WriteString(_m.ProviderPreset)
+	builder.WriteString(", ")
+	builder.WriteString("plan=")
+	builder.WriteString(_m.Plan)
 	builder.WriteString(", ")
 	builder.WriteString("api_type=")
 	builder.WriteString(_m.APIType)

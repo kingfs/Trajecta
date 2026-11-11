@@ -17,7 +17,7 @@ func TestBuiltinPresets(t *testing.T) {
 		"openai", "anthropic", "deepseek", "openrouter", "google",
 		"moonshot", "zhipu", "zai", "minimax", "xai", "groq", "mistral",
 		"together", "fireworks", "cerebras", "github", "azure", "vertex",
-		"vllm", "ollama", "qwen_coding", "qwen_coding_intl", "qwen_coding_anthropic", "qwen_coding_intl_anthropic", "qwen_token_plan", "qwen_token_plan_intl", "zai_coding", "zai_coding_anthropic", "zhipu_coding", "zhipu_coding_anthropic", "kimi_coding",
+		"vllm", "ollama", "alibaba", "alibaba_intl", "qwen_coding", "qwen_coding_intl", "qwen_coding_anthropic", "qwen_coding_intl_anthropic", "qwen_token_plan", "qwen_token_plan_intl", "zai_coding", "zai_coding_anthropic", "zhipu_coding", "zhipu_coding_anthropic", "kimi_coding",
 	}
 	byID := make(map[string]Preset, len(presets))
 	for _, preset := range presets {

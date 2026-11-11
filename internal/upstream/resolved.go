@@ -65,6 +65,7 @@ type ProviderPresetSpec struct {
 
 var providerPresetRegistry = map[string]ProviderPresetSpec{
 	"alibaba":                    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"alibaba_intl":               {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"anthropic":                  {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
 	"azure":                      {ProtocolFamily: ProtocolFamilyOpenAICompatible, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy}},
 	"azure_openai":               {ProtocolFamily: ProtocolFamilyOpenAICompatible, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy}},

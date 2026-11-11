@@ -4381,6 +4381,60 @@ a:focus-visible {
   color: var(--muted);
 }
 
+/* Channel plugins page: one card per vendor plugin, reusing the provider grid
+   so the narrow-screen collapse applies unchanged. */
+.plugins-intro {
+  margin: 0 0 14px;
+  max-width: 860px;
+}
+
+.plugin-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.plugin-card .panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plugin-description {
+  margin: 0;
+}
+
+.plugin-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plugin-stats {
+  margin: 0;
+}
+
+.plugin-links {
+  display: flex;
+  gap: 14px;
+  font-size: var(--text-label);
+}
+
+.plugin-conflict-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.plugin-conflict-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .provider-selected-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);

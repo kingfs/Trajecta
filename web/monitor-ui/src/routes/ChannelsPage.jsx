@@ -20,6 +20,7 @@ import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { buildProviderLink, formatCount, formatDateTime, formatRateAvg, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { localizedName, localizedDescription, planDisplayName, planDisplayDescription, projectPlan, planKeyPlaceholder } from "../lib/plugins";
 
 // The create form asks only for what a channel actually needs. Interface
 // capabilities are detected per model now, so the legacy channel-level
@@ -28,6 +29,7 @@ const DEFAULT_FORM = {
   name: "",
   base_url: "",
   provider_preset: "openai",
+  plan: "",
   api_type: "chat_completions",
   protocol_family: "openai_compatible",
   routing_profile: "openai_default",
@@ -282,7 +284,7 @@ function splitModelList(value) {
 }
 
 function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [mode, setMode] = useState("official");
   const [form, setForm] = useState(() => ({ ...DEFAULT_FORM, interfaces: familyInterfaces("openai_compatible") }));
   const [selectedCatalogID, setSelectedCatalogID] = useState("");
@@ -308,6 +310,8 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   }, [catalogItems, catalogQuery]);
   const selectedCatalogItem = catalogItems.find((item) => item.id === selectedCatalogID) || null;
   const selectedPreset = presetsByID.get(selectedCatalogID) || null;
+  const selectedProjection = selectedCatalogItem ? projectPlan(selectedCatalogItem, form.plan) : null;
+  const selectedPlan = selectedProjection?.plan || null;
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const customRoutingState = {
     ...presetState,
@@ -333,6 +337,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
       setForm((current) => ({
         ...current,
         provider_preset: "",
+        plan: "",
         base_url: "",
         endpoints: {},
         api_type: "chat_completions",
@@ -342,13 +347,17 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
       }));
       return;
     }
-    setForm((current) => ({ ...current, provider_preset: "", base_url: "", endpoints: {} }));
+    setForm((current) => ({ ...current, provider_preset: "", plan: "", base_url: "", endpoints: {} }));
   };
 
-  const applyCatalogPreset = (item) => {
+  const applyCatalogPreset = (item, planId = "") => {
     const spec = presetsByID.get(item.id) || {};
-    const protocols = item.protocols || spec.protocols || [];
-    const endpoints = item.endpoints || {};
+    // The selected plan's endpoints override the preset defaults; one channel
+    // carries every protocol surface (OpenAI /v1 and Anthropic /apps/anthropic,
+    // for example) with a single key.
+    const projected = projectPlan(item, planId);
+    const protocols = projected.protocols.length ? projected.protocols : (spec.protocols || []);
+    const endpoints = projected.endpoints;
     const primaryProtocol = protocols.includes("chat_completions")
       ? "chat_completions"
       : protocols.includes("responses")
@@ -373,8 +382,9 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
     setProbeReport(null);
     setForm((current) => ({
       ...current,
-      name: item.name || item.id,
+      name: localizedName(item, language),
       provider_preset: item.id,
+      plan: planId,
       api_type: apiType,
       protocol_family: family,
       routing_profile: spec.routing_profile || (Array.isArray(spec.allowed_profiles) ? spec.allowed_profiles[0] : "") || FAMILY_ROUTING[family] || current.routing_profile,
@@ -459,7 +469,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
           {mode === "official" ? (
             <div className="provider-form provider-form-modal">
               <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
-              <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
+              <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={planKeyPlaceholder(selectedPlan)} /></label>
               <div className="provider-form-wide provider-catalog-panel">
                 <div className="provider-catalog-head">
                   <div>
@@ -478,11 +488,21 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                       className={selectedCatalogID === item.id ? "provider-catalog-card is-selected" : "provider-catalog-card"}
                       onClick={() => applyCatalogPreset(item)}
                     >
-                      <strong>{item.name || item.id}</strong>
+                      <strong>{localizedName(item, language)}</strong>
                       <span>{protocolLabels(item.protocols, t).join(" · ") || "—"}</span>
+                      {item.plans?.length ? (
+                        <span className="trace-subline">{item.plans.map((plan) => planDisplayName(plan, language)).join(" / ")}</span>
+                      ) : null}
                     </button>
                   ))}
-                  {!filteredCatalog.length ? <p className="trace-subline provider-form-wide">{t("providers.catalogEmpty")}</p> : null}
+                  {!filteredCatalog.length ? (
+                    catalogItems.length === 0 ? (
+                      <p className="trace-subline provider-form-wide">
+                        {t("providers.catalogNoPlugins")}{" "}
+                        <Link to="/plugins" onClick={onClose}>{t("providers.catalogNoPluginsLink")}</Link>
+                      </p>
+                    ) : <p className="trace-subline provider-form-wide">{t("providers.catalogEmpty")}</p>
+                  ) : null}
                   </div>
                 </div>
               </div>
@@ -490,17 +510,40 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                 <div className="provider-form-wide provider-selected-summary">
                   <div>
                     <p className="eyebrow">{t("providers.selectedProvider")}</p>
-                    <strong>{selectedCatalogItem.name || selectedCatalogItem.id}</strong>
-                    <p className="trace-subline">{selectedPreset?.notes || selectedCatalogItem.notes || ""}</p>
-                    {selectedCatalogItem.models?.no_list ? <p className="trace-subline">{t("providers.noModelListHint")}</p> : null}
+                    <strong>{localizedName(selectedCatalogItem, language)}</strong>
+                    <p className="trace-subline">{localizedDescription(selectedCatalogItem, language)}</p>
+                    {selectedProjection?.noList ? <p className="trace-subline">{t("providers.noModelListHint")}</p> : null}
                   </div>
                   <div className="provider-endpoint-summary">
                     <span>{t("providers.baseURL")}</span>
                     <code>{form.base_url || t("providers.baseURLHint")}</code>
+                    {form.endpoints?.messages && form.endpoints.messages !== form.base_url ? (
+                      <>
+                        <span>{t("providers.interfaceMessages")}</span>
+                        <code>{form.endpoints.messages}</code>
+                      </>
+                    ) : null}
                     <span className="trace-subline">{t("providers.officialEndpointHint")}</span>
                   </div>
                 </div>
               ) : <p className="trace-subline provider-form-wide">{t("providers.selectProviderHint")}</p>}
+              {selectedCatalogItem?.plans?.length ? (
+                <label className="provider-form-wide">{t("providers.plan")}
+                  <Select
+                    value={form.plan || "__default"}
+                    onValueChange={(value) => applyCatalogPreset(selectedCatalogItem, value === "__default" ? "" : value)}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default">{t("providers.planDefault")}</SelectItem>
+                      {selectedCatalogItem.plans.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>{planDisplayName(plan, language)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedPlan ? <span className="trace-subline">{planDisplayDescription(selectedPlan, language)}</span> : null}
+                </label>
+              ) : null}
               <label className="provider-form-wide">{t("providers.models")}
                 <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder="gpt-5&#10;gpt-5-mini" spellCheck={false} />
                 <span className="trace-subline">{t("providers.modelsHint")}</span>
@@ -556,6 +599,7 @@ function createChannelPayload(form, mode, selectedCatalogID) {
     name: form.name,
     base_url: form.base_url,
     provider_preset: mode === "official" ? selectedCatalogID : "",
+    plan: mode === "official" ? (form.plan || "") : "",
     api_type: form.api_type,
     protocol_family: form.protocol_family,
     routing_profile: form.routing_profile,
@@ -578,7 +622,7 @@ function createChannelPayload(form, mode, selectedCatalogID) {
 }
 
 function ProviderCard({ item, windowValue, onRefresh }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const summary = item.summary || {};
   const [probeOpen, setProbeOpen] = useState(false);
   // Called with the next value only. Bubble suppression lives in the Switch,
@@ -608,11 +652,12 @@ function ProviderCard({ item, windowValue, onRefresh }) {
     <Link className="upstream-card" to={buildProviderLink(item.id, windowValue)}>
       <div className="upstream-card-head">
         <div>
-          <p className="eyebrow">{item.plan_name || item.provider_preset || "custom"}</p>
+          <p className="eyebrow">{item.provider_preset || "custom"}</p>
           <h2>{item.name || item.id}</h2>
         </div>
         <div className="trace-tag-group">
-          {item.coding_plan ? <InlineTag tone="accent">{t("providers.codingPlan")}</InlineTag> : null}
+          {item.plan_name ? <InlineTag tone="accent">{language === "en" ? item.plan_name : (item.plan_name_zh || item.plan_name)}</InlineTag> : null}
+          {item.provider_preset && item.plugin_enabled === false ? <InlineTag tone="danger">{t("providers.pluginDisabled")}</InlineTag> : null}
           <Switch checked={Boolean(item.enabled)} onChange={(enabled) => setEnabled.mutate(enabled)} disabled={saving} label={`${item.name || item.id} enabled`} />
           <Button variant="default" size="icon" type="button" onClick={deleteProvider} disabled={saving} title={t("providers.deleteTitle")} aria-label={t("providers.deleteConfirm", { name: item.name || item.id })}>
             <DeleteIcon />

@@ -29,6 +29,7 @@ type ChannelConfigRecord struct {
 	Source           string
 	BaseURL          string
 	ProviderPreset   string
+	Plan             string
 	APIType          string
 	Mode             string
 	CapabilitiesJSON string
@@ -256,6 +257,7 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetSource(strings.TrimSpace(record.Source)).
 		SetBaseURL(record.BaseURL).
 		SetProviderPreset(strings.TrimSpace(record.ProviderPreset)).
+		SetPlan(strings.TrimSpace(record.Plan)).
 		SetAPIType(strings.TrimSpace(record.APIType)).
 		SetMode(strings.TrimSpace(record.Mode)).
 		SetCapabilitiesJSON(strings.TrimSpace(record.CapabilitiesJSON)).
@@ -1226,6 +1228,7 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		Source:           row.Source,
 		BaseURL:          row.BaseURL,
 		ProviderPreset:   row.ProviderPreset,
+		Plan:             row.Plan,
 		APIType:          row.APIType,
 		Mode:             row.Mode,
 		CapabilitiesJSON: row.CapabilitiesJSON,

@@ -4,13 +4,16 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/upstream"
 	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 // providerCatalogResponse is the read-only provider catalog used by the
 // onboarding UI. It is derived entirely from pkg/upstream's compiled presets:
-// no channel row, credential or operator-specific state is included.
+// no channel row, credential or operator-specific state is included. Only
+// visible presets whose plugin is enabled are served; hidden legacy presets
+// stay resolvable for existing channels but are never offered to new ones.
 type providerCatalogResponse struct {
 	Items []providerCatalogItem `json:"items"`
 }
@@ -18,7 +21,9 @@ type providerCatalogResponse struct {
 type providerCatalogItem struct {
 	ID        string                `json:"id"`
 	Name      string                `json:"name"`
+	NameZh    string                `json:"name_zh,omitempty"`
 	Kind      string                `json:"kind"`
+	Region    string                `json:"region,omitempty"`
 	Endpoints map[string]string     `json:"endpoints"`
 	Protocols []string              `json:"protocols"`
 	Auth      providerCatalogAuth   `json:"auth"`
@@ -28,6 +33,7 @@ type providerCatalogItem struct {
 	DocsURL   string                `json:"docs_url,omitempty"`
 	KeysURL   string                `json:"keys_url,omitempty"`
 	Notes     string                `json:"notes,omitempty"`
+	NotesZh   string                `json:"notes_zh,omitempty"`
 }
 
 type providerCatalogAuth struct {
@@ -50,10 +56,18 @@ type providerCatalogOAuth struct {
 }
 
 type providerCatalogPlan struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Endpoints   map[string]string `json:"endpoints"`
-	ModelFilter string            `json:"model_filter,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	NameZh        string            `json:"name_zh,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	DescriptionZh string            `json:"description_zh,omitempty"`
+	Endpoints     map[string]string `json:"endpoints"`
+	ModelFilter   string            `json:"model_filter,omitempty"`
+	KeyPrefix     string            `json:"key_prefix,omitempty"`
+	Coding        bool              `json:"coding,omitempty"`
+	NoList        bool              `json:"no_list,omitempty"`
+	DocsURL       string            `json:"docs_url,omitempty"`
+	KeysURL       string            `json:"keys_url,omitempty"`
 }
 
 type providerCatalogModels struct {
@@ -63,16 +77,26 @@ type providerCatalogModels struct {
 	Protocol string   `json:"protocol,omitempty"`
 }
 
-func providerCatalogAPIHandler() http.HandlerFunc {
+func providerCatalogAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		presets := upstream.Presets()
+		enabled, err := enabledPluginSet(r.Context(), st)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		presets := upstream.VisiblePresets()
 		items := make([]providerCatalogItem, 0, len(presets))
 		for _, preset := range presets {
+			// A visible preset is its own plugin; disabled plugins keep their
+			// cards out of the channel creation dialog.
+			if !enabled[preset.ID] {
+				continue
+			}
 			items = append(items, providerCatalogItemFrom(preset))
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
@@ -84,7 +108,9 @@ func providerCatalogItemFrom(preset upstream.Preset) providerCatalogItem {
 	item := providerCatalogItem{
 		ID:        preset.ID,
 		Name:      preset.Name,
+		NameZh:    preset.NameZh,
 		Kind:      string(preset.Kind),
+		Region:    preset.Region,
 		Endpoints: protocolEndpoints(preset.Endpoints),
 		Protocols: protocolNames(preset.Endpoints),
 		Auth:      catalogAuth(preset.Auth),
@@ -97,17 +123,29 @@ func providerCatalogItemFrom(preset upstream.Preset) providerCatalogItem {
 		DocsURL: preset.DocsURL,
 		KeysURL: preset.KeysURL,
 		Notes:   preset.Notes,
+		NotesZh: preset.NotesZh,
 	}
 	if preset.Models.Protocol.Valid() {
 		item.Models.Protocol = string(preset.Models.Protocol)
 	}
 	for _, plan := range preset.Plans {
-		item.Plans = append(item.Plans, providerCatalogPlan{
-			ID:          plan.ID,
-			Name:        plan.Name,
-			Endpoints:   protocolEndpoints(plan.Endpoints),
-			ModelFilter: plan.ModelFilter,
-		})
+		catalogPlan := providerCatalogPlan{
+			ID:            plan.ID,
+			Name:          plan.Name,
+			NameZh:        plan.NameZh,
+			Description:   plan.Description,
+			DescriptionZh: plan.DescriptionZh,
+			Endpoints:     protocolEndpoints(plan.Endpoints),
+			ModelFilter:   plan.ModelFilter,
+			KeyPrefix:     plan.KeyPrefix,
+			Coding:        plan.Coding,
+			DocsURL:       plan.DocsURL,
+			KeysURL:       plan.KeysURL,
+		}
+		if plan.Models != nil {
+			catalogPlan.NoList = plan.Models.NoList
+		}
+		item.Plans = append(item.Plans, catalogPlan)
 	}
 	return item
 }

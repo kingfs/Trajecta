@@ -1,4 +1,4 @@
-h1:W2Y+hiOFol11P/BJ1tjrQ6eZf64Chnk4dUxt/FS3GCg=
+h1:iiFvMytPGxcTWhuSpF/eHJAeC7LhU0lXElEUbw59Mkc=
 20260622122251_init_postgres_schema.up.sql h1:7lbLKcBmjAOx39ZaBSxhO1vStgVir8vtGkw0J8OFbaU=
 20260622130545_add_runtime_store_tables.up.sql h1:KMW/0oh0mGqxIeNgomZLBMusEM2GyIx4HGj+pI/Ni0w=
 20260622163432_add_channel_api_surface.up.sql h1:NLf8JWve8TTnzlswQtHlbyuRWeTnS/Wrg7STSN2hYFM=
@@ -27,3 +27,4 @@ h1:W2Y+hiOFol11P/BJ1tjrQ6eZf64Chnk4dUxt/FS3GCg=
 20261107130000_add_channel_proxy.up.sql h1:wm3aEu1YDq7G1jk/W7szWyhgG47xiUUZaFwynkFQbZI=
 20261110120000_add_channel_model_protocols.up.sql h1:PzeRjdsIQy5V3lRRqYdfq08zCDmn3wBfEyGDdpyYpzc=
 20261111000000_drop_semantic_nodes.up.sql h1:a8WQVERdwWvZqqDNXhF4TJjIrCcsXhueHyBwbRSNys8=
+20261111121531_add_channel_plan.up.sql h1:YpVCQ2gFKrK2SGVqeSjrcV16j2DfI1Q24+hzQe77ses=

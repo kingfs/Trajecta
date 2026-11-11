@@ -182,7 +182,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 | Azure OpenAI | `azure` (v1 and deployment routing) | verified |
 | vLLM | `vllm` | verified |
 
-The complete preset list (25 registry keys, 20 distinct providers after alias deduplication), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The proxy is **protocol-aware pass-through plus recording/parsing**; by default it does not translate between protocol families in the forwarding hot path. With `router.selection.protocol_conversion` enabled it converts a non-streaming chat/messages/gemini request only when no native candidate is selectable (`/v1/responses` is always served by the local runtime; streaming and multimodal/thinking content are not converted).
+The complete plugin/preset list (22 visible channel plugins organized by vendor site, with plans and protocol endpoints built in), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The official catalog is gated by the switches on the Plugins page (all disabled by default). The proxy is **protocol-aware pass-through plus recording/parsing**; by default it does not translate between protocol families in the forwarding hot path. With `router.selection.protocol_conversion` enabled it converts a non-streaming chat/messages/gemini request only when no native candidate is selectable (`/v1/responses` is always served by the local runtime; streaming and multimodal/thinking content are not converted).
 
 ## Architecture
 

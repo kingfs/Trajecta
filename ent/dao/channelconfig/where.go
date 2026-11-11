@@ -89,6 +89,11 @@ func ProviderPreset(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldProviderPreset, v))
 }
 
+// Plan applies equality check predicate on the "plan" field. It's identical to PlanEQ.
+func Plan(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldPlan, v))
+}
+
 // APIType applies equality check predicate on the "api_type" field. It's identical to APITypeEQ.
 func APIType(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldAPIType, v))
@@ -537,6 +542,71 @@ func ProviderPresetEqualFold(v string) predicate.ChannelConfig {
 // ProviderPresetContainsFold applies the ContainsFold predicate on the "provider_preset" field.
 func ProviderPresetContainsFold(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldContainsFold(FieldProviderPreset, v))
+}
+
+// PlanEQ applies the EQ predicate on the "plan" field.
+func PlanEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldPlan, v))
+}
+
+// PlanNEQ applies the NEQ predicate on the "plan" field.
+func PlanNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldPlan, v))
+}
+
+// PlanIn applies the In predicate on the "plan" field.
+func PlanIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldPlan, vs...))
+}
+
+// PlanNotIn applies the NotIn predicate on the "plan" field.
+func PlanNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldPlan, vs...))
+}
+
+// PlanGT applies the GT predicate on the "plan" field.
+func PlanGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldPlan, v))
+}
+
+// PlanGTE applies the GTE predicate on the "plan" field.
+func PlanGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldPlan, v))
+}
+
+// PlanLT applies the LT predicate on the "plan" field.
+func PlanLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldPlan, v))
+}
+
+// PlanLTE applies the LTE predicate on the "plan" field.
+func PlanLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldPlan, v))
+}
+
+// PlanContains applies the Contains predicate on the "plan" field.
+func PlanContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldPlan, v))
+}
+
+// PlanHasPrefix applies the HasPrefix predicate on the "plan" field.
+func PlanHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldPlan, v))
+}
+
+// PlanHasSuffix applies the HasSuffix predicate on the "plan" field.
+func PlanHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldPlan, v))
+}
+
+// PlanEqualFold applies the EqualFold predicate on the "plan" field.
+func PlanEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldPlan, v))
+}
+
+// PlanContainsFold applies the ContainsFold predicate on the "plan" field.
+func PlanContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldPlan, v))
 }
 
 // APITypeEQ applies the EQ predicate on the "api_type" field.

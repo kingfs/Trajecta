@@ -58,7 +58,7 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 | 类别 | 表 | 处理 |
 | --- | --- | --- |
 | 渠道配置 | `channel_configs`、`channel_models`、`model_aliases`、`model_catalog`、`channel_probe_runs` | 导出；API key 与 `headers_json` 中的密钥在导出时解密 |
-| 应用设置（白名单） | `app_settings` 的 `routing.settings`、`rates.alerts`、`responses.function_executors.config_snapshot` | 导出；导入时只在目标缺失该键时写入 |
+| 应用设置（白名单） | `app_settings` 的 `routing.settings`、`rates.alerts`、`responses.function_executors.config_snapshot`、`plugins.channels` | 导出；导入时只在目标缺失该键时写入 |
 | 原始录制索引 | `logs` | 导出，保留原 `trace_id`、`mod_time_ns`、`file_size` |
 | 上游 exchange 索引 | `upstream_exchanges` | 导出；`cassette_path` 在导入时重写 |
 | 遮蔽审计 | `credential_mask_audits`、`credential_mask_event_states` | 导出；真值/假值在导出时解密、导入时用目标密钥重加密 |

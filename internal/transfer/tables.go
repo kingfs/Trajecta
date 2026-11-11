@@ -182,6 +182,7 @@ type channelConfigRow struct {
 	Source         string `json:"source"`
 	BaseURL        string `json:"base_url"`
 	ProviderPreset string `json:"provider_preset"`
+	Plan           string `json:"plan"`
 	ProtocolFamily string `json:"protocol_family"`
 	RoutingProfile string `json:"routing_profile"`
 	APIVersion     string `json:"api_version"`
@@ -212,7 +213,7 @@ type channelConfigRow struct {
 	ProxyJSON          string  `json:"proxy_json"`
 }
 
-const channelConfigScan = `id, name, description, source, base_url, provider_preset, protocol_family, routing_profile, api_version, deployment, project, location, model_resource, api_key_ciphertext, api_key_hint, headers_json, enabled, priority, weight, capacity_hint, model_discovery, allow_unknown_models, created_at, updated_at, last_probe_at, last_probe_status, last_probe_error, api_type, mode, capabilities_json, proxy_json`
+const channelConfigScan = `id, name, description, source, base_url, provider_preset, plan, protocol_family, routing_profile, api_version, deployment, project, location, model_resource, api_key_ciphertext, api_key_hint, headers_json, enabled, priority, weight, capacity_hint, model_discovery, allow_unknown_models, created_at, updated_at, last_probe_at, last_probe_status, last_probe_error, api_type, mode, capabilities_json, proxy_json`
 
 func scanChannelConfig(rows *sql.Rows) (channelConfigRow, error) {
 	var r channelConfigRow
@@ -223,7 +224,7 @@ func scanChannelConfig(rows *sql.Rows) (channelConfigRow, error) {
 	var createdAt any
 	var updatedAt any
 	err := rows.Scan(
-		&r.ID, &r.Name, &r.Description, &r.Source, &r.BaseURL, &r.ProviderPreset, &r.ProtocolFamily,
+		&r.ID, &r.Name, &r.Description, &r.Source, &r.BaseURL, &r.ProviderPreset, &r.Plan, &r.ProtocolFamily,
 		&r.RoutingProfile, &r.APIVersion, &r.Deployment, &r.Project, &r.Location, &r.ModelResource,
 		&apiKeyCipher, &r.APIKeyHint, &r.HeadersJSON,
 		&enabled, &r.Priority, &r.Weight, &r.CapacityHint, &r.ModelDiscovery, &allowUnknown,
@@ -397,6 +398,9 @@ var appSettingsImportWhitelist = map[string]bool{
 	"routing.settings": true,
 	"rates.alerts":     true,
 	"responses.function_executors.config_snapshot": true,
+	// Channel plugin enablement is configuration, not environment-specific
+	// egress state; import inserts it only when the target has no row yet.
+	"plugins.channels": true,
 }
 
 // ---------------------------------------------------------------------------

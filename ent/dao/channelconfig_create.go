@@ -77,6 +77,20 @@ func (_c *ChannelConfigCreate) SetNillableProviderPreset(v *string) *ChannelConf
 	return _c
 }
 
+// SetPlan sets the "plan" field.
+func (_c *ChannelConfigCreate) SetPlan(v string) *ChannelConfigCreate {
+	_c.mutation.SetPlan(v)
+	return _c
+}
+
+// SetNillablePlan sets the "plan" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillablePlan(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetPlan(*v)
+	}
+	return _c
+}
+
 // SetAPIType sets the "api_type" field.
 func (_c *ChannelConfigCreate) SetAPIType(v string) *ChannelConfigCreate {
 	_c.mutation.SetAPIType(v)
@@ -472,6 +486,10 @@ func (_c *ChannelConfigCreate) defaults() {
 		v := channelconfig.DefaultProviderPreset
 		_c.mutation.SetProviderPreset(v)
 	}
+	if _, ok := _c.mutation.Plan(); !ok {
+		v := channelconfig.DefaultPlan
+		_c.mutation.SetPlan(v)
+	}
 	if _, ok := _c.mutation.APIType(); !ok {
 		v := channelconfig.DefaultAPIType
 		_c.mutation.SetAPIType(v)
@@ -592,6 +610,9 @@ func (_c *ChannelConfigCreate) check() error {
 	}
 	if _, ok := _c.mutation.ProviderPreset(); !ok {
 		return &ValidationError{Name: "provider_preset", err: errors.New(`dao: missing required field "ChannelConfig.provider_preset"`)}
+	}
+	if _, ok := _c.mutation.Plan(); !ok {
+		return &ValidationError{Name: "plan", err: errors.New(`dao: missing required field "ChannelConfig.plan"`)}
 	}
 	if _, ok := _c.mutation.APIType(); !ok {
 		return &ValidationError{Name: "api_type", err: errors.New(`dao: missing required field "ChannelConfig.api_type"`)}
@@ -723,6 +744,10 @@ func (_c *ChannelConfigCreate) createSpec() (*ChannelConfig, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
 		_node.ProviderPreset = value
+	}
+	if value, ok := _c.mutation.Plan(); ok {
+		_spec.SetField(channelconfig.FieldPlan, field.TypeString, value)
+		_node.Plan = value
 	}
 	if value, ok := _c.mutation.APIType(); ok {
 		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
@@ -933,6 +958,18 @@ func (u *ChannelConfigUpsert) SetProviderPreset(v string) *ChannelConfigUpsert {
 // UpdateProviderPreset sets the "provider_preset" field to the value that was provided on create.
 func (u *ChannelConfigUpsert) UpdateProviderPreset() *ChannelConfigUpsert {
 	u.SetExcluded(channelconfig.FieldProviderPreset)
+	return u
+}
+
+// SetPlan sets the "plan" field.
+func (u *ChannelConfigUpsert) SetPlan(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldPlan, v)
+	return u
+}
+
+// UpdatePlan sets the "plan" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdatePlan() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldPlan)
 	return u
 }
 
@@ -1381,6 +1418,20 @@ func (u *ChannelConfigUpsertOne) SetProviderPreset(v string) *ChannelConfigUpser
 func (u *ChannelConfigUpsertOne) UpdateProviderPreset() *ChannelConfigUpsertOne {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateProviderPreset()
+	})
+}
+
+// SetPlan sets the "plan" field.
+func (u *ChannelConfigUpsertOne) SetPlan(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetPlan(v)
+	})
+}
+
+// UpdatePlan sets the "plan" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdatePlan() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdatePlan()
 	})
 }
 
@@ -2051,6 +2102,20 @@ func (u *ChannelConfigUpsertBulk) SetProviderPreset(v string) *ChannelConfigUpse
 func (u *ChannelConfigUpsertBulk) UpdateProviderPreset() *ChannelConfigUpsertBulk {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateProviderPreset()
+	})
+}
+
+// SetPlan sets the "plan" field.
+func (u *ChannelConfigUpsertBulk) SetPlan(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetPlan(v)
+	})
+}
+
+// UpdatePlan sets the "plan" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdatePlan() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdatePlan()
 	})
 }
 

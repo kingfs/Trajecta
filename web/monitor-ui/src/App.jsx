@@ -26,6 +26,7 @@ import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 // entry chunk under the size the build warns about, which is the same trade
 // components/common/Charts.jsx and Display.jsx already make.
 const AboutPage = React.lazy(() => import("./routes/AboutPage").then((module) => ({ default: module.AboutPage })));
+const PluginsPage = React.lazy(() => import("./routes/PluginsPage").then((module) => ({ default: module.PluginsPage })));
 
 function App() {
   const { t } = useI18n();
@@ -135,6 +136,7 @@ function App() {
           <Route path="/channels/:channelID" element={<ProviderDetailPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/models/:model" element={<ModelDetailPage />} />
+          <Route path="/plugins" element={<Suspense fallback={<RouteLoading />}><PluginsPage /></Suspense>} />
           <Route path="/connect" element={<AccessPage />} />
 
           <Route path="/system" element={<SystemPage />} />

@@ -49,9 +49,9 @@ Monitor 同时使用两类数据：
 
 ## 页面
 
-左侧主导航分三组共 9 项：**监控**（概览、流量、事件、质量）、**配置**（渠道、模型、接入）、**系统**（系统、关于）。「渠道」是本项目对“一个上游连接 + 凭据”的正式称呼（对应数据库 `channel_configs`）；`provider` 只指上游公司或 provider preset，不再作为页面名。原来的独立「路由」页已经折叠：路由设置与 dry-run 检查进入渠道页底部的高级卡片，模型别名进入模型页，`/routing` 只保留重定向。导航模型只有一份，声明在 `web/monitor-ui/src/lib/nav.js`：侧边栏与快速导航面板都从它生成，新增一个目的页不会出现「侧边栏有、面板没有」的第二份清单。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。导航栏底部、账号按钮上方是**构建、连接状态与仓库**合成的一行：左边显示当前运行的版本号并链到关于页，右边是实时连接状态图标与 GitHub 图标，前两者与仓库地址都来自 `GET /api/about`（连接状态来自本地 socket，见「实时推送」）。三者在展开状态下同处一行，不再为单个图标多占一行；版本号在窄屏与折叠状态的侧边栏里隐藏，三个图标等分那一列（每个 18px）。侧栏在 1180px 以下为 72px 宽，720px 以下收窄到 64px；两种窄栏都保留 56px 内容宽，三个 18px 图标仍能同处一行。
+左侧主导航分三组共 10 项：**监控**（概览、流量、事件、质量）、**配置**（渠道、模型、插件、接入）、**系统**（系统、关于）。「渠道」是本项目对“一个上游连接 + 凭据”的正式称呼（对应数据库 `channel_configs`）；`provider` 只指上游公司或 provider preset，不再作为页面名。原来的独立「路由」页已经折叠：路由设置与 dry-run 检查进入渠道页底部的高级卡片，模型别名进入模型页，`/routing` 只保留重定向。导航模型只有一份，声明在 `web/monitor-ui/src/lib/nav.js`：侧边栏与快速导航面板都从它生成，新增一个目的页不会出现「侧边栏有、面板没有」的第二份清单。「插件」项与系统页一样仅 admin（含无认证部署的 local 伪用户）可见。内容较多的页面用页内标签页（tab）而不是继续增加导航项——标签页状态保存在 URL 的 `tab` 查询参数里（例如 `/traces?tab=sessions`），因此可以收藏与分享。标签条由 Radix Tabs 实现：整条 strip 只占一个 tab stop，方向键与 Home/End 移动选中项，只有选中的 tab 是 `tabindex=0`，tab 与它所控制的 panel 用 `aria-controls` / `aria-labelledby` 互指。导航栏底部、账号按钮上方是**构建、连接状态与仓库**合成的一行：左边显示当前运行的版本号并链到关于页，右边是实时连接状态图标与 GitHub 图标，前两者与仓库地址都来自 `GET /api/about`（连接状态来自本地 socket，见「实时推送」）。三者在展开状态下同处一行，不再为单个图标多占一行；版本号在窄屏与折叠状态的侧边栏里隐藏，三个图标等分那一列（每个 18px）。侧栏在 1180px 以下为 72px 宽，720px 以下收窄到 64px；两种窄栏都保留 56px 内容宽，三个 18px 图标仍能同处一行。
 
-品牌下方的「快速导航」按钮（或任意页面按 `Ctrl K` / `⌘ K`）打开命令面板：输入即过滤十个目的页，也可以执行「刷新数据」「切换明暗主题」「切换语言」三个动作。面板是 Radix Dialog（portal、焦点陷阱、Esc、焦点归还都由 primitive 提供），输入框保持焦点，`↑` / `↓` / `Home` / `End` 移动高亮行、`Enter` 打开；搜索框用 `aria-activedescendant` 指向当前行，读屏器能读出高亮项。目的页列表来自 `navGroups()`，动作只有刷新与两个偏好切换，因此面板不会成为第二套导航。面板与新增的「刷新数据」都不引入新的轮询：刷新只是让 TanStack Query 失效当前读请求，实时主题仍然负责后台更新。
+品牌下方的「快速导航」按钮（或任意页面按 `Ctrl K` / `⌘ K`）打开命令面板：输入即过滤各目的页，也可以执行「刷新数据」「切换明暗主题」「切换语言」三个动作。面板是 Radix Dialog（portal、焦点陷阱、Esc、焦点归还都由 primitive 提供），输入框保持焦点，`↑` / `↓` / `Home` / `End` 移动高亮行、`Enter` 打开；搜索框用 `aria-activedescendant` 指向当前行，读屏器能读出高亮项。目的页列表来自 `navGroups()`，动作只有刷新与两个偏好切换，因此面板不会成为第二套导航。面板与新增的「刷新数据」都不引入新的轮询：刷新只是让 TanStack Query 失效当前读请求，实时主题仍然负责后台更新。
 
 下面按导航顺序说明路由与用途。
 
@@ -170,10 +170,10 @@ Trajecta 自身的事件收件箱：
 
 **创建渠道**弹窗分为两个标签页：
 
-- **官方渠道**直接列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。填写 API key 和可选模型列表即可创建；Qwen Coding/Token Plan 的 `sk-sp-` key 校验仍在创建时执行。卡片展示 preset 的 `notes` 与 `no_list` 提示（无模型列表接口时需创建后手动添加模型），并沿用 `GET /api/provider-presets` 的 protocol/routing 默认值。
+- **官方渠道**列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索）。目录按**渠道插件**过滤：只有已在「插件」页启用的插件才会出现卡片，默认全部禁用时目录为空并给出「去插件页启用」的引导链接。每张卡片是一个厂商站点（双语短名，如「阿里百炼-中国」/ "Alibaba Bailian-China"），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。带套餐的插件（如阿里百炼的 Coding Plan / Token Plan）选中后出现**套餐选择器**，默认按量付费；切换套餐会重算端点与 key 占位提示（`sk-sp-…`），创建请求携带 `plan` 字段，一个渠道共用一个 key 服务全部协议端点。填写 API key 和可选模型列表即可创建；套餐的 `sk-sp-` key 校验在创建时由服务端执行。卡片展示 preset 的双语 `notes` 与 `no_list` 提示（无模型列表接口时需创建后手动添加模型），并沿用 `GET /api/provider-presets` 的 protocol/routing 默认值。
 - **自定义渠道**面向不在内置目录里的上游：手填名称、Base URL、API key（可选）、支持的协议（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选会写入渠道级 `capabilities`，并决定存储的 `api_type` 与（内部的）`protocol_family` / `routing_profile`（Chat Completions/Responses → `openai_compatible` / `openai_default`，仅 Messages → `anthropic_messages` / `anthropic_default`，仅 generateContent → `google_genai` / `google_ai_studio`），因此没有单独的「协议族」选项，分析和配置以勾选的支持协议为准；路由配置、每协议 `endpoints`、代理等仍在「高级选项」中。创建请求走 `POST /api/channels`，`models` 数组会在同一事务内写成启用的 `channel_models` 行。
 
-**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；官方渠道由目录预填，自定义渠道可自由填写。渠道卡片会显示 `Coding Plan` 标记和具体 plan 名称，它们使用各自的专用 coding endpoint 和 API key。
+**渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；官方渠道由目录预填（创建时服务端也按 preset+plan 自动补齐），自定义渠道可自由填写。渠道卡片会显示具体套餐名称徽标（如 Coding Plan），它们使用各自的专用 coding endpoint 和 API key；渠道所属插件被停用时卡片显示「插件已停用」徽标（仅提示，不影响路由）。
 
 **模型广场**回答“当前平台能调用哪些模型”。数据来自 `GET /api/model-square`：按小写模型名聚合 `channel_models`，每个模型一张卡，卡上展示可用渠道的协议 badge（chat_completions / responses / messages / gemini），并列出声明该模型的所有渠道（渠道名 + 可用/停用圆点，芯片的 tooltip 给出渠道 ID、上游模型名与状态），并给出声明该模型的渠道总数。可调用 = 渠道本身启用、且该 channel-model 对路由可用（`channel.ModelRoutable`，即模型启用且未被最近一次成功同步判定为 removed）；默认只显示至少有一个可调用渠道的模型，分段控件切到“全部已配置”后连未启用、仅挂在停用渠道上或上游已移除的模型也会出现，便于对照配置。搜索覆盖模型名、显示名、渠道名、渠道 ID，以及 Argus 元数据中的模型名、供应商和描述；广场使用 `square_q` / `square_page`，与实时统计的 `q` / `page` 分开保存，切换标签页不会把一种列表的过滤条件带到另一种列表。卡片按可调用优先、可调用渠道数、渠道数、模型名排序，24 个/页；头部四张读数卡分别是模型数、可调用模型数、可用渠道数和已匹配元数据数。
 
@@ -184,6 +184,12 @@ Trajecta 自身的事件收件箱：
 **实时统计**保留原来的按窗口聚合：模型覆盖哪些渠道，以及请求数、错误数、Token、RPM/TPM 与趋势。它只显示窗口内真正有请求的模型——没有流量的模型属于广场，不再因为“有配置但没调用”而混进统计。窗口选择器只在这个标签页的页头出现，广场没有时间维度。
 
 详情路由为 `/models/:model`，同样分**概览**与**实时统计**两页。概览顶部是模型信息卡（Argus 描述、能力、标签、官网/模型卡链接；未匹配时给出说明），随后是渠道支持列表与每个渠道的 Codex 配置卡；实时统计是汇总读数条、请求/Token 趋势和渠道用量。页头与渠道行按路由口径显示“可调用渠道数 / 渠道总数”，行状态同时考虑渠道启用、模型启用与 removed 判定（渠道已停用、已停用、上游已移除，其余按是否可调用显示），不再只显示模型级 `enabled`；完整的同步状态（含“未验证”）仍在渠道页的模型卡上；从实时统计或概览页的模型分布点进详情时默认落在实时统计，从广场点进时落在概览。详情页可编辑该模型的 `display_name`、`enabled`、`upstream_model`、`context_window`、`max_output_tokens`、`compact_history_item_threshold` 与 `profile_adoption_status`，以及三态的 `supports_responses` / `supports_chat_completions` / `supports_embeddings` 能力覆盖（模型级声明优先于 provider 级配置）。模型别名表仍在模型广场页底部折叠卡片中。
+
+#### 插件 `/plugins`
+
+渠道插件的管理页，仅 admin 可见，当前只有一个标签页「渠道插件」（`?tab=channels`，为后续插件类型预留）。每个插件一张卡：双语短名 + 区域徽标（中国/国际）、描述、套餐 chips（按量付费 / Coding Plan / Token Plan 等）、协议 badges、渠道统计（渠道数 · 启用渠道数 · 启用模型数）、文档与 API Key 管理链接，以及启用开关。数据来自 `GET /api/plugins`，开关走 `PATCH /api/plugins/{id}`。
+
+**默认全部禁用**：插件未启用时，创建渠道弹窗的官方目录为空。启用插件后对应官方渠道卡片才出现。**停用只隐藏目录卡片，从不中断已有渠道的流量**；停用仍有启用渠道的插件时，服务端返回 409 与受影响渠道列表，页面弹出确认框列出这些渠道及其启用模型数，建议「先去关闭渠道」（跳转渠道页）真正停掉流量后再停用，也可「仍要停用」显式确认（请求携带 `force:true`）。启用状态保存在 `app_settings` 键 `plugins.channels`，随导入导出白名单迁移（只插不覆盖）。
 
 #### 渠道 `/channels`
 

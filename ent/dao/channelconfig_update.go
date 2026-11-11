@@ -100,6 +100,20 @@ func (_u *ChannelConfigUpdate) SetNillableProviderPreset(v *string) *ChannelConf
 	return _u
 }
 
+// SetPlan sets the "plan" field.
+func (_u *ChannelConfigUpdate) SetPlan(v string) *ChannelConfigUpdate {
+	_u.mutation.SetPlan(v)
+	return _u
+}
+
+// SetNillablePlan sets the "plan" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillablePlan(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetPlan(*v)
+	}
+	return _u
+}
+
 // SetAPIType sets the "api_type" field.
 func (_u *ChannelConfigUpdate) SetAPIType(v string) *ChannelConfigUpdate {
 	_u.mutation.SetAPIType(v)
@@ -555,6 +569,9 @@ func (_u *ChannelConfigUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	if value, ok := _u.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.Plan(); ok {
+		_spec.SetField(channelconfig.FieldPlan, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.APIType(); ok {
 		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
 	}
@@ -735,6 +752,20 @@ func (_u *ChannelConfigUpdateOne) SetProviderPreset(v string) *ChannelConfigUpda
 func (_u *ChannelConfigUpdateOne) SetNillableProviderPreset(v *string) *ChannelConfigUpdateOne {
 	if v != nil {
 		_u.SetProviderPreset(*v)
+	}
+	return _u
+}
+
+// SetPlan sets the "plan" field.
+func (_u *ChannelConfigUpdateOne) SetPlan(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetPlan(v)
+	return _u
+}
+
+// SetNillablePlan sets the "plan" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillablePlan(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetPlan(*v)
 	}
 	return _u
 }
@@ -1223,6 +1254,9 @@ func (_u *ChannelConfigUpdateOne) sqlSave(ctx context.Context) (_node *ChannelCo
 	}
 	if value, ok := _u.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Plan(); ok {
+		_spec.SetField(channelconfig.FieldPlan, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.APIType(); ok {
 		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
