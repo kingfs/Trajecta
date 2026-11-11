@@ -186,6 +186,7 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 | 由写入路径增量维护 | `session_summaries` | 随写入按 session 重建，但重建先记进进程内队列（上限 256 条）。进程内由谁消费取决于是否启动了后台 flusher：`serve` 调 `Store.StartDerivedRefresh()`，此后由后台 goroutine 唯一消费——写入会直接唤醒它，所以通常毫秒级落库，2 秒的 ticker 只作为漏唤醒与失败重试的兜底；此时读取端不再自己 flush，页面渲染不会为整会话重建买单，代价是读取端最多看到亚秒级的滞后（表现为某次请求暂时未计入会话合计，不会是错误或自相矛盾的行）。没有启动 flusher 的调用方（测试、无服务器的 CLI 命令）保持同步语义：读取端自己先 flush，因此读与它之前的写立即一致。`Store.Close()` 会先停 flusher 再 settle 队列（其余只 `Close` 的命令行入口由此覆盖），刷新失败时 work 会留在队列里等下一次 flush 重试而不是被丢弃。与 logs 的漂移用 `trajecta db summary rebuild sessions` 修复 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
 | 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
+| 跨部署迁移 | 上述「持久化状态（非 cassette 可推导）」与原始 cassette | `trajecta export` 打包、`trajecta import --apply` 合并；见 [导入与导出](./IMPORT_EXPORT.md) |
 
 重算命令（均为当前可用子命令；`analyze reparse` / `scan` / `repair-usage` / `reanalyze` / `batch` 在 cobra 里是 `Hidden`，`--help` 只列出 `refresh` 与 `session`）：
 
@@ -212,7 +213,8 @@ trajecta db cleanup requests --status 404 [--apply] [--keep-cassettes]
 
 - 语义节点树不落库：Protocol/详情视图在打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 实时重解析（见 `internal/monitor/server.go` 的 `handleTraceObservation`），数据库只保留 `trace_observations` 的紧凑摘要；没有独立的 blob 或 sidecar 存储，原始字节只保留在 cassette，多模态数据只索引 metadata。
 - 应用库只存索引与聚合：`logs` 存路径、长度与指标，`request_audits` 存 `body_preview`/`body_sha256` 等摘要字段，不存完整 body。
-- 本分支停止写入后，`semantic_nodes`（旧数据的 115 GB 量级来源）的数据仍然留在已有 Postgres 库里；Postgres 的历史迁移仍然创建该表（没有 drop 迁移），所以新建 Postgres 库经 `db migrate up` 会得到一张空表。`overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP：新库不会建表，已有旧库升级时数据随表一并删除（down 迁移只重建空表，不可逆）。运行时代码、必需表检查与任何命令都不会读取或删除 `semantic_nodes`；是否回收其空间是运维的手工决定：建议稳定运行 1–2 周、确认详情视图与 Overview 无回归后，再自行执行 `DROP TABLE semantic_nodes;`（先备份；删除不可逆，且代码不会代做）。
+- `semantic_nodes`（旧数据的 115 GB 量级来源）已由迁移 `20261111000000_drop_semantic_nodes` 正式 DROP：新库不再建表，已有旧库升级时数据随表一并删除（down 迁移只重建空表，不恢复数据，不可逆）。运行时代码、必需表检查与任何命令都不再读写该表；删除前请确认已有备份，因为删掉后只能靠重解析 cassette 重建，而新版代码本身已不再落这张表。
+- `overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP，同样只重建空表。
 - cassette 是唯一事实源，归档或删除 cassette 会同时失去 replay 与 detail 能力；只要 cassette 还在，DB 索引与派生行可以重建（`migrate --rebuild-index`、`analyze refresh`）。
 - `credential_mask_audits` 是这张规则的一个例外，两点都要知道：它是**按 trace** 保存真值与假值的表，假值由进程内 vault 生成、cassette 只记原始请求体，所以删掉这些行之后**无法重建**；反过来，它每天只随真正被改写的请求增长（每个被替换的值一行），量级远低于 `logs`，因此没有自动保留策略。长期保留真值是一项有意的运维取舍：需要缩短留存时按 `detected_at` 手工删除即可，删行不影响 replay 与 trace 详情。
 - `{{output_dir}}/secret_mask_mappings.db` 是遮蔽映射的 bbolt 文件，保存真值与假值、按真值去重，默认开启（`secret_masking.mapping_store`）。它和 cassette、审计表一样按凭据级别对待：用 `trace_index.secret` 加密（无本地密钥时为明文），`0600`，不能跨机器共享，同一目录只能被一个进程打开（bbolt 排他锁）。备份时与 SQLite DB、`.http` 目录一起备份，但要在进程停止时复制或用文件系统快照——运行中直接 `cp` 一个 bbolt 文件可能拿到不一致的页。删除它不影响已有 cassette 与审计行，只影响重启后能否复用旧假值。停 serve 后可用 `trajecta db secret-mapping stats|list|delete|prune|compact` 查看与清理它（默认 dry-run，`--apply` 才落盘；`prune --rule <规则名>` 从 `credential_mask_audits` 找真值再删映射，`compact` 用于回收 bbolt 不归还的空间），细节见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md)。

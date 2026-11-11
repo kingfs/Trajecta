@@ -62,7 +62,9 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 - eval 与实验：`datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`。
 - 其他：`app_settings`、`session_summaries`、`users`、`api_tokens`。
 
-`semantic_nodes` 与 `overview_metric_buckets` / `overview_metric_bucket_members` 已不再被写入或读取：SQLite 启动 schema 不再建这三张表，必需表检查（`internal/appdbmigrate`、`internal/store`）也不再要求它们；语义节点树改由 Protocol/详情视图按需从 cassette 重解析（`Store.SaveObservation` 只写 `trace_observations` 的紧凑摘要），Overview 直接聚合 `logs`，路由事实则落到 `logs` 新增的 `route_target_id` / `channel_id` / `credential_id` / `sticky_status` / `sticky_previous_upstream_id` 五列上。注意 `overview_metric_buckets` / `overview_metric_bucket_members` 已由迁移 `20261009120000_drop_overview_metric_tables` 在 Postgres 正式 DROP（新库不会建表，旧库升级时数据随表删除，down 迁移只重建空表）；`semantic_nodes` 仍由历史迁移 `20260622130545_add_runtime_store_tables` 创建且没有 drop 迁移，所以新建 Postgres 库仍会得到该空表、已有库保留旧数据，代码不读取也不删除它，回收空间是运维在稳定运行一段时间后手工 `DROP TABLE` 的决定（详见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。派生汇总命令当前只有 `trajecta db summary rebuild sessions`，`trajecta db summary rebuild overview` 已随派生表一起移除。
+`semantic_nodes` 与 `overview_metric_buckets` / `overview_metric_bucket_members` 已不再被写入或读取：SQLite 启动 schema 不再建这三张表，必需表检查（`internal/appdbmigrate`、`internal/store`）也不再要求它们；语义节点树改由 Protocol/详情视图按需从 cassette 重解析（`Store.SaveObservation` 只写 `trace_observations` 的紧凑摘要），Overview 直接聚合 `logs`，路由事实则落到 `logs` 新增的 `route_target_id` / `channel_id` / `credential_id` / `sticky_status` / `sticky_previous_upstream_id` 五列上。这三张表都已由 Postgres 迁移正式 DROP：`overview_metric_buckets` / `overview_metric_bucket_members` 由 `20261009120000_drop_overview_metric_tables`，`semantic_nodes` 由 `20261111000000_drop_semantic_nodes`；新库不会建表，旧库升级时数据随表删除，down 迁移只重建空表、不恢复数据（详见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。派生汇总命令当前只有 `trajecta db summary rebuild sessions`，`trajecta db summary rebuild overview` 已随派生表一起移除。
+
+跨部署合并已实现：`trajecta export` / `trajecta import` 在 `serve` 停止时把另一套部署的录制索引、cassette、渠道/模型配置、分析结果与审计数据合并进来。导入是可重复执行的增量合并（同一 bundle 第二次导入零写入），渠道按 `base_url` + 解密后的 API key 识别，`session_summaries` 在合并后重建，因此导入的会话在 Monitor 历史里可查。详见 [导入与导出](./IMPORT_EXPORT.md)。
 
 `config inspect`、`db migrate status` 和 `doctor` 会输出 `production_storage_driver=postgres`、`production_ready`、`storage_role`、`storage_contract`。`db migrate status` 与 `db migrate up/down --dry-run` 报告迁移来源：Postgres 为 checked-in SQL，SQLite 为 `internal/store` 启动 DDL fallback；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 与 required table 状态，不创建缺失文件、不做 destructive repair。Postgres 真实检查与代表 runtime SQL 路径由 `TRAJECTA_TEST_POSTGRES_DSN` 门控，默认测试离线。该 DSN 必须指向专用的测试库（例如 `trajecta_scratch`）而不是生产库：`TestMergeSQLiteIntoPostgresIntegration` 这类用例会向 `logs` 写入真实行，指向生产库时会在生产库留下指向不存在 cassette 的索引行。
 
@@ -198,6 +200,7 @@ Responses audit 属于部分实现，职责边界如下：
 - 真实 `file_search` / `code_interpreter` / `computer_use_preview` hosted 工具的执行 lifecycle（MCP hosted tool executor 已实现，不在未实现之列）。
 - 独立的 Postgres auth migration namespace：auth 表当前由 application migration set 拥有，`auth migrate down` 被阻止。
 - SQLite 到 Postgres 的自动数据迁移；SQLite 只保留为 startup-schema fallback。
+- 跨部署的持续/双向同步与 `users` / `api_tokens` 合并：`trajecta import` 是「冻结一段数据后合并」的单向增量，鉴权与 `secret_mask_mappings.db` 按部署独立。
 - 更完整的批量 provider onboarding 与自动修复策略。
 - 更深层的 analytics 查询，以及独立 auth namespace 之外的额外迁移能力。
 

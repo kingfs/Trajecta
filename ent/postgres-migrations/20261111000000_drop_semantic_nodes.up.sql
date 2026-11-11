@@ -1,0 +1,18 @@
+-- Drop the dead "semantic_nodes" table.
+--
+-- Semantic node trees used to be persisted here on every parse; the Monitor
+-- now reparses on demand from the cassette (observeworker.ReparseTrace) and
+-- "Store.SaveObservation" only keeps the compact trace_observations summary.
+-- Nothing in the runtime reads or writes this table: no query, no required-table
+-- check, no CLI command, and the SQLite startup schema stopped creating it.
+--
+-- The table held on the order of 115 GB of parsed observations on the
+-- reference deployment (one row per node per trace), which is the single
+-- largest consumer of the application database. Since nothing can read it
+-- back, there is no data an operator could not recompute by reparsing
+-- cassettes; the cassette remains the source of truth either way.
+--
+-- Data loss: intentional and irreversible. Back up first if the rows are
+-- wanted for offline archaeology. The down migration recreates the table
+-- empty and does not restore any data.
+DROP TABLE IF EXISTS "semantic_nodes";
