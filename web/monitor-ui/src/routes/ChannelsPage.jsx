@@ -181,7 +181,7 @@ const FAMILY_ROUTING = {
   vertex_native: "vertex_express",
 };
 
-const INTERFACE_OPTIONS = [
+export const INTERFACE_OPTIONS = [
   ["chat_completions", "providers.interfaceChat"],
   ["responses", "providers.interfaceResponses"],
   ["messages", "providers.interfaceMessages"],
@@ -210,6 +210,48 @@ function primaryAPIType(interfaces) {
   return "";
 }
 
+// The custom-channel protocol vocabulary is the four wire protocols the
+// operator checks. The stored protocol_family/routing_profile are an internal
+// projection of that selection, not a separate user-facing choice: Chat
+// Completions and Responses are the OpenAI-compatible surface, Messages is
+// anthropic_messages, and generateContent is google_genai. Cross-family
+// leftovers (a chat-capable channel that also serves Messages) keep working
+// through the capability declaration instead of a family.
+export function familyForInterfaces(interfaces, fallback = "openai_compatible") {
+  if (!interfaces) return fallback;
+  if (interfaces.chat_completions || interfaces.responses) return "openai_compatible";
+  if (interfaces.messages) return "anthropic_messages";
+  if (interfaces.gemini) return "google_genai";
+  return fallback;
+}
+
+// deriveCustomChannelRouting projects a checkbox selection onto the stored
+// api_type/protocol_family/routing_profile. The routing profile is only
+// re-derived when the family changes, so an explicitly chosen profile (e.g.
+// azure) survives edits that keep the family.
+export function deriveCustomChannelRouting(interfaces, current = {}) {
+  const currentFamily = current.protocol_family || "openai_compatible";
+  const protocolFamily = familyForInterfaces(interfaces, currentFamily);
+  return {
+    api_type: primaryAPIType(interfaces) || current.api_type || "chat_completions",
+    protocol_family: protocolFamily,
+    routing_profile:
+      protocolFamily !== currentFamily
+        ? FAMILY_ROUTING[protocolFamily] || current.routing_profile || ""
+        : current.routing_profile || FAMILY_ROUTING[protocolFamily] || "",
+  };
+}
+
+export function interfacesFromCapabilities(capabilities) {
+  const out = { chat_completions: false, responses: false, messages: false, gemini: false };
+  if (!capabilities || typeof capabilities !== "object") return out;
+  out.chat_completions = capabilities.chat_completions === true;
+  out.responses = capabilities.responses === true;
+  out.messages = capabilities.messages === true;
+  out.gemini = capabilities.gemini_generate_content === true;
+  return out;
+}
+
 function interfacesFromProtocols(protocols) {
   const out = { chat_completions: false, responses: false, messages: false, gemini: false };
   for (const protocol of protocols || []) {
@@ -218,7 +260,7 @@ function interfacesFromProtocols(protocols) {
   return out;
 }
 
-function capabilitiesFromInterfaces(interfaces = {}) {
+export function capabilitiesFromInterfaces(interfaces = {}) {
   return {
     chat_completions: Boolean(interfaces.chat_completions),
     responses: Boolean(interfaces.responses),
@@ -273,26 +315,13 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   };
 
   const updateForm = (key, value) => {
-    setForm((current) => {
-      if (key === "protocol_family" && mode === "custom") {
-        const family = value;
-        return {
-          ...current,
-          protocol_family: family,
-          api_type: defaultAPITypeForProtocolFamily(family),
-          routing_profile: FAMILY_ROUTING[family] || current.routing_profile,
-          model_resource: family === "vertex_native" && !current.model_resource ? "publishers/google/models" : current.model_resource,
-          interfaces: familyInterfaces(family),
-        };
-      }
-      return normalizePresetSelection({ ...current, [key]: value }, presetData, key);
-    });
+    setForm((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
   };
 
   const toggleInterface = (key, checked) => {
     setForm((current) => {
       const interfaces = { ...(current.interfaces || {}), [key]: checked };
-      return { ...current, interfaces, api_type: primaryAPIType(interfaces) || current.api_type };
+      return { ...current, interfaces, ...deriveCustomChannelRouting(interfaces, current) };
     });
   };
 
@@ -399,7 +428,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   const anyInterface = Object.values(form.interfaces || {}).some(Boolean);
   const canCreate = mode === "official"
     ? Boolean(selectedCatalogID && form.name.trim() && form.base_url.trim())
-    : Boolean(form.name.trim() && form.base_url.trim() && form.protocol_family && anyInterface);
+    : Boolean(form.name.trim() && form.base_url.trim() && anyInterface);
 
   const submit = (event) => {
     event.preventDefault();
@@ -483,15 +512,6 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
               <label>{t("providers.name")}<Input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="My provider" /></label>
               <label>{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.example.com/v1" spellCheck={false} /></label>
               <label>{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={t("providers.optional")} /></label>
-              <label>{t("providers.protocolFamily")}
-                <Select value={form.protocol_family} onValueChange={(next) => updateForm("protocol_family", next)}>
-                  <SelectTrigger aria-label={t("providers.protocolFamily")} className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {presetState.protocolOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <span className="trace-subline">{t("providers.protocolFamilyHint")}</span>
-              </label>
               <fieldset className="provider-interface-fieldset provider-form-wide">
                 <legend>{t("providers.supportedInterfaces")}</legend>
                 <div className="provider-interface-grid">

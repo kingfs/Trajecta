@@ -250,7 +250,7 @@ func RunForced(ctx context.Context, target Target, protocols []Protocol, client 
 			continue
 		}
 		seen[protocol] = true
-		if !structurallyServable(protocol, target.ProtocolFamily) {
+		if !servableOrDeclared(protocol, target) {
 			report.Results = append(report.Results, Result{
 				Protocol: protocol,
 				Declared: target.Declared[protocol],
@@ -300,31 +300,22 @@ func copyDeclared(in map[Protocol]bool) map[Protocol]bool {
 func selectProtocols(report *Report, target Target, protocol Protocol) ([]Protocol, []Result) {
 	if protocol == ProtocolAuto {
 		var selected []Protocol
-		var deferred []Result
 		for _, candidate := range protocolOrder {
-			if !target.Declared[candidate] {
-				continue
+			// A declared protocol is always probeable, even when it is not part
+			// of the channel's family: the declaration is the configuration of
+			// record and the probe exists to verify it.
+			if target.Declared[candidate] {
+				selected = append(selected, candidate)
 			}
-			if !structurallyServable(candidate, target.ProtocolFamily) {
-				continue
-			}
-			selected = append(selected, candidate)
 		}
 		if target.Declared[ProtocolChatCompletions] && !target.Declared[ProtocolResponses] {
 			report.Warnings = append(report.Warnings, "/v1/responses is not declared; the local Responses runtime will translate /v1/responses requests into /v1/chat/completions")
 		}
-		return selected, deferred
+		return selected, nil
 	}
 
-	if !structurallyServable(protocol, target.ProtocolFamily) {
-		return nil, []Result{{
-			Protocol: protocol,
-			Declared: target.Declared[protocol],
-			Method:   http.MethodPost,
-			Path:     probePath(protocol, target),
-			Status:   StatusUnsupportedProtocol,
-			Hint:     fmt.Sprintf("protocol %s is not part of protocol family %s", protocol, displayFamily(target.ProtocolFamily)),
-		}}
+	if !servableOrDeclared(protocol, target) {
+		return nil, []Result{unsupportedResult(protocol, target)}
 	}
 	if !target.Declared[protocol] {
 		return nil, []Result{skippedResult(protocol, false, probePath(protocol, target), "the channel and model do not declare this protocol")}
@@ -340,6 +331,26 @@ func skippedResult(protocol Protocol, declared bool, path, hint string) Result {
 		Path:     path,
 		Status:   StatusSkipped,
 		Hint:     hint,
+	}
+}
+
+// servableOrDeclared reports whether protocol may be probed: either it belongs
+// to the channel's protocol family, or the operator declared it. For a custom
+// channel that checks several protocols the declaration is the configuration of
+// record, so a cross-family declaration must probe rather than report
+// unsupported_protocol.
+func servableOrDeclared(protocol Protocol, target Target) bool {
+	return structurallyServable(protocol, target.ProtocolFamily) || target.Declared[protocol]
+}
+
+func unsupportedResult(protocol Protocol, target Target) Result {
+	return Result{
+		Protocol: protocol,
+		Declared: target.Declared[protocol],
+		Method:   http.MethodPost,
+		Path:     probePath(protocol, target),
+		Status:   StatusUnsupportedProtocol,
+		Hint:     fmt.Sprintf("protocol %s is not part of protocol family %s", protocol, displayFamily(target.ProtocolFamily)),
 	}
 }
 

@@ -17,7 +17,7 @@ import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogT
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatRateAvg, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
-import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
+import { buildPresetState, capabilitiesFromInterfaces, deriveCustomChannelRouting, INTERFACE_OPTIONS, interfacesFromCapabilities, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 import {
   applyResponsesDisabled,
   buildModelTestPayload,
@@ -512,8 +512,15 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
   const { t } = useI18n();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
+  const isCustom = !form.provider_preset;
   const updateForm = (key, value) => {
     onChange((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
+  };
+  const toggleInterface = (key, checked) => {
+    onChange((current) => {
+      const interfaces = { ...(current.interfaces || {}), [key]: checked };
+      return { ...current, interfaces, interfaces_dirty: true, ...deriveCustomChannelRouting(interfaces, current) };
+    });
   };
   const submit = (event) => {
     event.preventDefault();
@@ -544,12 +551,25 @@ function EditProviderDialog({ provider, form, presetData, saving, onChange, onRe
           </label>
           <label className="provider-form-wide">{t("providers.baseURL")}<Input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
           <label className="provider-form-wide">{t("providers.apiKey")}<Input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? t("channelDetail.keepApiKey", { hint: provider.api_key_hint }) : t("channelDetail.unchanged")} /></label>
+          {isCustom ? (
+            <fieldset className="provider-interface-fieldset provider-form-wide">
+              <legend>{t("providers.supportedInterfaces")}</legend>
+              <div className="provider-interface-grid">
+                {INTERFACE_OPTIONS.map(([key, labelKey]) => (
+                  <label className="checkbox-row" key={key}>
+                    <input type="checkbox" checked={Boolean(form.interfaces?.[key])} onChange={(event) => toggleInterface(key, event.target.checked)} />
+                    {t(labelKey)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
         </div>
         <p className="trace-subline"><strong>{t("channels.autoDetect")}</strong> · {t("channels.autoDetectHint")}</p>
         <Button variant="ghost" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? t("providers.hideAdvanced") : t("providers.advanced")}</Button>
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
-            <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
+            <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders showProtocolSelectors={!isCustom} />
           </div>
         ) : null}
         <DialogFooter>
@@ -1019,6 +1039,12 @@ function emptyEditForm() {
     proxy_https: "",
     proxy_no_proxy: "",
     endpoints: {},
+    // The four checked wire protocols of a custom channel; official channels
+    // keep the protocol selectors instead.
+    interfaces: { chat_completions: false, responses: false, messages: false, gemini: false },
+    // Unedited capability keys (tool_calling, embeddings, ...) ride along so
+    // an edit never narrows the stored declaration.
+    capability_seed: {},
   };
 }
 
@@ -1046,6 +1072,8 @@ function editFormFromProvider(provider = {}) {
     proxy_https: provider.proxy?.https_proxy || "",
     proxy_no_proxy: provider.proxy?.no_proxy || "",
     endpoints: provider.capabilities?.endpoints || provider.endpoints || {},
+    interfaces: interfacesFromCapabilities(provider.capabilities),
+    capability_seed: provider.capabilities && typeof provider.capabilities === "object" ? { ...provider.capabilities } : {},
   };
 }
 
@@ -1076,6 +1104,19 @@ function providerPayloadFromForm(form) {
   };
   if (form.api_key.trim()) {
     payload.api_key = form.api_key.trim();
+  }
+  if (!form.provider_preset) {
+    // A custom channel is analysed by the protocols the operator checks; the
+    // internal family/profile projection is derived, never asked for. The
+    // unedited capability keys ride along from the seed so an edit never
+    // narrows a stored declaration. capabilities are only rewritten when a box
+    // was actually ticked, so a name-only edit of a legacy channel that never
+    // declared capabilities does not flip unset keys to false.
+    const interfaces = form.interfaces || {};
+    Object.assign(payload, deriveCustomChannelRouting(interfaces, payload));
+    if (form.interfaces_dirty) {
+      payload.capabilities = { ...(form.capability_seed || {}), ...capabilitiesFromInterfaces(interfaces) };
+    }
   }
   return payload;
 }

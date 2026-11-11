@@ -171,8 +171,6 @@ export default {
   "providers.fillable": "{count} fillable",
   "providers.apiType": "api type",
   "providers.protocol": "Protocol",
-  "providers.protocolFamily": "Protocol family",
-  "providers.protocolFamilyHint": "How the upstream is adapted; choose the concrete interfaces below.",
   "providers.noModelListHint": "This preset has no model-list endpoint. Add models manually in the channel detail after creation.",
   "providers.codingPlan": "Coding Plan",
   "providers.capabilities": "capabilities",

@@ -171,7 +171,7 @@ Trajecta 自身的事件收件箱：
 **创建渠道**弹窗分为两个标签页：
 
 - **官方渠道**直接列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。填写 API key 和可选模型列表即可创建；Qwen Coding/Token Plan 的 `sk-sp-` key 校验仍在创建时执行。卡片展示 preset 的 `notes` 与 `no_list` 提示（无模型列表接口时需创建后手动添加模型），并沿用 `GET /api/provider-presets` 的 protocol/routing 默认值。
-- **自定义渠道**面向不在内置目录里的上游：手填名称、Base URL、API key（可选）、协议族、支持的协议（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选会写入渠道级 `capabilities`，并决定默认 `api_type`，路由配置、每协议 `endpoints`、代理等仍在「高级选项」中。创建请求走 `POST /api/channels`，`models` 数组会在同一事务内写成启用的 `channel_models` 行。
+- **自定义渠道**面向不在内置目录里的上游：手填名称、Base URL、API key（可选）、支持的协议（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选会写入渠道级 `capabilities`，并决定存储的 `api_type` 与（内部的）`protocol_family` / `routing_profile`（Chat Completions/Responses → `openai_compatible` / `openai_default`，仅 Messages → `anthropic_messages` / `anthropic_default`，仅 generateContent → `google_genai` / `google_ai_studio`），因此没有单独的「协议族」选项，分析和配置以勾选的支持协议为准；路由配置、每协议 `endpoints`、代理等仍在「高级选项」中。创建请求走 `POST /api/channels`，`models` 数组会在同一事务内写成启用的 `channel_models` 行。
 
 **渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；官方渠道由目录预填，自定义渠道可自由填写。渠道卡片会显示 `Coding Plan` 标记和具体 plan 名称，它们使用各自的专用 coding endpoint 和 API key。
 
@@ -187,7 +187,7 @@ Trajecta 自身的事件收件箱：
 
 #### 渠道 `/channels`
 
-管理上游渠道（一个渠道 = 一个 `base_url` + 一组凭据 + 一种协议族；`provider preset` 只用来描述上游公司/默认协议）。页面字段已经收敛：主表单只有 name、base URL、API key、preset、enabled；高级里保留 `protocol_family`、`routing_profile`、`api_type`（默认 `chat_completions`）、Azure/Vertex 参数、headers、priority/weight/capacity。**不再手工勾选 Responses/Chat/Tool/Models/Embeddings/Tokenize 能力，也不再暴露 `mode` 与 `model_discovery`**：模型接口由按模型自动探测得到。
+管理上游渠道（一个渠道 = 一个 `base_url` + 一组凭据 + 一种协议族；`provider preset` 只用来描述上游公司/默认协议）。页面字段已经收敛：主表单只有 name、base URL、API key、preset、enabled；高级里保留 `api_type`、`protocol_family`、`routing_profile`（默认 `chat_completions`）、Azure/Vertex 参数、headers、priority/weight/capacity。**不再手工勾选 Responses/Chat/Tool/Models/Embeddings/Tokenize 能力，也不再暴露 `mode` 与 `model_discovery`**：模型接口由按模型自动探测得到。其中「API 类型」「协议族」两个下拉只在官方渠道（填了 preset）的高级选项里出现；自定义渠道改为勾选「支持的协议」，存储的 `api_type`/`protocol_family`/`routing_profile` 随之推导，高级选项里不再出现协议族选择。
 
 创建前可以先做探测：
 
@@ -197,7 +197,7 @@ Trajecta 自身的事件收件箱：
 - 列表页的 Batch probe and apply 先跑 `POST /api/provider-probe/report` 预览，再用 `POST /api/provider-probe/report/apply` 对 detected 且存在可补字段的 provider 批量应用；批量应用只补缺失的 `api_type`、`protocol_family` 和未设置的 capability，不覆盖显式配置，也不覆盖显式 `false`。
 - provider probe 只检查路由是否存在：它给 `/v1/responses` 发空 body，`400 missing model` 也会被算作 endpoint 存在，所以不能证明某个模型在该协议上可用。因此 Chat Completions 渠道的 `capabilities.responses` 不再由 route-only probe 自动写入；模型级支持用按模型自动识别/连通性测试实测确认。
 
-**模型接口自动识别（推荐路径）。** 每个模型卡带一组接口标签：`Chat Completions`、`Native Responses`、`Responses via local`（`/v1/responses` 由本地 runtime 用 chat 翻译）、`Messages`（Anthropic 协议族）、`GenerateContent`（Gemini/Vertex）。在模型卡点「识别接口」会调用 `POST /api/provider-model-detect`，用该渠道已解密的 key 和模型线上名，对协议族内所有接口并行发一次最小请求（8s/协议），把结论写入该模型的三态 `supports_*`（`overwrite=true` 会覆盖已有值）；启停开关打开某个模型时，前端会自动以 `overwrite=false` 补全尚未声明的接口；渠道工具栏的「识别已启用模型的接口」会批量处理该渠道所有已启用模型。识别只写模型能力，不写 `channel_probe_runs`/`last_probe_at`、不生成 cassette/logs、不经过 router，因此不会污染流量与用量。识别结果会决定 `/v1/responses` 是原生直通还是走本地翻译，接口由此不再需要猜。
+**模型接口自动识别（推荐路径）。** 每个模型卡带一组接口标签：`Chat Completions`、`Native Responses`、`Responses via local`（`/v1/responses` 由本地 runtime 用 chat 翻译）、`Messages`（Anthropic 协议族）、`GenerateContent`（Gemini/Vertex）。在模型卡点「识别接口」会调用 `POST /api/provider-model-detect`，用该渠道已解密的 key 和模型线上名，对渠道**已声明支持**的协议并行发一次最小请求（8s/协议；例如自定义渠道勾选了 Messages，即使渠道解析为 OpenAI-compatible 协议族也会探测 `/v1/messages`；渠道未声明任何协议能力时回退为按协议族选择：OpenAI-compatible → Chat Completions + Responses，Anthropic → Messages，Gemini/Vertex → generateContent），把结论写入该模型的三态 `supports_*`（`overwrite=true` 会覆盖已有值）；启停开关打开某个模型时，前端会自动以 `overwrite=false` 补全尚未声明的接口；渠道工具栏的「识别已启用模型的接口」会批量处理该渠道所有已启用模型。识别只写模型能力，不写 `channel_probe_runs`/`last_probe_at`、不生成 cassette/logs、不经过 router，因此不会污染流量与用量。识别结果会决定 `/v1/responses` 是原生直通还是走本地翻译，接口由此不再需要猜。
 
 每个模型卡还有「连通性测试」按钮：它按当前声明协议发最小请求并给出逐协议结论，当 chat 可用而 `/v1/responses` 不可用时给出「关闭该模型的 Responses 支持」的一键操作（只写模型级 `supports_responses=false`，立即 reload 路由，不需要重启）。测试与识别都不写 probe 记录、不产生 cassette/logs、不进入用量统计。
 

@@ -127,7 +127,7 @@ host 推断的当前规则（按顺序匹配）：`api.deepseek.com` 且未指�
 
 渠道页面不再要求操作者手工勾选 Responses/Chat/Tool/Models 等能力。每个模型行有一个由配置投影出来的 `interfaces`（`chat_completions`、`native_responses`、`responses_via_chat`、`messages`、`generate_content`），并可通过 `POST /api/provider-model-detect` 用真实最小请求重新探测：
 
-- OpenAI-compatible 渠道探测 `chat_completions` 与 `responses`；Anthropic 渠道探测 `messages`；Google/Vertex 探测 `generate_content`。探测强制忽略当前声明，避免“用旧能力证明旧能力”。
+- 探测集合以渠道已声明的协议为准：声明了哪些协议就探测哪些，包括跨协议族声明（例如 OpenAI-compatible 自定义渠道勾选了 Messages，`POST /api/provider-model-detect` 也会探测 `/v1/messages`，勾选的支持的协议就是配置依据）；渠道未声明任何协议能力时回退为按协议族选择：OpenAI-compatible 探测 `chat_completions` 与 `responses`，Anthropic 探测 `messages`，Google/Vertex 探测 `generate_content`。「强制」指的是不依据模型级已有的 `supports_*` 结论跳过实测。
 - 结论只写回 OpenAI-compatible 的两个模型级三态列：`ok` 写支持，`endpoint_not_supported`/`model_not_found` 写不支持，鉴权/超时/网络错误等不确定结果不写；`messages`/`generate_content` 是协议族级接口，只报告。
 - 识别在配置锁外完成网络探测，再在一个配置事务里写能力并 reload 路由；它不写 `last_probe_at`、`channel_probe_runs`、cassette 或 logs，也不经过 router，因此不会污染流量与用量。
 - 启用模型时前端会自动补全尚未声明的接口；模型卡的「识别接口」可以覆盖重新识别；渠道工具栏可以批量识别所有已启用模型。

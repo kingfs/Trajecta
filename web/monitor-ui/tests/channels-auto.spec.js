@@ -264,6 +264,9 @@ test("channels use channel terminology and a two-mode create form", async ({ pag
   await expect(dialog.getByLabel("Base URL")).toBeVisible();
   await expect(dialog.getByLabel("API key")).toBeVisible();
   await expect(dialog.getByRole("group", { name: "Supported protocols" })).toBeVisible();
+  // Custom channels carry no separate protocol-family picker: the checked
+  // protocols are the configuration of record.
+  await expect(dialog.getByLabel("Protocol family")).toHaveCount(0);
   await expect(dialog.getByLabel("Chat Completions")).toBeVisible();
   await expect(dialog.getByLabel("Responses")).toBeVisible();
   await expect(dialog.getByLabel("Anthropic Messages")).toBeVisible();
@@ -293,8 +296,11 @@ test("custom channel create sends manual protocols and models", async ({ page })
   expect(body.provider_preset).toBe("");
   expect(body.base_url).toBe("https://custom.example/v1");
   expect(body.api_key).toBe("sk-custom");
-  expect(body.protocol_family).toBe("openai_compatible");
+  // The API surface is derived from the checked protocols: Messages only means
+  // an anthropic_messages channel with the anthropic routing profile.
+  expect(body.protocol_family).toBe("anthropic_messages");
   expect(body.api_type).toBe("messages");
+  expect(body.routing_profile).toBe("anthropic_default");
   expect(body.models).toEqual(["custom-a", "custom-b"]);
   expect(body.capabilities.messages).toBe(true);
   expect(body.capabilities.chat_completions).toBe(false);

@@ -502,6 +502,56 @@ test("editing a channel persists a corrected base URL", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeHidden();
 });
 
+// A custom channel (no provider preset) is edited with the same controls the
+// create flow uses: the checked protocols are the configuration of record, the
+// API surface is derived from them on save, and capability keys the form does
+// not edit (tool_calling here) ride along untouched instead of being dropped.
+test("custom channel edit derives the API surface from checked protocols", async ({ page }) => {
+  const customDetail = {
+    ...channelDetailPayload(),
+    provider_preset: "",
+    api_type: "messages",
+    protocol_family: "anthropic_messages",
+    routing_profile: "anthropic_default",
+    capabilities: { responses: false, chat_completions: false, messages: true, gemini_generate_content: false, tool_calling: true },
+  };
+  await page.route(/\/api\/channels\/openai-primary(\?.*)?$/, (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: customDetail });
+    }
+    return route.fulfill({ json: { ...customDetail, ...route.request().postDataJSON() } });
+  });
+  await page.goto("/providers/openai-primary");
+
+  await page.getByRole("button", { name: "Edit channel" }).click();
+  const dialog = page.locator(".provider-edit-modal");
+  await expect(dialog.getByRole("heading", { name: "Edit channel" })).toBeVisible();
+  // No protocol-family picker for a custom channel; the supported protocols are
+  // the only interface control.
+  await expect(dialog.getByLabel("Protocol family")).toHaveCount(0);
+  await expect(dialog.getByRole("group", { name: "Supported protocols" })).toBeVisible();
+  await expect(dialog.getByLabel("Anthropic Messages")).toBeChecked();
+  await expect(dialog.getByLabel("Chat Completions")).not.toBeChecked();
+  // Advanced options hide the API type / protocol selectors for custom channels.
+  await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(dialog.getByLabel("API type")).toHaveCount(0);
+  await expect(dialog.getByLabel("protocol")).toHaveCount(0);
+  // Chat Completions joins Messages: Chat wins the derived surface.
+  await dialog.getByLabel("Chat Completions").check();
+
+  const patched = page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/channels/openai-primary");
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  const body = (await patched).postDataJSON();
+  expect(body.provider_preset).toBe("");
+  expect(body.api_type).toBe("chat_completions");
+  expect(body.protocol_family).toBe("openai_compatible");
+  expect(body.routing_profile).toBe("openai_default");
+  expect(body.capabilities.chat_completions).toBe(true);
+  expect(body.capabilities.messages).toBe(true);
+  expect(body.capabilities.tool_calling).toBe(true);
+});
+
 // Creating a token is a rare, deliberate act, so its form lives behind a button
 // in a dialog instead of occupying a card above the list it appends to.
 test("API tokens are created in a dialog and copied from it", async ({ page, context }) => {

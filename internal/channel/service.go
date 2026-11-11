@@ -1149,16 +1149,13 @@ func (s *Service) ModelProbeTarget(channelID, model string) (modelprobe.Target, 
 		modelprobe.ProtocolChatCompletions: resolved.SupportsChatCompletionsAPIForModel(record.Model),
 		// "Declared" is deliberately broader than native pass-through eligibility: the
 		// operator needs the test to tell them that a declared Responses surface is not
-		// actually served for this model, which is exactly the NVIDIA NIM incident.
+		// actually served for this model, which is exactly the NVIDIA NIM incident. The
+		// Messages and generateContent declarations likewise follow the capability
+		// declaration, so a custom channel that checks those boxes probes and reports
+		// them even on an OpenAI-compatible family.
 		modelprobe.ProtocolResponses:       responsesDeclared(resolved, record.Model),
-		modelprobe.ProtocolMessages:        false,
-		modelprobe.ProtocolGenerateContent: false,
-	}
-	switch resolved.ProtocolFamily {
-	case upstream.ProtocolFamilyAnthropicMessages:
-		declared[modelprobe.ProtocolMessages] = true
-	case upstream.ProtocolFamilyGoogleGenAI, upstream.ProtocolFamilyVertexNative:
-		declared[modelprobe.ProtocolGenerateContent] = true
+		modelprobe.ProtocolMessages:        resolved.SupportsMessagesAPIForModel(record.Model),
+		modelprobe.ProtocolGenerateContent: resolved.SupportsGenerateContentAPIForModel(record.Model),
 	}
 	return modelprobe.Target{
 		ChannelID:       channel.ID,
@@ -1251,8 +1248,12 @@ type ModelInterfaces struct {
 // the detection uses the same decrypted credential and per-model projection as the
 // forwarding path, and it writes nothing.
 //
-// openai_compatible models are probed for Chat Completions and Responses in parallel;
-// anthropic_messages models for Messages; google_genai/vertex models for generateContent.
+// The protocol set is the channel's declared capabilities: a custom channel is
+// analysed by the protocols the operator checked, not by a preset family default.
+// When no capability is declared at all, the family default is probed (official
+// catalog rows declare theirs, so they always take the declared set):
+// openai_compatible models for Chat Completions and Responses, anthropic_messages
+// models for Messages, google_genai/vertex models for generateContent.
 // perProtocolTimeout defaults to ModelDetectionProtocolTimeout when non-positive.
 func (s *Service) DetectModelInterfaces(ctx context.Context, channelID, model string, perProtocolTimeout time.Duration) (ModelInterfaceDetection, error) {
 	target, err := s.ModelProbeTarget(channelID, model)
@@ -1262,7 +1263,7 @@ func (s *Service) DetectModelInterfaces(ctx context.Context, channelID, model st
 	if perProtocolTimeout <= 0 {
 		perProtocolTimeout = ModelDetectionProtocolTimeout
 	}
-	protocols := detectionProtocolsForFamily(target.ProtocolFamily)
+	protocols := detectionProtocolsForTarget(target.Resolved)
 	results := make([]modelprobe.Result, len(protocols))
 	var wg sync.WaitGroup
 	for i, protocol := range protocols {
@@ -1358,6 +1359,33 @@ func EffectiveModelInterfaces(channel store.ChannelConfigRecord, model store.Cha
 	out.Messages = resolved.SupportsMessagesAPIForModel(model.Model)
 	out.GenerateContent = resolved.SupportsGenerateContentAPIForModel(model.Model)
 	return out
+}
+
+// detectionProtocolsForTarget picks the surfaces interface detection probes. The
+// channel-level declared capabilities win: a custom channel is analysed by the
+// protocols the operator checked. A family that does not normally serve a declared
+// protocol (e.g. Messages checked on an OpenAI-compatible custom channel) is still
+// probed — the declaration is the configuration of record — and the family default
+// applies only when nothing is declared at all.
+func detectionProtocolsForTarget(resolved upstream.ResolvedUpstream) []modelprobe.Protocol {
+	caps := resolved.Capabilities
+	declared := make([]modelprobe.Protocol, 0, 4)
+	if caps.ChatCompletions != nil && *caps.ChatCompletions {
+		declared = append(declared, modelprobe.ProtocolChatCompletions)
+	}
+	if caps.Responses != nil && *caps.Responses {
+		declared = append(declared, modelprobe.ProtocolResponses)
+	}
+	if caps.Messages != nil && *caps.Messages {
+		declared = append(declared, modelprobe.ProtocolMessages)
+	}
+	if caps.GenerateContent != nil && *caps.GenerateContent {
+		declared = append(declared, modelprobe.ProtocolGenerateContent)
+	}
+	if len(declared) > 0 {
+		return declared
+	}
+	return detectionProtocolsForFamily(resolved.ProtocolFamily)
 }
 
 func detectionProtocolsForFamily(family string) []modelprobe.Protocol {

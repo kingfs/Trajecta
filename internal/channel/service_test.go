@@ -1091,6 +1091,54 @@ func TestDetectModelInterfacesOpenAI(t *testing.T) {
 	}
 }
 
+func TestDetectModelInterfacesDeclaredProtocolsWinOverFamily(t *testing.T) {
+	trueBool := true
+	falseBool := false
+	var chatPath, messagesPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			chatPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"choices":[]}`))
+		case "/v1/messages":
+			messagesPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"id":"msg-1","content":[{"type":"text","text":"pong"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	// A custom channel on the default OpenAI-compatible family that checks Chat
+	// Completions and Anthropic Messages: detection must analyse the protocols
+	// the operator checked, including the family's cross-protocol sibling, and
+	// must not probe Responses, which the operator left unchecked.
+	st := newInterfaceTestStore(t, server.URL+"/v1", upstream.APITypeChatCompletions, upstream.ProtocolFamilyOpenAICompatible, "", "", config.UpstreamCapabilitiesConfig{
+		ChatCompletions: &trueBool,
+		Messages:        &trueBool,
+		Responses:       &falseBool,
+	}, []store.ChannelModelRecord{
+		{Model: "client-model", Source: "manual", Enabled: true},
+	})
+	detection, err := NewService(st).DetectModelInterfaces(context.Background(), "probe", "client-model", 2*time.Second)
+	if err != nil {
+		t.Fatalf("DetectModelInterfaces() error = %v", err)
+	}
+	if chatPath != "/v1/chat/completions" || messagesPath != "/v1/messages" {
+		t.Fatalf("probed paths = chat:%q messages:%q, want both declared surfaces", chatPath, messagesPath)
+	}
+	byProtocol := map[string]ModelInterfaceProtocolReport{}
+	for _, report := range detection.Protocols {
+		byProtocol[report.Protocol] = report
+	}
+	if len(byProtocol) != 2 || byProtocol["chat_completions"].Status != modelprobe.StatusOK || byProtocol["messages"].Status != modelprobe.StatusOK {
+		t.Fatalf("protocols = %+v, want chat_completions and messages both ok", detection.Protocols)
+	}
+	if _, probed := byProtocol["responses"]; probed {
+		t.Fatalf("protocols = %+v, responses was unchecked and must not be probed", detection.Protocols)
+	}
+}
+
 func TestDetectModelInterfacesOtherFamilies(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
