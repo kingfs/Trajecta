@@ -8,8 +8,17 @@
 
 ```bash
 # 导出（时间窗必填，或显式 --all）
+# --out 是输出目录，文件名按写入时刻自动生成
 trajecta export --since 2026-09-01 --until 2026-10-01 \
-  --out office-2026-09.tar.gz --source-name office
+  --out /app/data/backups --source-name office
+#   -> /app/data/backups/trajecta-export-20261111T143255Z-20260901-20261001.tar.gz
+
+# 省略 --out 时默认写入 <trace.output_dir>/backups
+trajecta export --all --source-name office
+#   -> ./data/traces/backups/trajecta-export-20261111T143255Z-all.tar.gz
+
+# 想自己指定文件名：--name（不加后缀会自动补 .tar.gz / .tar）
+trajecta export --all --out /app/data/backups --name office-before-upgrade
 
 # 未指定 --password 时自动生成随机密码，并在命令结束时打印一次
 # （也可以 --password 指定，或用环境变量 TRAJECTA_EXPORT_PASSWORD）
@@ -28,10 +37,12 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 | --- | --- |
 | `export --since/--until` | `logs.recorded_at` 的闭区间窗口；`--since` 只给下界，`--until` 只给上界 |
 | `export --all` | 不设窗口，导出全部录制，并额外归档未被 `logs` 索引的孤儿 `.http` |
+| `export --out` | **输出目录**（不存在会创建）；缺省为 `{{output_dir}}/backups`。若值本身以 `.tar` / `.tar.gz` / `.tgz` 结尾，则按精确文件路径处理（兼容脚本） |
+| `export --name` | 在 `--out` 目录内使用指定文件名；不含归档后缀时自动补 `.tar.gz` / `.tar`，不允许含路径分隔符 |
 | `export --password` | 指定 bundle 密码；缺省则生成随机密码并只打印一次 |
 | `export --allow-plaintext` | 不加密（bundle 内含解密后的渠道凭据，慎用）；与 `--password` 互斥 |
 | `export --compression` | `gzip`（默认）或 `none`；300 GB 级数据可关压缩以换 CPU |
-| `export --force` | 覆盖已存在的 bundle 文件 |
+| `export --force` | 覆盖已存在的 bundle 文件（仅对显式文件路径/`--name` 有意义；自动生成的名称不会覆盖已有备份，冲突时追加 `-2`、`-3`…） |
 | `export --log-file` | 把逐条明细日志同时写入文件 |
 | `import --apply` | 真正写库、落盘；不带时只做完整检查并输出报告 |
 | `import --channel-map <src-id>=<dst-id>` | 强制把源渠道合并到指定目标渠道（可重复） |
