@@ -45,6 +45,7 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 | Agent 接口 | MCP server 暴露 22 个查询 / 重分析工具，让 agent 直接读轨迹而不是抓 HTML |
 | 多上游路由 | 按渠道、权重、p2c 策略与粘性路由选上游，支持模型别名与 per-model 能力覆盖 |
 | 存储分层 | 生产用 Postgres（含 checked-in SQL 迁移），本地用 SQLite，cassette 始终是事实源 |
+| 多部署合并 | `trajecta export` / `trajecta import` 把另一套部署的录制、渠道配置与分析结果合并进来；bundle 默认加密，渠道按 `base_url` + API key 识别，可重复导入只应用增量 |
 
 ## 快速开始
 
@@ -212,7 +213,8 @@ func TestChat(t *testing.T) {
 | 目录 | 职责 |
 | --- | --- |
 | `cmd/server` | 运行时二进制入口：`serve`（以及 `version`、`completion`） |
-| `cmd/trajecta`、`internal/cli` | 运维 CLI 与两个二进制共享的命令契约：upgrade、layout、db、auth、provider、models、audit、analyze、doctor… |
+| `cmd/trajecta`、`internal/cli` | 运维 CLI 与两个二进制共享的命令契约：upgrade、layout、db、auth、provider、models、audit、analyze、export、import、doctor… |
+| `internal/transfer` | 跨部署导入导出的 bundle 格式、逐表读写与合并语义 |
 | `internal/proxy` | 反向代理、协议入口归一化、流式响应拦截 |
 | `internal/recorder` | cassette 录制与落盘 |
 | `pkg/recordfile` | 录制格式解析与写入（V3 写入，V2 / 旧 magic 兼容读取） |

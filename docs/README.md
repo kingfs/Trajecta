@@ -14,6 +14,7 @@
 - 要参与开发：读 [开发与测试](./DEVELOPMENT.md) 与 [架构与代码地图](./ARCHITECTURE.md)。
 - 要部署与运维：读 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 与 [PostgreSQL 运维手册](./POSTGRES_OPERATIONS.md)。
 - 要把改名前的 `llm-tracelab` 部署迁到 Postgres：读 [从 llm-tracelab 迁移](./LEGACY_MIGRATION.md)。
+- 要把另一套部署的录制与配置合并进来：读 [导入与导出](./IMPORT_EXPORT.md)。
 - 要看协议矩阵与协议原文：读 [协议参考](./protocol-reference/README.md)。
 - 要提交改动或报告安全问题：读 [CONTRIBUTING](../CONTRIBUTING.md) 与 [SECURITY](../SECURITY.md)；每个版本改了什么见 [CHANGELOG](../CHANGELOG.md)。
 
@@ -32,6 +33,7 @@
 | [协议转换](./PROTOCOL_CONVERSION.md) | 直通优先与协议转换怎么决策、转换 API 与 IR 边界 |
 | [语义解析、Observation IR 与审计](./OBSERVATION_AND_AUDIT.md) | 录制怎么变成 Observation IR、findings 与重分析怎么工作 |
 | [存储与部署](./STORAGE_AND_DEPLOYMENT.md) | 数据放在哪、怎么迁移、怎么部署 |
+| [导入与导出](./IMPORT_EXPORT.md) | 怎么把另一套部署的数据合并进来、bundle 里有什么、冲突怎么处理 |
 
 ## 操作指南
 

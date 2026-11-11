@@ -45,6 +45,7 @@ Trajecta is a **local-first record/replay proxy**. Point your SDK or CLI at it d
 | Agent interface | An MCP server exposes 22 query and reanalysis tools so agents read trajectories instead of scraping HTML |
 | Multi-upstream routing | Channel, weight, p2c and sticky routing, with model aliases and per-model capability overrides |
 | Storage tiers | Postgres in production (with checked-in SQL migrations), SQLite locally, cassettes always authoritative |
+| Multi-deployment merge | `trajecta export` / `trajecta import` merge another deployment's recordings, channel configuration and analysis results; the bundle is encrypted by default, channels are matched by `base_url` + API key, and re-importing only applies the delta |
 
 ## Quick Start
 
@@ -212,6 +213,7 @@ The complete preset list (25 registry keys, 20 distinct providers after alias de
 | Directory | Responsibility |
 | --- | --- |
 | `cmd/server` | Runtime binary entry point: `serve` (plus `version` and `completion`) |
+| `internal/transfer` | Cross-deployment export/import bundle format, per-table readers/writers and merge semantics |
 | `cmd/trajecta`, `internal/cli` | Operations CLI and the command contract both binaries share: upgrade, layout, db, auth, provider, models, audit, analyze, doctor… |
 | `internal/proxy` | Reverse proxy, protocol entry normalization, streaming interception |
 | `internal/recorder` | Cassette recording and persistence |

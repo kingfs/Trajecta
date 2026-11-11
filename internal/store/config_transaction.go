@@ -37,18 +37,7 @@ func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store,
 		return err
 	}
 	defer tx.Rollback()
-	name := dialect.SQLite
-	if s.driver == "postgres" {
-		name = dialect.Postgres
-	}
-	driver := &configurationTxDriver{Driver: entsql.NewDriver(name, entsql.Conn{ExecQuerier: tx})}
-	view := &Store{
-		db:        &rebindingDB{DB: s.db.DB, tx: tx, driver: s.driver},
-		client:    dao.NewClient(dao.Driver(driver)),
-		outputDir: s.outputDir, dbPath: s.dbPath, driver: s.driver,
-		secrets: s.secrets, useSessionSummaryRead: s.useSessionSummaryRead,
-		shared: s.shared,
-	}
+	view := s.txView(tx)
 	committed := false
 	commit := func() error {
 		if err := tx.Commit(); err != nil {
@@ -64,6 +53,24 @@ func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store,
 		return errors.New("configuration transaction was not committed")
 	}
 	return nil
+}
+
+// txView builds the Store view shared by ConfigurationTransaction and the
+// transfer read transaction: raw SQL and ent operations both run inside tx,
+// with the same secrets box, shared locks and output directory.
+func (s *Store) txView(tx *sql.Tx) *Store {
+	name := dialect.SQLite
+	if s.driver == "postgres" {
+		name = dialect.Postgres
+	}
+	driver := &configurationTxDriver{Driver: entsql.NewDriver(name, entsql.Conn{ExecQuerier: tx})}
+	return &Store{
+		db:        &rebindingDB{DB: s.db.DB, tx: tx, driver: s.driver},
+		client:    dao.NewClient(dao.Driver(driver)),
+		outputDir: s.outputDir, dbPath: s.dbPath, driver: s.driver,
+		secrets: s.secrets, useSessionSummaryRead: s.useSessionSummaryRead,
+		shared: s.shared,
+	}
 }
 
 // TransactionScoped reports whether this store view writes through one open

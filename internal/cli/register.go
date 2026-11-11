@@ -30,5 +30,7 @@ func Register(root *cobra.Command, rt *Runtime, opts Options) {
 		newAuditCommand(rt),
 		newAuthCommand(rt),
 		newSchemaCommand(rt, root),
+		newExportCommand(rt),
+		newImportCommand(rt),
 	)
 }
