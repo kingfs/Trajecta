@@ -58,9 +58,6 @@ func TestPluginsAPIDefaultAllDisabled(t *testing.T) {
 	if alibaba.Preset.ID != "alibaba" || len(alibaba.Preset.Plans) != 2 {
 		t.Fatalf("alibaba preset payload = %+v", alibaba.Preset)
 	}
-	if alibaba.ChannelCount != 0 || alibaba.EnabledChannelCount != 0 {
-		t.Fatalf("alibaba channel stats = %+v", alibaba)
-	}
 }
 
 func TestPluginEnableDisableRoundTrip(t *testing.T) {
@@ -290,28 +287,32 @@ func TestPluginSettingsNormalizeUnknownIDs(t *testing.T) {
 	}
 }
 
-func TestLegacyPresetChannelCountsTowardPlugin(t *testing.T) {
+func TestLegacyPresetChannelTriggersDisableCheck(t *testing.T) {
 	st := newPluginTestStore(t)
-	// A channel created from a hidden legacy preset still belongs to its plugin.
+	// A channel created from a hidden legacy preset still belongs to its
+	// plugin: the list carries no stats, but the disable check must find it.
 	create := `{"name":"Legacy Qwen","provider_preset":"qwen_coding_anthropic","api_type":"messages","protocol_family":"anthropic_messages","api_key":"sk-sp-test"}`
 	rr := httptest.NewRecorder()
 	channelListCreateAPIHandler(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/channels", strings.NewReader(create)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("create status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	rr = httptest.NewRecorder()
-	pluginsAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/plugins", nil))
-	var payload pluginsResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+	if err := saveChannelPluginSettings(context.Background(), st, channelPluginSettings{Enabled: []string{"alibaba"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range payload.Items {
-		if item.ID == "alibaba" {
-			if item.ChannelCount != 1 || item.EnabledChannelCount != 1 {
-				t.Fatalf("legacy channel not counted: %+v", item)
-			}
-			return
-		}
+	rr = httptest.NewRecorder()
+	pluginDetailAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodPatch, "/api/plugins/alibaba", strings.NewReader(`{"enabled":false}`)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("disable status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	t.Fatal("alibaba plugin missing")
+	var conflict struct {
+		Error    string             `json:"error"`
+		Channels []pluginChannelRef `json:"channels"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &conflict); err != nil {
+		t.Fatal(err)
+	}
+	if conflict.Error != "plugin_in_use" || len(conflict.Channels) != 1 || conflict.Channels[0].Name != "Legacy Qwen" {
+		t.Fatalf("legacy channel not reported by the disable check: %+v", conflict)
+	}
 }

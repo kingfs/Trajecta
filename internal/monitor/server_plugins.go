@@ -83,21 +83,21 @@ type pluginChannelRef struct {
 	EnabledModelCount int    `json:"enabled_model_count"`
 }
 
-// pluginItem is one channel plugin with its catalog payload and usage facts.
+// pluginItem is one channel plugin with its catalog payload. The list is
+// deliberately free of channel-association stats: the plugins page presents
+// what the vendor offers, and only the disable check queries which channels
+// use the plugin.
 type pluginItem struct {
-	ID                  string              `json:"id"`
-	Name                string              `json:"name"`
-	NameZh              string              `json:"name_zh,omitempty"`
-	Region              string              `json:"region,omitempty"`
-	Description         string              `json:"description,omitempty"`
-	DescriptionZh       string              `json:"description_zh,omitempty"`
-	DocsURL             string              `json:"docs_url,omitempty"`
-	KeysURL             string              `json:"keys_url,omitempty"`
-	Enabled             bool                `json:"enabled"`
-	ChannelCount        int                 `json:"channel_count"`
-	EnabledChannelCount int                 `json:"enabled_channel_count"`
-	EnabledModelCount   int                 `json:"enabled_model_count"`
-	Preset              providerCatalogItem `json:"preset"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	NameZh        string              `json:"name_zh,omitempty"`
+	Region        string              `json:"region,omitempty"`
+	Description   string              `json:"description,omitempty"`
+	DescriptionZh string              `json:"description_zh,omitempty"`
+	DocsURL       string              `json:"docs_url,omitempty"`
+	KeysURL       string              `json:"keys_url,omitempty"`
+	Enabled       bool                `json:"enabled"`
+	Preset        providerCatalogItem `json:"preset"`
 }
 
 type pluginsResponse struct {
@@ -153,21 +153,17 @@ func pluginChannelStats(st *store.Store, pluginID string) (refs []pluginChannelR
 	return refs, enabledChannels, enabledModels
 }
 
-func pluginItemFrom(plugin pkgupstream.Plugin, enabled bool, st *store.Store) pluginItem {
-	refs, enabledChannels, enabledModels := pluginChannelStats(st, plugin.ID)
+func pluginItemFrom(plugin pkgupstream.Plugin, enabled bool) pluginItem {
 	item := pluginItem{
-		ID:                  plugin.ID,
-		Name:                plugin.Name,
-		NameZh:              plugin.NameZh,
-		Region:              plugin.Region,
-		Description:         plugin.Description,
-		DescriptionZh:       plugin.DescriptionZh,
-		DocsURL:             plugin.DocsURL,
-		KeysURL:             plugin.KeysURL,
-		Enabled:             enabled,
-		ChannelCount:        len(refs),
-		EnabledChannelCount: enabledChannels,
-		EnabledModelCount:   enabledModels,
+		ID:            plugin.ID,
+		Name:          plugin.Name,
+		NameZh:        plugin.NameZh,
+		Region:        plugin.Region,
+		Description:   plugin.Description,
+		DescriptionZh: plugin.DescriptionZh,
+		DocsURL:       plugin.DocsURL,
+		KeysURL:       plugin.KeysURL,
+		Enabled:       enabled,
 	}
 	if preset, ok := pkgupstream.LookupPreset(plugin.PresetID); ok {
 		item.Preset = providerCatalogItemFrom(preset)
@@ -200,7 +196,7 @@ func pluginsAPIHandler(st *store.Store) http.HandlerFunc {
 		plugins := pkgupstream.Plugins()
 		items := make([]pluginItem, 0, len(plugins))
 		for _, plugin := range plugins {
-			items = append(items, pluginItemFrom(plugin, enabled[plugin.ID], st))
+			items = append(items, pluginItemFrom(plugin, enabled[plugin.ID]))
 		}
 		writeJSON(w, http.StatusOK, pluginsResponse{Items: items, UpdatedAt: settings.UpdatedAt})
 	}
@@ -279,7 +275,7 @@ func pluginDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, pluginItemFrom(plugin, *req.Enabled, st))
+		writeJSON(w, http.StatusOK, pluginItemFrom(plugin, *req.Enabled))
 	}
 }
 

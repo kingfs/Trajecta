@@ -170,7 +170,7 @@ Trajecta 自身的事件收件箱：
 
 **创建渠道**弹窗分为两个标签页：
 
-- **官方渠道**列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索）。目录按**渠道插件**过滤：只有已在「插件」页启用的插件才会出现卡片，默认全部禁用时目录为空并给出「去插件页启用」的引导链接。每张卡片是一个厂商站点（双语短名，如「阿里百炼-中国」/ "Alibaba Bailian-China"），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。带套餐的插件（如阿里百炼的 Coding Plan / Token Plan）选中后出现**套餐选择器**，默认按量付费；切换套餐会重算端点与 key 占位提示（`sk-sp-…`），创建请求携带 `plan` 字段，一个渠道共用一个 key 服务全部协议端点。填写 API key 和可选模型列表即可创建；套餐的 `sk-sp-` key 校验在创建时由服务端执行。卡片展示 preset 的双语 `notes` 与 `no_list` 提示（无模型列表接口时需创建后手动添加模型），并沿用 `GET /api/provider-presets` 的 protocol/routing 默认值。
+- **官方渠道**列出 `GET /api/catalog/providers` 的内置 provider 卡片（可搜索）。目录按**渠道插件**过滤：只有已在「插件」页启用的插件才会出现卡片，默认全部禁用时目录为空并给出「去插件页启用」的引导链接。每张卡片是一个厂商站点（双语短名，如「阿里百炼-中国」/ "Alibaba Bailian-China"），点击即选中并填入该 provider 的 endpoint、`api_type`、`protocol_family`、`routing_profile` 与每协议 `endpoints`；内置 endpoint 不需要手填，Base URL 只在「高级选项」里作为可覆盖项出现。带套餐的插件（如阿里百炼的 Coding Plan / Token Plan）选中后出现**套餐选择器**，默认按量付费；切换套餐会重算端点与 key 占位提示（`sk-sp-…`），创建请求携带 `plan` 字段，一个渠道共用一个 key 服务全部协议端点。填写 API key 和可选模型列表即可创建；套餐的 `sk-sp-` key 校验在创建时由服务端执行。弹窗只保留卡片与表单，不再展示 endpoint/描述摘要；选中后显示一行紧凑的已选渠道名，旁边的 link 图标打开与插件页相同的右侧详情抽屉（接口、API base、套餐端点、`no_list` 提示），不打断表单填写。协议/路由默认值沿用 `GET /api/provider-presets`。
 - **自定义渠道**面向不在内置目录里的上游：手填名称、Base URL、API key（可选）、支持的协议（Chat Completions / Responses / Anthropic Messages / Gemini generateContent）和模型列表；协议勾选会写入渠道级 `capabilities`，并决定存储的 `api_type` 与（内部的）`protocol_family` / `routing_profile`（Chat Completions/Responses → `openai_compatible` / `openai_default`，仅 Messages → `anthropic_messages` / `anthropic_default`，仅 generateContent → `google_genai` / `google_ai_studio`），因此没有单独的「协议族」选项，分析和配置以勾选的支持协议为准；路由配置、每协议 `endpoints`、代理等仍在「高级选项」中。创建请求走 `POST /api/channels`，`models` 数组会在同一事务内写成启用的 `channel_models` 行。
 
 **渠道高级选项**可逐协议填写 `endpoints`（chat_completions / responses / messages / gemini），留空使用 Base URL；官方渠道由目录预填（创建时服务端也按 preset+plan 自动补齐），自定义渠道可自由填写。渠道卡片会显示具体套餐名称徽标（如 Coding Plan），它们使用各自的专用 coding endpoint 和 API key；渠道所属插件被停用时卡片显示「插件已停用」徽标（仅提示，不影响路由）。
@@ -187,7 +187,7 @@ Trajecta 自身的事件收件箱：
 
 #### 插件 `/plugins`
 
-渠道插件的管理页，仅 admin 可见，当前只有一个标签页「渠道插件」（`?tab=channels`，为后续插件类型预留）。每个插件一张卡：双语短名 + 区域徽标（中国/国际）、描述、套餐 chips（按量付费 / Coding Plan / Token Plan 等）、协议 badges、渠道统计（渠道数 · 启用渠道数 · 启用模型数）、文档与 API Key 管理链接，以及启用开关。数据来自 `GET /api/plugins`，开关走 `PATCH /api/plugins/{id}`。
+渠道插件的管理页，仅 admin 可见，当前只有一个标签页「渠道插件」（`?tab=channels`，为后续插件类型预留）。每个插件一张卡：双语短名 + 区域徽标（中国/国际）、描述、文档与 API Key 管理链接，以及启用开关；卡片不展示关联渠道统计——插件页关注厂商提供什么，而不是已经配置了什么。点击卡片打开右侧详情抽屉：支持的接口与默认（按量付费）API base（可复制）、各套餐的说明、专用 key 前缀与逐协议端点；抽屉内也可直接启停插件。数据来自 `GET /api/plugins`，开关走 `PATCH /api/plugins/{id}`。
 
 **默认全部禁用**：插件未启用时，创建渠道弹窗的官方目录为空。启用插件后对应官方渠道卡片才出现。**停用只隐藏目录卡片，从不中断已有渠道的流量**；停用仍有启用渠道的插件时，服务端返回 409 与受影响渠道列表，页面弹出确认框列出这些渠道及其启用模型数，建议「先去关闭渠道」（跳转渠道页）真正停掉流量后再停用，也可「仍要停用」显式确认（请求携带 `force:true`）。启用状态保存在 `app_settings` 键 `plugins.channels`，随导入导出白名单迁移（只插不覆盖）。
 

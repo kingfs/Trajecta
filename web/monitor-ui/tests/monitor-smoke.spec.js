@@ -436,8 +436,10 @@ test("channel management renders and supports core actions", async ({ page }) =>
   );
   expect(clippedCard).toBe(false);
   await page.locator(".provider-catalog-card").filter({ hasText: "OpenAI" }).first().click();
-  await expect(createDialog.getByText("Selected provider")).toBeVisible();
-  await expect(createDialog.locator("code", { hasText: "https://api.openai.example/v1" })).toBeVisible();
+  // The compact selection row replaces the old endpoint/description summary;
+  // its link icon opens the plugin detail drawer.
+  await expect(createDialog.locator(".provider-selected-row")).toBeVisible();
+  await expect(createDialog.getByRole("button", { name: "View channel plugin details" })).toBeVisible();
   await createDialog.getByLabel("API key").fill("sk-test-secret");
   await createDialog.getByLabel("Models").fill("gpt-5");
   await expect(page.getByRole("button", { name: "Create channel" })).toBeEnabled();

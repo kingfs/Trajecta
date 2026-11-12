@@ -43,6 +43,17 @@ describe("locale tables", () => {
     }
   });
 
+  it("never uses double-brace placeholders", () => {
+    // The configured delimiters are single braces; a {{name}} placeholder is
+    // emitted literally (the plugins-page stats incident), so no table may
+    // contain one.
+    for (const [language, table] of Object.entries(messages)) {
+      for (const [key, value] of Object.entries(table)) {
+        assert.ok(!/\{\{[^}]+\}\}/.test(value), `${language}/${key} uses {{...}}: ${value}`);
+      }
+    }
+  });
+
 });
 
 describe("lookup behaviour", () => {
@@ -56,6 +67,15 @@ describe("lookup behaviour", () => {
     const t = await translator("en");
     assert.equal(t("providers.missingUsage", { count: "3" }), "3 missing usage");
     assert.equal(t("traceDetail.callID", { id: "call_1" }), "call id call_1");
+  });
+
+  it("interpolates the plugin disable-check messages", async () => {
+    const enT = await translator("en");
+    assert.equal(enT("plugins.disableStats", { channels: 1, models: 2 }), "1 enabled channels and 2 enabled models currently use this plugin.");
+    assert.equal(enT("plugins.disableConfirmTitle", { name: "Alibaba Bailian-China" }), 'Disable "Alibaba Bailian-China"?');
+    const zhT = await translator("zh-CN");
+    assert.equal(zhT("plugins.conflictModels", { models: 2 }), "2 个启用模型");
+    assert.equal(zhT("plugins.viewDetails", { name: "阿里百炼-中国" }), "查看 阿里百炼-中国 详情");
   });
 
   it("leaves a value that is only a brace pair alone", async () => {

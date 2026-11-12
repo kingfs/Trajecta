@@ -79,7 +79,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 当前有 22 个可见插件：`alibaba`（阿里百炼-中国）、`alibaba_intl`（阿里百炼-国际）、`anthropic`、`azure`、`cerebras`、`deepseek`、`fireworks`、`github`、`google`、`groq`、`minimax`、`mistral`、`moonshot`、`ollama`、`openai`、`openrouter`、`together`、`vertex`、`vllm`、`xai`、`zai`、`zhipu`。每个 preset 携带双语短名（`Name`/`NameZh`，如 "Alibaba Bailian-China" / "阿里百炼-中国"）、区域、端点、鉴权、套餐、模型来源与文档链接；`Plugins()`/`PluginForPreset()`/`PresetIDsForPlugin()` 提供插件视图与归属推导。
 
-插件的启用状态保存在应用数据库 `app_settings` 键 `plugins.channels`（`{"enabled":[...]}`），**默认全部禁用**：`GET /api/catalog/providers` 只返回已启用插件的可见 preset，创建渠道弹窗的官方目录因此初始为空，由「插件」页启用。`GET /api/plugins`（admin）返回全量插件目录与每插件的渠道/启用模型统计；`PATCH /api/plugins/{id}` 切换开关，停用仍有启用渠道的插件时返回 409 与受影响渠道列表，需 `force:true` 确认。**插件开关只影响目录展示，从不改变路由**：已有渠道的流量由渠道自身的 `enabled` 决定。
+插件的启用状态保存在应用数据库 `app_settings` 键 `plugins.channels`（`{"enabled":[...]}`），**默认全部禁用**：`GET /api/catalog/providers` 只返回已启用插件的可见 preset，创建渠道弹窗的官方目录因此初始为空，由「插件」页启用。`GET /api/plugins`（admin）返回全量插件目录（厂商信息：名称/描述/文档/套餐/端点，不含渠道关联统计）；`PATCH /api/plugins/{id}` 切换开关，停用仍有启用渠道的插件时返回 409 与受影响渠道列表（仅此时查询渠道归属），需 `force:true` 确认。**插件开关只影响目录展示，从不改变路由**：已有渠道的流量由渠道自身的 `enabled` 决定。
 
 11 个历史 plan/协议 preset 被标记 `Hidden` 并保留可解析（存量渠道与导入 bundle 不受影响），每条通过 `Replacement` 指向规范 preset+plan：`qwen_coding`、`qwen_coding_anthropic` → `alibaba`+`coding`；`qwen_coding_intl`、`qwen_coding_intl_anthropic` → `alibaba_intl`+`coding`；`qwen_token_plan` → `alibaba`+`token`；`qwen_token_plan_intl` → `alibaba_intl`+`token`；`zai_coding`、`zai_coding_anthropic` → `zai`+`coding`；`zhipu_coding`、`zhipu_coding_anthropic` → `zhipu`+`coding`；`kimi_coding` → `moonshot`+`kimi-code`。隐藏 preset 不出现在目录与插件页。
 

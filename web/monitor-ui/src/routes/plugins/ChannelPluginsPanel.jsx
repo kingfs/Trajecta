@@ -2,34 +2,32 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ChevronRight, ExternalLink, KeyRound } from "lucide-react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { InlineTag } from "../../components/common/Badges";
 import { EmptyState } from "../../components/common/EmptyState";
 import { Switch } from "../../components/common/Controls";
+import { PluginDetailDrawer } from "../../components/monitor/PluginDetailDrawer";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, patchJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { useWriteMutation } from "../../lib/mutations";
-import { localizedName, localizedDescription, planDisplayName } from "../../lib/plugins";
+import { localizedName, localizedDescription, pluginDrawerFacts } from "../../lib/plugins";
 
-const PROTOCOL_LABEL_KEYS = {
-  chat_completions: "providers.interfaceChat",
-  responses: "providers.interfaceResponses",
-  messages: "providers.interfaceMessages",
-  gemini: "providers.interfaceGemini",
-};
-
-// ChannelPluginsPanel lists every compiled channel plugin with its enable
-// switch. Disabling never touches routing: the dialog says so explicitly and
-// recommends disabling the affected channels first when any are still enabled.
+// ChannelPluginsPanel presents what each vendor plugin offers: name,
+// description, docs/key links and the enable switch. Clicking a card opens the
+// detail drawer (interfaces, API bases, plans). Channel-association facts are
+// deliberately absent here; only the disable check queries them, and the
+// server's 409 payload drives that confirmation.
 export function ChannelPluginsPanel() {
   const { t, language } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const plugins = useJSON(apiPaths.plugins, []);
   const [busyID, setBusyID] = useState("");
+  const [detailID, setDetailID] = useState("");
   // conflict holds the server's 409 payload: the enabled channels that must be
   // acknowledged before the plugin's catalog cards are hidden.
   const [conflict, setConflict] = useState(null);
@@ -79,6 +77,9 @@ export function ChannelPluginsPanel() {
   };
 
   const items = plugins.data?.items || [];
+  // Resolve the open drawer against the freshest data so a toggle made inside
+  // it is reflected without closing it.
+  const detailItem = detailID ? (items.find((item) => item.id === detailID) || null) : null;
 
   if (plugins.error) {
     return <EmptyState title={t("plugins.loadError")} detail={plugins.error} tone="danger" />;
@@ -91,57 +92,68 @@ export function ChannelPluginsPanel() {
     <>
       <p className="trace-subline plugins-intro">{t("plugins.intro")}</p>
       <div className="provider-grid">
-        {items.map((item) => {
-          const preset = item.preset || {};
-          const plans = preset.plans || [];
-          const protocols = preset.protocols || [];
-          return (
-            <Card key={item.id} className="plugin-card">
-              <div className="panel-head">
-                <div>
-                  <h2>
-                    {localizedName(item, language)}
-                    {item.region ? <InlineTag tone="default">{t(`plugins.region.${item.region}`)}</InlineTag> : null}
-                  </h2>
-                  <p className="trace-subline">{item.id}</p>
-                </div>
-                <Switch
-                  checked={Boolean(item.enabled)}
-                  disabled={busyID === item.id || enable.isPending}
-                  onChange={(next) => onToggle(item, next)}
-                  label={t("plugins.enableSwitch")}
-                />
+        {items.map((item) => (
+          <Card
+            key={item.id}
+            className="plugin-card"
+            role="button"
+            tabIndex={0}
+            aria-label={t("plugins.viewDetails", { name: localizedName(item, language) })}
+            onClick={() => setDetailID(item.id)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setDetailID(item.id);
+              }
+            }}
+          >
+            <div className="plugin-card-head">
+              <div className="plugin-card-name">
+                <h2>{localizedName(item, language)}</h2>
+                {item.region ? <InlineTag tone="default">{t(`plugins.region.${item.region}`)}</InlineTag> : null}
               </div>
-              <p className="trace-subline plugin-description">{localizedDescription(item, language)}</p>
-              <div className="plugin-tags">
-                <InlineTag tone="default">{t("plugins.defaultPlan")}</InlineTag>
-                {plans.map((plan) => (
-                  <InlineTag key={plan.id} tone={plan.coding ? "accent" : "neutral"} title={plan.key_prefix ? `${plan.key_prefix}…` : ""}>
-                    {planDisplayName(plan, language)}
-                  </InlineTag>
-                ))}
+              <Switch
+                checked={Boolean(item.enabled)}
+                disabled={busyID === item.id || enable.isPending}
+                onChange={(next) => onToggle(item, next)}
+                label={t("plugins.enableSwitch")}
+              />
+            </div>
+            <p className="plugin-card-desc">{localizedDescription(item, language)}</p>
+            <div className="plugin-card-foot">
+              <div className="plugin-links" onClick={(event) => event.stopPropagation()}>
+                {item.docs_url ? (
+                  <a href={item.docs_url} target="_blank" rel="noreferrer">
+                    <ExternalLink size={12} aria-hidden="true" />
+                    <span>{t("plugins.docs")}</span>
+                  </a>
+                ) : null}
+                {item.keys_url ? (
+                  <a href={item.keys_url} target="_blank" rel="noreferrer">
+                    <KeyRound size={12} aria-hidden="true" />
+                    <span>{t("plugins.keys")}</span>
+                  </a>
+                ) : null}
               </div>
-              <div className="plugin-tags">
-                {protocols.map((protocol) => (
-                  <InlineTag key={protocol} tone="default">{t(PROTOCOL_LABEL_KEYS[protocol] || protocol)}</InlineTag>
-                ))}
-              </div>
-              <p className="trace-subline plugin-stats">
-                {t("plugins.channelStats", {
-                  channels: item.channel_count || 0,
-                  enabled: item.enabled_channel_count || 0,
-                  models: item.enabled_model_count || 0,
-                })}
-              </p>
-              <div className="plugin-links">
-                {item.docs_url ? <a href={item.docs_url} target="_blank" rel="noreferrer">{t("plugins.docs")}</a> : null}
-                {item.keys_url ? <a href={item.keys_url} target="_blank" rel="noreferrer">{t("plugins.keys")}</a> : null}
-              </div>
-            </Card>
-          );
-        })}
+              <span className="plugin-card-more" aria-hidden="true">
+                {t("plugins.details")}
+                <ChevronRight size={13} />
+              </span>
+            </div>
+          </Card>
+        ))}
         {!items.length ? <EmptyState title={t("plugins.none")} detail={t("plugins.noneDetail")} /> : null}
       </div>
+
+      <PluginDetailDrawer
+        facts={pluginDrawerFacts(detailItem)}
+        open={Boolean(detailItem)}
+        onClose={() => setDetailID("")}
+        enabled={Boolean(detailItem?.enabled)}
+        onToggle={detailItem ? (next) => onToggle(detailItem, next) : undefined}
+        toggleDisabled={busyID === detailID || enable.isPending}
+      />
 
       {conflict ? (
         <Dialog open onOpenChange={(next) => (next ? undefined : setConflict(null))}>

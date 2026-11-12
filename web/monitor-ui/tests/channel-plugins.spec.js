@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-// The channel-plugin surface: the plugins page's enable/disable flow (including
-// the in-use confirmation) and the creation dialog's plan selector. Every
-// endpoint is mocked and the write bodies are captured, so "one plugin card,
-// one channel, one key, both protocol endpoints" is proven from the requests.
+// The channel-plugin surface: the plugins page's vendor cards and detail
+// drawer, the enable/disable flow (including the in-use confirmation with
+// rendered interpolation), and the creation dialog's plan selector with its
+// link icon into the same drawer. Every endpoint is mocked and the write bodies
+// are captured, so "one plugin card, one channel, one key, both protocol
+// endpoints" is proven from the requests.
 let pluginPatches = [];
 let channelCreates = [];
 let pluginState;
@@ -19,9 +21,6 @@ function alibabaPlugin(overrides = {}) {
     docs_url: "https://help.aliyun.com/zh/model-studio/",
     keys_url: "https://bailian.console.aliyun.com",
     enabled: false,
-    channel_count: 0,
-    enabled_channel_count: 0,
-    enabled_model_count: 0,
     preset: {
       id: "alibaba",
       name: "Alibaba Bailian-China",
@@ -138,28 +137,51 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("plugins page enables a vendor plugin with one switch", async ({ page }) => {
+test("plugin cards show vendor facts and open the detail drawer", async ({ page }) => {
   await page.goto("/plugins");
   const card = page.locator(".plugin-card", { hasText: "Alibaba Bailian-China" });
   await expect(card).toBeVisible();
-  await expect(card.getByText("Coding Plan", { exact: true })).toBeVisible();
-  await expect(card.getByText("Token Plan", { exact: true })).toBeVisible();
+  // The card carries the vendor facts, not channel-association stats.
+  await expect(card.getByText("Pay-as-you-go DashScope endpoints.")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Docs" })).toBeVisible();
+  await expect(card.getByRole("link", { name: "API keys" })).toBeVisible();
+  await expect(card.getByText("{{channels}}", { exact: false })).toHaveCount(0);
+  // Clicking the card opens the drawer with interfaces and plan endpoints.
+  await card.click();
+  const drawer = page.locator(".plugin-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText("Supported interfaces")).toBeVisible();
+  await expect(drawer.getByText("https://dashscope.aliyuncs.com/compatible-mode/v1")).toBeVisible();
+  await expect(drawer.locator(".plugin-plan-head strong", { hasText: "Coding Plan" })).toBeVisible();
+  await expect(drawer.getByText("https://coding.dashscope.aliyuncs.com/apps/anthropic")).toBeVisible();
+  await expect(drawer.getByText("sk-sp-…").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+});
+
+test("the enable switch toggles without opening the drawer", async ({ page }) => {
+  await page.goto("/plugins");
+  const card = page.locator(".plugin-card", { hasText: "Alibaba Bailian-China" });
   const toggle = card.getByRole("switch");
   await expect(toggle).not.toBeChecked();
   await toggle.click();
   await expect(toggle).toBeChecked();
+  await expect(page.locator(".plugin-drawer")).toBeHidden();
   expect(pluginPatches).toEqual([{ enabled: true }]);
 });
 
 test("disabling a plugin with enabled channels asks before hiding the cards", async ({ page }) => {
-  pluginState = alibabaPlugin({ enabled: true, channel_count: 1, enabled_channel_count: 1, enabled_model_count: 2 });
+  pluginState = alibabaPlugin({ enabled: true, enabled_channel_count: 1, enabled_model_count: 2 });
   await page.goto("/plugins");
   const card = page.locator(".plugin-card", { hasText: "Alibaba Bailian-China" });
   await card.getByRole("switch").click();
-  // The 409 opens the confirmation with the affected channel.
-  const dialog = page.getByRole("dialog");
+  // The 409 opens the confirmation with the affected channel and rendered
+  // (single-brace) interpolation.
+  const dialog = page.getByRole("dialog").filter({ hasText: "Disable check" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Bailian Coding")).toBeVisible();
+  await expect(dialog.getByText("1 enabled channels and 2 enabled models currently use this plugin.")).toBeVisible();
+  await expect(dialog.getByText("2 enabled models", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Disable channels first")).toBeVisible();
   expect(pluginPatches).toEqual([{ enabled: false, force: false }]);
   // The operator acknowledges; the force flag is explicit.
@@ -173,15 +195,21 @@ test("creating a channel from a plan sends one key and both protocol endpoints",
   pluginState = alibabaPlugin({ enabled: true });
   await page.goto("/channels");
   await page.getByRole("button", { name: "New channel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.locator(".provider-create-modal");
   await dialog.locator(".provider-catalog-card", { hasText: "Alibaba Bailian-China" }).click();
-  // The default selection is pay-as-you-go.
-  await expect(dialog.locator(".provider-endpoint-summary code").first()).toHaveText("https://dashscope.aliyuncs.com/compatible-mode/v1");
+  // The compact selection row replaces the old endpoint/description summary.
+  await expect(dialog.locator(".provider-selected-summary")).toHaveCount(0);
+  await expect(dialog.locator(".provider-selected-row")).toContainText("Alibaba Bailian-China");
+  // The link icon opens the plugin drawer without losing the form.
+  await dialog.getByRole("button", { name: "View channel plugin details" }).click();
+  const drawer = page.locator(".plugin-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText("https://coding.dashscope.aliyuncs.com/v1")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
   // Switch to the coding plan.
   await dialog.getByRole("combobox").click();
   await page.getByRole("option", { name: "Coding Plan" }).click();
-  await expect(dialog.locator(".provider-endpoint-summary code").first()).toHaveText("https://coding.dashscope.aliyuncs.com/v1");
-  await expect(dialog.locator(".provider-endpoint-summary code").nth(1)).toHaveText("https://coding.dashscope.aliyuncs.com/apps/anthropic");
   await dialog.getByPlaceholder("sk-sp-...").fill("sk-sp-test-key");
   await dialog.getByRole("button", { name: "Create channel" }).click();
   await expect(dialog).toBeHidden();
@@ -200,13 +228,13 @@ test("creating a channel from a plan sends one key and both protocol endpoints",
 test("an empty catalog points the operator to the plugins page", async ({ page }) => {
   await page.goto("/channels");
   await page.getByRole("button", { name: "New channel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.locator(".provider-create-modal");
   await expect(dialog.getByText("The official catalog is empty: no channel plugin is enabled yet.")).toBeVisible();
   await dialog.getByRole("link", { name: "Enable plugins" }).click();
   await expect(page).toHaveURL(/\/plugins$/);
 });
 
-test("Chinese console shows the short vendor-region plugin name", async ({ page }) => {
+test("Chinese console shows the short vendor-region card and drawer", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("trajecta.monitor.language", "zh-CN");
   });
@@ -214,5 +242,12 @@ test("Chinese console shows the short vendor-region plugin name", async ({ page 
   const card = page.locator(".plugin-card", { hasText: "阿里百炼-中国" });
   await expect(card).toBeVisible();
   await expect(card.getByText("中国", { exact: true })).toBeVisible();
-  await expect(card.getByText("按量付费", { exact: true })).toBeVisible();
+  await expect(card.getByText("按量付费 DashScope 端点。")).toBeVisible();
+  await expect(card.getByRole("link", { name: "文档" })).toBeVisible();
+  await expect(card.getByRole("link", { name: "API Key 管理" })).toBeVisible();
+  await card.click();
+  const drawer = page.locator(".plugin-drawer");
+  await expect(drawer.getByText("支持的接口")).toBeVisible();
+  await expect(drawer.getByText("套餐", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("订阅制编程套餐：专用 sk-sp- key。")).toBeVisible();
 });

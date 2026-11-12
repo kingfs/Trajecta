@@ -50,3 +50,34 @@ export function planKeyPlaceholder(plan) {
   if (plan?.key_prefix) return `${plan.key_prefix}...`;
   return "sk-...";
 }
+
+// The canonical protocol display order, shared by the drawer's endpoint lists.
+export const PROTOCOL_ORDER = ["chat_completions", "responses", "messages", "gemini"];
+
+// orderedEndpoints projects an endpoint map onto [protocol, url] pairs in the
+// canonical order, dropping empty entries.
+export function orderedEndpoints(endpoints) {
+  return PROTOCOL_ORDER.filter((protocol) => endpoints?.[protocol]).map((protocol) => [protocol, endpoints[protocol]]);
+}
+
+// pluginDrawerFacts normalizes the two shapes that open the detail drawer — a
+// plugins-page item (meta + nested preset) and a catalog card (the preset
+// itself) — into one fact set the drawer renders.
+export function pluginDrawerFacts(item, { fromCatalog = false } = {}) {
+  if (!item) return null;
+  const preset = fromCatalog ? item : (item.preset || {});
+  return {
+    id: item.id,
+    name: item.name,
+    name_zh: item.name_zh,
+    region: item.region || preset.region || "",
+    description: fromCatalog ? item.notes : item.description,
+    description_zh: fromCatalog ? item.notes_zh : item.description_zh,
+    docs_url: item.docs_url || preset.docs_url || "",
+    keys_url: item.keys_url || preset.keys_url || "",
+    endpoints: preset.endpoints || {},
+    protocols: preset.protocols || [],
+    plans: preset.plans || [],
+    models: preset.models || {},
+  };
+}

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Link2 } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
@@ -12,6 +13,7 @@ import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
 import { ChannelRoutingPanels } from "../components/monitor/ChannelRoutingPanels";
+import { PluginDetailDrawer } from "../components/monitor/PluginDetailDrawer";
 import { Switch } from "../components/common/Controls";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { useJSON } from "../hooks/useJSON";
@@ -20,7 +22,7 @@ import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useWriteMutation } from "../lib/mutations";
 import { buildProviderLink, formatCount, formatDateTime, formatRateAvg, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
-import { localizedName, localizedDescription, planDisplayName, planDisplayDescription, projectPlan, planKeyPlaceholder } from "../lib/plugins";
+import { localizedName, planDisplayName, projectPlan, planKeyPlaceholder, pluginDrawerFacts } from "../lib/plugins";
 
 // The create form asks only for what a channel actually needs. Interface
 // capabilities are detected per model now, so the legacy channel-level
@@ -291,6 +293,9 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   const [catalogQuery, setCatalogQuery] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [probeReport, setProbeReport] = useState(null);
+  // The plugin detail drawer opened from the link icon; read-only here so the
+  // form behind it keeps its state.
+  const [pluginDetail, setPluginDetail] = useState(null);
 
   const presetsByID = useMemo(() => {
     const map = new Map();
@@ -450,6 +455,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   };
 
   return (
+    <>
     <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
       <DialogContent className="provider-create-modal">
         <form onSubmit={submit}>
@@ -507,24 +513,19 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                 </div>
               </div>
               {selectedCatalogItem ? (
-                <div className="provider-form-wide provider-selected-summary">
-                  <div>
-                    <p className="eyebrow">{t("providers.selectedProvider")}</p>
-                    <strong>{localizedName(selectedCatalogItem, language)}</strong>
-                    <p className="trace-subline">{localizedDescription(selectedCatalogItem, language)}</p>
-                    {selectedProjection?.noList ? <p className="trace-subline">{t("providers.noModelListHint")}</p> : null}
-                  </div>
-                  <div className="provider-endpoint-summary">
-                    <span>{t("providers.baseURL")}</span>
-                    <code>{form.base_url || t("providers.baseURLHint")}</code>
-                    {form.endpoints?.messages && form.endpoints.messages !== form.base_url ? (
-                      <>
-                        <span>{t("providers.interfaceMessages")}</span>
-                        <code>{form.endpoints.messages}</code>
-                      </>
-                    ) : null}
-                    <span className="trace-subline">{t("providers.officialEndpointHint")}</span>
-                  </div>
+                <div className="provider-form-wide provider-selected-row">
+                  <strong>{localizedName(selectedCatalogItem, language)}</strong>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="provider-plugin-link"
+                    title={t("providers.viewPlugin")}
+                    aria-label={t("providers.viewPlugin")}
+                    onClick={() => setPluginDetail(selectedCatalogItem)}
+                  >
+                    <Link2 size={14} aria-hidden="true" />
+                  </Button>
                 </div>
               ) : <p className="trace-subline provider-form-wide">{t("providers.selectProviderHint")}</p>}
               {selectedCatalogItem?.plans?.length ? (
@@ -541,7 +542,6 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {selectedPlan ? <span className="trace-subline">{planDisplayDescription(selectedPlan, language)}</span> : null}
                 </label>
               ) : null}
               <label className="provider-form-wide">{t("providers.models")}
@@ -591,6 +591,12 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
         </form>
       </DialogContent>
     </Dialog>
+    <PluginDetailDrawer
+      facts={pluginDrawerFacts(pluginDetail, { fromCatalog: true })}
+      open={Boolean(pluginDetail)}
+      onClose={() => setPluginDetail(null)}
+    />
+    </>
   );
 }
 

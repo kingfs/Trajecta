@@ -16,12 +16,15 @@ import {
   planDisplayDescription,
   projectPlan,
   planKeyPlaceholder,
+  orderedEndpoints,
+  pluginDrawerFacts,
 } from "../src/lib/plugins.js";
 
 const alibaba = {
   id: "alibaba",
   name: "Alibaba Bailian-China",
   name_zh: "阿里百炼-中国",
+  region: "cn",
   notes: "Pay-as-you-go DashScope endpoints.",
   notes_zh: "按量付费 DashScope 端点。",
   endpoints: {
@@ -104,5 +107,53 @@ describe("projectPlan", () => {
     assert.equal(planKeyPlaceholder(projectPlan(alibaba, "coding").plan), "sk-sp-...");
     assert.equal(planKeyPlaceholder(projectPlan(alibaba, "").plan), "sk-...");
     assert.equal(planKeyPlaceholder(null), "sk-...");
+  });
+});
+
+describe("orderedEndpoints", () => {
+  it("lists protocols in canonical order and drops empties", () => {
+    const pairs = orderedEndpoints({
+      messages: "https://m",
+      chat_completions: "https://c",
+      responses: "",
+    });
+    assert.deepEqual(pairs, [["chat_completions", "https://c"], ["messages", "https://m"]]);
+    assert.deepEqual(orderedEndpoints(null), []);
+  });
+});
+
+describe("pluginDrawerFacts", () => {
+  const pluginItem = {
+    id: "alibaba",
+    name: alibaba.name,
+    name_zh: alibaba.name_zh,
+    region: "cn",
+    description: "plugin description",
+    description_zh: "插件描述",
+    docs_url: "https://docs",
+    keys_url: "https://keys",
+    preset: alibaba,
+  };
+
+  it("normalizes a plugins-page item", () => {
+    const facts = pluginDrawerFacts(pluginItem);
+    assert.equal(facts.id, "alibaba");
+    assert.equal(facts.description, "plugin description");
+    assert.equal(facts.description_zh, "插件描述");
+    assert.equal(facts.docs_url, "https://docs");
+    assert.deepEqual(facts.endpoints, alibaba.endpoints);
+    assert.equal(facts.plans.length, 2);
+  });
+
+  it("normalizes a catalog card (notes become the description)", () => {
+    const facts = pluginDrawerFacts(alibaba, { fromCatalog: true });
+    assert.equal(facts.description, alibaba.notes);
+    assert.equal(facts.description_zh, alibaba.notes_zh);
+    assert.equal(facts.region, "cn");
+    assert.deepEqual(facts.endpoints, alibaba.endpoints);
+  });
+
+  it("returns null for a missing item", () => {
+    assert.equal(pluginDrawerFacts(null), null);
   });
 });
