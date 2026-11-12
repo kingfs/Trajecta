@@ -459,13 +459,16 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
     <Dialog
       open
       onOpenChange={(next) => {
+        if (next) return;
         // While the plugin drawer is open it owns Escape. Radix only lets the
-        // topmost layer dismiss, but in the mount race window both layers can
-        // request a close; ignore this dialog's close while the drawer is up
-        // (guarding onOpenChange instead of the event keeps the shared Escape
-        // event untouched, so the drawer still closes normally).
-        if (!next && pluginDetail) return;
-        if (!next) onClose();
+        // topmost layer dismiss, but in the mount race window this dialog can
+        // receive the close instead; redirect it to the drawer so one Escape
+        // always closes exactly the topmost layer and never the form.
+        if (pluginDetail) {
+          setPluginDetail(null);
+          return;
+        }
+        onClose();
       }}
     >
       <DialogContent className="provider-create-modal">
