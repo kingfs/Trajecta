@@ -118,9 +118,10 @@ func decodeBlock(n *wire.Node, path string) (xir.Part, error) {
 		// value so callers do not have to know which one the IR consumer
 		// looks at.
 		sealed := &xir.Sealed{
-			Protocol: xir.ProtocolMessages,
-			Kind:     "redacted_thinking",
-			Raw:      cloneRaw(n.Raw()),
+			Protocol:      xir.ProtocolMessages,
+			Kind:          "redacted_thinking",
+			Raw:           cloneRaw(n.Raw()),
+			MustRoundTrip: true,
 		}
 		return xir.Part{
 			Kind: xir.PartReasoning,

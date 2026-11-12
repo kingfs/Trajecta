@@ -151,7 +151,7 @@ func TestMaskerBuiltinCredentialAndPII(t *testing.T) {
 		t.Fatal(err)
 	}
 	vault := secretmask.NewVault([]byte("test-seed-0123456789abcdef"))
-	m := NewMasker(vault, rt)
+	m := NewMasker(vault, rt, 0)
 
 	body := []byte(`{"key":"` + fixtureAWSKey + `","id":"` + fixtureChineseID + `"}`)
 	out, events := m.Mask(body)
@@ -184,7 +184,7 @@ func TestMaskerDisabledPluginStopsMasking(t *testing.T) {
 		t.Fatal(err)
 	}
 	vault := secretmask.NewVault([]byte("test-seed-0123456789abcdef"))
-	m := NewMasker(vault, rt)
+	m := NewMasker(vault, rt, 0)
 	body := []byte(`{"key":"` + fixtureAWSKey + `"}`)
 	out, events := m.Mask(body)
 	if len(events) != 0 || string(out) != string(body) {
@@ -208,7 +208,7 @@ func TestMaskerDisablePIISetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	vault := secretmask.NewVault([]byte("test-seed-0123456789abcdef"))
-	m := NewMasker(vault, rt)
+	m := NewMasker(vault, rt, 0)
 	body := []byte(`{"key":"` + fixtureAWSKey + `","id":"` + fixtureChineseID + `"}`)
 	out, events := m.Mask(body)
 	if len(events) != 1 || events[0].RuleName() != "aws.access_key_id" {
@@ -221,7 +221,7 @@ func TestMaskerDisablePIISetting(t *testing.T) {
 
 func TestMaskerNilVaultNoOp(t *testing.T) {
 	rt, _ := NewRuntime(context.Background(), nil)
-	m := NewMasker(nil, rt)
+	m := NewMasker(nil, rt, 0)
 	body := []byte(`{"key":"` + fixtureAWSKey + `"}`)
 	out, events := m.Mask(body)
 	if len(events) != 0 || string(out) != string(body) {

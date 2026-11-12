@@ -256,27 +256,35 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 - 热车道：`internal/detector.Masker` 实现 `gateway.Masker`，从已发布快照收集启用插件的可遮蔽命中，交 `Vault.MaskCandidates` 渲染。内置 `secretmask` 命中保留 `RuleID`，渲染仍走精确的编译期规则元数据；第三方扫描器命中以 `MaskCandidate.Meta`（`secretmask.Rule` 描述符）携带渲染/审计身份。`Vault.Mask` 现在是 `MaskCandidates` 的内置特例。`MaskEvent.Meta` 让插件规则以自己的名字/厂商/类别写审计，内置事件 `Meta` 为零、行为不变。
 - 规则级开关走插件 `Settings`（DFA 是一台编译期机器，不能按规则拆插件）：`secretmask` 支持 `{"disable_pii":true,"disabled_rules":["pii.chinese_id",…]}`。
 - 审计车道：`internal/audit.Inspector.Detectors` 从快照取按 Point 索引的引擎（`AuditEngineFor`，取代旧的 `detect.New(secretmask.New())` 单扫描器硬编码）；`internal/reanalysis` 的 runner 由快照 `Runner()` 提供（`analyzer.NewRunnerList` 不做默认回退，禁用全部观测插件即得到空 runner）。
-- IR 作用域：每个插件用 `Points`（复用 `pkg/xir/hook.Point` 词汇）声明它作用的 XIR 字段——`secretmask` 作用于 system/message/tool_call/tool_result/reasoning/output 等文本字段，`access.indicators` 只作用于两侧 tool_call.arguments。审计投影节点经 `internal/audit.NodePoint` 映射到 Point，`detectObservation` 只在该 Point 声明的插件上扫描，`Detection` 输出携带 `point`。**加密内容结构性跳过**：`encrypted_content`/`thinking`/`inlineData` 等在 IR 里是 `xir.Sealed` 块，投影只保留 `Raw` 引用、永不生成 `Text`，`NodePoint` 对 sealed 返回空 Point，因此文本检测器根本看不到它们——跳过是字段投影的性质，而非检测器事后识别丢弃。热路径默认仍为字节级（opaque 保护由 `opaque.go` 兜底），IR 作用域在审计车道强制，并可通过 `secret_masking.hot_path_scope: ir` 在热路径启用（见下节）；`Points` 同时是目录事实，Monitor 抽屉展示插件的 IR 作用域。
+- IR 作用域：每个插件用 `Points`（复用 `pkg/xir/hook.Point` 词汇）声明它作用的 XIR 字段——`secretmask` 作用于 system/message/tool_declaration/tool_call/tool_result/reasoning/output 等文本字段，`access.indicators` 只作用于两侧 tool_call.arguments。审计投影节点经 `pkg/xir/audit.NodePoint` 映射到 Point，`detectObservation` 只在该 Point 声明的插件上扫描，`Detection` 输出携带 `point`。**只有签名/加密绑定的内容结构性跳过**：codec 把这类块标为 `xir.Sealed{ MustRoundTrip: true }`（Anthropic `redacted_thinking`、Responses `encrypted_content`、Gemini thought/thoughtSignature），投影只保留 `Raw`、永不生成 `Text`；而仅"原样保留"的未建模原生 part（如 Gemini `executableCode`）不置该标记，仍作为普通内容参与检测。Anthropic `thinking`（可见文本 + signature）在 IR 里不是 Sealed，由 `pkg/secretmask/opaque.go` 的整对象 opaque 规则保护；Gemini thought part 现在也走同一规则，因此字节路径与 IR 路径对它一致。热路径默认仍为字节级，IR 作用域可通过 `secret_masking.hot_path_scope: ir` 在热路径启用（见下节）；`Points` 同时是目录事实，Monitor 抽屉展示插件的 IR 作用域。
 
 ## 热路径的 XIR 作用域（opt-in）
 
 `secret_masking.hot_path_scope` 选择转发热路径的检测作用域方式：
 
 - `byte`（默认，留空同义）：零解析快路径。`detector.Masker` 用编译期 DFA 扫整个 body，opaque 由 `opaque.go` 兜底。这是插件化之前的行为，性能不变。
-- `ir`：`Masker.MaskWithProtocol` 先把请求体解析为 XIR 投影（`xir.ParseDocument` → codec `DecodeRequest` → `pkg/xir/audit.Build` 请求侧），收集 **Sealed 块**（加密推理/媒体/协议原生 opaque）的原始字节 span，然后扫描**整个 body 减去这些 Sealed span**（`internal/detector.ParseRequestScope` + `RequestScope.ScannableSpans`）。这是**保覆盖**的：字节路径扫到的每个字节这里仍扫到，只是结构性地排除加密内容。命中仍是原始字节偏移，交 `Vault.MaskCandidates` 渲染。解析失败（未知协议、decode 失败）时**回退字节快路径**。**热路径刻意不按 `Points` 字段收窄扫描范围**——凭据若落在非投影位置（JSON key、`user`/`metadata` 字段、JSON-only 的 tool result）仍必须被遮蔽，按字段收窄会漏检泄漏；字段级 `Points` 作用域只用于审计车道（advisory，无安全影响）。
+- `ir`：`Masker.MaskWithProtocol` 在**需要时**把请求体解析为 XIR 投影（`xir.ParseDocument` → codec `DecodeRequest`），一次遍历得到两样东西：
+  1. **sealed 集合**：只有 codec 标记 `MustRoundTrip` 的内容才被排除改写（签名/加密绑定：Anthropic `redacted_thinking`、Responses `encrypted_content`、Gemini thought/thoughtSignature）；被 codec 仅"原样保留"的未建模原生 part（Gemini `executableCode`）是普通内容，仍扫描、仍遮蔽。
+  2. **字段集合**：每个 `hook.Point` 的原始字节 span。声明了 `Points` 的热插件只扫描自己的字段（窄算法只付自己那份字节，也看不到无关文本）；未声明 `Points` 的插件保持整 body 覆盖。
 
-正确性由差分夹具钉住：`internal/detector` 的语料库（四协议，含加密推理/thinking/inlineData 的 opaque 用例，以及凭据位于 JSON key/user/metadata/结构化 tool result 的**覆盖边界用例**）上，IR 路径与字节路径的 wire 输出与 `MaskEvent` **逐字节一致**（`TestMaskerIRParityWithVault`）；`internal/proxy` 的 `TestHandlerMasksCredentialsIRScope` 端到端验证 IR 模式下上游遮蔽、等长、客户端还原、cassette 原文。Vault 的 `opaque.go` 在两条路径都仍是最终 opaque 守卫（即便投影未捕获某个 Sealed 区域，Vault 仍会拒绝其中的候选）。
+  热路径对 body **只做一次扫描**，再由 Vault 丢弃与 sealed span 相交的候选（`secretmask.Vault.MaskCandidatesExcluding`，与 opaque 候选同样是"交集即拒绝"）。它不再把 body 切成互补 span 分别扫描：切分会改变 DFA 在边界处的上下文窗口（手机号 24B 上下文、`NAME=value` 邻域），让同一输入与字节路径评分不同。内置 `secretmask` 保持整 body 覆盖（安全性由它兜底），`Points` 因此不影响它的热覆盖：JSON key、`user`/`metadata`、结构化 tool result 等非投影位置仍会被内置扫描。字段级 `Points` 用于审计车道与第三方热插件。
 
-**性能（arm64，`go test ./internal/detector -bench . -benchmem`，暖 vault、稀疏凭据）**：
+  解析按协议预过滤：chat-completions 的 codec 永远不产生 sealed part，body-only 模式下直接走字节路径、零解析；messages/responses/gemini 只有在 body 含 `redacted_thinking`/`encrypted_content`/`thought` 标记，或存在字段级热插件时才解析。解析失败、未知协议、或 body 超过 `secret_masking.ir_max_body_bytes`（默认 256 KiB，负值关闭上限）时回退字节快路径。协议转换后的 masking 使用转换目标的 wire 协议（`gateway.ProtocolConverter`），而不是客户端协议。
 
-| body | byte ns/op | ir ns/op | ir/byte | byte MB/s | ir MB/s | byte allocs | ir allocs |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 KiB | 42471 | 87418 | ≈2.06× | 31.7 | 15.4 | 9 | 175 |
-| 19 KiB | 598222 | 1206792 | ≈2.02× | 34.0 | 16.9 | 34 | 2251 |
-| 79 KiB | 2505872 | 4908417 | ≈1.96× | 32.4 | 16.6 | 88 | 8847 |
+正确性由差分夹具钉住：`internal/detector` 的语料库（四协议，含 Anthropic thinking / Responses encrypted reasoning / Gemini thought 与 executableCode / inlineData / 未建模 item，以及凭据位于 JSON key/user/metadata/结构化 tool result 的覆盖边界用例）上，IR 路径与字节路径的 wire 输出与 `MaskEvent` **逐字节一致**（`TestMaskerIRParityWithVault`）；`internal/proxy` 的 `TestHandlerMasksCredentialsIRScope` 钉住 chat 快路径，`TestHandlerMasksCredentialsIRScopeMessages` 端到端验证 sealed 块原样、可见值遮蔽/等长/客户端还原/cassette 原文。Vault 的 `opaque.go` 在两条路径都仍是最终 opaque 守卫。
 
-IR 路径约慢 2×、分配高约 20–100×，开销来自 `wire.Parse` + codec 解码 + `audit.Build` 投影（DFA 扫描本身两条路径相同）。因此默认 `byte` 保持快路径，`ir` 为需要**结构性 opaque 排除**（以 IR 投影识别 Sealed，替代 `opaque.go` 的惰性字节发现）时的显式选择，覆盖与字节路径一致。协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），透传与本地 Responses 两条路径一致；`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
-- 发布与一致性：`detector.Runtime` 持有原子快照，启动时构建、Monitor PATCH 成功后 `Republish` 重建；构建失败保留旧快照。管理 API 为 admin-only 的 `GET /api/detector-plugins` 与 `PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`）；禁用 hot 车道插件且 vault 仍有映射时返回 409 `plugin_in_use`（`mapping_count`），`force` 豁免。`plugins.detectors` 已加入 `internal/transfer` 的导入白名单（仅目标缺行才插入）。
+**性能（arm64，`go test ./internal/detector -bench 'BenchmarkIRMasker' -benchmem`）**：
+
+| body | byte ns/op | ir ns/op | ir/byte | byte allocs | ir allocs |
+| --- | --- | --- | --- | --- | --- |
+| chat 232 B | 13016 | 13023 | ≈1.00× | 16 | 16 |
+| chat 55 KB | 2,174,715 | 2,179,519 | ≈1.00× | 80 | 80 |
+| responses encrypted（0.5 KB） | 32305 | 54525 | ≈1.69× | 66 | 139 |
+| gemini thought（0.15 KB） | 20461 | 23620 | ≈1.15× | 43 | 57 |
+
+chat-completions 是零成本：codec 不产生 sealed，body-only 模式不解析。真正含 sealed 的小 body 只多付一次投影（几十 µs）；body 越大，投影占比越低（55 KB 的 `ParseRequestScope` 约 1.1 ms，而 DFA 扫描本身约 2.1 ms）。端到端（同一容器交替 A/B、cgroup CPU/请求、8 并发）实测：chat 小/大 body、responses sealed、gemini thought 的 IR 相对 byte 偏差在 **±5% 以内（噪声）**（此前 chat 大 body 为 +25%）。因此 `ir` 现在可以按需启用：它为 sealed 提供结构性保障、为字段级插件提供隔离，而不再有可感知的固定成本。
+
+协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），转换场景由 `gateway.ProtocolConverter` 换成目标协议；透传与本地 Responses 两条路径一致。`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
 
 ## 审计事件与审计表
 

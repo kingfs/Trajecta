@@ -30,6 +30,17 @@ type ProtocolMasker interface {
 	MaskWithProtocol(body []byte, protocol string) ([]byte, []secretmask.MaskEvent)
 }
 
+// ProtocolConverter is an optional Converter extension that names the wire
+// protocol of the body it produced. Masking must parse the converted body with
+// the target codec, not the client's: after a chat -> messages conversion the
+// bytes are messages-shaped, and parsing them as chat would either fail (and
+// silently fall back to the byte path) or, worse, read a sealed marker out of a
+// field that only exists in the other protocol.
+type ProtocolConverter interface {
+	Converter
+	UpstreamProtocol() string
+}
+
 // ConverterFactory builds a converter from the post-alias record body. It is
 // called only after the alias rewrite, because conversion protocol selection
 // depends on the wire model. Returning nil means native passthrough.
@@ -120,8 +131,14 @@ func (t RequestTransform) Apply(client []byte) (RequestResult, error) {
 	if t.Masker != nil {
 		var masked []byte
 		var events []secretmask.MaskEvent
-		if pm, ok := t.Masker.(ProtocolMasker); ok && t.Protocol != "" {
-			masked, events = pm.MaskWithProtocol(result.WireBody, t.Protocol)
+		maskProtocol := t.Protocol
+		if converted, ok := result.Converter.(ProtocolConverter); ok {
+			if upstream := strings.TrimSpace(converted.UpstreamProtocol()); upstream != "" {
+				maskProtocol = upstream
+			}
+		}
+		if pm, ok := t.Masker.(ProtocolMasker); ok && maskProtocol != "" {
+			masked, events = pm.MaskWithProtocol(result.WireBody, maskProtocol)
 		} else {
 			masked, events = t.Masker.Mask(result.WireBody)
 		}

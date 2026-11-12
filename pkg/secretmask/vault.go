@@ -397,6 +397,24 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 // Masking is idempotent: a value the vault already knows as a fake is left
 // alone, so masking a body twice is the same as masking it once.
 func (v *Vault) MaskCandidates(src []byte, cands []MaskCandidate) ([]byte, []MaskEvent) {
+	return v.maskCandidates(src, cands, nil)
+}
+
+// MaskCandidatesExcluding is MaskCandidates plus a set of byte ranges that must
+// not be rewritten, for the hot path's structurally sealed content (signed
+// reasoning, encrypted reasoning, redacted thinking). A candidate that overlaps
+// an excluded range by even one byte is dropped, exactly like a candidate that
+// overlaps an opaque protocol value: rewriting part of a signature-bound block
+// would change bytes the provider expects back verbatim. excluded must be sorted
+// by Start; RequestScope.SealedSpans returns it that way.
+func (v *Vault) MaskCandidatesExcluding(src []byte, cands []MaskCandidate, excluded []Span) ([]byte, []MaskEvent) {
+	if len(excluded) == 0 {
+		return v.maskCandidates(src, cands, nil)
+	}
+	return v.maskCandidates(src, cands, excluded)
+}
+
+func (v *Vault) maskCandidates(src []byte, cands []MaskCandidate, excluded []Span) ([]byte, []MaskEvent) {
 	if len(src) == 0 || len(cands) == 0 {
 		return src, nil
 	}
@@ -435,6 +453,11 @@ func (v *Vault) MaskCandidates(src []byte, cands []MaskCandidate) ([]byte, []Mas
 		// Check it before the lazy JSON walk so a body whose only candidates are
 		// suppressed does not pay for opaque-span discovery.
 		if suppressionHit(suppressions, c.ruleName(), src[c.Start:c.End]) {
+			continue
+		}
+		// Sealed content is excluded before the lazy JSON walk: a candidate
+		// inside it never needs opaque discovery.
+		if spanOverlapsAny(c.Finding.Span, excluded) {
 			continue
 		}
 		if !opaqueSpansKnown {
@@ -1106,4 +1129,18 @@ func renderCNMobile(real, ks []byte) []byte {
 		out[10] = '0' + (out[10]-'0'+1)%10
 	}
 	return out
+}
+
+// spanOverlapsAny reports whether span overlaps any of the sorted, disjoint
+// excluded ranges.
+func spanOverlapsAny(span Span, excluded []Span) bool {
+	for _, ex := range excluded {
+		if ex.Start >= span.End {
+			return false
+		}
+		if ex.End > span.Start {
+			return true
+		}
+	}
+	return false
 }

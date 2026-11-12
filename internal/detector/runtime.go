@@ -12,6 +12,13 @@ import (
 	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
+// hotScanner is one third-party hot-lane scanner plus the XIR points it declares.
+// An empty points slice means "not field-scoped": scan the whole body.
+type hotScanner struct {
+	scanner detect.Scanner
+	points  []hook.Point
+}
+
 // Snapshot is an immutable compiled execution state built from a Config. The
 // hot path and the read paths load it atomically; rebuilding happens only at
 // startup and when an operator changes the plugin state (Republish), never per
@@ -36,8 +43,10 @@ type Snapshot struct {
 
 	// hotScanners are the enabled hot-lane scanner plugins other than the
 	// builtin secretmask plugin (third-party detectors). Their maskable matches
-	// become Vault candidates carrying rule metadata.
-	hotScanners []detect.Scanner
+	// become Vault candidates carrying rule metadata. A scanner that declares
+	// hook Points is fed only those fields on the IR path; a scanner without
+	// Points keeps whole-body coverage.
+	hotScanners []hotScanner
 }
 
 // AuditEngine returns the compiled read-only engine for the audit detection
@@ -132,7 +141,7 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 				if err != nil {
 					return nil, fmt.Errorf("detector: build %q: %w", p.ID, err)
 				}
-				snap.hotScanners = append(snap.hotScanners, scanner)
+				snap.hotScanners = append(snap.hotScanners, hotScanner{scanner: scanner, points: p.Points})
 			}
 		case ContractObservation:
 			det, err := reg.NewDetector(cfg.SettingsFor(p.ID))

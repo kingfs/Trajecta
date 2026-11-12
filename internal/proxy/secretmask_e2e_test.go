@@ -42,12 +42,12 @@ func TestSecretMaskingFixtures(t *testing.T) {
 	}
 }
 
-// TestHandlerMasksCredentialsIRScope is the end-to-end contract for the XIR
-// field-scoped hot path (secret_masking.hot_path_scope: ir): with the detection
-// runtime wired, the proxy parses the request to the IR projection, scopes
-// detection to the declared fields, and still masks the wire, preserves length,
-// restores the client echo and records the original cassette — identically to
-// the byte path.
+// TestHandlerMasksCredentialsIRScope pins the chat-completions fast path with
+// secret_masking.hot_path_scope: ir configured. The chat codec can never produce
+// a must-round-trip block, so the hot path must not project the body at all:
+// behaviour and cost stay identical to the byte path. The sealed-protocol IR
+// path is covered by the detector parity corpus and by
+// TestHandlerMasksCredentialsIRScopeMessages below.
 func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -120,6 +120,103 @@ func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	}
 	if echoed.Echo != testOpenAIProjectKey {
 		t.Errorf("IR path: client received %q, want the original key restored", echoed.Echo)
+	}
+}
+
+// TestHandlerMasksCredentialsIRScopeMessages is the end-to-end contract for the
+// sealed-protocol IR path: a Messages request carries a redacted_thinking block
+// (must round-trip byte for byte) beside a visible credential. The upstream must
+// receive the sealed block verbatim and a stand-in for the visible value, the
+// client must get the original value restored, and the cassette must keep the
+// original bytes.
+func TestHandlerMasksCredentialsIRScopeMessages(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		seen := "(missing)"
+		if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 && i+len(testOpenAIProjectKey) <= len(body) {
+			seen = string(body[i : i+len(testOpenAIProjectKey)])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_mock", "type": "message", "role": "assistant", "model": "claude-test",
+			"content":     []map[string]any{{"type": "text", "text": seen}},
+			"stop_reason": "end_turn", "usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Upstream.ApiKey = "sk-test-upstream"
+	cfg.Upstream.ProviderPreset = "anthropic"
+	cfg.Upstream.APIType = "messages"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+	cfg.SecretMasking.HotPathScope = "ir"
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	rt, err := detector.NewRuntime(context.Background(), st)
+	if err != nil {
+		t.Fatalf("detector.NewRuntime() error = %v", err)
+	}
+	handler.SetDetectorRuntime(rt)
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	body := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"assistant","content":[` +
+		`{"type":"redacted_thinking","data":"` + testGoogleAPIKey + `c2VhbGVk"},` +
+		`{"type":"text","text":"visible ` + testOpenAIProjectKey + `"}]}]}`
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/messages", "application/json",
+		strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+	}
+	if strings.Contains(upstreamBody, testOpenAIProjectKey) {
+		t.Errorf("upstream received the visible real value")
+	}
+	if !strings.Contains(upstreamBody, "sk-proj-") {
+		t.Errorf("upstream lost the visible stand-in: %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, testGoogleAPIKey+"c2VhbGVk") {
+		t.Errorf("sealed redacted_thinking block was not preserved: %s", upstreamBody)
+	}
+	var echoed struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(respBody, &echoed); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(echoed.Content) != 1 || echoed.Content[0].Text != testOpenAIProjectKey {
+		t.Errorf("client did not receive the original value: %+v", echoed.Content)
+	}
+	path := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(path, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	_, recordedBody, _, _ := recordfile.ExtractSections(mustReadFile(t, path), parsed)
+	if !strings.Contains(string(recordedBody), testOpenAIProjectKey) {
+		t.Errorf("the cassette did not record the original body: %s", recordedBody)
 	}
 }
 

@@ -37,9 +37,10 @@ func decodePart(node *wire.Node, path string) (xir.Part, error) {
 			Text:      text,
 			Signature: signature,
 			Sealed: &xir.Sealed{
-				Protocol: xir.ProtocolGemini,
-				Kind:     reasoningSealedKind(thought, signature),
-				Raw:      cloneRaw(node.Raw()),
+				Protocol:      xir.ProtocolGemini,
+				Kind:          reasoningSealedKind(thought, signature),
+				Raw:           cloneRaw(node.Raw()),
+				MustRoundTrip: true,
 			},
 		}
 	}

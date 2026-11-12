@@ -174,6 +174,9 @@ var opaqueJSONPrefilterTokens = func() [][]byte {
 	for _, objectType := range opaqueJSONObjectTypes {
 		tokens = append(tokens, quotedJSONString(objectType))
 	}
+	// A Gemini thought part is identified by members, not by a "type" value:
+	// {"thought":true,...} or {... "thoughtSignature":"..."}.
+	tokens = append(tokens, quotedJSONString("thought"))
 	for _, scoped := range opaqueJSONScopedFields {
 		tokens = append(tokens, quotedJSONString(scoped.objectType))
 	}
@@ -297,6 +300,11 @@ func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, sta
 	var objectType string
 	var pending []opaqueValueSpan
 	var scoped []scopedOpaqueValue
+	// thoughtBound marks a Gemini thought part. Its text is verified by the
+	// thoughtSignature (or the thought flag itself marks the part as reasoning
+	// state), so the provider expects the whole part back unmodified; masking
+	// any byte of it is as fatal as masking an Anthropic thinking block.
+	thoughtBound := false
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
@@ -316,6 +324,35 @@ func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, sta
 			}
 			if decoded, ok := decodeJSONString(src[span.start:span.end]); ok {
 				objectType = decoded
+			}
+			continue
+		}
+		if key == "thought" {
+			if nextJSONValueIsScalar(src, dec) {
+				span, err := opaqueValueSpanFor(dec, src)
+				if err != nil {
+					return err
+				}
+				if bytes.Equal(src[span.start:span.end], []byte("true")) {
+					thoughtBound = true
+				}
+				continue
+			}
+			if err := walkJSONValue(dec, src, spans); err != nil {
+				return err
+			}
+			continue
+		}
+		if key == "thoughtSignature" || key == "thought_signature" {
+			thoughtBound = true
+			if nextJSONValueIsScalar(src, dec) {
+				if _, err := opaqueValueSpanFor(dec, src); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := walkJSONValue(dec, src, spans); err != nil {
+				return err
 			}
 			continue
 		}
@@ -373,7 +410,7 @@ func walkJSONObject(dec *json.Decoder, src []byte, spans *[]opaqueValueSpan, sta
 	if _, err := dec.Token(); err != nil { // closing '}'
 		return err
 	}
-	if isOpaqueJSONObjectType(objectType) {
+	if isOpaqueJSONObjectType(objectType) || thoughtBound {
 		end := int(dec.InputOffset())
 		if start < 0 || end > len(src) || end <= start || src[start] != '{' || src[end-1] != '}' {
 			return errJSONValueSpan
@@ -420,6 +457,17 @@ func opaqueValueSpanFor(dec *json.Decoder, src []byte) (opaqueValueSpan, error) 
 func nextJSONValueIsString(src []byte, dec *json.Decoder) bool {
 	start := jsonValueStart(src, int(dec.InputOffset()))
 	return start >= 0 && start < len(src) && src[start] == '"'
+}
+
+// nextJSONValueIsScalar reports whether the next value is not an object or an
+// array, so consuming it as one RawMessage cannot skip nested members that the
+// walker still has to examine.
+func nextJSONValueIsScalar(src []byte, dec *json.Decoder) bool {
+	start := jsonValueStart(src, int(dec.InputOffset()))
+	if start < 0 || start >= len(src) {
+		return false
+	}
+	return src[start] != '{' && src[start] != '['
 }
 
 // jsonValueStart returns the first byte of the value following an object key.

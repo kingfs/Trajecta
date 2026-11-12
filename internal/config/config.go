@@ -353,13 +353,19 @@ type LimitConfig struct {
 type SecretMaskingConfig struct {
 	Enabled      bool                         `yaml:"enabled"`
 	MappingStore SecretMaskMappingStoreConfig `yaml:"mapping_store"`
+	// IRMaxBodyBytes bounds the request body the hot path may project through
+	// an XIR codec when secret_masking.hot_path_scope is ir. Zero keeps the
+	// 256 KiB built-in bound; a negative value disables the bound. Bodies over
+	// the bound keep the byte fast path, which is still fully covered.
+	IRMaxBodyBytes int `yaml:"ir_max_body_bytes"`
 	// HotPathScope selects how the forwarding hot path scopes detection. "byte"
 	// (the default, also empty) scans the whole body with the compiled DFA and
-	// the opaque.go guard — the zero-parse fast path. "ir" parses the request to
-	// the XIR projection and scans only the fields each detection plugin declares,
-	// excluding sealed/encrypted content structurally; it is functionally
-	// equivalent on representative traffic but costs an extra parse (measured
-	// ~2x the byte path), so it is opt-in.
+	// the opaque.go guard - the zero-parse fast path. "ir" projects the request
+	// to the XIR once and uses the result two ways: sealed (must-round-trip)
+	// content is excluded from replacement, and a plugin that declares hook
+	// Points scans only those fields. The builtin scanner keeps whole-body
+	// coverage; protocols whose codec cannot produce a sealed part (chat
+	// completions) stay on the byte path.
 	HotPathScope string `yaml:"hot_path_scope"`
 }
 
@@ -939,6 +945,7 @@ func applyEnvOverrides(cfg *Config) {
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
 	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
 	envString(&cfg.SecretMasking.HotPathScope, "TRAJECTA_SECRET_MASKING_HOT_PATH_SCOPE")
+	envInt(&cfg.SecretMasking.IRMaxBodyBytes, "TRAJECTA_SECRET_MASKING_IR_MAX_BODY_BYTES")
 	envBool(&cfg.SecretMasking.MappingStore.Enabled, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED")
 	envString(&cfg.SecretMasking.MappingStore.Path, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_PATH")
 	envInt(&cfg.SecretMasking.MappingStore.LoadLimit, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_LOAD_LIMIT")

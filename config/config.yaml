@@ -198,6 +198,13 @@ telemetry:
 # up from the file before rendering a new stand-in.
 secret_masking:
   enabled: true
+  # byte (default) is the zero-parse fast path. ir projects the request once to
+  # exclude signature-bound content and to scope point-declaring plugins to their
+  # fields; chat-completions bodies skip the projection entirely.
+  hot_path_scope: byte
+  # Upper bound on the body the hot path may project when hot_path_scope is ir.
+  # 0 keeps the 256 KiB built-in bound; a negative value disables the bound.
+  ir_max_body_bytes: 262144
   mapping_store:
     enabled: true
     # path: ""        # default {{output_dir}}/secret_mask_mappings.db

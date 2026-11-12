@@ -58,7 +58,7 @@ func assertMaskEquivalent(t *testing.T, name string, body []byte, masker *Masker
 	want := outcomeOf(wantWire, wantEvents)
 
 	gotVault := secretmask.NewVault(seed)
-	gotMasker := NewMasker(gotVault, masker.rt)
+	gotMasker := NewMasker(gotVault, masker.rt, 0)
 	gotWire, gotEvents := gotMasker.Mask(body)
 	got := outcomeOf(gotWire, gotEvents)
 
@@ -100,7 +100,7 @@ func TestMaskerIRParityWithVault(t *testing.T) {
 			want := outcomeOf(wantWire, wantEvents)
 
 			gotVault := secretmask.NewVault(seed)
-			m := NewMasker(gotVault, rt)
+			m := NewMasker(gotVault, rt, 0)
 			gotWire, gotEvents := m.MaskWithProtocol(body, entry.protocol)
 			got := outcomeOf(gotWire, gotEvents)
 
@@ -119,7 +119,7 @@ func TestMaskerByteParityWithVault(t *testing.T) {
 	}
 	for _, entry := range maskCorpus() {
 		t.Run(entry.name, func(t *testing.T) {
-			assertMaskEquivalent(t, entry.name, []byte(entry.body), NewMasker(nil, rt))
+			assertMaskEquivalent(t, entry.name, []byte(entry.body), NewMasker(nil, rt, 0))
 		})
 	}
 }

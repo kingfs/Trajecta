@@ -44,6 +44,16 @@ type protocolConversion struct {
 	responseWarnings []protocolconvert.Warning
 }
 
+// UpstreamProtocol names the wire protocol of the body ConvertRequest produces.
+// The gateway uses it so protocol-aware masking parses the converted bytes with
+// the target codec rather than the client's.
+func (c *protocolConversion) UpstreamProtocol() string {
+	if c == nil {
+		return ""
+	}
+	return string(c.upstreamProtocol)
+}
+
 // conversionForSelection decides whether this selection needs conversion.
 // It returns nil for the overwhelmingly common cases: conversion disabled,
 // a non-convertible endpoint, or native passthrough. Correctness rules:

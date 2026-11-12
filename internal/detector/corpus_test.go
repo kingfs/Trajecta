@@ -94,6 +94,36 @@ func maskCorpus() []corpusEntry {
 			body:     `{"model":"gpt-5","metadata":{"token":"` + corpusAWSKey + `"},"messages":[{"role":"user","content":"hi"}]}`,
 		},
 		{
+			// A Gemini thought part is signature-bound: neither path may
+			// rewrite it, while the sibling visible part is masked.
+			name:     "gemini_thought_text",
+			protocol: "gemini",
+			body: `{"contents":[{"role":"model","parts":[` +
+				`{"text":"my key is ` + corpusAWSKey + `","thought":true},` +
+				`{"text":"visible key ` + corpusAWSKey + `"}]}]}`,
+		},
+		{
+			name:     "gemini_thought_signature",
+			protocol: "gemini",
+			body: `{"contents":[{"role":"model","parts":[` +
+				`{"text":"key ` + corpusAWSKey + `","thought":true,"thoughtSignature":"c2ln"},` +
+				`{"text":"visible key ` + corpusAWSKey + `"}]}]}`,
+		},
+		{
+			// An unmodeled native part is not signature-bound: it is ordinary
+			// content and must be masked by both paths.
+			name:     "gemini_executable_code",
+			protocol: "gemini",
+			body: `{"contents":[{"role":"model","parts":[` +
+				`{"executableCode":{"language":"PYTHON","code":"key = '` + corpusAWSKey + `'"}}]}]}`,
+		},
+		{
+			name:     "responses_unknown_item",
+			protocol: "responses",
+			body: `{"model":"gpt-5","input":[{"type":"web_search_call","id":"x","query":"` +
+				corpusAWSKey + `"}]}`,
+		},
+		{
 			name:     "messages_structured_tool_result",
 			protocol: "messages",
 			body:     `{"model":"claude","max_tokens":256,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"` + corpusAWSKey + `"}]}]}]}`,

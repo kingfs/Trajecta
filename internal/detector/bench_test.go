@@ -23,7 +23,7 @@ func benchMasker(b *testing.B, body []byte, ir bool) {
 		b.Fatal(err)
 	}
 	vault := secretmask.NewVault([]byte("hot-path-bench-seed"))
-	m := NewMasker(vault, rt)
+	m := NewMasker(vault, rt, 0)
 	mask := func() int {
 		if ir {
 			_, events := m.MaskWithProtocol(body, "chat_completions")

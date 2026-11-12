@@ -364,10 +364,26 @@ type Reasoning struct {
 
 // Sealed is a protocol-native opaque block. Its bytes are preserved, but it
 // must only be re-emitted by the protocol that produced it.
+//
+// MustRoundTrip separates two kinds of preserved block that look the same in
+// the IR but mean opposite things to a content detector:
+//
+//   - true: the surrounding wire object is bound by a signature, ciphertext or
+//     integrity check. A stand-in that rewrites any byte of it (including
+//     visible text next to the signature, such as an Anthropic thinking block
+//     or a Gemini thought part) makes the provider reject the request, so a
+//     content scanner must never be fed it.
+//   - false: the block is merely unmodeled - a protocol-native part this codec
+//     does not type, such as Gemini executableCode. It is preserved for
+//     re-emission, but it is ordinary content: a credential inside it must
+//     still be detected and masked.
+//
+// A codec sets this flag; a consumer must not infer it from Kind.
 type Sealed struct {
-	Protocol Protocol
-	Kind     string
-	Raw      json.RawMessage
+	Protocol      Protocol
+	Kind          string
+	Raw           json.RawMessage
+	MustRoundTrip bool
 }
 
 // Citation is one model citation.

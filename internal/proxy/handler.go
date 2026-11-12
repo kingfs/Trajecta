@@ -323,7 +323,11 @@ func (h *Handler) SetDetectorRuntime(rt *detector.Runtime) {
 	}
 	h.detectorRuntime = rt
 	if h.secretVault != nil && rt != nil && h.maskRef != nil {
-		h.maskRef.m = detector.NewMasker(h.secretVault, rt)
+		maxScopeBytes := 0
+		if h.cfg != nil {
+			maxScopeBytes = h.cfg.SecretMasking.IRMaxBodyBytes
+		}
+		h.maskRef.m = detector.NewMasker(h.secretVault, rt, maxScopeBytes)
 	}
 }
 

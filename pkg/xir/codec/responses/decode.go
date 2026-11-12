@@ -239,9 +239,10 @@ func decodeReasoningItem(item *wire.Node) xir.Message {
 		reasoning.EncryptedContent = encrypted
 		// The whole item is sealed: only the Responses codec may re-emit it.
 		reasoning.Sealed = &xir.Sealed{
-			Protocol: xir.ProtocolResponses,
-			Kind:     "reasoning",
-			Raw:      cloneRaw(item.Raw()),
+			Protocol:      xir.ProtocolResponses,
+			Kind:          "reasoning",
+			Raw:           cloneRaw(item.Raw()),
+			MustRoundTrip: true,
 		}
 	}
 

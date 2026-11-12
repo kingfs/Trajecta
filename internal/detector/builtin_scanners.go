@@ -31,6 +31,7 @@ func init() {
 			Points: []hook.Point{
 				hook.PointRequestSystem,
 				hook.PointRequestMessage,
+				hook.PointRequestToolDecl,
 				hook.PointRequestToolCall,
 				hook.PointRequestToolResult,
 				hook.PointResponseOutput,
