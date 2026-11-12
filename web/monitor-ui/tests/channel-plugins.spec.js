@@ -9,6 +9,7 @@ import { expect, test } from "@playwright/test";
 let pluginPatches = [];
 let channelCreates = [];
 let pluginState;
+let catalogOverride = null;
 
 function alibabaPlugin(overrides = {}) {
   return {
@@ -98,6 +99,7 @@ test.beforeEach(async ({ page }) => {
   pluginPatches = [];
   channelCreates = [];
   pluginState = alibabaPlugin();
+  catalogOverride = null;
   await page.addInitScript(() => {
     window.localStorage.setItem("trajecta.monitor.language", "en");
   });
@@ -138,7 +140,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: pluginState });
     }
     if (path === "/api/catalog/providers") {
-      return route.fulfill({ json: catalogPayload() });
+      return route.fulfill({ json: catalogOverride || catalogPayload() });
     }
     if (path === "/api/provider-presets") {
       return route.fulfill({
@@ -235,6 +237,8 @@ test("creating a channel from a plan sends one key and both protocol endpoints",
   await dialog.getByRole("combobox").click();
   await page.getByRole("option", { name: "Coding Plan" }).click();
   await dialog.getByPlaceholder("sk-sp-...").fill("sk-sp-test-key");
+  // The models hint lives in the placeholder, not as a separate line.
+  await expect(dialog.getByPlaceholder("Optional. One per line or comma-separated; they are created enabled on this channel.")).toBeVisible();
   await dialog.getByRole("button", { name: "Create channel" }).click();
   await expect(dialog).toBeHidden();
   expect(channelCreates).toHaveLength(1);
@@ -247,6 +251,31 @@ test("creating a channel from a plan sends one key and both protocol endpoints",
   expect(body.capabilities.messages).toBe(true);
   expect(body.capabilities.chat_completions).toBe(true);
   expect(body.api_key).toBe("sk-sp-test-key");
+});
+
+test("the catalog search box only appears with nine or more cards", async ({ page }) => {
+  pluginState = alibabaPlugin({ enabled: true });
+  await page.goto("/channels");
+  await page.getByRole("button", { name: "New channel" }).click();
+  const dialog = page.locator(".provider-create-modal");
+  await expect(dialog.locator(".provider-catalog-card")).toHaveCount(1);
+  // A small catalog needs no search box, and the redundant hints are gone.
+  await expect(dialog.getByRole("searchbox")).toHaveCount(0);
+  await expect(dialog.getByText("Pick a built-in provider.", { exact: false })).toHaveCount(0);
+  await expect(dialog.getByText("Select a provider above", { exact: false })).toHaveCount(0);
+  // Nine cards bring the search box back. A fresh page load resets the query
+  // cache, so the catalog is refetched through the override.
+  catalogOverride = {
+    items: Array.from({ length: 9 }, (_, i) => ({ ...alibabaPlugin().preset, id: `vendor-${i}`, name: `Vendor ${i}`, name_zh: `厂商 ${i}` })),
+  };
+  await page.reload();
+  await page.getByRole("button", { name: "New channel" }).click();
+  await expect(dialog.locator(".provider-catalog-card")).toHaveCount(9);
+  const search = dialog.getByRole("searchbox");
+  await expect(search).toBeVisible();
+  await search.fill("Vendor 3");
+  await expect(dialog.locator(".provider-catalog-card")).toHaveCount(1);
+  await expect(dialog.locator(".provider-catalog-card")).toContainText("Vendor 3");
 });
 
 test("an empty catalog points the operator to the plugins page", async ({ page }) => {

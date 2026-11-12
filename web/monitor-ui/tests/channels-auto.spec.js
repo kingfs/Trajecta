@@ -254,7 +254,7 @@ test("channels use channel terminology and a two-mode create form", async ({ pag
   await expect(dialog.getByLabel("API key")).toBeVisible();
   await expect(dialog.getByRole("switch", { name: "Enabled" })).toBeVisible();
   await expect(dialog.getByLabel("Models")).toBeVisible();
-  await expect(page.getByText("Pick a built-in provider. Its endpoint is already known; you only need the API key.")).toBeVisible();
+  await expect(dialog.getByText("Built-in providers")).toBeVisible();
   // The official mode does not ask for a URL in the primary form; the catalog
   // supplies it and Advanced options can override it.
   await expect(dialog.getByLabel("Base URL")).toHaveCount(0);
