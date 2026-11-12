@@ -4385,11 +4385,6 @@ a:focus-visible {
    so the narrow-screen collapse applies unchanged. Cards present the vendor
    (name, description, docs/key links); the detail drawer carries interfaces,
    API bases and plans. */
-.plugins-intro {
-  margin: 0 0 14px;
-  max-width: 860px;
-}
-
 .plugins-toolbar {
   display: flex;
   justify-content: flex-end;

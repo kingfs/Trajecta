@@ -93,7 +93,6 @@ export function ChannelPluginsPanel() {
 
   return (
     <>
-      <p className="trace-subline plugins-intro">{t("plugins.intro")}</p>
       <div className="plugins-toolbar">
         <Input
           type="search"
@@ -167,11 +166,12 @@ export function ChannelPluginsPanel() {
         enabled={Boolean(detailItem?.enabled)}
         onToggle={detailItem ? (next) => onToggle(detailItem, next) : undefined}
         toggleDisabled={busyID === detailID || enable.isPending}
+        escapeBlocked={Boolean(conflict)}
       />
 
       {conflict ? (
         <Dialog open onOpenChange={(next) => (next ? undefined : setConflict(null))}>
-          <DialogContent>
+          <DialogContent onEscapeKeyDown={(event) => { if (detailItem) event.preventDefault(); }}>
             <DialogHeader>
               <div>
                 <p className="eyebrow">{t("plugins.disableCheck")}</p>

@@ -457,7 +457,13 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
   return (
     <>
     <Dialog open onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent className="provider-create-modal">
+      <DialogContent
+        className="provider-create-modal"
+        // While the plugin drawer is open it owns Escape. Radix only lets the
+        // topmost layer dismiss, but in the mount race window both listeners
+        // can fire; preventDefault here keeps the form open regardless.
+        onEscapeKeyDown={(event) => { if (pluginDetail) event.preventDefault(); }}
+      >
         <form onSubmit={submit}>
           <DialogHeader>
             <div>
@@ -480,9 +486,10 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                 <div className="provider-catalog-head">
                   <div>
                     <strong>{t("providers.selectProvider")}</strong>
-                    <p className="trace-subline">{t("providers.modeOfficialHint")}</p>
                   </div>
-                  <Input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder={t("providers.searchProviders")} aria-label={t("providers.searchProviders")} />
+                  {catalogItems.length >= 9 ? (
+                    <Input type="search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder={t("providers.searchProviders")} aria-label={t("providers.searchProviders")} />
+                  ) : null}
                 </div>
                 <div className="provider-catalog-scroll">
                   <div className="provider-catalog-grid">
@@ -527,7 +534,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                     <Link2 size={14} aria-hidden="true" />
                   </Button>
                 </div>
-              ) : <p className="trace-subline provider-form-wide">{t("providers.selectProviderHint")}</p>}
+              ) : null}
               {selectedCatalogItem?.plans?.length ? (
                 <label className="provider-form-wide">{t("providers.plan")}
                   <Select
@@ -545,8 +552,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                 </label>
               ) : null}
               <label className="provider-form-wide">{t("providers.models")}
-                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder="gpt-5&#10;gpt-5-mini" spellCheck={false} />
-                <span className="trace-subline">{t("providers.modelsHint")}</span>
+                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder={t("providers.modelsHint")} spellCheck={false} />
               </label>
               <label className="provider-form-check provider-form-wide">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
             </div>
@@ -567,8 +573,7 @@ function CreateProviderDialog({ presetData, catalog, onClose, onCreated }) {
                 </div>
               </fieldset>
               <label className="provider-form-wide">{t("providers.models")}
-                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder="model-a&#10;model-b" spellCheck={false} />
-                <span className="trace-subline">{t("providers.modelsHint")}</span>
+                <textarea value={form.models} onChange={(event) => updateForm("models", event.target.value)} placeholder={t("providers.modelsHint")} spellCheck={false} />
               </label>
               <label className="provider-form-check provider-form-wide">{t("providers.enabled")}<Switch checked={Boolean(form.enabled)} onChange={(enabled) => updateForm("enabled", enabled)} label={t("providers.enabled")} /></label>
             </div>
