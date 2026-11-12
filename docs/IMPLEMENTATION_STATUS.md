@@ -175,7 +175,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 - `detector.Runtime` 持原子快照，启动构建、Monitor PATCH 后 `Republish`。管理 API：admin `GET /api/detector-plugins`、`PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`），禁用 hot 插件且仍有映射时 409 `plugin_in_use`（`mapping_count`）。Monitor「插件」页有「检测算法」tab，抽屉展示规则与 IR 作用域。
 - **替换不可插拔**：热车道 `detector.Masker`（`gateway.Masker`）收集启用插件命中交 `secretmask.Vault.MaskCandidates`，保形等长/opaque/幂等/抑制/还原仍由 Vault 集中强制。规则级开关走插件 `Settings`（`secretmask`：`disable_pii`、`disabled_rules`）。
 - 每个插件声明 `Points`（`pkg/xir/hook.Point` 词汇）。审计车道按 Point 索引引擎（`Snapshot.AuditEngineFor`），`pkg/xir/audit.NodePoint` 把投影节点映射到 Point，Sealed/加密内容因无 `Text` 结构性跳过，`Detection` 携带 `point`。
-- **热路径 XIR 作用域（opt-in）**：`secret_masking.hot_path_scope: byte|ir`，默认 `byte`（零解析快路径，行为与性能同插件化前）。`ir` 时 `Masker.MaskWithProtocol` 解析请求为 XIR 投影、按插件 `Points` 取字段原始字节 span 扫描（`ParseRequestScope`，Sealed 结构性排除），无法作用域化时回退字节路径。差分夹具证明 IR 与字节路径在四协议语料（含 opaque）上 wire 输出与事件逐字节一致；`internal/proxy` 有 IR 模式端到端测试。性能（arm64）：IR 约慢 2×（16 vs 32 MB/s）、分配高约 20–100×（`wire.Parse`+codec+`audit.Build` 开销），故默认 byte。详见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md) 的热路径 XIR 作用域一节。
+- **热路径 XIR 作用域（opt-in）**：`secret_masking.hot_path_scope: byte|ir`，默认 `byte`（零解析快路径，行为与性能同插件化前）。`ir` 时 `Masker.MaskWithProtocol` 解析请求为 XIR 投影、收集 Sealed 块字节 span，扫描**整个 body 减去 Sealed span**（`ParseRequestScope` + `ScannableSpans`，保覆盖：JSON key/user/metadata/结构化 tool result 等非投影位置的凭据仍被遮蔽），Sealed 结构性排除；解析失败回退字节路径。字段级 `Points` 作用域只用于审计车道，不收窄热路径扫描范围。差分夹具（四协议 + opaque + 结构位置覆盖用例）证明 IR 与字节路径 wire 输出与事件逐字节一致；`internal/proxy` 有 IR 模式端到端测试。性能（arm64）：IR 约慢 2×（16 vs 32 MB/s）、分配高约 20–100×（`wire.Parse`+codec+`audit.Build` 开销），故默认 byte。详见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md) 的热路径 XIR 作用域一节。
 
 ## 语义解析、审计与重分析
 

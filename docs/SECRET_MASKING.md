@@ -263,19 +263,19 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 `secret_masking.hot_path_scope` 选择转发热路径的检测作用域方式：
 
 - `byte`（默认，留空同义）：零解析快路径。`detector.Masker` 用编译期 DFA 扫整个 body，opaque 由 `opaque.go` 兜底。这是插件化之前的行为，性能不变。
-- `ir`：`Masker.MaskWithProtocol` 先把请求体解析为 XIR 投影（`xir.ParseDocument` → codec `DecodeRequest` → `pkg/xir/audit.Build` 请求侧），按插件 `Points` 取对应字段的**原始字节 span**（`internal/detector.ParseRequestScope`），只在这些 span 内扫描；Sealed 块不贡献 span，加密内容结构性排除。命中仍是原始字节偏移，交 `Vault.MaskCandidates` 渲染。无法作用域化（未知协议、解析失败、文本节点无 wire span）时**回退字节快路径**，绝不因作用域化漏检。
+- `ir`：`Masker.MaskWithProtocol` 先把请求体解析为 XIR 投影（`xir.ParseDocument` → codec `DecodeRequest` → `pkg/xir/audit.Build` 请求侧），收集 **Sealed 块**（加密推理/媒体/协议原生 opaque）的原始字节 span，然后扫描**整个 body 减去这些 Sealed span**（`internal/detector.ParseRequestScope` + `RequestScope.ScannableSpans`）。这是**保覆盖**的：字节路径扫到的每个字节这里仍扫到，只是结构性地排除加密内容。命中仍是原始字节偏移，交 `Vault.MaskCandidates` 渲染。解析失败（未知协议、decode 失败）时**回退字节快路径**。**热路径刻意不按 `Points` 字段收窄扫描范围**——凭据若落在非投影位置（JSON key、`user`/`metadata` 字段、JSON-only 的 tool result）仍必须被遮蔽，按字段收窄会漏检泄漏；字段级 `Points` 作用域只用于审计车道（advisory，无安全影响）。
 
-正确性由差分夹具钉住：`internal/detector` 的语料库（四协议、含加密推理/thinking/inlineData 的 opaque 用例）上，IR 路径与字节路径的 wire 输出与 `MaskEvent` **逐字节一致**（`TestMaskerIRParityWithVault`）；`internal/proxy` 的 `TestHandlerMasksCredentialsIRScope` 端到端验证 IR 模式下上游遮蔽、等长、客户端还原、cassette 原文。Vault 的 `opaque.go` 在两条路径都仍是最终 opaque 守卫。
+正确性由差分夹具钉住：`internal/detector` 的语料库（四协议，含加密推理/thinking/inlineData 的 opaque 用例，以及凭据位于 JSON key/user/metadata/结构化 tool result 的**覆盖边界用例**）上，IR 路径与字节路径的 wire 输出与 `MaskEvent` **逐字节一致**（`TestMaskerIRParityWithVault`）；`internal/proxy` 的 `TestHandlerMasksCredentialsIRScope` 端到端验证 IR 模式下上游遮蔽、等长、客户端还原、cassette 原文。Vault 的 `opaque.go` 在两条路径都仍是最终 opaque 守卫（即便投影未捕获某个 Sealed 区域，Vault 仍会拒绝其中的候选）。
 
 **性能（arm64，`go test ./internal/detector -bench . -benchmem`，暖 vault、稀疏凭据）**：
 
 | body | byte ns/op | ir ns/op | ir/byte | byte MB/s | ir MB/s | byte allocs | ir allocs |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 KiB | 42944 | 88621 | ≈2.06× | 31.3 | 15.2 | 9 | 180 |
-| 19 KiB | 601679 | 1207000 | ≈2.01× | 33.8 | 16.9 | 34 | 2264 |
-| 79 KiB | 2517886 | 4927286 | ≈1.96× | 32.3 | 16.5 | 88 | 8885 |
+| 1 KiB | 42471 | 87418 | ≈2.06× | 31.7 | 15.4 | 9 | 175 |
+| 19 KiB | 598222 | 1206792 | ≈2.02× | 34.0 | 16.9 | 34 | 2251 |
+| 79 KiB | 2505872 | 4908417 | ≈1.96× | 32.4 | 16.6 | 88 | 8847 |
 
-IR 路径约慢 2×、分配高约 20–100×，开销来自 `wire.Parse` + codec 解码 + `audit.Build` 投影（DFA 扫描本身两条路径相同）。因此默认 `byte` 保持快路径，`ir` 为需要字段级精度/结构性 opaque 排除时的显式选择。协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），透传与本地 Responses 两条路径一致；`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
+IR 路径约慢 2×、分配高约 20–100×，开销来自 `wire.Parse` + codec 解码 + `audit.Build` 投影（DFA 扫描本身两条路径相同）。因此默认 `byte` 保持快路径，`ir` 为需要**结构性 opaque 排除**（以 IR 投影识别 Sealed，替代 `opaque.go` 的惰性字节发现）时的显式选择，覆盖与字节路径一致。协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），透传与本地 Responses 两条路径一致；`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
 - 发布与一致性：`detector.Runtime` 持有原子快照，启动时构建、Monitor PATCH 成功后 `Republish` 重建；构建失败保留旧快照。管理 API 为 admin-only 的 `GET /api/detector-plugins` 与 `PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`）；禁用 hot 车道插件且 vault 仍有映射时返回 409 `plugin_in_use`（`mapping_count`），`force` 豁免。`plugins.detectors` 已加入 `internal/transfer` 的导入白名单（仅目标缺行才插入）。
 
 ## 审计事件与审计表

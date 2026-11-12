@@ -74,6 +74,30 @@ func maskCorpus() []corpusEntry {
 			protocol: "chat_completions",
 			body:     largeChatBody(40, 8),
 		},
+		// Coverage-boundary cases: credentials in positions the audit projection
+		// does not represent as Text. The hot path must still mask them (the IR
+		// scan universe is the whole body minus sealed spans, not just text
+		// fields), so these pin parity with the byte path.
+		{
+			name:     "chat_credential_in_json_key",
+			protocol: "chat_completions",
+			body:     `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"` + corpusAWSKey + `":"structural-value"}`,
+		},
+		{
+			name:     "chat_credential_in_user_field",
+			protocol: "chat_completions",
+			body:     `{"model":"gpt-5","user":"` + corpusAWSKey + `","messages":[{"role":"user","content":"hi"}]}`,
+		},
+		{
+			name:     "chat_credential_in_metadata",
+			protocol: "chat_completions",
+			body:     `{"model":"gpt-5","metadata":{"token":"` + corpusAWSKey + `"},"messages":[{"role":"user","content":"hi"}]}`,
+		},
+		{
+			name:     "messages_structured_tool_result",
+			protocol: "messages",
+			body:     `{"model":"claude","max_tokens":256,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"` + corpusAWSKey + `"}]}]}]}`,
+		},
 	}
 }
 

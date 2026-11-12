@@ -33,20 +33,11 @@ type Snapshot struct {
 	secretmaskHot bool
 	smSettings    secretmaskSettings
 	smDisabled    map[string]bool
-	// smPoints is the builtin secretmask plugin's declared XIR scope, used by
-	// the IR-scoped hot path to scan only those fields.
-	smPoints []hook.Point
 
 	// hotScanners are the enabled hot-lane scanner plugins other than the
 	// builtin secretmask plugin (third-party detectors). Their maskable matches
 	// become Vault candidates carrying rule metadata.
-	hotScanners []hotScanner
-}
-
-// hotScanner pairs a third-party hot-lane scanner with its declared XIR scope.
-type hotScanner struct {
-	scanner detect.Scanner
-	points  []hook.Point
+	hotScanners []detect.Scanner
 }
 
 // AuditEngine returns the compiled read-only engine for the audit detection
@@ -126,7 +117,6 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 			if p.HasLane(LaneHot) {
 				if p.ID == PluginSecretmask {
 					snap.secretmaskHot = true
-					snap.smPoints = p.Points
 					if raw := cfg.SettingsFor(p.ID); len(raw) > 0 {
 						if err := json.Unmarshal(raw, &snap.smSettings); err != nil {
 							return nil, fmt.Errorf("detector: secretmask settings: %w", err)
@@ -142,7 +132,7 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 				if err != nil {
 					return nil, fmt.Errorf("detector: build %q: %w", p.ID, err)
 				}
-				snap.hotScanners = append(snap.hotScanners, hotScanner{scanner: scanner, points: p.Points})
+				snap.hotScanners = append(snap.hotScanners, scanner)
 			}
 		case ContractObservation:
 			det, err := reg.NewDetector(cfg.SettingsFor(p.ID))

@@ -158,6 +158,11 @@ func (r *Registry) Register(reg Registration) error {
 	if len(p.Lanes) == 0 {
 		return fmt.Errorf("detector: plugin %q declares no lanes", p.ID)
 	}
+	for _, point := range p.Points {
+		if !point.Valid() {
+			return fmt.Errorf("detector: plugin %q declares unknown point %q", p.ID, point)
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.regs == nil {

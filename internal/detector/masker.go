@@ -33,14 +33,19 @@ func (m *Masker) Mask(src []byte) ([]byte, []secretmask.MaskEvent) {
 	return m.MaskWithProtocol(src, "")
 }
 
-// MaskWithProtocol rewrites src, applying XIR field scoping when a wire protocol
-// is given and the enabled plugins declare an IR scope. It parses the body to the
-// XIR projection once, scans each plugin only on the raw byte spans of the fields
-// it declares (sealed/encrypted content excluded by construction), and hands the
-// candidates to the Vault. If the body cannot be scoped — unknown protocol, parse
-// failure, or a text node without a wire span — it falls back to the whole-body
-// byte path so scoping never costs a detection. With no protocol it is the byte
-// fast path with zero parsing overhead.
+// MaskWithProtocol rewrites src, applying XIR structural scoping when a wire
+// protocol is given and a hot-lane detector is enabled. It parses the body to the
+// XIR projection once and scans the whole body EXCEPT the sealed (encrypted
+// reasoning / media) spans, so coverage matches the byte path while opaque
+// content is excluded structurally rather than by a post-hoc byte filter.
+// Findings are handed to the Vault, which remains the final opaque guard. If the
+// body cannot be parsed (unknown protocol or decode failure) it falls back to the
+// whole-body byte path. With no protocol it is the byte fast path with zero
+// parsing overhead.
+//
+// Field-level point scoping is intentionally not used to narrow the hot scan
+// universe: a credential in a non-projected position must still be masked. Points
+// scope the advisory audit lane instead.
 //
 // It never fails: the builtin detector is total, and a third-party scanner error
 // is logged and skipped. The Vault still refuses any candidate that is not
@@ -67,18 +72,10 @@ func (m *Masker) MaskWithProtocol(src []byte, protocol string) ([]byte, []secret
 	return m.vault.MaskCandidates(src, cands)
 }
 
-// hasIRScope reports whether any enabled hot-lane plugin declares an XIR point
-// scope, which is what makes IR parsing worthwhile on the hot path.
+// hasIRScope reports whether any hot-lane detector is enabled, which is what
+// makes IR parsing worthwhile on the hot path (structural sealed exclusion).
 func (s *Snapshot) hasIRScope() bool {
-	if s.secretmaskHot && len(s.smPoints) > 0 {
-		return true
-	}
-	for _, hs := range s.hotScanners {
-		if len(hs.points) > 0 {
-			return true
-		}
-	}
-	return false
+	return s.secretmaskHot || len(s.hotScanners) > 0
 }
 
 // collectCandidates gathers builtin and plugin findings over the whole body (the
@@ -99,13 +96,13 @@ func (s *Snapshot) collectCandidates(src []byte) []secretmask.MaskCandidate {
 		}
 	}
 	for _, hs := range s.hotScanners {
-		matches, err := hs.scanner.Scan(context.Background(), detect.Input{Raw: src})
+		matches, err := hs.Scan(context.Background(), detect.Input{Raw: src})
 		if err != nil {
-			slog.Warn("Detector hot-lane scanner failed; skipping its matches", "scanner", hs.scanner.Name(), "error", err)
+			slog.Warn("Detector hot-lane scanner failed; skipping its matches", "scanner", hs.Name(), "error", err)
 			continue
 		}
 		for _, m := range matches {
-			if m.Metadata["maskable"] != "true" {
+			if m.Metadata["maskable"] != "true" || m.Rule == "" {
 				continue
 			}
 			cands = append(cands, candidateFromMatch(m))
@@ -114,18 +111,21 @@ func (s *Snapshot) collectCandidates(src []byte) []secretmask.MaskCandidate {
 	return cands
 }
 
-// collectCandidatesIR gathers findings restricted to the IR field spans each
-// plugin declares. The builtin detector scans each declared span's raw bytes
-// (offsetting findings back into the body) so it keeps its RuleID; sealed spans
-// are absent from the scope, so encrypted content is never scanned. The Vault
-// remains the final opaque guard regardless.
+// collectCandidatesIR gathers findings over the whole body minus the sealed
+// spans (RequestScope.ScannableSpans). This preserves the byte path's coverage —
+// a credential in a non-projected position (JSON key, user/metadata field,
+// JSON-only tool result) is still scanned — while excluding sealed/encrypted
+// content structurally. The builtin detector scans each scannable span's raw
+// bytes (offsetting findings back into the body) so it keeps its RuleID. The
+// Vault remains the final opaque guard regardless.
 func (s *Snapshot) collectCandidatesIR(src []byte, scope RequestScope) []secretmask.MaskCandidate {
 	if s == nil {
 		return nil
 	}
+	spans := scope.ScannableSpans()
 	var cands []secretmask.MaskCandidate
 	if s.secretmaskHot {
-		for _, span := range scope.SpansFor(s.smPoints) {
+		for _, span := range spans {
 			if span.Start < 0 || span.End > len(src) || span.End <= span.Start {
 				continue
 			}
@@ -140,17 +140,13 @@ func (s *Snapshot) collectCandidatesIR(src []byte, scope RequestScope) []secretm
 		}
 	}
 	for _, hs := range s.hotScanners {
-		spans := scope.SpansFor(hs.points)
-		if len(hs.points) == 0 {
-			spans = []detect.Span{{Start: 0, End: len(src)}}
-		}
-		matches, err := hs.scanner.Scan(context.Background(), detect.Input{Raw: src, Spans: spans})
+		matches, err := hs.Scan(context.Background(), detect.Input{Raw: src, Spans: spans})
 		if err != nil {
-			slog.Warn("Detector hot-lane scanner failed; skipping its matches", "scanner", hs.scanner.Name(), "error", err)
+			slog.Warn("Detector hot-lane scanner failed; skipping its matches", "scanner", hs.Name(), "error", err)
 			continue
 		}
 		for _, m := range matches {
-			if m.Metadata["maskable"] != "true" {
+			if m.Metadata["maskable"] != "true" || m.Rule == "" {
 				continue
 			}
 			cands = append(cands, candidateFromMatch(m))
