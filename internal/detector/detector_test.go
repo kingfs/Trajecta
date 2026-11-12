@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -107,7 +108,7 @@ func TestConfigRoundTripAndUnknownFilter(t *testing.T) {
 }
 
 func TestSnapshotAuditEngineAndRunner(t *testing.T) {
-	snap, err := buildSnapshot(DefaultConfig())
+	snap, err := buildSnapshot(DefaultConfig(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestSnapshotAuditEngineAndRunner(t *testing.T) {
 	// Enabling indicators adds a second audit scanner.
 	cfg := DefaultConfig()
 	cfg.Enabled = append(cfg.Enabled, PluginIndicators)
-	snap, err = buildSnapshot(cfg)
+	snap, err = buildSnapshot(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestSnapshotAuditEngineAndRunner(t *testing.T) {
 
 	// Disabling every observation plugin yields an empty runner, not the default set.
 	cfg = Config{Enabled: []string{PluginSecretmask}}
-	snap, err = buildSnapshot(cfg)
+	snap, err = buildSnapshot(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +233,7 @@ func TestMaskerNilVaultNoOp(t *testing.T) {
 func TestAuditEngineForPointScope(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = append(cfg.Enabled, PluginIndicators)
-	snap, err := buildSnapshot(cfg)
+	snap, err := buildSnapshot(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,4 +266,59 @@ func TestPluginPointsDeclared(t *testing.T) {
 	if ind.Plugin.HasPoint(hook.PointRequestMessage) {
 		t.Fatal("indicators must not act on message text")
 	}
+}
+
+func TestSecretmaskHotScanValidation(t *testing.T) {
+	cfg := Config{Enabled: []string{PluginSecretmask}, Settings: map[string]json.RawMessage{
+		PluginSecretmask: json.RawMessage(`{"hot_scan":"sideways"}`),
+	}}
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("an unknown hot_scan value must fail validation")
+	}
+	cfg.Settings[PluginSecretmask] = json.RawMessage(`{"hot_scan":"fields"}`)
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("fields mode must validate: %v", err)
+	}
+}
+
+// In fields mode the DFA sees only projected content: a credential used as a
+// JSON key is envelope, not content, and is deliberately left alone, while the
+// same value in message text is masked.
+func TestSecretmaskFieldsModeScopesToContent(t *testing.T) {
+	cfg := Config{Enabled: []string{PluginSecretmask}, Settings: map[string]json.RawMessage{
+		PluginSecretmask: json.RawMessage(`{"hot_scan":"fields"}`),
+	}}
+	snap, err := buildSnapshot(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "AKIAIOSFODNN7EXAMPLE"
+	body := []byte(`{"model":"gpt-5","` + key + `":"envelope","messages":[{"role":"user","content":"key ` + key + `"}]}`)
+	vault := secretmask.NewVault([]byte("fields-mode-seed"))
+	m := NewMasker(vault, nil, 0)
+	// Bind the snapshot directly; the masker normally reads it from a Runtime,
+	// and a nil Runtime would take the byte path.
+	masked, events := maskWithSnapshot(m, snap, body, "chat_completions")
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1 (the content value only)", len(events))
+	}
+	if !bytes.Contains(masked, []byte(`"`+key+`":"envelope"`)) {
+		t.Fatalf("the JSON-key occurrence was masked in fields mode: %s", masked)
+	}
+	if bytes.Contains(masked, []byte("key "+key)) {
+		t.Fatalf("the content occurrence was not masked: %s", masked)
+	}
+}
+
+// maskWithSnapshot mirrors Masker.MaskWithProtocol against an explicit snapshot
+// so a test can install a config without a Runtime.
+func maskWithSnapshot(m *Masker, snap *Snapshot, src []byte, protocol string) ([]byte, []secretmask.MaskEvent) {
+	scope, outcome := ParseRequestScopeWithOutcome(protocol, src, ScopeOptions{
+		MaxBytes:      m.maxScopeBytes,
+		RequireFields: snap.hasHotFields(),
+	})
+	if outcome != ScopeProjected {
+		return m.replacement(src, snap.collectCandidates(src), nil)
+	}
+	return m.replacement(src, snap.collectCandidatesScoped(src, scope), scope.SealedSpans())
 }

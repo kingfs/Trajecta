@@ -151,10 +151,24 @@ func runServeWithConfig(configPath string) int {
 	// block startup.
 	detectorRuntime, err := detector.NewRuntime(context.Background(), traceStore)
 	if err != nil {
-		slog.Warn("Failed to load detection plugins; using builtin detectors", "error", err)
-		detectorRuntime = nil
+		// Keep masking running with the compiled defaults rather than disabling
+		// the runtime: a nil runtime makes the hot path fall back to a bare
+		// Vault, which would silently ignore disabled_rules and disable_pii.
+		slog.Error("Failed to compile stored detection plugins; using builtin defaults", "error", err)
+		fallback, fallbackErr := detector.NewRuntimeFromConfig(detector.DefaultConfig())
+		if fallbackErr != nil {
+			slog.Error("Failed to compile builtin detection defaults", "error", fallbackErr)
+			detectorRuntime = nil
+		} else {
+			detectorRuntime = fallback
+		}
 	}
-	parseWorker := observeworker.New(traceStore, observeworker.Options{Interval: 5 * time.Second, BatchSize: 10})
+	parseWorker := observeworker.New(traceStore, observeworker.Options{
+		Interval:  5 * time.Second,
+		BatchSize: 10,
+		Detectors: detectorRuntime,
+		AutoScan:  cfg.Analysis.AutoScanFindings,
+	})
 	background.Add(1)
 	go func() {
 		defer background.Done()

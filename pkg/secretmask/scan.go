@@ -156,7 +156,7 @@ type Detector struct{}
 // by giving a strictly contained DFA span up to the wider native one and
 // keeping the DFA span on any other overlap.
 func (Detector) AppendFindings(dst []Finding, src []byte) []Finding {
-	if len(src) == 0 {
+	if len(src) == 0 || !mayContainSecret(src) {
 		return dst
 	}
 	c := collector{src: src, findings: dst}

@@ -72,6 +72,12 @@ type PrepareOptions struct {
 	TraceID                        string
 	ResponseID                     string
 	MinimalCassette                bool
+	// WireModel is the model the forwarded body actually names (post alias).
+	// When set, the recorder skips re-parsing the body just to learn it: the
+	// forwarding path already resolved it, and the parse is pure overhead on
+	// every recorded request. Callers that do not know it leave it empty and
+	// keep the extraction fallback.
+	WireModel string
 }
 
 type Recorder struct {
@@ -218,8 +224,8 @@ func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOpti
 }
 
 func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts PrepareOptions, bodyBytes []byte) (*LogInfo, error) {
-	modelName := "unknown-model"
-	if len(bodyBytes) > 0 {
+	modelName := strings.TrimSpace(opts.WireModel)
+	if modelName == "" && len(bodyBytes) > 0 {
 		if parsedReq, err := llm.ParseRequestForPath(req.URL.Path, opts.SiteURL, bodyBytes); err == nil && parsedReq.Model != "" {
 			modelName = parsedReq.Model
 		} else {
@@ -233,6 +239,9 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 				modelName = payload.Name
 			}
 		}
+	}
+	if modelName == "" {
+		modelName = "unknown-model"
 	}
 	if modelName == "unknown-model" && strings.HasSuffix(req.URL.Path, "/models") {
 		modelName = "list_models"

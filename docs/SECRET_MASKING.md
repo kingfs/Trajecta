@@ -286,6 +286,17 @@ chat-completions 是零成本：codec 不产生 sealed，body-only 模式不解�
 
 协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），转换场景由 `gateway.ProtocolConverter` 换成目标协议；透传与本地 Responses 两条路径一致。`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
 
+### 字段模式与预过滤
+
+`secretmask` 的插件 Settings 支持 `hot_scan`：
+
+- `body`（默认）：IR 路径仍扫整个 body（sealed 由 Vault 排除），JSON 外壳里的凭据也会被遮蔽。
+- `fields`：只扫 `RequestScope` 投影出的内容字段（`FieldsFor(AllPoints)` 合并后的 span），不扫 JSON 键、模型名和未投影字段。这是"只看自己字段"的落点，代价是外壳边界内的凭据不再由这个插件覆盖；非法值在 PATCH 时被 `ValidateConfig` 拒绝（400），不会落库。
+
+`pkg/secretmask` 在 DFA 前增加了一层**精确**预过滤：从同一张规则表生成字面量触发集（所有 `Prefixes`、`eyJ`、`_KEY`/`_PASSWORD`/`_URL`/`_URI`/`_DSN`/`_CONNECTION_STRING`、`://`），并对两条无字面量的规则做形状检查（11/18 位数字串、32 位 hex + `.`）。测试对每条规则的 positive sample 验证触发命中，新增规则若没有触发会 build 失败，所以预过滤不会漏检。同一 53 KB 干净 body 实测：门控 0.55 ms（96 MB/s），直接 DFA 0.84 ms（63 MB/s）；门控在遇到第一个触发词/形状时立即返回，因此触发词靠前的 body 只多几微秒，触发词在末尾的最坏情况约 +0.55 ms。是否开启由工作负载决定：多数请求不含任何触发词时是净收益，全部请求都带 URL/长数字时收益变小。
+
+`GET /api/detector-plugins/stats`（admin）返回热路径计数（投影/跳过原因、候选/替换数）、近 30 天按规则替换量、抑制与映射规模；`POST /api/detector-plugins/secretmask/test`（admin）用临时内存 Vault 做只读规则沙盒：贴一段 body 返回每条命中的规则、偏移、置信度、是否被抑制和保形假值，不读写映射表。抑制名单已作用于审计车道的 `detections`（inspector 内部按 span 取原文比较，从不返回值）；观测 findings 是另一套 IR 且 evidence 已脱敏，未接入抑制名单。
+
 ## 审计事件与审计表
 
 一次命中会在**三个地方**留下记录，各自承担不同职责，不能合并：

@@ -1018,6 +1018,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingScore:                   selection.Score,
 			RoutingCandidateCount:          selection.CandidateCount,
 			MinimalCassette:                h.cfg.Trace.MinimalCassette,
+			WireModel:                      upstreamModel,
 		}, recordBody)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)

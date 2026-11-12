@@ -334,3 +334,70 @@ func escapedBenchToolOutput(text string) []byte {
 	b.WriteString(`"}]}]}`)
 	return []byte(b.String())
 }
+
+// BenchmarkPrefilterNoSecret measures the gate on a request body that cannot
+// contain a credential: the DFA pass is skipped entirely.
+func BenchmarkPrefilterNoSecret(b *testing.B) {
+	body := []byte(largeNoSecretBody())
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if mayContainSecret(body) {
+			b.Fatal("gate accepted a clean body")
+		}
+	}
+}
+
+// BenchmarkScanNoSecret is the byte path for the same clean body: only the gate
+// runs.
+func BenchmarkScanNoSecret(b *testing.B) {
+	body := []byte(largeNoSecretBody())
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = (Detector{}).Scan(body)
+	}
+}
+
+// BenchmarkScanOneSecret is the same body with a single credential, so the DFA
+// pass does run: the gate costs one extra scan, it does not remove work.
+func BenchmarkScanOneSecret(b *testing.B) {
+	body := []byte(largeNoSecretBody() + ` key AKIAIOSFODNN7EXAMPLE`)
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = (Detector{}).Scan(body)
+	}
+}
+
+func largeNoSecretBody() string {
+	const noise = "Please review commit 3f2a9c8e1b4d5a6f7c8e9d0a1b2c3d4e5f607182 and the helper func handleRequest. The upstream returned 502 after 30s; check resp.StatusCode and the retry budget. Blob d41d8cd98f00b204e9800998ecf8427e is not a credential. "
+	var b strings.Builder
+	b.WriteString(`{"model":"gpt-5","messages":[`)
+	for i := 0; i < 200; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"role":"user","content":"`)
+		b.WriteString(noise)
+		b.WriteString(`"}`)
+	}
+	b.WriteString(`]}`)
+	return b.String()
+}
+
+// BenchmarkDFANoSecret is the DFA-only cost on the same clean body the gate
+// skips, so the prefilter's saving is measured against a like-for-like fixture.
+func BenchmarkDFANoSecret(b *testing.B) {
+	body := []byte(largeNoSecretBody())
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var findings []Finding
+		scanDFA(body, &collector{src: body, findings: findings})
+	}
+}

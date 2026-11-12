@@ -78,7 +78,8 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, err
 	}
-	if rewrittenBody, rewritten := gateway.RewriteModelAlias(body, selection.Request.ModelName, selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol))); rewritten {
+	wireModel := selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol))
+	if rewrittenBody, rewritten := gateway.RewriteModelAlias(body, selection.Request.ModelName, wireModel); rewritten {
 		body = rewrittenBody
 	}
 
@@ -133,6 +134,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		RoutingScore:                   selection.Score,
 		RoutingCandidateCount:          selection.CandidateCount,
 		MinimalCassette:                a.minimalCassette,
+		WireModel:                      wireModel,
 	}
 	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
 		prepareOpts.ExchangeKind = metadata.ExchangeKind

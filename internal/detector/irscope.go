@@ -134,31 +134,41 @@ func mayHaveSealed(proto xir.Protocol, body []byte) bool {
 // empty body, over the size bound, no sealed marker when fields were not
 // required, or a parse/decode failure); the caller keeps the byte fast path.
 func ParseRequestScope(protocol string, body []byte, opts ScopeOptions) (RequestScope, bool) {
+	scope, outcome := ParseRequestScopeWithOutcome(protocol, body, opts)
+	return scope, outcome == ScopeProjected
+}
+
+// ParseRequestScopeWithOutcome is ParseRequestScope plus the reason the
+// projection did or did not happen, for the hot-path counters.
+func ParseRequestScopeWithOutcome(protocol string, body []byte, opts ScopeOptions) (RequestScope, ScopeOutcome) {
 	po, ok := protocolOperations[protocol]
-	if !ok || len(body) == 0 {
-		return RequestScope{}, false
+	if !ok {
+		return RequestScope{}, ScopeUnknownProtocol
+	}
+	if len(body) == 0 {
+		return RequestScope{}, ScopeEmptyBody
 	}
 	maxBytes := opts.MaxBytes
 	if maxBytes == 0 {
 		maxBytes = defaultMaxScopeBytes
 	}
 	if maxBytes > 0 && len(body) > maxBytes {
-		return RequestScope{}, false
+		return RequestScope{}, ScopeOverSize
 	}
 	if !opts.RequireFields && !mayHaveSealed(po.proto, body) {
-		return RequestScope{}, false
+		return RequestScope{}, ScopeNoMarker
 	}
 	doc, err := xir.ParseDocument(po.proto, po.op, body)
 	if err != nil {
-		return RequestScope{}, false
+		return RequestScope{}, ScopeParseFailed
 	}
 	codec, ok := registry.Default().Lookup(po.proto)
 	if !ok {
-		return RequestScope{}, false
+		return RequestScope{}, ScopeUnknownProtocol
 	}
 	req, err := codec.DecodeRequest(context.Background(), doc, xir.DecodeOptions{NeedParts: true, NeedTools: true})
 	if err != nil {
-		return RequestScope{}, false
+		return RequestScope{}, ScopeDecodeFailed
 	}
 	scope := RequestScope{bodyLen: len(body)}
 	if opts.RequireFields {
@@ -169,7 +179,7 @@ func ParseRequestScope(protocol string, body []byte, opts ScopeOptions) (Request
 	for point, spans := range scope.fields {
 		scope.fields[point] = mergeSpans(spans, 0)
 	}
-	return scope, true
+	return scope, ScopeProjected
 }
 
 // collectRequestScope walks the decoded request once and records the sealed

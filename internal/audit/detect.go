@@ -37,7 +37,7 @@ type engineResolver func(hook.Point) *detect.Engine
 // and scanned only by the plugins that declare that point. A sealed block maps
 // to no point and carries no text, so encrypted reasoning and media are skipped
 // structurally rather than by a detector having to recognise them.
-func detectObservation(ctx context.Context, observation *audit.Observation, resolve engineResolver) ([]Detection, error) {
+func detectObservation(ctx context.Context, observation *audit.Observation, resolve engineResolver, suppressed func(rule string, value []byte) bool) ([]Detection, error) {
 	if observation == nil || len(observation.Nodes) == 0 {
 		return nil, nil
 	}
@@ -67,6 +67,11 @@ func detectObservation(ctx context.Context, observation *audit.Observation, reso
 			return nil, err
 		}
 		for _, match := range matches {
+			if suppressed != nil && match.Start >= 0 && match.End <= len(node.Text) && match.End > match.Start {
+				if suppressed(match.Rule, []byte(node.Text)[match.Start:match.End]) {
+					continue
+				}
+			}
 			out = append(out, Detection{
 				Section:    node.Section,
 				Path:       node.Path,

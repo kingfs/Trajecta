@@ -34,6 +34,17 @@ type Config struct {
 		UpstreamResponseHeaderTimeout time.Duration `yaml:"upstream_response_header_timeout"`
 	} `yaml:"server"`
 
+	// Analysis controls the observation-detector lane that runs beside the
+	// parser.
+	Analysis struct {
+		// AutoScanFindings runs the enabled observation detectors on every
+		// freshly parsed cassette and persists their findings, so the findings
+		// pages and session analysis cover normal traffic without a manual
+		// reanalysis. It defaults to true; an explicit `false` keeps the old
+		// on-demand behaviour.
+		AutoScanFindings bool `yaml:"auto_scan_findings"`
+	} `yaml:"analysis"`
+
 	Monitor struct {
 		Port string `yaml:"port"`
 		// Timezone names the IANA zone the Monitor's day-based windows
@@ -582,6 +593,10 @@ func Load(path string) (*Config, error) {
 	// disagree about the stand-in for the same value.
 	cfg.SecretMasking.MappingStore.Enabled = true
 	cfg.SecretMasking.MappingStore.LoadLimit = DefaultSecretMappingLoadLimit
+	// Observation detectors are on by default, and they only do something if
+	// the parser runs them; seed the auto-scan so an omitted key keeps the
+	// "default on" promise instead of silently idling five plugins.
+	cfg.Analysis.AutoScanFindings = true
 	if err := rejectLegacyChannelConfig(data); err != nil {
 		return nil, err
 	}
@@ -944,6 +959,7 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
 	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
+	envBool(&cfg.Analysis.AutoScanFindings, "TRAJECTA_ANALYSIS_AUTO_SCAN_FINDINGS")
 	envString(&cfg.SecretMasking.HotPathScope, "TRAJECTA_SECRET_MASKING_HOT_PATH_SCOPE")
 	envInt(&cfg.SecretMasking.IRMaxBodyBytes, "TRAJECTA_SECRET_MASKING_IR_MAX_BODY_BYTES")
 	envBool(&cfg.SecretMasking.MappingStore.Enabled, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED")

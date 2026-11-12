@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -629,4 +630,98 @@ func TestWorkerIndexesTraceResources(t *testing.T) {
 	if !values["/old/history.txt"] {
 		t.Fatalf("request history was not indexed: %+v", items)
 	}
+}
+
+// A freshly parsed trace runs the enabled observation detectors and stores
+// their findings without a manual reanalysis; switching AutoScan off keeps the
+// old on-demand behaviour.
+func TestWorkerAutoScanPersistsFindings(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedPIITrace(t, st, dir)
+	if err := st.EnqueueParseJob(traceID); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := detector.NewRuntime(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := New(st, Options{BatchSize: 5, Detectors: rt, AutoScan: true})
+	worker.RunOnce(context.Background())
+
+	findings, err := st.ListFindings(traceID, store.FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) == 0 {
+		t.Fatal("auto scan stored no findings for a trace with personal data")
+	}
+
+	// A second trace with AutoScan off must not write findings.
+	otherStore, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherStore.Close()
+	offDir := t.TempDir()
+	offID := writeIndexedPIITraceNamed(t, otherStore, offDir, "worker-pii-off.http")
+	if err := otherStore.EnqueueParseJob(offID); err != nil {
+		t.Fatal(err)
+	}
+	off := New(otherStore, Options{BatchSize: 5, Detectors: rt, AutoScan: false})
+	off.RunOnce(context.Background())
+	offFindings, err := otherStore.ListFindings(offID, store.FindingFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offFindings) != 0 {
+		t.Fatalf("AutoScan=false still stored %d findings", len(offFindings))
+	}
+}
+
+func writeIndexedPIITrace(t *testing.T, st *store.Store, dir string) string {
+	return writeIndexedPIITraceNamed(t, st, dir, "worker-pii-trace.http")
+}
+
+func writeIndexedPIITraceNamed(t *testing.T, st *store.Store, dir, name string) string {
+	t.Helper()
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
+	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"身份证 11010519491231002X"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID: "req-worker-pii", Time: time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model: "gpt-5.1", Provider: "openai_compatible", Operation: "responses",
+			Endpoint: "/v1/responses", URL: "/v1/responses", Method: "POST",
+			StatusCode: 200, DurationMs: 20, TTFTMs: 5, ClientIP: "127.0.0.1",
+			ContentLength: int64(len(reqBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(reqHead)), ReqBodyLen: int64(len(reqBody)),
+			ResHeaderLen: int64(len(resHead)), ResBodyLen: int64(len(resBody)),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	logPath := filepath.Join(dir, name)
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID(header.Meta.RequestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	return entry.ID
 }

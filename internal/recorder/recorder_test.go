@@ -810,3 +810,29 @@ func TestDetectClientHarnessExchangeKinds(t *testing.T) {
 		t.Fatalf("nil request detection = %+v, want empty", got)
 	}
 }
+
+// A caller that already knows the wire model must not make the recorder parse
+// the body again: the recorded model is the caller's, even when the body names
+// something else.
+func TestPrepareLogFileUsesWireModelWithoutParsing(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, true, nil)
+
+	body := []byte(`{"model":"body-model","messages":[{"role":"user","content":"hi"}]}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{
+		SiteURL:   "https://api.openai.com",
+		WireModel: "wire-model",
+	}, body)
+	if err != nil {
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
+	}
+	defer info.File.Close()
+	if info.Header.Meta.Model != "wire-model" {
+		t.Fatalf("model = %q, want wire-model", info.Header.Meta.Model)
+	}
+}

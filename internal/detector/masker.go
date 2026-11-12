@@ -6,6 +6,7 @@ import (
 
 	"github.com/kingfs/Trajecta/pkg/detect"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
 // Masker is the hot-lane masking coordinator. It implements gateway.Masker: it
@@ -65,23 +66,61 @@ func (m *Masker) MaskWithProtocol(src []byte, protocol string) ([]byte, []secret
 	if m == nil || m.vault == nil || len(src) == 0 {
 		return src, nil
 	}
+	if m.rt != nil {
+		m.rt.stats.hotCalls.Add(1)
+	}
 	snap := m.rt.Snapshot()
 	if snap == nil {
 		// A missing snapshot must never silently disable masking: fall back to
 		// the builtin detector the vault already owns.
-		return m.vault.Mask(src)
+		masked, events := m.vault.Mask(src)
+		if m.rt != nil {
+			m.rt.stats.maskEvents.Add(uint64(len(events)))
+		}
+		return masked, events
 	}
 	if protocol == "" || !snap.hasIRScope() {
-		return m.replacement(src, snap.collectCandidates(src), nil)
+		if m.rt != nil {
+			m.rt.stats.byteFallbacks.Add(1)
+		}
+		cands := snap.collectCandidates(src)
+		masked, events := m.replacement(src, cands, nil)
+		m.recordReplacement(cands, events)
+		return masked, events
 	}
-	scope, ok := ParseRequestScope(protocol, src, ScopeOptions{
+	scope, outcome := ParseRequestScopeWithOutcome(protocol, src, ScopeOptions{
 		MaxBytes:      m.maxScopeBytes,
 		RequireFields: snap.hasHotFields(),
 	})
-	if !ok {
-		return m.replacement(src, snap.collectCandidates(src), nil)
+	if m.rt != nil {
+		m.rt.recordScopeOutcome(outcome)
 	}
-	return m.replacement(src, snap.collectCandidatesScoped(src, scope), scope.SealedSpans())
+	if outcome != ScopeProjected {
+		if m.rt != nil {
+			m.rt.stats.byteFallbacks.Add(1)
+		}
+		cands := snap.collectCandidates(src)
+		masked, events := m.replacement(src, cands, nil)
+		m.recordReplacement(cands, events)
+		return masked, events
+	}
+	sealed := scope.SealedSpans()
+	if m.rt != nil {
+		m.rt.stats.sealedSpans.Add(uint64(len(sealed)))
+	}
+	cands := snap.collectCandidatesScoped(src, scope)
+	masked, events := m.replacement(src, cands, sealed)
+	m.recordReplacement(cands, events)
+	return masked, events
+}
+
+// recordReplacement updates the counters shared by both scan paths.
+func (m *Masker) recordReplacement(cands []secretmask.MaskCandidate, events []secretmask.MaskEvent) {
+	if m.rt == nil {
+		return
+	}
+	m.rt.stats.maskCandidates.Add(uint64(len(cands)))
+	m.rt.stats.maskEvents.Add(uint64(len(events)))
 }
 
 // replacement renders the candidates, excluding the sealed spans when there are
@@ -109,6 +148,12 @@ func (s *Snapshot) hasIRScope() bool {
 // hasHotFields reports whether an enabled hot-lane scanner declares hook Points,
 // i.e. whether the hot path needs the per-point field projection.
 func (s *Snapshot) hasHotFields() bool {
+	if s == nil {
+		return false
+	}
+	if s.secretmaskHot && s.smSettings.HotScan == "fields" {
+		return true
+	}
 	for _, hs := range s.hotScanners {
 		if len(hs.points) > 0 {
 			return true
@@ -141,10 +186,13 @@ func (s *Snapshot) collectCandidatesScoped(src []byte, scope RequestScope) []sec
 	if s == nil {
 		return nil
 	}
-	cands := s.builtinCandidates(src)
+	cands := s.builtinCandidatesScoped(src, scope)
 	for _, hs := range s.hotScanners {
 		var spans []detect.Span
 		if len(hs.points) > 0 {
+			if s.stats != nil {
+				s.stats.fieldRuns.Add(1)
+			}
 			spans = scope.FieldsFor(hs.points)
 			if len(spans) == 0 {
 				continue
@@ -161,8 +209,43 @@ func (s *Snapshot) builtinCandidates(src []byte) []secretmask.MaskCandidate {
 	if !s.secretmaskHot {
 		return nil
 	}
+	return s.filterBuiltin((secretmask.Detector{}).Scan(src))
+}
+
+// builtinCandidatesScoped is the IR-path variant. In the default body mode it
+// is the whole-body scan; in fields mode it scans only the merged content-field
+// spans of the projection, so the JSON envelope (model name, keys, unprojected
+// siblings) is never fed to the DFA. Sealed spans never appear in the field map,
+// so they are excluded by construction.
+func (s *Snapshot) builtinCandidatesScoped(src []byte, scope RequestScope) []secretmask.MaskCandidate {
+	if !s.secretmaskHot {
+		return nil
+	}
+	if s.smSettings.HotScan != "fields" {
+		return s.filterBuiltin((secretmask.Detector{}).Scan(src))
+	}
+	spans := scope.FieldsFor(hook.AllPoints())
 	var cands []secretmask.MaskCandidate
-	for _, f := range (secretmask.Detector{}).Scan(src) {
+	for _, span := range spans {
+		if span.Start < 0 || span.End > len(src) || span.End <= span.Start {
+			continue
+		}
+		for _, f := range (secretmask.Detector{}).Scan(src[span.Start:span.End]) {
+			f.Start += span.Start
+			f.End += span.Start
+			if !s.secretmaskRuleAllowed(f) {
+				continue
+			}
+			cands = append(cands, secretmask.MaskCandidate{Finding: f})
+		}
+	}
+	return cands
+}
+
+// filterBuiltin applies the plugin's rule-level settings to native findings.
+func (s *Snapshot) filterBuiltin(findings []secretmask.Finding) []secretmask.MaskCandidate {
+	var cands []secretmask.MaskCandidate
+	for _, f := range findings {
 		if !s.secretmaskRuleAllowed(f) {
 			continue
 		}
@@ -176,6 +259,9 @@ func (s *Snapshot) builtinCandidates(src []byte) []secretmask.MaskCandidate {
 func (s *Snapshot) scanHotScanner(hs hotScanner, src []byte, spans []detect.Span) []secretmask.MaskCandidate {
 	matches, err := hs.scanner.Scan(context.Background(), detect.Input{Raw: src, Spans: spans})
 	if err != nil {
+		if s.stats != nil {
+			s.stats.scannerErrors.Add(1)
+		}
 		slog.Warn("Detector hot-lane scanner failed; skipping its matches", "scanner", hs.scanner.Name(), "error", err)
 		return nil
 	}

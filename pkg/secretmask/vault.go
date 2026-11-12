@@ -400,6 +400,20 @@ func (v *Vault) MaskCandidates(src []byte, cands []MaskCandidate) ([]byte, []Mas
 	return v.maskCandidates(src, cands, nil)
 }
 
+// Suppressed reports whether the operator's false-positive list suppresses
+// (rule, real). It is the read-side counterpart of the check MaskCandidates
+// performs, so the audit lane can apply the same policy to the values it sees
+// without rendering anything.
+func (v *Vault) Suppressed(rule string, real []byte) bool {
+	if v == nil {
+		return false
+	}
+	v.mu.RLock()
+	set := v.suppressions
+	v.mu.RUnlock()
+	return suppressionHit(set, rule, real)
+}
+
 // MaskCandidatesExcluding is MaskCandidates plus a set of byte ranges that must
 // not be rewritten, for the hot path's structurally sealed content (signed
 // reasoning, encrypted reasoning, redacted thinking). A candidate that overlaps

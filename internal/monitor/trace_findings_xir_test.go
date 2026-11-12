@@ -47,7 +47,7 @@ func TestTraceFindingsMergesXIRDetections(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	handleTraceFindings(rr, httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/findings", nil), st, entry)
+	handleTraceFindings(rr, httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/findings", nil), st, entry, nil, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}

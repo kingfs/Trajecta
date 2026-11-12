@@ -55,7 +55,7 @@ func TestDetectObservationRespectsPointScope(t *testing.T) {
 		}
 		return nil
 	}
-	got, err := detectObservation(context.Background(), observation, resolve)
+	got, err := detectObservation(context.Background(), observation, resolve, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDetectObservationSkipsSealed(t *testing.T) {
 	}
 	secret := detect.New(detectsecretmask.New())
 	resolve := func(hook.Point) *detect.Engine { return secret }
-	got, err := detectObservation(context.Background(), observation, resolve)
+	got, err := detectObservation(context.Background(), observation, resolve, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

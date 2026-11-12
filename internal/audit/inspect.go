@@ -45,6 +45,10 @@ type Inspector struct {
 	// published detection-plugin snapshot. A nil value falls back to the builtin
 	// secretmask scanner.
 	Detectors *detector.Runtime
+	// Suppressed applies the operator's false-positive list to the detections.
+	// It is optional: a nil value reports every match. The value is only used
+	// internally for the comparison; Detection never carries it.
+	Suppressed func(rule string, value []byte) bool
 }
 
 // New returns an Inspector with all four built-in codecs.
@@ -132,7 +136,7 @@ func (i *Inspector) InspectBytes(ctx context.Context, content []byte) (*Result, 
 		Observation: audit.Build(protocol, operation, request, response),
 		Warnings:    warnings,
 	}
-	detections, detectErr := detectObservation(ctx, result.Observation, i.detectEngine())
+	detections, detectErr := detectObservation(ctx, result.Observation, i.detectEngine(), i.Suppressed)
 	if detectErr != nil {
 		result.Warnings = append(result.Warnings, "detect: "+detectErr.Error())
 	} else {

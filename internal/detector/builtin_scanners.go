@@ -96,6 +96,12 @@ type secretmaskSettings struct {
 	DisablePII bool `json:"disable_pii,omitempty"`
 	// DisabledRules drops individual rules by stable name.
 	DisabledRules []string `json:"disabled_rules,omitempty"`
+	// HotScan selects the builtin scanner's scan universe on the IR path:
+	// "body" (default) covers the whole request body; "fields" scans only the
+	// XIR content-field spans, leaving the JSON envelope (keys, the model name,
+	// unprojected siblings) unscanned. Field mode lowers false positives and
+	// bytes scanned at the cost of that envelope boundary.
+	HotScan string `json:"hot_scan,omitempty"`
 }
 
 func newSecretmaskScanner(s Settings) (detect.Scanner, error) {

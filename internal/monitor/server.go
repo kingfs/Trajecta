@@ -801,7 +801,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		return modelAliasDetailAPIHandler(st)
 	}), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router, opt.Detectors), monitorVerifier))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandlerWithSuppression(st, opt.Router, suppressionCheckerFrom(opt.SecretSuppressions), opt.Detectors), monitorVerifier))
 	mux.HandleFunc("/api/resources", monitorAuthRequired(resourcesAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/resources/backfill", monitorAuthRequired(resourceBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
@@ -847,6 +847,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// Detection plugins gate which detectors run (masking, audit, reanalysis);
 	// the forwarding core never depends on a plugin identity. Admin-only.
 	mux.HandleFunc("/api/detector-plugins", monitorAdminRequired(detectorPluginsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/detector-plugins/stats", monitorAdminRequired(detectorPluginStatsAPIHandler(st, opt.Detectors, opt.SecretMappings, opt.SecretSuppressions), monitorVerifier))
+	mux.HandleFunc("/api/detector-plugins/secretmask/test", monitorAdminRequired(detectorSandboxAPIHandler(opt.SecretSuppressions), monitorVerifier))
 	mux.HandleFunc("/api/detector-plugins/", monitorAdminRequired(detectorPluginDetailAPIHandler(st, opt.Detectors, opt.SecretMappings), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
@@ -2074,6 +2076,23 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 }
 
 func traceAPIHandler(st *store.Store, rtr *router.Router, detectors ...*detector.Runtime) http.HandlerFunc {
+	return traceAPIHandlerWithSuppression(st, rtr, nil, detectors...)
+}
+
+// suppressionCheckerFrom adapts the vault's suppression list to the audit
+// lane. The interface is optional so a test or a deployment without a vault
+// simply reports every match.
+func suppressionCheckerFrom(admin SecretSuppressionAdmin) func(rule string, value []byte) bool {
+	checker, ok := admin.(interface {
+		Suppressed(rule string, real []byte) bool
+	})
+	if !ok {
+		return nil
+	}
+	return checker.Suppressed
+}
+
+func traceAPIHandlerWithSuppression(st *store.Store, rtr *router.Router, suppressed func(rule string, value []byte) bool, detectors ...*detector.Runtime) http.HandlerFunc {
 	var det *detector.Runtime
 	if len(detectors) > 0 {
 		det = detectors[0]
@@ -2106,11 +2125,11 @@ func traceAPIHandler(st *store.Store, rtr *router.Router, detectors ...*detector
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
 			handleTraceObservation(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "xir" && r.Method == http.MethodGet:
-			handleTraceXIR(w, r, absPath, entry, det)
+			handleTraceXIR(w, r, absPath, entry, det, suppressed)
 		case len(parts) == 2 && parts[1] == "trajectory" && r.Method == http.MethodGet:
 			handleTraceTrajectory(w, r, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
-			handleTraceFindings(w, r, st, entry, det)
+			handleTraceFindings(w, r, st, entry, det, suppressed)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:
 			handleTraceFindingLocate(w, r, st, entry, parts[2])
 		case len(parts) == 4 && parts[1] == "secret-masks" && parts[3] == "locate" && r.Method == http.MethodGet:
@@ -2236,9 +2255,10 @@ func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.St
 // handleTraceXIR returns the Exchange IR audit projection of one cassette.
 // The projection is derived on demand from the raw exchange; it is not
 // persisted and does not replace the existing Observation view.
-func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entry store.LogEntry, detectors *detector.Runtime) {
+func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entry store.LogEntry, detectors *detector.Runtime, suppressed func(rule string, value []byte) bool) {
 	inspector := auditpkg.New()
 	inspector.Detectors = detectors
+	inspector.Suppressed = suppressed
 	result, err := inspector.InspectFile(r.Context(), absPath)
 	if err != nil {
 		if errors.Is(err, auditpkg.ErrUnsupportedProtocol) {
@@ -2259,11 +2279,7 @@ func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entr
 	})
 }
 
-func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry, detectors ...*detector.Runtime) {
-	var det *detector.Runtime
-	if len(detectors) > 0 {
-		det = detectors[0]
-	}
+func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry, det *detector.Runtime, suppressed func(rule string, value []byte) bool) {
 	filter := store.FindingFilter{
 		Category: strings.TrimSpace(r.URL.Query().Get("category")),
 		Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
@@ -2277,7 +2293,7 @@ func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store
 	for _, finding := range findings {
 		items = append(items, findingViewFromObservation(finding))
 	}
-	items = append(items, xirFindings(entry, items, filter, det)...)
+	items = append(items, xirFindings(entry, items, filter, det, suppressed)...)
 	writeJSON(w, http.StatusOK, findingListResponse{
 		ID:       entry.ID,
 		Items:    items,
@@ -2589,12 +2605,13 @@ func findingViewFromObservation(finding observe.Finding) findingView {
 // xirFindings surfaces the on-demand XIR/detect detections that the persisted
 // analyzer pass did not already record. They are advisory and never carry the
 // matched value; the source field keeps the two planes distinguishable.
-func xirFindings(entry store.LogEntry, existing []findingView, filter store.FindingFilter, detectors *detector.Runtime) []findingView {
+func xirFindings(entry store.LogEntry, existing []findingView, filter store.FindingFilter, detectors *detector.Runtime, suppressed func(rule string, value []byte) bool) []findingView {
 	if strings.TrimSpace(entry.LogPath) == "" {
 		return nil
 	}
 	inspector := auditpkg.New()
 	inspector.Detectors = detectors
+	inspector.Suppressed = suppressed
 	result, err := inspector.InspectFile(context.Background(), entry.LogPath)
 	if err != nil {
 		return nil

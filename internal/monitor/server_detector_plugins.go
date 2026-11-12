@@ -112,6 +112,7 @@ func detectorPluginDetailAPIHandler(st *store.Store, rt *detector.Runtime, mappi
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		original := cloneDetectorConfig(cfg)
 
 		if req.Enabled != nil && !*req.Enabled && reg.Plugin.HasLane(detector.LaneHot) && !req.Force {
 			if count := mappingCount(r.Context(), mappings); count > 0 {
@@ -145,18 +146,43 @@ func detectorPluginDetailAPIHandler(st *store.Store, rt *detector.Runtime, mappi
 			cfg.Settings[id] = req.Settings
 		}
 
+		// Compile the candidate state before persisting it: a settings payload
+		// that cannot build a scanner (an unknown hot_scan value, a bad rule
+		// name type) must be rejected here instead of being written and then
+		// failing every later republish.
+		if err := detector.ValidateConfig(cfg); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid plugin settings: " + err.Error()})
+			return
+		}
 		if err := detector.SaveConfig(r.Context(), st, cfg); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		if rt != nil {
 			if err := rt.Republish(r.Context()); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "plugin state saved but republish failed: " + err.Error()})
+				// Restore the previous state so the stored row and the live
+				// snapshot cannot disagree.
+				_ = detector.SaveConfig(r.Context(), st, original)
+				_ = rt.Republish(r.Context())
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "plugin state was not applied: " + err.Error()})
 				return
 			}
 		}
 		writeJSON(w, http.StatusOK, detectorPluginItemFrom(reg.Plugin, cfg))
 	}
+}
+
+// cloneDetectorConfig copies the persisted state so a failed republish can put
+// the previous row back.
+func cloneDetectorConfig(cfg detector.Config) detector.Config {
+	out := detector.Config{UpdatedAt: cfg.UpdatedAt, Enabled: append([]string(nil), cfg.Enabled...)}
+	if len(cfg.Settings) > 0 {
+		out.Settings = make(map[string]json.RawMessage, len(cfg.Settings))
+		for id, raw := range cfg.Settings {
+			out.Settings[id] = append(json.RawMessage(nil), raw...)
+		}
+	}
+	return out
 }
 
 // mappingCount reads the live vault's mapping count for the disable check. A nil

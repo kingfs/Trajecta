@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"github.com/kingfs/Trajecta/internal/analyzer"
@@ -25,6 +26,10 @@ type hotScanner struct {
 // request.
 type Snapshot struct {
 	Config Config
+
+	// stats is shared with the Runtime that published this snapshot. It is nil
+	// for a validation-only build (ValidateConfig), which never serves traffic.
+	stats *runtimeStats
 
 	auditEngine *detect.Engine
 	// auditByPoint indexes the audit scanners by the XIR point they declare, so
@@ -83,9 +88,9 @@ func (s *Snapshot) Runner() *analyzer.Runner {
 
 // buildSnapshot compiles a Config into an executable snapshot. A factory error
 // aborts the build so a misconfigured plugin cannot silently drop out of a lane.
-func buildSnapshot(cfg Config) (*Snapshot, error) {
+func buildSnapshot(cfg Config, stats *runtimeStats) (*Snapshot, error) {
 	enabled := cfg.enabledSet()
-	snap := &Snapshot{Config: cfg}
+	snap := &Snapshot{Config: cfg, stats: stats}
 
 	engine := detect.New()
 	auditByPoint := make(map[hook.Point]*detect.Engine, len(hook.AllPoints()))
@@ -131,6 +136,14 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 							return nil, fmt.Errorf("detector: secretmask settings: %w", err)
 						}
 					}
+					switch strings.ToLower(strings.TrimSpace(snap.smSettings.HotScan)) {
+					case "", "body":
+						snap.smSettings.HotScan = "body"
+					case "fields":
+						snap.smSettings.HotScan = "fields"
+					default:
+						return nil, fmt.Errorf("detector: secretmask hot_scan %q is not body|fields", snap.smSettings.HotScan)
+					}
 					snap.smDisabled = make(map[string]bool, len(snap.smSettings.DisabledRules))
 					for _, name := range snap.smSettings.DisabledRules {
 						snap.smDisabled[name] = true
@@ -162,8 +175,9 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 // publication: configuration is read once per change, and the hot path only
 // loads an immutable pointer.
 type Runtime struct {
-	st   *store.Store
-	snap atomic.Pointer[Snapshot]
+	st    *store.Store
+	snap  atomic.Pointer[Snapshot]
+	stats runtimeStats
 }
 
 // NewRuntime loads the plugin state and publishes the first snapshot.
@@ -173,6 +187,29 @@ func NewRuntime(ctx context.Context, st *store.Store) (*Runtime, error) {
 		return nil, err
 	}
 	return rt, nil
+}
+
+// NewRuntimeFromConfig publishes cfg without reading the store. It is the
+// startup fallback when the stored settings row cannot be compiled: the process
+// keeps masking with the builtin defaults instead of disabling the runtime (a
+// nil runtime would make the hot path fall back to a bare Vault and silently
+// ignore disabled_rules / disable_pii).
+func NewRuntimeFromConfig(cfg Config) (*Runtime, error) {
+	rt := &Runtime{}
+	snap, err := buildSnapshot(cfg, &rt.stats)
+	if err != nil {
+		return nil, err
+	}
+	rt.snap.Store(snap)
+	return rt, nil
+}
+
+// ValidateConfig compiles cfg without publishing it, so a PATCH can reject a
+// settings payload that would make the runtime unbuildable instead of
+// persisting it and failing later.
+func ValidateConfig(cfg Config) error {
+	_, err := buildSnapshot(cfg, nil)
+	return err
 }
 
 // Snapshot returns the currently published snapshot.
@@ -191,7 +228,7 @@ func (r *Runtime) Republish(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	snap, err := buildSnapshot(cfg)
+	snap, err := buildSnapshot(cfg, &r.stats)
 	if err != nil {
 		return err
 	}

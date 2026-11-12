@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
@@ -21,12 +22,22 @@ type Worker struct {
 	registry  *observe.Registry
 	interval  time.Duration
 	batchSize int
+	// detectors is the published detection-plugin snapshot. When autoScan is
+	// set, the parser runs the enabled observation detectors over the freshly
+	// stored observation and persists their findings, so the findings surfaces
+	// cover normal traffic instead of waiting for a manual reanalysis.
+	detectors *detector.Runtime
+	autoScan  bool
 }
 
 type Options struct {
 	Interval  time.Duration
 	BatchSize int
 	Registry  *observe.Registry
+	Detectors *detector.Runtime
+	// AutoScan runs the observation detectors after a successful parse. It is
+	// normally cfg.Analysis.AutoScanFindings.
+	AutoScan bool
 }
 
 func New(st *store.Store, opts Options) *Worker {
@@ -47,6 +58,8 @@ func New(st *store.Store, opts Options) *Worker {
 		registry:  registry,
 		interval:  interval,
 		batchSize: batchSize,
+		detectors: opts.Detectors,
+		autoScan:  opts.AutoScan,
 	}
 }
 
@@ -110,10 +123,36 @@ func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
 		return err
 	}
+	w.scanFindings(ctx, job.TraceID, obs)
 	if err := w.store.MarkParseJobDone(job.ID); err != nil {
 		return err
 	}
 	return nil
+}
+
+// scanFindings runs the observation detectors over a freshly parsed exchange.
+// A failure here is logged rather than failing the parse job: the observation
+// and resource index are already stored, and a reanalysis can recompute the
+// findings without re-reading the cassette from a failed job.
+func (w *Worker) scanFindings(ctx context.Context, traceID string, obs observe.TraceObservation) {
+	if !w.autoScan || w.detectors == nil {
+		return
+	}
+	snap := w.detectors.Snapshot()
+	if snap == nil {
+		return
+	}
+	findings, err := snap.Runner().Analyze(ctx, obs)
+	if err != nil {
+		slog.Warn("Auto findings scan failed", "trace_id", traceID, "error", err)
+		return
+	}
+	if len(findings) == 0 {
+		return
+	}
+	if err := w.store.SaveFindings(traceID, findings); err != nil {
+		slog.Warn("Save auto findings failed", "trace_id", traceID, "error", err)
+	}
 }
 
 // StoreResourceAccesses adapts the extracted values to the write shape without

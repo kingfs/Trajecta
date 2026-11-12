@@ -1,6 +1,12 @@
 server:
   port: "8080"
 
+# Observation-detector lane. The enabled detectors in `plugins.detectors` run on
+# every freshly parsed cassette and persist their findings; set false to keep
+# the old manual-reanalysis-only behaviour.
+analysis:
+  auto_scan_findings: true
+
 monitor:
   port: "8081"
   # Timezone for the day-based windows ("today") and the calendar buckets in the

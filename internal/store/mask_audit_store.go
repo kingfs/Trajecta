@@ -1225,3 +1225,46 @@ func systemEventForCredentialMask(rule, vendor, kind, confidence string, score i
 		}),
 	}
 }
+
+// MaskAuditRuleStat is one rule's replacement count over a window, for the
+// detection-plugin stats endpoint. Rows are grouped by rule and kind so the
+// caller can show the category the rule belongs to without a second lookup.
+type MaskAuditRuleStat struct {
+	Rule     string    `json:"rule"`
+	Kind     string    `json:"kind"`
+	Hits     int       `json:"hits"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+// RuleMaskStats returns the per-rule replacement counts since a point in time,
+// most frequent first. It reads the audit table, so it reflects replacements
+// that actually happened rather than a second detector run.
+func (s *Store) RuleMaskStats(since time.Time, limit int) ([]MaskAuditRuleStat, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := s.db.Query(`
+		SELECT rule, kind, COUNT(*), MAX(detected_at)
+		FROM credential_mask_audits
+		WHERE detected_at >= ?
+		GROUP BY rule, kind
+		ORDER BY COUNT(*) DESC, rule ASC
+		LIMIT ?
+	`, since.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]MaskAuditRuleStat, 0, 32)
+	for rows.Next() {
+		var stat MaskAuditRuleStat
+		if err := rows.Scan(&stat.Rule, &stat.Kind, &stat.Hits, &stat.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, stat)
+	}
+	return out, rows.Err()
+}
