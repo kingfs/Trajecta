@@ -166,13 +166,24 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 
 细节与已知边界见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md)。
 
+## 检测算法插件化
+
+`internal/detector` 把检测算法按算法族插件化，复用渠道插件范式（编译期目录 + `app_settings` 启用名单 + admin API + Monitor tab）：
+
+- 启用状态在 `app_settings` 键 `plugins.detectors`（`{enabled:[ids], settings:{id:{…}}}`）。**缺行回退内置默认**（遮蔽与观测检测器默认开，保持插件化前行为），已有行权威并过滤未知 id；随 `internal/transfer` 导入白名单迁移（只插不覆盖）。
+- 两种执行契约共享目录：`scanner`（`pkg/detect.Scanner`，字节+span）喂审计 XIR 投影与热车道遮蔽；`observation`（`internal/analyzer.Detector`，Observation IR）喂重分析 runner。内置插件：`secretmask`（凭据/PII DFA + assignment/DSN，hot+audit，默认开）、`access.indicators`（路径/URL，仅报告，audit，默认关）、五个观测检测器 `behavior.dangerous_shell`/`credential.regex`/`pii.observation`/`safety.provider_refusal`/`tool.error`（audit，默认开）。
+- `detector.Runtime` 持原子快照，启动构建、Monitor PATCH 后 `Republish`。管理 API：admin `GET /api/detector-plugins`、`PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`），禁用 hot 插件且仍有映射时 409 `plugin_in_use`（`mapping_count`）。Monitor「插件」页有「检测算法」tab，抽屉展示规则与 IR 作用域。
+- **替换不可插拔**：热车道 `detector.Masker`（`gateway.Masker`）收集启用插件命中交 `secretmask.Vault.MaskCandidates`，保形等长/opaque/幂等/抑制/还原仍由 Vault 集中强制。规则级开关走插件 `Settings`（`secretmask`：`disable_pii`、`disabled_rules`）。
+- 每个插件声明 `Points`（`pkg/xir/hook.Point` 词汇）。审计车道按 Point 索引引擎（`Snapshot.AuditEngineFor`），`pkg/xir/audit.NodePoint` 把投影节点映射到 Point，Sealed/加密内容因无 `Text` 结构性跳过，`Detection` 携带 `point`。
+- **热路径 XIR 作用域（opt-in）**：`secret_masking.hot_path_scope: byte|ir`，默认 `byte`（零解析快路径，行为与性能同插件化前）。`ir` 时 `Masker.MaskWithProtocol` 解析请求为 XIR 投影、按插件 `Points` 取字段原始字节 span 扫描（`ParseRequestScope`，Sealed 结构性排除），无法作用域化时回退字节路径。差分夹具证明 IR 与字节路径在四协议语料（含 opaque）上 wire 输出与事件逐字节一致；`internal/proxy` 有 IR 模式端到端测试。性能（arm64）：IR 约慢 2×（16 vs 32 MB/s）、分配高约 20–100×（`wire.Parse`+codec+`audit.Build` 开销），故默认 byte。详见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md) 的热路径 XIR 作用域一节。
+
 ## 语义解析、审计与重分析
 
 语义解析与派生分析层已实现：
 
 - `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化紧凑摘要（parser、status、usage、warnings 等）并可在 trace detail 展示；节点树不落库，Protocol/详情视图打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 重解析；parser 失败写入 system events。
 - 资源索引：`internal/resources` 在解析 worker 每次成功解析后，从模型自己产生的工具调用（响应侧、请求侧 assistant 历史、entry 的原始请求/响应）的参数、shell 操作数与 patch 头部提取本地路径与 URL（消息正文、工具结果与代码内容不参与），路径 key 与 shell 操作数里的相对目录没有扩展名也算（`/dev/null` 等设备 sink 不计），按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；trace 详情的 资源 tab 通过 `GET /api/traces/{id}/resources` 读取，详情页「解析资源」按钮触发一次 reparse 写入索引。全局「质量 → 资源」页已移除（质量页现有 6 个 tab：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康）；后端 `GET /api/resources` 与 `POST /api/resources/backfill` 仍保留，但没有 UI 入口，历史 trace 也可直接用 backfill 端点排队重解析。
-- deterministic audit detectors：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error，以及复用 `pkg/secretmask` 的个人数据检测（`pii`，只报可改写档的身份证号与手机号，evidence 里的命中值替换为 `[redacted]`）；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。
+- deterministic audit detectors（经 `internal/detector` 以观测插件暴露，runner 由插件快照提供）：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error，以及复用 `pkg/secretmask` 的个人数据检测（`pii`，只报可改写档的身份证号与手机号，evidence 里的命中值替换为 `[redacted]`）；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。审计 XIR 投影的检测引擎由插件快照按 Point 提供（`Inspector.Detectors`，缺省回退内置 secretmask 扫描器）。
 - 重分析 job 类型：`trace_reparse`、`trace_rescan`、`trace_repair_usage`、`trace_reanalyze`、`session_reanalyze`、`batch_reanalyze`，状态持久化在 `analysis_jobs`。
 - parser/analyzer/router/upstream 事件写入 system events。
 - session 聚合已实现，提取顺序为 `Session_id`、`X-Claude-Code-Session-Id`、`X-Codex-Turn-Metadata.session_id`、`X-Codex-Window-Id` 的 `:` 前缀、空 session；Monitor 与 MCP 都可查询 session 列表和详情。

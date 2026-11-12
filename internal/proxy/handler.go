@@ -327,6 +327,17 @@ func (h *Handler) SetDetectorRuntime(rt *detector.Runtime) {
 	}
 }
 
+// hotPathProtocol returns the wire protocol to hand the masker only when the
+// operator opted into XIR field scoping (secret_masking.hot_path_scope: ir).
+// Otherwise it returns empty, keeping the zero-parse byte fast path: the
+// gateway then calls Mask rather than MaskWithProtocol.
+func (h *Handler) hotPathProtocol(protocol string) string {
+	if h != nil && h.cfg != nil && strings.EqualFold(strings.TrimSpace(h.cfg.SecretMasking.HotPathScope), "ir") {
+		return protocol
+	}
+	return ""
+}
+
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
 	return newHandler(cfg, st, nil, provided...)
 }
@@ -559,6 +570,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			events:          executionEventRecorder,
 			secretVault:     secretVault,
 			maskRef:         maskRef,
+			irScope:         strings.EqualFold(strings.TrimSpace(cfg.SecretMasking.HotPathScope), "ir"),
 			minimalCassette: cfg.Trace.MinimalCassette,
 		}, responseStore, runtimeOptions...)
 		return httpapi.NewHandler(
@@ -956,7 +968,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				return conv, nil
 			},
-			Masker: masker,
+			Masker:   masker,
+			Protocol: h.hotPathProtocol(string(selection.Request.Protocol)),
 		}
 		transformResult, convErr := transform.Apply(bodyBytes)
 		recordBody := transformResult.RecordBody

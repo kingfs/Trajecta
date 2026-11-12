@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -38,6 +39,87 @@ func TestSecretMaskingFixtures(t *testing.T) {
 	}
 	if got := len(testGoogleAPIKey); got != 39 {
 		t.Errorf("google api key is %d bytes, want 39", got)
+	}
+}
+
+// TestHandlerMasksCredentialsIRScope is the end-to-end contract for the XIR
+// field-scoped hot path (secret_masking.hot_path_scope: ir): with the detection
+// runtime wired, the proxy parses the request to the IR projection, scopes
+// detection to the declared fields, and still masks the wire, preserves length,
+// restores the client echo and records the original cassette — identically to
+// the byte path.
+func TestHandlerMasksCredentialsIRScope(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		seen := "(missing)"
+		if i := bytes.Index(body, []byte("sk-proj-")); i >= 0 {
+			if i+len(testOpenAIProjectKey) <= len(body) {
+				seen = string(body[i : i+len(testOpenAIProjectKey)])
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"echo": seen})
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+	cfg.SecretMasking.HotPathScope = "ir"
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	rt, err := detector.NewRuntime(context.Background(), st)
+	if err != nil {
+		t.Fatalf("detector.NewRuntime() error = %v", err)
+	}
+	handler.SetDetectorRuntime(rt)
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(secretMaskingBody()))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
+	}
+
+	for _, secret := range []string{testOpenAIProjectKey, testGoogleAPIKey} {
+		if strings.Contains(upstreamBody, secret) {
+			t.Errorf("IR path: upstream received the real value %q", secret)
+		}
+	}
+	if !strings.Contains(upstreamBody, "sk-proj-") || !strings.Contains(upstreamBody, "T3BlbkFJ") {
+		t.Errorf("IR path: stand-in lost prefix/watermark: %s", upstreamBody)
+	}
+	if len(upstreamBody) != len(secretMaskingBody()) {
+		t.Errorf("IR path: body length changed: got %d, want %d", len(upstreamBody), len(secretMaskingBody()))
+	}
+	var echoed struct {
+		Echo string `json:"echo"`
+	}
+	if err := json.Unmarshal(respBody, &echoed); err != nil {
+		t.Fatalf("decode response %q: %v", respBody, err)
+	}
+	if echoed.Echo != testOpenAIProjectKey {
+		t.Errorf("IR path: client received %q, want the original key restored", echoed.Echo)
 	}
 }
 

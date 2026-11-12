@@ -353,6 +353,14 @@ type LimitConfig struct {
 type SecretMaskingConfig struct {
 	Enabled      bool                         `yaml:"enabled"`
 	MappingStore SecretMaskMappingStoreConfig `yaml:"mapping_store"`
+	// HotPathScope selects how the forwarding hot path scopes detection. "byte"
+	// (the default, also empty) scans the whole body with the compiled DFA and
+	// the opaque.go guard — the zero-parse fast path. "ir" parses the request to
+	// the XIR projection and scans only the fields each detection plugin declares,
+	// excluding sealed/encrypted content structurally; it is functionally
+	// equivalent on representative traffic but costs an extra parse (measured
+	// ~2x the byte path), so it is opt-in.
+	HotPathScope string `yaml:"hot_path_scope"`
 }
 
 // SecretMaskMappingStoreConfig controls the durable mapping beside the vault.
@@ -930,6 +938,7 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Trace.OutputDir, "TRAJECTA_TRACE_OUTPUT_DIR")
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
 	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
+	envString(&cfg.SecretMasking.HotPathScope, "TRAJECTA_SECRET_MASKING_HOT_PATH_SCOPE")
 	envBool(&cfg.SecretMasking.MappingStore.Enabled, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED")
 	envString(&cfg.SecretMasking.MappingStore.Path, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_PATH")
 	envInt(&cfg.SecretMasking.MappingStore.LoadLimit, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_LOAD_LIMIT")

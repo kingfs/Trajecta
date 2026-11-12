@@ -22,6 +22,14 @@ type Masker interface {
 	Mask([]byte) ([]byte, []secretmask.MaskEvent)
 }
 
+// ProtocolMasker is an optional Masker extension that receives the wire protocol
+// so it can apply protocol-aware (XIR field-scoped) detection. A Masker that does
+// not implement it is called with Mask alone; the detection-plugin coordinator
+// implements it to scope detection to the IR fields each plugin declares.
+type ProtocolMasker interface {
+	MaskWithProtocol(body []byte, protocol string) ([]byte, []secretmask.MaskEvent)
+}
+
 // ConverterFactory builds a converter from the post-alias record body. It is
 // called only after the alias rewrite, because conversion protocol selection
 // depends on the wire model. Returning nil means native passthrough.
@@ -38,6 +46,10 @@ type RequestTransform struct {
 	UpstreamModel  string
 	ConverterFor   ConverterFactory
 	Masker         Masker
+	// Protocol is the client wire protocol (chat_completions/responses/messages/
+	// gemini). When set and the Masker implements ProtocolMasker, masking is
+	// scoped to the XIR fields the detection plugins declare.
+	Protocol string
 }
 
 // RequestResult is the outcome of one request transform.
@@ -106,7 +118,13 @@ func (t RequestTransform) Apply(client []byte) (RequestResult, error) {
 	}
 
 	if t.Masker != nil {
-		masked, events := t.Masker.Mask(result.WireBody)
+		var masked []byte
+		var events []secretmask.MaskEvent
+		if pm, ok := t.Masker.(ProtocolMasker); ok && t.Protocol != "" {
+			masked, events = pm.MaskWithProtocol(result.WireBody, t.Protocol)
+		} else {
+			masked, events = t.Masker.Mask(result.WireBody)
+		}
 		if len(events) > 0 {
 			if masked == nil {
 				return result, fmt.Errorf("gateway: masker returned nil body with %d events", len(events))

@@ -40,6 +40,7 @@ type responsesChatCompletionsAdapter struct {
 	events          responsesaudit.ExecutionEventRecorder
 	secretVault     *secretmask.Vault
 	maskRef         *maskerHolder
+	irScope         bool
 	minimalCassette bool
 }
 
@@ -87,7 +88,18 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	sendBody := body
 	var maskedEvents []secretmask.MaskEvent
 	if a.maskRef != nil && a.maskRef.m != nil {
-		if masked, events := a.maskRef.m.Mask(body); len(events) > 0 {
+		protocol := ""
+		if a.irScope {
+			protocol = string(selection.Request.Protocol)
+		}
+		var masked []byte
+		var events []secretmask.MaskEvent
+		if pm, ok := a.maskRef.m.(gateway.ProtocolMasker); ok && protocol != "" {
+			masked, events = pm.MaskWithProtocol(body, protocol)
+		} else {
+			masked, events = a.maskRef.m.Mask(body)
+		}
+		if len(events) > 0 {
 			sendBody = masked
 			maskedEvents = events
 		}

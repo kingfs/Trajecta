@@ -256,7 +256,26 @@ cassette 记录的是**原始值**，这是有意选择：replay 按请求字节
 - 热车道：`internal/detector.Masker` 实现 `gateway.Masker`，从已发布快照收集启用插件的可遮蔽命中，交 `Vault.MaskCandidates` 渲染。内置 `secretmask` 命中保留 `RuleID`，渲染仍走精确的编译期规则元数据；第三方扫描器命中以 `MaskCandidate.Meta`（`secretmask.Rule` 描述符）携带渲染/审计身份。`Vault.Mask` 现在是 `MaskCandidates` 的内置特例。`MaskEvent.Meta` 让插件规则以自己的名字/厂商/类别写审计，内置事件 `Meta` 为零、行为不变。
 - 规则级开关走插件 `Settings`（DFA 是一台编译期机器，不能按规则拆插件）：`secretmask` 支持 `{"disable_pii":true,"disabled_rules":["pii.chinese_id",…]}`。
 - 审计车道：`internal/audit.Inspector.Detectors` 从快照取按 Point 索引的引擎（`AuditEngineFor`，取代旧的 `detect.New(secretmask.New())` 单扫描器硬编码）；`internal/reanalysis` 的 runner 由快照 `Runner()` 提供（`analyzer.NewRunnerList` 不做默认回退，禁用全部观测插件即得到空 runner）。
-- IR 作用域：每个插件用 `Points`（复用 `pkg/xir/hook.Point` 词汇）声明它作用的 XIR 字段——`secretmask` 作用于 system/message/tool_call/tool_result/reasoning/output 等文本字段，`access.indicators` 只作用于两侧 tool_call.arguments。审计投影节点经 `internal/audit.NodePoint` 映射到 Point，`detectObservation` 只在该 Point 声明的插件上扫描，`Detection` 输出携带 `point`。**加密内容结构性跳过**：`encrypted_content`/`thinking`/`inlineData` 等在 IR 里是 `xir.Sealed` 块，投影只保留 `Raw` 引用、永不生成 `Text`，`NodePoint` 对 sealed 返回空 Point，因此文本检测器根本看不到它们——跳过是字段投影的性质，而非检测器事后识别丢弃。热路径仍为字节级（opaque 保护由 `opaque.go` 兜底），IR 作用域目前只在审计车道强制；`Points` 同时是目录事实，Monitor 抽屉展示插件的 IR 作用域。
+- IR 作用域：每个插件用 `Points`（复用 `pkg/xir/hook.Point` 词汇）声明它作用的 XIR 字段——`secretmask` 作用于 system/message/tool_call/tool_result/reasoning/output 等文本字段，`access.indicators` 只作用于两侧 tool_call.arguments。审计投影节点经 `internal/audit.NodePoint` 映射到 Point，`detectObservation` 只在该 Point 声明的插件上扫描，`Detection` 输出携带 `point`。**加密内容结构性跳过**：`encrypted_content`/`thinking`/`inlineData` 等在 IR 里是 `xir.Sealed` 块，投影只保留 `Raw` 引用、永不生成 `Text`，`NodePoint` 对 sealed 返回空 Point，因此文本检测器根本看不到它们——跳过是字段投影的性质，而非检测器事后识别丢弃。热路径默认仍为字节级（opaque 保护由 `opaque.go` 兜底），IR 作用域在审计车道强制，并可通过 `secret_masking.hot_path_scope: ir` 在热路径启用（见下节）；`Points` 同时是目录事实，Monitor 抽屉展示插件的 IR 作用域。
+
+## 热路径的 XIR 作用域（opt-in）
+
+`secret_masking.hot_path_scope` 选择转发热路径的检测作用域方式：
+
+- `byte`（默认，留空同义）：零解析快路径。`detector.Masker` 用编译期 DFA 扫整个 body，opaque 由 `opaque.go` 兜底。这是插件化之前的行为，性能不变。
+- `ir`：`Masker.MaskWithProtocol` 先把请求体解析为 XIR 投影（`xir.ParseDocument` → codec `DecodeRequest` → `pkg/xir/audit.Build` 请求侧），按插件 `Points` 取对应字段的**原始字节 span**（`internal/detector.ParseRequestScope`），只在这些 span 内扫描；Sealed 块不贡献 span，加密内容结构性排除。命中仍是原始字节偏移，交 `Vault.MaskCandidates` 渲染。无法作用域化（未知协议、解析失败、文本节点无 wire span）时**回退字节快路径**，绝不因作用域化漏检。
+
+正确性由差分夹具钉住：`internal/detector` 的语料库（四协议、含加密推理/thinking/inlineData 的 opaque 用例）上，IR 路径与字节路径的 wire 输出与 `MaskEvent` **逐字节一致**（`TestMaskerIRParityWithVault`）；`internal/proxy` 的 `TestHandlerMasksCredentialsIRScope` 端到端验证 IR 模式下上游遮蔽、等长、客户端还原、cassette 原文。Vault 的 `opaque.go` 在两条路径都仍是最终 opaque 守卫。
+
+**性能（arm64，`go test ./internal/detector -bench . -benchmem`，暖 vault、稀疏凭据）**：
+
+| body | byte ns/op | ir ns/op | ir/byte | byte MB/s | ir MB/s | byte allocs | ir allocs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 KiB | 42944 | 88621 | ≈2.06× | 31.3 | 15.2 | 9 | 180 |
+| 19 KiB | 601679 | 1207000 | ≈2.01× | 33.8 | 16.9 | 34 | 2264 |
+| 79 KiB | 2517886 | 4927286 | ≈1.96× | 32.3 | 16.5 | 88 | 8885 |
+
+IR 路径约慢 2×、分配高约 20–100×，开销来自 `wire.Parse` + codec 解码 + `audit.Build` 投影（DFA 扫描本身两条路径相同）。因此默认 `byte` 保持快路径，`ir` 为需要字段级精度/结构性 opaque 排除时的显式选择。协议经 `gateway.RequestTransform.Protocol` 穿透（`gateway.ProtocolMasker` 可选接口），透传与本地 Responses 两条路径一致；`byte` 模式下不传协议，gateway 调 `Mask` 而非 `MaskWithProtocol`。
 - 发布与一致性：`detector.Runtime` 持有原子快照，启动时构建、Monitor PATCH 成功后 `Republish` 重建；构建失败保留旧快照。管理 API 为 admin-only 的 `GET /api/detector-plugins` 与 `PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`）；禁用 hot 车道插件且 vault 仍有映射时返回 409 `plugin_in_use`（`mapping_count`），`force` 豁免。`plugins.detectors` 已加入 `internal/transfer` 的导入白名单（仅目标缺行才插入）。
 
 ## 审计事件与审计表
