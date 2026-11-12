@@ -162,7 +162,7 @@ export function ChannelPluginsPanel() {
       <PluginDetailDrawer
         facts={pluginDrawerFacts(detailItem)}
         open={Boolean(detailItem)}
-        onClose={() => { if (!conflict) setDetailID(""); }}
+        onClose={() => { if (conflict) setConflict(null); else setDetailID(""); }}
         enabled={Boolean(detailItem?.enabled)}
         onToggle={detailItem ? (next) => onToggle(detailItem, next) : undefined}
         toggleDisabled={busyID === detailID || enable.isPending}
