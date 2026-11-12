@@ -128,6 +128,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			channelconfig.FieldSource:             {Type: field.TypeString, Column: channelconfig.FieldSource},
 			channelconfig.FieldBaseURL:            {Type: field.TypeString, Column: channelconfig.FieldBaseURL},
 			channelconfig.FieldProviderPreset:     {Type: field.TypeString, Column: channelconfig.FieldProviderPreset},
+			channelconfig.FieldPlan:               {Type: field.TypeString, Column: channelconfig.FieldPlan},
 			channelconfig.FieldAPIType:            {Type: field.TypeString, Column: channelconfig.FieldAPIType},
 			channelconfig.FieldMode:               {Type: field.TypeString, Column: channelconfig.FieldMode},
 			channelconfig.FieldCapabilitiesJSON:   {Type: field.TypeString, Column: channelconfig.FieldCapabilitiesJSON},
@@ -1163,6 +1164,11 @@ func (f *ChannelConfigFilter) WhereBaseURL(p entql.StringP) {
 // WhereProviderPreset applies the entql string predicate on the provider_preset field.
 func (f *ChannelConfigFilter) WhereProviderPreset(p entql.StringP) {
 	f.Where(p.Field(channelconfig.FieldProviderPreset))
+}
+
+// WherePlan applies the entql string predicate on the plan field.
+func (f *ChannelConfigFilter) WherePlan(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldPlan))
 }
 
 // WhereAPIType applies the entql string predicate on the api_type field.

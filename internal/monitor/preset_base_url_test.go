@@ -37,7 +37,7 @@ func TestDefaultPresetBaseURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := defaultPresetBaseURL(tc.preset, tc.family, tc.apiType); got != tc.want {
+			if got := defaultPresetBaseURL(tc.preset, "", tc.family, tc.apiType); got != tc.want {
 				t.Fatalf("defaultPresetBaseURL(%q,%q,%q) = %q, want %q", tc.preset, tc.family, tc.apiType, got, tc.want)
 			}
 		})

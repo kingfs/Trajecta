@@ -73,36 +73,44 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 未在表中列出的状态码按状态类别回退（4xx → 调用方错误、5xx → 服务端错误），不再一律回退到服务端错误。响应同时带 `X-Trajecta-Error-Source: proxy` 以区分代理自身错误与上游错误；上游返回的错误体原样透传，不被改写。
 
-## Provider Preset 清单
+## 渠道插件与 Provider Preset 清单
 
-`internal/upstream/resolved.go` 的 `providerPresetRegistry` 当前有 25 个键；其中若干键的 spec 完全相同而互为别名，去重后为 20 个独立 provider。Monitor 通过 `GET /api/provider-presets` 暴露同一份矩阵。
+目录的事实源是 `pkg/upstream/presets.go` 的编译期 preset 表，按**渠道插件**组织：一个可见 preset = 一个插件 = 一个厂商站点（厂商 + 区域）。计费套餐（Coding Plan、Token Plan、Kimi Code 会员）是 preset 的 `PlanVariant`，协议面（OpenAI 兼容、Anthropic Messages、Gemini）是 preset 的每协议 `Endpoints`——两者都不是独立 preset。一个渠道携带 preset 声明的全部协议端点，共用一个 API key。
+
+当前有 21 个可见插件：`alibaba`（阿里百炼-中国）、`alibaba_intl`（阿里百炼-国际）、`anthropic`、`azure`、`cerebras`、`deepseek`、`fireworks`、`google`、`groq`、`minimax`、`mistral`、`moonshot`、`ollama`、`openai`、`openrouter`、`together`、`vertex`、`vllm`、`xai`、`zai`、`zhipu`。每个 preset 携带双语短名（`Name`/`NameZh`，如 "Alibaba Bailian-China" / "阿里百炼-中国"）、区域、基于官方文档撰写的双语描述、端点、鉴权、套餐、模型来源与文档链接；`Plugins()`/`PluginForPreset()`/`PresetIDsForPlugin()` 提供插件视图与归属推导。`github`（GitHub Models）已于 2026-07-30 被官方全面退役，preset 隐藏、不再进入目录，仅保留给存量渠道解析。
+
+插件的启用状态保存在应用数据库 `app_settings` 键 `plugins.channels`（`{"enabled":[...]}`），**默认全部禁用**：`GET /api/catalog/providers` 只返回已启用插件的可见 preset，创建渠道弹窗的官方目录因此初始为空，由「插件」页启用。`GET /api/plugins`（admin）返回全量插件目录（厂商信息：名称/描述/文档/套餐/端点，不含渠道关联统计）；`PATCH /api/plugins/{id}` 切换开关，停用仍有启用渠道的插件时返回 409 与受影响渠道列表（仅此时查询渠道归属），需 `force:true` 确认。**插件开关只影响目录展示，从不改变路由**：已有渠道的流量由渠道自身的 `enabled` 决定。
+
+11 个历史 plan/协议 preset 被标记 `Hidden` 并保留可解析（存量渠道与导入 bundle 不受影响），每条通过 `Replacement` 指向规范 preset+plan：`qwen_coding`、`qwen_coding_anthropic` → `alibaba`+`coding`；`qwen_coding_intl`、`qwen_coding_intl_anthropic` → `alibaba_intl`+`coding`；`qwen_token_plan` → `alibaba`+`token`；`qwen_token_plan_intl` → `alibaba_intl`+`token`；`zai_coding`、`zai_coding_anthropic` → `zai`+`coding`；`zhipu_coding`、`zhipu_coding_anthropic` → `zhipu`+`coding`；`kimi_coding` → `moonshot`+`kimi-code`。隐藏 preset 不出现在目录与插件页。
+
+运行时校验矩阵仍是 `internal/upstream/resolved.go` 的 `providerPresetRegistry`（preset → 协议族 + routing profile）：显式条目优先，目录新增 preset 由 `catalogSpec` 自动注入。Monitor 通过 `GET /api/provider-presets` 暴露该矩阵（含隐藏 preset，供存量渠道编辑）。主要条目：
 
 | `provider_preset` | 协议族 | 默认 `routing_profile` | 允许的 `routing_profile` | 支持级别 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `alibaba` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
-| `azure` | `openai_compatible` | 自动推断 | `azure_openai_v1`、`azure_openai_deployment` | verified | |
-| `azure_openai` | `openai_compatible` | 自动推断 | 同上 | verified | `azure` 别名 |
-| `baseten` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
+| `alibaba` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 中国站；套餐 coding/token |
+| `alibaba_intl` | `openai_compatible` | `openai_default` | `openai_default` | verified | 国际站；套餐 coding/token |
+| `azure` | `openai_compatible` | 自动推断 | `azure_openai_v1`、`azure_openai_deployment` | verified | `azure_openai` 别名 |
+| `baseten` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 仅 registry |
 | `cerebras` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
 | `deepseek` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 允许以 origin 作为 base URL |
 | `fireworks` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
-| `github` | `openai_compatible` | `openai_default` | `openai_default` | verified | `github_models` 别名 |
-| `github_models` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
+| `github` | `openai_compatible` | `openai_default` | `openai_default` | verified | `github_models` 别名；服务已于 2026-07-30 退役，preset 隐藏，仅存量渠道 |
 | `groq` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
-| `hugging_face` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
-| `moonshot` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
-| `nvidia_nim` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
+| `hugging_face` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 仅 registry |
+| `minimax` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
+| `mistral` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
+| `moonshot` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 套餐 kimi-code |
+| `nvidia_nim` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 仅 registry |
 | `openai` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
 | `openrouter` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
-| `perplexity` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
+| `perplexity` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 仅 registry |
 | `together` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
 | `vllm` | `openai_compatible` | `vllm_openai` | `vllm_openai` | verified | |
 | `xai` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
+| `zai` | `openai_compatible` | `openai_default` | `openai_default` | verified | 套餐 coding |
+| `zhipu` | `openai_compatible` | `openai_default` | `openai_default` | verified | 套餐 coding |
 | `anthropic` | `anthropic_messages` | `anthropic_default` | `anthropic_default` | verified | |
-| `google` | `google_genai` | `google_ai_studio` | `google_ai_studio` | verified | `google_genai` 别名 |
-| `google_ai_studio` | `google_genai` | `google_ai_studio` | `google_ai_studio` | verified | `google_genai` 别名 |
-| `google_genai` | `google_genai` | `google_ai_studio` | `google_ai_studio` | verified | |
-| `gemini` | `google_genai` | `google_ai_studio` | `google_ai_studio` | verified | `google_genai` 别名 |
+| `google` | `google_genai` | `google_ai_studio` | `google_ai_studio` | verified | `google_genai`/`google_ai_studio`/`gemini` 别名 |
 | `vertex` | `vertex_native` | 自动推断 | `vertex_express`、`vertex_project_location` | verified | |
 
 `provider_preset` 是可选项；省略时由 host、base path 与 `protocol_family` 推断协议族和 routing profile。提供 preset 时，若与显式 `protocol_family` 冲突，或使用了不在允许列表内的 routing profile，会在配置解析或启动时失败。例如 `provider_preset: anthropic` 搭配 `protocol_family: google_genai`、`provider_preset: openrouter` 搭配 `routing_profile: azure_openai_v1`、以及未知 preset 都会报错。
@@ -195,27 +203,26 @@ trajecta provider probe-report
 {"endpoints":{"messages":"https://api.deepseek.com/anthropic","gemini":"https://generativelanguage.googleapis.com"}}
 ```
 
-未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；渠道 API 另有顶层 `endpoints`，Monitor 高级选项可逐协议编辑。
+未列出的协议继续使用渠道 `BaseURL`。转发路径在 native 请求上按客户端 path 选择 endpoint，在 conversion 后按目标协议显式选择（`ResolvedUpstream.BuildURLForProtocol`）。该字段通过应用数据库的 `channel_configs.capabilities_json` 持久化，不需要新增表；渠道 API 另有顶层 `endpoints`，Monitor 高级选项可逐协议编辑。从官方目录创建渠道时，`channelRecordFromRequest` 会按 preset+plan 自动填充全部协议端点与对应能力布尔（显式传入优先，编辑不重新推导），因此「一个 key、两个 URL」（如 `/v1` 与 `/apps/anthropic`）不需要手工配置。
 
 
-## Coding Plan 预设
+## 套餐（Coding Plan / Token Plan）
 
-当前内置以下专用 coding-plan 预设（均为 API key 鉴权，endpoint 与普通按量 endpoint 隔离）：
+套餐是插件 preset 的 `PlanVariant`：覆盖端点、声明专用 key 前缀（`KeyPrefix`）、标记 `Coding`、可覆盖模型来源（`Models`，coding 端点通常无模型列表接口）。渠道以 `provider_preset` + `plan`（`channel_configs.plan` 列）记录所选套餐；创建时 `ValidatePlanCredential` 按套餐校验 key 前缀，`IsCodingPlan`/`PlanNameFor` 推导渠道卡的套餐徽标。
 
-| 预设 | 区域 | Chat endpoint | Anthropic endpoint |
+阿里百炼两个插件的套餐端点（与官方文档一致，均为 Bearer 鉴权、双协议共用一个 key）：
+
+| 插件 | 套餐 | Chat endpoint | Anthropic endpoint |
 | --- | --- | --- | --- |
-| `qwen_coding` | 中国 | `https://coding.dashscope.aliyuncs.com/v1` | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
-| `qwen_coding_intl` | 国际 | `https://coding-intl.dashscope.aliyuncs.com/v1` | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
-| `qwen_coding_anthropic` | 中国，仅 Anthropic | - | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
-| `qwen_coding_intl_anthropic` | 国际，仅 Anthropic | - | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
-| `zai_coding` | Z.ai | `https://api.z.ai/api/coding/paas/v4` | `https://api.z.ai/api/anthropic` |
-| `zai_coding_anthropic` | Z.ai，仅 Anthropic | - | `https://api.z.ai/api/anthropic` |
-| `zhipu_coding` | 智谱 BigModel | `https://open.bigmodel.cn/api/coding/paas/v4` | `https://open.bigmodel.cn/api/anthropic` |
-| `zhipu_coding_anthropic` | 智谱，仅 Anthropic | - | `https://open.bigmodel.cn/api/anthropic` |
-| `kimi_coding` | Kimi Code | -（仅 Anthropic Messages） | `https://api.kimi.ai/coding` |
-| `qwen_token_plan` | 中国 | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic` |
-| `qwen_token_plan_intl` | 新加坡 | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic` |
+| `alibaba`（中国） | 默认（按量） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://dashscope.aliyuncs.com/apps/anthropic` |
+| `alibaba`（中国） | `coding` | `https://coding.dashscope.aliyuncs.com/v1` | `https://coding.dashscope.aliyuncs.com/apps/anthropic` |
+| `alibaba`（中国） | `token` | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic` |
+| `alibaba_intl`（国际） | 默认（按量） | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `https://dashscope-intl.aliyuncs.com/apps/anthropic` |
+| `alibaba_intl`（国际） | `coding` | `https://coding-intl.dashscope.aliyuncs.com/v1` | `https://coding-intl.dashscope.aliyuncs.com/apps/anthropic` |
+| `alibaba_intl`（国际） | `token` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic` |
 
-Qwen Coding Plan 与 Token Plan 使用 `sk-sp-` 前缀的专用 key，和普通 DashScope key 不可混用；渠道创建时会拒绝非 `sk-sp-` key。GLM Coding Plan 使用对应平台的 API key；coding endpoint 才会消耗套餐额度。
+Coding Plan 与 Token Plan 使用 `sk-sp-` 前缀的专用 key，和普通 DashScope key 不可混用；渠道创建/编辑时会拒绝非 `sk-sp-` key。Coding Plan 整合千问、GLM、Kimi、MiniMax 等模型，是阿里百炼的产品而非单一模型厂商的套餐。GLM Coding Plan（`zai`/`zhipu` 的 `coding` 套餐）使用对应平台的 API key；Kimi Code 会员（`moonshot` 的 `kimi-code` 套餐）使用会员 key 访问 `https://api.kimi.ai/coding`。coding endpoint 才会消耗套餐额度。
+
+历史的独立 plan/协议 preset（`qwen_coding*`、`qwen_token_plan*`、`zai_coding*`、`zhipu_coding*`、`kimi_coding`）已隐藏，仅保留给存量渠道解析，其凭据校验由 `Replacement` 指向的规范套餐派生，行为不变。
 
 **关于 OAuth**：Qwen 当前公开文档已把 Qwen OAuth 从 `/auth` 选项移除，官方 coding plan 走专用 API key；Z.ai 的 ZCode OAuth 是桌面客户端流程，BigModel 的 OAuth 也只接受桌面回调，均不是稳定的公开第三方 API。Trajecta 先接入官方 API key 路径，不实现逆向/客户端专用 OAuth。

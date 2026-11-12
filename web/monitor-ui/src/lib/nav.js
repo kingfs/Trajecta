@@ -39,6 +39,9 @@ export const NAV_GROUPS = [
       // destination.
       { to: "/channels", labelKey: "nav.providers", icon: "plug", legacyPaths: ["/providers", "/routing"] },
       { to: "/models", labelKey: "nav.models", icon: "box" },
+      // Channel plugins gate the official provider catalog. The page is
+      // admin-only like the other configuration switches it resembles.
+      { to: "/plugins", labelKey: "nav.plugins", icon: "puzzle", adminOnly: true },
       { to: "/connect", labelKey: "nav.access", icon: "terminal" },
     ],
   },

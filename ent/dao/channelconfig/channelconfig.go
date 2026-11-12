@@ -23,6 +23,8 @@ const (
 	FieldBaseURL = "base_url"
 	// FieldProviderPreset holds the string denoting the provider_preset field in the database.
 	FieldProviderPreset = "provider_preset"
+	// FieldPlan holds the string denoting the plan field in the database.
+	FieldPlan = "plan"
 	// FieldAPIType holds the string denoting the api_type field in the database.
 	FieldAPIType = "api_type"
 	// FieldMode holds the string denoting the mode field in the database.
@@ -85,6 +87,7 @@ var Columns = []string{
 	FieldSource,
 	FieldBaseURL,
 	FieldProviderPreset,
+	FieldPlan,
 	FieldAPIType,
 	FieldMode,
 	FieldCapabilitiesJSON,
@@ -133,6 +136,8 @@ var (
 	BaseURLValidator func(string) error
 	// DefaultProviderPreset holds the default value on creation for the "provider_preset" field.
 	DefaultProviderPreset string
+	// DefaultPlan holds the default value on creation for the "plan" field.
+	DefaultPlan string
 	// DefaultAPIType holds the default value on creation for the "api_type" field.
 	DefaultAPIType string
 	// DefaultMode holds the default value on creation for the "mode" field.
@@ -214,6 +219,11 @@ func ByBaseURL(opts ...sql.OrderTermOption) OrderOption {
 // ByProviderPreset orders the results by the provider_preset field.
 func ByProviderPreset(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProviderPreset, opts...).ToFunc()
+}
+
+// ByPlan orders the results by the plan field.
+func ByPlan(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPlan, opts...).ToFunc()
 }
 
 // ByAPIType orders the results by the api_type field.

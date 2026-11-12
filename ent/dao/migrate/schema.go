@@ -133,6 +133,7 @@ var (
 		{Name: "source", Type: field.TypeString, Default: "manual"},
 		{Name: "base_url", Type: field.TypeString},
 		{Name: "provider_preset", Type: field.TypeString, Default: ""},
+		{Name: "plan", Type: field.TypeString, Default: ""},
 		{Name: "api_type", Type: field.TypeString, Default: ""},
 		{Name: "mode", Type: field.TypeString, Default: ""},
 		{Name: "capabilities_json", Type: field.TypeString, Default: "{}"},
@@ -168,7 +169,7 @@ var (
 			{
 				Name:    "channelconfig_enabled_priority",
 				Unique:  false,
-				Columns: []*schema.Column{ChannelConfigsColumns[20], ChannelConfigsColumns[21]},
+				Columns: []*schema.Column{ChannelConfigsColumns[21], ChannelConfigsColumns[22]},
 			},
 			{
 				Name:    "channelconfig_provider_preset",

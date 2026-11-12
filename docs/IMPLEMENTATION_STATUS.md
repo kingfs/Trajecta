@@ -211,7 +211,7 @@ Responses audit 属于部分实现，职责边界如下：
 - `pkg/xir`：协议无关 Exchange IR，含 span-preserving wire、四个协议 codec、hook、convert、SSE stream、audit projection；
 - `pkg/usage`：canonical usage 与 Merge/Add/Normalize；
 - `pkg/detect`：通用 span scanner 框架，`pkg/detect/secretmask` 适配凭据/PII detector；
-- `pkg/upstream`：20 个 provider preset、每协议 endpoint、auth spec、OAuth 预留类型、模型发现；
+- `pkg/upstream`：21 个可见渠道插件（厂商站点 preset，双语短名/区域/官方描述）、11 个隐藏历史 preset 与已退役的 github、每协议 endpoint、auth spec、PlanVariant 套餐（key 前缀/模型源覆盖）、OAuth 预留类型、模型发现；插件启用状态在 `app_settings` 键 `plugins.channels`，默认全禁用，仅过滤官方目录；
 - `pkg/route`：纯 route planner，支持 native/local/convert、compat/strict priority、affinity 与候选解释；
 - `pkg/session`：session 信号解析与 fingerprint；
 - `pkg/harness`：客户端 harness 只读分类。

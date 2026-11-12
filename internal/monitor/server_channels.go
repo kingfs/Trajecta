@@ -51,6 +51,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
 		enrichChannelItemAnalytics(st, &item, record, since, bucketSize, bucketCount, true)
+		annotateChannelItemPluginState(r.Context(), st, &item)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodPatch:
 		existing, err := st.GetChannelConfig(channelID)
@@ -78,7 +79,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 		if strings.TrimSpace(key) == "" {
 			key = string(record.APIKeyCiphertext)
 		}
-		if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, key); err != nil {
+		if err := pkgupstream.ValidatePlanCredential(record.ProviderPreset, record.Plan, key); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -92,7 +93,9 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			return
 		}
 		models, _ := st.ListChannelModels(channelID, false)
-		writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, channelID)))
+		item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, channelID))
+		annotateChannelItemPluginState(r.Context(), st, &item)
+		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
 		if err := st.DeleteChannelConfig(channelID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {

@@ -121,6 +121,9 @@ func Resolve(cfg Config) (Resolved, error) {
 		for protocol, raw := range plan.Endpoints {
 			endpoints[protocol] = raw
 		}
+		if plan.Models != nil {
+			preset.Models = *plan.Models
+		}
 	}
 	for protocol, raw := range cfg.Endpoints {
 		endpoints[protocol] = raw

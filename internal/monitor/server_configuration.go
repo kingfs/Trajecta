@@ -152,44 +152,49 @@ type channelListResponse struct {
 }
 
 type channelItem struct {
-	ID                string               `json:"id"`
-	Name              string               `json:"name"`
-	Description       string               `json:"description,omitempty"`
-	Source            string               `json:"source"`
-	BaseURL           string               `json:"base_url"`
-	ProviderPreset    string               `json:"provider_preset"`
-	APIType           string               `json:"api_type"`
-	Mode              string               `json:"mode"`
-	Capabilities      upstreamCapabilities `json:"capabilities,omitempty"`
-	Endpoints         map[string]string    `json:"endpoints,omitempty"`
-	CodingPlan        bool                 `json:"coding_plan,omitempty"`
-	PlanName          string               `json:"plan_name,omitempty"`
-	ProtocolFamily    string               `json:"protocol_family"`
-	RoutingProfile    string               `json:"routing_profile"`
-	APIVersion        string               `json:"api_version,omitempty"`
-	Deployment        string               `json:"deployment,omitempty"`
-	Project           string               `json:"project,omitempty"`
-	Location          string               `json:"location,omitempty"`
-	ModelResource     string               `json:"model_resource,omitempty"`
-	APIKeyHint        string               `json:"api_key_hint,omitempty"`
-	SecretStorageMode string               `json:"secret_storage_mode"`
-	Headers           map[string]string    `json:"headers,omitempty"`
-	Proxy             netproxy.Settings    `json:"proxy"`
-	Enabled           bool                 `json:"enabled"`
-	Priority          int                  `json:"priority"`
-	Weight            float64              `json:"weight"`
-	CapacityHint      float64              `json:"capacity_hint"`
-	ModelDiscovery    string               `json:"model_discovery"`
-	ModelCount        int                  `json:"model_count"`
-	EnabledModelCount int                  `json:"enabled_model_count"`
-	CreatedAt         time.Time            `json:"created_at"`
-	UpdatedAt         time.Time            `json:"updated_at"`
-	LastProbeAt       time.Time            `json:"last_probe_at,omitempty"`
-	LastProbeStatus   string               `json:"last_probe_status,omitempty"`
-	LastProbeError    string               `json:"last_probe_error,omitempty"`
-	Summary           usageSummaryView     `json:"summary,omitempty"`
-	Trends            []usageTrendView     `json:"trends,omitempty"`
-	ModelsUsage       []modelChannelItem   `json:"models_usage,omitempty"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Description    string               `json:"description,omitempty"`
+	Source         string               `json:"source"`
+	BaseURL        string               `json:"base_url"`
+	ProviderPreset string               `json:"provider_preset"`
+	Plan           string               `json:"plan,omitempty"`
+	APIType        string               `json:"api_type"`
+	Mode           string               `json:"mode"`
+	Capabilities   upstreamCapabilities `json:"capabilities,omitempty"`
+	Endpoints      map[string]string    `json:"endpoints,omitempty"`
+	CodingPlan     bool                 `json:"coding_plan,omitempty"`
+	PlanName       string               `json:"plan_name,omitempty"`
+	PlanNameZh     string               `json:"plan_name_zh,omitempty"`
+	// PluginEnabled reports whether the channel's catalog plugin is enabled.
+	// It is cosmetic: routing depends on the channel's own enabled flag only.
+	PluginEnabled     bool               `json:"plugin_enabled"`
+	ProtocolFamily    string             `json:"protocol_family"`
+	RoutingProfile    string             `json:"routing_profile"`
+	APIVersion        string             `json:"api_version,omitempty"`
+	Deployment        string             `json:"deployment,omitempty"`
+	Project           string             `json:"project,omitempty"`
+	Location          string             `json:"location,omitempty"`
+	ModelResource     string             `json:"model_resource,omitempty"`
+	APIKeyHint        string             `json:"api_key_hint,omitempty"`
+	SecretStorageMode string             `json:"secret_storage_mode"`
+	Headers           map[string]string  `json:"headers,omitempty"`
+	Proxy             netproxy.Settings  `json:"proxy"`
+	Enabled           bool               `json:"enabled"`
+	Priority          int                `json:"priority"`
+	Weight            float64            `json:"weight"`
+	CapacityHint      float64            `json:"capacity_hint"`
+	ModelDiscovery    string             `json:"model_discovery"`
+	ModelCount        int                `json:"model_count"`
+	EnabledModelCount int                `json:"enabled_model_count"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	LastProbeAt       time.Time          `json:"last_probe_at,omitempty"`
+	LastProbeStatus   string             `json:"last_probe_status,omitempty"`
+	LastProbeError    string             `json:"last_probe_error,omitempty"`
+	Summary           usageSummaryView   `json:"summary,omitempty"`
+	Trends            []usageTrendView   `json:"trends,omitempty"`
+	ModelsUsage       []modelChannelItem `json:"models_usage,omitempty"`
 	// Interfaces is the union of the effective protocol surfaces of the enabled
 	// models, computed with the same model-override-precedence rules as routing.
 	Interfaces      []string              `json:"interfaces,omitempty"`
@@ -345,6 +350,7 @@ type channelUpsertRequest struct {
 	Description    string                             `json:"description"`
 	BaseURL        string                             `json:"base_url"`
 	ProviderPreset string                             `json:"provider_preset"`
+	Plan           string                             `json:"plan"`
 	APIType        string                             `json:"api_type"`
 	Mode           string                             `json:"mode"`
 	Capabilities   *config.UpstreamCapabilitiesConfig `json:"capabilities"`
@@ -823,6 +829,7 @@ func providerSetupAPIHandlerUncommitted(st *store.Store, rtr *router.Router, cha
 			return
 		}
 		item := channelItemFromRecord(st, record, 0, 0)
+		annotateChannelItemPluginState(r.Context(), st, &item)
 		resp.Applied = true
 		resp.Channel = &item
 		writeJSON(w, http.StatusOK, resp)
@@ -860,8 +867,10 @@ func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecor
 		Mode:              record.Mode,
 		Capabilities:      capabilities,
 		Endpoints:         capabilities.Endpoints,
-		CodingPlan:        pkgupstream.IsCodingPlanPreset(record.ProviderPreset),
-		PlanName:          pkgupstream.PlanNameForPreset(record.ProviderPreset),
+		Plan:              record.Plan,
+		CodingPlan:        pkgupstream.IsCodingPlan(record.ProviderPreset, record.Plan),
+		PlanName:          pkgupstream.PlanNameFor(record.ProviderPreset, record.Plan),
+		PlanNameZh:        pkgupstream.PlanNameZhFor(record.ProviderPreset, record.Plan),
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,
@@ -888,6 +897,7 @@ func providerSetupUpsertRequest(normalized channelItem, original channelUpsertRe
 		Description:    normalized.Description,
 		BaseURL:        normalized.BaseURL,
 		ProviderPreset: normalized.ProviderPreset,
+		Plan:           normalized.Plan,
 		APIType:        normalized.APIType,
 		Mode:           normalized.Mode,
 		Capabilities:   &normalized.Capabilities,
@@ -1030,6 +1040,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 				item.Trends = usageTrendViews(channelTrends(record.ID))
 				items = append(items, item)
 			}
+			annotateChannelItemsPluginState(r.Context(), st, items)
 			writeJSON(w, http.StatusOK, channelListResponse{Items: items, RefreshedAt: time.Now().UTC()})
 		case http.MethodPost:
 			var req channelUpsertRequest
@@ -1046,7 +1057,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 			if strings.TrimSpace(key) == "" {
 				key = string(record.APIKeyCiphertext)
 			}
-			if err := pkgupstream.ValidateCodingPlanCredential(record.ProviderPreset, key); err != nil {
+			if err := pkgupstream.ValidatePlanCredential(record.ProviderPreset, record.Plan, key); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
@@ -1074,6 +1085,7 @@ func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router,
 			models, _ := st.ListChannelModels(record.ID, false)
 			item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(record, models, record.ID))
 			item.Interfaces = channelInterfaceNames(record, models)
+			annotateChannelItemPluginState(r.Context(), st, &item)
 			writeJSON(w, http.StatusOK, item)
 		default:
 			http.NotFound(w, r)
@@ -1604,6 +1616,7 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ProviderPreset) != "" {
 		record.ProviderPreset = strings.TrimSpace(req.ProviderPreset)
 	}
+	record.Plan = valueOrExisting(req.Plan, record.Plan)
 	record.APIType = valueOrExisting(req.APIType, record.APIType)
 	record.Mode = valueOrExisting(req.Mode, record.Mode)
 	if req.Capabilities != nil {
@@ -1679,18 +1692,114 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	// base_url still wins, and a custom channel (no preset) keeps the old
 	// requirement.
 	if strings.TrimSpace(record.BaseURL) == "" {
-		record.BaseURL = defaultPresetBaseURL(record.ProviderPreset, record.ProtocolFamily, record.APIType)
+		record.BaseURL = defaultPresetBaseURL(record.ProviderPreset, record.Plan, record.ProtocolFamily, record.APIType)
+	}
+	// Creation from the catalog also derives the multi-protocol facts the
+	// preset carries; an ordinary edit never re-derives stored facts.
+	if existing.ID == "" {
+		applyPresetChannelDefaults(&record, req)
 	}
 	return record
 }
 
-// defaultPresetBaseURL resolves the base URL for a known provider preset. It
-// maps the channel's declared protocol surface to the matching preset endpoint
-// and falls back to the preset's canonical order. It returns "" for a custom
-// channel or a preset without a universal endpoint (Azure, Vertex).
-func defaultPresetBaseURL(presetID, protocolFamily, apiType string) string {
+// applyPresetChannelDefaults fills the multi-protocol facts a preset already
+// knows when a channel is created from the catalog: every declared protocol
+// endpoint and its capability flag, so one channel with one key serves all of
+// the vendor's surfaces (the OpenAI /v1 and Anthropic /apps/anthropic URLs of a
+// coding plan, for example). Explicit request values always win.
+func applyPresetChannelDefaults(record *store.ChannelConfigRecord, req channelUpsertRequest) {
+	presetID := strings.TrimSpace(record.ProviderPreset)
+	if presetID == "" {
+		return
+	}
 	preset, ok := pkgupstream.LookupPreset(presetID)
-	if !ok || len(preset.Endpoints) == 0 {
+	if !ok {
+		return
+	}
+	endpoints := make(map[xir.Protocol]string, len(preset.Endpoints))
+	for protocol, raw := range preset.Endpoints {
+		endpoints[protocol] = raw
+	}
+	models := preset.Models
+	if strings.TrimSpace(record.Plan) != "" {
+		plan, ok := preset.Plan(record.Plan)
+		if !ok {
+			return
+		}
+		for protocol, raw := range plan.Endpoints {
+			endpoints[protocol] = raw
+		}
+		if plan.Models != nil {
+			models = *plan.Models
+		}
+	}
+	if len(endpoints) == 0 {
+		return
+	}
+	var capabilities upstreamCapabilities
+	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+	}
+	if req.Endpoints == nil && len(capabilities.Endpoints) == 0 {
+		merged := make(map[string]string, len(endpoints))
+		for protocol, raw := range endpoints {
+			merged[string(protocol)] = raw
+		}
+		capabilities.Endpoints = merged
+	}
+	if req.Capabilities == nil {
+		if endpoints[xir.ProtocolChatCompletions] != "" && capabilities.ChatCompletions == nil {
+			capabilities.ChatCompletions = catalogBoolPtr(true)
+		}
+		if endpoints[xir.ProtocolResponses] != "" && capabilities.Responses == nil {
+			capabilities.Responses = catalogBoolPtr(true)
+		}
+		if endpoints[xir.ProtocolMessages] != "" && capabilities.Messages == nil {
+			capabilities.Messages = catalogBoolPtr(true)
+		}
+		if endpoints[xir.ProtocolGemini] != "" && capabilities.GenerateContent == nil {
+			capabilities.GenerateContent = catalogBoolPtr(true)
+		}
+	}
+	if data, err := json.Marshal(capabilities); err == nil {
+		record.CapabilitiesJSON = string(data)
+	}
+	// Coding-plan endpoints have no model-list API; discovery would only
+	// record a failing probe.
+	if models.NoList && strings.TrimSpace(req.ModelDiscovery) == "" {
+		record.ModelDiscovery = "disabled"
+	}
+}
+
+func catalogBoolPtr(value bool) *bool {
+	return &value
+}
+
+// defaultPresetBaseURL resolves the base URL for a known provider preset and
+// plan. It maps the channel's declared protocol surface to the matching preset
+// endpoint and falls back to the preset's canonical order. It returns "" for a
+// custom channel or a preset without a universal endpoint (Azure, Vertex).
+func defaultPresetBaseURL(presetID, planID, protocolFamily, apiType string) string {
+	preset, ok := pkgupstream.LookupPreset(presetID)
+	if !ok {
+		return ""
+	}
+	endpoints := preset.Endpoints
+	if strings.TrimSpace(planID) != "" {
+		plan, ok := preset.Plan(planID)
+		if !ok {
+			return ""
+		}
+		merged := make(map[xir.Protocol]string, len(preset.Endpoints)+len(plan.Endpoints))
+		for protocol, raw := range preset.Endpoints {
+			merged[protocol] = raw
+		}
+		for protocol, raw := range plan.Endpoints {
+			merged[protocol] = raw
+		}
+		endpoints = merged
+	}
+	if len(endpoints) == 0 {
 		return ""
 	}
 	want := xir.Protocol("")
@@ -1714,11 +1823,11 @@ func defaultPresetBaseURL(presetID, protocolFamily, apiType string) string {
 			want = xir.ProtocolChatCompletions
 		}
 	}
-	if endpoint := strings.TrimSpace(preset.Endpoints[want]); endpoint != "" {
+	if endpoint := strings.TrimSpace(endpoints[want]); endpoint != "" {
 		return endpoint
 	}
 	for _, protocol := range []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages, xir.ProtocolGemini} {
-		if endpoint := strings.TrimSpace(preset.Endpoints[protocol]); endpoint != "" {
+		if endpoint := strings.TrimSpace(endpoints[protocol]); endpoint != "" {
 			return endpoint
 		}
 	}
@@ -1750,8 +1859,10 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		Mode:              record.Mode,
 		Capabilities:      capabilities,
 		Endpoints:         capabilities.Endpoints,
-		CodingPlan:        pkgupstream.IsCodingPlanPreset(record.ProviderPreset),
-		PlanName:          pkgupstream.PlanNameForPreset(record.ProviderPreset),
+		Plan:              record.Plan,
+		CodingPlan:        pkgupstream.IsCodingPlan(record.ProviderPreset, record.Plan),
+		PlanName:          pkgupstream.PlanNameFor(record.ProviderPreset, record.Plan),
+		PlanNameZh:        pkgupstream.PlanNameZhFor(record.ProviderPreset, record.Plan),
 		ProtocolFamily:    record.ProtocolFamily,
 		RoutingProfile:    record.RoutingProfile,
 		APIVersion:        record.APIVersion,

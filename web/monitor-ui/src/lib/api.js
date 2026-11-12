@@ -99,6 +99,9 @@ export const apiPaths = {
   providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",
   providerCatalog: "/api/catalog/providers",
+  // Channel plugins: the vendor catalog units gated by the plugins page.
+  plugins: "/api/plugins",
+  plugin: (pluginID) => `/api/plugins/${encodeURIComponent(pluginID)}`,
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",

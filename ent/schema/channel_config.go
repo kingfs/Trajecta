@@ -26,6 +26,10 @@ func (ChannelConfig) Fields() []ent.Field {
 		field.String("source").Default("manual"),
 		field.String("base_url").NotEmpty(),
 		field.String("provider_preset").Default(""),
+		// plan selects a PlanVariant of the provider preset (for example the
+		// Coding Plan of an Alibaba Bailian plugin). Empty means the preset
+		// defaults; legacy plan presets keep their own provider_preset value.
+		field.String("plan").Default(""),
 		field.String("api_type").Default(""),
 		field.String("mode").Default(""),
 		field.String("capabilities_json").Default("{}"),

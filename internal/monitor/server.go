@@ -834,7 +834,11 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
-	mux.HandleFunc("/api/catalog/providers", monitorAuthRequired(providerCatalogAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/catalog/providers", monitorAuthRequired(providerCatalogAPIHandler(st), monitorVerifier))
+	// Channel plugins gate the official catalog only; routing never depends on
+	// them. The management surface is admin-only like the other settings.
+	mux.HandleFunc("/api/plugins", monitorAdminRequired(pluginsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/plugins/", monitorAdminRequired(pluginDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	// The system page is admin-only: it exposes process internals, the database

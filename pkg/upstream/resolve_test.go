@@ -27,10 +27,17 @@ func TestResolvePresetDefaults(t *testing.T) {
 		{"openai", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
 		{"anthropic", []xir.Protocol{xir.ProtocolMessages}},
 		{"deepseek", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
-		{"openrouter", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolMessages}},
+		{"openrouter", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
 		{"google", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolGemini}},
 		{"vertex", []xir.Protocol{xir.ProtocolGemini}},
-		{"ollama", []xir.Protocol{xir.ProtocolChatCompletions}},
+		{"ollama", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"vllm", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"alibaba", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"alibaba_intl", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"moonshot", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"zhipu", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"mistral", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"together", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
 	}
 	for _, test := range tests {
 		resolved := mustResolve(t, Config{PresetID: test.preset})

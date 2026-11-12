@@ -2767,6 +2767,7 @@ type ChannelConfigMutation struct {
 	source               *string
 	base_url             *string
 	provider_preset      *string
+	plan                 *string
 	api_type             *string
 	mode                 *string
 	capabilities_json    *string
@@ -3083,6 +3084,42 @@ func (m *ChannelConfigMutation) OldProviderPreset(ctx context.Context) (v string
 // ResetProviderPreset resets all changes to the "provider_preset" field.
 func (m *ChannelConfigMutation) ResetProviderPreset() {
 	m.provider_preset = nil
+}
+
+// SetPlan sets the "plan" field.
+func (m *ChannelConfigMutation) SetPlan(s string) {
+	m.plan = &s
+}
+
+// Plan returns the value of the "plan" field in the mutation.
+func (m *ChannelConfigMutation) Plan() (r string, exists bool) {
+	v := m.plan
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlan returns the old "plan" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldPlan(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlan is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlan requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlan: %w", err)
+	}
+	return oldValue.Plan, nil
+}
+
+// ResetPlan resets all changes to the "plan" field.
+func (m *ChannelConfigMutation) ResetPlan() {
+	m.plan = nil
 }
 
 // SetAPIType sets the "api_type" field.
@@ -4105,7 +4142,7 @@ func (m *ChannelConfigMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelConfigMutation) Fields() []string {
-	fields := make([]string, 0, 30)
+	fields := make([]string, 0, 31)
 	if m.name != nil {
 		fields = append(fields, channelconfig.FieldName)
 	}
@@ -4120,6 +4157,9 @@ func (m *ChannelConfigMutation) Fields() []string {
 	}
 	if m.provider_preset != nil {
 		fields = append(fields, channelconfig.FieldProviderPreset)
+	}
+	if m.plan != nil {
+		fields = append(fields, channelconfig.FieldPlan)
 	}
 	if m.api_type != nil {
 		fields = append(fields, channelconfig.FieldAPIType)
@@ -4214,6 +4254,8 @@ func (m *ChannelConfigMutation) Field(name string) (ent.Value, bool) {
 		return m.BaseURL()
 	case channelconfig.FieldProviderPreset:
 		return m.ProviderPreset()
+	case channelconfig.FieldPlan:
+		return m.Plan()
 	case channelconfig.FieldAPIType:
 		return m.APIType()
 	case channelconfig.FieldMode:
@@ -4283,6 +4325,8 @@ func (m *ChannelConfigMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldBaseURL(ctx)
 	case channelconfig.FieldProviderPreset:
 		return m.OldProviderPreset(ctx)
+	case channelconfig.FieldPlan:
+		return m.OldPlan(ctx)
 	case channelconfig.FieldAPIType:
 		return m.OldAPIType(ctx)
 	case channelconfig.FieldMode:
@@ -4376,6 +4420,13 @@ func (m *ChannelConfigMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetProviderPreset(v)
+		return nil
+	case channelconfig.FieldPlan:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlan(v)
 		return nil
 	case channelconfig.FieldAPIType:
 		v, ok := value.(string)
@@ -4669,6 +4720,9 @@ func (m *ChannelConfigMutation) ResetField(name string) error {
 		return nil
 	case channelconfig.FieldProviderPreset:
 		m.ResetProviderPreset()
+		return nil
+	case channelconfig.FieldPlan:
+		m.ResetPlan()
 		return nil
 	case channelconfig.FieldAPIType:
 		m.ResetAPIType()

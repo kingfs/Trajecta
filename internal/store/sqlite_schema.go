@@ -130,6 +130,7 @@ var sqliteSchemaStatements = []string{
 			source TEXT NOT NULL DEFAULT 'manual',
 			base_url TEXT NOT NULL,
 			provider_preset TEXT NOT NULL DEFAULT '',
+			plan TEXT NOT NULL DEFAULT '',
 			api_type TEXT NOT NULL DEFAULT '',
 			mode TEXT NOT NULL DEFAULT '',
 			capabilities_json TEXT NOT NULL DEFAULT '{}',
@@ -749,6 +750,9 @@ func (s *Store) applySQLiteSchemaUpgrades() error {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "plan", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "api_type", "TEXT NOT NULL DEFAULT ''"); err != nil {

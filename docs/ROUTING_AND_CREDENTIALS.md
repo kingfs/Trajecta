@@ -18,7 +18,7 @@
 
 ## 数据模型
 
-- `channel_configs`（渠道主配置）：`id`、`name`、`description`、`source`、`base_url`、`provider_preset`、`api_type`、`mode`、`capabilities_json`、`protocol_family`、`routing_profile`、`api_version`、`deployment`、`project`、`location`、`model_resource`、`api_key_ciphertext`、`api_key_hint`、`headers_json`、`enabled`、`priority`、`weight`、`capacity_hint`、`model_discovery`、`created_at`、`updated_at`、`last_probe_at`、`last_probe_status`、`last_probe_error`。
+- `channel_configs`（渠道主配置）：`id`、`name`、`description`、`source`、`base_url`、`provider_preset`、`plan`（preset 的套餐 ID，如 `coding`/`token`，空为按量默认）、`api_type`、`mode`、`capabilities_json`、`protocol_family`、`routing_profile`、`api_version`、`deployment`、`project`、`location`、`model_resource`、`api_key_ciphertext`、`api_key_hint`、`headers_json`、`enabled`、`priority`、`weight`、`capacity_hint`、`model_discovery`、`created_at`、`updated_at`、`last_probe_at`、`last_probe_status`、`last_probe_error`。
 - `channel_models`（渠道与模型的供应/启用关系）：唯一键 `(channel_id, model)`；字段包括 `display_name`、`source`（`static` / `discovered` / `manual` / `trace`）、`enabled`、`supports_responses` / `supports_chat_completions` / `supports_embeddings`（三态 `INTEGER NULL`，`NULL` 表示继承渠道级能力）、`context_window`、`max_output_tokens`、`compact_history_item_threshold`、`upstream_model`、`profile_source`、`profile_adoption_status`、输入/输出模态 JSON、`raw_model_json` 与 `first_seen_at` / `last_seen_at` / `last_probe_at`。
 - `model_aliases`：`id`、`alias`、`target_model`、`channel_id`（空表示全局别名）、`enabled`、`description`、`source`、时间戳。
   `channel_id` 非空时表示该别名只允许在该渠道展开；写入时校验禁止直接别名循环、禁止同一 `alias + channel` 重复激活目标，冲突返回 `model alias conflict`。

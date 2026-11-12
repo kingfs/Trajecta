@@ -182,7 +182,7 @@ func TestChat(t *testing.T) {
 | Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
 | vLLM | `vllm` | verified |
 
-完整 preset 清单（registry 25 个键，去重后 20 个独立 provider）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。代理是**协议感知的直通 + 录制/解析**，默认不在转发热路径上做跨协议翻译；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选时才对非流式 chat/messages/gemini 请求做协议转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
+完整插件/preset 清单（21 个可见渠道插件，按厂商站点组织，官方描述、套餐与协议端点内置）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。官方目录由「插件」页的开关控制（默认全禁用）。代理是**协议感知的直通 + 录制/解析**，默认不在转发热路径上做跨协议翻译；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选时才对非流式 chat/messages/gemini 请求做协议转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
 
 ## 架构一览
 

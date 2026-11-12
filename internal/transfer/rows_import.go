@@ -220,13 +220,13 @@ func (s *importState) handleChannelConfigs(body io.Reader, size int64, target []
 		s.result.ChannelsCreated = append(s.result.ChannelsCreated, dstID)
 		return s.exec(`
 			INSERT INTO channel_configs (
-				id, name, description, source, base_url, provider_preset, protocol_family, routing_profile,
+				id, name, description, source, base_url, provider_preset, plan, protocol_family, routing_profile,
 				api_version, deployment, project, location, model_resource, api_key_ciphertext, api_key_hint,
 				headers_json, enabled, priority, weight, capacity_hint, model_discovery, allow_unknown_models,
 				created_at, updated_at, last_probe_at, last_probe_status, last_probe_error,
 				api_type, mode, capabilities_json, proxy_json
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			dstID, src.Name, src.Description, src.Source, src.BaseURL, src.ProviderPreset, src.ProtocolFamily,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			dstID, src.Name, src.Description, src.Source, src.BaseURL, src.ProviderPreset, src.Plan, src.ProtocolFamily,
 			src.RoutingProfile, src.APIVersion, src.Deployment, src.Project, src.Location, src.ModelResource,
 			nilIfEmpty(cipher), src.APIKeyHint, headers, src.Enabled, src.Priority, src.Weight, src.CapacityHint,
 			src.ModelDiscovery, src.AllowUnknownModels, src.CreatedAt, src.UpdatedAt, nilIfEmptyPtr(src.LastProbeAt),
