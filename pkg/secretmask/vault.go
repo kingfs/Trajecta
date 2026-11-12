@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -239,6 +240,12 @@ type MaskEvent struct {
 	Confidence Confidence
 	Reasons    Reason
 
+	// Meta names the rule for a candidate that did not come from the compiled
+	// rule table (a plugin detector). It is zero for builtin events, whose rule
+	// metadata is read from Rule via ruleTable; when Meta names a rule it wins,
+	// so a plugin stand-in is audited under its own rule name, vendor and kind.
+	Meta Rule
+
 	// Original is the real credential and StandIn is the format-preserving
 	// replacement that left the machine. Neither is nil for an event Mask
 	// returned, and Attributes and AuditValues are the two supported ways to read
@@ -260,7 +267,7 @@ type MaskEvent struct {
 // credential was rewritten and which rule decided that, and the audit table is
 // where an operator goes to see the value.
 func (e MaskEvent) Attributes() map[string]interface{} {
-	r := ruleTable[e.Rule]
+	r := e.rule()
 	return map[string]interface{}{
 		"rule":       r.Name,
 		"vendor":     r.Vendor,
@@ -274,6 +281,17 @@ func (e MaskEvent) Attributes() map[string]interface{} {
 	}
 }
 
+// rule returns the metadata naming this event. A builtin event carries a RuleID
+// into the compiled table; a plugin detector supplies Meta directly and leaves
+// Rule as RuleUnknown. Meta wins when it names a rule, so the two paths render
+// identically for builtin events and a plugin event keeps its own identity.
+func (e MaskEvent) rule() Rule {
+	if e.Meta.Name != "" {
+		return e.Meta
+	}
+	return ruleTable[e.Rule]
+}
+
 // AuditValues returns the pair a credential audit row stores, as strings so the
 // caller does not have to keep the buffer Mask worked on alive.
 func (e MaskEvent) AuditValues() (original, standIn string) {
@@ -283,24 +301,91 @@ func (e MaskEvent) AuditValues() (original, standIn string) {
 // RuleName is the stable name of the rule that made the decision, for a row or a
 // system event that has to name the rule.
 func (e MaskEvent) RuleName() string {
-	return ruleTable[e.Rule].Name
+	return e.rule().Name
 }
 
 // Vendor is the rule's vendor label, empty for the structural rules that have
 // none. It lets a row say "OpenAI" without the reader holding the rule table.
 func (e MaskEvent) Vendor() string {
-	return ruleTable[e.Rule].Vendor
+	return e.rule().Vendor
 }
 
 // Kind is the rule's credential kind, such as "api_key".
 func (e MaskEvent) Kind() string {
-	return ruleTable[e.Rule].Kind.String()
+	return e.rule().Kind.String()
 }
 
-// Mask rewrites every credential in src that the detector both recognises and
-// considers safe to rewrite, and returns the rewritten bytes with one event per
-// replacement. src is never modified; when there is nothing to rewrite the
-// original slice is returned unchanged.
+// MaskCandidate is one detected region offered to the Vault for replacement.
+//
+// A builtin finding carries its RuleID and leaves Meta zero: the Vault derives
+// the render and event metadata from the compiled rule table. A plugin detector
+// supplies Meta directly and leaves ID as RuleUnknown, so a third-party rule can
+// be rendered and audited under its own name without a slot in the closed table.
+// Either way the Vault enforces every replacement invariant centrally — equal
+// length, opaque protection, idempotency, suppression — so a plugin cannot widen
+// what leaves the machine beyond what the core allows.
+type MaskCandidate struct {
+	Finding
+	// Meta names the rule for rendering and for the event when ID is not a
+	// builtin rule. Empty for builtin candidates.
+	Meta Rule
+}
+
+// meta returns the rule descriptor used to render the stand-in and name the
+// event. Meta wins when it names a rule; otherwise the compiled table is used.
+func (c MaskCandidate) meta() Rule {
+	if c.Meta.Name != "" {
+		return c.Meta
+	}
+	return ruleTable[c.ID]
+}
+
+// ruleName returns the stable rule name used for suppression matching.
+func (c MaskCandidate) ruleName() string { return c.meta().Name }
+
+// maskable reports whether the candidate may be rewritten. A ReportOnly rule is
+// never maskable regardless of score; otherwise the confidence band decides.
+// The builtin path defers to Finding.Maskable so its behaviour is unchanged.
+func (c MaskCandidate) maskable() bool {
+	if c.Meta.Name != "" {
+		if c.Meta.ReportOnly {
+			return false
+		}
+		return c.Confidence >= ConfidenceMedium
+	}
+	return c.Finding.Maskable()
+}
+
+// Mask rewrites every credential in src that the builtin detector both
+// recognises and considers safe to rewrite. It is the builtin specialisation of
+// MaskCandidates: the detector's findings are offered as candidates with no
+// Meta, so every rule is rendered and audited from the compiled table exactly as
+// before. See MaskCandidates for the replacement contract and its invariants.
+func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
+	if len(src) == 0 {
+		return src, nil
+	}
+	findings := v.det.Scan(src)
+	cands := make([]MaskCandidate, len(findings))
+	for i, f := range findings {
+		cands[i] = MaskCandidate{Finding: f}
+	}
+	return v.MaskCandidates(src, cands)
+}
+
+// MaskCandidates rewrites every candidate the Vault considers safe to rewrite
+// and returns the rewritten bytes with one event per replacement. src is never
+// modified; when there is nothing to rewrite the original slice is returned
+// unchanged. It is the pluggable entry point: the hot lane collects candidates
+// from the enabled detector plugins and hands them here, and the builtin Mask is
+// the same path fed by the compiled detector.
+//
+// Candidates may come from any detector, so the Vault normalises them itself:
+// they are ordered by start and any candidate overlapping an earlier one is
+// dropped, because the rewrite copies stand-ins onto one buffer in order and an
+// overlap would overwrite bytes a previous stand-in already replaced. The
+// builtin detector already yields disjoint ordered spans, so this is a no-op for
+// Mask and a safety net for plugin findings.
 //
 // Values of opaque JSON protocol members (opaque.go) are neither rewritten nor
 // reported: a provider's encrypted reasoning state is not a user secret, it has
@@ -311,8 +396,8 @@ func (e MaskEvent) Kind() string {
 //
 // Masking is idempotent: a value the vault already knows as a fake is left
 // alone, so masking a body twice is the same as masking it once.
-func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
-	if len(src) == 0 {
+func (v *Vault) MaskCandidates(src []byte, cands []MaskCandidate) ([]byte, []MaskEvent) {
+	if len(src) == 0 || len(cands) == 0 {
 		return src, nil
 	}
 	v.mu.RLock()
@@ -320,17 +405,28 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 	suppressions := v.suppressions
 	v.mu.RUnlock()
 
-	var usable []Finding
+	ordered := make([]MaskCandidate, len(cands))
+	copy(ordered, cands)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Start < ordered[j].Start })
+
+	var usable []MaskCandidate
 	var opaqueSpans []opaqueValueSpan
 	opaqueSpansKnown := false
-	for _, f := range v.det.Scan(src) {
-		if !f.Maskable() {
+	prevEnd := -1
+	for _, c := range ordered {
+		if c.Start < 0 || c.End <= c.Start || c.End > len(src) {
 			continue
 		}
-		if policySkipMask(f.ID) {
+		if c.Start < prevEnd {
 			continue
 		}
-		if alreadyFake && v.isFake(src[f.Start:f.End]) {
+		if !c.maskable() {
+			continue
+		}
+		if policySkipMask(c.ID) {
+			continue
+		}
+		if alreadyFake && v.isFake(src[c.Start:c.End]) {
 			continue
 		}
 		// A suppression records a reviewer's decision that this rule/value pair
@@ -338,17 +434,18 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 		// rendered, no mapping is written and no audit row or event is produced.
 		// Check it before the lazy JSON walk so a body whose only candidates are
 		// suppressed does not pay for opaque-span discovery.
-		if suppressionHit(suppressions, ruleTable[f.ID].Name, src[f.Start:f.End]) {
+		if suppressionHit(suppressions, c.ruleName(), src[c.Start:c.End]) {
 			continue
 		}
 		if !opaqueSpansKnown {
 			opaqueSpans = opaqueJSONValueSpans(src)
 			opaqueSpansKnown = true
 		}
-		if findingInOpaqueValue(f, opaqueSpans) {
+		if findingInOpaqueValue(c.Finding, opaqueSpans) {
 			continue
 		}
-		usable = append(usable, f)
+		usable = append(usable, c)
+		prevEnd = c.End
 	}
 	if len(usable) == 0 {
 		return src, nil
@@ -357,22 +454,24 @@ func (v *Vault) Mask(src []byte) ([]byte, []MaskEvent) {
 	out := make([]byte, len(src))
 	copy(out, src)
 	events := make([]MaskEvent, 0, len(usable))
-	for _, f := range usable {
+	for _, c := range usable {
 		// Own StandIn rather than pointing it into out. out is what the caller
 		// hands the wire, so a caller that keeps an event and lets the send
 		// overwrite its buffer would otherwise read back whatever replaced the
 		// stand-in. Original may stay a view of src: nothing in this package
 		// writes to src.
-		fake := v.fakeFor(&ruleTable[f.ID], src[f.Start:f.End])
-		copy(out[f.Start:f.End], fake)
+		meta := c.meta()
+		fake := v.fakeFor(&meta, src[c.Start:c.End])
+		copy(out[c.Start:c.End], fake)
 		events = append(events, MaskEvent{
-			Rule:       f.ID,
-			Start:      f.Start,
-			End:        f.End,
-			Score:      f.Score,
-			Confidence: f.Confidence,
-			Reasons:    f.Reasons,
-			Original:   src[f.Start:f.End],
+			Rule:       c.ID,
+			Start:      c.Start,
+			End:        c.End,
+			Score:      c.Score,
+			Confidence: c.Confidence,
+			Reasons:    c.Reasons,
+			Meta:       c.Meta,
+			Original:   src[c.Start:c.End],
 			StandIn:    []byte(fake),
 		})
 	}

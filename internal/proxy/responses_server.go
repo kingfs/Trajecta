@@ -39,6 +39,7 @@ type responsesChatCompletionsAdapter struct {
 	auditor         responsesaudit.UpstreamExchangeRecorder
 	events          responsesaudit.ExecutionEventRecorder
 	secretVault     *secretmask.Vault
+	maskRef         *maskerHolder
 	minimalCassette bool
 }
 
@@ -85,8 +86,8 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	// used the original body, so routing is unaffected.
 	sendBody := body
 	var maskedEvents []secretmask.MaskEvent
-	if a.secretVault != nil {
-		if masked, events := a.secretVault.Mask(body); len(events) > 0 {
+	if a.maskRef != nil && a.maskRef.m != nil {
+		if masked, events := a.maskRef.m.Mask(body); len(events) > 0 {
 			sendBody = masked
 			maskedEvents = events
 		}

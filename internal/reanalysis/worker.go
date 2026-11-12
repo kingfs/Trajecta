@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/store"
 )
 
@@ -19,6 +20,9 @@ type WorkerOptions struct {
 	Interval  time.Duration
 	BatchSize int
 	Service   *Service
+	// DetectorRuntime supplies the plugin-driven observation runner when no
+	// explicit Service is given.
+	DetectorRuntime *detector.Runtime
 }
 
 func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
@@ -32,7 +36,7 @@ func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
 	}
 	service := opts.Service
 	if service == nil {
-		service = New(st, Options{})
+		service = New(st, Options{DetectorRuntime: opts.DetectorRuntime})
 	}
 	return &Worker{
 		store:     st,

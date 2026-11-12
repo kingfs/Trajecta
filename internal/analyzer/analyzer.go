@@ -39,6 +39,14 @@ func NewRunner(detectors ...Detector) *Runner {
 	return &Runner{detectors: detectors}
 }
 
+// NewRunnerList builds a runner from exactly the given detectors, with no
+// fallback to DefaultDetectors. The detection-plugin layer uses it so that
+// disabling every observation plugin yields an empty runner rather than silently
+// restoring the builtin set.
+func NewRunnerList(detectors []Detector) *Runner {
+	return &Runner{detectors: detectors}
+}
+
 func DefaultDetectors() []Detector {
 	return []Detector{
 		DangerousShellDetector{},

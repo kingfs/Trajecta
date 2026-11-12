@@ -102,6 +102,12 @@ export const apiPaths = {
   // Channel plugins: the vendor catalog units gated by the plugins page.
   plugins: "/api/plugins",
   plugin: (pluginID) => `/api/plugins/${encodeURIComponent(pluginID)}`,
+  // Detection plugins: the algorithm catalog behind the plugins page's
+  // detection tab. Same enablement pattern as the channel plugins above; the
+  // PATCH also carries opaque per-plugin settings and answers 409
+  // plugin_in_use when a hot-lane plugin still has stand-in mappings.
+  detectorPlugins: "/api/detector-plugins",
+  detectorPlugin: (pluginID) => `/api/detector-plugins/${encodeURIComponent(pluginID)}`,
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",

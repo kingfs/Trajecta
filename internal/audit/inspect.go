@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kingfs/Trajecta/internal/detector"
+	"github.com/kingfs/Trajecta/pkg/detect"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/kingfs/Trajecta/pkg/xir"
 	"github.com/kingfs/Trajecta/pkg/xir/audit"
@@ -40,10 +42,22 @@ type Result struct {
 // codec registry.
 type Inspector struct {
 	Registry *registry.Registry
+	// Detectors, when set, supplies the audit detection engine from the
+	// published detection-plugin snapshot. A nil value falls back to the builtin
+	// secretmask scanner.
+	Detectors *detector.Runtime
 }
 
 // New returns an Inspector with all four built-in codecs.
 func New() *Inspector { return &Inspector{Registry: registry.Default()} }
+
+// detectEngine resolves the engine for the audit detection lane.
+func (i *Inspector) detectEngine() *detect.Engine {
+	if i != nil && i.Detectors != nil {
+		return i.Detectors.Snapshot().AuditEngine()
+	}
+	return nil
+}
 
 // InspectFile reads one cassette and returns its audit projection.
 func (i *Inspector) InspectFile(ctx context.Context, path string) (*Result, error) {
@@ -117,7 +131,7 @@ func (i *Inspector) InspectBytes(ctx context.Context, content []byte) (*Result, 
 		Observation: audit.Build(protocol, operation, request, response),
 		Warnings:    warnings,
 	}
-	detections, detectErr := detectObservation(ctx, result.Observation)
+	detections, detectErr := detectObservation(ctx, result.Observation, i.detectEngine())
 	if detectErr != nil {
 		result.Warnings = append(result.Warnings, "detect: "+detectErr.Error())
 	} else {

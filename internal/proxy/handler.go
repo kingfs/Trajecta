@@ -25,6 +25,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/chaos"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/gateway"
 	"github.com/kingfs/Trajecta/internal/limit"
 	"github.com/kingfs/Trajecta/internal/netproxy"
@@ -292,9 +293,38 @@ type Handler struct {
 	// and response bodies. It is nil when secret_masking is off, which is the
 	// only check each call site makes.
 	secretVault *secretmask.Vault
+	// maskRef holds the request-side masker. It defaults to the vault and is
+	// upgraded to the detection-plugin coordinator by SetDetectorRuntime. The
+	// lazily built local Responses adapter captures the same holder, so a runtime
+	// wired after construction is still seen by both forwarding paths.
+	maskRef *maskerHolder
+	// detectorRuntime supplies the enabled detection plugins to the masker.
+	detectorRuntime *detector.Runtime
 	// conversionEngine selects the protocol conversion implementation:
 	// "legacy" (default) or "xir".
 	conversionEngine string
+}
+
+// maskerHolder lets the request-side masker be replaced after construction while
+// every capture site (the pass-through path and the local Responses adapter)
+// reads the current value through the shared pointer.
+type maskerHolder struct {
+	m gateway.Masker
+}
+
+// SetDetectorRuntime wires the detection-plugin runtime into the request-side
+// masking path. With a runtime and a vault, masking runs the enabled detector
+// plugins and renders through the Vault; without one, the vault's builtin
+// detector is used unchanged. It is called once at startup after the handler is
+// built and the runtime is loaded.
+func (h *Handler) SetDetectorRuntime(rt *detector.Runtime) {
+	if h == nil {
+		return
+	}
+	h.detectorRuntime = rt
+	if h.secretVault != nil && rt != nil && h.maskRef != nil {
+		h.maskRef.m = detector.NewMasker(h.secretVault, rt)
+	}
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -324,6 +354,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	if err != nil {
 		return nil, fmt.Errorf("initialize secret masking: %w", err)
 	}
+	// The request-side masker defaults to the vault itself; SetDetectorRuntime
+	// upgrades it to the plugin coordinator once the runtime is loaded.
+	var defaultMasker gateway.Masker
+	if secretVault != nil {
+		defaultMasker = secretVault
+	}
+	maskRef := &maskerHolder{m: defaultMasker}
 	// TraceOutputDir() resolves trace.output_dir with a debug.output_dir fallback, which is
 	// what the store, the default SQLite path and the startup log already use. Reading
 	// Debug.OutputDir directly here meant a configuration that set only trace.output_dir
@@ -521,6 +558,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			auditor:         upstreamExchangeRecorder,
 			events:          executionEventRecorder,
 			secretVault:     secretVault,
+			maskRef:         maskRef,
 			minimalCassette: cfg.Trace.MinimalCassette,
 		}, responseStore, runtimeOptions...)
 		return httpapi.NewHandler(
@@ -543,6 +581,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		responsesPath:    responsesPath,
 		responsesBuilder: buildLocalResponses,
 		secretVault:      secretVault,
+		maskRef:          maskRef,
 		conversionEngine: strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
 	}, nil
 }
@@ -904,8 +943,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// conversion -> masking -> wire body. The cassette records the
 		// post-alias, pre-conversion/pre-mask body.
 		var masker gateway.Masker
-		if h.secretVault != nil {
-			masker = h.secretVault
+		if h.maskRef != nil {
+			masker = h.maskRef.m
 		}
 		transform := gateway.RequestTransform{
 			RequestedModel: selection.Request.ModelName,

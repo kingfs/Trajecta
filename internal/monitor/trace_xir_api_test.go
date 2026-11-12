@@ -22,7 +22,7 @@ func TestHandleTraceXIRReturnsAuditProjection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/t/xir", nil)
-	handleTraceXIR(rr, req, path, store.LogEntry{ID: "t"})
+	handleTraceXIR(rr, req, path, store.LogEntry{ID: "t"}, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}

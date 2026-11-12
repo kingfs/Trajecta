@@ -4762,6 +4762,104 @@ a:focus-visible {
   flex-wrap: wrap;
 }
 
+/* Detection plugins: the same card grid and drawer chrome as the channel
+   plugins, plus the contract/lane tag rows, the execution facts, the
+   secretmask PII setting and the rule catalog list. */
+.detector-plugin-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.detector-facts {
+  display: grid;
+  gap: 6px;
+}
+
+.detector-fact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.detector-fact-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.detector-setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.detector-setting-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detector-setting-text strong {
+  font-size: 0.85rem;
+}
+
+.detector-setting-text p {
+  margin: 0;
+}
+
+.detector-rule-list {
+  display: grid;
+  gap: 6px;
+}
+
+.detector-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.detector-rule-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.detector-rule-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: none;
+}
+
+.detector-rule-vendor {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .provider-selected-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);

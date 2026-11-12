@@ -15,6 +15,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
@@ -143,13 +144,23 @@ func runServeWithConfig(configPath string) int {
 		cancelSync()
 		background.Wait()
 	}()
+	// The detection-plugin runtime publishes the enabled detector set to the
+	// masking coordinator, the audit projection and the reanalysis runner. A
+	// load failure is non-fatal: those paths fall back to the builtin vault
+	// detector and the builtin analysis runner, so a bad settings row cannot
+	// block startup.
+	detectorRuntime, err := detector.NewRuntime(context.Background(), traceStore)
+	if err != nil {
+		slog.Warn("Failed to load detection plugins; using builtin detectors", "error", err)
+		detectorRuntime = nil
+	}
 	parseWorker := observeworker.New(traceStore, observeworker.Options{Interval: 5 * time.Second, BatchSize: 10})
 	background.Add(1)
 	go func() {
 		defer background.Done()
 		parseWorker.Run(syncCtx)
 	}()
-	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{Interval: 5 * time.Second, BatchSize: 5})
+	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{Interval: 5 * time.Second, BatchSize: 5, DetectorRuntime: detectorRuntime})
 	background.Add(1)
 	go func() {
 		defer background.Done()
@@ -196,6 +207,7 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
 	}
+	handler.SetDetectorRuntime(detectorRuntime)
 	// Registered after the trace store's cleanup, so it runs first: the mapping
 	// append queue must be flushed while its file is still open, and the trace
 	// store close that follows is unrelated to it.
@@ -217,7 +229,7 @@ func runServeWithConfig(configPath string) int {
 			secretMappings = vault
 			secretSuppressions = vault
 		}
-		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, authStore)
+		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, detectorRuntime, authStore)
 		managementSrv = newManagementHTTPServer(cfg, mux)
 		go func(srv *http.Server) {
 			addr := srv.Addr

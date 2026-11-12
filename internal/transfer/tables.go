@@ -401,6 +401,9 @@ var appSettingsImportWhitelist = map[string]bool{
 	// Channel plugin enablement is configuration, not environment-specific
 	// egress state; import inserts it only when the target has no row yet.
 	"plugins.channels": true,
+	// Detection-plugin enablement and per-plugin settings are configuration the
+	// same way; import inserts the row only when the target has none yet.
+	"plugins.detectors": true,
 }
 
 // ---------------------------------------------------------------------------

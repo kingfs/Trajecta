@@ -22,17 +22,20 @@ type Detection struct {
 	Confidence float64 `json:"confidence"`
 }
 
-// detectObservation runs the generic pkg/detect engine over the text nodes of
-// the XIR audit projection. The engine is built per call because it is cheap
-// and the Inspector is a read-path concern, not the forwarding hot path.
+// detectObservation runs a pkg/detect engine over the text nodes of the XIR
+// audit projection. The engine is supplied by the caller (the detection-plugin
+// snapshot in production); a nil engine falls back to the builtin secretmask
+// scanner so the projection still works without a plugin runtime.
 //
 // Opaque protocol material never reaches Node.Text by construction (sealed
 // blocks and media bytes stay in Raw/Metadata), so this is a text-only lane.
-func detectObservation(ctx context.Context, observation *audit.Observation) ([]Detection, error) {
+func detectObservation(ctx context.Context, observation *audit.Observation, engine *detect.Engine) ([]Detection, error) {
 	if observation == nil || len(observation.Nodes) == 0 {
 		return nil, nil
 	}
-	engine := detect.New(detectsecretmask.New())
+	if engine == nil {
+		engine = detect.New(detectsecretmask.New())
+	}
 	var out []Detection
 	for _, node := range observation.Nodes {
 		if node.Text == "" {

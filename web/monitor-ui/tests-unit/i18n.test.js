@@ -78,6 +78,16 @@ describe("lookup behaviour", () => {
     assert.equal(zhT("plugins.viewDetails", { name: "阿里百炼-中国" }), "查看 阿里百炼-中国 详情");
   });
 
+  it("interpolates the detection-plugin disable-check messages", async () => {
+    const enT = await translator("en");
+    assert.equal(enT("plugins.detectionMappingCount", { count: 12 }), "The masking vault currently holds 12 stand-in mappings.");
+    assert.equal(enT("plugins.detectionRulesCount", { count: 3 }), "3 rules");
+    const zhT = await translator("zh-CN");
+    assert.equal(zhT("plugins.detectionMappingCount", { count: 12 }), "当前遮蔽映射表中有 12 条映射。");
+    assert.equal(zhT("plugins.detectionRulesCount", { count: 3 }), "共 3 条规则");
+    assert.equal(zhT("plugins.tabDetection"), "检测插件");
+  });
+
   it("leaves a value that is only a brace pair alone", async () => {
     // The delimiter pair must require a non-empty name, or this message - the
     // English placeholder for "there is no JSON here" - would render as "".

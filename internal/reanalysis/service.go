@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/analyzer"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/sessionanalysis"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -38,16 +39,22 @@ const (
 )
 
 type Service struct {
-	store    *store.Store
-	registry *observe.Registry
-	runner   *analyzer.Runner
-	now      func() time.Time
+	store     *store.Store
+	registry  *observe.Registry
+	runner    *analyzer.Runner
+	detectors *detector.Runtime
+	now       func() time.Time
 }
 
 type Options struct {
 	Registry *observe.Registry
 	Runner   *analyzer.Runner
-	Now      func() time.Time
+	// DetectorRuntime, when set, supplies the observation runner from the
+	// published detection-plugin snapshot, so enabling/disabling a detector
+	// plugin takes effect on the next job without a restart. An explicit Runner
+	// still wins for tests and callers that pin a detector set.
+	DetectorRuntime *detector.Runtime
+	Now             func() time.Time
 }
 
 type TraceOptions struct {
@@ -126,14 +133,27 @@ func New(st *store.Store, opts Options) *Service {
 		registry = observe.NewDefaultRegistry()
 	}
 	runner := opts.Runner
-	if runner == nil {
+	if runner == nil && opts.DetectorRuntime == nil {
 		runner = analyzer.NewRunner()
 	}
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Service{store: st, registry: registry, runner: runner, now: now}
+	return &Service{store: st, registry: registry, runner: runner, detectors: opts.DetectorRuntime, now: now}
+}
+
+// currentRunner resolves the observation runner for one job. An explicit Runner
+// pins the set; otherwise the detection-plugin snapshot supplies it, falling back
+// to the builtin default when no runtime is wired.
+func (s *Service) currentRunner() *analyzer.Runner {
+	if s.runner != nil {
+		return s.runner
+	}
+	if s.detectors != nil {
+		return s.detectors.Snapshot().Runner()
+	}
+	return analyzer.NewRunner()
 }
 
 func (s *Service) ReparseTrace(ctx context.Context, traceID string, opts TraceOptions) (Result, error) {
@@ -517,7 +537,7 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 	}
 
 	if opts.Scan {
-		findings, scanErr := s.runner.Analyze(ctx, obs)
+		findings, scanErr := s.currentRunner().Analyze(ctx, obs)
 		if scanErr != nil {
 			err = scanErr
 			return Result{}, err

@@ -9,6 +9,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/mcpserver"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
@@ -29,13 +30,15 @@ func newManagementMuxWithFunctionExecutorManager(
 	functionExecutorManager *functionexec.Manager,
 	authStore ...*auth.Store,
 ) *http.ServeMux {
-	return newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, nil, nil, authStore...)
+	return newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, nil, nil, nil, authStore...)
 }
 
 // newManagementMuxWithSecretMappings is the serve-time constructor. Both admin
 // values are surfaces of the proxy handler's live vault, which does not exist in
 // the test callers of the function above; nil is a valid answer and makes the
 // mapping and suppression endpoints report that the store is unavailable.
+// detectorRuntime is the detection-plugin runtime; nil falls back to builtin
+// detectors in the test callers.
 func newManagementMuxWithSecretMappings(
 	traceStore *store.Store,
 	rtr *router.Router,
@@ -43,6 +46,7 @@ func newManagementMuxWithSecretMappings(
 	functionExecutorManager *functionexec.Manager,
 	secretMappings monitor.SecretMappingAdmin,
 	secretSuppressions monitor.SecretSuppressionAdmin,
+	detectorRuntime *detector.Runtime,
 	authStore ...*auth.Store,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -100,6 +104,7 @@ func newManagementMuxWithSecretMappings(
 		ResponsesFunctionExecutorManager: functionExecutorManager,
 		SecretMappings:                   secretMappings,
 		SecretSuppressions:               secretSuppressions,
+		Detectors:                        detectorRuntime,
 		Location:                         cfg.MonitorLocation(),
 		DebugPprofEnabled:                cfg.DebugPprofEnabled(),
 		About: monitor.AboutOptions{

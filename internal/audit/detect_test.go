@@ -14,7 +14,7 @@ func TestDetectObservationReportsRuleAndSpanWithoutValue(t *testing.T) {
 			{Section: audit.SectionRequest, Path: "$.messages[0]", Kind: "text", Text: "prefix OPENAI_API_KEY=abcdefghijklmnopqrstuvwxyz123456 suffix"},
 		},
 	}
-	got, err := detectObservation(context.Background(), observation)
+	got, err := detectObservation(context.Background(), observation, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

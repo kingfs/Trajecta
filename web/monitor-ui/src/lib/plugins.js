@@ -85,6 +85,8 @@ export function pluginDrawerFacts(item, { fromCatalog = false } = {}) {
 // filterPlugins matches the plugins-page search box against both language
 // names and the canonical id, so a reader can type "百炼", "Bailian" or
 // "alibaba" regardless of the active language. An empty query keeps everything.
+// Detection-plugin items carry the same name/name_zh/id fields, so the
+// detection tab reuses it unchanged.
 export function filterPlugins(items, query) {
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return items || [];
@@ -92,4 +94,30 @@ export function filterPlugins(items, query) {
     const haystack = [item?.name, item?.name_zh, item?.id].filter(Boolean).join(" ").toLowerCase();
     return haystack.includes(needle);
   });
+}
+
+// The canonical lane display order of a detection plugin: the forwarding hot
+// path first, then the asynchronous audit path. Unknown lanes keep their
+// relative order after the known ones so a newer server still renders.
+export const DETECTOR_LANE_ORDER = ["hot", "audit"];
+
+export function orderedDetectorLanes(lanes) {
+  const list = Array.isArray(lanes) ? lanes : [];
+  const known = DETECTOR_LANE_ORDER.filter((lane) => list.includes(lane));
+  const extra = list.filter((lane) => !DETECTOR_LANE_ORDER.includes(lane));
+  return [...known, ...extra];
+}
+
+// detectorPIIEnabled reads the secretmask plugin's personal-data switch. The
+// stored setting is inverted (disable_pii) and a missing settings object means
+// the builtin default: PII masking on.
+export function detectorPIIEnabled(item) {
+  return !item?.settings?.disable_pii;
+}
+
+// detectorPIISettings merges the PII switch over the plugin's opaque settings,
+// keeping every other key (disabled_rules, ...) the server may hold. The PATCH
+// replaces the whole settings object, so the spread is what preserves them.
+export function detectorPIISettings(item, enabled) {
+  return { ...(item?.settings || {}), disable_pii: !enabled };
 }

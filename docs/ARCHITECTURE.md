@@ -42,10 +42,11 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/netproxy`：出站代理策略。系统级策略存于 `app_settings` 键 `network.proxy`，渠道级策略存于 `channel_configs.proxy_json`；两者都按 Linux `http_proxy`/`https_proxy`/`no_proxy` 语义编译成不可变 resolver，`Manager` 原子替换系统策略。进程启动时读库并安装 `http.DefaultTransport`；渠道策略随 `upstream.Resolve` 编译进 `ResolvedUpstream.Proxy`，转发路径通过请求 context 覆盖共享 transport 的代理决策，probe/发现/本地 Responses/tokenize 则用渠道 resolver 包装各自的 client，因此保存设置无需重启。详见 [Monitor 使用指南](MONITOR_GUIDE.md) 的系统页与渠道页一节。
 - `internal/mcpserver`：受限 MCP 工具层。
 - `internal/analyzer`：确定性 detector，产出 Observation findings。
+- `internal/detector`：检测算法插件层，复用渠道插件范式（编译期目录 + `app_settings` 键 `plugins.detectors` 启用名单 + admin API + Monitor tab）。一个插件是一个算法族；两种执行契约——`scanner`（`pkg/detect.Scanner`，喂审计投影与热车道遮蔽）与 `observation`（`internal/analyzer.Detector`，喂重分析 runner）。`Runtime` 持原子快照，启动构建、Monitor PATCH 后 `Republish`。热车道 `Masker` 收集启用插件命中交 `secretmask.Vault.MaskCandidates` 集中渲染——替换不可插拔，保形/ opaque/幂等/抑制/还原仍由 Vault 强制。规则级开关走插件 `Settings`。详见 [敏感凭据与个人数据遮蔽](./SECRET_MASKING.md) 的检测插件化一节。
 - `internal/resources`：从 Observation IR 的模型工具调用中提取本地路径与 URL（不含文件内容），由解析 worker 写入 `resources` / `trace_resources` 资源索引；工具结果、消息正文与代码内容不参与。
 - `internal/observeworker`：从 cassette 解析 Observation IR 并落库的后台 worker。
 - `internal/reanalysis`：trace/session/batch 重分析任务（service 与 worker）。
-- `internal/audit`：按需从 cassette 构造 XIR 并调用 `pkg/xir/audit` 生成审计投影，供 `GET /api/traces/<id>/xir` 使用；节点文本再经 `pkg/detect` 输出不含明文值的 `detections`。不写 DB、不替代 `pkg/observe` 的详情视图。
+- `internal/audit`：按需从 cassette 构造 XIR 并调用 `pkg/xir/audit` 生成审计投影，供 `GET /api/traces/<id>/xir` 使用；节点文本再经 `pkg/detect` 输出不含明文值的 `detections`，检测引擎由 `internal/detector` 快照提供（`Inspector.Detectors`，缺省回退内置 secretmask 扫描器）。不写 DB、不替代 `pkg/observe` 的详情视图。
 - `internal/sessionanalysis`：session 级聚合分析。
 - `internal/trajectory`：从客户端可见的 Responses cassette 重建 ATIF-v1.8 会话轨迹（不调用模型、不修改 cassette）；`scripts/validate_atif.py` 与 `scripts/atif_tests` 用固定版本官方模型做离线格式校验。
 - `internal/providerprobe`：provider 能力探测。

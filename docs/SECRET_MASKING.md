@@ -246,6 +246,18 @@ vault 为空时每个字节当场判定，未发生遮蔽的流不引入任何�
 
 cassette 记录的是**原始值**，这是有意选择：replay 按请求字节匹配（`pkg/replay`），人读 trace 也需要看到真实请求。代价是 cassette 里存在真实凭据，与 `debug.mask_key` 只处理请求头不同，这一点在 `SECURITY.md` 中有运维提示。
 
+## 检测插件化
+
+检测算法按「算法族」插件化，复用渠道插件的范式（编译期目录 + 运行期启用名单 + admin API + Monitor tab），实现位于 `internal/detector`。**替换本身不可插拔**：插件只决定「检测到什么」，保形假值的渲染、映射持久化、幂等、抑制名单与流式还原仍由 `secretmask.Vault` 集中强制。
+
+- 目录与启用名单：`internal/detector` 注册内置插件描述符（`Plugin`：id/双语名/描述/kind/contract/lanes/rules）。启用状态存在应用数据库 `app_settings` 键 `plugins.detectors`（`{enabled:[ids], settings:{id:{…}}, updated_at}`）。**缺行语义与渠道相反**：缺行回退到 `DefaultConfig`（内置遮蔽与观测检测器默认开），以保持插件化之前的行为；已有行则以 `enabled` 为准，读取时按编译目录过滤未知 id。
+- 两种执行契约：`scanner`（`pkg/detect.Scanner`，字节+span）喂审计 XIR 投影与热车道遮蔽；`observation`（`internal/analyzer.Detector`，Observation IR）喂重分析 runner。目录、启用、API、UI 共享，仅执行适配不同。
+- 内置插件：`secretmask`（凭据/PII DFA + assignment/DSN，hot+audit，默认开）、`access.indicators`（路径/URL，仅报告，audit，默认关以保持 XIR 投影输出不变）、以及五个观测检测器 `behavior.dangerous_shell`/`credential.regex`/`pii.observation`/`safety.provider_refusal`/`tool.error`（audit，默认开）。
+- 热车道：`internal/detector.Masker` 实现 `gateway.Masker`，从已发布快照收集启用插件的可遮蔽命中，交 `Vault.MaskCandidates` 渲染。内置 `secretmask` 命中保留 `RuleID`，渲染仍走精确的编译期规则元数据；第三方扫描器命中以 `MaskCandidate.Meta`（`secretmask.Rule` 描述符）携带渲染/审计身份。`Vault.Mask` 现在是 `MaskCandidates` 的内置特例。`MaskEvent.Meta` 让插件规则以自己的名字/厂商/类别写审计，内置事件 `Meta` 为零、行为不变。
+- 规则级开关走插件 `Settings`（DFA 是一台编译期机器，不能按规则拆插件）：`secretmask` 支持 `{"disable_pii":true,"disabled_rules":["pii.chinese_id",…]}`。
+- 审计车道：`internal/audit.Inspector.Detectors` 从快照取 `AuditEngine()`（取代旧的 `detect.New(secretmask.New())` 单扫描器硬编码）；`internal/reanalysis` 的 runner 由快照 `Runner()` 提供（`analyzer.NewRunnerList` 不做默认回退，禁用全部观测插件即得到空 runner）。
+- 发布与一致性：`detector.Runtime` 持有原子快照，启动时构建、Monitor PATCH 成功后 `Republish` 重建；构建失败保留旧快照。管理 API 为 admin-only 的 `GET /api/detector-plugins` 与 `PATCH /api/detector-plugins/{id}`（`{enabled?,settings?,force?}`）；禁用 hot 车道插件且 vault 仍有映射时返回 409 `plugin_in_use`（`mapping_count`），`force` 豁免。`plugins.detectors` 已加入 `internal/transfer` 的导入白名单（仅目标缺行才插入）。
+
 ## 审计事件与审计表
 
 一次命中会在**三个地方**留下记录，各自承担不同职责，不能合并：

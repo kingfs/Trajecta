@@ -20,6 +20,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
+	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/providerprobe"
@@ -458,6 +459,10 @@ type RouteOptions struct {
 	// SecretSuppressions is the same vault's false-positive list. It is nil for
 	// the same configurations, and the suppression page reports that state.
 	SecretSuppressions SecretSuppressionAdmin
+	// Detectors is the detection-plugin runtime. It backs the detector-plugins
+	// admin API (enable/disable + republish) and supplies the audit projection's
+	// detection engine. A nil value falls back to the builtin detectors.
+	Detectors *detector.Runtime
 	// Location anchors the day-based windows and the calendar buckets. A nil
 	// value keeps whatever SetDisplayLocation was last given, which defaults to
 	// Asia/Shanghai.
@@ -796,7 +801,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		return modelAliasDetailAPIHandler(st)
 	}), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router, opt.Detectors), monitorVerifier))
 	mux.HandleFunc("/api/resources", monitorAuthRequired(resourcesAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/resources/backfill", monitorAuthRequired(resourceBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
@@ -839,6 +844,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// them. The management surface is admin-only like the other settings.
 	mux.HandleFunc("/api/plugins", monitorAdminRequired(pluginsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/plugins/", monitorAdminRequired(pluginDetailAPIHandler(st), monitorVerifier))
+	// Detection plugins gate which detectors run (masking, audit, reanalysis);
+	// the forwarding core never depends on a plugin identity. Admin-only.
+	mux.HandleFunc("/api/detector-plugins", monitorAdminRequired(detectorPluginsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/detector-plugins/", monitorAdminRequired(detectorPluginDetailAPIHandler(st, opt.Detectors, opt.SecretMappings), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	// The system page is admin-only: it exposes process internals, the database
@@ -2064,7 +2073,11 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
+func traceAPIHandler(st *store.Store, rtr *router.Router, detectors ...*detector.Runtime) http.HandlerFunc {
+	var det *detector.Runtime
+	if len(detectors) > 0 {
+		det = detectors[0]
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(pathClean(r.URL.Path), "/api/traces/")
 		path = strings.Trim(path, "/")
@@ -2093,11 +2106,11 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
 			handleTraceObservation(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "xir" && r.Method == http.MethodGet:
-			handleTraceXIR(w, r, absPath, entry)
+			handleTraceXIR(w, r, absPath, entry, det)
 		case len(parts) == 2 && parts[1] == "trajectory" && r.Method == http.MethodGet:
 			handleTraceTrajectory(w, r, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
-			handleTraceFindings(w, r, st, entry)
+			handleTraceFindings(w, r, st, entry, det)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:
 			handleTraceFindingLocate(w, r, st, entry, parts[2])
 		case len(parts) == 4 && parts[1] == "secret-masks" && parts[3] == "locate" && r.Method == http.MethodGet:
@@ -2223,8 +2236,10 @@ func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.St
 // handleTraceXIR returns the Exchange IR audit projection of one cassette.
 // The projection is derived on demand from the raw exchange; it is not
 // persisted and does not replace the existing Observation view.
-func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entry store.LogEntry) {
-	result, err := auditpkg.New().InspectFile(r.Context(), absPath)
+func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entry store.LogEntry, detectors *detector.Runtime) {
+	inspector := auditpkg.New()
+	inspector.Detectors = detectors
+	result, err := inspector.InspectFile(r.Context(), absPath)
 	if err != nil {
 		if errors.Is(err, auditpkg.ErrUnsupportedProtocol) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
@@ -2244,7 +2259,11 @@ func handleTraceXIR(w http.ResponseWriter, r *http.Request, absPath string, entr
 	})
 }
 
-func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry, detectors ...*detector.Runtime) {
+	var det *detector.Runtime
+	if len(detectors) > 0 {
+		det = detectors[0]
+	}
 	filter := store.FindingFilter{
 		Category: strings.TrimSpace(r.URL.Query().Get("category")),
 		Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
@@ -2258,7 +2277,7 @@ func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store
 	for _, finding := range findings {
 		items = append(items, findingViewFromObservation(finding))
 	}
-	items = append(items, xirFindings(entry, items, filter)...)
+	items = append(items, xirFindings(entry, items, filter, det)...)
 	writeJSON(w, http.StatusOK, findingListResponse{
 		ID:       entry.ID,
 		Items:    items,
@@ -2570,11 +2589,13 @@ func findingViewFromObservation(finding observe.Finding) findingView {
 // xirFindings surfaces the on-demand XIR/detect detections that the persisted
 // analyzer pass did not already record. They are advisory and never carry the
 // matched value; the source field keeps the two planes distinguishable.
-func xirFindings(entry store.LogEntry, existing []findingView, filter store.FindingFilter) []findingView {
+func xirFindings(entry store.LogEntry, existing []findingView, filter store.FindingFilter, detectors *detector.Runtime) []findingView {
 	if strings.TrimSpace(entry.LogPath) == "" {
 		return nil
 	}
-	result, err := auditpkg.New().InspectFile(context.Background(), entry.LogPath)
+	inspector := auditpkg.New()
+	inspector.Detectors = detectors
+	result, err := inspector.InspectFile(context.Background(), entry.LogPath)
 	if err != nil {
 		return nil
 	}

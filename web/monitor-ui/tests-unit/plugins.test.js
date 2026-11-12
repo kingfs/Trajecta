@@ -19,6 +19,9 @@ import {
   orderedEndpoints,
   pluginDrawerFacts,
   filterPlugins,
+  orderedDetectorLanes,
+  detectorPIIEnabled,
+  detectorPIISettings,
 } from "../src/lib/plugins.js";
 
 const alibaba = {
@@ -177,5 +180,39 @@ describe("filterPlugins", () => {
     assert.deepEqual(filterPlugins(items, "   "), items);
     assert.deepEqual(filterPlugins(items, "no-such-vendor"), []);
     assert.deepEqual(filterPlugins(null, "x"), []);
+  });
+
+  it("filters detection-plugin items on the same fields", () => {
+    const detectors = [
+      { id: "secretmask", name: "Credential & PII masking", name_zh: "凭据与个人数据遮蔽" },
+      { id: "tool.error", name: "Tool errors", name_zh: "工具错误" },
+    ];
+    assert.deepEqual(filterPlugins(detectors, "遮蔽").map((i) => i.id), ["secretmask"]);
+    assert.deepEqual(filterPlugins(detectors, "tool.error").map((i) => i.id), ["tool.error"]);
+  });
+});
+
+describe("detector plugin helpers", () => {
+  it("orders lanes hot before audit and keeps unknown lanes after", () => {
+    assert.deepEqual(orderedDetectorLanes(["audit", "hot"]), ["hot", "audit"]);
+    assert.deepEqual(orderedDetectorLanes(["audit"]), ["audit"]);
+    assert.deepEqual(orderedDetectorLanes(["audit", "future"]), ["audit", "future"]);
+    assert.deepEqual(orderedDetectorLanes(null), []);
+  });
+
+  it("reads the inverted disable_pii setting with the builtin default on", () => {
+    assert.equal(detectorPIIEnabled({ id: "secretmask" }), true);
+    assert.equal(detectorPIIEnabled({ settings: {} }), true);
+    assert.equal(detectorPIIEnabled({ settings: { disable_pii: false } }), true);
+    assert.equal(detectorPIIEnabled({ settings: { disable_pii: true } }), false);
+    assert.equal(detectorPIIEnabled(null), true);
+  });
+
+  it("merges the PII switch over the opaque settings without mutating them", () => {
+    const item = { settings: { disabled_rules: ["mobile.cn"], disable_pii: false } };
+    assert.deepEqual(detectorPIISettings(item, false), { disabled_rules: ["mobile.cn"], disable_pii: true });
+    assert.deepEqual(detectorPIISettings(item, true), { disabled_rules: ["mobile.cn"], disable_pii: false });
+    assert.deepEqual(detectorPIISettings({}, true), { disable_pii: false });
+    assert.deepEqual(item.settings, { disabled_rules: ["mobile.cn"], disable_pii: false });
   });
 });
