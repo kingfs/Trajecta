@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/detector"
-	"github.com/kingfs/Trajecta/pkg/detect"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/kingfs/Trajecta/pkg/xir"
 	"github.com/kingfs/Trajecta/pkg/xir/audit"
@@ -51,10 +50,12 @@ type Inspector struct {
 // New returns an Inspector with all four built-in codecs.
 func New() *Inspector { return &Inspector{Registry: registry.Default()} }
 
-// detectEngine resolves the engine for the audit detection lane.
-func (i *Inspector) detectEngine() *detect.Engine {
+// detectEngine resolves the point-scoped engine for the audit detection lane.
+// A nil resolver makes detectObservation fall back to the builtin secretmask
+// scanner on every point.
+func (i *Inspector) detectEngine() engineResolver {
 	if i != nil && i.Detectors != nil {
-		return i.Detectors.Snapshot().AuditEngine()
+		return i.Detectors.Snapshot().AuditEngineFor
 	}
 	return nil
 }

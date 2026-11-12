@@ -4860,6 +4860,23 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.detector-point-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detector-point {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .provider-selected-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);

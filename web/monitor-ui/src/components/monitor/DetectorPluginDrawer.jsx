@@ -87,6 +87,20 @@ export function DetectorPluginDrawer({
               </div>
             </section>
 
+            <section className="plugin-drawer-section">
+              <h3>{t("plugins.detectionPoints")}</h3>
+              <p className="trace-subline plugin-drawer-section-hint">{t("plugins.detectionPointsHint")}</p>
+              {Array.isArray(item.points) && item.points.length ? (
+                <div className="detector-point-list">
+                  {item.points.map((point) => (
+                    <code className="detector-point" key={point} title={point}>{point}</code>
+                  ))}
+                </div>
+              ) : (
+                <p className="trace-subline plugin-drawer-note">{t("plugins.detectionNoPoints")}</p>
+              )}
+            </section>
+
             {item.id === SECRETMASK_ID ? (
               <section className="plugin-drawer-section">
                 <h3>{t("plugins.detectionSettings")}</h3>

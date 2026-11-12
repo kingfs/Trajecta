@@ -9,6 +9,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
 func emptyObservation() observe.TraceObservation {
@@ -225,5 +226,43 @@ func TestMaskerNilVaultNoOp(t *testing.T) {
 	out, events := m.Mask(body)
 	if len(events) != 0 || string(out) != string(body) {
 		t.Fatal("nil vault must be a no-op")
+	}
+}
+
+func TestAuditEngineForPointScope(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Enabled = append(cfg.Enabled, PluginIndicators)
+	snap, err := buildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// secretmask declares message text; indicators declare only tool-call
+	// arguments. So a message point runs secretmask alone, a tool-call point
+	// runs both, and a usage point runs neither.
+	if got := len(snap.AuditEngineFor(hook.PointRequestMessage).Scanners()); got != 1 {
+		t.Fatalf("request.message scanners = %d, want 1 (secretmask)", got)
+	}
+	if got := len(snap.AuditEngineFor(hook.PointRequestToolCall).Scanners()); got != 2 {
+		t.Fatalf("request.tool_call scanners = %d, want 2 (secretmask + indicators)", got)
+	}
+	if got := len(snap.AuditEngineFor(hook.PointResponseUsage).Scanners()); got != 0 {
+		t.Fatalf("response.usage scanners = %d, want 0", got)
+	}
+}
+
+func TestPluginPointsDeclared(t *testing.T) {
+	sm, _ := Lookup(PluginSecretmask)
+	if !sm.Plugin.HasPoint(hook.PointRequestMessage) {
+		t.Fatal("secretmask must act on request.message")
+	}
+	if sm.Plugin.HasPoint(hook.PointResponseUsage) {
+		t.Fatal("secretmask must not act on response.usage")
+	}
+	ind, _ := Lookup(PluginIndicators)
+	if !ind.Plugin.HasPoint(hook.PointResponseToolCall) {
+		t.Fatal("indicators must act on response.tool_call.arguments")
+	}
+	if ind.Plugin.HasPoint(hook.PointRequestMessage) {
+		t.Fatal("indicators must not act on message text")
 	}
 }

@@ -31,6 +31,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/analyzer"
 	"github.com/kingfs/Trajecta/pkg/detect"
+	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
 // Contract names the execution interface a plugin implements.
@@ -73,7 +74,14 @@ type Plugin struct {
 	Kind          string   `json:"kind"`
 	Contract      Contract `json:"contract"`
 	Lanes         []Lane   `json:"lanes"`
-	Builtin       bool     `json:"builtin"`
+	// Points declares the XIR fields the plugin acts on, using the pkg/xir/hook
+	// point vocabulary. The audit lane feeds a plugin only the projection nodes
+	// whose point it declares, so a plugin scoped to message text never sees a
+	// sealed (encrypted reasoning / media) block: those nodes carry no text by
+	// construction. An empty Points means the plugin is not point-scoped (the
+	// audit lane runs it on every text node, the pre-scope behaviour).
+	Points  []hook.Point `json:"points,omitempty"`
+	Builtin bool         `json:"builtin"`
 	// DefaultEnabled is the state used when no app_settings row exists yet. It
 	// preserves the behaviour the binary had before pluginisation: masking and
 	// the builtin analysis detectors start on, unlike channel plugins which
@@ -86,6 +94,20 @@ type Plugin struct {
 func (p Plugin) HasLane(lane Lane) bool {
 	for _, l := range p.Lanes {
 		if l == lane {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPoint reports whether the plugin declares point. A plugin with no Points
+// is not point-scoped and matches every point (see Plugin.Points).
+func (p Plugin) HasPoint(point hook.Point) bool {
+	if len(p.Points) == 0 {
+		return true
+	}
+	for _, pt := range p.Points {
+		if pt == point {
 			return true
 		}
 	}

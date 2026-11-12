@@ -9,6 +9,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/analyzer"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/detect"
+	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
 // Snapshot is an immutable compiled execution state built from a Config. The
@@ -19,7 +20,11 @@ type Snapshot struct {
 	Config Config
 
 	auditEngine *detect.Engine
-	runner      *analyzer.Runner
+	// auditByPoint indexes the audit scanners by the XIR point they declare, so
+	// the audit lane runs a plugin only on the projection nodes whose point it
+	// acts on. A plugin with no Points is registered under every point.
+	auditByPoint map[hook.Point]*detect.Engine
+	runner       *analyzer.Runner
 
 	// secretmaskHot records whether the builtin credential/PII plugin runs on
 	// the hot lane. Its findings are collected natively (keeping their RuleID so
@@ -44,6 +49,21 @@ func (s *Snapshot) AuditEngine() *detect.Engine {
 	return s.auditEngine
 }
 
+// AuditEngineFor returns the audit engine scoped to one XIR point: only the
+// plugins that declare point (or declare no point at all) run on it. A point
+// with no matching plugin yields an empty engine. This is how a plugin scoped to
+// message text never sees a sealed block — the audit lane simply does not run it
+// there.
+func (s *Snapshot) AuditEngineFor(point hook.Point) *detect.Engine {
+	if s == nil {
+		return detect.New()
+	}
+	if engine, ok := s.auditByPoint[point]; ok {
+		return engine
+	}
+	return detect.New()
+}
+
 // Runner returns the compiled Observation-IR runner for the reanalysis lane.
 func (s *Snapshot) Runner() *analyzer.Runner {
 	if s == nil {
@@ -59,6 +79,10 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 	snap := &Snapshot{Config: cfg}
 
 	engine := detect.New()
+	auditByPoint := make(map[hook.Point]*detect.Engine, len(hook.AllPoints()))
+	for _, point := range hook.AllPoints() {
+		auditByPoint[point] = detect.New()
+	}
 	var detectors []analyzer.Detector
 	for _, p := range Plugins() {
 		if !enabled[p.ID] {
@@ -77,6 +101,17 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 				}
 				if err := engine.Register(scanner); err != nil {
 					return nil, fmt.Errorf("detector: register %q: %w", p.ID, err)
+				}
+				// The same scanner instance serves every point it declares; an
+				// unscoped plugin (no Points) serves all points.
+				points := p.Points
+				if len(points) == 0 {
+					points = hook.AllPoints()
+				}
+				for _, point := range points {
+					if err := auditByPoint[point].Register(scanner); err != nil {
+						return nil, fmt.Errorf("detector: register %q at %s: %w", p.ID, point, err)
+					}
 				}
 			}
 			if p.HasLane(LaneHot) {
@@ -108,6 +143,7 @@ func buildSnapshot(cfg Config) (*Snapshot, error) {
 		}
 	}
 	snap.auditEngine = engine
+	snap.auditByPoint = auditByPoint
 	snap.runner = analyzer.NewRunnerList(detectors)
 	return snap, nil
 }

@@ -20,6 +20,7 @@ function secretmaskPlugin(overrides = {}) {
     kind: "credential_masking",
     contract: "scanner",
     lanes: ["hot", "audit"],
+    points: ["request.system", "request.message", "request.tool_call.arguments", "response.output"],
     builtin: true,
     default_enabled: true,
     rules: [
@@ -42,6 +43,7 @@ function indicatorsPlugin(overrides = {}) {
     kind: "access_indicator",
     contract: "scanner",
     lanes: ["audit"],
+    points: ["request.tool_call.arguments", "response.tool_call.arguments"],
     builtin: true,
     default_enabled: false,
     rules: [{ name: "access.local_path", kind: "path", report_only: true }],
@@ -202,6 +204,22 @@ test("the drawer shows the rule catalog and the PII switch merges settings", asy
   ]);
   await page.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
+});
+
+test("the drawer shows the plugin IR scope and the unscoped fallback", async ({ page }) => {
+  await page.goto("/plugins?tab=detection");
+  await page.locator(".plugin-card", { hasText: "Credential & PII masking" }).click();
+  const drawer = page.locator(".plugin-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText("IR scope")).toBeVisible();
+  await expect(drawer.locator(".detector-point", { hasText: "request.message" })).toBeVisible();
+  await expect(drawer.locator(".detector-point", { hasText: "response.output" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  // An observation plugin with no declared points shows the unscoped fallback.
+  await page.locator(".plugin-card", { hasText: "Tool errors" }).click();
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText("Not field-scoped: acts on every text node.")).toBeVisible();
 });
 
 test("report-only rules are badged and observation plugins list no rules", async ({ page }) => {

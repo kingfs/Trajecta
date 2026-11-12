@@ -8,6 +8,7 @@ import (
 	"github.com/kingfs/Trajecta/pkg/detect"
 	detectsecretmask "github.com/kingfs/Trajecta/pkg/detect/secretmask"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
 // Plugin IDs of the builtin byte/span scanners.
@@ -19,14 +20,24 @@ const (
 func init() {
 	mustRegister(Registration{
 		Plugin: Plugin{
-			ID:             PluginSecretmask,
-			Name:           "Credential & PII masking",
-			NameZh:         "凭据与个人数据遮蔽",
-			Description:    "The compiled credential/PII DFA plus the name-anchored assignment and DSN passes. Detects API keys, tokens, private keys, national IDs and mobile numbers; maskable findings are rendered into format-preserving stand-ins by the Vault on the hot lane.",
-			DescriptionZh:  "编译期凭据/个人数据 DFA，外加环境变量赋值与 DSN 原生扫描。识别 API key、token、私钥、身份证号与手机号；热车道上由 Vault 将可遮蔽命中渲染为保形假值。",
-			Kind:           "credential_masking",
-			Contract:       ContractScanner,
-			Lanes:          []Lane{LaneHot, LaneAudit},
+			ID:            PluginSecretmask,
+			Name:          "Credential & PII masking",
+			NameZh:        "凭据与个人数据遮蔽",
+			Description:   "The compiled credential/PII DFA plus the name-anchored assignment and DSN passes. Detects API keys, tokens, private keys, national IDs and mobile numbers; maskable findings are rendered into format-preserving stand-ins by the Vault on the hot lane.",
+			DescriptionZh: "编译期凭据/个人数据 DFA，外加环境变量赋值与 DSN 原生扫描。识别 API key、token、私钥、身份证号与手机号；热车道上由 Vault 将可遮蔽命中渲染为保形假值。",
+			Kind:          "credential_masking",
+			Contract:      ContractScanner,
+			Lanes:         []Lane{LaneHot, LaneAudit},
+			Points: []hook.Point{
+				hook.PointRequestSystem,
+				hook.PointRequestMessage,
+				hook.PointRequestToolCall,
+				hook.PointRequestToolResult,
+				hook.PointResponseOutput,
+				hook.PointResponseReasoning,
+				hook.PointResponseToolCall,
+				hook.PointResponseToolResult,
+			},
 			Builtin:        true,
 			DefaultEnabled: true,
 			Rules:          secretmaskRuleCatalog(false),
@@ -35,14 +46,18 @@ func init() {
 	})
 	mustRegister(Registration{
 		Plugin: Plugin{
-			ID:             PluginIndicators,
-			Name:           "Access indicators",
-			NameZh:         "访问指示符",
-			Description:    "The separate path/URL indicator machine. Report-only: it surfaces the local paths and URLs an exchange touched, never rewrites them. Gates the audit detection lane; the resources index keeps its own dedicated path.",
-			DescriptionZh:  "独立的路径/URL 指示符机器。仅报告：呈现交换触及的本地路径与 URL，绝不改写。门控审计检测车道；资源索引仍走其专用路径。",
-			Kind:           "access_indicator",
-			Contract:       ContractScanner,
-			Lanes:          []Lane{LaneAudit},
+			ID:            PluginIndicators,
+			Name:          "Access indicators",
+			NameZh:        "访问指示符",
+			Description:   "The separate path/URL indicator machine. Report-only: it surfaces the local paths and URLs an exchange touched, never rewrites them. Gates the audit detection lane; the resources index keeps its own dedicated path.",
+			DescriptionZh: "独立的路径/URL 指示符机器。仅报告：呈现交换触及的本地路径与 URL，绝不改写。门控审计检测车道；资源索引仍走其专用路径。",
+			Kind:          "access_indicator",
+			Contract:      ContractScanner,
+			Lanes:         []Lane{LaneAudit},
+			Points: []hook.Point{
+				hook.PointRequestToolCall,
+				hook.PointResponseToolCall,
+			},
 			Builtin:        true,
 			DefaultEnabled: false,
 			Rules:          secretmaskRuleCatalog(true),
