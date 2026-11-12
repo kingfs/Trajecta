@@ -45,7 +45,7 @@ function EndpointRow({ protocol, url }) {
 // offer": description, docs/key links, the per-protocol API bases and every
 // plan's endpoints. It is informational; the enable switch is optional so the
 // creation dialog can open it read-only without losing the form behind it.
-export function PluginDetailDrawer({ facts, open, onClose, enabled = false, onToggle, toggleDisabled = false, escapeBlocked = false }) {
+export function PluginDetailDrawer({ facts, open, onClose, enabled = false, onToggle, toggleDisabled = false }) {
   const { t, language } = useI18n();
   if (!facts) return null;
   const defaultEndpoints = orderedEndpoints(facts.endpoints);
@@ -53,14 +53,7 @@ export function PluginDetailDrawer({ facts, open, onClose, enabled = false, onTo
     <DialogPrimitive.Root open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="nav-modal-backdrop plugin-drawer-backdrop" />
-        <DialogPrimitive.Content
-          className="plugin-drawer"
-          aria-describedby={undefined}
-          // A dialog stacked above this drawer (the disable confirmation) owns
-          // Escape while it is open; guard the mount race window the same way
-          // the creation dialog guards this drawer.
-          onEscapeKeyDown={(event) => { if (escapeBlocked) event.preventDefault(); }}
-        >
+        <DialogPrimitive.Content className="plugin-drawer" aria-describedby={undefined}>
           <header className="plugin-drawer-head">
             <div className="plugin-drawer-head-name">
               <p className="eyebrow">{t("plugins.tabChannels")}</p>
