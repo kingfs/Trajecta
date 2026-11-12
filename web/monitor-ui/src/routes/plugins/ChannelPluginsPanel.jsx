@@ -162,16 +162,15 @@ export function ChannelPluginsPanel() {
       <PluginDetailDrawer
         facts={pluginDrawerFacts(detailItem)}
         open={Boolean(detailItem)}
-        onClose={() => setDetailID("")}
+        onClose={() => { if (!conflict) setDetailID(""); }}
         enabled={Boolean(detailItem?.enabled)}
         onToggle={detailItem ? (next) => onToggle(detailItem, next) : undefined}
         toggleDisabled={busyID === detailID || enable.isPending}
-        escapeBlocked={Boolean(conflict)}
       />
 
       {conflict ? (
         <Dialog open onOpenChange={(next) => (next ? undefined : setConflict(null))}>
-          <DialogContent onEscapeKeyDown={(event) => { if (detailItem) event.preventDefault(); }}>
+          <DialogContent>
             <DialogHeader>
               <div>
                 <p className="eyebrow">{t("plugins.disableCheck")}</p>
