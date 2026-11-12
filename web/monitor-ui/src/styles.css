@@ -4390,6 +4390,16 @@ a:focus-visible {
   max-width: 860px;
 }
 
+.plugins-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 12px;
+}
+
+.plugins-search {
+  width: min(320px, 100%);
+}
+
 .plugin-card {
   display: grid;
   gap: 10px;

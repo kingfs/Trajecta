@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ChevronRight, ExternalLink, KeyRound } from "lucide-react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { InlineTag } from "../../components/common/Badges";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -14,7 +15,7 @@ import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, patchJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
 import { useWriteMutation } from "../../lib/mutations";
-import { localizedName, localizedDescription, pluginDrawerFacts } from "../../lib/plugins";
+import { localizedName, localizedDescription, pluginDrawerFacts, filterPlugins } from "../../lib/plugins";
 
 // ChannelPluginsPanel presents what each vendor plugin offers: name,
 // description, docs/key links and the enable switch. Clicking a card opens the
@@ -28,6 +29,7 @@ export function ChannelPluginsPanel() {
   const plugins = useJSON(apiPaths.plugins, []);
   const [busyID, setBusyID] = useState("");
   const [detailID, setDetailID] = useState("");
+  const [query, setQuery] = useState("");
   // conflict holds the server's 409 payload: the enabled channels that must be
   // acknowledged before the plugin's catalog cards are hidden.
   const [conflict, setConflict] = useState(null);
@@ -77,6 +79,7 @@ export function ChannelPluginsPanel() {
   };
 
   const items = plugins.data?.items || [];
+  const visibleItems = filterPlugins(items, query);
   // Resolve the open drawer against the freshest data so a toggle made inside
   // it is reflected without closing it.
   const detailItem = detailID ? (items.find((item) => item.id === detailID) || null) : null;
@@ -91,8 +94,18 @@ export function ChannelPluginsPanel() {
   return (
     <>
       <p className="trace-subline plugins-intro">{t("plugins.intro")}</p>
+      <div className="plugins-toolbar">
+        <Input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("plugins.searchPlaceholder")}
+          aria-label={t("plugins.searchPlaceholder")}
+          className="plugins-search"
+        />
+      </div>
       <div className="provider-grid">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <Card
             key={item.id}
             className="plugin-card"
@@ -144,6 +157,7 @@ export function ChannelPluginsPanel() {
           </Card>
         ))}
         {!items.length ? <EmptyState title={t("plugins.none")} detail={t("plugins.noneDetail")} /> : null}
+        {items.length && !visibleItems.length ? <EmptyState title={t("plugins.searchEmpty")} detail={t("plugins.searchEmptyDetail")} /> : null}
       </div>
 
       <PluginDetailDrawer

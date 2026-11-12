@@ -34,7 +34,11 @@ func TestCapabilities(t *testing.T) {
 		},
 		{
 			preset: "ollama",
-			want:   xir.Capabilities{ChatCompletions: true},
+			want:   xir.Capabilities{ChatCompletions: true, Responses: true},
+		},
+		{
+			preset: "vllm",
+			want:   xir.Capabilities{ChatCompletions: true, Responses: true},
 		},
 	}
 	for _, test := range tests {

@@ -18,6 +18,7 @@ import {
   planKeyPlaceholder,
   orderedEndpoints,
   pluginDrawerFacts,
+  filterPlugins,
 } from "../src/lib/plugins.js";
 
 const alibaba = {
@@ -155,5 +156,26 @@ describe("pluginDrawerFacts", () => {
 
   it("returns null for a missing item", () => {
     assert.equal(pluginDrawerFacts(null), null);
+  });
+});
+
+describe("filterPlugins", () => {
+  const items = [
+    { id: "alibaba", name: "Alibaba Bailian-China", name_zh: "阿里百炼-中国" },
+    { id: "openai", name: "OpenAI", name_zh: "OpenAI" },
+  ];
+
+  it("matches both language names and the id, case-insensitively", () => {
+    assert.deepEqual(filterPlugins(items, "百炼").map((i) => i.id), ["alibaba"]);
+    assert.deepEqual(filterPlugins(items, "BAILIAN").map((i) => i.id), ["alibaba"]);
+    assert.deepEqual(filterPlugins(items, "alibaba").map((i) => i.id), ["alibaba"]);
+    assert.deepEqual(filterPlugins(items, "openai").map((i) => i.id), ["openai"]);
+  });
+
+  it("keeps everything for an empty query and nothing for a miss", () => {
+    assert.deepEqual(filterPlugins(items, ""), items);
+    assert.deepEqual(filterPlugins(items, "   "), items);
+    assert.deepEqual(filterPlugins(items, "no-such-vendor"), []);
+    assert.deepEqual(filterPlugins(null, "x"), []);
   });
 });

@@ -81,3 +81,15 @@ export function pluginDrawerFacts(item, { fromCatalog = false } = {}) {
     models: preset.models || {},
   };
 }
+
+// filterPlugins matches the plugins-page search box against both language
+// names and the canonical id, so a reader can type "百炼", "Bailian" or
+// "alibaba" regardless of the active language. An empty query keeps everything.
+export function filterPlugins(items, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return items || [];
+  return (items || []).filter((item) => {
+    const haystack = [item?.name, item?.name_zh, item?.id].filter(Boolean).join(" ").toLowerCase();
+    return haystack.includes(needle);
+  });
+}

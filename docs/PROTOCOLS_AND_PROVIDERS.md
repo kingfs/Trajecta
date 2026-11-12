@@ -77,7 +77,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 目录的事实源是 `pkg/upstream/presets.go` 的编译期 preset 表，按**渠道插件**组织：一个可见 preset = 一个插件 = 一个厂商站点（厂商 + 区域）。计费套餐（Coding Plan、Token Plan、Kimi Code 会员）是 preset 的 `PlanVariant`，协议面（OpenAI 兼容、Anthropic Messages、Gemini）是 preset 的每协议 `Endpoints`——两者都不是独立 preset。一个渠道携带 preset 声明的全部协议端点，共用一个 API key。
 
-当前有 22 个可见插件：`alibaba`（阿里百炼-中国）、`alibaba_intl`（阿里百炼-国际）、`anthropic`、`azure`、`cerebras`、`deepseek`、`fireworks`、`github`、`google`、`groq`、`minimax`、`mistral`、`moonshot`、`ollama`、`openai`、`openrouter`、`together`、`vertex`、`vllm`、`xai`、`zai`、`zhipu`。每个 preset 携带双语短名（`Name`/`NameZh`，如 "Alibaba Bailian-China" / "阿里百炼-中国"）、区域、端点、鉴权、套餐、模型来源与文档链接；`Plugins()`/`PluginForPreset()`/`PresetIDsForPlugin()` 提供插件视图与归属推导。
+当前有 21 个可见插件：`alibaba`（阿里百炼-中国）、`alibaba_intl`（阿里百炼-国际）、`anthropic`、`azure`、`cerebras`、`deepseek`、`fireworks`、`google`、`groq`、`minimax`、`mistral`、`moonshot`、`ollama`、`openai`、`openrouter`、`together`、`vertex`、`vllm`、`xai`、`zai`、`zhipu`。每个 preset 携带双语短名（`Name`/`NameZh`，如 "Alibaba Bailian-China" / "阿里百炼-中国"）、区域、基于官方文档撰写的双语描述、端点、鉴权、套餐、模型来源与文档链接；`Plugins()`/`PluginForPreset()`/`PresetIDsForPlugin()` 提供插件视图与归属推导。`github`（GitHub Models）已于 2026-07-30 被官方全面退役，preset 隐藏、不再进入目录，仅保留给存量渠道解析。
 
 插件的启用状态保存在应用数据库 `app_settings` 键 `plugins.channels`（`{"enabled":[...]}`），**默认全部禁用**：`GET /api/catalog/providers` 只返回已启用插件的可见 preset，创建渠道弹窗的官方目录因此初始为空，由「插件」页启用。`GET /api/plugins`（admin）返回全量插件目录（厂商信息：名称/描述/文档/套餐/端点，不含渠道关联统计）；`PATCH /api/plugins/{id}` 切换开关，停用仍有启用渠道的插件时返回 409 与受影响渠道列表（仅此时查询渠道归属），需 `force:true` 确认。**插件开关只影响目录展示，从不改变路由**：已有渠道的流量由渠道自身的 `enabled` 决定。
 
@@ -94,7 +94,7 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 | `cerebras` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |
 | `deepseek` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 允许以 origin 作为 base URL |
 | `fireworks` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
-| `github` | `openai_compatible` | `openai_default` | `openai_default` | verified | `github_models` 别名 |
+| `github` | `openai_compatible` | `openai_default` | `openai_default` | verified | `github_models` 别名；服务已于 2026-07-30 退役，preset 隐藏，仅存量渠道 |
 | `groq` | `openai_compatible` | `openai_default` | `openai_default` | verified | |
 | `hugging_face` | `openai_compatible` | `openai_default` | `openai_default` | compatible | 仅 registry |
 | `minimax` | `openai_compatible` | `openai_default` | `openai_default` | compatible | |

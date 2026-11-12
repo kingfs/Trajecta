@@ -70,6 +70,30 @@ function catalogPayload() {
   return { items: pluginState.enabled ? [preset] : [] };
 }
 
+function openaiPlugin() {
+  return {
+    id: "openai",
+    name: "OpenAI",
+    name_zh: "OpenAI",
+    region: "",
+    description: "First-party OpenAI API.",
+    description_zh: "OpenAI 官方 API。",
+    docs_url: "https://platform.openai.com/docs",
+    keys_url: "https://platform.openai.com/api-keys",
+    enabled: false,
+    preset: {
+      id: "openai",
+      name: "OpenAI",
+      kind: "vendor",
+      endpoints: { chat_completions: "https://api.openai.com/v1", responses: "https://api.openai.com/v1" },
+      protocols: ["chat_completions", "responses"],
+      auth: { mode: "api_key", header: "Authorization", scheme: "Bearer" },
+      models: { list_path: "/models", protocol: "chat_completions" },
+      plans: [],
+    },
+  };
+}
+
 test.beforeEach(async ({ page }) => {
   pluginPatches = [];
   channelCreates = [];
@@ -93,7 +117,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: { version: "test", commit: "test", branch: "test", build_date: "2026-01-01", repository: "https://github.com/kingfs/Trajecta" } });
     }
     if (path === "/api/plugins" && method === "GET") {
-      return route.fulfill({ json: { items: [pluginState] } });
+      return route.fulfill({ json: { items: [pluginState, openaiPlugin()] } });
     }
     if (path === "/api/plugins/alibaba" && method === "PATCH") {
       const body = route.request().postDataJSON();
@@ -232,6 +256,23 @@ test("an empty catalog points the operator to the plugins page", async ({ page }
   await expect(dialog.getByText("The official catalog is empty: no channel plugin is enabled yet.")).toBeVisible();
   await dialog.getByRole("link", { name: "Enable plugins" }).click();
   await expect(page).toHaveURL(/\/plugins$/);
+});
+
+test("the search box filters plugins by either language name", async ({ page }) => {
+  await page.goto("/plugins");
+  await expect(page.locator(".plugin-card")).toHaveCount(2);
+  const search = page.getByRole("searchbox");
+  await search.fill("百炼");
+  await expect(page.locator(".plugin-card")).toHaveCount(1);
+  await expect(page.locator(".plugin-card")).toContainText("Alibaba Bailian-China");
+  await search.fill("OPENAI");
+  await expect(page.locator(".plugin-card")).toHaveCount(1);
+  await expect(page.locator(".plugin-card")).toContainText("OpenAI");
+  await search.fill("no-such-vendor");
+  await expect(page.locator(".plugin-card")).toHaveCount(0);
+  await expect(page.getByText("No plugin matches the search")).toBeVisible();
+  await search.fill("");
+  await expect(page.locator(".plugin-card")).toHaveCount(2);
 });
 
 test("Chinese console shows the short vendor-region card and drawer", async ({ page }) => {

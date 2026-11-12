@@ -48,7 +48,7 @@ func TestResolveProviderPresets(t *testing.T) {
 		{
 			name: "together_preset_defaults",
 			cfg: config.UpstreamConfig{
-				BaseURL:        "https://api.together.xyz/v1",
+				BaseURL:        "https://api.together.ai/v1",
 				ProviderPreset: "together",
 			},
 			wantFamily:  ProtocolFamilyOpenAICompatible,
