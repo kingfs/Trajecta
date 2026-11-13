@@ -77,7 +77,7 @@ func locateInText(text string, finding observe.Finding) (int, int, bool) {
 		if finding.Detector == dangerousShellDetectorName {
 			return locateLiteral(text, ".ssh/id_rsa", ".aws/credentials", "security find-generic-password", "env | curl")
 		}
-		return locateCredential(text)
+		return locateCredential(text, finding)
 	case "filesystem_destructive_operation":
 		if loc := destructiveRMPattern.FindStringIndex(strings.ToLower(text)); loc != nil {
 			return loc[0], loc[1], true
@@ -112,12 +112,18 @@ func locatePII(text string, finding observe.Finding) (int, int, bool) {
 
 // locateCredential recomputes the credential span with the same compiled DFA
 // the detector uses, so the highlighted bytes are exactly what the finding was
-// proven by. The first maskable non-PII match wins; a credentialed URL surfaces
-// through the DSN userinfo-password rule rather than a separate URL regex.
-func locateCredential(text string) (int, int, bool) {
+// proven by. The finding title carries the rule, and one node can hold several
+// credentials, so the first match for that rule wins; a credentialed URL
+// surfaces through the DSN userinfo-password rule rather than a separate URL
+// regex.
+func locateCredential(text string, finding observe.Finding) (int, int, bool) {
+	ruleName := strings.TrimSpace(strings.TrimPrefix(finding.Title, "Credential: "))
 	for _, match := range secretmask.Scan([]byte(text)) {
 		rule, ok := match.Rule()
 		if !ok || rule.Kind.PII() || !match.Maskable() {
+			continue
+		}
+		if ruleName != "" && rule.Name != ruleName {
 			continue
 		}
 		return match.Start, match.End, true

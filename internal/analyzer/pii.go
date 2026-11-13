@@ -36,7 +36,7 @@ type PIIDetector struct{}
 func (PIIDetector) Name() string    { return "pii" }
 func (PIIDetector) Version() string { return "0.1.0" }
 
-func (d PIIDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
+func (d PIIDetector) Detect(ctx context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
 	for _, node := range allNodes(obs) {
 		seen := map[secretmask.RuleID]bool{}
@@ -44,7 +44,7 @@ func (d PIIDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]
 			if text == "" {
 				continue
 			}
-			for _, match := range secretmask.Scan([]byte(text)) {
+			for _, match := range scanText(ctx, text) {
 				rule, ok := match.Rule()
 				if !ok || !rule.Kind.PII() || !match.Maskable() || seen[match.ID] {
 					continue

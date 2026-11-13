@@ -1,18 +1,16 @@
 import React, { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { ChevronRight } from "lucide-react";
 import { Card } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { InlineTag } from "../../components/common/Badges";
 import { EmptyState } from "../../components/common/EmptyState";
-import { Switch } from "../../components/common/Controls";
 import { DetectorPluginDrawer } from "../../components/monitor/DetectorPluginDrawer";
+import { DetectorPluginSwitch } from "../../components/monitor/DetectorPluginSwitch";
+import { DetectorPluginConflictDialog } from "../../components/monitor/DetectorPluginConflictDialog";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, patchJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
+import { useDetectorPluginToggle } from "../../hooks/useDetectorPluginToggle";
 import { useWriteMutation } from "../../lib/mutations";
 import {
   localizedName,
@@ -29,24 +27,10 @@ import {
 // here the stand-in mapping count — drives the force confirmation.
 export function DetectorPluginsPanel() {
   const { t, language } = useI18n();
-  const queryClient = useQueryClient();
   const plugins = useJSON(apiPaths.detectorPlugins, []);
-  const [busyID, setBusyID] = useState("");
   const [detailID, setDetailID] = useState("");
   const [query, setQuery] = useState("");
-  // conflict holds the server's 409 payload: the mapping count that must be
-  // acknowledged before a hot-lane plugin stops masking new values.
-  const [conflict, setConflict] = useState(null);
-
-  const invalidateCatalog = () => {
-    queryClient.invalidateQueries({ queryKey: ["GET", apiPaths.detectorPlugins] });
-  };
-
-  const enable = useWriteMutation({
-    mutationFn: (item) => patchJSON(apiPaths.detectorPlugin(item.id), { enabled: true }),
-    success: "plugins.enabledToast",
-    invalidate: [["GET", apiPaths.detectorPlugins]],
-  });
+  const { busyID, conflict, setConflict, enable, requestDisable, onToggle } = useDetectorPluginToggle();
 
   // The settings write replaces the plugin's opaque settings object, so the
   // caller merges over the current value (detectorPIISettings) to keep the
@@ -56,38 +40,6 @@ export function DetectorPluginsPanel() {
     success: "plugins.detectionPiiSaved",
     invalidate: [["GET", apiPaths.detectorPlugins]],
   });
-
-  const requestDisable = async (item, force) => {
-    setBusyID(item.id);
-    try {
-      await patchJSON(apiPaths.detectorPlugin(item.id), { enabled: false, force: Boolean(force) });
-      toast.success(t("plugins.disabledToast"));
-      setConflict(null);
-      invalidateCatalog();
-    } catch (err) {
-      if (err?.status === 409 && err?.payload?.error === "plugin_in_use") {
-        setConflict({
-          plugin: item,
-          mappingCount: err.payload.mapping_count || 0,
-        });
-      } else {
-        toast.error(err?.message || t("common.actionFailed"));
-      }
-    } finally {
-      setBusyID("");
-    }
-  };
-
-  const onToggle = (item, next) => {
-    if (next) {
-      enable.mutate(item);
-      return;
-    }
-    // The server owns the check; the non-force attempt returns the mapping
-    // count when the vault still holds stand-ins, and succeeds directly
-    // otherwise.
-    requestDisable(item, false);
-  };
 
   const items = plugins.data?.items || [];
   const capabilities = plugins.data?.capabilities || [];
@@ -159,16 +111,11 @@ export function DetectorPluginsPanel() {
                 <h2>{localizedName(item, language)}</h2>
                 {item.kind ? <InlineTag tone="accent">{t(`plugins.kind.${item.kind}`)}</InlineTag> : null}
               </div>
-              {item.always_on ? (
-                <InlineTag tone="green">{t("plugins.detectionAlwaysOn")}</InlineTag>
-              ) : (
-                <Switch
-                  checked={Boolean(item.enabled)}
-                  disabled={busyID === item.id || enable.isPending}
-                  onChange={(next) => onToggle(item, next)}
-                  label={t("plugins.enableSwitch")}
-                />
-              )}
+              <DetectorPluginSwitch
+                item={item}
+                disabled={busyID === item.id || enable.isPending}
+                onChange={(next) => onToggle(item, next)}
+              />
             </div>
             <p className="plugin-card-desc">{localizedDescription(item, language)}</p>
             <div className="plugin-card-foot">
@@ -200,31 +147,12 @@ export function DetectorPluginsPanel() {
         piiToggleDisabled={busyID === detailID || saveSettings.isPending}
       />
 
-      {conflict ? (
-        <Dialog open onOpenChange={(next) => (next ? undefined : setConflict(null))}>
-          <DialogContent>
-            <DialogHeader>
-              <div>
-                <p className="eyebrow">{t("plugins.disableCheck")}</p>
-                <DialogTitle>{t("plugins.disableConfirmTitle", { name: localizedName(conflict.plugin, language) })}</DialogTitle>
-              </div>
-            </DialogHeader>
-            <p className="trace-subline">{t("plugins.detectionDisableWarning")}</p>
-            <p className="trace-subline">{t("plugins.detectionMappingCount", { count: conflict.mappingCount })}</p>
-            <DialogFooter>
-              <Button variant="ghost" type="button" onClick={() => setConflict(null)}>{t("common.cancel")}</Button>
-              <Button
-                variant="primary"
-                type="button"
-                disabled={busyID === conflict.plugin.id}
-                onClick={() => requestDisable(conflict.plugin, true)}
-              >
-                {t("plugins.disableAnyway")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      ) : null}
+      <DetectorPluginConflictDialog
+        conflict={conflict}
+        busy={conflict ? busyID === conflict.plugin.id : false}
+        onCancel={() => setConflict(null)}
+        onConfirm={() => requestDisable(conflict.plugin, true)}
+      />
     </>
   );
 }

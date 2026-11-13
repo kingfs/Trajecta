@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   XIR_CARD_H, XIR_CARD_W, XIR_COL_W, XIR_PAD,
   buildPointPluginIndex, buildStructureIndex, defaultCollapsedIds,
-  hookedNodeIds, hooksOnlyHidden, layoutXirTree, pluginColor,
+  expandAncestors, hookedNodeIds, hooksOnlyHidden, layoutXirTree, pluginColor,
   pluginsForNode, sectionOf, structureStats,
 } from "../src/lib/xirStructure.js";
 
@@ -90,6 +90,21 @@ test("defaultCollapsedIds opens the first three levels", () => {
   assert.ok(collapsed.has("request.messages"));
   assert.ok(!collapsed.has("request"));
   assert.ok(!collapsed.has("exchange"));
+});
+
+test("expandAncestors opens the path to a focused node", () => {
+  const idx = index();
+  const collapsed = defaultCollapsedIds(idx);
+  assert.ok(collapsed.has("request.messages"));
+
+  const expanded = expandAncestors(idx, ["request.text"], collapsed);
+  assert.ok(!expanded.has("request.messages"), "the collapsed ancestor must open");
+  assert.notStrictEqual(expanded, collapsed);
+
+  // The original set is not mutated, and no-op calls keep identity.
+  assert.ok(collapsed.has("request.messages"));
+  const untouched = expandAncestors(idx, ["request"], expanded);
+  assert.strictEqual(untouched, expanded);
 });
 
 test("hidden nodes disappear with their subtree", () => {

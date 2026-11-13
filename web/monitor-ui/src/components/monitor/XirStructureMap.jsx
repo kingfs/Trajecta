@@ -3,14 +3,14 @@ import {
   Activity, AlertTriangle, Brain, ClipboardList, Cpu, Expand, FileText, Filter,
   Globe, Hash, Image as ImageIcon, Info, Link2, ListTree, Lock, Mail, Maximize2,
   MessageSquare, Network, Quote, Radio, Send, ShieldAlert, Shrink,
-  SlidersHorizontal, Tag, Waves, Wrench, X, ZoomIn, ZoomOut,
+  SlidersHorizontal, Tag, Waves, Wrench, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useI18n } from "../../lib/i18n";
 import {
-  XIR_CARD_H, XIR_CARD_W, XIR_PAD,
-  defaultCollapsedIds, hookedNodeIds, hooksOnlyHidden, layoutXirTree,
+  XIR_CARD_H, XIR_CARD_W,
+  defaultCollapsedIds, expandAncestors, hookedNodeIds, hooksOnlyHidden, layoutXirTree,
   localizedName, pluginColor, pluginsForNode, sectionOf,
 } from "../../lib/xirStructure";
 
@@ -120,6 +120,25 @@ export function XirStructureMap({
     () => layoutXirTree(index, { collapsed, hidden }),
     [index, collapsed, hidden],
   );
+
+  // A focused plugin's points and the hooks-only set both live below the
+  // default-collapsed groups. Expand their ancestors so the highlight is
+  // actually visible instead of dimming a tree that contains nothing.
+  const expandTargets = useMemo(() => {
+    if (focusPlugin) {
+      return index.nodes
+        .filter((node) => node.point && pluginsForNode(node, pluginIndex).some((plugin) => plugin.id === focusPlugin.id))
+        .map((node) => node.id);
+    }
+    if (hooksOnly) return [...hooked];
+    return [];
+  }, [focusPlugin, hooksOnly, hooked, index, pluginIndex]);
+
+  useEffect(() => {
+    if (!expandTargets.length) return;
+    setCollapsed((prev) => expandAncestors(index, expandTargets, prev));
+    fitRequested.current = true;
+  }, [expandTargets, index]);
 
   // Per-node overlay facts, computed once per layout.
   const cardFacts = useMemo(() => {
@@ -417,6 +436,9 @@ export function XirStructureMap({
               aria-label={`${localizedName(node, language)}, ${node.type}${node.point ? `, ${t("xir.pointLabel")} ${node.point}` : ""}${dots.length ? `, ${t("xir.pluginCount", { count: dots.length })}` : ""}`}
               onClick={() => onSelect?.(node.id)}
               onKeyDown={(event) => {
+                // A nested control (the collapse button) owns its own keys;
+                // without this guard Enter/Space there also selects the card.
+                if (event.target !== event.currentTarget) return;
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   onSelect?.(node.id);
@@ -464,6 +486,7 @@ export function XirStructureMap({
                     event.stopPropagation();
                     toggleCollapse(card.id);
                   }}
+                  onKeyDown={(event) => event.stopPropagation()}
                 >
                   {card.collapsed ? <span className="xir-collapse-count">{card.childCount}</span> : <span className="xir-collapse-minus" aria-hidden="true">−</span>}
                 </button>

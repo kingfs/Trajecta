@@ -1455,6 +1455,8 @@ export default {
   "xir.nodeDetail": "节点详情",
   "xir.sealedNote": "密封块按字节原样往返，投影不赋予文本，任何检测插件都不会被喂入它。",
   "xir.noPointNote": "此节点不承载 hook 挂点。",
+  "xir.pointReserved": "预留挂点",
+  "xir.pointReservedNote": "当前审计投影还没有节点产出该挂点；它描述的是逻辑字段，不是已生效的审计挂点。",
   "xir.mediaNote": "媒体块只保留元数据（类型、URL、媒体类型、文件名），内联字节不进入节点。",
   "xir.recursiveNote": "递归结构：子级重复同一套内容块词汇。",
   "xir.pluginsOnNode": "作用于此节点的插件",

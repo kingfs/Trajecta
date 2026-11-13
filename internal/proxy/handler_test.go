@@ -669,9 +669,9 @@ func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
-	transport, ok := handler.proxy.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("transport type = %T, want *http.Transport", handler.proxy.Transport)
+	transport := handler.transport
+	if transport == nil {
+		t.Fatal("handler transport is nil")
 	}
 	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("proxy transport disables upstream TLS certificate verification")

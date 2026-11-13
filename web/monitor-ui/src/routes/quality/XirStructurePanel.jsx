@@ -1,20 +1,18 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { ChevronRight, ExternalLink, Lock, X } from "lucide-react";
+import { ChevronRight, Lock, X } from "lucide-react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { InlineTag } from "../../components/common/Badges";
 import { EmptyState } from "../../components/common/EmptyState";
 import { StatCard } from "../../components/common/Display";
-import { Switch } from "../../components/common/Controls";
 import { XirStructureMap } from "../../components/monitor/XirStructureMap";
+import { DetectorPluginSwitch } from "../../components/monitor/DetectorPluginSwitch";
+import { DetectorPluginConflictDialog } from "../../components/monitor/DetectorPluginConflictDialog";
 import { useJSON } from "../../hooks/useJSON";
-import { apiPaths, patchJSON } from "../../lib/api";
+import { apiPaths } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { useWriteMutation } from "../../lib/mutations";
+import { useDetectorPluginToggle } from "../../hooks/useDetectorPluginToggle";
 import { localizedName as pluginName, orderedDetectorLanes } from "../../lib/plugins";
 import {
   buildPointPluginIndex, buildStructureIndex, hookedNodeIds,
@@ -35,9 +33,9 @@ import {
  */
 export function XirStructurePanel() {
   const { t, language } = useI18n();
-  const queryClient = useQueryClient();
   const structure = useJSON(apiPaths.xirStructure);
   const pluginsQuery = useJSON(apiPaths.detectorPlugins);
+  const { busyID, conflict, setConflict, enable, requestDisable, onToggle } = useDetectorPluginToggle();
 
   const index = useMemo(() => buildStructureIndex(structure.data), [structure.data]);
   const items = pluginsQuery.data?.items || [];
@@ -47,8 +45,6 @@ export function XirStructurePanel() {
 
   const [focusId, setFocusId] = useState("");
   const [selectedId, setSelectedId] = useState("");
-  const [busyID, setBusyID] = useState("");
-  const [conflict, setConflict] = useState(null);
 
   const focusPlugin = items.find((item) => item.id === focusId) || null;
   const selectedNode = selectedId ? index.byId.get(selectedId) || null : null;
@@ -56,39 +52,6 @@ export function XirStructurePanel() {
     ? index.points.find((info) => info.point === selectedNode.point)
     : null;
   const selectedActing = selectedNode ? pluginsForNode(selectedNode, pluginIndex) : [];
-
-  const invalidateCatalog = () => {
-    queryClient.invalidateQueries({ queryKey: ["GET", apiPaths.detectorPlugins] });
-  };
-
-  const enable = useWriteMutation({
-    mutationFn: (item) => patchJSON(apiPaths.detectorPlugin(item.id), { enabled: true }),
-    success: "plugins.enabledToast",
-    invalidate: [["GET", apiPaths.detectorPlugins]],
-  });
-
-  const requestDisable = async (item, force) => {
-    setBusyID(item.id);
-    try {
-      await patchJSON(apiPaths.detectorPlugin(item.id), { enabled: false, force: Boolean(force) });
-      toast.success(t("plugins.disabledToast"));
-      setConflict(null);
-      invalidateCatalog();
-    } catch (err) {
-      if (err?.status === 409 && err?.payload?.error === "plugin_in_use") {
-        setConflict({ plugin: item, mappingCount: err.payload.mapping_count || 0 });
-      } else {
-        toast.error(err?.message || t("common.actionFailed"));
-      }
-    } finally {
-      setBusyID("");
-    }
-  };
-
-  const onToggle = (item, next) => {
-    if (next) enable.mutate(item);
-    else requestDisable(item, false);
-  };
 
   if (structure.error) {
     return <EmptyState title={t("xir.loadError")} detail={structure.error} tone="danger" />;
@@ -144,7 +107,9 @@ export function XirStructurePanel() {
               {selectedNode.point ? (
                 <div className="xir-detail-point">
                   <code className="xir-point">{selectedNode.point}</code>
+                  {pointInfo?.reserved ? <InlineTag tone="gold">{t("xir.pointReserved")}</InlineTag> : null}
                   {pointInfo ? <p>{language === "en" ? pointInfo.description : pointInfo.description_zh || pointInfo.description}</p> : null}
+                  {pointInfo?.reserved ? <p className="xir-detail-nopoint">{t("xir.pointReservedNote")}</p> : null}
                 </div>
               ) : (
                 <p className="xir-detail-nopoint">
@@ -217,11 +182,10 @@ export function XirStructurePanel() {
                           <em>{t("xir.pointCount", { count: (item.points || []).length })}</em>
                         </span>
                       </span>
-                      <Switch
-                        checked={Boolean(item.enabled)}
+                      <DetectorPluginSwitch
+                        item={item}
                         disabled={busyID === item.id || enable.isPending}
                         onChange={(next) => onToggle(item, next)}
-                        label={t("plugins.enableSwitch")}
                       />
                     </div>
                   );
@@ -246,31 +210,12 @@ export function XirStructurePanel() {
         </aside>
       </div>
 
-      {conflict ? (
-        <Dialog open onOpenChange={(next) => (next ? undefined : setConflict(null))}>
-          <DialogContent>
-            <DialogHeader>
-              <div>
-                <p className="eyebrow">{t("plugins.disableCheck")}</p>
-                <DialogTitle>{t("plugins.disableConfirmTitle", { name: pluginName(conflict.plugin, language) })}</DialogTitle>
-              </div>
-            </DialogHeader>
-            <p className="trace-subline">{t("plugins.detectionDisableWarning")}</p>
-            <p className="trace-subline">{t("plugins.detectionMappingCount", { count: conflict.mappingCount })}</p>
-            <DialogFooter>
-              <Button variant="ghost" type="button" onClick={() => setConflict(null)}>{t("common.cancel")}</Button>
-              <Button
-                variant="primary"
-                type="button"
-                disabled={busyID === conflict.plugin.id}
-                onClick={() => requestDisable(conflict.plugin, true)}
-              >
-                {t("plugins.disableAnyway")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      ) : null}
+      <DetectorPluginConflictDialog
+        conflict={conflict}
+        busy={conflict ? busyID === conflict.plugin.id : false}
+        onCancel={() => setConflict(null)}
+        onConfirm={() => requestDisable(conflict.plugin, true)}
+      />
     </>
   );
 }

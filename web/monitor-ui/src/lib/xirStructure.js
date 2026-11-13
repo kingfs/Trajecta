@@ -103,6 +103,28 @@ export function defaultCollapsedIds(index) {
 }
 
 /**
+ * Expand the ancestors of `ids` so those nodes become visible under the
+ * default collapsed tree. A focused plugin's points and the hooks-only filter
+ * both live below collapsed groups; without this the filter highlights nodes
+ * the reader cannot see. Returns the same Set when nothing changed, so a React
+ * state update can bail out.
+ */
+export function expandAncestors(index, ids, collapsed) {
+  let next = collapsed;
+  for (const id of ids || []) {
+    let cur = index.parentOf.get(id);
+    while (cur) {
+      if (next.has(cur)) {
+        if (next === collapsed) next = new Set(collapsed);
+        next.delete(cur);
+      }
+      cur = index.parentOf.get(cur);
+    }
+  }
+  return next;
+}
+
+/**
  * Lay out the visible tree. `collapsed` hides a node's children (the node
  * itself stays, with a count badge); `hidden` removes nodes entirely (the
  * hooks-only filter). Returns cards with world coordinates, parent->child

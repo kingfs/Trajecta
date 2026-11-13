@@ -1456,6 +1456,8 @@ export default {
   "xir.nodeDetail": "Node detail",
   "xir.sealedNote": "A sealed block round-trips byte for byte; the projection gives it no text, so no detection plugin is ever fed it.",
   "xir.noPointNote": "This node carries no hook point.",
+  "xir.pointReserved": "Reserved",
+  "xir.pointReservedNote": "No audit projection node produces this hook point yet; it documents a logical field rather than a live audit hook.",
   "xir.mediaNote": "Media keeps metadata only (kind, URL, media type, filename); inline bytes never enter a node.",
   "xir.recursiveNote": "Recursive structure: children repeat the same part vocabulary.",
   "xir.pluginsOnNode": "Plugins acting on this node",

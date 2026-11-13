@@ -13,8 +13,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"path"
 	"strconv"
@@ -99,13 +97,6 @@ type aggregatedModelTopProvider struct {
 	ContextLength       *int `json:"context_length,omitempty"`
 	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
 }
-
-type contextKey string
-
-const (
-	logInfoContextKey   contextKey = "log_info"
-	selectionContextKey contextKey = "router_selection"
-)
 
 const (
 	upstreamRetryBudget       = 30 * time.Second
@@ -275,7 +266,7 @@ func (rw *InstrumentedResponseWriter) GetMetrics() (int, int64, int64) {
 }
 
 type Handler struct {
-	proxy        *httputil.ReverseProxy
+	transport    *http.Transport
 	recorder     *recorder.Recorder
 	chaosManager *chaos.Manager
 	cfg          *config.Config
@@ -346,36 +337,71 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	return newHandler(cfg, st, nil, provided...)
 }
 
-// restoreForwardingHeaders reproduces the forwarding-header behaviour of the
-// deprecated Director path. ReverseProxy strips Forwarded, X-Forwarded-For,
-// X-Forwarded-Host and X-Forwarded-Proto before calling Rewrite and does not
-// append the client IP afterwards, so copy the client values back and append
-// the client IP to X-Forwarded-For exactly as ServeHTTP did after Director
-// returned: the other three pass through unchanged, and a prior
-// X-Forwarded-For is folded into one comma+space separated list.
-func restoreForwardingHeaders(pr *httputil.ProxyRequest) {
-	for _, name := range []string{"Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto"} {
-		if values := pr.In.Header[name]; len(values) > 0 {
-			pr.Out.Header[name] = values
+// hopByHopHeaders are connection-scoped headers that must not be forwarded to
+// an upstream. The forwarding path writes the upstream exchange itself instead
+// of delegating to httputil.ReverseProxy, so this list is the proxy's copy of
+// the RFC 7230 section 6.1 rule; the Connection header can name further
+// connection-scoped fields and those are dropped too.
+var hopByHopHeaders = []string{
+	"Connection",
+	"Proxy-Connection",
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
+// copyEndToEndHeaders copies the client's end-to-end headers to the outbound
+// request. Hop-by-hop headers are dropped, including every header named by the
+// client's Connection field: a proxy that forwards them can confuse the next
+// hop and leak proxy credentials (Proxy-Authorization) to the upstream.
+func copyEndToEndHeaders(dst, src http.Header) {
+	drop := make(map[string]struct{}, len(hopByHopHeaders))
+	for _, name := range hopByHopHeaders {
+		drop[name] = struct{}{}
+	}
+	for _, value := range src.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if token = strings.TrimSpace(token); token != "" {
+				drop[http.CanonicalHeaderKey(token)] = struct{}{}
+			}
 		}
 	}
-	clientIP, _, err := net.SplitHostPort(pr.In.RemoteAddr)
-	if err != nil {
-		// ServeHTTP left the inbound X-Forwarded-For untouched when the
-		// remote address could not be split into host and port.
-		if values := pr.In.Header["X-Forwarded-For"]; len(values) > 0 {
-			pr.Out.Header["X-Forwarded-For"] = values
+	for key, values := range src {
+		if _, skip := drop[http.CanonicalHeaderKey(key)]; skip {
+			continue
 		}
+		for _, value := range values {
+			dst.Add(key, value)
+		}
+	}
+}
+
+// appendForwardedFor appends the client IP to X-Forwarded-For, folding
+// multiple inbound fields into one comma+space separated list. When the remote
+// address cannot be split into host and port the inbound header is left
+// untouched, which is what the historical Director path did.
+func appendForwardedFor(header http.Header, remoteAddr string) {
+	clientIP, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
 		return
 	}
-	prior, ok := pr.In.Header["X-Forwarded-For"]
-	omit := ok && prior == nil // Issue 38079: nil means don't populate the header
-	if len(prior) > 0 {
+	if prior := header.Values("X-Forwarded-For"); len(prior) > 0 {
 		clientIP = strings.Join(prior, ", ") + ", " + clientIP
 	}
-	if !omit {
-		pr.Out.Header.Set("X-Forwarded-For", clientIP)
-	}
+	header.Set("X-Forwarded-For", clientIP)
+}
+
+// applyForwardingHeaders is the request-side header policy of the forwarding
+// path: end-to-end client headers pass through (Forwarded, X-Forwarded-Host and
+// X-Forwarded-Proto included), connection-scoped fields are stripped, and the
+// client IP is appended to X-Forwarded-For.
+func applyForwardingHeaders(outreq, original *http.Request) {
+	copyEndToEndHeaders(outreq.Header, original.Header)
+	appendForwardedFor(outreq.Header, original.RemoteAddr)
 }
 
 func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *functionexec.Manager, provided ...*router.Router) (*Handler, error) {
@@ -424,104 +450,22 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		localLimiter = nil
 	}
 
-	rp := &httputil.ReverseProxy{
-		Transport: &http.Transport{
-			// The proxy decision is read per request from the policy the
-			// Monitor's System page publishes, so enabling or editing the
-			// proxy needs no restart.
-			Proxy: netproxy.ProxyFunc,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          200,
-			MaxIdleConnsPerHost:   100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			ResponseHeaderTimeout: cfg.UpstreamResponseHeaderTimeout(),
-		},
-	}
-
-	rp.Rewrite = func(pr *httputil.ProxyRequest) {
-		restoreForwardingHeaders(pr)
-		selection, ok := pr.Out.Context().Value(selectionContextKey).(*router.Selection)
-		if !ok || selection == nil || selection.Target == nil {
-			return
-		}
-		// A channel can carry its own outbound proxy policy. The shared
-		// transport reads this per-request override before the system policy, so
-		// no second transport is needed. Replacing pr.Out keeps the context
-		// change visible to the transport after Rewrite returns.
-		req := pr.Out.WithContext(netproxy.WithResolver(pr.Out.Context(), selection.Target.Upstream.Proxy))
-		pr.Out = req
-		// Read the path and query from the inbound request: Rewrite sanitizes
-		// Out.URL.RawQuery before this call, while Director saw the raw query.
-		clientPath := pr.In.URL.Path
-		if pr.In.URL.RawQuery != "" {
-			clientPath += "?" + pr.In.URL.RawQuery
-		}
-		targetURL, err := url.Parse(selection.Target.Upstream.BaseURL)
-		if err == nil {
-			req.Host = targetURL.Host
-			req.URL.Scheme = targetURL.Scheme
-			req.URL.Host = targetURL.Host
-		}
-		fullURL, err := selection.Target.Upstream.BuildURL(clientPath)
-		if err == nil {
-			if parsed, parseErr := url.Parse(fullURL); parseErr == nil {
-				req.URL.Path = parsed.Path
-				req.URL.RawPath = parsed.RawPath
-				req.URL.RawQuery = parsed.RawQuery
-			}
-		}
-		selection.Target.Upstream.ApplyAuthHeaders(req.Header)
-		req.Header.Set("Accept-Encoding", "identity")
-	}
-
-	rp.ModifyResponse = func(resp *http.Response) error {
-		logInfo, ok := resp.Request.Context().Value(logInfoContextKey).(*recorder.LogInfo)
-		if !ok || logInfo == nil {
-			return nil
-		}
-
-		// 1. 写入分隔符
-		logInfo.File.Write([]byte("\n"))
-
-		// 2. 写入 Header
-		headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
-		resp.Header.Write(headerBuf)
-		headerBuf.WriteString("\r\n")
-
-		n, _ := logInfo.File.Write(headerBuf.Bytes())
-		logInfo.Header.Layout.ResHeaderLen = int64(n)
-
-		// 3. 判断 Stream
-		isStream := llm.DetectStreamingResponse(resp.Header)
-		if isStream {
-			logInfo.Header.Layout.IsStream = true
-		}
-
-		// 4. 劫持 Body
-		resp.Body = &gateway.UsageSniffer{
-			Source:      resp.Body,
-			File:        logInfo.File,
-			Count:       &logInfo.Header.Layout.ResBodyLen,
-			Usage:       &logInfo.Usage,
-			RecordUsage: &logInfo.Header.Usage,
-			Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-			Events:      &logInfo.Events,
-		}
-		return nil
-	}
-
-	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		slog.Error("Proxy error", "err", err)
-		if logInfo, ok := r.Context().Value(logInfoContextKey).(*recorder.LogInfo); ok && logInfo != nil {
-			logInfo.Header.Meta.Error = err.Error()
-		}
-		writeProxyError(w, r, http.StatusBadGateway, "upstream_transport_error", "Proxy Error: "+err.Error())
+	transport := &http.Transport{
+		// The proxy decision is read per request from the policy the
+		// Monitor's System page publishes, so enabling or editing the
+		// proxy needs no restart.
+		Proxy: netproxy.ProxyFunc,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          200,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: cfg.UpstreamResponseHeaderTimeout(),
 	}
 
 	responsesPath := cfg.ResponsesServerPath()
@@ -623,7 +567,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	}
 
 	return &Handler{
-		proxy:            rp,
+		transport:        transport,
 		recorder:         rec,
 		chaosManager:     cm,
 		cfg:              cfg,
@@ -2273,12 +2217,10 @@ func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *ro
 		return nil, fmt.Errorf("create outbound request: %w", err)
 	}
 
-	// Copy relevant headers from the original request.
-	for key, vals := range original.Header {
-		for _, val := range vals {
-			outreq.Header.Add(key, val)
-		}
-	}
+	// Copy the client's end-to-end headers and rewrite X-Forwarded-For. The
+	// connection-scoped fields (Proxy-Authorization included) are dropped here;
+	// see applyForwardingHeaders.
+	applyForwardingHeaders(outreq, original)
 	if conv != nil && pathOverride != "" {
 		gateway.ApplyConvertedHeaders(outreq, original, conv.upstreamProtocol)
 	}
@@ -2290,7 +2232,7 @@ func (h *Handler) sendUpstreamRequestWithPath(original *http.Request, target *ro
 		outreq.ContentLength = int64(len(bodyBytes))
 	}
 
-	return h.proxy.Transport.RoundTrip(outreq)
+	return h.transport.RoundTrip(outreq)
 }
 
 // writeUpstreamResponse writes a successful upstream response to the client response writer,

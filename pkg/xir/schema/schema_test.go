@@ -3,6 +3,8 @@ package schema
 import (
 	"testing"
 
+	"github.com/kingfs/Trajecta/pkg/xir"
+	"github.com/kingfs/Trajecta/pkg/xir/audit"
 	"github.com/kingfs/Trajecta/pkg/xir/hook"
 )
 
@@ -114,6 +116,89 @@ func TestPointsAreValidAndCovered(t *testing.T) {
 			t.Fatalf("point %q missing bilingual name or section", info.Point)
 		}
 	}
+}
+
+// The document is only useful if its points describe the projection that
+// actually runs. Every point pkg/xir/audit.NodePoint can produce must be
+// represented by a non-reserved node, and every point no projection node
+// produces must be marked reserved (the vocabulary is allowed to run ahead of
+// the code, but the map must not imply a live hook).
+func TestPointsMatchAuditProjection(t *testing.T) {
+	produced := map[hook.Point]bool{}
+	kinds := []string{
+		string(xir.PartText),
+		string(xir.PartRefusal),
+		string(xir.PartCitation),
+		string(xir.PartSearch),
+		string(xir.PartSealed),
+		string(xir.PartToolCall),
+		string(xir.PartToolResult),
+		string(xir.PartReasoning),
+		"tool",
+		"message",
+		"error",
+		"usage",
+	}
+	roles := []xir.Role{xir.RoleSystem, xir.RoleDeveloper, xir.RoleUser, xir.RoleAssistant, xir.RoleTool}
+	for _, section := range []string{audit.SectionRequest, audit.SectionResponse} {
+		for _, kind := range kinds {
+			for _, role := range roles {
+				if point := audit.NodePoint(audit.Node{Section: section, Kind: kind, Role: role}); point != "" {
+					produced[point] = true
+				}
+			}
+		}
+	}
+	if len(produced) == 0 {
+		t.Fatal("audit.NodePoint produced no points; the cross-check would be vacuous")
+	}
+
+	s := Build()
+	byPoint := make(map[hook.Point]PointInfo, len(s.Points))
+	for _, info := range s.Points {
+		byPoint[info.Point] = info
+	}
+	carried := make(map[hook.Point]bool)
+	for _, node := range s.Nodes {
+		if node.Point != "" {
+			carried[node.Point] = true
+		}
+	}
+	for point := range produced {
+		info, ok := byPoint[point]
+		if !ok {
+			t.Errorf("audit.NodePoint produces %q but the vocabulary does not describe it", point)
+			continue
+		}
+		if info.Reserved {
+			t.Errorf("audit.NodePoint produces %q but it is marked reserved", point)
+		}
+		if !carried[point] {
+			t.Errorf("audit.NodePoint produces %q but no structure node carries it", point)
+		}
+	}
+	for _, info := range s.Points {
+		if produced[info.Point] && info.Reserved {
+			t.Errorf("point %q is both produced and reserved", info.Point)
+		}
+		if !produced[info.Point] && !info.Reserved {
+			t.Errorf("point %q has no producer and is not marked reserved", info.Point)
+		}
+	}
+}
+
+// A no-text part is never fed to a detector, so it must not advertise a hook
+// point: the map would otherwise light it up as covered.
+func TestMediaNodeCarriesNoPoint(t *testing.T) {
+	for _, node := range Build().Nodes {
+		if node.ID == "request.message.media" {
+			if node.Point != "" {
+				t.Fatalf("media node carries point %q", node.Point)
+			}
+			return
+		}
+	}
+	t.Fatal("request.message.media node not found")
 }
 
 func TestSealedNodesCarryNoPoint(t *testing.T) {

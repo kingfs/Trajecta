@@ -3977,7 +3977,7 @@ debug:
 	}
 
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello with AKIAIOSFODNN7EXAMPLE"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
 	header := recordfile.RecordHeader{
@@ -4301,7 +4301,7 @@ debug:
 	}
 
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello with AKIAIOSFODNN7EXAMPLE"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_cmd","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from cli"}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}`
 	header := recordfile.RecordHeader{

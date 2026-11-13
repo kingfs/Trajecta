@@ -61,6 +61,12 @@ type Node struct {
 }
 
 // PointInfo describes one hook point of the pkg/xir/hook vocabulary.
+//
+// Reserved marks a point that belongs to the vocabulary but has no producer in
+// the current audit projection: a scanner may not declare it, because no node
+// maps to it yet. An observation detector may still read the same logical field
+// (its points are catalog metadata), so the map shows the distinction instead
+// of implying a live audit hook.
 type PointInfo struct {
 	Point         hook.Point `json:"point"`
 	Section       string     `json:"section"`
@@ -68,6 +74,7 @@ type PointInfo struct {
 	NameZh        string     `json:"name_zh"`
 	Description   string     `json:"description,omitempty"`
 	DescriptionZh string     `json:"description_zh,omitempty"`
+	Reserved      bool       `json:"reserved,omitempty"`
 }
 
 // Representation describes one of the two views the IR keeps of an exchange.
@@ -206,9 +213,8 @@ func nodes() []Node {
 		{
 			ID: "request.message.media", Kind: KindPart, Type: "xir.Part(image|file|audio|video)",
 			Name: "Media", NameZh: "媒体",
-			Description:   "Normalized image/file/audio/video payloads. The audit projection keeps only metadata (kind, URL, media type, filename); inline bytes are never copied into a node, so there is no text to scan.",
-			DescriptionZh: "归一化的图像/文件/音频/视频载荷。审计投影只保留元数据（类型、URL、媒体类型、文件名）；内联字节从不复制进节点，因此没有可扫描的文本。",
-			Point:         hook.PointRequestMessage,
+			Description:   "Normalized image/file/audio/video payloads. The audit projection keeps only metadata (kind, URL, media type, filename); inline bytes are never copied into a node, so there is no text to scan and no hook point is fed.",
+			DescriptionZh: "归一化的图像/文件/音频/视频载荷。审计投影只保留元数据（类型、URL、媒体类型、文件名）；内联字节从不复制进节点，因此没有可扫描的文本，也不会有挂点被喂入。",
 			Flags:         []string{FlagMedia, FlagNoText},
 		},
 		{
@@ -446,6 +452,7 @@ func points() []PointInfo {
 			Name: "Request envelope", NameZh: "请求信封",
 			Description:   "The model name and stream flag the routing envelope reads.",
 			DescriptionZh: "路由信封读取的模型名与流式开关。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointRequestSystem, Section: "request",
@@ -482,6 +489,7 @@ func points() []PointInfo {
 			Name: "Request metadata", NameZh: "请求元数据",
 			Description:   "The user identifier and metadata map.",
 			DescriptionZh: "user 标识与 metadata 映射。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointResponseOutput, Section: "response",
@@ -512,42 +520,49 @@ func points() []PointInfo {
 			Name: "Usage", NameZh: "用量",
 			Description:   "The normalized token usage of the response.",
 			DescriptionZh: "响应归一化后的 token 用量。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointResponseError, Section: "response",
 			Name: "Error", NameZh: "错误",
 			Description:   "The normalized provider/proxy error.",
 			DescriptionZh: "归一化的提供方/代理错误。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointStreamEvent, Section: "stream",
 			Name: "Stream event", NameZh: "流式事件",
 			Description:   "The envelope of any streamed event, including lifecycle frames.",
 			DescriptionZh: "任意流式事件的信封，包括生命周期帧。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointStreamTextDelta, Section: "stream",
 			Name: "Text delta", NameZh: "文本增量",
 			Description:   "An incremental run of answer text.",
 			DescriptionZh: "回答文本的增量片段。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointStreamReasonDelta, Section: "stream",
 			Name: "Reasoning delta", NameZh: "推理增量",
 			Description:   "An incremental run of visible reasoning.",
 			DescriptionZh: "可见推理的增量片段。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointStreamToolArgs, Section: "stream",
 			Name: "Tool args delta", NameZh: "工具参数增量",
 			Description:   "An incremental run of tool-call arguments.",
 			DescriptionZh: "工具调用参数的增量片段。",
+			Reserved:      true,
 		},
 		{
 			Point: hook.PointExchangeFinalize, Section: "exchange",
 			Name: "Exchange finalize", NameZh: "交换收尾",
 			Description:   "The whole exchange after the response completes; the reserved place for cross-cutting hooks.",
 			DescriptionZh: "响应完成后的整个交换；横切 hook 的预留位置。",
+			Reserved:      true,
 		},
 	}
 }

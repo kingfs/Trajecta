@@ -74,11 +74,10 @@ func handlerAgainstSilentUpstream(t *testing.T, headerTimeout time.Duration) (*H
 
 func forwardingTransport(t *testing.T, handler *Handler) *http.Transport {
 	t.Helper()
-	transport, ok := handler.proxy.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("forwarding transport is %T, want *http.Transport", handler.proxy.Transport)
+	if handler.transport == nil {
+		t.Fatal("forwarding transport is nil")
 	}
-	return transport
+	return handler.transport
 }
 
 // TestUpstreamResponseHeaderTimeoutIsWiredIntoTheForwardingTransport pins the setting to

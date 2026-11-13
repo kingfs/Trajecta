@@ -59,6 +59,10 @@ func DefaultDetectors() []Detector {
 
 func (r *Runner) Analyze(ctx context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
+	// The credential and PII detectors scan the same node texts. One cache per
+	// run lets the union DFA run once per distinct text instead of once per
+	// detector (and once per duplicate Text/Raw view).
+	ctx = withScanCache(ctx)
 	scope := observationExchangeScope(obs)
 	for _, detector := range r.detectors {
 		if detector == nil {
@@ -229,7 +233,7 @@ type CredentialDetector struct{}
 func (CredentialDetector) Name() string    { return "credential" }
 func (CredentialDetector) Version() string { return "0.2.0" }
 
-func (d CredentialDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
+func (d CredentialDetector) Detect(ctx context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
 	for _, node := range allNodes(obs) {
 		seen := map[secretmask.RuleID]bool{}
@@ -237,7 +241,7 @@ func (d CredentialDetector) Detect(_ context.Context, obs observe.TraceObservati
 			if text == "" {
 				continue
 			}
-			for _, match := range secretmask.Scan([]byte(text)) {
+			for _, match := range scanText(ctx, text) {
 				rule, ok := match.Rule()
 				if !ok || rule.Kind.PII() || !match.Maskable() || seen[match.ID] {
 					continue
@@ -347,8 +351,12 @@ func finding(traceID, category string, severity observe.Severity, confidence flo
 	return f
 }
 
+// stableFindingID is the finding's identity across reparses. The title carries
+// the rule ("Credential: aws.access_key_id", "Personal data: national_id"), so
+// two rules that hit the same node are two findings rather than one: a finding
+// per node/category silently dropped every rule after the first.
 func stableFindingID(f observe.Finding) string {
-	key := strings.Join([]string{f.TraceID, f.Category, string(f.Severity), f.NodeID, f.EvidencePath, f.Detector, f.DetectorVersion}, "|")
+	key := strings.Join([]string{f.TraceID, f.Category, string(f.Severity), f.NodeID, f.EvidencePath, f.Title, f.Detector, f.DetectorVersion}, "|")
 	sum := sha1.Sum([]byte(key))
 	return "finding_" + hex.EncodeToString(sum[:])[:16]
 }

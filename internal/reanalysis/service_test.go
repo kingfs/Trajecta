@@ -287,7 +287,7 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
 	// The credential stays in the request (the findings detector scans it), while
 	// the resources come from the model's own tool calls in the response.
-	reqBody := `{"model":"gpt-5.1","input":"hello sk-test_abcdefghijklmnopqrstuvwxyz"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello AKIAIOSFODNN7EXAMPLE"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]},{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\"file_path\":\"/tmp/reanalysis.log\"}"},{"type":"function_call","call_id":"call_2","name":"web_fetch","arguments":"{\"url\":\"https://api.example.com/x\"}"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
 	header := recordfile.RecordHeader{

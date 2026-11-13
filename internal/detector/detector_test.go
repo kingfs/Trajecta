@@ -64,8 +64,8 @@ func TestDefaultConfigPreservesBehaviour(t *testing.T) {
 	if !cfg.IsEnabled(PluginSecretmask) {
 		t.Fatal("secretmask must default enabled to preserve masking")
 	}
-	if !cfg.IsEnabled(PluginIndicators) {
-		t.Fatal("indicators are a builtin DFA capability and must always be enabled")
+	if cfg.IsEnabled(PluginIndicators) {
+		t.Fatal("indicators are report-only and default disabled to preserve the audit projection output")
 	}
 	for _, id := range []string{PluginDangerousShell, PluginCredentialRe, PluginPIIObservation, PluginProviderSafety, PluginToolError} {
 		if !cfg.IsEnabled(id) {
@@ -112,14 +112,14 @@ func TestSnapshotAuditEngineAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(snap.AuditEngine().Scanners()); got != 2 {
-		t.Fatalf("default audit engine scanners = %d, want 2 (both builtin DFA scanners always run)", got)
+	if got := len(snap.AuditEngine().Scanners()); got != 1 {
+		t.Fatalf("default audit engine scanners = %d, want 1 (secretmask only)", got)
 	}
 	if snap.runner == nil {
 		t.Fatal("runner must be built")
 	}
 
-	// Indicators are already always-on, so listing them again keeps the count at 2.
+	// Enabling the report-only indicator machine adds a second audit scanner.
 	cfg := DefaultConfig()
 	cfg.Enabled = append(cfg.Enabled, PluginIndicators)
 	snap, err = buildSnapshot(cfg, nil)

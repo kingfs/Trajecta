@@ -33,11 +33,14 @@ func TestDetectorPluginsAPIDefaults(t *testing.T) {
 	if !byID[detector.PluginSecretmask].Enabled {
 		t.Fatal("secretmask must default enabled")
 	}
-	if !byID[detector.PluginIndicators].Enabled {
-		t.Fatal("indicators are a builtin DFA capability and must always be enabled")
+	if byID[detector.PluginIndicators].Enabled {
+		t.Fatal("indicators must default disabled to preserve the audit projection output")
 	}
-	if !byID[detector.PluginSecretmask].AlwaysOn || !byID[detector.PluginIndicators].AlwaysOn {
-		t.Fatal("the DFA scanner capabilities must be marked always-on")
+	if !byID[detector.PluginSecretmask].AlwaysOn {
+		t.Fatal("the credential/PII union machine must be marked always-on")
+	}
+	if byID[detector.PluginIndicators].AlwaysOn {
+		t.Fatal("the report-only indicator machine must stay toggleable")
 	}
 }
 
@@ -74,6 +77,38 @@ func TestDetectorPluginBuiltinCannotBeDisabled(t *testing.T) {
 	cfg, _ = detector.LoadConfig(context.Background(), st)
 	if !cfg.IsEnabled(detector.PluginSecretmask) {
 		t.Fatal("secretmask should be enabled")
+	}
+}
+
+// The report-only indicator machine is a separate Ragel machine, not the
+// compiled union machine: an operator can turn its audit detections off.
+func TestDetectorPluginIndicatorsCanBeDisabled(t *testing.T) {
+	st := newPluginTestStore(t)
+	detail := detectorPluginDetailAPIHandler(st, nil, nil)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginIndicators, strings.NewReader(`{"enabled":false}`))
+	detail.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable indicators status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	cfg, err := detector.LoadConfig(context.Background(), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsEnabled(detector.PluginIndicators) {
+		t.Fatal("indicators should be disabled after PATCH")
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginIndicators, strings.NewReader(`{"enabled":true}`))
+	detail.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable indicators status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	cfg, _ = detector.LoadConfig(context.Background(), st)
+	if !cfg.IsEnabled(detector.PluginIndicators) {
+		t.Fatal("indicators should be enabled after PATCH")
 	}
 }
 
