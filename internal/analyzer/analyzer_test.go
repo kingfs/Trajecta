@@ -2,6 +2,9 @@ package analyzer
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/kingfs/Trajecta/pkg/observe"
@@ -189,4 +192,156 @@ func hasFindingCategory(findings []observe.Finding, category string) bool {
 func metadataStringValue(metadata map[string]any, key string) string {
 	value, _ := metadata[key].(string)
 	return value
+}
+
+// TestToolErrorDetectorIgnoresErrorTokenInSuccessfulOutput is the regression for
+// the recorded trace that reported a successful `git diff` as a tool error: the
+// diff contained a slog key `"error"` in source code, and the old rule searched
+// the output text for that literal token. Tool output is data, not execution
+// status.
+func TestToolErrorDetectorIgnoresErrorTokenInSuccessfulOutput(t *testing.T) {
+	node := observe.SemanticNode{
+		ID:             "node-diff",
+		ProviderType:   "function_call_output",
+		NormalizedType: observe.NodeToolResult,
+		Path:           "$.input[220]",
+		Text:           " pkg/sandboxinit/egress_linux.go | 2 +-\n+ \"sandbox_id\", s.sandboxID, \"error\", err)",
+	}
+	obs := observe.TraceObservation{
+		TraceID: "trace-tool-error-text",
+		Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{node}},
+	}
+
+	findings, err := NewRunner(ToolErrorDetector{}).Analyze(context.Background(), obs)
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("successful output produced tool error findings: %+v", findings)
+	}
+}
+
+func TestToolErrorDetectorReportsOnlyStructuredFailures(t *testing.T) {
+	toolResult := func(id, text string, metadata map[string]any) observe.SemanticNode {
+		return observe.SemanticNode{
+			ID:             id,
+			ProviderType:   "function_call_output",
+			NormalizedType: observe.NodeToolResult,
+			Path:           "$.input[0]",
+			Text:           text,
+			Metadata:       metadata,
+		}
+	}
+	codeResult := func(id, outcome string) observe.SemanticNode {
+		raw, err := json.Marshal(map[string]string{"outcome": outcome})
+		if err != nil {
+			t.Fatalf("marshal outcome: %v", err)
+		}
+		return observe.SemanticNode{
+			ID:             id,
+			ProviderType:   "codeExecutionResult",
+			NormalizedType: observe.NodeCodeResult,
+			Path:           "$.output[0]",
+			Metadata:       map[string]any{"codeExecutionResult": json.RawMessage(raw)},
+		}
+	}
+
+	cases := []struct {
+		name string
+		obs  observe.TraceObservation
+		want []string
+	}{
+		{
+			name: "request-side failed status",
+			obs: observe.TraceObservation{
+				TraceID: "trace-failed-status",
+				Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{
+					toolResult("node-failed", `{"cwd":"/tmp"}`, map[string]any{"status": "failed"}),
+				}},
+			},
+			want: []string{"node-failed"},
+		},
+		{
+			name: "anthropic is_error flag",
+			obs: observe.TraceObservation{
+				TraceID: "trace-is-error",
+				Request: observe.ObservationRequest{Nodes: []observe.SemanticNode{
+					toolResult("node-is-error", "boom", map[string]any{"is_error": "true"}),
+				}},
+			},
+			want: []string{"node-is-error"},
+		},
+		{
+			name: "provider error node",
+			obs: observe.TraceObservation{
+				TraceID: "trace-provider-error",
+				Response: observe.ObservationResponse{Nodes: []observe.SemanticNode{{
+					ID:             "node-provider",
+					ProviderType:   "error",
+					NormalizedType: observe.NodeError,
+					Path:           "$.error",
+					Text:           "overloaded",
+				}}},
+			},
+			want: []string{"node-provider"},
+		},
+		{
+			name: "gemini code execution failure",
+			obs: observe.TraceObservation{
+				TraceID: "trace-code-failed",
+				Response: observe.ObservationResponse{Nodes: []observe.SemanticNode{
+					codeResult("node-code", "OUTCOME_FAILED"),
+				}},
+			},
+			want: []string{"node-code"},
+		},
+		{
+			name: "result flag and node flag emit one finding",
+			obs: observe.TraceObservation{
+				TraceID: "trace-dedupe",
+				Response: observe.ObservationResponse{Nodes: []observe.SemanticNode{
+					toolResult("node-dedupe", "boom", map[string]any{"status": "failed"}),
+				}},
+				Tools: observe.ObservationTools{Results: []observe.ToolResultObservation{{
+					ID:      "call-dedupe",
+					NodeID:  "node-dedupe",
+					Text:    "boom",
+					IsError: true,
+				}}},
+			},
+			want: []string{"node-dedupe"},
+		},
+		{
+			name: "result flag without a parsed node",
+			obs: observe.TraceObservation{
+				TraceID: "trace-missing-node",
+				Tools: observe.ObservationTools{Results: []observe.ToolResultObservation{{
+					ID:      "call-missing",
+					NodeID:  "node-missing",
+					Text:    "boom",
+					IsError: true,
+				}}},
+			},
+			want: []string{"node-missing"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, err := NewRunner(ToolErrorDetector{}).Analyze(context.Background(), tc.obs)
+			if err != nil {
+				t.Fatalf("Analyze() error = %v", err)
+			}
+			got := make([]string, 0, len(findings))
+			for _, finding := range findings {
+				got = append(got, finding.NodeID)
+			}
+			sort.Strings(got)
+			want := slices.Clone(tc.want)
+			sort.Strings(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("finding nodes = %v, want %v (findings=%+v)", got, want, findings)
+			}
+		})
+	}
 }

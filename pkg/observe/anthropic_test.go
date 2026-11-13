@@ -317,3 +317,34 @@ func TestAnthropicParserJoinsStreamedToolInputFragments(t *testing.T) {
 		t.Fatalf("response tool calls = %+v", obs.Response.ToolCalls)
 	}
 }
+
+// Anthropic is the one mainstream protocol with an explicit tool_result error
+// flag. The flag, not the result text, decides whether the execution failed.
+func TestAnthropicParserToolResultUsesIsErrorFlag(t *testing.T) {
+	parser := NewAnthropicParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID: "trace-anthropic-tool-error",
+		Header:  anthropicTestHeader(false),
+		RequestBody: []byte(`{
+			"model":"claude-sonnet-4-5",
+			"messages":[{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"toolu_failed","content":"boom","is_error":true},
+				{"type":"tool_result","tool_use_id":"toolu_ok","content":"+ \"sandbox_id\", s.sandboxID, \"error\", err)","is_error":false}
+			]}],
+			"max_tokens":64
+		}`),
+		ResponseBody: []byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}]}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Tools.Results) != 2 {
+		t.Fatalf("tool results = %+v", obs.Tools.Results)
+	}
+	if !obs.Tools.Results[0].IsError {
+		t.Errorf("is_error=true result was not marked failed: %+v", obs.Tools.Results[0])
+	}
+	if obs.Tools.Results[1].IsError {
+		t.Errorf("is_error=false result was marked failed from its text: %+v", obs.Tools.Results[1])
+	}
+}

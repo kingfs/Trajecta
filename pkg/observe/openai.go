@@ -592,6 +592,12 @@ func parseOpenAIChatMessages(raw json.RawMessage, section string, basePath strin
 		node.Text = firstTextNodeText(node.Children)
 		if role == "tool" || stringField(obj, "tool_call_id") != "" {
 			node.NormalizedType = NodeToolResult
+			// Chat Completions has no standard error field on a tool message.
+			// Some compatible providers still send is_error; keep the explicit
+			// flag so ToolResultFailed can see it without reading the content.
+			if isErr := boolField(obj, "is_error"); isErr {
+				node.Metadata["is_error"] = "true"
+			}
 		}
 		nodes = append(nodes, node)
 	}
@@ -917,6 +923,9 @@ func parseResponsesItem(raw json.RawMessage, section string, path string, index 
 	if args := stringField(obj, "arguments"); args != "" {
 		node.Metadata["arguments"] = args
 	}
+	if isErr := boolField(obj, "is_error"); isErr {
+		node.Metadata["is_error"] = "true"
+	}
 	if len(obj["output"]) > 0 && string(obj["output"]) != "null" {
 		node.Metadata["output"] = cloneRaw(obj["output"])
 	}
@@ -1048,7 +1057,7 @@ func toolResultObservationFromNode(node SemanticNode, owner ToolOwner) ToolResul
 		JSON:    rawMessageFromMetadata(node.Metadata, "output"),
 		NodeID:  node.ID,
 		Path:    node.Path,
-		IsError: strings.Contains(strings.ToLower(metadataString(node.Metadata, "status")), "error"),
+		IsError: ToolResultFailed(node),
 	}
 }
 

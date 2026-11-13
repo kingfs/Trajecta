@@ -687,3 +687,52 @@ func TestOpenAIParserRecordsPlainTextHTTPErrorWithoutLLMResponseParse(t *testing
 		t.Fatalf("warnings = %+v", obs.Warnings)
 	}
 }
+
+// A Responses function_call_output normally has no error flag at all. The parser
+// must not invent one from the output text: a successful command can return a
+// diff or source code containing the word "error". Only an explicit status or
+// is_error field may mark the execution as failed.
+func TestOpenAIParserResponsesToolResultUsesProtocolErrorState(t *testing.T) {
+	parser := NewOpenAIParser()
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-responses-tool-error",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationResponses,
+				Endpoint:  "/v1/responses",
+			},
+		},
+		RequestBody: []byte(`{
+			"model":"gpt-5.1",
+			"input":[
+				{"type":"function_call_output","call_id":"call_ok","output":"+ \"sandbox_id\", s.sandboxID, \"error\", err)"},
+				{"type":"function_call_output","call_id":"call_failed","status":"failed","output":"boom"}
+			]
+		}`),
+		ResponseBody: []byte(`{
+			"id":"resp_1",
+			"object":"response",
+			"status":"completed",
+			"model":"gpt-5.1",
+			"output":[
+				{"type":"function_call_output","call_id":"call_failed","status":"failed","output":"boom"}
+			]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Request.Inputs) != 2 {
+		t.Fatalf("request inputs = %+v", obs.Request.Inputs)
+	}
+	if ToolResultFailed(obs.Request.Inputs[0]) {
+		t.Errorf("successful output containing the token \"error\" was marked failed: %+v", obs.Request.Inputs[0])
+	}
+	if !ToolResultFailed(obs.Request.Inputs[1]) {
+		t.Errorf("failed status was not recognized: %+v", obs.Request.Inputs[1])
+	}
+	if len(obs.Tools.Results) != 1 || !obs.Tools.Results[0].IsError {
+		t.Fatalf("response tool results = %+v, want one failed result", obs.Tools.Results)
+	}
+}

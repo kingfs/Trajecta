@@ -298,30 +298,57 @@ func (d ProviderSafetyDetector) Detect(_ context.Context, obs observe.TraceObser
 type ToolErrorDetector struct{}
 
 func (ToolErrorDetector) Name() string    { return "tool_error" }
-func (ToolErrorDetector) Version() string { return "0.1.0" }
+func (ToolErrorDetector) Version() string { return "0.2.0" }
 
+// Detect reports a tool execution failure only when the exchange itself says the
+// execution failed. The previous rule also searched every tool-result text for
+// the literal token `"error"`, which turned any successful command that printed
+// or returned source code, a log line or a schema containing that token into a
+// "Tool or provider error" finding. Tool output is arbitrary bytes and is not an
+// execution-status channel; the protocol's explicit error state is.
+//
+// One finding is emitted per failing node. Tools.Results carries the parser's
+// protocol-derived IsError flag for both request history and response items on
+// Anthropic and Gemini; the node walk covers OpenAI Responses, whose
+// function_call_output history items are not fed into Tools.Results, and every
+// explicit provider error node.
 func (d ToolErrorDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
+	seen := make(map[string]struct{}, len(obs.Tools.Results))
+	record := func(node observe.SemanticNode, confidence float64, title, description, evidence string) {
+		if node.ID != "" {
+			if _, ok := seen[node.ID]; ok {
+				return
+			}
+			seen[node.ID] = struct{}{}
+		}
+		findings = append(findings, finding(obs.TraceID, "tool_result_error", observe.SeverityMedium, confidence, title, description,
+			node, excerpt(evidence), d.Name(), d.Version()))
+	}
+
 	for _, result := range obs.Tools.Results {
 		if !result.IsError {
 			continue
 		}
 		node := findNodeByID(obs, result.NodeID)
-		findings = append(findings, finding(obs.TraceID, "tool_result_error", observe.SeverityMedium, 0.95, "Tool result error",
-			"Tool result was marked as an error by the provider or parser.",
-			node, excerpt(firstNonEmpty(result.Text, rawText(result.JSON))), d.Name(), d.Version()))
+		record(node, 0.95, "Tool result error",
+			"Tool execution was marked as failed by the provider protocol.",
+			firstNonEmpty(node.Text, result.Text, rawText(result.JSON)))
 	}
+
 	for _, node := range allNodes(obs) {
-		if node.NormalizedType != observe.NodeToolResult && node.NormalizedType != observe.NodeServerToolResult && node.NormalizedType != observe.NodeError {
+		if node.NormalizedType == observe.NodeError {
+			record(node, 0.9, "Tool or provider error",
+				"Provider output contains an explicit error node.",
+				firstNonEmpty(node.Text, rawText(node.Raw), rawText(node.JSON)))
 			continue
 		}
-		status := strings.ToLower(metadataString(node.Metadata, "status"))
-		text := strings.ToLower(firstNonEmpty(node.Text, rawText(node.Raw), rawText(node.JSON)))
-		if node.NormalizedType == observe.NodeError || strings.Contains(status, "error") || strings.Contains(text, `"error"`) {
-			findings = append(findings, finding(obs.TraceID, "tool_result_error", observe.SeverityMedium, 0.9, "Tool or provider error",
-				"Tool result or provider output contains an error signal.",
-				node, excerpt(firstNonEmpty(node.Text, rawText(node.Raw), rawText(node.JSON))), d.Name(), d.Version()))
+		if !observe.ToolResultFailed(node) {
+			continue
 		}
+		record(node, 0.95, "Tool result error",
+			"Tool execution was marked as failed by the provider protocol.",
+			firstNonEmpty(node.Text, rawText(node.Raw), rawText(node.JSON)))
 	}
 	return dedupeFindings(findings), nil
 }

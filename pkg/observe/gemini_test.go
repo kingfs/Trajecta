@@ -262,3 +262,42 @@ func TestRequestParsersTolerateABodylessRequest(t *testing.T) {
 		})
 	}
 }
+
+// Gemini's functionResponse has no standard error flag, so a response body that
+// happens to contain an "error" member must not be reported as a failed tool.
+// A codeExecutionResult does carry a structured outcome, and only its failure
+// states count.
+func TestGeminiParserToolErrorUsesStructuredFailureState(t *testing.T) {
+	parser := NewGeminiParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID: "trace-gemini-tool-error",
+		Header:  geminiTestHeader("google_genai", "/v1beta/models:generateContent", false),
+		RequestBody: []byte(`{"contents":[{"role":"user","parts":[
+			{"functionResponse":{"name":"lookup","response":{"error":"not found"}}}
+		]}]}`),
+		ResponseBody: []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[
+			{"codeExecutionResult":{"outcome":"OUTCOME_FAILED","output":"boom"}},
+			{"codeExecutionResult":{"outcome":"OUTCOME_OK","output":"ok"}}
+		]}}]}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Tools.Results) != 1 || obs.Tools.Results[0].IsError {
+		t.Fatalf("functionResponse containing an error member was marked failed: %+v", obs.Tools.Results)
+	}
+	var failed, ok int
+	for _, node := range obs.Response.ToolResults {
+		if node.NormalizedType != NodeCodeResult {
+			continue
+		}
+		if ToolResultFailed(node) {
+			failed++
+		} else {
+			ok++
+		}
+	}
+	if failed != 1 || ok != 1 {
+		t.Fatalf("code execution outcomes = failed %d / ok %d, want 1/1", failed, ok)
+	}
+}

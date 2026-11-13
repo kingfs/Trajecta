@@ -404,16 +404,15 @@ func geminiToolCallFromNode(node SemanticNode) ToolCallObservation {
 func geminiToolResultFromNode(node SemanticNode) ToolResultObservation {
 	raw := firstRaw(rawMessageFromMetadata(node.Metadata, "functionResponse"), rawMessageFromMetadata(node.Metadata, "toolResponse"), rawMessageFromMetadata(node.Metadata, "codeExecutionResult"))
 	return ToolResultObservation{
-		ID:     firstNonEmpty(metadataString(node.Metadata, "id"), node.ID),
-		Name:   firstNonEmpty(metadataString(node.Metadata, "name"), node.Text),
-		Kind:   node.ProviderType,
-		Owner:  geminiToolOwner(node.ProviderType, false),
-		Text:   node.Text,
-		JSON:   raw,
-		NodeID: node.ID,
-		Path:   node.Path,
-		IsError: strings.Contains(strings.ToLower(node.ProviderType), "error") ||
-			strings.Contains(strings.ToLower(node.Text), "error"),
+		ID:      firstNonEmpty(metadataString(node.Metadata, "id"), node.ID),
+		Name:    firstNonEmpty(metadataString(node.Metadata, "name"), node.Text),
+		Kind:    node.ProviderType,
+		Owner:   geminiToolOwner(node.ProviderType, false),
+		Text:    node.Text,
+		JSON:    raw,
+		NodeID:  node.ID,
+		Path:    node.Path,
+		IsError: ToolResultFailed(node),
 	}
 }
 

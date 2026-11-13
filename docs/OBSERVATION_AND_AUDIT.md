@@ -280,7 +280,7 @@ type Detector interface {
 - credential：复用遮蔽引擎的编译期 Ragel DFA（`secretmask.Scan`）扫描所有节点文本，仅报告可遮蔽的非 PII 凭据命中（API key、token、私钥、JWT/JWE、Bearer、赋值/DSN 口令等）；无平行正则实现，与遮蔽策略保持一致（`CredentialDetector`，version 0.2.0）。检测是 observe-only，不修改请求或响应。
 - pii：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Scan`，只保留 `Kind.PII()` 且 `Finding.Maskable()` 的命中（当前是中国居民身份证号 `pii.chinese_id` 与手机号 `pii.cn_mobile`）。因为复用遮蔽引擎，只有可改写档的值才会被上报：身份证靠离线校验器，手机号靠上下文词表，裸 11 位数字只报 Low、不入账，因此审计与改写口径一致。evidence 用 `excerptRedacted` 把命中值换成 `[redacted]`，findings 表不会成为第二份明文。每个节点的每个 PII 类别只报一条。
 - provider_safety：把 `safety` 节点映射为 `provider_safety_block`、`refusal` 节点映射为 `model_refusal`，并叠加 `ObservationSafety.Blocked`/`Refused` 汇总位。
-- tool_error：`obs.Tools.Results[].IsError` 为真，或 `tool_result`/`server_tool_result`/`error` 节点的 status/text 含错误信号时报告 `tool_result_error`。
+- tool_error：只在交换本身声明工具执行失败时报告 `tool_result_error`。判定来源是协议级错误状态：`obs.Tools.Results[].IsError`（Anthropic `tool_result.is_error`、Responses 工具结果 `status: failed` 等）、节点 metadata 的 `is_error` 或失败 `status`、显式 `error`/`*_error` 类型，以及 Gemini `codeExecutionResult.outcome` 的 `OUTCOME_FAILED`/`OUTCOME_DEADLINE_EXCEEDED`。不再扫描工具结果文本中的 `"error"` 字面量，因此成功命令返回的 diff、源码、日志或 JSON 里出现 error 字样不会误报；代价是 Chat Completions 这类没有结构化失败字段、只在内容里写错误的协议不会产生该 finding。每个失败节点只报一条。
 
 ## 遮蔽审计的定位
 

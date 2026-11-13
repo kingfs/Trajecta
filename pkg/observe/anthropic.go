@@ -495,7 +495,7 @@ func anthropicToolResultFromNode(node SemanticNode) ToolResultObservation {
 		JSON:    rawMessageFromMetadata(node.Metadata, "content"),
 		NodeID:  node.ID,
 		Path:    node.Path,
-		IsError: metadataString(node.Metadata, "is_error") == "true" || strings.Contains(strings.ToLower(node.ProviderType), "error"),
+		IsError: ToolResultFailed(node),
 	}
 }
 
