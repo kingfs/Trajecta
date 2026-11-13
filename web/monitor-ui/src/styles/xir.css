@@ -136,7 +136,10 @@
   stroke: color-mix(in srgb, var(--sec-color) 40%, transparent);
   stroke-width: 1.5;
   stroke-linecap: round;
-  stroke-dasharray: 640;
+  /* The path carries pathLength=1, so this dash pattern is normalized to the
+     full edge length: the draw-in animation works for any edge, and a long
+     exchange->request/stream edge is never left dashed (broken) afterwards. */
+  stroke-dasharray: 1;
   stroke-dashoffset: 0;
   animation: xir-draw 0.65s var(--ease-out-soft) backwards;
 }
@@ -153,7 +156,7 @@
 }
 
 @keyframes xir-draw {
-  from { stroke-dashoffset: 640; }
+  from { stroke-dashoffset: 1; }
   to { stroke-dashoffset: 0; }
 }
 @keyframes xir-flow {
@@ -181,7 +184,6 @@
   animation-delay: var(--enter-delay, 0ms);
 }
 .xir-card:hover {
-  transform: translateY(-1px);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
   z-index: 3;

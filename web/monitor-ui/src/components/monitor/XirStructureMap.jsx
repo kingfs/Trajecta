@@ -365,9 +365,11 @@ export function XirStructureMap({
             return (
               <g
                 key={`${link.from.id}->${link.to.id}`}
+                data-from={link.from.id}
+                data-to={link.to.id}
                 className={`xir-edge ${SECTION_CLASS[section]} ${dimmed ? "is-dimmed" : ""}`}
               >
-                <path className="xir-edge-base" d={d} />
+                <path className="xir-edge-base" d={d} pathLength={1} />
                 {flowPlugin ? (
                   <path
                     className="xir-edge-flow"

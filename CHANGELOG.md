@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Fixed
 - Resolved every golangci-lint v2.15.0 finding: an ineffectual assignment in the native assignment scanner, two De Morgan simplifications, three embedded-field selector simplifications, the export manifest window conversion and a merged variable declaration, the deprecated `bbolt.ErrTimeout` alias (now `go.etcd.io/bbolt/errors.ErrTimeout`), and four unused symbols (a probe test server, a CLI encryption-mode helper, a mapping-queue flush field, a transfer insert-columns constant). The two intentional nil-context tests keep their nil argument behind a scoped `nolint`.
 
+### Fixed
+- The XIR structure map's long edges no longer render broken. The draw-in animation used a fixed 640px dash segment, so once branches were expanded the exchange→request and exchange→stream edges (901px fully expanded) ran past the dash and disappeared into its gap. Base edges now carry `pathLength=1` so the dash pattern is normalized to the full edge length at any size, and node hover no longer lifts the card 1px away from its pinned edges.
+
 ## [3.4.0] - 2026-11-12
 
 ### Added
