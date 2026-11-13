@@ -1425,6 +1425,8 @@ export default {
   "xir.expandAll": "展开全部",
   "xir.collapseDefault": "收起深层分支",
   "xir.fit": "适配视图",
+  "xir.fullscreenEnter": "全屏展示",
+  "xir.fullscreenExit": "退出全屏",
   "xir.zoomIn": "放大",
   "xir.zoomOut": "缩小",
   "xir.hooksOnly": "仅挂点",

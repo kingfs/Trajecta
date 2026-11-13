@@ -1426,6 +1426,8 @@ export default {
   "xir.expandAll": "Expand all",
   "xir.collapseDefault": "Collapse deep branches",
   "xir.fit": "Fit view",
+  "xir.fullscreenEnter": "Fullscreen",
+  "xir.fullscreenExit": "Exit fullscreen",
   "xir.zoomIn": "Zoom in",
   "xir.zoomOut": "Zoom out",
   "xir.hooksOnly": "Hooks only",

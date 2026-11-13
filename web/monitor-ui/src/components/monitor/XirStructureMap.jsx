@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, Brain, ClipboardList, Cpu, FileText, Filter, Globe,
-  Hash, Image as ImageIcon, Info, Link2, ListTree, Lock, Mail, Maximize2,
-  MessageSquare, Network, Quote, Radio, Send, ShieldAlert, SlidersHorizontal,
-  Tag, Waves, Wrench, X, ZoomIn, ZoomOut,
+  Activity, AlertTriangle, Brain, ClipboardList, Cpu, Expand, FileText, Filter,
+  Globe, Hash, Image as ImageIcon, Info, Link2, ListTree, Lock, Mail, Maximize2,
+  MessageSquare, Network, Quote, Radio, Send, ShieldAlert, Shrink,
+  SlidersHorizontal, Tag, Waves, Wrench, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -94,6 +94,8 @@ export function XirStructureMap({
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [hooksOnly, setHooksOnly] = useState(false);
   const [panning, setPanning] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fsFallback, setFsFallback] = useState(false);
   const fitRequested = useRef(true);
   const pointers = useRef(new Map());
   const pinch = useRef(null);
@@ -270,12 +272,68 @@ export function XirStructureMap({
     zoomAt(size.w / 2, size.h / 2, factor);
   };
 
+  // Fullscreen: the canvas — toolbar, hint and legend included — takes over
+  // the whole screen through the native Fullscreen API. Where the API is
+  // missing or refused (iOS Safari, some embedded webviews) a fixed-position
+  // overlay is the fallback, exited with the same button or Escape.
+  const isFull = fullscreen || fsFallback;
+  const toggleFullscreen = useCallback(async () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // The fullscreenchange event reconciles the state either way.
+      }
+      return;
+    }
+    if (fsFallback) {
+      setFsFallback(false);
+      fitRequested.current = true;
+      return;
+    }
+    if (typeof el.requestFullscreen === "function") {
+      try {
+        await el.requestFullscreen();
+        return;
+      } catch {
+        // Fall through to the overlay.
+      }
+    }
+    setFsFallback(true);
+    fitRequested.current = true;
+  }, [fsFallback]);
+
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(document.fullscreenElement === containerRef.current);
+      // Re-anchor for the new viewport: fullscreen gains a lot of height, and
+      // the ResizeObserver delivers it right after this event.
+      fitRequested.current = true;
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!fsFallback) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        setFsFallback(false);
+        fitRequested.current = true;
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [fsFallback]);
+
   const focusColor = focusPlugin ? pluginColor(focusPlugin.id) : "";
 
   return (
     <div
       ref={containerRef}
-      className={`xir-canvas ${panning ? "is-panning" : ""}`}
+      className={`xir-canvas ${panning ? "is-panning" : ""} ${fsFallback ? "is-fullscreen-fallback" : ""}`}
       role="group"
       aria-label={t("xir.mapAria")}
       onPointerDown={onPointerDown}
@@ -422,6 +480,17 @@ export function XirStructureMap({
         </Button>
         <Button variant="subtle" size="icon-sm" onClick={requestFit} title={t("xir.fit")} aria-label={t("xir.fit")}>
           <Maximize2 size={14} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="subtle"
+          size="icon-sm"
+          className="xir-fs-toggle"
+          onClick={toggleFullscreen}
+          aria-pressed={isFull}
+          title={isFull ? t("xir.fullscreenExit") : t("xir.fullscreenEnter")}
+          aria-label={isFull ? t("xir.fullscreenExit") : t("xir.fullscreenEnter")}
+        >
+          {isFull ? <Shrink size={14} aria-hidden="true" /> : <Expand size={14} aria-hidden="true" />}
         </Button>
         <span className="xir-toolbar-sep" aria-hidden="true" />
         <Button variant="subtle" size="icon-sm" onClick={() => zoomButton(1 / 1.25)} title={t("xir.zoomOut")} aria-label={t("xir.zoomOut")}>

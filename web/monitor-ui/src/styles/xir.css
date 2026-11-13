@@ -71,6 +71,30 @@
 .xir-canvas.is-panning {
   cursor: grabbing;
 }
+
+/* Fullscreen: the canvas owns the whole screen — toolbar, hint and legend
+   come with it; the rail and reading strip stay behind. The native API puts
+   the element in the top layer; the fallback is a fixed overlay above the
+   console chrome (z-index <= 200) for browsers without the API. */
+.xir-canvas:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background-color: var(--bg-canvas);
+}
+.xir-canvas::backdrop {
+  background: var(--bg-canvas);
+}
+.xir-canvas.is-fullscreen-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  border-radius: 0;
+  background-color: var(--bg-canvas);
+}
 .xir-canvas::after {
   content: "";
   position: absolute;
