@@ -21,7 +21,7 @@ func TestDefaultDetectorsFindAuditSignals(t *testing.T) {
 		ProviderType:   "output_text",
 		NormalizedType: observe.NodeText,
 		Path:           "$.output[1].content[0]",
-		Text:           "token sk-test_abcdefghijklmnopqrstuvwxyz",
+		Text:           "aws access key AKIAIOSFODNN7EXAMPLE",
 	}
 	refusal := observe.SemanticNode{
 		ID:             "node-refusal",
@@ -129,7 +129,7 @@ func TestAnalyzeEntryObservationScopesFindingsAndSkipsModelToolDetectors(t *test
 		ProviderType:   "input_text",
 		NormalizedType: observe.NodeText,
 		Path:           "$.request.input",
-		Text:           "bearer entry_secret_token_abcdefghijklmnopqrstuvwxyz",
+		Text:           "aws access key AKIAIOSFODNN7EXAMPLE",
 	}
 	obs := observe.TraceObservation{
 		TraceID:      "trace-entry",

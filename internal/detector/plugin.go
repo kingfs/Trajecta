@@ -82,6 +82,15 @@ type Plugin struct {
 	// audit lane runs it on every text node, the pre-scope behaviour).
 	Points  []hook.Point `json:"points,omitempty"`
 	Builtin bool         `json:"builtin"`
+	// AlwaysOn marks a builtin DFA detection capability that cannot be disabled.
+	// The Ragel DFA algorithms are compiled into the binary as one fixed union
+	// machine, so there is no runtime selection of algorithm subsets to toggle:
+	// detection always runs. The plugin layer still lists these as capabilities
+	// (with their detection items) so an operator can see what the engine
+	// detects, but the enable switch is informational, not a gate. The masking
+	// ACTION remains governed by secret_masking.enabled, which is a policy
+	// separate from detection.
+	AlwaysOn bool `json:"always_on"`
 	// DefaultEnabled is the state used when no app_settings row exists yet. It
 	// preserves the behaviour the binary had before pluginisation: masking and
 	// the builtin analysis detectors start on, unlike channel plugins which
@@ -216,6 +225,15 @@ func Register(reg Registration) error { return defaultRegistry.Register(reg) }
 
 // Lookup resolves a plugin from the default catalog.
 func Lookup(id string) (Registration, bool) { return defaultRegistry.Lookup(id) }
+
+// AlwaysOn reports whether id is a builtin DFA detection capability that cannot
+// be disabled. The compiled Ragel DFA algorithms always run; the plugin layer
+// displays them as capabilities rather than gating them. An unknown id is not
+// always-on.
+func AlwaysOn(id string) bool {
+	reg, ok := defaultRegistry.Lookup(id)
+	return ok && reg.Plugin.AlwaysOn
+}
 
 // Plugins returns the default catalog's descriptors sorted by ID.
 func Plugins() []Plugin { return defaultRegistry.Plugins() }

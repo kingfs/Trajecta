@@ -48,7 +48,9 @@ export function DetectorPluginDrawer({
               </DialogPrimitive.Title>
             </div>
             <div className="plugin-drawer-head-actions">
-              {onToggle ? (
+              {item.always_on ? (
+                <InlineTag tone="green">{t("plugins.detectionAlwaysOn")}</InlineTag>
+              ) : onToggle ? (
                 <Switch checked={Boolean(enabled)} disabled={toggleDisabled} onChange={onToggle} label={t("plugins.enableSwitch")} />
               ) : null}
               <DialogPrimitive.Close asChild>
@@ -61,6 +63,9 @@ export function DetectorPluginDrawer({
           <div className="plugin-drawer-body">
             {localizedDescription(item, language) ? (
               <p className="plugin-drawer-desc">{localizedDescription(item, language)}</p>
+            ) : null}
+            {item.always_on ? (
+              <p className="plugin-drawer-note detector-always-on-note">{t("plugins.detectionAlwaysOnHint")}</p>
             ) : null}
 
             <section className="plugin-drawer-section">
@@ -82,6 +87,12 @@ export function DetectorPluginDrawer({
                   <div className="detector-fact-row">
                     <span className="detector-fact-label">{t("plugins.detectionOrigin")}</span>
                     <InlineTag tone="green">{t("plugins.detectionBuiltin")}</InlineTag>
+                  </div>
+                ) : null}
+                {item.always_on ? (
+                  <div className="detector-fact-row">
+                    <span className="detector-fact-label">{t("plugins.detectionAvailability")}</span>
+                    <InlineTag tone="green">{t("plugins.detectionAlwaysOn")}</InlineTag>
                   </div>
                 ) : null}
               </div>

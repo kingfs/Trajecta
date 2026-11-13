@@ -4877,6 +4877,53 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.detector-capabilities {
+  margin-bottom: 16px;
+}
+
+.detector-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.detector-capability {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+}
+
+.detector-capability-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detector-capability-head strong {
+  font-size: 0.85rem;
+}
+
+.detector-capability-count {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.detector-always-on-note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--success-border, var(--line));
+  border-radius: var(--radius-control);
+  background: var(--success-soft, var(--surface-inset));
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .provider-selected-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);

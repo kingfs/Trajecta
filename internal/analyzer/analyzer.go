@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/kingfs/Trajecta/pkg/observe"
+	"github.com/kingfs/Trajecta/pkg/secretmask"
 )
 
 const excerptLimit = 240
@@ -211,24 +211,48 @@ func (d DangerousShellDetector) detectText(traceID string, node observe.Semantic
 	return observe.Finding{}, false
 }
 
+// CredentialDetector reports credential leakage found in a trace.
+//
+// It reuses the masking engine instead of carrying a second set of patterns:
+// secretmask.Scan is one pass over the node text with the same compiled Ragel
+// DFA the hot lane masks with, and only values the masking policy would rewrite
+// are reported (Finding.Maskable, non-PII kinds). The audit and the rewrite
+// therefore agree on what counts as a credential — there is no parallel regex
+// implementation to drift out of sync. Personal data is the sibling
+// PIIDetector's concern; the two partition the same scan by Kind.PII.
+//
+// Like PIIDetector, this works on the stored observation, so it also covers
+// traces recorded before masking was enabled, re-analysis, and values that
+// reached the provider while masking was off.
 type CredentialDetector struct{}
 
 func (CredentialDetector) Name() string    { return "credential" }
-func (CredentialDetector) Version() string { return "0.1.0" }
+func (CredentialDetector) Version() string { return "0.2.0" }
 
 func (d CredentialDetector) Detect(_ context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
 	for _, node := range allNodes(obs) {
-		texts := []string{node.Text, metadataString(node.Metadata, "arguments"), rawText(node.Raw), rawText(node.JSON)}
-		for _, text := range texts {
+		seen := map[secretmask.RuleID]bool{}
+		for _, text := range nodeTexts(node) {
 			if text == "" {
 				continue
 			}
-			if match, title := credentialMatch(text); match {
-				findings = append(findings, finding(obs.TraceID, "credential_leak", observe.SeverityHigh, 0.9, title,
-					"Node text or structured payload matched a known credential pattern.",
-					node, excerpt(text), d.Name(), d.Version()))
-				break
+			for _, match := range secretmask.Scan([]byte(text)) {
+				rule, ok := match.Rule()
+				if !ok || rule.Kind.PII() || !match.Maskable() || seen[match.ID] {
+					continue
+				}
+				seen[match.ID] = true
+				evidence := "A value matching " + rule.Name + " is strong enough to mask but appears in this trace."
+				switch {
+				case match.Reasons&secretmask.ReasonValidator != 0:
+					evidence = "A value matching " + rule.Name + " passed its offline validator and appears in this trace."
+				case match.Reasons&secretmask.ReasonContext != 0:
+					evidence = "A value matching " + rule.Name + " appears next to matching vocabulary in this trace."
+				}
+				findings = append(findings, finding(obs.TraceID, "credential_leak", observe.SeverityHigh, 0.9,
+					"Credential: "+rule.Name, evidence,
+					node, excerptRedacted(text, match.Start, match.End), d.Name(), d.Version()))
 			}
 		}
 	}
@@ -298,32 +322,7 @@ func (d ToolErrorDetector) Detect(_ context.Context, obs observe.TraceObservatio
 	return dedupeFindings(findings), nil
 }
 
-var credentialPatterns = []struct {
-	name string
-	re   *regexp.Regexp
-}{
-	{"OpenAI API key", regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`)},
-	{"AWS access key", regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
-	{"GitHub token", regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{20,}`)},
-	{"Private key block", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
-	{"Bearer token", regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{20,}`)},
-	{"Database connection string", regexp.MustCompile(`(?i)(postgres|mysql|mongodb)://[^ \n\t]+`)},
-	{"Cookie header", regexp.MustCompile(`(?i)\bcookie:\s*[^;\n]+=[^;\n]+`)},
-}
-
 var destructiveRMPattern = regexp.MustCompile("(^|[\\s;&|:\"'])rm\\s+-[a-z]*r[a-z]*f[a-z]*\\s+(/|~)([\\s\"'`,}$]|$|[;&|])")
-
-func credentialMatch(text string) (bool, string) {
-	for _, pattern := range credentialPatterns {
-		if pattern.re.MatchString(text) {
-			return true, pattern.name + " exposure"
-		}
-	}
-	if parsed, err := url.Parse(text); err == nil && parsed.User != nil && parsed.Scheme != "" && parsed.Host != "" {
-		return true, "Credentialed URL exposure"
-	}
-	return false, ""
-}
 
 func finding(traceID, category string, severity observe.Severity, confidence float64, title, description string, node observe.SemanticNode, evidence, detector, version string) observe.Finding {
 	f := observe.Finding{

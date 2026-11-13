@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -111,28 +110,20 @@ func locatePII(text string, finding observe.Finding) (int, int, bool) {
 	return 0, 0, false
 }
 
+// locateCredential recomputes the credential span with the same compiled DFA
+// the detector uses, so the highlighted bytes are exactly what the finding was
+// proven by. The first maskable non-PII match wins; a credentialed URL surfaces
+// through the DSN userinfo-password rule rather than a separate URL regex.
 func locateCredential(text string) (int, int, bool) {
-	for _, pattern := range credentialPatterns {
-		if loc := pattern.re.FindStringIndex(text); loc != nil {
-			return loc[0], loc[1], true
+	for _, match := range secretmask.Scan([]byte(text)) {
+		rule, ok := match.Rule()
+		if !ok || rule.Kind.PII() || !match.Maskable() {
+			continue
 		}
-	}
-	// The credentialed-URL rule has no fixed pattern: it parses the text and
-	// looks at the userinfo. The narrow URL scan recovers the bytes to mark
-	// without returning the whole node.
-	for _, loc := range credentialURLPattern.FindAllStringIndex(text, -1) {
-		candidate := text[loc[0]:loc[1]]
-		parsed, err := url.Parse(candidate)
-		if err == nil && parsed.User != nil && parsed.Scheme != "" && parsed.Host != "" {
-			return loc[0], loc[1], true
-		}
+		return match.Start, match.End, true
 	}
 	return 0, 0, false
 }
-
-// credentialURLPattern is the substring shape of a URL; credentialMatch parses
-// a whole text, while a node may carry a URL inside a sentence.
-var credentialURLPattern = regexp.MustCompile(`(?i)[a-z][a-z0-9+.\-]*://[^\s"'<>]+`)
 
 var shellPipePattern = regexp.MustCompile(`(?i)(curl|wget)[^\n|]*\|\s*(sh|bash)`)
 

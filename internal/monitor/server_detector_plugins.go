@@ -19,6 +19,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/pkg/identify"
 )
 
 type detectorPluginItem struct {
@@ -30,6 +31,12 @@ type detectorPluginItem struct {
 type detectorPluginsResponse struct {
 	Items     []detectorPluginItem `json:"items"`
 	UpdatedAt time.Time            `json:"updated_at,omitempty"`
+	// Capabilities is the detection capability manifest derived from the same
+	// rule table the engine runs (pkg/identify): the shapes this build can
+	// detect, grouped into credentials, personal data and access indicators. It
+	// is what the plugin page displays as "what we can detect", independent of
+	// the toggleable observation plugins.
+	Capabilities []identify.Capability `json:"capabilities"`
 }
 
 func detectorPluginItemFrom(p detector.Plugin, cfg detector.Config) detectorPluginItem {
@@ -63,7 +70,7 @@ func detectorPluginsAPIHandler(st *store.Store) http.HandlerFunc {
 		for _, p := range plugins {
 			items = append(items, detectorPluginItemFrom(p, cfg))
 		}
-		writeJSON(w, http.StatusOK, detectorPluginsResponse{Items: items, UpdatedAt: cfg.UpdatedAt})
+		writeJSON(w, http.StatusOK, detectorPluginsResponse{Items: items, UpdatedAt: cfg.UpdatedAt, Capabilities: identify.Capabilities()})
 	}
 }
 
@@ -105,6 +112,16 @@ func detectorPluginDetailAPIHandler(st *store.Store, rt *detector.Runtime, mappi
 		}
 		if req.Enabled == nil && req.Settings == nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled or settings is required"})
+			return
+		}
+		// A builtin DFA detection capability is compiled infrastructure, not a
+		// toggleable algorithm: it cannot be disabled. Settings (rule-level
+		// switches) remain writable; only the enable gate is rejected.
+		if req.Enabled != nil && !*req.Enabled && reg.Plugin.AlwaysOn {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":   "plugin_builtin",
+				"message": "builtin DFA detection is always on and cannot be disabled; it is a compiled capability, not a toggleable algorithm",
+			})
 			return
 		}
 		cfg, err := detector.LoadConfig(r.Context(), st)

@@ -260,7 +260,7 @@ type Finding struct {
 
 Finding ID 由 `stableFindingID` 基于 trace、category、severity、node、evidence 与 detector 版本生成 sha1，保证重算稳定。
 
-`GET /api/traces/{id}/findings/{findingID}/locate` 回答「这条 findings 实际命中的是哪几个字节」：它重新解析 cassette，用 `analyzer.LocateFinding` 对 finding 所在节点重跑对应类别的判定，返回匹配文本、文本视图与字节区间，以及该节点的顶级祖先 `anchor`。findings 表仍只存 `[redacted]` 摘要、不新增匹配列；匹配值只在这类已鉴权的单次读取中返回。可判定跨度的类别是 `pii_leak`（标题里的 `national_id`/`mobile` 决定取哪一类命中）、`credential_leak`（凭据模式或带用户信息的 URL）、以及 dangerous_shell 的四个类别；`tool_result_error`、`provider_safety_block`、`model_refusal` 是整节点判断，没有单一跨度，接口只返回 `anchor`，前端仅定位步骤。检测按 exchange scope 过滤：entry observation 只跑 `credential` 与 `pii`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
+`GET /api/traces/{id}/findings/{findingID}/locate` 回答「这条 findings 实际命中的是哪几个字节」：它重新解析 cassette，用 `analyzer.LocateFinding` 对 finding 所在节点重跑对应类别的判定，返回匹配文本、文本视图与字节区间，以及该节点的顶级祖先 `anchor`。findings 表仍只存 `[redacted]` 摘要、不新增匹配列；匹配值只在这类已鉴权的单次读取中返回。可判定跨度的类别是 `pii_leak`（标题里的 `national_id`/`mobile` 决定取哪一类命中）、`credential_leak`（DFA 凭据命中，含 DSN userinfo 口令）、以及 dangerous_shell 的四个类别；`tool_result_error`、`provider_safety_block`、`model_refusal` 是整节点判断，没有单一跨度，接口只返回 `anchor`，前端仅定位步骤。检测按 exchange scope 过滤：entry observation 只跑 `credential` 与 `pii`，其余检测器只作用于 model observation；每个 finding 的 `Metadata` 会写入 `exchange_kind` 与 `exchange_scope`；`exchange_role` 只在 `scope.Role` 非空时才写入（`internal/analyzer/analyzer.go` 的 `attachFindingExchangeScope`）。
 
 ## 检测器
 
@@ -277,7 +277,7 @@ type Detector interface {
 `DefaultDetectors()` 返回 `DangerousShellDetector`、`CredentialDetector`、`PIIDetector`、`ProviderSafetyDetector`、`ToolErrorDetector`。
 
 - dangerous_shell：扫描 `obs.Tools.Calls[].ArgsText`/`ArgsJSON`，以及类型为 `tool_call`/`server_tool_call`/`code` 的节点文本；用正则 `destructiveRMPattern` 识别 `rm -rf /`、`rm -rf ~`，并用关键字识别 `sudo rm`、`mkfs`、`diskutil erase`、`dd if=`、`chmod -R 777`、`chown -R`、`nc -e`、`bash -i`、`curl|wget ... | sh/bash`、`.ssh/id_rsa`、`.aws/credentials`、`security find-generic-password`、`env | curl`。
-- credential：对所有节点扫描 `credentialPatterns`：OpenAI key `sk-...`、AWS `AKIA...`、GitHub `gh[pousr]_...`、`-----BEGIN ... PRIVATE KEY-----`、Bearer token、`postgres|mysql|mongodb://` 连接串、Cookie header，以及带用户名密码的 URL。检测是 observe-only，不修改请求或响应。
+- credential：复用遮蔽引擎的编译期 Ragel DFA（`secretmask.Scan`）扫描所有节点文本，仅报告可遮蔽的非 PII 凭据命中（API key、token、私钥、JWT/JWE、Bearer、赋值/DSN 口令等）；无平行正则实现，与遮蔽策略保持一致（`CredentialDetector`，version 0.2.0）。检测是 observe-only，不修改请求或响应。
 - pii：对每个节点的 `Text`、`Metadata["arguments"]`、`Raw` 与 `JSON` 调用 `pkg/secretmask` 的 `Scan`，只保留 `Kind.PII()` 且 `Finding.Maskable()` 的命中（当前是中国居民身份证号 `pii.chinese_id` 与手机号 `pii.cn_mobile`）。因为复用遮蔽引擎，只有可改写档的值才会被上报：身份证靠离线校验器，手机号靠上下文词表，裸 11 位数字只报 Low、不入账，因此审计与改写口径一致。evidence 用 `excerptRedacted` 把命中值换成 `[redacted]`，findings 表不会成为第二份明文。每个节点的每个 PII 类别只报一条。
 - provider_safety：把 `safety` 节点映射为 `provider_safety_block`、`refusal` 节点映射为 `model_refusal`，并叠加 `ObservationSafety.Blocked`/`Refused` 汇总位。
 - tool_error：`obs.Tools.Results[].IsError` 为真，或 `tool_result`/`server_tool_result`/`error` 节点的 status/text 含错误信号时报告 `tool_result_error`。

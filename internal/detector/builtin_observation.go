@@ -10,6 +10,9 @@ import (
 // enablement, not new detection logic.
 const (
 	PluginDangerousShell = "behavior.dangerous_shell"
+	// PluginCredentialRe keeps its historical "credential.regex" ID for config
+	// compatibility, but the detector is now DFA-backed (it reuses the masking
+	// engine's compiled Ragel DFA); the regex implementation was removed.
 	PluginCredentialRe   = "credential.regex"
 	PluginPIIObservation = "pii.observation"
 	PluginProviderSafety = "safety.provider_refusal"
@@ -51,9 +54,9 @@ func init() {
 		"标记模型工具调用中的破坏性或高风险 shell 命令。",
 		[]hook.Point{hook.PointResponseToolCall},
 		func(Settings) (analyzer.Detector, error) { return analyzer.DangerousShellDetector{}, nil })
-	observation(PluginCredentialRe, "Credential leakage (regex)", "凭据泄漏（正则）", "credential",
-		"Pattern-based credential leakage detector over the Observation IR; independent of the masking DFA.",
-		"基于正则的凭据泄漏检测器，作用于 Observation IR；独立于遮蔽 DFA。",
+	observation(PluginCredentialRe, "Credential leakage (DFA)", "凭据泄漏（DFA）", "credential",
+		"Credential leakage detector over the Observation IR, reusing the same compiled Ragel DFA as the masking engine. Reports maskable credential findings; there is no parallel regex implementation to drift out of sync.",
+		"作用于 Observation IR 的凭据泄漏检测器，复用与遮蔽引擎相同的编译期 Ragel DFA。仅报告可遮蔽的凭据命中；不存在会与之失同步的平行正则实现。",
 		textPoints,
 		func(Settings) (analyzer.Detector, error) { return analyzer.CredentialDetector{}, nil })
 	observation(PluginPIIObservation, "Personal data (observation)", "个人数据（观测）", "pii",

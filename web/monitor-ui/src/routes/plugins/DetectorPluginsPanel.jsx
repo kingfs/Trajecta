@@ -90,6 +90,7 @@ export function DetectorPluginsPanel() {
   };
 
   const items = plugins.data?.items || [];
+  const capabilities = plugins.data?.capabilities || [];
   const visibleItems = filterPlugins(items, query);
   // Resolve the open drawer against the freshest data so a toggle made inside
   // it is reflected without closing it.
@@ -114,6 +115,28 @@ export function DetectorPluginsPanel() {
           className="plugins-search"
         />
       </div>
+      {capabilities.length ? (
+        <Card as="section" className="detector-capabilities">
+          <div className="panel-head">
+            <div>
+              <h2>{t("plugins.detectionCapabilities")}</h2>
+              <p className="system-note">{t("plugins.detectionCapabilitiesHint")}</p>
+            </div>
+          </div>
+          <div className="detector-capability-grid">
+            {capabilities.map((cap) => (
+              <div className="detector-capability" key={cap.id}>
+                <div className="detector-capability-head">
+                  <strong>{language === "en" ? cap.name : cap.name_zh || cap.name}</strong>
+                  {cap.report_only ? <InlineTag tone="gold">{t("plugins.detectionReportOnly")}</InlineTag> : null}
+                </div>
+                <p className="trace-subline">{language === "en" ? cap.description : cap.description_zh || cap.description}</p>
+                <span className="detector-capability-count">{t("plugins.detectionRulesCount", { count: (cap.rules || []).length })}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
       <div className="provider-grid">
         {visibleItems.map((item) => (
           <Card
@@ -136,12 +159,16 @@ export function DetectorPluginsPanel() {
                 <h2>{localizedName(item, language)}</h2>
                 {item.kind ? <InlineTag tone="accent">{t(`plugins.kind.${item.kind}`)}</InlineTag> : null}
               </div>
-              <Switch
-                checked={Boolean(item.enabled)}
-                disabled={busyID === item.id || enable.isPending}
-                onChange={(next) => onToggle(item, next)}
-                label={t("plugins.enableSwitch")}
-              />
+              {item.always_on ? (
+                <InlineTag tone="green">{t("plugins.detectionAlwaysOn")}</InlineTag>
+              ) : (
+                <Switch
+                  checked={Boolean(item.enabled)}
+                  disabled={busyID === item.id || enable.isPending}
+                  onChange={(next) => onToggle(item, next)}
+                  label={t("plugins.enableSwitch")}
+                />
+              )}
             </div>
             <p className="plugin-card-desc">{localizedDescription(item, language)}</p>
             <div className="plugin-card-foot">

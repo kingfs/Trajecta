@@ -33,32 +33,38 @@ func TestDetectorPluginsAPIDefaults(t *testing.T) {
 	if !byID[detector.PluginSecretmask].Enabled {
 		t.Fatal("secretmask must default enabled")
 	}
-	if byID[detector.PluginIndicators].Enabled {
-		t.Fatal("indicators must default disabled")
+	if !byID[detector.PluginIndicators].Enabled {
+		t.Fatal("indicators are a builtin DFA capability and must always be enabled")
+	}
+	if !byID[detector.PluginSecretmask].AlwaysOn || !byID[detector.PluginIndicators].AlwaysOn {
+		t.Fatal("the DFA scanner capabilities must be marked always-on")
 	}
 }
 
-func TestDetectorPluginEnableDisableRoundTrip(t *testing.T) {
+func TestDetectorPluginBuiltinCannotBeDisabled(t *testing.T) {
 	st := newPluginTestStore(t)
 	detail := detectorPluginDetailAPIHandler(st, nil, nil)
 
-	// Disable secretmask (no vault mappings, so no conflict).
+	// Disabling a builtin DFA capability is rejected: it is compiled
+	// infrastructure, not a toggleable algorithm.
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginSecretmask, strings.NewReader(`{"enabled":false}`))
 	detail.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("disable status = %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("disable status = %d body=%s, want 400", rr.Code, rr.Body.String())
 	}
-
+	if !strings.Contains(rr.Body.String(), "plugin_builtin") {
+		t.Fatalf("disable error = %s, want plugin_builtin", rr.Body.String())
+	}
 	cfg, err := detector.LoadConfig(context.Background(), st)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.IsEnabled(detector.PluginSecretmask) {
-		t.Fatal("secretmask should be disabled after PATCH")
+	if !cfg.IsEnabled(detector.PluginSecretmask) {
+		t.Fatal("secretmask must remain enabled after a rejected disable")
 	}
 
-	// Re-enable.
+	// Enabling (idempotent) is accepted.
 	rr = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginSecretmask, strings.NewReader(`{"enabled":true}`))
 	detail.ServeHTTP(rr, req)
@@ -67,7 +73,7 @@ func TestDetectorPluginEnableDisableRoundTrip(t *testing.T) {
 	}
 	cfg, _ = detector.LoadConfig(context.Background(), st)
 	if !cfg.IsEnabled(detector.PluginSecretmask) {
-		t.Fatal("secretmask should be re-enabled")
+		t.Fatal("secretmask should be enabled")
 	}
 }
 
@@ -114,17 +120,22 @@ func TestDetectorPluginRepublishUpdatesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rt.Snapshot().Config.IsEnabled(detector.PluginSecretmask) {
-		t.Fatal("initial snapshot should enable secretmask")
+	if !rt.Snapshot().Config.IsEnabled(detector.PluginDangerousShell) {
+		t.Fatal("initial snapshot should enable dangerous_shell")
 	}
+	// A toggleable observation plugin can be disabled; republish must update the
+	// live snapshot. The builtin DFA capability stays on regardless.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginSecretmask, strings.NewReader(`{"enabled":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/detector-plugins/"+detector.PluginDangerousShell, strings.NewReader(`{"enabled":false}`))
 	detectorPluginDetailAPIHandler(st, rt, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if rt.Snapshot().Config.IsEnabled(detector.PluginSecretmask) {
-		t.Fatal("republish should disable secretmask in the live snapshot")
+	if rt.Snapshot().Config.IsEnabled(detector.PluginDangerousShell) {
+		t.Fatal("republish should disable dangerous_shell in the live snapshot")
+	}
+	if !rt.Snapshot().Config.IsEnabled(detector.PluginSecretmask) {
+		t.Fatal("builtin secretmask must stay enabled in the live snapshot")
 	}
 }
 

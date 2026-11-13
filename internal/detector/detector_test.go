@@ -64,8 +64,8 @@ func TestDefaultConfigPreservesBehaviour(t *testing.T) {
 	if !cfg.IsEnabled(PluginSecretmask) {
 		t.Fatal("secretmask must default enabled to preserve masking")
 	}
-	if cfg.IsEnabled(PluginIndicators) {
-		t.Fatal("indicators default disabled to preserve the audit projection output")
+	if !cfg.IsEnabled(PluginIndicators) {
+		t.Fatal("indicators are a builtin DFA capability and must always be enabled")
 	}
 	for _, id := range []string{PluginDangerousShell, PluginCredentialRe, PluginPIIObservation, PluginProviderSafety, PluginToolError} {
 		if !cfg.IsEnabled(id) {
@@ -87,7 +87,7 @@ func TestConfigRoundTripAndUnknownFilter(t *testing.T) {
 		t.Fatal("missing row should default to secretmask enabled")
 	}
 
-	// Persist a row that disables secretmask and carries an unknown id.
+	// Persist a row that omits secretmask and carries an unknown id.
 	stored := Config{Enabled: []string{PluginDangerousShell, "no.such.plugin"}}
 	if err := SaveConfig(ctx, st, stored); err != nil {
 		t.Fatal(err)
@@ -96,8 +96,8 @@ func TestConfigRoundTripAndUnknownFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.IsEnabled(PluginSecretmask) {
-		t.Fatal("stored row must be authoritative: secretmask disabled")
+	if !cfg.IsEnabled(PluginSecretmask) {
+		t.Fatal("secretmask is a builtin DFA capability: a stored row omitting it cannot disable it")
 	}
 	if cfg.IsEnabled("no.such.plugin") {
 		t.Fatal("unknown plugin id must be filtered out")
@@ -112,14 +112,14 @@ func TestSnapshotAuditEngineAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(snap.AuditEngine().Scanners()); got != 1 {
-		t.Fatalf("default audit engine scanners = %d, want 1 (secretmask only)", got)
+	if got := len(snap.AuditEngine().Scanners()); got != 2 {
+		t.Fatalf("default audit engine scanners = %d, want 2 (both builtin DFA scanners always run)", got)
 	}
 	if snap.runner == nil {
 		t.Fatal("runner must be built")
 	}
 
-	// Enabling indicators adds a second audit scanner.
+	// Indicators are already always-on, so listing them again keeps the count at 2.
 	cfg := DefaultConfig()
 	cfg.Enabled = append(cfg.Enabled, PluginIndicators)
 	snap, err = buildSnapshot(cfg, nil)
@@ -174,7 +174,10 @@ func TestMaskerBuiltinCredentialAndPII(t *testing.T) {
 	}
 }
 
-func TestMaskerDisabledPluginStopsMasking(t *testing.T) {
+// The builtin DFA detection is always on: a stored row that omits secretmask
+// cannot switch it off, so masking still happens. The masking ACTION is gated
+// by secret_masking.enabled at the proxy, not by plugin enablement.
+func TestMaskerBuiltinAlwaysOnDespiteStoredRow(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 	if err := SaveConfig(ctx, st, Config{Enabled: []string{PluginDangerousShell}}); err != nil {
@@ -188,8 +191,8 @@ func TestMaskerDisabledPluginStopsMasking(t *testing.T) {
 	m := NewMasker(vault, rt, 0)
 	body := []byte(`{"key":"` + fixtureAWSKey + `"}`)
 	out, events := m.Mask(body)
-	if len(events) != 0 || string(out) != string(body) {
-		t.Fatalf("disabled secretmask plugin must not mask, got %d events", len(events))
+	if len(events) != 1 || string(out) == string(body) {
+		t.Fatalf("builtin secretmask must still mask despite the stored row, got %d events", len(events))
 	}
 }
 

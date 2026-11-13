@@ -79,8 +79,13 @@ func SaveConfig(ctx context.Context, st *store.Store, cfg Config) error {
 	return st.SaveAppSettingJSON(ctx, SettingsKey, cfg)
 }
 
-// IsEnabled reports whether id is in the enablement list.
+// IsEnabled reports whether id is in the enablement list. A builtin DFA
+// detection capability (AlwaysOn) is always enabled regardless of the stored
+// list: the compiled union machine is infrastructure, not a toggleable subset.
 func (c Config) IsEnabled(id string) bool {
+	if AlwaysOn(id) {
+		return true
+	}
 	for _, e := range c.Enabled {
 		if e == id {
 			return true
@@ -101,6 +106,14 @@ func (c Config) enabledSet() map[string]bool {
 	set := make(map[string]bool, len(c.Enabled))
 	for _, id := range c.Enabled {
 		set[id] = true
+	}
+	// Builtin DFA detection capabilities always run regardless of the stored
+	// enablement list, so a row written before a capability became always-on
+	// (or one that omits it) cannot switch the compiled machine off.
+	for _, p := range Plugins() {
+		if p.AlwaysOn {
+			set[p.ID] = true
+		}
 	}
 	return set
 }

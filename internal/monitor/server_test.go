@@ -5128,7 +5128,7 @@ func TestTraceAPIHandlerReanalysisActions(t *testing.T) {
 	defer st.Close()
 
 	content := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
-		`{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`,
+		`{"model":"gpt-5.1","input":"hello with AKIAIOSFODNN7EXAMPLE"}`,
 		`{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
 		func(header *recordfile.RecordHeader) {
 			header.Meta.Provider = "openai_compatible"
