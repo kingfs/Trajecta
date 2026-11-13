@@ -48,7 +48,7 @@ func TestGeneratedBundleNameFillsAnOpenEndedWindow(t *testing.T) {
 func TestNameSortsChronologically(t *testing.T) {
 	earlier := generatedBundleName(exportTargetOptions{All: true, Now: time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)}, ".tar.gz")
 	later := generatedBundleName(exportTargetOptions{All: true, Now: time.Date(2026, 11, 11, 14, 0, 0, 0, time.UTC)}, ".tar.gz")
-	if !(earlier < later) {
+	if earlier >= later {
 		t.Fatalf("names do not sort chronologically: %q >= %q", earlier, later)
 	}
 }

@@ -68,7 +68,7 @@ After signing in, configure upstream URLs and API keys on the `Channels` page, t
 
 ### Option 2: From source
 
-Requires Go 1.26+, [Task](https://taskfile.dev) optional but recommended.
+Requires Go 1.27+, [Task](https://taskfile.dev) optional but recommended.
 
 ```bash
 task build && task run                  # Postgres-first default: config/config.yaml

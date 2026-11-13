@@ -103,7 +103,7 @@ func appendNativeFindings(dst []Finding, src []byte, dfa []Finding) []Finding {
 	nextEq := nextSeparator(src, 0, '=')
 	nextCol := nextSeparator(src, 0, ':')
 	for {
-		at := -1
+		var at int
 		switch {
 		case nextEq < 0 && nextCol < 0:
 			return dst
@@ -964,7 +964,7 @@ func mergeFindings(dfa, extra []Finding) []Finding {
 		partial := false
 		for j < len(dfa) && dfa[j].Start < cand.End {
 			if cand.Start <= dfa[j].Start && dfa[j].End <= cand.End &&
-				!(cand.Start == dfa[j].Start && cand.End == dfa[j].End) {
+				(cand.Start != dfa[j].Start || cand.End != dfa[j].End) {
 				contained++
 			} else {
 				partial = true

@@ -504,7 +504,7 @@ func TestPlanRunNilInputs(t *testing.T) {
 	h := &testHook{id: "h", points: []hook.Point{hook.PointRequestMessage}, lanes: hook.LaneHot}
 	plan := mustCompile(t, newRegistry(t, h), enabled("h"))
 
-	if _, err := plan.Run(nil, &hook.Event{}); err == nil || !strings.Contains(err.Error(), "nil context") {
+	if _, err := plan.Run(nil, &hook.Event{}); err == nil || !strings.Contains(err.Error(), "nil context") { //nolint:staticcheck // intentional nil context: Run must reject it
 		t.Fatalf("nil context error = %v", err)
 	}
 	if _, err := plan.Run(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "nil event") {

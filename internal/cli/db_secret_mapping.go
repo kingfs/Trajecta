@@ -321,13 +321,6 @@ func (ctx *dbSecretMappingContext) warnings() []string {
 	return warnings
 }
 
-func (ctx *dbSecretMappingContext) encryptionMode() string {
-	if ctx == nil || ctx.store == nil {
-		return ""
-	}
-	return ctx.store.SecretStatus().Mode
-}
-
 // fingerprint returns the keyed redacted digest for a real value. A nil mapping
 // store has no rows to render, so the empty string is safe here.
 func (ctx *dbSecretMappingContext) fingerprint(real string) string {

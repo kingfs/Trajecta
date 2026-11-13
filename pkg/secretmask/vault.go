@@ -353,7 +353,7 @@ func (c MaskCandidate) maskable() bool {
 		}
 		return c.Confidence >= ConfidenceMedium
 	}
-	return c.Finding.Maskable()
+	return c.Maskable()
 }
 
 // Mask rewrites every credential in src that the builtin detector both
@@ -471,7 +471,7 @@ func (v *Vault) maskCandidates(src []byte, cands []MaskCandidate, excluded []Spa
 		}
 		// Sealed content is excluded before the lazy JSON walk: a candidate
 		// inside it never needs opaque discovery.
-		if spanOverlapsAny(c.Finding.Span, excluded) {
+		if spanOverlapsAny(c.Span, excluded) {
 			continue
 		}
 		if !opaqueSpansKnown {

@@ -916,11 +916,6 @@ type logRow struct {
 
 const logScanColumns = `path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code, duration_ms, ttft_ms, client_ip, content_length, error_text, prompt_tokens, completion_tokens, total_tokens, cached_tokens, req_header_len, req_body_len, res_header_len, res_body_len, is_stream, session_id, session_source, window_id, client_request_id, request_audit_id, response_id, exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index, selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset, routing_policy, routing_score, routing_candidate_count, routing_failure_reason, route_target_id, channel_id, credential_id, sticky_status, sticky_previous_upstream_id, client_harness, client_harness_name, client_harness_version, client_harness_kind, client_harness_confidence, client_harness_tags_json`
 
-// logInsertColumns is every column except trace_id, for the ON CONFLICT
-// update path (trace_id never changes on an existing path) and for inserts
-// when the target has no row for the path.
-const logInsertColumns = logScanColumns
-
 func scanLog(rows *sql.Rows) (logRow, error) {
 	var r logRow
 	var modTimeNs, fileSize, statusCode, durationMs, ttftMs, contentLength any

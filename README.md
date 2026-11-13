@@ -68,7 +68,7 @@ docker compose exec trajecta /app/bin/trajecta \
 
 ### 方式二：从源码运行
 
-需要 Go 1.26+，[Task](https://taskfile.dev) 可选但推荐。
+需要 Go 1.27+，[Task](https://taskfile.dev) 可选但推荐。
 
 ```bash
 task build && task run                  # 默认 Postgres-first 配置：config/config.yaml

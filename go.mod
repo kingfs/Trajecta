@@ -1,6 +1,6 @@
 module github.com/kingfs/Trajecta
 
-go 1.26.0
+go 1.27.0
 
 require (
 	ariga.io/atlas v0.36.2-0.20250730182955-2c6300d0a3e1

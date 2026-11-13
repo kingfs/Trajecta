@@ -474,22 +474,3 @@ func TestVersionCommandSupportsJSONEnvelope(t *testing.T) {
 		t.Fatalf("version envelope = %+v", envelope)
 	}
 }
-
-func newOpenAIProbeTestServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/models":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-test"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/chat/completions":
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"message":"model is required"}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/responses":
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"message":"input is required"}}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}

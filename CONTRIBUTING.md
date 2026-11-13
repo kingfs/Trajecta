@@ -12,7 +12,8 @@ Thanks for taking the time to contribute. This document covers how to set up the
 
 | Requirement | Notes |
 | --- | --- |
-| Go 1.26+ | Version pinned in `go.mod` |
+| Go 1.27+ | Version pinned in `go.mod` |
+| golangci-lint v2.15.0+ | Required by `task lint`; Go 1.27 support starts at v2.13, and CI pins v2.15.0 |
 | [Task](https://taskfile.dev) | Optional; every task has a plain `go`/`bun` equivalent |
 | Bun + Node | Only for the monitor UI in `web/monitor-ui` |
 | Postgres | Optional. `task run` uses the Postgres-first `config/config.yaml`; `CONFIG=config/examples/local-sqlite.yaml task run` needs no Postgres at all |

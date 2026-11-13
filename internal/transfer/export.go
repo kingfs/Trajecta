@@ -167,7 +167,7 @@ func Export(ctx context.Context, st *store.Store, outputDir string, opts ExportO
 		MigrationsVersion: migrationsVersion,
 		SourceName:        opts.SourceName,
 		SourceOutputDir:   outputDir,
-		Window:            Window{Since: window.Since, Until: window.Until, All: window.All},
+		Window:            Window(window),
 		PasswordProtected: password != "",
 		Compression:       compression,
 		Tables:            pre.Tables,
@@ -178,8 +178,7 @@ func Export(ctx context.Context, st *store.Store, outputDir string, opts ExportO
 	}
 
 	result := &ExportResult{Bundle: bundlePath, Tables: pre.Tables}
-	var writeErr error
-	writeErr = st.TransferReadTx(ctx, func(view *store.Store) error {
+	writeErr := st.TransferReadTx(ctx, func(view *store.Store) error {
 		counts := map[string]int64{}
 		for _, table := range tableExportOrder {
 			n, err := exportTable(ctx, view, table, window, bundle, log)

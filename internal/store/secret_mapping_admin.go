@@ -20,6 +20,7 @@ import (
 
 	"github.com/kingfs/Trajecta/pkg/secretmask"
 	bolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 // ErrSecretMappingStoreLocked is returned by the administrative open when
@@ -34,7 +35,7 @@ var ErrStopSecretMappingIteration = errors.New("stop secret mapping iteration")
 // IsSecretMappingStoreLocked reports whether err is bbolt's exclusive-lock
 // timeout, which is what a second process sees while serve holds the file.
 func IsSecretMappingStoreLocked(err error) bool {
-	return errors.Is(err, bolt.ErrTimeout)
+	return errors.Is(err, bolterrors.ErrTimeout)
 }
 
 // SecretMappingEntry is one mapping row as the administrative commands see it.

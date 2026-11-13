@@ -171,7 +171,7 @@ func normalizeMatches(matches []Match, in Input) []Match {
 	}
 	out := make([]Match, 0, len(matches))
 	for _, m := range matches {
-		if !m.Span.Valid() || m.End > len(in.Raw) {
+		if !m.Valid() || m.End > len(in.Raw) {
 			continue
 		}
 		if len(scope) > 0 && !ContainsSpan(scope, m.Span) {

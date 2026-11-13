@@ -346,6 +346,38 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	return newHandler(cfg, st, nil, provided...)
 }
 
+// restoreForwardingHeaders reproduces the forwarding-header behaviour of the
+// deprecated Director path. ReverseProxy strips Forwarded, X-Forwarded-For,
+// X-Forwarded-Host and X-Forwarded-Proto before calling Rewrite and does not
+// append the client IP afterwards, so copy the client values back and append
+// the client IP to X-Forwarded-For exactly as ServeHTTP did after Director
+// returned: the other three pass through unchanged, and a prior
+// X-Forwarded-For is folded into one comma+space separated list.
+func restoreForwardingHeaders(pr *httputil.ProxyRequest) {
+	for _, name := range []string{"Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto"} {
+		if values := pr.In.Header[name]; len(values) > 0 {
+			pr.Out.Header[name] = values
+		}
+	}
+	clientIP, _, err := net.SplitHostPort(pr.In.RemoteAddr)
+	if err != nil {
+		// ServeHTTP left the inbound X-Forwarded-For untouched when the
+		// remote address could not be split into host and port.
+		if values := pr.In.Header["X-Forwarded-For"]; len(values) > 0 {
+			pr.Out.Header["X-Forwarded-For"] = values
+		}
+		return
+	}
+	prior, ok := pr.In.Header["X-Forwarded-For"]
+	omit := ok && prior == nil // Issue 38079: nil means don't populate the header
+	if len(prior) > 0 {
+		clientIP = strings.Join(prior, ", ") + ", " + clientIP
+	}
+	if !omit {
+		pr.Out.Header.Set("X-Forwarded-For", clientIP)
+	}
+}
+
 func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *functionexec.Manager, provided ...*router.Router) (*Handler, error) {
 	var rtr *router.Router
 	if len(provided) > 0 {
@@ -412,19 +444,23 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		},
 	}
 
-	rp.Director = func(req *http.Request) {
-		selection, ok := req.Context().Value(selectionContextKey).(*router.Selection)
+	rp.Rewrite = func(pr *httputil.ProxyRequest) {
+		restoreForwardingHeaders(pr)
+		selection, ok := pr.Out.Context().Value(selectionContextKey).(*router.Selection)
 		if !ok || selection == nil || selection.Target == nil {
 			return
 		}
 		// A channel can carry its own outbound proxy policy. The shared
 		// transport reads this per-request override before the system policy, so
-		// no second transport is needed. Assigning through *req keeps the
-		// context change visible to the transport after Director returns.
-		*req = *req.WithContext(netproxy.WithResolver(req.Context(), selection.Target.Upstream.Proxy))
-		clientPath := req.URL.Path
-		if req.URL.RawQuery != "" {
-			clientPath += "?" + req.URL.RawQuery
+		// no second transport is needed. Replacing pr.Out keeps the context
+		// change visible to the transport after Rewrite returns.
+		req := pr.Out.WithContext(netproxy.WithResolver(pr.Out.Context(), selection.Target.Upstream.Proxy))
+		pr.Out = req
+		// Read the path and query from the inbound request: Rewrite sanitizes
+		// Out.URL.RawQuery before this call, while Director saw the raw query.
+		clientPath := pr.In.URL.Path
+		if pr.In.URL.RawQuery != "" {
+			clientPath += "?" + pr.In.URL.RawQuery
 		}
 		targetURL, err := url.Parse(selection.Target.Upstream.BaseURL)
 		if err == nil {

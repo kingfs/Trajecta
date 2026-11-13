@@ -124,7 +124,7 @@ task build:go
 
 ## 依赖管理
 
-- Go：`task deps:verify` 只校验不改文件（`go mod verify` + `go list -mod=readonly ./...`）；只有依赖确实变化时才用 `task deps:tidy`（会改写 `go.mod` / `go.sum`）。`go.mod` 声明 `go 1.26.0`。
+- Go：`task deps:verify` 只校验不改文件（`go mod verify` + `go list -mod=readonly ./...`）；只有依赖确实变化时才用 `task deps:tidy`（会改写 `go.mod` / `go.sum`）。`go.mod` 声明 `go 1.27.0`。Go 1.27 起标准库 `encoding/json`（v1 API）默认由 `encoding/json/v2` 实现支撑：v1 的 Marshal/Unmarshal 语义保持不变（错误消息文本可能略有差异），Unmarshal 明显更快；仓库全部 JSON 调用仍走 v1 API，不做 v2 默认行为迁移（v2 默认拒绝重复成员名/非法 UTF-8、nil slice 编码为 `[]`，与录制的字节保真约束冲突）。如需回退旧实现，用 `GOEXPERIMENT=nojsonv2` 构建。
 - 前端：依赖锁定在 `web/monitor-ui/bun.lock`，task 与 CI 都使用 `bun install --frozen-lockfile`。
 - ent 代码生成：`task generate:ent` 重新生成 `ent` 控制面 DAO；新增 SQLite / Postgres migration 分别用 `task migrate:ent:sqlite NAME=...` 和 `task migrate:ent:postgres NAME=... DEV_URL=...`。
 - 凭据 DFA 代码生成：`task generate:secretmask` 从 `pkg/secretmask/rules.rl` 重新生成 `pkg/secretmask/rules_ragel.go`。**需要 `ragel-go` 二进制**：通用 `ragel` 对这台机器输出 C，两者不可互换。生成文件已提交，因此常规构建、测试与 `task check:full` 都不需要它；只有改规则时才要装，并须同时改 `rules.rl`（模式）与 `rule.go`（元数据），把生成文件一起提交，不要手工编辑生成文件。
@@ -230,14 +230,14 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 
 1. `actions/checkout@v4`。
 2. `oven-sh/setup-bun@v2`（bun `1.3.11`）。
-3. `actions/setup-go@v5`（Go `1.26.x`，开启 module cache）。
+3. `actions/setup-go@v5`（Go `1.27.x`，开启 module cache）。
 4. `go mod download`。
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
 7. `go build -v -o server ./cmd/server` 与 `go build -v -o trajecta ./cmd/trajecta`（同时产出服务端与 CLI，供第 17 步上传）。
 8. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
 9. `go vet ./...`。
-10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.11.4`。
+10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.15.0`（首个支持 Go 1.27 的系列为 v2.13+，此处与本地 `task lint` 使用同一版本）。
 11. `go test -v ./...`。
 12. `actions/setup-python@v5`（Python `3.12`）。
 13. ATIF v1.8 校验：`python -m pip install -r scripts/atif-requirements.txt`、`python -m unittest discover -s scripts/atif_tests`、`ATIF_TEST_OUTPUT_DIR="$RUNNER_TEMP" go test ./internal/trajectory -run TestBuildCumulativeHistoryAndHumanCorrection -count=1`、`python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"`。

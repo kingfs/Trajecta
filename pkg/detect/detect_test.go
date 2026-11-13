@@ -389,7 +389,7 @@ func TestEnginePassesContextAndNilContext(t *testing.T) {
 	}
 	// A nil context is replaced with context.Background().
 	got = nil
-	if _, err := New(scanner).Scan(nil, Input{}); err != nil {
+	if _, err := New(scanner).Scan(nil, Input{}); err != nil { //nolint:staticcheck // intentional nil context: Scan normalizes it to context.Background()
 		t.Fatalf("Scan(nil ctx) error = %v, want nil", err)
 	}
 	if got != nil {

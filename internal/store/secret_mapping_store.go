@@ -53,13 +53,12 @@ const (
 // ErrSecretMappingStoreClosed is returned by an append that races shutdown.
 var ErrSecretMappingStoreClosed = errors.New("secret mapping store is closed")
 
-// secretMappingRequest is one item in the writer's queue: either a pair to
-// append or a barrier whose closure means every append queued before it has been
-// committed. The barrier exists for live deletion: a delete must not race an
-// append that is still sitting in the batch buffer, or the row comes back.
+// secretMappingRequest is one item in the writer's queue: a pair to append.
+// The flush barrier is a separate channel (flushCh): a live delete must not
+// race an append that is still sitting in the batch buffer, or the row comes
+// back.
 type secretMappingRequest struct {
 	mapping *secretmask.Mapping
-	flush   chan struct{}
 }
 
 // SecretMappingStore is the bbolt-backed durable side of a secretmask.Vault.

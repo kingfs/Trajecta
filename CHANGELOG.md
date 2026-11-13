@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Changed
+- Upgraded the Go toolchain to 1.27: `go.mod` declares `go 1.27.0`, CI builds with Go `1.27.x`, and the Docker builder image is `golang:1.27-alpine`. With Go 1.27 the standard `encoding/json` package is backed by the new `encoding/json/v2` implementation, so every existing JSON call site keeps the v1 API and v1 semantics while unmarshaling becomes significantly faster; no call site migrates to the v2 defaults (which reject duplicate member names and invalid UTF-8 and encode nil slices as `[]`), preserving cassette and wire byte fidelity. `GOEXPERIMENT=nojsonv2` restores the previous implementation if a compatibility problem appears.
+- Upgraded golangci-lint from v2.11.4 to v2.15.0 (Go 1.27 support landed in v2.13.0); CI and `task lint` use the same version.
+- The forwarding reverse proxy uses the `Rewrite` hook instead of the deprecated `Director` (deprecated since Go 1.26). Outbound forwarding-header behaviour is preserved exactly: `Forwarded`, `X-Forwarded-Host` and `X-Forwarded-Proto` pass through from the client, the client IP is appended to any inbound `X-Forwarded-For`, and the outbound path/query are still built from the raw inbound query.
+
+### Fixed
+- Resolved every golangci-lint v2.15.0 finding: an ineffectual assignment in the native assignment scanner, two De Morgan simplifications, three embedded-field selector simplifications, the export manifest window conversion and a merged variable declaration, the deprecated `bbolt.ErrTimeout` alias (now `go.etcd.io/bbolt/errors.ErrTimeout`), and four unused symbols (a probe test server, a CLI encryption-mode helper, a mapping-queue flush field, a transfer insert-columns constant). The two intentional nil-context tests keep their nil argument behind a scoped `nolint`.
+
 ## [3.4.0] - 2026-11-12
 
 ### Added
