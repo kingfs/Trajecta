@@ -181,13 +181,16 @@ func (r Resolved) ApplyAuth(cred Credential, req *http.Request) error {
 	if !mode.Valid() {
 		return fmt.Errorf("%w: %q", ErrInvalidAuthMode, mode)
 	}
+	// Clear before the mode branch, not inside it: AuthModeNone is used by the
+	// keyless presets (Ollama, vLLM) and the previous placement forwarded the
+	// caller's own Authorization / x-api-key header to those upstreams.
+	clearAuthHeaders(req.Header)
 	if mode != AuthModeNone {
 		secret, err := credentialSecret(mode, cred)
 		if err != nil {
 			return err
 		}
 		header, scheme := r.authHeader()
-		clearAuthHeaders(req.Header)
 		value := secret
 		if scheme != "" {
 			value = scheme + " " + secret

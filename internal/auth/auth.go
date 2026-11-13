@@ -17,6 +17,10 @@ type Principal struct {
 	Username string
 	Role     string
 	Scope    string
+	// SessionFingerprint binds a monitor JWT to the password hash that was
+	// current when it was issued. It is carried only inside the signed token and
+	// is cleared by SessionVerifier before the principal reaches a handler.
+	SessionFingerprint string
 }
 
 func BearerToken(header string) (string, bool) {

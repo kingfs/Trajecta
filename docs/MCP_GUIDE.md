@@ -45,17 +45,17 @@ transport 与协议：
 
 ## 认证
 
-MCP endpoint 始终包在个人 token 认证中间件里（`auth.Middleware(mcpHandler, "trajecta-mcp", verifier)`）：缺失、格式错误或无效 token 的请求返回 `401 Unauthorized`，并带 `WWW-Authenticate: Bearer realm="trajecta-mcp"`。没有免认证本地模式。
+MCP endpoint 始终包在个人 token 认证中间件里（`auth.Middleware(mcpHandler, "trajecta-mcp", auth.ScopedVerifier(verifier, auth.ScopeMCP))`）：缺失、格式错误、无效 token，或 `scope=proxy` 的 token 返回 `401 Unauthorized`，并带 `WWW-Authenticate: Bearer realm="trajecta-mcp"`。没有免认证本地模式。
 
 流程：
 
 1. 用 `trajecta auth init-user` 初始化首个用户。
-2. 登录 Monitor，在 `Tokens` 页面创建个人 token；或用 `trajecta auth create-token` 创建。
+2. 用 `trajecta auth create-token --username <u> --scope mcp` 创建 MCP 专用 token（`--scope all` 或历史值 `api` 也可以，但那样同一个 token 也能进代理端口）。Monitor 的 `Tokens` 对话框目前固定写 `api`，不等同于最小权限。
 3. MCP client 每个请求发送 `Authorization: Bearer <token>`。
 
 要点：
 
-- MCP 与 proxy API 复用同一套个人 API token；Monitor 登录态 JWT 只用于 Monitor API，Monitor API 反过来不接受个人 API token。
+- MCP 与 proxy API 复用同一套个人 API token，但 scope 不同：`mcp` 只进 `/mcp`，`proxy` 只进代理端口，`all`/`api` 两边都进。Monitor 登录态 JWT 只用于 Monitor API，Monitor API 反过来不接受个人 API token。
 - server 侧没有 MCP token 环境变量。Codex 示例里的 `TRAJECTA_MCP_TOKEN` 是**客户端**自己声明的环境变量名（`bearer_token_env_var`），不是服务端配置项。
 - `internal/responses/tools/mcp` 的 `tools.mcp.servers[].bearer_token_env` 是另一回事：它指定 hosted executor 去哪个环境变量读取访问**外部** MCP server 的 token。
 

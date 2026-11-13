@@ -64,7 +64,10 @@ func newManagementMuxWithSecretMappings(
 		if err != nil {
 			panic(err)
 		}
-		monitorVerifier = monitorJWT
+		// The JWT is stateless, so a password reset, a disabled user or a role
+		// change would otherwise not take effect until it expired. The session
+		// verifier re-reads those facts from the auth store on every request.
+		monitorVerifier = auth.NewSessionVerifier(monitorJWT, authStorePtr)
 	}
 	if cfg.MCP.Enabled {
 		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
@@ -77,7 +80,7 @@ func newManagementMuxWithSecretMappings(
 			// endpoint for older clients.
 			Stateless: true,
 		})
-		mux.Handle(config.EffectiveMCPPath(cfg), auth.Middleware(mcpHandler, "trajecta-mcp", verifier))
+		mux.Handle(config.EffectiveMCPPath(cfg), auth.Middleware(mcpHandler, "trajecta-mcp", auth.ScopedVerifier(verifier, auth.ScopeMCP)))
 	}
 	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()
 	if functionExecutorManager != nil {

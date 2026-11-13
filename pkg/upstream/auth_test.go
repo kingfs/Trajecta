@@ -170,19 +170,42 @@ func TestApplyAuthTemplatesAndStaticHeaders(t *testing.T) {
 	}
 }
 
-func TestApplyAuthNone(t *testing.T) {
+func TestApplyAuthNoneDropsClientCredentialHeaders(t *testing.T) {
 	resolved := mustResolve(t, Config{PresetID: "ollama"})
 	resolved.Headers = map[string]string{"X-Local": "1"}
+	req := newAuthRequest()
+	req.Header.Set("Authorization", "Bearer client-key")
+	req.Header.Set("X-Api-Key", "client-api-key")
+	req.Header.Set("X-Goog-Api-Key", "client-google-key")
+	req.Header.Set("Api-Key", "client-azure-key")
+	if err := resolved.ApplyAuth(Credential{}, req); err != nil {
+		t.Fatal(err)
+	}
+	// A keyless channel is exactly the case where the caller's Trajecta token
+	// used to reach the upstream: AuthModeNone means "send no credential", not
+	// "forward whatever the client sent".
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Api-Key"} {
+		if got := req.Header.Get(name); got != "" {
+			t.Errorf("%s = %q, want empty", name, got)
+		}
+	}
+	if got := req.Header.Get("X-Local"); got != "1" {
+		t.Errorf("X-Local = %q", got)
+	}
+}
+
+// A configured static header is the operator explicitly asking for a value on
+// the wire, so it is applied after the clear and must survive.
+func TestApplyAuthNoneKeepsConfiguredStaticAuthHeader(t *testing.T) {
+	resolved := mustResolve(t, Config{PresetID: "ollama"})
+	resolved.Headers = map[string]string{"Authorization": "Bearer static-key"}
 	req := newAuthRequest()
 	req.Header.Set("Authorization", "Bearer client-key")
 	if err := resolved.ApplyAuth(Credential{}, req); err != nil {
 		t.Fatal(err)
 	}
-	if got := req.Header.Get("Authorization"); got != "Bearer client-key" {
-		t.Errorf("none auth should leave the request auth header alone, got %q", got)
-	}
-	if got := req.Header.Get("X-Local"); got != "1" {
-		t.Errorf("X-Local = %q", got)
+	if got := req.Header.Get("Authorization"); got != "Bearer static-key" {
+		t.Errorf("Authorization = %q, want the configured static header", got)
 	}
 }
 

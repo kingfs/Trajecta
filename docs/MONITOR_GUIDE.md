@@ -19,6 +19,8 @@ go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --pa
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
+JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
+
 左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 264px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
 
 对话框仍用于真正需要打断的表单：修改密码（从面板进入，`DialogContent` 的 `onCloseAutoFocus` 显式把焦点还给账号按钮，因为这个表单没有自己的触发按钮）、渠道列表页的新建弹窗、渠道详情页的编辑弹窗（`ChannelDetailPage` 里的 `EditProviderDialog`，触发按钮与对话框同处一个 Dialog root）以及 trace 详情页的工具弹窗，都走 `web/monitor-ui/src/components/ui/dialog.tsx`（`@radix-ui/react-dialog`）。焦点陷阱、Esc 关闭、遮罩点击关闭、`role="dialog"` 与 `aria-modal` 语义、背景滚动锁定都由这个 primitive 提供，`src/` 里已没有自建的 portal。`serve` 总是挂载 auth store，所以 `/api/auth/status` 返回 `auth_required: true`；只有在没有挂载 auth store 的嵌入式/测试场景下才返回 `false`，此时前端以 local 用户直接进入。
@@ -27,14 +29,14 @@ Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签�
 
 「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、status、created、expires、last_used。
 
-创建不是一个常驻卡片，而是列表页头部的按钮：点击后弹出对话框（`TokensPanel` 的 `CreateTokenDialog`）。表单只有两项——名称，以及**到期时间**（`datetime-local` 选择器）。到期时间默认为空，代表永不过期；填了就必须晚于当前时间，对话框把它换算成 API 接受的 `ttl` 时长（`<秒数>s`）再提交，`ttl` 本身不出现在表单和列表里。`scope` 只有 `api` 一个取值，既不可选、也不作为列表列显示（每行都是同一个词），创建时固定写 `api` 存入记录。创建成功后表单原位换成 token 明文：令牌只显示这一次，对话框保持打开，明文右侧是复制按钮。取消、关闭或点「完成」后原文不可再取，只保留 prefix。
+创建不是一个常驻卡片，而是列表页头部的按钮：点击后弹出对话框（`TokensPanel` 的 `CreateTokenDialog`）。表单只有两项——名称，以及**到期时间**（`datetime-local` 选择器）。到期时间默认为空，代表永不过期；填了就必须晚于当前时间，对话框把它换算成 API 接受的 `ttl` 时长（`<秒数>s`）再提交，`ttl` 本身不出现在表单和列表里。对话框不提供 scope 选择，创建时固定写历史值 `api` 存入记录；服务端把 `api` 视为全量访问（与 `all` 相同）。需要最小权限 token 时用 CLI：`trajecta auth create-token --scope proxy|mcp`。`proxy` 只被代理端口接受、`/mcp` 会拒绝；`mcp` 相反；`all` 是默认的全量值。列表仍不显示 scope，因为 Monitor 自己创建的每个 token 都是 `api`。创建成功后表单原位换成 token 明文：令牌只显示这一次，对话框保持打开，明文右侧是复制按钮。取消、关闭或点「完成」后原文不可再取，只保留 prefix。
 
 复制按钮先用异步 Clipboard API，失败或该 API 不存在（例如 Monitor 通过纯 HTTP 的局域网地址访问时就不是安全上下文）时退回 `document.execCommand("copy")`；两条路都失败会提示手动复制，明文本身用 `user-select: all`，单击即整段选中，因此手工 Ctrl+C 始终可行（`web/monitor-ui/src/lib/clipboard.js`）。
 
 新签发的 token 形如 `sk-<base64url>`，与 OpenAI 的凭据形状一致；校验只看数据库里的 SHA-256 哈希，不看前缀，因此重命名之前签发的 `llmtl_` token 继续可用。个人 token 的用途：
 
-- 代理 API：`Authorization: Bearer <token>`，proxy 的每个请求都要通过该 token 鉴权。
-- MCP：`Authorization: Bearer <token>`。
+- 代理 API：`Authorization: Bearer <token>`，proxy 的每个请求都要通过该 token 鉴权；`scope` 为 `mcp` 的 token 在这里返回 401。
+- MCP：`Authorization: Bearer <token>`；`scope` 为 `proxy` 的 token 在这里返回 401。
 
 Monitor API 本身只接受登录 JWT，不使用个人 token。
 
@@ -258,7 +260,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 #### 系统 `/system`
 
-管理员专属页面：导航项只对 `role=admin` 的登录用户显示，未启用认证时显示给 `local` 伪用户（此时 Monitor 本身不校验身份）；后端对未认证请求返回 401、对已认证的非管理员返回 403。页面分六个标签页，各标签页只读取自己需要的接口；`运行时` 曾经一个标签页同时装主机与进程，长度是其它标签页的两倍，也是这一页读起来像把同一件事说了好几遍的原因——主机指标来自 `/proc`，在没有 `/proc` 的平台上会失败，Go 运行时与连接池来自进程本身、不会失败，两者是两个问题，因此拆成 `系统信息` 与服务端（主机标签页沿用 `runtime` 这个 id，旧链接仍落在原处）。这一页是唯一由服务端定时的数据：只要还有一个标签页停在系统页，服务端就每 30 秒推送一次 `system` 主题（见「实时推送」一节），系统信息、服务端、数据库与慢查询共用这一份采样：
+管理员专属页面：导航项只对 `role=admin` 的登录用户显示，未启用认证时显示给 `local` 伪用户（此时 Monitor 本身不校验身份）；后端对未认证请求返回 401、对已认证的非管理员返回 403。`auth init-user --role viewer` 创建只读用户，`auth set-role` 修改现有用户角色；角色变化在下一个请求生效。开启 `debug.pprof_enabled` 时 `/debug/pprof/*` 也走同一 admin gate（未认证 401、非管理员 403）。页面分六个标签页，各标签页只读取自己需要的接口；`运行时` 曾经一个标签页同时装主机与进程，长度是其它标签页的两倍，也是这一页读起来像把同一件事说了好几遍的原因——主机指标来自 `/proc`，在没有 `/proc` 的平台上会失败，Go 运行时与连接池来自进程本身、不会失败，两者是两个问题，因此拆成 `系统信息` 与服务端（主机标签页沿用 `runtime` 这个 id，旧链接仍落在原处）。这一页是唯一由服务端定时的数据：只要还有一个标签页停在系统页，服务端就每 30 秒推送一次 `system` 主题（见「实时推送」一节），系统信息、服务端、数据库与慢查询共用这一份采样：
 
 - **系统信息**：`GET /api/system/host`。
 - **服务端**：`GET /api/system/runtime` + `GET /api/system/host`（只取其中的进程段）。
@@ -286,7 +288,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 `GET /api/system/slow-queries` 返回进程内慢语句环形缓冲区。采集默认关闭：`debug.slow_query_threshold`（`TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD`）为 `0` 时不记录任何语句，热路径只有一次原子读取，页面显示「collector disabled」空状态并提示设置该配置。设为正数（例如 `"200ms"`）并重启后，慢于阈值且经过数据库驱动的语句进入容量 50 的缓冲区，保存时间、耗时、操作类型（`query`/`exec`）以及脱敏并截断到 500 字符的语句。
 
-pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 false）为 true 时挂载到 Monitor 的 `/debug/pprof/`；为 false 时该前缀返回 404，不会落到前端 SPA。
+pprof 只在 `debug.pprof_enabled`（`TRAJECTA_DEBUG_PPROF_ENABLED`，默认 false）为 true 时挂载到 Monitor 的 `/debug/pprof/`；挂载后它和系统页一样要求 admin（未认证 401、非管理员 403），因为堆快照可能包含请求体与凭据；为 false 时该前缀返回 404，不会落到前端 SPA。
 
 #### 关于 `/about`
 

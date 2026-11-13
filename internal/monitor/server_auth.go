@@ -4,12 +4,27 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/auth"
+)
+
+const (
+	// loginBodyLimit bounds the one unauthenticated JSON body in the Monitor.
+	// A login payload is two short strings; anything larger is an attempt to make
+	// the process allocate before it has authenticated anyone.
+	loginBodyLimit = 64 << 10
+	// loginMaxFailures is per (client IP, username) inside loginFailureWindow.
+	// Ten wrong passwords in a quarter of an hour is far above an operator typo
+	// and far below a useful online guessing rate.
+	loginMaxFailures   = 10
+	loginFailureWindow = 15 * time.Minute
 )
 
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
@@ -18,6 +33,7 @@ func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	}
 }
 func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
+	throttle := newLoginThrottle()
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -27,9 +43,17 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth store not configured"})
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, loginBodyLimit)
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid login payload"})
+			return
+		}
+		key := loginAttemptKey(r, req.Username)
+		if wait := throttle.retryAfter(key); wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
+			slog.Warn("Monitor login rejected", "reason", "rate_limited", "username", strings.TrimSpace(req.Username), "remote", loginRemoteHost(r))
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many login attempts; try again later"})
 			return
 		}
 		var token auth.TokenResult
@@ -44,10 +68,151 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 			token, err = authStore.Login(r.Context(), req.Username, req.Password, ttl)
 		}
 		if err != nil {
+			throttle.recordFailure(key)
+			// The username is safe to log; the password never is.
+			slog.Warn("Monitor login failed", "username", strings.TrimSpace(req.Username), "remote", loginRemoteHost(r))
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
 			return
 		}
+		throttle.reset(key)
 		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
+	}
+}
+
+// loginThrottle is an in-memory, per-(IP, username) failure counter. It is not
+// a distributed rate limiter; it exists so the only unauthenticated write
+// endpoint cannot be used as an online password oracle or as a bcrypt CPU sink.
+type loginThrottle struct {
+	mu      sync.Mutex
+	entries map[string]loginThrottleEntry
+	max     int
+	window  time.Duration
+	maxKeys int
+	now     func() time.Time
+}
+
+type loginThrottleEntry struct {
+	failures     int
+	windowStart  time.Time
+	blockedUntil time.Time
+}
+
+func newLoginThrottle() *loginThrottle {
+	return newLoginThrottleWithClock(time.Now)
+}
+
+func newLoginThrottleWithClock(now func() time.Time) *loginThrottle {
+	if now == nil {
+		now = time.Now
+	}
+	return &loginThrottle{
+		entries: make(map[string]loginThrottleEntry),
+		max:     loginMaxFailures,
+		window:  loginFailureWindow,
+		maxKeys: 4096,
+		now:     now,
+	}
+}
+
+func (t *loginThrottle) retryAfter(key string) time.Duration {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, ok := t.entries[key]
+	if !ok {
+		return 0
+	}
+	now := t.now()
+	if entry.blockedUntil.After(now) {
+		return entry.blockedUntil.Sub(now)
+	}
+	if now.Sub(entry.windowStart) > t.window {
+		delete(t.entries, key)
+	}
+	return 0
+}
+
+func (t *loginThrottle) recordFailure(key string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	entry, ok := t.entries[key]
+	if !ok || now.Sub(entry.windowStart) > t.window {
+		entry = loginThrottleEntry{windowStart: now}
+	}
+	entry.failures++
+	if entry.failures >= t.max {
+		entry.failures = 0
+		entry.windowStart = now
+		entry.blockedUntil = now.Add(t.window)
+	}
+	t.entries[key] = entry
+	if len(t.entries) > t.maxKeys {
+		t.pruneLocked(now)
+	}
+}
+
+func (t *loginThrottle) reset(key string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	delete(t.entries, key)
+	t.mu.Unlock()
+}
+
+// pruneLocked drops expired entries, and clears the map if a flood of distinct
+// keys filled it. Clearing only loses the throttle, never credentials.
+func (t *loginThrottle) pruneLocked(now time.Time) {
+	for key, entry := range t.entries {
+		if entry.blockedUntil.After(now) {
+			continue
+		}
+		if now.Sub(entry.windowStart) > t.window {
+			delete(t.entries, key)
+		}
+	}
+	if len(t.entries) > t.maxKeys {
+		t.entries = make(map[string]loginThrottleEntry)
+	}
+}
+
+func loginAttemptKey(r *http.Request, username string) string {
+	return loginRemoteHost(r) + "|" + strings.ToLower(strings.TrimSpace(username))
+}
+
+func loginRemoteHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return host
+}
+
+// healthAPIHandler is the only side-effect-free, data-free endpoint the Monitor
+// exposes without a credential. It exists so a load balancer or container
+// runtime can probe liveness without holding an operator token.
+func healthAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}
 	}
 }
 func authCheckAPIHandler() http.HandlerFunc {

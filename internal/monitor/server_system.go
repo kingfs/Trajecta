@@ -8,6 +8,7 @@ import (
 	"runtime/metrics"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/store"
 )
 
@@ -233,10 +234,18 @@ func systemSlowQueriesAPIHandler(st *store.Store) http.HandlerFunc {
 // profile explains are the Monitor's own - and because the proxy mux serves the
 // latency-critical data path, where an extra route is an extra way to be wrong.
 // The switch is off by default; see debug.pprof_enabled.
-func registerPprofHandlers(mux *http.ServeMux) {
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+func registerPprofHandlers(mux *http.ServeMux, verifier auth.TokenVerifier) {
+	// pprof exposes heap contents (including request bodies and secrets) and a
+	// CPU sampler, so it sits behind the same admin gate as the system page. It
+	// used to be mounted bare, which made it the one unauthenticated data
+	// surface on the management port once debug.pprof_enabled was turned on.
+	for path, handler := range map[string]http.HandlerFunc{
+		"/debug/pprof/":        pprof.Index,
+		"/debug/pprof/cmdline": pprof.Cmdline,
+		"/debug/pprof/profile": pprof.Profile,
+		"/debug/pprof/symbol":  pprof.Symbol,
+		"/debug/pprof/trace":   pprof.Trace,
+	} {
+		mux.HandleFunc(path, monitorAdminRequired(handler, verifier))
+	}
 }

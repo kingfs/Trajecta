@@ -57,6 +57,9 @@ type jwtClaims struct {
 	Username  string `json:"username"`
 	Role      string `json:"role"`
 	Scope     string `json:"scope"`
+	// SessionFingerprint ties the token to the password hash that was current
+	// when it was issued; SessionVerifier checks it on every Monitor request.
+	SessionFingerprint string `json:"pwd,omitempty"`
 }
 
 func NewJWTManager(opts JWTOptions) (*JWTManager, error) {
@@ -105,17 +108,18 @@ func (m *JWTManager) IssueToken(principal Principal) (TokenResult, error) {
 		return TokenResult{}, err
 	}
 	claims := jwtClaims{
-		Issuer:    m.issuer,
-		Subject:   strconv.Itoa(principal.UserID),
-		Audience:  m.audience,
-		Expires:   now.Add(m.ttl).Unix(),
-		NotBefore: now.Add(-30 * time.Second).Unix(),
-		IssuedAt:  now.Unix(),
-		JWTID:     jti,
-		UserID:    principal.UserID,
-		Username:  principal.Username,
-		Role:      principal.Role,
-		Scope:     principal.Scope,
+		Issuer:             m.issuer,
+		Subject:            strconv.Itoa(principal.UserID),
+		Audience:           m.audience,
+		Expires:            now.Add(m.ttl).Unix(),
+		NotBefore:          now.Add(-30 * time.Second).Unix(),
+		IssuedAt:           now.Unix(),
+		JWTID:              jti,
+		UserID:             principal.UserID,
+		Username:           principal.Username,
+		Role:               principal.Role,
+		Scope:              principal.Scope,
+		SessionFingerprint: principal.SessionFingerprint,
 	}
 	token, err := m.sign(jwtHeader{Algorithm: "HS256", Type: "JWT"}, claims)
 	if err != nil {
@@ -137,10 +141,11 @@ func (m *JWTManager) VerifyToken(ctx context.Context, token string) (Principal, 
 		return Principal{}, false, err
 	}
 	return Principal{
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Role:     claims.Role,
-		Scope:    claims.Scope,
+		UserID:             claims.UserID,
+		Username:           claims.Username,
+		Role:               claims.Role,
+		Scope:              claims.Scope,
+		SessionFingerprint: claims.SessionFingerprint,
 	}, true, nil
 }
 

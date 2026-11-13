@@ -760,6 +760,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	}
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(monitorVerifier))
 	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL))
+	// A liveness probe must not require an operator token (a container runtime
+	// cannot hold one) and must not report anything about the deployment: one
+	// fixed JSON object, no store reads.
+	mux.HandleFunc("/healthz", healthAPIHandler())
 	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), monitorVerifier))
 	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), monitorVerifier))
 	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), monitorVerifier))
@@ -781,33 +785,33 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/ws", monitorAuthRequired(realtimeSocketAPIHandler(realtime), monitorVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))
+	mux.HandleFunc("/api/responses/function-executors", monitorAdminRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/settings/routing", monitorAdminRequired(routingSettingsAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
 	// The proxy URL may carry credentials and changing it moves every outbound
 	// request, so this is admin-only like the rest of the system surface.
 	mux.HandleFunc("/api/settings/network-proxy", monitorAdminRequired(networkProxySettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/rates-alerts", monitorAdminRequired(ratesAlertsSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
+	mux.HandleFunc("/api/model-aliases", monitorAdminRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasListCreateAPIHandler(st)
 	}), monitorVerifier))
-	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
+	mux.HandleFunc("/api/model-aliases/", monitorAdminRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasDetailAPIHandler(st)
 	}), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandlerWithSuppression(st, opt.Router, suppressionCheckerFrom(opt.SecretSuppressions), opt.Detectors), monitorVerifier))
 	mux.HandleFunc("/api/resources", monitorAuthRequired(resourcesAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/resources/backfill", monitorAuthRequired(resourceBackfillAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/resources/backfill", monitorAdminRequired(resourceBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAdminRequired(analysisBatchReanalyzeAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), monitorVerifier))
@@ -817,27 +821,27 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// channel exposes, with its catalogue card. /api/models above stays the
 	// traffic-facing list and is unchanged.
 	mux.HandleFunc("/api/model-square", monitorAuthRequired(modelSquareAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/secret-masks", monitorAuthRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/secret-masks/", monitorAuthRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secrets/local-key", monitorAdminRequired(localSecretKeyAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secret-masks", monitorAdminRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secret-masks/", monitorAdminRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
 	// The global real-to-stand-in mapping file behind 质量 → 遮蔽映射. Unlike the
 	// audit rows above, these pairs are not tied to one trace; they are what the
 	// vault consults before rendering a new fake.
-	mux.HandleFunc("/api/secret-mappings", monitorAuthRequired(secretMappingListAPIHandler(opt.SecretMappings), monitorVerifier))
-	mux.HandleFunc("/api/secret-mappings/", monitorAuthRequired(secretMappingDeleteAPIHandler(opt.SecretMappings), monitorVerifier))
+	mux.HandleFunc("/api/secret-mappings", monitorAdminRequired(secretMappingListAPIHandler(opt.SecretMappings), monitorVerifier))
+	mux.HandleFunc("/api/secret-mappings/", monitorAdminRequired(secretMappingDeleteAPIHandler(opt.SecretMappings), monitorVerifier))
 	// The false-positive list consulted before a replacement is rendered. It is
 	// policy, not an audit: an entry stops masking, and removing it re-enables
 	// the rule the next time the value appears.
-	mux.HandleFunc("/api/secret-suppressions", monitorAuthRequired(secretSuppressionAPIHandler(opt.SecretSuppressions), monitorVerifier))
-	mux.HandleFunc("/api/secret-suppressions/", monitorAuthRequired(secretSuppressionDeleteAPIHandler(opt.SecretSuppressions), monitorVerifier))
-	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
-	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
-	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
-	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), monitorVerifier))
-	mux.HandleFunc("/api/provider-model-test", monitorAuthRequired(providerModelTestAPIHandler(st, opt.ChannelService), monitorVerifier))
-	mux.HandleFunc("/api/provider-model-detect", monitorAuthRequired(providerModelDetectAPIHandler(st, opt.ChannelService, opt.Router), monitorVerifier))
-	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
-	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/secret-suppressions", monitorAdminRequired(secretSuppressionAPIHandler(opt.SecretSuppressions), monitorVerifier))
+	mux.HandleFunc("/api/secret-suppressions/", monitorAdminRequired(secretSuppressionDeleteAPIHandler(opt.SecretSuppressions), monitorVerifier))
+	mux.HandleFunc("/api/provider-setup/", monitorAdminRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report/apply", monitorAdminRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report", monitorAdminRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe", monitorAdminRequired(providerProbeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/provider-model-test", monitorAdminRequired(providerModelTestAPIHandler(st, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-model-detect", monitorAdminRequired(providerModelDetectAPIHandler(st, opt.ChannelService, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/channels", monitorAdminRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/channels/", monitorAdminRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
 	mux.HandleFunc("/api/catalog/providers", monitorAuthRequired(providerCatalogAPIHandler(st), monitorVerifier))
 	// Channel plugins gate the official catalog only; routing never depends on
@@ -864,7 +868,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/system/host", monitorAdminRequired(systemHostAPIHandler(), monitorVerifier))
 	// pprof is mounted on the Monitor mux; see registerPprofHandlers.
 	if opt.DebugPprofEnabled {
-		registerPprofHandlers(mux)
+		registerPprofHandlers(mux, monitorVerifier)
 	} else {
 		mux.HandleFunc("/debug/", func(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)

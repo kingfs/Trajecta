@@ -89,8 +89,8 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `auth migrate up` 对 Postgres 委托给同一份 `ent/postgres-migrations`，因此与 `db migrate up` 幂等；CLI 不会暗示存在独立的 auth 命名空间。
 - `auth migrate down` 在 Postgres 下被阻止（`ErrPostgresAuthRollbackUnsupported`），以 usage 错误码退出（CLI 退出码 `3`）：auth 命令不能回滚应用表。生产回滚同样依赖备份或经过评审的应用迁移方案。
 - `auth migrate status --check-db` 是只读检查：Postgres 读共享 `schema_migrations` 并检查 `users`、`api_tokens` 是否存在；SQLite 读配置的 auth 迁移表并检查同样两张表。不带 `--check-db` 时只报告配置。
-- 用户与令牌运维命令：`auth init-user --username <u> --password <p>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 默认 `auth.DefaultTokenScope`，`--ttl 0` 表示不过期）。新签发的 token 形如 `sk-<base64url>`；校验按 `api_tokens.token_hash` 查表，不看前缀，因此更早签发的 `llmtl_` token 无需迁移即可继续使用。
-- 预览类 flag：`auth migrate up` / `auth migrate down` 支持 `--step N` 与 `--dry-run`，其中 `--all` 只属于 `auth migrate down`（回滚全部迁移）；`auth init-user`、`auth reset-password`、`auth create-token` 都支持 `--dry-run`，只报告将要执行的操作而不写库。
+- 用户与令牌运维命令：`auth init-user --username <u> --password <p> --role admin|viewer`（默认 `admin`）、`auth set-role --username <u> --role admin|viewer`、`auth disable-user --username <u>` / `auth enable-user --username <u>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 取 `all`（默认）、`proxy`、`mcp`；历史自定义值仍按全量访问处理，`--ttl 0` 表示不过期）。`proxy` token 只被代理端口接受，`mcp` token 只被 `/mcp` 接受。`auth reset-password` 会同时让该用户已签发的 Monitor 会话立即失效（JWT 里带密码指纹，服务端每请求回查）。新签发的 token 形如 `sk-<base64url>`；校验按 `api_tokens.token_hash` 查表，不看前缀，因此更早签发的 `llmtl_` token 无需迁移即可继续使用。
+- 预览类 flag：`auth migrate up` / `auth migrate down` 支持 `--step N` 与 `--dry-run`，其中 `--all` 只属于 `auth migrate down`（回滚全部迁移）；`auth init-user`、`auth set-role`、`auth disable-user`、`auth enable-user`、`auth reset-password`、`auth create-token` 都支持 `--dry-run`，只报告将要执行的操作而不写库。
 
 ## 生产部署（默认拓扑、必需环境变量、迁移与首个用户创建）
 

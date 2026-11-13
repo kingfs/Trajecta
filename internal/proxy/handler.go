@@ -782,6 +782,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	normalizeClientEntrypoint(r)
 
+	// /healthz is the only path answered before authentication: a container
+	// runtime or load balancer cannot hold an operator token, and previously
+	// every proxy-port probe was rejected with 401. It reports one fixed object
+	// and reads neither the body nor the store.
+	if pathClean(r.URL.Path) == "/healthz" {
+		writeProxyHealth(w, r)
+		return
+	}
+
 	// Bound the request body before anything reads it, so every path that reads it -
 	// the buffer the routing decision needs, the pass-through transport and the
 	// locally answered endpoints - is finite. A declared size over the limit is
@@ -1194,6 +1203,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // upstream target is considered: authentication, the OpenAI model-detail call, the
 // Ollama show call and the aggregated model list. It reports whether the request
 // has been answered.
+// writeProxyHealth answers GET/HEAD /healthz without consulting auth, the
+// router or the store.
+func writeProxyHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}
+}
+
 func (h *Handler) serveEntrypointShortcuts(w http.ResponseWriter, r *http.Request, start time.Time) bool {
 	if !auth.RequestAuthorized(r, h.authVerifier) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)

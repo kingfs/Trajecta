@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/appdb"
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
@@ -216,7 +217,10 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 
-	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore, functionExecutorManager)
+	// A personal token handed to an SDK only needs the forwarding plane. The
+	// scoped verifier keeps a proxy token out of /mcp even though both surfaces
+	// share the same auth store.
+	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, auth.ScopedVerifier(authStore, auth.ScopeProxy), functionExecutorManager)
 	if err != nil {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1

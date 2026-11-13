@@ -188,10 +188,41 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	return s.client.Schema.Create(ctx)
 }
 
+const (
+	// RoleAdmin may change configuration, read credential material and use the
+	// admin-only diagnostics. RoleViewer may sign in and read the traffic
+	// surfaces but is rejected by monitorAdminRequired.
+	RoleAdmin  = "admin"
+	RoleViewer = "viewer"
+)
+
+func normalizeRole(role string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "", RoleAdmin:
+		return RoleAdmin, nil
+	case RoleViewer:
+		return RoleViewer, nil
+	default:
+		return "", fmt.Errorf("unsupported role %q; use admin or viewer", role)
+	}
+}
+
+// CreateUser keeps the historical behaviour and creates an admin.
 func (s *Store) CreateUser(ctx context.Context, username string, password string) (*dao.User, error) {
+	return s.CreateUserWithRole(ctx, username, password, RoleAdmin)
+}
+
+// CreateUserWithRole is CreateUser with an explicit role. The role is validated
+// here rather than in the CLI so every caller (including tests and future
+// management code) gets the same set.
+func (s *Store) CreateUserWithRole(ctx context.Context, username string, password string, role string) (*dao.User, error) {
 	username = normalizeUsername(username)
 	if username == "" {
 		return nil, errors.New("username is required")
+	}
+	role, err := normalizeRole(role)
+	if err != nil {
+		return nil, err
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
@@ -200,12 +231,52 @@ func (s *Store) CreateUser(ctx context.Context, username string, password string
 	row, err := s.client.User.Create().
 		SetUsername(username).
 		SetPasswordHash(hash).
-		SetRole("admin").
+		SetRole(role).
 		Save(ctx)
 	if dao.IsConstraintError(err) {
 		return nil, fmt.Errorf("user %q already exists", username)
 	}
 	return row, err
+}
+
+// SetUserRole changes an existing user's role. monitorAdminRequired reads the
+// role from the auth store on every request (via SessionVerifier), so the change
+// applies to live sessions immediately.
+func (s *Store) SetUserRole(ctx context.Context, username string, role string) error {
+	username = normalizeUsername(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	role, err := normalizeRole(role)
+	if err != nil {
+		return err
+	}
+	n, err := s.client.User.Update().Where(user.UsernameEQ(username)).SetRole(role).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
+}
+
+// SetUserEnabled disables or re-enables an existing user. A disabled user's
+// personal tokens already fail VerifyToken; SessionVerifier makes their monitor
+// JWT fail on the next request too.
+func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled bool) error {
+	username = normalizeUsername(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	n, err := s.client.User.Update().Where(user.UsernameEQ(username)).SetEnabled(enabled).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
 }
 
 // DeleteUser removes a user and its tokens. It exists for test fixtures and
@@ -279,10 +350,11 @@ func (s *Store) AuthenticatePassword(ctx context.Context, username string, passw
 		return Principal{}, err
 	}
 	return Principal{
-		UserID:   row.ID,
-		Username: row.Username,
-		Role:     row.Role,
-		Scope:    DefaultTokenScope,
+		UserID:             row.ID,
+		Username:           row.Username,
+		Role:               row.Role,
+		Scope:              DefaultTokenScope,
+		SessionFingerprint: passwordFingerprint(row.PasswordHash),
 	}, nil
 }
 
@@ -302,10 +374,7 @@ func (s *Store) CreateToken(ctx context.Context, username string, name string, s
 	if err != nil {
 		return TokenResult{}, err
 	}
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = DefaultTokenScope
-	}
+	scope = NormalizeTokenScope(scope)
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "api-token"
@@ -425,6 +494,27 @@ func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool,
 		Username: u.Username,
 		Role:     u.Role,
 		Scope:    row.Scope,
+	}, true, nil
+}
+
+// SessionState reads the three facts SessionVerifier needs. The boolean reports
+// whether the row exists, which lets the verifier reject a deleted user without
+// treating that as an internal error.
+func (s *Store) SessionState(ctx context.Context, userID int) (SessionState, bool, error) {
+	if s == nil || s.client == nil {
+		return SessionState{}, false, errors.New("auth store not configured")
+	}
+	row, err := s.client.User.Get(ctx, userID)
+	if dao.IsNotFound(err) {
+		return SessionState{}, false, nil
+	}
+	if err != nil {
+		return SessionState{}, false, err
+	}
+	return SessionState{
+		Enabled:             row.Enabled,
+		Role:                row.Role,
+		PasswordFingerprint: passwordFingerprint(row.PasswordHash),
 	}, true, nil
 }
 

@@ -32,6 +32,7 @@ type authUserOptions struct {
 	configPath string
 	username   string
 	password   string
+	role       string
 	dryRun     bool
 	format     string
 	stdout     io.Writer
@@ -72,6 +73,9 @@ func newAuthCommand(runtime *Runtime) *cobra.Command {
 	migrateCmd.AddCommand(newAuthMigrateStatusCommand(runtime))
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newAuthInitUserCommand(runtime))
+	cmd.AddCommand(newAuthSetRoleCommand(runtime))
+	cmd.AddCommand(newAuthSetEnabledCommand(runtime, "disable-user", false))
+	cmd.AddCommand(newAuthSetEnabledCommand(runtime, "enable-user", true))
 	cmd.AddCommand(newAuthResetPasswordCommand(runtime))
 	cmd.AddCommand(newAuthCreateTokenCommand(runtime))
 	return cmd
@@ -132,6 +136,7 @@ func newAuthMigrateStatusCommand(runtime *Runtime) *cobra.Command {
 func newAuthInitUserCommand(runtime *Runtime) *cobra.Command {
 	var username string
 	var password string
+	var role string
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "init-user",
@@ -143,6 +148,7 @@ func newAuthInitUserCommand(runtime *Runtime) *cobra.Command {
 					configPath: runtime.ConfigPath(),
 					username:   username,
 					password:   password,
+					role:       role,
 					dryRun:     dryRun,
 					format:     runtime.OutputFormat(),
 					stdout:     cmd.OutOrStdout(),
@@ -152,7 +158,35 @@ func newAuthInitUserCommand(runtime *Runtime) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
 	cmd.Flags().StringVar(&password, "password", "", "Password")
+	cmd.Flags().StringVar(&role, "role", auth.RoleAdmin, "Role: admin or viewer")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview user creation without changing the database")
+	return cmd
+}
+
+func newAuthSetRoleCommand(runtime *Runtime) *cobra.Command {
+	var username string
+	var role string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "set-role",
+		Short: "Change an auth user's role",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunCode(func() int {
+				return runAuthSetRoleWithOptions(authUserOptions{
+					configPath: runtime.ConfigPath(),
+					username:   username,
+					role:       role,
+					dryRun:     dryRun,
+					format:     runtime.OutputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "", "Username")
+	cmd.Flags().StringVar(&role, "role", "", "Role: admin or viewer")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview the role change without writing the database")
 	return cmd
 }
 
@@ -210,7 +244,7 @@ func newAuthCreateTokenCommand(runtime *Runtime) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
 	cmd.Flags().StringVar(&name, "name", "cli", "Token name")
-	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope")
+	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope: all (default), proxy or mcp")
 	cmd.Flags().DurationVar(&ttl, "ttl", 0, "Token TTL, 0 means no expiration")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview token creation without changing the database")
 	return cmd
@@ -492,6 +526,7 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 			"dry_run":  true,
 			"mutated":  false,
 			"username": opts.username,
+			"role":     opts.role,
 		})
 	}
 	cfg, st, code := openAuthStoreForCommand(opts.configPath)
@@ -499,15 +534,117 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 		return code
 	}
 	defer st.Close()
-	if _, err := st.CreateUser(context.Background(), opts.username, opts.password); err != nil {
+	if _, err := st.CreateUserWithRole(context.Background(), opts.username, opts.password, opts.role); err != nil {
 		slog.Error("Create user failed", "error", err)
 		return 1
 	}
-	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", opts.username)
+	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", opts.username, "role", opts.role)
 	if opts.format == "json" {
 		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.init-user", map[string]any{
 			"mutated":  true,
 			"username": opts.username,
+			"role":     opts.role,
+		}, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+// newAuthSetEnabledCommand creates the disable-user / enable-user pair. It is
+// the operator path behind SessionVerifier: a disabled user's next Monitor
+// request is rejected even though the signed JWT has not expired.
+func newAuthSetEnabledCommand(runtime *Runtime, use string, enabled bool) *cobra.Command {
+	var username string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: strings.ReplaceAll(use, "-", " ") + " an auth user",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return RunCode(func() int {
+				return runAuthSetEnabledWithOptions(authUserOptions{
+					configPath: runtime.ConfigPath(),
+					username:   username,
+					dryRun:     dryRun,
+					format:     runtime.OutputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				}, enabled)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "", "Username")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview the change without writing the database")
+	return cmd
+}
+
+func runAuthSetEnabledWithOptions(opts authUserOptions, enabled bool) int {
+	if strings.TrimSpace(opts.username) == "" {
+		fmt.Fprintln(os.Stderr, "--username is required")
+		return 2
+	}
+	result := map[string]any{
+		"username": opts.username,
+		"enabled":  enabled,
+	}
+	if opts.dryRun {
+		result["dry_run"] = true
+		result["mutated"] = false
+		return writeDryRunResult(opts.stdout, opts.format, "auth.set-enabled", result)
+	}
+	cfg, st, code := openAuthStoreForCommand(opts.configPath)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+	if err := st.SetUserEnabled(context.Background(), opts.username, enabled); err != nil {
+		slog.Error("Set user status failed", "error", err)
+		return 1
+	}
+	slog.Info("User status updated", "driver", cfg.DatabaseDriver(), "username", opts.username, "enabled", enabled)
+	if opts.format == "json" {
+		result["mutated"] = true
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.set-enabled", result, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+func runAuthSetRoleWithOptions(opts authUserOptions) int {
+	if strings.TrimSpace(opts.username) == "" {
+		fmt.Fprintln(os.Stderr, "--username is required")
+		return 2
+	}
+	if strings.TrimSpace(opts.role) == "" {
+		fmt.Fprintln(os.Stderr, "--role is required")
+		return 2
+	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "auth.set-role", map[string]any{
+			"dry_run":  true,
+			"mutated":  false,
+			"username": opts.username,
+			"role":     opts.role,
+		})
+	}
+	cfg, st, code := openAuthStoreForCommand(opts.configPath)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+	if err := st.SetUserRole(context.Background(), opts.username, opts.role); err != nil {
+		slog.Error("Set role failed", "error", err)
+		return 1
+	}
+	slog.Info("User role updated", "driver", cfg.DatabaseDriver(), "username", opts.username, "role", opts.role)
+	if opts.format == "json" {
+		if err := WriteResult(stdoutOrDefault(opts.stdout), opts.format, "auth.set-role", map[string]any{
+			"mutated":  true,
+			"username": opts.username,
+			"role":     opts.role,
 		}, nil); err != nil {
 			slog.Error("Write command result failed", "error", err)
 			return 1
