@@ -143,7 +143,7 @@ Trajecta 自身的事件收件箱：
 
 #### 质量 `/audit`
 
-六个标签页：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
+七个标签页：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康、XIR 结构。带 `?response_id=` 或 `?request_audit_id=` 的深链直接打开「请求链路」，否则默认「发现项」。
 
 **发现项**（`GET /api/findings`）：按类别和级别（`critical`、`high`、`medium`、`low`）过滤，25 条/页；服务端返回过滤后的 `total` 并用 `page`/`limit` 分页，页码输入可直接跳转；每条发现项给出可读的定位（`$.input[4] · #5`）并直接跳到对应 trace 会话中的那一步（`?node=`），另有入口进入该 trace 的审计页与协议页。`severity` 与 `category` 都是大小写不敏感的整值匹配，`all` 表示不过滤（与事件列表 `GET /api/events` 的 `severity`/`category`/`status` 同一套规则）；未识别的取值按字面量匹配、返回空列表，不会退化成"不过滤"。
 
@@ -160,7 +160,9 @@ Trajecta 自身的事件收件箱：
 
 **数据健康**：派生数据管道的健康度——已解析/未解析 trace、解析队列深度与失败的分析任务数，未解析项可跳到按 `observation=unparsed` 过滤的流量列表。数据由实时 socket 推送。这一项原先挤在概览页，但它是解析管道的属性，与「最近一小时的流量」无关，所以它没有时间窗口控件，统计覆盖全部已索引 trace，并只向 `GET /api/overview` 请求 `sections=health`。
 
-整个页面调用的接口只有 `GET /api/findings`、`GET /api/secret-mappings`、`DELETE /api/secret-mappings/{seq}`、`GET`/`POST /api/secret-suppressions`、`DELETE /api/secret-suppressions/{id}`、`GET /api/responses/audit/trace`、`GET /api/analysis/*` 和概览/事件摘要接口；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。server-side function executor 状态面板已移到「系统 → 服务端工具」。
+**XIR 结构**（`GET /api/xir/structure` + `GET /api/detector-plugins`）：协议中立交换 IR 的静态逻辑结构图谱，不关联任何实时流量。结构文档来自 `pkg/xir/schema`：根为交换（Exchange），下分请求、响应、流式事件三个分支，共 43 个节点；每个节点标注 Go 类型与 `pkg/xir/hook` 挂点（18 个挂点词汇），密封块（签名/加密推理等 MustRoundTrip 内容）不承载挂点，结构上不进入任何检测。图形为可平移缩放的节点链接树：节点卡片按分支着色（请求铜色、响应青色、流式紫色），已启用检测插件以彩色圆点标注在其声明的挂点上，入边以流动虚线表示观测关系；点击插件行聚焦其挂点（其余节点弱化），点击节点打开详情（描述、挂点释义、作用插件及启用状态）。右侧插件栏的开关与插件页同步（同一 `PATCH /api/detector-plugins/{id}`，热车道插件停用仍有映射时同样触发 409 强制确认）；工具栏提供展开全部、收起深层、适配视图、缩放与「仅挂点」筛选，图例解释分支色、密封块、圆点与流动虚线。挂点表示插件声明的字段级作用面：审计车道按挂点执行，热车道默认整 body 扫描（`secretmask` 可设 `hot_scan: fields` 收窄），插件栏底部给出该口径说明。非 admin 读者仍可见结构与挂点词汇；插件目录（admin-only）不可读时降级为提示而非错误页。
+
+整个页面调用的接口只有 `GET /api/findings`、`GET /api/secret-mappings`、`DELETE /api/secret-mappings/{seq}`、`GET`/`POST /api/secret-suppressions`、`DELETE /api/secret-suppressions/{id}`、`GET /api/responses/audit/trace`、`GET /api/analysis/*`、`GET /api/xir/structure`、`GET`/`PATCH /api/detector-plugins*` 和概览/事件摘要接口；`GET /api/responses/audit/tool-calls`（工具调用审计）虽已在 management server 注册，但 Monitor UI 从不调用它，属于 API-only 接口。server-side function executor 状态面板已移到「系统 → 服务端工具」。
 
 ### 配置
 

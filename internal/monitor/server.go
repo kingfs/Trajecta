@@ -850,6 +850,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/detector-plugins/stats", monitorAdminRequired(detectorPluginStatsAPIHandler(st, opt.Detectors, opt.SecretMappings, opt.SecretSuppressions), monitorVerifier))
 	mux.HandleFunc("/api/detector-plugins/secretmask/test", monitorAdminRequired(detectorSandboxAPIHandler(opt.SecretSuppressions), monitorVerifier))
 	mux.HandleFunc("/api/detector-plugins/", monitorAdminRequired(detectorPluginDetailAPIHandler(st, opt.Detectors, opt.SecretMappings), monitorVerifier))
+	// The static XIR structure map (质量 → XIR 结构): metadata only, no traffic
+	// and no store reads, so any signed-in role can render it. The plugin
+	// overlay comes from the admin-only detector-plugins catalog above.
+	mux.HandleFunc("/api/xir/structure", monitorAuthRequired(xirStructureAPIHandler(), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	// The system page is admin-only: it exposes process internals, the database

@@ -1,6 +1,7 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import { TabbedPage } from "../components/TabbedPage";
+import { EmptyState } from "../components/common/EmptyState";
 import { FindingsPanel } from "./quality/FindingsPanel";
 import { LineagePanel } from "./quality/LineagePanel";
 import { AnalysisPanel } from "./quality/AnalysisPanel";
@@ -8,6 +9,13 @@ import { DataHealthPanel } from "./quality/DataHealthPanel";
 import { SecretMappingsPanel } from "./quality/SecretMappingsPanel";
 import { SecretSuppressionsPanel } from "./quality/SecretSuppressionsPanel";
 import { useI18n } from "../lib/i18n";
+
+// The structure map is the heaviest quality panel (SVG canvas, pan/zoom, the
+// plugin overlay); it loads on demand like the About and Plugins routes so the
+// findings list every reader opens first stays in the main chunk.
+const XirStructurePanel = React.lazy(() =>
+  import("./quality/XirStructurePanel").then((module) => ({ default: module.XirStructurePanel })),
+);
 
 // The audit page used to be three unrelated things stacked in one scroll: a
 // deterministic findings list, a Responses-lineage lookup tool, and a
@@ -41,6 +49,18 @@ export function QualityPage() {
         // Data health is pipeline state, not a traffic window, so it carries no
         // range control; see DataHealthPanel.
         { id: "health", label: t("quality.tabHealth"), element: <DataHealthPanel /> },
+        // The XIR structure map is static metadata, not a traffic window: the
+        // logical shape of the Exchange IR plus the detection-plugin hook
+        // overlay. It reads no trace data; see XirStructurePanel.
+        {
+          id: "xir",
+          label: t("quality.tabXir"),
+          element: (
+            <Suspense fallback={<EmptyState title={t("xir.loading")} detail={t("xir.loadingDetail")} />}>
+              <XirStructurePanel />
+            </Suspense>
+          ),
+        },
       ]}
     />
   );

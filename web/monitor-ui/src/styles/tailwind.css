@@ -53,6 +53,7 @@
 @import "./components.css" layer(legacy);
 @import "./pages.css" layer(legacy);
 @import "./console.css" layer(legacy);
+@import "./xir.css" layer(legacy);
 
 @source "../**/*.{js,jsx,ts,tsx}";
 @source "../index.html";

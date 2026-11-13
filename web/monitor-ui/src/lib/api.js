@@ -108,6 +108,10 @@ export const apiPaths = {
   // plugin_in_use when a hot-lane plugin still has stand-in mappings.
   detectorPlugins: "/api/detector-plugins",
   detectorPlugin: (pluginID) => `/api/detector-plugins/${encodeURIComponent(pluginID)}`,
+  // The static logical structure of the Exchange IR behind 质量 → XIR 结构.
+  // Metadata only: no traffic and no store reads; the plugin overlay comes
+  // from the detector-plugins catalog above.
+  xirStructure: "/api/xir/structure",
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",
