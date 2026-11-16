@@ -28,31 +28,53 @@ const DerivedRefreshInterval = 2 * time.Second
 // applies the queue before it answers. That is what every test and the
 // server-less CLI commands want, because it makes a read immediately consistent
 // with the write that preceded it.
+// Lifecycle states under derivedLifeMu. Stop before Start is a no-op that must not
+// consume the stop path: a caller may stop a store that was never started and
+// still start and stop it afterwards.
+const (
+	derivedIdle = iota
+	derivedRunning
+	derivedStopped
+)
+
 func (s *Store) StartDerivedRefresh() {
 	if s == nil || s.shared == nil {
 		return
 	}
 	shared := s.shared
-	shared.derivedStartOnce.Do(func() {
+	shared.derivedLifeMu.Lock()
+	defer shared.derivedLifeMu.Unlock()
+	if shared.derivedState == derivedIdle {
 		shared.derivedStop = make(chan struct{})
+		shared.derivedDone = make(chan struct{})
+		shared.derivedState = derivedRunning
 		go shared.runDerivedRefresh(s)
-	})
+	}
 	// Set after the goroutine exists, so a reader can never see async mode with
-	// nobody consuming the queue.
+	// nobody consuming the queue. Stays latched across Stop, as before.
 	shared.derivedAsync.Store(true)
 }
 
-// StopDerivedRefresh ends the background flusher. It is idempotent, and it does
-// not drain: the caller flushes (Close does) so the last writes are not lost.
+// StopDerivedRefresh ends the background flusher and waits for its goroutine
+// to exit, so a flush already in flight cannot drain the queue after Stop
+// returns. It is idempotent, and it does not drain: the caller flushes (Close
+// does) so the last writes are not lost.
 func (s *Store) StopDerivedRefresh() {
 	if s == nil || s.shared == nil {
 		return
 	}
-	s.shared.derivedStopOnce.Do(func() {
-		if s.shared.derivedStop != nil {
-			close(s.shared.derivedStop)
-		}
-	})
+	shared := s.shared
+	shared.derivedLifeMu.Lock()
+	var done chan struct{}
+	if shared.derivedState == derivedRunning {
+		close(shared.derivedStop)
+		shared.derivedState = derivedStopped
+		done = shared.derivedDone
+	}
+	shared.derivedLifeMu.Unlock()
+	if done != nil {
+		<-done
+	}
 }
 
 // signalDerivedRefresh wakes the background flusher. It never blocks: the channel
@@ -89,6 +111,7 @@ func (s *Store) flushDerivedBeforeRead() {
 }
 
 func (shared *storeShared) runDerivedRefresh(s *Store) {
+	defer close(shared.derivedDone)
 	ticker := time.NewTicker(DerivedRefreshInterval)
 	defer ticker.Stop()
 	for {

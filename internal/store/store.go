@@ -117,11 +117,12 @@ type storeShared struct {
 	// for a whole-session rebuild. Until it is set - the default, and what every
 	// test and CLI command keeps - a reader applies the queue itself, so a read is
 	// immediately consistent with the write that preceded it.
-	derivedAsync     atomic.Bool
-	derivedSignal    chan struct{}
-	derivedStop      chan struct{}
-	derivedStartOnce sync.Once
-	derivedStopOnce  sync.Once
+	derivedAsync  atomic.Bool
+	derivedSignal chan struct{}
+	derivedLifeMu sync.Mutex
+	derivedState  int
+	derivedStop   chan struct{}
+	derivedDone   chan struct{}
 	// derivedLimit overrides derivedQueueLimit when positive; tests use it to
 	// observe the bound without writing the default number of recordings.
 	derivedLimit int
