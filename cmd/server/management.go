@@ -54,7 +54,7 @@ func newManagementMuxWithSecretMappings(
 		monitorVerifier = auth.NewSessionVerifier(monitorJWT, authStorePtr)
 	}
 	if cfg.MCP.Enabled {
-		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
+		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr, ParserEngine: cfg.Analysis.ParserEngine})
 		mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			return server
 		}, &mcp.StreamableHTTPOptions{
@@ -80,6 +80,7 @@ func newManagementMuxWithSecretMappings(
 	telemetry := cfg.TelemetrySettings()
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
 		Router:                           rtr,
+		ParserEngine:                     cfg.Analysis.ParserEngine,
 		ChannelService:                   channel.NewService(traceStore),
 		AuthVerifier:                     verifier,
 		MonitorAuthVerifier:              monitorVerifier,

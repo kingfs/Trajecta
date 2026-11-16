@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/kingfs/Trajecta/internal/analyzer"
-	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
 )
@@ -49,7 +48,7 @@ func handleTraceFindingLocate(w http.ResponseWriter, r *http.Request, st *store.
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "finding not found"})
 		return
 	}
-	observation, err := observeworker.ReparseTrace(r.Context(), st, nil, entry.ID)
+	observation, err := reparseTraceWithConfiguredEngine(r.Context(), st, entry.ID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace cassette not found"})

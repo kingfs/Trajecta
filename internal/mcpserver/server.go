@@ -31,6 +31,8 @@ const (
 
 type Options struct {
 	Router *router.Router
+	// ParserEngine mirrors analysis.parser_engine for the MCP reanalysis tools.
+	ParserEngine string
 }
 
 type listTracesInput struct {
@@ -366,15 +368,16 @@ type systemEventSummaryOutput struct {
 }
 
 type serverAPI struct {
-	handler http.Handler
-	store   *store.Store
+	handler      http.Handler
+	store        *store.Store
+	parserEngine string
 }
 
 func New(traceStore *store.Store, opts Options) *mcp.Server {
 	mux := http.NewServeMux()
-	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: opts.Router})
+	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: opts.Router, ParserEngine: opts.ParserEngine})
 
-	api := &serverAPI{handler: mux, store: traceStore}
+	api := &serverAPI{handler: mux, store: traceStore, parserEngine: opts.ParserEngine}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "trajecta",
 		Version: "1.0.0",
@@ -1017,7 +1020,7 @@ func (a *serverAPI) reanalyzeTrace(ctx context.Context, req *mcp.CallToolRequest
 		return nil, nil, err
 	}
 	reparse, scan := defaultReanalysisSteps(in.Reparse, in.Scan)
-	svc := reanalysis.New(a.store, reanalysis.Options{})
+	svc := reanalysis.New(a.store, reanalysis.Options{ParserEngine: a.parserEngine})
 	if in.Async {
 		if in.RepairUsage {
 			job, err := svc.EnqueueTraceRepairUsage(traceID)
@@ -1066,7 +1069,7 @@ func (a *serverAPI) reanalyzeSession(ctx context.Context, req *mcp.CallToolReque
 		return nil, nil, err
 	}
 	reparse, scan := defaultReanalysisSteps(in.Reparse, in.Scan)
-	svc := reanalysis.New(a.store, reanalysis.Options{})
+	svc := reanalysis.New(a.store, reanalysis.Options{ParserEngine: a.parserEngine})
 	if in.Async {
 		job, err := svc.EnqueueSessionReanalyze(sessionID, reanalysis.SessionOptions{Reparse: reparse, Scan: scan})
 		if err != nil {

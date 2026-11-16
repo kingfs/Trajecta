@@ -335,7 +335,7 @@ CLI 入口（`internal/cli/analyze.go`）：`analyze reparse`、`analyze scan`�
 
 `analysis.parser_engine` 选择把 cassette 解析成持久化 observation IR 的实现：`observe`（默认，`pkg/observe` 的四协议解析器 + entry parser）或 `xir`（`internal/xirobserve`：XIR codec 解码 + 投影到同一份 `observe.TraceObservation` 形状）。
 
-- `xir` 当前覆盖非流式四协议（chat/responses/messages/gemini）；流式响应与 entry exchange 返回 `ErrUnsupported`，解析 worker 自动回退 observe。切换默认前必须先通过 findings / tools / usage / 资源对账（`internal/xirobserve/parity_test.go`）。
+- `xir` 覆盖四协议的非流式与流式响应（SSE 折叠成对应协议的完整响应体后交给 codec）；entry exchange 没有 xir codec，返回 `ErrUnsupported` 由 observe 承接。切换默认前必须先通过 findings / tools / usage / 资源对账（`internal/xirobserve/parity_test.go`）。
 - 两种引擎写出的 observation 存储形状一致，Monitor/MCP/检测器不需要分支；`parser` 字段记录实际引擎（`xir` 或 `openai`/`anthropic`/`gemini`/`entry`）。
 - 默认仍为 `observe`；该开关只影响新解析/重分析，不改动已存数据，回退只需改配置并重启。
-- 生效范围：parse worker、reanalysis worker 与 `trajecta analyze` 读取该配置；Monitor/MCP 的按需 locate/reanalyze 仍走 observe，直到下一版切换默认时一并接线。
+- 生效范围：parse worker、reanalysis worker、`trajecta analyze` 以及 Monitor/MCP 的按需 locate/reanalyze 都读取该配置。

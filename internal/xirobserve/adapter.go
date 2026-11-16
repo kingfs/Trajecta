@@ -4,11 +4,11 @@
 // consumers stay unchanged, while the semantic decode comes from the XIR
 // codecs instead of the per-protocol observe parsers.
 //
-// Scope of this stage: non-streaming model exchanges for all four wire
-// protocols. Streaming responses and client entry exchanges return
-// ErrUnsupported so the caller can fall back to pkg/observe; those are the
-// remaining gaps before the engine can become the default. The caller chooses
-// the engine; this package never changes a default by itself.
+// Scope: non-streaming and streamed model exchanges for all four wire
+// protocols. Streamed responses are folded into the protocol's non-streaming
+// wire shape and decoded by the same codec. Client entry exchanges have no xir
+// codec and return ErrUnsupported so the caller falls back to pkg/observe. The
+// caller chooses the engine; this package never changes a default by itself.
 package xirobserve
 
 import (
@@ -69,9 +69,19 @@ func Parse(ctx context.Context, input observe.ParseInput) (observe.TraceObservat
 	obs.Model = request.Model
 	builder.request(request, operation)
 
+	streaming := input.IsStream || input.Header.Layout.IsStream || looksLikeSSE(input.ResponseBody)
 	var response *xir.Response
 	if len(strings.TrimSpace(string(input.ResponseBody))) > 0 {
-		respDoc, err := xir.ParseDocument(protocol, operation, input.ResponseBody)
+		wireBody := input.ResponseBody
+		var streamSection observe.ObservationStream
+		if streaming {
+			wireBody, streamSection, err = assembleStream(protocol, input.ResponseBody)
+			if err != nil {
+				return obs, fmt.Errorf("xirobserve: assemble %s stream: %w", protocol, err)
+			}
+			builder.obs.Stream = streamSection
+		}
+		respDoc, err := xir.ParseDocument(protocol, operation, wireBody)
 		if err != nil {
 			return obs, fmt.Errorf("xirobserve: parse %s response: %w", protocol, err)
 		}
@@ -98,14 +108,12 @@ func Parse(ctx context.Context, input observe.ParseInput) (observe.TraceObservat
 	return obs, nil
 }
 
-// unsupported reports the exchanges left for the fallback engine in this
-// stage: client entry exchanges (no xir codec) and any streamed response
-// (XIR stream assembly currently exists for chat only).
+// unsupported reports the exchanges left for the fallback engine: client entry
+// exchanges have no xir codec (they are a harness envelope, not a model
+// protocol), and operations outside the four model protocols are unsupported.
+// Streamed model responses are assembled from SSE for all four protocols.
 func unsupported(input observe.ParseInput) bool {
 	if input.ExchangeKind == "entry" || input.Header.Meta.ExchangeKind == "entry" {
-		return true
-	}
-	if input.IsStream || input.Header.Layout.IsStream || looksLikeSSE(input.ResponseBody) {
 		return true
 	}
 	return false

@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
 )
@@ -51,7 +50,7 @@ func handleTraceMaskLocate(w http.ResponseWriter, r *http.Request, st *store.Sto
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential mask original value is unavailable"})
 		return
 	}
-	observation, err := observeworker.ReparseTrace(r.Context(), st, nil, entry.ID)
+	observation, err := reparseTraceWithConfiguredEngine(r.Context(), st, entry.ID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace cassette not found"})

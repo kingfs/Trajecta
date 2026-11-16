@@ -8,10 +8,10 @@ analysis:
   auto_scan_findings: true
   # Observation parser: observe (per-protocol parsers, default) or xir (the
   # Exchange IR projection). The XIR engine currently falls back to observe for
-  # streamed responses and client entry exchanges; it becomes the default once
-  # that coverage and the findings/resources parity gate pass. The setting is
-  # read by the parse worker, the reanalysis workers and `trajecta analyze`;
-  # Monitor/MCP on-demand locate/reanalysis still use observe until the switch.
+  # streamed responses are assembled for all four protocols and client entry
+  # exchanges; it becomes the default once the full findings/resources parity
+  # gate passes. The setting is read by the parse/reanalysis workers,
+  # `trajecta analyze`, and the Monitor/MCP on-demand reparse paths.
   parser_engine: observe
 
 monitor:

@@ -118,7 +118,7 @@ func handleSessionReanalyze(w http.ResponseWriter, r *http.Request, st *store.St
 		Scan:    req.Scan,
 	}
 	mode := requestMode(req.Mode, "async")
-	svc := reanalysis.New(st, reanalysis.Options{})
+	svc := reanalysis.New(st, reanalysis.Options{ParserEngine: currentObservationParserEngine()})
 	if mode == "async" {
 		job, err := svc.EnqueueSessionReanalyze(sessionID, opts)
 		if err != nil {
@@ -213,7 +213,7 @@ func analysisBatchReanalyzeAPIHandler(st *store.Store) http.HandlerFunc {
 			Scan:        req.Scan,
 		}
 		mode := requestMode(req.Mode, "async")
-		svc := reanalysis.New(st, reanalysis.Options{})
+		svc := reanalysis.New(st, reanalysis.Options{ParserEngine: currentObservationParserEngine()})
 		switch mode {
 		case "async":
 			job, err := svc.EnqueueBatchReanalyze(opts)
@@ -303,7 +303,7 @@ func runTraceReanalysis(
 	enqueue func(*reanalysis.Service) (store.AnalysisJobRecord, error),
 	runSync func(*reanalysis.Service) (reanalysis.Result, error),
 ) {
-	svc := reanalysis.New(st, reanalysis.Options{})
+	svc := reanalysis.New(st, reanalysis.Options{ParserEngine: currentObservationParserEngine()})
 	switch mode {
 	case "async":
 		job, err := enqueue(svc)

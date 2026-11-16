@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	auditpkg "github.com/kingfs/Trajecta/internal/audit"
@@ -438,7 +439,11 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router                           *router.Router
+	Router *router.Router
+	// ParserEngine selects the observation parser used by the on-demand
+	// reparse/locate paths ("observe" default, "xir" opt-in). It mirrors
+	// analysis.parser_engine; empty means observe.
+	ParserEngine                     string
 	ChannelService                   *channel.Service
 	AuthVerifier                     auth.TokenVerifier
 	MonitorAuthVerifier              auth.TokenVerifier
@@ -474,6 +479,33 @@ type RouteOptions struct {
 	// renders. A zero value is a valid, quiet answer - a version-less dev build
 	// with the release check and the install ping off.
 	About AboutOptions
+}
+
+// observationParserEngine is the process-wide parser engine for on-demand
+// reparse/locate paths. It is set once by RegisterRoutes from
+// analysis.parser_engine; a zero value means observe.
+var observationParserEngine atomic.Value
+
+func setObservationParserEngine(engine string) {
+	if strings.EqualFold(strings.TrimSpace(engine), "xir") {
+		observationParserEngine.Store("xir")
+		return
+	}
+	observationParserEngine.Store("observe")
+}
+
+func currentObservationParserEngine() string {
+	if value, ok := observationParserEngine.Load().(string); ok && value != "" {
+		return value
+	}
+	return "observe"
+}
+
+// reparseTraceWithConfiguredEngine is the shared on-demand reparse used by the
+// trace detail, locate and resource handlers, so they agree with the stored
+// observation instead of always re-parsing with observe.
+func reparseTraceWithConfiguredEngine(ctx context.Context, st *store.Store, traceID string) (observe.TraceObservation, error) {
+	return observeworker.ReparseTraceWithEngine(ctx, st, nil, currentObservationParserEngine(), traceID)
 }
 
 // SecretMappingAdmin is the live administrative surface of the proxy's secret
@@ -736,6 +768,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		opt = opts[0]
 	}
 	SetDisplayLocation(opt.Location)
+	setObservationParserEngine(opt.ParserEngine)
 	monitorVerifier := opt.MonitorAuthVerifier
 	if monitorVerifier == nil {
 		monitorVerifier = opt.AuthVerifier
@@ -1958,7 +1991,7 @@ func requestMode(mode string, fallback string) string {
 // the parse that the worker recorded; a trace that was never parsed falls back to
 // a live parse instead of the old "run analyze reparse first" dead end.
 func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
-	observation, err := observeworker.ReparseTrace(r.Context(), st, nil, entry.ID)
+	observation, err := reparseTraceWithConfiguredEngine(r.Context(), st, entry.ID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace cassette not found"})

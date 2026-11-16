@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
@@ -168,7 +167,7 @@ func handleTraceResourceLocate(w http.ResponseWriter, r *http.Request, st *store
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value is required"})
 		return
 	}
-	observation, err := observeworker.ReparseTrace(r.Context(), st, nil, entry.ID)
+	observation, err := reparseTraceWithConfiguredEngine(r.Context(), st, entry.ID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace cassette not found"})

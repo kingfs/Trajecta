@@ -278,14 +278,6 @@ func TestUnsupportedExchangesFallBack(t *testing.T) {
 		input observe.ParseInput
 	}{
 		{
-			name: "streamed response",
-			input: func() observe.ParseInput {
-				input := inputFor(t, "chat", request, []byte("data: {\"choices\":[]}\n\n"))
-				input.IsStream = true
-				return input
-			}(),
-		},
-		{
 			name: "entry exchange",
 			input: func() observe.ParseInput {
 				input := inputFor(t, "chat", request, response)
@@ -310,4 +302,83 @@ func TestUnsupportedExchangesFallBack(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParityStreamingModelExchanges pins the SSE assembly path: each protocol's
+// stream is folded into its non-streaming wire shape, decoded by the same codec
+// and compared with the observe stream parser.
+func TestParityStreamingModelExchanges(t *testing.T) {
+	secret := benchcorpus.SensitiveValues()[0]
+	cases := []struct {
+		name     string
+		protocol string
+		sse      string
+	}{
+		{"chat", "chat", "data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-bench\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-bench\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello \"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-bench\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OPENAI_API_KEY=" + secret + "\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-1\",\"model\":\"gpt-5-bench\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n" +
+			"data: [DONE]\n\n"},
+		{"responses", "responses", "event: response.output_text.delta\n" +
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello streaming\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_s\",\"object\":\"response\",\"created_at\":1,\"status\":\"completed\",\"model\":\"gpt-5-bench\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello streaming\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n"},
+		{"messages", "messages", "event: message_start\n" +
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_s\",\"model\":\"gpt-5-bench\",\"usage\":{\"input_tokens\":10}}}\n\n" +
+			"event: content_block_start\n" +
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+			"event: content_block_delta\n" +
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello streaming\"}}\n\n" +
+			"event: message_delta\n" +
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n" +
+			"event: message_stop\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"},
+		{"gemini", "gemini", "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello \"}]}}],\"modelVersion\":\"gemini-bench\"}\n\n" +
+			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"streaming\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}\n\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := inputFor(t, tc.protocol, benchcorpus.Encode(benchcorpusProtocol(tc.protocol), benchcorpus.Agent(benchcorpus.ShortBytes, benchcorpus.Options{Secrets: true})), []byte(tc.sse))
+			input.IsStream = true
+			legacy, next := parseBoth(t, input)
+			if next.Parser != xirobserve.ParserName {
+				t.Fatalf("parser = %q", next.Parser)
+			}
+			if !strings.Contains(next.Stream.AccumulatedText, "hello") {
+				t.Fatalf("xir accumulated text = %q", next.Stream.AccumulatedText)
+			}
+			var nextTexts []string
+			for _, node := range observe.TraceNodes(next) {
+				if text := strings.TrimSpace(node.Text); text != "" {
+					nextTexts = append(nextTexts, text)
+				}
+				if args := strings.TrimSpace(observe.NodeArguments(node)); args != "" {
+					nextTexts = append(nextTexts, args)
+				}
+			}
+			nextJoined := strings.Join(nextTexts, "\n")
+			for _, text := range contentTexts(legacy) {
+				if !strings.Contains(nextJoined, text) {
+					t.Fatalf("xir streaming observation lost text %.60q", text)
+				}
+			}
+			if strings.Join(findingSignature(t, legacy), "\n") != strings.Join(findingSignature(t, next), "\n") {
+				t.Fatalf("streaming findings differ\nobserve=%v\nxir=%v", findingSignature(t, legacy), findingSignature(t, next))
+			}
+		})
+	}
+}
+
+func benchcorpusProtocol(name string) xir.Protocol {
+	switch name {
+	case "chat":
+		return xir.ProtocolChatCompletions
+	case "responses":
+		return xir.ProtocolResponses
+	case "messages":
+		return xir.ProtocolMessages
+	case "gemini":
+		return xir.ProtocolGemini
+	}
+	return xir.ProtocolChatCompletions
 }

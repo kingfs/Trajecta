@@ -6,10 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
-## [3.6.0] - 2026-11-16
+## [3.5.1] - 2026-11-16
 
 ### Added
-- Observation parser engine selection: `analysis.parser_engine` chooses `observe` (default) or `xir`. The new `internal/xirobserve` projects the XIR-decoded request/response onto the same stored `observe.TraceObservation` shape, so the Monitor, detectors, resources and session analysis need no branch; streamed responses and client entry exchanges currently fall back to observe. Findings/tools/usage parity over all four protocols is pinned by `internal/xirobserve/parity_test.go`; the default stays observe until the remaining streaming/entry coverage lands in the next release.
+- Observation parser engine selection: `analysis.parser_engine` chooses `observe` (default) or `xir`. The new `internal/xirobserve` projects the XIR-decoded request/response onto the same stored `observe.TraceObservation` shape, so the Monitor, detectors, resources and session analysis need no branch. It covers non-streaming and streamed exchanges for all four protocols (SSE is folded into the protocol's complete wire body and decoded by the same codec); client entry exchanges have no XIR codec and fall back to observe. The setting is read by the parse/reanalysis workers, `trajecta analyze`, and the Monitor/MCP on-demand reparse paths. Findings/tools/usage/content parity and the fallback are pinned by `internal/xirobserve/parity_test.go`; the default stays observe until the full findings/resources parity gate passes in the next release.
 - `analysis.parser_engine` is also exposed as `TRAJECTA_ANALYSIS_PARSER_ENGINE` and validated at load time.
 
 ### Changed
