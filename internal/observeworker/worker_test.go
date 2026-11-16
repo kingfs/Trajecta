@@ -15,9 +15,9 @@ import (
 
 func TestWorkerRunOnceParsesQueuedJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -50,9 +50,9 @@ func TestWorkerRunOnceParsesQueuedJob(t *testing.T) {
 
 func TestWorkerRunOnceParsesEntryExchangeWithEntryObservation(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -85,9 +85,9 @@ func TestWorkerRunOnceParsesEntryExchangeWithEntryObservation(t *testing.T) {
 
 func TestWorkerRunOnceRecordsPlainTextProxyErrorAsObservation(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -134,9 +134,9 @@ func TestWorkerRunOnceRecordsPlainTextProxyErrorAsObservation(t *testing.T) {
 
 func TestWorkerRunOnceParsesAnthropicQueuedJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -159,9 +159,9 @@ func TestWorkerRunOnceParsesAnthropicQueuedJob(t *testing.T) {
 
 func TestWorkerRunOnceParsesGeminiQueuedJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -220,8 +220,8 @@ func writeIndexedPlainTextProxyErrorTrace(t *testing.T, st *store.Store, dir str
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -268,8 +268,8 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -322,8 +322,8 @@ func writeIndexedEntryTrace(t *testing.T, st *store.Store, dir string) string {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -370,8 +370,8 @@ func writeIndexedGeminiTrace(t *testing.T, st *store.Store, dir string) string {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -418,8 +418,8 @@ func writeIndexedAnthropicTrace(t *testing.T, st *store.Store, dir string) strin
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -467,8 +467,8 @@ func writeIndexedEmbeddingsTrace(t *testing.T, st *store.Store, dir string) stri
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {
@@ -489,9 +489,9 @@ func writeIndexedEmbeddingsTrace(t *testing.T, st *store.Store, dir string) stri
 // reanalysis completes.
 func TestWorkerRecordsExchangeWithoutAParserAsUnsupported(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -555,9 +555,9 @@ func reparseForTest(t *testing.T, st *store.Store, traceID string) observe.Trace
 // the database, with no analyze scan in the path.
 func TestWorkerIndexesTraceResources(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -601,8 +601,8 @@ func TestWorkerIndexesTraceResources(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(requestID)
 	if err != nil {
@@ -637,9 +637,9 @@ func TestWorkerIndexesTraceResources(t *testing.T) {
 // old on-demand behaviour.
 func TestWorkerAutoScanPersistsFindings(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -663,7 +663,7 @@ func TestWorkerAutoScanPersistsFindings(t *testing.T) {
 	}
 
 	// A second trace with AutoScan off must not write findings.
-	otherStore, err := store.New(t.TempDir())
+	otherStore, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,8 +716,8 @@ func writeIndexedPIITraceNamed(t *testing.T, st *store.Store, dir, name string) 
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(header.Meta.RequestID)
 	if err != nil {

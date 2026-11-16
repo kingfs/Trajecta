@@ -64,20 +64,6 @@ var AllProtocols = []Protocol{
 	ProtocolGemini,
 }
 
-// ParseProtocol normalizes a protocol name. "" is an error: unlike
-// modelprobe, conversion never guesses.
-func ParseProtocol(value string) (Protocol, error) {
-	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "-", "_")
-	switch Protocol(normalized) {
-	case ProtocolChatCompletions:
-		return ProtocolChatCompletions, nil
-	case ProtocolResponses, ProtocolMessages, ProtocolGemini, ProtocolGenerateContent:
-		return canonical(Protocol(normalized)), nil
-	default:
-		return "", fmt.Errorf("protocolconvert: unknown protocol %q", strings.TrimSpace(value))
-	}
-}
-
 func canonical(p Protocol) Protocol {
 	if p == ProtocolGenerateContent {
 		return ProtocolGemini

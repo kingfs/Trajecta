@@ -50,9 +50,9 @@ func TestSecretMaskingFixtures(t *testing.T) {
 // TestHandlerMasksCredentialsIRScopeMessages below.
 func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -77,9 +77,9 @@ func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	rt, err := detector.NewRuntime(context.Background(), st)
 	if err != nil {
@@ -131,9 +131,9 @@ func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 // original bytes.
 func TestHandlerMasksCredentialsIRScopeMessages(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -163,9 +163,9 @@ func TestHandlerMasksCredentialsIRScopeMessages(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	rt, err := detector.NewRuntime(context.Background(), st)
 	if err != nil {
@@ -239,9 +239,9 @@ func secretMaskingBody() string {
 // length.
 func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -268,9 +268,9 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -366,9 +366,9 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 // config.Config has the zero value and the proxy treats that as off.
 func TestHandlerLeavesBodiesAloneWhenMaskingIsOff(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -385,9 +385,9 @@ func TestHandlerLeavesBodiesAloneWhenMaskingIsOff(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -443,9 +443,9 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -488,9 +488,9 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -525,9 +525,9 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 // restored.
 func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -572,9 +572,9 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -726,9 +726,9 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 	for _, field := range []string{"content", "tool_calls"} {
 		t.Run(field, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -767,9 +767,9 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -817,9 +817,9 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 // outcomes would swap - which is the compatibility break this pins down.
 func TestMaskedCassetteStillReplays(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -840,9 +840,9 @@ func TestMaskedCassetteStillReplays(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -904,9 +904,9 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 	requestBody := `{"model":"gpt-5","messages":[{"role":"user","content":"我的身份证号是 ` + id + `，请帮我核对。"}]}`
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -928,9 +928,9 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1049,9 +1049,9 @@ func TestHandlerSkipsOpaqueEncryptedContent(t *testing.T) {
 	)
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1077,9 +1077,9 @@ func TestHandlerSkipsOpaqueEncryptedContent(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1210,9 +1210,9 @@ func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
 	requestBody := `{"model":"gpt-5","messages":[{"role":"user","content":"` + escapedKey + `"}]}`
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1250,9 +1250,9 @@ func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1417,9 +1417,9 @@ func TestHandlerLeavesOpaqueProtocolValuesOnTheWire(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -1440,9 +1440,9 @@ func TestHandlerLeavesOpaqueProtocolValuesOnTheWire(t *testing.T) {
 				tc.configure(cfg)
 			}
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()

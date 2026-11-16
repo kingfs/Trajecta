@@ -284,11 +284,6 @@ func (m *Manager) Transport() *http.Transport {
 	return m.transport
 }
 
-// Client returns a client with the manager's transport and the given timeout.
-func (m *Manager) Client(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: m.Transport()}
-}
-
 // ClientWith returns a client that behaves like base (timeout, redirects, jar)
 // but whose transport applies resolver. It is how a channel-level policy reaches
 // callers that already receive an *http.Client, such as the provider probes and

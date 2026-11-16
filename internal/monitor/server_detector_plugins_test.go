@@ -23,8 +23,8 @@ func TestDetectorPluginsAPIDefaults(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Items) != len(detector.IDs()) {
-		t.Fatalf("items = %d, want %d", len(resp.Items), len(detector.IDs()))
+	if len(resp.Items) != len(detector.Plugins()) {
+		t.Fatalf("items = %d, want %d", len(resp.Items), len(detector.Plugins()))
 	}
 	byID := map[string]detectorPluginItem{}
 	for _, item := range resp.Items {

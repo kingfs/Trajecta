@@ -59,25 +59,6 @@ func ContainsSpan(spans []Span, sp Span) bool {
 	return false
 }
 
-// MergeMatches returns the union of a and b, deduplicated by (start, end,
-// rule) and sorted by start, then end, then rule. For an identical triple the
-// first match in a wins over the one in b.
-//
-// MergeMatches neither validates spans against a buffer nor clamps
-// confidence; it is the ordering half of Scan for callers that combine
-// already-validated sets. The input slices are not modified and the result
-// does not alias their backing arrays.
-func MergeMatches(a, b []Match) []Match {
-	if len(a) == 0 && len(b) == 0 {
-		return nil
-	}
-	out := make([]Match, 0, len(a)+len(b))
-	out = append(out, a...)
-	out = append(out, b...)
-	sortMatches(out)
-	return dedupeMatches(out)
-}
-
 // sortMatches orders matches by start, end and rule. It is stable so that
 // registration order breaks a tie between two matches with the same triple.
 func sortMatches(matches []Match) {

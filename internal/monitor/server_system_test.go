@@ -40,9 +40,9 @@ func systemTestRequest(mux *http.ServeMux, path string, token string) *httptest.
 func TestSystemAPIRoutesAreAdminOnly(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -71,9 +71,9 @@ func TestSystemAPIRoutesAreAdminOnly(t *testing.T) {
 func TestSystemRuntimeAPIReportsProcessFacts(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -130,9 +130,9 @@ func TestSystemRuntimeAPIReportsProcessFacts(t *testing.T) {
 func TestSystemDatabaseAPIReportsUnsupportedOnSQLite(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -176,9 +176,9 @@ func TestSystemSlowQueriesAPIReportsTheDisabledCollector(t *testing.T) {
 		store.ResetSlowQueries()
 	})
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

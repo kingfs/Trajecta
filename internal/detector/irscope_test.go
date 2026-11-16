@@ -25,9 +25,9 @@ func spanHas(body []byte, spans []detect.Span, needle string) bool {
 
 func mustScope(t *testing.T, protocol, body string, opts ScopeOptions) (RequestScope, []byte) {
 	t.Helper()
-	scope, ok := ParseRequestScope(protocol, []byte(body), opts)
-	if !ok {
-		t.Fatalf("ParseRequestScope(%q) = false, want a scope", protocol)
+	scope, outcome := ParseRequestScopeWithOutcome(protocol, []byte(body), opts)
+	if outcome != ScopeProjected {
+		t.Fatalf("ParseRequestScopeWithOutcome(%q) = %q, want projected", protocol, outcome)
 	}
 	return scope, []byte(body)
 }
@@ -36,8 +36,8 @@ func mustScope(t *testing.T, protocol, body string, opts ScopeOptions) (RequestS
 // body-scoped hot path must not pay for the projection at all.
 func TestScopeChatShortCircuits(t *testing.T) {
 	body := `{"model":"gpt-5","messages":[{"role":"user","content":"key ` + corpusAWSKey + `"}]}`
-	if _, ok := ParseRequestScope("chat_completions", []byte(body), ScopeOptions{}); ok {
-		t.Fatal("chat_completions must not be projected when no plugin needs fields")
+	if _, outcome := ParseRequestScopeWithOutcome("chat_completions", []byte(body), ScopeOptions{}); outcome != ScopeNoMarker {
+		t.Fatalf("chat_completions outcome = %q, want no_marker: it must not be projected when no plugin needs fields", outcome)
 	}
 }
 
@@ -194,30 +194,32 @@ func TestScopeStructuredToolResultPoint(t *testing.T) {
 
 func TestScopePrefilter(t *testing.T) {
 	plain := `{"model":"claude","max_tokens":8,"messages":[{"role":"user","content":"hello"}]}`
-	if _, ok := ParseRequestScope("messages", []byte(plain), ScopeOptions{}); ok {
-		t.Fatal("a body with no sealed marker must not be projected for the body-only hot path")
+	if _, outcome := ParseRequestScopeWithOutcome("messages", []byte(plain), ScopeOptions{}); outcome != ScopeNoMarker {
+		t.Fatalf("outcome = %q, want no_marker: a body with no sealed marker must not be projected for the body-only hot path", outcome)
 	}
-	if _, ok := ParseRequestScope("messages", []byte(plain), ScopeOptions{RequireFields: true}); !ok {
-		t.Fatal("a field-scoped plugin must force the projection")
+	if _, outcome := ParseRequestScopeWithOutcome("messages", []byte(plain), ScopeOptions{RequireFields: true}); outcome != ScopeProjected {
+		t.Fatalf("outcome = %q, want projected: a field-scoped plugin must force the projection", outcome)
 	}
 }
 
 func TestScopeMaxBytes(t *testing.T) {
 	body := `{"model":"claude","max_tokens":8,"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"` + corpusAWSKey + `"}]}]}`
-	if _, ok := ParseRequestScope("messages", []byte(body), ScopeOptions{MaxBytes: 10}); ok {
-		t.Fatal("a body over MaxBytes must fall back")
+	if _, outcome := ParseRequestScopeWithOutcome("messages", []byte(body), ScopeOptions{MaxBytes: 10}); outcome != ScopeOverSize {
+		t.Fatalf("outcome = %q, want over_size: a body over MaxBytes must fall back", outcome)
 	}
-	if _, ok := ParseRequestScope("messages", []byte(body), ScopeOptions{MaxBytes: -1}); !ok {
-		t.Fatal("a negative MaxBytes disables the bound")
+	if _, outcome := ParseRequestScopeWithOutcome("messages", []byte(body), ScopeOptions{MaxBytes: -1}); outcome != ScopeProjected {
+		t.Fatalf("outcome = %q, want projected: a negative MaxBytes disables the bound", outcome)
 	}
 }
 
 func TestScopeUnknownProtocolAndMalformed(t *testing.T) {
-	if _, ok := ParseRequestScope("unknown", []byte(`{}`), ScopeOptions{}); ok {
-		t.Fatal("unknown protocol must fall back")
+	if _, outcome := ParseRequestScopeWithOutcome("unknown", []byte(`{}`), ScopeOptions{}); outcome != ScopeUnknownProtocol {
+		t.Fatalf("outcome = %q, want unknown_protocol: unknown protocol must fall back", outcome)
 	}
-	if _, ok := ParseRequestScope("messages", []byte(`not json`), ScopeOptions{}); ok {
-		t.Fatal("malformed body must fall back")
+	// RequireFields forces the projection past the marker prefilter so the
+	// malformed body actually reaches the parser.
+	if _, outcome := ParseRequestScopeWithOutcome("messages", []byte(`not json`), ScopeOptions{RequireFields: true}); outcome != ScopeParseFailed {
+		t.Fatalf("outcome = %q, want parse_failed: malformed body must fall back", outcome)
 	}
 }
 
@@ -261,9 +263,9 @@ func TestScopedCollectionKeepsBuiltinCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := rt.Snapshot()
-	scope, ok := ParseRequestScope("chat_completions", body, ScopeOptions{RequireFields: true})
-	if !ok {
-		t.Fatal("scope required")
+	scope, outcome := ParseRequestScopeWithOutcome("chat_completions", body, ScopeOptions{RequireFields: true})
+	if outcome != ScopeProjected {
+		t.Fatalf("scope required, outcome = %q", outcome)
 	}
 	cands := snap.collectCandidatesScoped(body, scope)
 	if len(cands) != 3 {

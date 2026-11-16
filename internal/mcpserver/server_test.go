@@ -109,35 +109,12 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("WriteFile(credential) error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
-	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
-		ID:                "openai-primary",
-		BaseURL:           "https://api.openai.com/v1",
-		ProviderPreset:    "openai",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          100,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
-	if err := st.ReplaceUpstreamModels("openai-primary", []store.UpstreamModelRecord{{
-		UpstreamID: "openai-primary",
-		Model:      "gpt-5.1-codex",
-		Source:     "static",
-		SeenAt:     time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
-	}}); err != nil {
-		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
-	}
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
@@ -627,9 +604,12 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool(list_upstreams) error = %v", err)
 	}
+	// Upstreams are served only from the live router snapshot; the retired
+	// upstream_targets/upstream_models projections are never read. This test
+	// server has no router, so the list is an empty array (not null).
 	upstreamItems := upstreams.StructuredContent.(map[string]any)["items"].([]any)
-	if len(upstreamItems) != 1 {
-		t.Fatalf("len(list_upstreams.items) = %d, want 1", len(upstreamItems))
+	if len(upstreamItems) != 0 {
+		t.Fatalf("len(list_upstreams.items) = %d, want 0 without a router", len(upstreamItems))
 	}
 
 	failures, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -801,9 +781,9 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 
 func TestResponsesAuditToolCallsTool(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1212,9 +1192,9 @@ func TestListTracesToolPassesHarnessFilter(t *testing.T) {
 		}
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {

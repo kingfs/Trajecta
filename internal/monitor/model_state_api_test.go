@@ -12,7 +12,7 @@ import (
 )
 
 func TestChannelModelsAPICarriesSyncState(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestChannelModelsAPICarriesSyncState(t *testing.T) {
 }
 
 func TestProviderDetailModelUsageCarriesSyncState(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

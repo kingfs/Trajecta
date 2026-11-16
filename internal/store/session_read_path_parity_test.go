@@ -22,9 +22,9 @@ import (
 // than that has to stay on the log path.
 func TestSessionFiltersAgreeAcrossReadPaths(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

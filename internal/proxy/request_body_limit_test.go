@@ -9,7 +9,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // newBodyLimitHandler builds a handler whose configured request-body limit is small
@@ -19,9 +18,9 @@ func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int, string) {
 	t.Helper()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -60,9 +59,9 @@ func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int, string) {
 	cfg.Debug.MaskKey = true
 	cfg.ResponsesServer.MaxRequestBodyBytes = limit
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	return handler, &received, outputDir
 }

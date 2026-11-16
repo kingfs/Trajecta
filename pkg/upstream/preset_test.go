@@ -2,7 +2,8 @@ package upstream
 
 import (
 	"net/url"
-	"sort"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kingfs/Trajecta/pkg/xir"
@@ -209,20 +210,51 @@ func TestLookupPresetAliasesAndCopies(t *testing.T) {
 	}
 }
 
-func TestPresetIDsSorted(t *testing.T) {
-	ids := PresetIDs()
-	if len(ids) < 20 {
-		t.Fatalf("PresetIDs() returned %d IDs", len(ids))
+// TestPresetProtocolSurfaces keeps the per-preset protocol coverage the old
+// Resolve-based tests asserted: the protocols a preset serves are exactly the
+// endpoints its catalog entry declares, in canonical order.
+func TestPresetProtocolSurfaces(t *testing.T) {
+	tests := []struct {
+		preset    string
+		protocols []xir.Protocol
+	}{
+		{"openai", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"anthropic", []xir.Protocol{xir.ProtocolMessages}},
+		{"deepseek", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"openrouter", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"google", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolGemini}},
+		{"vertex", []xir.Protocol{xir.ProtocolGemini}},
+		{"ollama", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"vllm", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"alibaba", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"alibaba_intl", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"moonshot", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"zhipu", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
+		{"mistral", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses}},
+		{"together", []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages}},
 	}
-	if !sort.StringsAreSorted(ids) {
-		t.Errorf("PresetIDs() is not sorted: %v", ids)
-	}
-	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		if seen[id] {
-			t.Errorf("PresetIDs() contains duplicate %q", id)
+	canonical := []xir.Protocol{xir.ProtocolChatCompletions, xir.ProtocolResponses, xir.ProtocolMessages, xir.ProtocolGemini}
+	for _, test := range tests {
+		preset, ok := LookupPreset(test.preset)
+		if !ok {
+			t.Fatalf("LookupPreset(%q) failed", test.preset)
 		}
-		seen[id] = true
+		var got []xir.Protocol
+		for _, protocol := range canonical {
+			if strings.TrimSpace(preset.Endpoints[protocol]) != "" {
+				got = append(got, protocol)
+			}
+		}
+		if !slices.Equal(got, test.protocols) {
+			t.Errorf("preset %q protocols = %v, want %v", test.preset, got, test.protocols)
+		}
+	}
+	openai, _ := LookupPreset("openai")
+	if openai.Models.ListPath != "/models" || openai.Models.Protocol != xir.ProtocolChatCompletions {
+		t.Errorf("openai models = %+v", openai.Models)
+	}
+	if openai.Kind != KindVendor {
+		t.Errorf("openai kind = %q", openai.Kind)
 	}
 }
 

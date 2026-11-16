@@ -115,9 +115,9 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -141,9 +141,9 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 
 			proxyServer := httptest.NewServer(handler)
@@ -210,7 +210,7 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 				t.Fatalf("waitForRecentEntries() error = %v", err)
 			}
 			if len(entries) != 1 {
-				t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+				t.Fatalf("waitForRecentEntries() len = %d, want 1", len(entries))
 			}
 			if entries[0].Header.Usage.TotalTokens != tt.wantTotalTokens {
 				t.Fatalf("indexed total tokens = %d, want %d", entries[0].Header.Usage.TotalTokens, tt.wantTotalTokens)
@@ -221,9 +221,9 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 
 func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -245,9 +245,9 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -317,9 +317,9 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -340,9 +340,9 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -389,9 +389,9 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 
 func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -427,9 +427,9 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -472,7 +472,7 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 		t.Fatalf("waitForRecentEntries() error = %v", err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+		t.Fatalf("waitForRecentEntries() len = %d, want 1", len(entries))
 	}
 	if entries[0].Header.Meta.RoutingFailureReason != router.SelectionFailureNoSupportingTarget {
 		t.Fatalf("indexed RoutingFailureReason = %q, want %q", entries[0].Header.Meta.RoutingFailureReason, router.SelectionFailureNoSupportingTarget)
@@ -481,9 +481,9 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 
 func TestHandlerSynthesizesAnthropicCountTokensWhenNoSupportingTarget(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -505,9 +505,9 @@ func TestHandlerSynthesizesAnthropicCountTokensWhenNoSupportingTarget(t *testing
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -558,9 +558,9 @@ func TestHandlerSynthesizesAnthropicCountTokensWhenNoSupportingTarget(t *testing
 
 func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -587,9 +587,9 @@ func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -637,9 +637,9 @@ func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
 
 func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -672,9 +672,9 @@ func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
@@ -721,9 +721,9 @@ func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 
 func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -754,9 +754,9 @@ func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *test
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
 	rec := httptest.NewRecorder()
@@ -780,9 +780,9 @@ func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *test
 
 func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -836,9 +836,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -993,7 +993,7 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 		t.Fatalf("waitForRecentEntries() error = %v", err)
 	}
 	if len(entries) != 2 {
-		t.Fatalf("ListRecent() len = %d, want 2", len(entries))
+		t.Fatalf("waitForRecentEntries() len = %d, want 2", len(entries))
 	}
 	indexedEndpoints := map[string]bool{}
 	for _, entry := range entries {
@@ -1119,9 +1119,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 
 func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1143,9 +1143,9 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1171,9 +1171,9 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 
 func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1248,9 +1248,9 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1318,9 +1318,9 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 			if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": tt.strategy}); err != nil {
@@ -1390,9 +1390,9 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -1445,9 +1445,9 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 
 func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1506,9 +1506,9 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1554,9 +1554,9 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 
 func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1584,16 +1584,16 @@ func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	if _, err := NewHandler(cfg, st); err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+	if _, err := NewHandlerWithAuth(cfg, st, nil, nil); err != nil {
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 }
 
 func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1616,16 +1616,16 @@ func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *te
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	if _, err := NewHandler(cfg, st); err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+	if _, err := NewHandlerWithAuth(cfg, st, nil, nil); err != nil {
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 }
 
 func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1672,9 +1672,9 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1768,9 +1768,9 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 
 func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1820,9 +1820,9 @@ func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -1924,9 +1924,9 @@ func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *
 
 func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1971,9 +1971,9 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2052,9 +2052,9 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 
 func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2104,9 +2104,9 @@ func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) 
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2163,9 +2163,9 @@ func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) 
 
 func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCompletions(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2228,9 +2228,9 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2340,9 +2340,9 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 
 func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2411,9 +2411,9 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2461,9 +2461,9 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 
 func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2532,9 +2532,9 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2590,9 +2590,9 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 
 func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2674,9 +2674,9 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -2704,9 +2704,9 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 func TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries(t *testing.T) {
 	newStore := func(t *testing.T, recordsByChannel map[string][]store.ChannelModelRecord) *store.Store {
 		t.Helper()
-		st, err := store.New(t.TempDir())
+		st, err := newTestStore(t.TempDir())
 		if err != nil {
-			t.Fatalf("store.New() error = %v", err)
+			t.Fatalf("newTestStore() error = %v", err)
 		}
 		t.Cleanup(func() { _ = st.Close() })
 		for channelID, records := range recordsByChannel {
@@ -2831,9 +2831,9 @@ func TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries(t *testing.T) {
 
 func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2910,9 +2910,9 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -3038,9 +3038,9 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 
 func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDeferred(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3109,9 +3109,9 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -3263,9 +3263,9 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 
 func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerRestart(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3313,9 +3313,9 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 
@@ -3341,9 +3341,9 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	resp.Body.Close()
 	proxyServer.Close()
 
-	restartedHandler, err := NewHandler(cfg, st)
+	restartedHandler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() after restart error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() after restart error = %v", err)
 	}
 	restartedServer := httptest.NewServer(restartedHandler)
 	defer restartedServer.Close()
@@ -3427,9 +3427,9 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -3466,9 +3466,9 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -3496,7 +3496,7 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 				t.Fatalf("waitForRecentEntries() error = %v", err)
 			}
 			if len(entries) != 1 {
-				t.Fatalf("ListRecent() len after failure = %d, want 1", len(entries))
+				t.Fatalf("waitForRecentEntries() len after failure = %d, want 1", len(entries))
 			}
 			parsed, err := waitForRecordedPrelude(entries[0].LogPath, time.Second)
 			if err != nil {
@@ -3529,9 +3529,9 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -3575,9 +3575,9 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxyServer := httptest.NewServer(handler)
 			defer proxyServer.Close()
@@ -3627,9 +3627,9 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 
 func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3669,9 +3669,9 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -3732,9 +3732,9 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 
 func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3766,9 +3766,9 @@ func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = false
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -3828,9 +3828,9 @@ func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
 
 func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3859,9 +3859,9 @@ func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -3896,9 +3896,9 @@ func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 
 func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3927,9 +3927,9 @@ func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -3967,9 +3967,9 @@ func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
 
 func TestHandlerAnthropicEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3988,9 +3988,9 @@ func TestHandlerAnthropicEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -4096,9 +4096,9 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -4135,9 +4135,9 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 
 			proxyServer := httptest.NewServer(handler)
@@ -4174,9 +4174,9 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 
 func TestHandlerGoogleGenAIPresetRoutesAndAuths(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4198,9 +4198,9 @@ func TestHandlerGoogleGenAIPresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4232,9 +4232,9 @@ func TestHandlerGoogleGenAIPresetRoutesAndAuths(t *testing.T) {
 
 func TestHandlerGoogleGenAIStreamAddsAltSSE(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4256,9 +4256,9 @@ func TestHandlerGoogleGenAIStreamAddsAltSSE(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4290,9 +4290,9 @@ func TestHandlerGoogleGenAIStreamAddsAltSSE(t *testing.T) {
 
 func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4318,9 +4318,9 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4370,9 +4370,9 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 
 func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4401,9 +4401,9 @@ func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4472,7 +4472,7 @@ func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing
 		t.Fatalf("waitForRecentEntries() error = %v", err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+		t.Fatalf("waitForRecentEntries() len = %d, want 1", len(entries))
 	}
 	if entries[0].Header.Meta.Provider != upstream.ProtocolFamilyVertexNative {
 		t.Fatalf("indexed provider = %q, want %q", entries[0].Header.Meta.Provider, upstream.ProtocolFamilyVertexNative)
@@ -4488,7 +4488,9 @@ func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]
 	var lastErr error
 
 	for {
-		lastEntries, lastErr = st.ListRecent(limit)
+		var page store.ListPageResult
+		page, lastErr = st.ListRoutingPage(1, limit, store.ListFilter{})
+		lastEntries = page.Items
 		if lastErr == nil && len(lastEntries) >= limit {
 			return lastEntries, nil
 		}
@@ -4598,9 +4600,9 @@ func waitForRecordedPrelude(path string, timeout time.Duration) (*recordfile.Par
 
 func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4658,9 +4660,9 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4706,9 +4708,9 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 
 func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4745,9 +4747,9 @@ func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -4789,9 +4791,9 @@ func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 
 func TestHandlerRetryOnUpstreamInsufficientBalance(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4847,9 +4849,9 @@ func TestHandlerRetryOnUpstreamInsufficientBalance(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -4900,9 +4902,9 @@ func TestHandlerRetryOnUpstreamInsufficientBalance(t *testing.T) {
 
 func TestHandlerRetryOnUpstream500(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4959,9 +4961,9 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -4987,9 +4989,9 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 
 func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5029,9 +5031,9 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -5057,9 +5059,9 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 
 func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5110,9 +5112,9 @@ func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -5160,9 +5162,9 @@ func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 
 func TestHandlerRetryQueueSaturationReturns503(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5213,9 +5215,9 @@ drained:
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	// /v1/chat/completions is a pure proxy path, so this exercises the retry
 	// queue directly. With the local Responses server always available, a
@@ -5260,16 +5262,16 @@ drained:
 
 func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only the inference call blocks; the router's model discovery during
-		// NewHandler() must be answered immediately (otherwise the test waits
+		// NewHandlerWithAuth() must be answered immediately (otherwise the test waits
 		// out the discovery HTTP timeout).
 		if isModelDiscoveryRequest(r) {
 			w.Header().Set("Content-Type", "application/json")
@@ -5291,9 +5293,9 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 	cfg.Limits.Enabled = true
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -5367,16 +5369,16 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 
 func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only the inference call blocks; the router's model discovery during
-		// NewHandler() must be answered immediately (otherwise the test waits
+		// NewHandlerWithAuth() must be answered immediately (otherwise the test waits
 		// out the discovery HTTP timeout).
 		if isModelDiscoveryRequest(r) {
 			w.Header().Set("Content-Type", "application/json")
@@ -5400,9 +5402,9 @@ func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 	cfg.Limits.ChannelKeyHeader = "X-Limit-Bucket"
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -5475,16 +5477,16 @@ func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 
 func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only the inference call blocks; the router's model discovery during
-		// NewHandler() must be answered immediately (otherwise the test waits
+		// NewHandlerWithAuth() must be answered immediately (otherwise the test waits
 		// out the discovery HTTP timeout).
 		if isModelDiscoveryRequest(r) {
 			w.Header().Set("Content-Type", "application/json")
@@ -5520,9 +5522,9 @@ func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 	cfg.Limits.Scope = "channel"
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -5590,16 +5592,16 @@ func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 
 func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	releaseUpstream := make(chan struct{})
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only the inference call blocks; the router's model discovery during
-		// NewHandler() must be answered immediately (otherwise the test waits
+		// NewHandlerWithAuth() must be answered immediately (otherwise the test waits
 		// out the discovery HTTP timeout).
 		if isModelDiscoveryRequest(r) {
 			w.Header().Set("Content-Type", "application/json")
@@ -5622,9 +5624,9 @@ func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 	cfg.Limits.MaxConcurrent = 1
 	cfg.Limits.MaxQueued = 1
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -5706,9 +5708,9 @@ func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 
 func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5747,9 +5749,9 @@ func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -5774,9 +5776,9 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	// 4xx errors other than 404 and 429 should NOT be retried — they indicate
 	// a client mistake that would fail on any upstream.
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5816,9 +5818,9 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	proxyServer := httptest.NewServer(handler)
@@ -5966,9 +5968,9 @@ func isModelDiscoveryRequest(r *http.Request) bool {
 // selectable by the harness filter.
 func TestHandlerRecordsClientHarnessClassification(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5984,9 +5986,9 @@ func TestHandlerRecordsClientHarnessClassification(t *testing.T) {
 	cfg.Upstream.ApiKey = "anth-secret"
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()

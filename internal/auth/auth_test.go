@@ -124,17 +124,17 @@ func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	if _, err := st.CreateToken(ctx, "admin", "invalid-negative", DefaultTokenScope, -time.Second); err == nil {
 		t.Fatalf("CreateToken(negative ttl) error = nil, want error")
@@ -211,17 +211,17 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "Admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "Admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	loginToken, err := st.Login(ctx, "admin", "change-me-123", time.Hour)
 	if err != nil {
@@ -247,17 +247,17 @@ func TestStoreIssuesOpenAIStyleTokenAndVerifiesLegacyPrefix(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	issued, err := st.CreateToken(ctx, "admin", "local-dev", "api", 0)
 	if err != nil {
@@ -296,17 +296,17 @@ func TestStoreLoginReplacesPreviousMonitorLoginToken(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	if _, err := st.CreateToken(ctx, "admin", "manual", "api", time.Hour); err != nil {
 		t.Fatalf("CreateToken(manual) error = %v", err)
@@ -350,19 +350,19 @@ func TestStoreListsAndRevokesUserTokens(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
 		t.Fatalf("CreateUser(admin) error = %v", err)
 	}
-	if _, err := st.CreateUser(ctx, "other", "change-me-123"); err != nil {
+	if _, err := st.CreateUserWithRole(ctx, "other", "change-me-123", RoleAdmin); err != nil {
 		t.Fatalf("CreateUser(other) error = %v", err)
 	}
 	adminToken, err := st.CreateToken(ctx, "admin", "local-dev", "api", time.Hour)
@@ -431,8 +431,8 @@ func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	if st.Path() != dbPath {
 		t.Fatalf("store path = %q, want %q", st.Path(), dbPath)
 	}
-	if _, err := st.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(context.Background(), "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 }
 
@@ -529,8 +529,8 @@ func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
 	// execution because users.username is UNIQUE.
 	username := fmt.Sprintf("admin_%s_%d", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
 	normalizedUsername := normalizeUsername(username)
-	if _, err := st.CreateUser(ctx, username, "change-me-123"); err != nil {
-		t.Fatalf("CreateUser(postgres) error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, username, "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole(postgres) error = %v", err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -614,7 +614,7 @@ func TestCheckStatusSQLiteReportsMissingAuthTables(t *testing.T) {
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
+		t.Fatalf("sql.OpenDatabase() error = %v", err)
 	}
 	if _, err := db.Exec(`DROP TABLE api_tokens`); err != nil {
 		_ = db.Close()
@@ -642,17 +642,17 @@ func TestStoreResetPassword(t *testing.T) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	if err := st.ResetPassword(ctx, "admin", "changed-again-123"); err != nil {
 		t.Fatalf("ResetPassword() error = %v", err)

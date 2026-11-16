@@ -9,7 +9,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // A provider 404 is the most common "my model does not work" report, and the
@@ -24,9 +23,9 @@ func TestUpstream404ErrorCarriesProviderNamePathAndBody(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -49,9 +48,9 @@ func TestUpstream404ErrorCarriesProviderNamePathAndBody(t *testing.T) {
 	}
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Debug.MaskKey = true
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxySrv := newStubProxyServer(t, handler)
 
@@ -168,13 +167,13 @@ func TestUpstreamFailureHintClassifies404Source(t *testing.T) {
 				header.Set("Content-Type", tt.contentType)
 			}
 			resp := &http.Response{StatusCode: tt.status, Header: header}
-			got := upstreamFailureHint(resp, tt.body)
+			got := upstreamFailureHintForBody(resp, tt.body)
 			if got != tt.want {
-				t.Fatalf("upstreamFailureHint() = %q, want %q", got, tt.want)
+				t.Fatalf("upstreamFailureHintForBody() = %q, want %q", got, tt.want)
 			}
 			for _, bad := range tt.notContains {
 				if strings.Contains(got, bad) {
-					t.Fatalf("upstreamFailureHint() = %q, must not contain %q", got, bad)
+					t.Fatalf("upstreamFailureHintForBody() = %q, must not contain %q", got, bad)
 				}
 			}
 		})

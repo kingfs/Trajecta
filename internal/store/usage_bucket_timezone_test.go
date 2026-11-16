@@ -16,9 +16,9 @@ import (
 // overview.go already named it; the three outliers now do too, and this gate keeps all five honest.
 func TestUsageBucketGridsAreUTC(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -89,9 +89,9 @@ func TestUsageBucketGridsAreUTC(t *testing.T) {
 // that is 08:00 in Asia/Shanghai.
 func TestUsageBucketGridsAlignToTheDisplayTimezone(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 

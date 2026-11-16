@@ -129,17 +129,12 @@ func mayHaveSealed(proto xir.Protocol, body []byte) bool {
 	return false
 }
 
-// ParseRequestScope parses body as a request of protocol and projects it into a
-// RequestScope. ok=false means the body was not projected (unknown protocol,
-// empty body, over the size bound, no sealed marker when fields were not
-// required, or a parse/decode failure); the caller keeps the byte fast path.
-func ParseRequestScope(protocol string, body []byte, opts ScopeOptions) (RequestScope, bool) {
-	scope, outcome := ParseRequestScopeWithOutcome(protocol, body, opts)
-	return scope, outcome == ScopeProjected
-}
-
-// ParseRequestScopeWithOutcome is ParseRequestScope plus the reason the
-// projection did or did not happen, for the hot-path counters.
+// ParseRequestScopeWithOutcome parses body as a request of protocol and
+// projects it into a RequestScope, reporting why the projection did or did not
+// happen for the hot-path counters. Any outcome other than ScopeProjected
+// (unknown protocol, empty body, over the size bound, no sealed marker when
+// fields were not required, or a parse/decode failure) means the caller keeps
+// the byte fast path.
 func ParseRequestScopeWithOutcome(protocol string, body []byte, opts ScopeOptions) (RequestScope, ScopeOutcome) {
 	po, ok := protocolOperations[protocol]
 	if !ok {

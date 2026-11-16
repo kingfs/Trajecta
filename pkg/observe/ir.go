@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -295,7 +294,7 @@ func FlattenNodes(nodes []SemanticNode) []FlatSemanticNode {
 //
 // The nodes used to be written to a `semantic_nodes` table and read back, which
 // is where this ordering came from. They are now rebuilt from the cassette when a
-// trace is opened, so the flattening lives here, next to the tree it inverts.
+// trace is opened, so the flattening lives here, next to the SemanticNode tree.
 func FlattenObservationNodes(obs TraceObservation) []FlatSemanticNode {
 	var roots []SemanticNode
 	roots = append(roots, obs.Request.Nodes...)
@@ -322,53 +321,4 @@ func dedupeFlatNodes(nodes []FlatSemanticNode) []FlatSemanticNode {
 		out = append(out, node)
 	}
 	return out
-}
-
-func RebuildNodeTree(rows []FlatSemanticNode) []SemanticNode {
-	nodes := make(map[string]*SemanticNode, len(rows))
-	order := make([]string, 0, len(rows))
-	for _, row := range rows {
-		node := row.Node
-		node.ParentID = row.ParentID
-		node.Children = nil
-		nodes[node.ID] = &node
-		order = append(order, node.ID)
-	}
-
-	for _, id := range order {
-		node := nodes[id]
-		if node == nil {
-			continue
-		}
-		if node.ParentID == "" || nodes[node.ParentID] == nil {
-			continue
-		}
-		parent := nodes[node.ParentID]
-		parent.Children = append(parent.Children, *node)
-	}
-
-	var roots []SemanticNode
-	for _, id := range order {
-		node := nodes[id]
-		if node == nil {
-			continue
-		}
-		if node.ParentID == "" || nodes[node.ParentID] == nil {
-			roots = append(roots, *node)
-		}
-	}
-	sortNodes(roots)
-	return roots
-}
-
-func sortNodes(nodes []SemanticNode) {
-	sort.SliceStable(nodes, func(i, j int) bool {
-		if nodes[i].Index == nodes[j].Index {
-			return nodes[i].ID < nodes[j].ID
-		}
-		return nodes[i].Index < nodes[j].Index
-	})
-	for i := range nodes {
-		sortNodes(nodes[i].Children)
-	}
 }

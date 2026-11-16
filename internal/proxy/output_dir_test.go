@@ -10,7 +10,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // TestRecorderUsesTheResolvedTraceOutputDirectory pins that a configuration which names only
@@ -45,9 +44,9 @@ func TestRecorderUsesTheResolvedTraceOutputDirectory(t *testing.T) {
 			t.Chdir(workDir)
 
 			upstream := newStubUpstream(t)
-			st, err := store.New(t.TempDir())
+			st, err := newTestStore(t.TempDir())
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			t.Cleanup(func() { _ = st.Close() })
 
@@ -79,9 +78,9 @@ func TestRecorderUsesTheResolvedTraceOutputDirectory(t *testing.T) {
 			}
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			proxySrv := newStubProxyServer(t, handler)
 

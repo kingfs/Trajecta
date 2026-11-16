@@ -16,9 +16,12 @@ func TestPluginsAreVisiblePresets(t *testing.T) {
 	if len(plugins) < 20 {
 		t.Fatalf("Plugins() returned %d plugins, want at least 20", len(plugins))
 	}
-	ids := PluginIDs()
+	ids := make([]string, 0, len(plugins))
+	for _, plugin := range plugins {
+		ids = append(ids, plugin.ID)
+	}
 	if !sort.StringsAreSorted(ids) {
-		t.Errorf("PluginIDs() not sorted: %v", ids)
+		t.Errorf("Plugins() not sorted by ID: %v", ids)
 	}
 	for i, plugin := range plugins {
 		if plugin.ID != visible[i].ID {
@@ -172,6 +175,11 @@ func TestAlibabaPluginEndpointsAndPlans(t *testing.T) {
 		if preset.Auth.Header != "Authorization" || preset.Auth.Scheme != "Bearer" {
 			t.Errorf("%s auth = %+v, want Bearer on every surface", tc.preset, preset.Auth)
 		}
+		// The pay-as-you-go preset keeps the discoverable model source; only
+		// the plan variants override it to NoList.
+		if preset.Models.NoList || preset.Models.ListPath != "/models" {
+			t.Errorf("%s payg model source = %+v", tc.preset, preset.Models)
+		}
 		coding, ok := preset.Plan("coding")
 		if !ok {
 			t.Fatalf("%s has no coding plan", tc.preset)
@@ -198,52 +206,6 @@ func TestAlibabaPluginEndpointsAndPlans(t *testing.T) {
 		if token.Endpoints[xir.ProtocolChatCompletions] != tc.tokenChat || token.Endpoints[xir.ProtocolMessages] != tc.tokenMsg {
 			t.Errorf("%s token endpoints = %v", tc.preset, token.Endpoints)
 		}
-	}
-}
-
-func TestResolvePlanOverridesEndpointsAndModels(t *testing.T) {
-	resolved, err := Resolve(Config{PresetID: "alibaba", Plan: "coding"})
-	if err != nil {
-		t.Fatalf("Resolve(alibaba, coding): %v", err)
-	}
-	if resolved.Endpoints[xir.ProtocolChatCompletions] != "https://coding.dashscope.aliyuncs.com/v1" {
-		t.Errorf("coding chat endpoint = %q", resolved.Endpoints[xir.ProtocolChatCompletions])
-	}
-	if resolved.Endpoints[xir.ProtocolMessages] != "https://coding.dashscope.aliyuncs.com/apps/anthropic" {
-		t.Errorf("coding messages endpoint = %q", resolved.Endpoints[xir.ProtocolMessages])
-	}
-	if !resolved.Models.NoList {
-		t.Error("coding plan must override the model source to NoList")
-	}
-	if resolved.Plan == nil || resolved.Plan.ID != "coding" {
-		t.Errorf("resolved plan = %+v", resolved.Plan)
-	}
-
-	defaults, err := Resolve(Config{PresetID: "alibaba"})
-	if err != nil {
-		t.Fatalf("Resolve(alibaba): %v", err)
-	}
-	if defaults.Endpoints[xir.ProtocolChatCompletions] != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
-		t.Errorf("payg chat endpoint = %q", defaults.Endpoints[xir.ProtocolChatCompletions])
-	}
-	if defaults.Models.NoList || defaults.Models.ListPath != "/models" {
-		t.Errorf("payg model source = %+v", defaults.Models)
-	}
-
-	// Explicit endpoint overrides still win over the plan.
-	custom, err := Resolve(Config{
-		PresetID:  "alibaba",
-		Plan:      "coding",
-		Endpoints: map[xir.Protocol]string{xir.ProtocolChatCompletions: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
-	})
-	if err != nil {
-		t.Fatalf("Resolve with override: %v", err)
-	}
-	if custom.Endpoints[xir.ProtocolChatCompletions] != "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1" {
-		t.Errorf("explicit override lost: %q", custom.Endpoints[xir.ProtocolChatCompletions])
-	}
-	if custom.Endpoints[xir.ProtocolMessages] != "https://coding.dashscope.aliyuncs.com/apps/anthropic" {
-		t.Errorf("plan messages endpoint lost: %q", custom.Endpoints[xir.ProtocolMessages])
 	}
 }
 
@@ -310,14 +272,20 @@ func TestPlanDisplayFacts(t *testing.T) {
 }
 
 func TestLegacyPlanMetadataDerivedFromCatalog(t *testing.T) {
-	ids := PlanPresetIDs()
+	// The legacy plan presets are exactly the hidden catalog entries with a
+	// Replacement; the credential metadata table is derived from them.
+	var ids []string
+	for _, preset := range Presets() {
+		if preset.Hidden && preset.Replacement != nil {
+			ids = append(ids, preset.ID)
+		}
+	}
 	if len(ids) != 11 {
-		t.Fatalf("PlanPresetIDs() = %d entries, want 11: %v", len(ids), ids)
+		t.Fatalf("hidden presets with a replacement = %d entries, want 11: %v", len(ids), ids)
 	}
 	for _, id := range ids {
-		preset, ok := LookupPreset(id)
-		if !ok || !preset.Hidden || preset.Replacement == nil {
-			t.Fatalf("legacy plan preset %q is not a hidden preset with a replacement", id)
+		if PlanNameForPreset(id) == "" {
+			t.Fatalf("legacy plan preset %q has no derived metadata", id)
 		}
 	}
 	// The derived table must keep the historical names and prefix facts.

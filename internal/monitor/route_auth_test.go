@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/auth"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // publicMonitorAPIRoutes are the only /api routes that may answer without a session, with the
@@ -55,9 +54,9 @@ func TestEveryMonitorAPIRouteRequiresAuthentication(t *testing.T) {
 		t.Fatalf("found %d /api patterns, want the whole registration list", len(patterns))
 	}
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

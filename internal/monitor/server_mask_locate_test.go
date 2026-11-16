@@ -30,15 +30,16 @@ func TestTraceMaskLocateAPI(t *testing.T) {
 		})
 	writeTraceFixture(t, outputDir, "mask-locate.http", content)
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
-	traces, err := st.ListRecent(10)
+	tracesPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
+	traces := tracesPage.Items
 	if err != nil || len(traces) == 0 {
-		t.Fatalf("ListRecent() = %v, %v", traces, err)
+		t.Fatalf("ListRoutingPage() = %v, %v", traces, err)
 	}
 	traceID := traces[0].ID
 
@@ -66,7 +67,7 @@ func TestTraceMaskLocateAPI(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID+"/secret-masks/"+maskID+"/locate", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("mask locate status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -91,14 +92,14 @@ func TestTraceMaskLocateAPI(t *testing.T) {
 
 	otherTrace := httptest.NewRequest(http.MethodGet, "/api/traces/other-trace/secret-masks/"+maskID+"/locate", nil)
 	otherRR := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(otherRR, otherTrace)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(otherRR, otherTrace)
 	if otherRR.Code == http.StatusOK {
 		t.Errorf("a mask from another trace must not locate: %s", otherRR.Body.String())
 	}
 
 	missing := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID+"/secret-masks/missing/locate", nil)
 	missingRR := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(missingRR, missing)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(missingRR, missing)
 	if missingRR.Code != http.StatusNotFound {
 		t.Errorf("missing mask status = %d, want 404", missingRR.Code)
 	}

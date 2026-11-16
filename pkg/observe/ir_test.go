@@ -113,7 +113,7 @@ func TestTraceObservationJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestFlattenAndRebuildNodeTree(t *testing.T) {
+func TestFlattenNodes(t *testing.T) {
 	root := SemanticNode{
 		ID:             "root",
 		ProviderType:   "message",
@@ -134,16 +134,17 @@ func TestFlattenAndRebuildNodeTree(t *testing.T) {
 	if len(flat) != 2 {
 		t.Fatalf("len(flat) = %d, want 2", len(flat))
 	}
+	if flat[0].Node.ID != "root" || flat[0].ParentID != "" || flat[0].Depth != 0 {
+		t.Fatalf("root row = %+v", flat[0])
+	}
 	if flat[1].ParentID != "root" {
 		t.Fatalf("child parent = %q, want root", flat[1].ParentID)
 	}
-
-	tree := RebuildNodeTree(flat)
-	if len(tree) != 1 || len(tree[0].Children) != 1 {
-		t.Fatalf("rebuilt tree = %+v", tree)
+	if flat[1].Depth != 1 || flat[1].Node.Text != "hello" {
+		t.Fatalf("child row = %+v", flat[1])
 	}
-	if tree[0].Children[0].Text != "hello" {
-		t.Fatalf("rebuilt child text = %q", tree[0].Children[0].Text)
+	if flat[1].Node.Children != nil {
+		t.Fatalf("flattened child kept Children: %+v", flat[1].Node.Children)
 	}
 }
 

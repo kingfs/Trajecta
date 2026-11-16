@@ -198,16 +198,11 @@ func TestFileMagicHelpers(t *testing.T) {
 	legacy := []byte(LegacyFileMagic + "\n# meta: {}\n\nREQUEST")
 	v2 := []byte(`{"version":"LLM_PROXY_V2"}` + "\n")
 
-	assert.True(t, HasFileMagic(current))
-	assert.True(t, HasFileMagic(legacy))
-	assert.False(t, HasFileMagic(v2))
-
 	assert.True(t, IsV3Prelude(current))
 	assert.True(t, IsV3Prelude(legacy))
 	assert.False(t, IsV3Prelude(v2))
 	// Magic without the terminating newline is not yet a complete prelude.
 	assert.False(t, IsV3Prelude([]byte(FileMagic)))
-	assert.True(t, HasFileMagic([]byte(FileMagic)))
 }
 
 // TestReadPreludeFileReadsOnlyThePrelude is the point of the function: a caller that

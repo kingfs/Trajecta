@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -57,7 +58,7 @@ func TestGeminiPartsKeepTheirKind(t *testing.T) {
 	}
 
 	// The non-stream mapper sees the same parts, so it has to classify them the same way.
-	nonStream := GeminiToLLM(GeminiResponse{Candidates: []GeminiCandidate{{
+	nonStreamBody, err := json.Marshal(GeminiResponse{Candidates: []GeminiCandidate{{
 		Content: GeminiContent{Role: "model", Parts: []GeminiPart{
 			{Text: "weighing options", Thought: true},
 			{FunctionCall: &GeminiFunctionCall{Name: "get_weather", Args: []byte(`{"city":"Paris"}`)}},
@@ -65,8 +66,15 @@ func TestGeminiPartsKeepTheirKind(t *testing.T) {
 		}},
 		FinishReason: "STOP",
 	}}})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	nonStream, err := ParseResponse(ProviderGoogleGenAI, "/v1beta/models:generateContent", nonStreamBody)
+	if err != nil {
+		t.Fatalf("ParseResponse() error = %v", err)
+	}
 	if len(nonStream.Candidates) != 1 {
-		t.Fatalf("GeminiToLLM() candidates = %d, want 1", len(nonStream.Candidates))
+		t.Fatalf("ParseResponse() candidates = %d, want 1", len(nonStream.Candidates))
 	}
 	nonStreamText := ""
 	nonStreamReasoning := ""
@@ -79,11 +87,11 @@ func TestGeminiPartsKeepTheirKind(t *testing.T) {
 		}
 	}
 	if nonStreamText != text || nonStreamReasoning != reasoning {
-		t.Fatalf("GeminiToLLM() text/reasoning = %q/%q, want %q/%q: the two Gemini readers must agree",
+		t.Fatalf("ParseResponse() text/reasoning = %q/%q, want %q/%q: the two Gemini readers must agree",
 			nonStreamText, nonStreamReasoning, text, reasoning)
 	}
 	if len(nonStream.Candidates[0].ToolCalls) != 1 || nonStream.Candidates[0].ToolCalls[0].ArgsText != `{"city":"Paris"}` {
-		t.Fatalf("GeminiToLLM() tool calls = %+v, want the functionCall part", nonStream.Candidates[0].ToolCalls)
+		t.Fatalf("ParseResponse() tool calls = %+v, want the functionCall part", nonStream.Candidates[0].ToolCalls)
 	}
 }
 

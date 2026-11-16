@@ -44,7 +44,10 @@ func BenchmarkParseLarge(b *testing.B) {
 
 func BenchmarkApplyOneString(b *testing.B) {
 	raw := []byte(`{"a":"secret","b":2}`)
-	node := MustParse(raw)
+	node, err := Parse(raw)
+	if err != nil {
+		b.Fatal(err)
+	}
 	value, _ := node.Get("a")
 	edits := []Edit{{Span: value.Span, Bytes: []byte("xxxxxx"), Mode: ReplaceString}}
 	b.ReportAllocs()

@@ -154,13 +154,3 @@ func PlanNameZhFor(presetID, planID string) string {
 	}
 	return plan.Name
 }
-
-// PlanPresetIDs returns the legacy plan preset IDs in sorted order. It is used
-// by tests and by callers that need to validate the metadata table.
-func PlanPresetIDs() []string {
-	out := make([]string, 0, len(planPresetMetadata))
-	for id := range planPresetMetadata {
-		out = append(out, id)
-	}
-	return out
-}

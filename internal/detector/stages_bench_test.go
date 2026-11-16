@@ -77,7 +77,7 @@ func BenchmarkStageDecode(b *testing.B) {
 }
 
 // BenchmarkStageAuditBuild isolates wire parse + decode + audit projection (the
-// full ParseRequestScope projection cost, before span collection).
+// full ParseRequestScopeWithOutcome projection cost, before span collection).
 func BenchmarkStageAuditBuild(b *testing.B) {
 	body := stageBody()
 	codec, _ := registry.Default().Lookup(xir.ProtocolChatCompletions)
@@ -106,9 +106,9 @@ func BenchmarkStageIRCollect(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		scope, ok := ParseRequestScope("chat_completions", body, ScopeOptions{RequireFields: true})
-		if !ok {
-			b.Fatal("scope failed")
+		scope, outcome := ParseRequestScopeWithOutcome("chat_completions", body, ScopeOptions{RequireFields: true})
+		if outcome != ScopeProjected {
+			b.Fatalf("scope failed, outcome = %q", outcome)
 		}
 		_ = snap.collectCandidatesScoped(body, scope)
 	}

@@ -18,6 +18,15 @@ import (
 	"github.com/kingfs/Trajecta/internal/responses/tools/websearch"
 )
 
+// testFunctionExecutor adapts a function to FunctionToolExecutor so tests can
+// register dynamic behaviour through the production registry path
+// (WithFunctionToolExecutorRegistry / NewFunctionToolExecutorRegistry).
+type testFunctionExecutor func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error)
+
+func (f testFunctionExecutor) ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+	return f(ctx, call)
+}
+
 type fakeChatClient struct {
 	reqs                 []ChatCompletionRequest
 	req                  ChatCompletionRequest
@@ -421,7 +430,7 @@ func TestRuntimeCreateClassifiesPrimaryAndToolFollowupModelCalls(t *testing.T) {
 		},
 	}
 	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}}})),
 	)
 
 	resp, err := rt.Create(context.Background(), functionToolCreateRequest("lookup codex"))
@@ -863,7 +872,7 @@ func TestRuntimeCreateStreamLeavesUnregisteredFunctionToolClientOwned(t *testing
 		client,
 		NewMemoryStore(),
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("other_tool", StaticFunctionToolExecutor{Output: "must not run"}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"other_tool": {Executor: StaticFunctionToolExecutor{Output: "must not run"}}})),
 	)
 	sink := &fakeResponseStreamSink{}
 
@@ -947,7 +956,7 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 		client,
 		store,
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}}})),
 	)
 
 	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -1126,8 +1135,10 @@ func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.
 		client,
 		NewMemoryStore(),
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
-		WithFunctionToolExecutor("summarize", StaticFunctionToolExecutor{Output: "short"}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{
+			"lookup":    {Executor: StaticFunctionToolExecutor{Output: map[string]any{"found": true}}},
+			"summarize": {Executor: StaticFunctionToolExecutor{Output: "short"}},
+		})),
 	)
 
 	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -1313,7 +1324,7 @@ func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *te
 		store,
 		WithWebSearchProvider(provider),
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: map[string]any{"found": true}}}})),
 	)
 
 	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -1474,7 +1485,7 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForMixedHostedWebSearchFail
 		NewMemoryStore(),
 		WithWebSearchProvider(provider),
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: map[string]any{"found": true}}}})),
 	)
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -1601,9 +1612,9 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFail
 		Config{DefaultModel: "fallback-model"},
 		client,
 		NewMemoryStore(),
-		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: testFunctionExecutor(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
 			return FunctionToolResult{Output: "sensitive-output"}, executorErr
-		})),
+		})}})),
 	)
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -1703,9 +1714,11 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForSecondFunctionToolExecut
 		Config{DefaultModel: "fallback-model"},
 		client,
 		NewMemoryStore(),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
-		WithFunctionToolExecutor("summarize", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
-			return FunctionToolResult{Output: "sensitive-output"}, executorErr
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{
+			"lookup": {Executor: StaticFunctionToolExecutor{Output: map[string]any{"found": true}}},
+			"summarize": {Executor: testFunctionExecutor(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+				return FunctionToolResult{Output: "sensitive-output"}, executorErr
+			})},
 		})),
 	)
 
@@ -2741,10 +2754,10 @@ func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinu
 		CompactHistoryItemThreshold: 1,
 	}, client, store,
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: testFunctionExecutor(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
 			executed = call
 			return FunctionToolResult{Output: map[string]any{"answer": "42"}}, nil
-		})),
+		})}})),
 	)
 	sink := &fakeResponseStreamSink{}
 
@@ -3020,7 +3033,7 @@ func TestRuntimeCreateStreamAutoCompactForcedFunctionToolChoiceRequiresDeferredF
 		DefaultModel:                "fallback-model",
 		AutoCompact:                 true,
 		CompactHistoryItemThreshold: 1,
-	}, client, store, WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: "must not run"}))
+	}, client, store, WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: "must not run"}}})))
 	sink := &fakeResponseStreamSink{}
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
@@ -3452,7 +3465,7 @@ func TestRuntimeFunctionToolExecutorRegistrySnapshotPreservesInFlightCreate(t *t
 		Config{DefaultModel: "gpt-test"},
 		client,
 		NewMemoryStore(),
-		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: "old"}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: StaticFunctionToolExecutor{Output: "old"}}})),
 	)
 	errCh := make(chan error, 1)
 	go func() {
@@ -3513,10 +3526,10 @@ func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
 		client,
 		NewMemoryStore(),
 		WithExecutionEventRecorder(events),
-		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {Executor: testFunctionExecutor(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
 			executed = append(executed, call)
 			return FunctionToolResult{Output: map[string]any{"ok": true, "value": "42"}}, nil
-		})),
+		})}})),
 	)
 
 	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
@@ -3607,10 +3620,13 @@ func TestRuntimeCreateRecordsConfiguredFunctionToolCallAudits(t *testing.T) {
 		client,
 		NewMemoryStore(),
 		WithToolCallAuditRecorder(toolAudits),
-		WithFunctionToolExecutorPolicy("lookup", StaticFunctionToolExecutor{Output: "secret output token"}, FunctionToolExecutorPolicy{
-			RedactArguments: true,
-			RedactOutput:    true,
-		}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {
+			Executor: StaticFunctionToolExecutor{Output: "secret output token"},
+			Policy: FunctionToolExecutorPolicy{
+				RedactArguments: true,
+				RedactOutput:    true,
+			},
+		}})),
 	)
 
 	ctx := audit.ContextWithRequestAuditID(context.Background(), "audit_function")
@@ -3691,11 +3707,14 @@ func TestRuntimeFunctionToolExecutorPolicyRedactsAndLimitsResult(t *testing.T) {
 		NewMemoryStore(),
 		WithExecutionEventRecorder(events),
 		WithToolCallAuditRecorder(toolAudits),
-		WithFunctionToolExecutorPolicy("lookup", StaticFunctionToolExecutor{Output: "too long"}, FunctionToolExecutorPolicy{
-			Timeout:         time.Second,
-			MaxResultBytes:  3,
-			RedactArguments: true,
-		}),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{"lookup": {
+			Executor: StaticFunctionToolExecutor{Output: "too long"},
+			Policy: FunctionToolExecutorPolicy{
+				Timeout:         time.Second,
+				MaxResultBytes:  3,
+				RedactArguments: true,
+			},
+		}})),
 	)
 
 	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{

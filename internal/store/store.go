@@ -41,8 +41,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/predicate"
 	"github.com/kingfs/Trajecta/ent/dao/score"
 	"github.com/kingfs/Trajecta/ent/dao/tracelog"
-	"github.com/kingfs/Trajecta/ent/dao/upstreammodel"
-	"github.com/kingfs/Trajecta/ent/dao/upstreamtarget"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -406,28 +404,6 @@ type GroupingInfo struct {
 	ClientRequestID string
 }
 
-type UpstreamTargetRecord struct {
-	ID                string
-	BaseURL           string
-	ProviderPreset    string
-	ProtocolFamily    string
-	RoutingProfile    string
-	Enabled           bool
-	Priority          int
-	Weight            float64
-	CapacityHint      float64
-	LastRefreshAt     time.Time
-	LastRefreshStatus string
-	LastRefreshError  string
-}
-
-type UpstreamModelRecord struct {
-	UpstreamID string
-	Model      string
-	Source     string
-	SeenAt     time.Time
-}
-
 type ModelAliasRecord struct {
 	ID          string
 	Alias       string
@@ -613,36 +589,6 @@ type ScoreFilter struct {
 	EvalRunID string
 }
 
-func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
-	rows, err := s.client.UpstreamTarget.Query().
-		Order(upstreamtarget.ByPriority(entsql.OrderDesc()), upstreamtarget.ByID()).
-		All(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]UpstreamTargetRecord, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, upstreamTargetRecordFromEnt(row))
-	}
-	return out, nil
-}
-
-func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
-	rows, err := s.client.UpstreamModel.Query().
-		Order(upstreammodel.ByUpstreamID(), upstreammodel.ByModel()).
-		All(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]UpstreamModelRecord, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, upstreamModelRecordFromEnt(row))
-	}
-	return out, nil
-}
-
 func (s *Store) ListModelAliases(alias string, enabledOnly bool) ([]ModelAliasRecord, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("store is not initialized")
@@ -786,28 +732,6 @@ func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {
 	row := s.db.QueryRow(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
 		FROM model_aliases WHERE id = ?`, id)
 	return scanModelAlias(row)
-}
-
-func (s *Store) SetModelAliasEnabled(id string, enabled bool) error {
-	if s == nil || s.db == nil {
-		return errors.New("store is not initialized")
-	}
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("model alias id is required")
-	}
-	result, err := s.db.Exec(`UPDATE model_aliases SET enabled = ?, updated_at = ? WHERE id = ?`, enabled, time.Now().UTC(), id)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
 }
 
 func (s *Store) DeleteModelAlias(id string) error {
@@ -1125,10 +1049,6 @@ func classifyUpstreamFailure(statusCode int, errorText string) string {
 	default:
 		return "unknown_failure"
 	}
-}
-
-func New(outputDir string) (*Store, error) {
-	return NewWithDatabase(outputDir, "sqlite", filepath.Join(outputDir, "trace_index.sqlite3"), 4, 4)
 }
 
 func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
@@ -1960,32 +1880,6 @@ func (s *Store) backfillSemantics() error {
 	return nil
 }
 
-func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
-	return s.UpsertLogWithGrouping(path, header, GroupingInfo{})
-}
-
-func (s *Store) UpsertUpstreamTarget(record UpstreamTargetRecord) error {
-	create := s.client.UpstreamTarget.Create().
-		SetID(record.ID).
-		SetBaseURL(record.BaseURL).
-		SetProviderPreset(record.ProviderPreset).
-		SetProtocolFamily(record.ProtocolFamily).
-		SetRoutingProfile(record.RoutingProfile).
-		SetEnabled(record.Enabled).
-		SetPriority(record.Priority).
-		SetWeight(record.Weight).
-		SetCapacityHint(record.CapacityHint).
-		SetLastRefreshStatus(record.LastRefreshStatus).
-		SetLastRefreshError(record.LastRefreshError)
-	if !record.LastRefreshAt.IsZero() {
-		create.SetLastRefreshAt(record.LastRefreshAt.UTC())
-	}
-	return create.
-		OnConflictColumns(upstreamtarget.FieldID).
-		UpdateNewValues().
-		Exec(context.Background())
-}
-
 func (s *Store) CreateDataset(name string, description string) (DatasetRecord, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -2412,41 +2306,6 @@ func (s *Store) ListExperimentRuns(limit int) ([]ExperimentRunRecord, error) {
 		out = append(out, experimentRunRecordFromEnt(row))
 	}
 	return out, nil
-}
-
-func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModelRecord) error {
-	ctx := context.Background()
-	tx, err := s.client.Tx(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.UpstreamModel.Delete().Where(upstreammodel.UpstreamIDEQ(upstreamID)).Exec(ctx); err != nil {
-		return err
-	}
-	creates := make([]*dao.UpstreamModelCreate, 0, len(records))
-	for _, record := range records {
-		seenAt := record.SeenAt
-		if seenAt.IsZero() {
-			seenAt = time.Now().UTC()
-		}
-		creates = append(creates, tx.UpstreamModel.Create().
-			SetUpstreamID(upstreamID).
-			SetModel(record.Model).
-			SetSource(record.Source).
-			SetSeenAt(seenAt.UTC()))
-	}
-	if len(creates) > 0 {
-		if err := tx.UpstreamModel.CreateBulk(creates...).
-			OnConflictColumns(upstreammodel.FieldUpstreamID, upstreammodel.FieldModel).
-			UpdateNewValues().
-			Exec(ctx); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
 }
 
 // UpsertLogWithGrouping indexes one cassette. The only derived read model left,
@@ -3171,22 +3030,6 @@ func (s *Store) lookupOrCreateTraceID(path string) (string, error) {
 	}
 }
 
-func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
-	rows, err := s.client.TraceLog.Query().
-		Order(tracelog.ByRecordedAt(entsql.OrderDesc())).
-		Limit(limit).
-		All(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	entries := make([]LogEntry, 0, len(rows))
-	for _, row := range rows {
-		entries = append(entries, logEntryFromTraceLog(row))
-	}
-	return entries, nil
-}
-
 func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
 	return s.listPage(page, pageSize, filter, true)
 }
@@ -3879,35 +3722,6 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	return entry
 }
 
-func upstreamTargetRecordFromEnt(row *dao.UpstreamTarget) UpstreamTargetRecord {
-	record := UpstreamTargetRecord{
-		ID:                row.ID,
-		BaseURL:           row.BaseURL,
-		ProviderPreset:    row.ProviderPreset,
-		ProtocolFamily:    row.ProtocolFamily,
-		RoutingProfile:    row.RoutingProfile,
-		Enabled:           row.Enabled,
-		Priority:          row.Priority,
-		Weight:            row.Weight,
-		CapacityHint:      row.CapacityHint,
-		LastRefreshStatus: row.LastRefreshStatus,
-		LastRefreshError:  row.LastRefreshError,
-	}
-	if row.LastRefreshAt != nil {
-		record.LastRefreshAt = *row.LastRefreshAt
-	}
-	return record
-}
-
-func upstreamModelRecordFromEnt(row *dao.UpstreamModel) UpstreamModelRecord {
-	return UpstreamModelRecord{
-		UpstreamID: row.UpstreamID,
-		Model:      row.Model,
-		Source:     row.Source,
-		SeenAt:     row.SeenAt,
-	}
-}
-
 func modelCatalogRecordFromEnt(row *dao.ModelCatalog) ModelCatalogRecord {
 	record := ModelCatalogRecord{
 		Model:       row.ID,
@@ -4144,13 +3958,6 @@ func nullableTime(v time.Time) any {
 		return nil
 	}
 	return v
-}
-
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 func boolValue(v any) bool {

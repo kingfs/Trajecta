@@ -375,10 +375,6 @@ func fromGenerateContentRequest(req GeminiGenerateContentRequest) LLMRequest {
 
 // ---- GeminiResponse -> LLMResponse ----
 
-func GeminiToLLM(resp GeminiResponse) LLMResponse {
-	return fromGenerateContentResponse(resp)
-}
-
 func fromGenerateContentResponse(resp GeminiResponse) LLMResponse {
 	cands := getCandidateSlice()
 	safetyAll := make([]LLMSafetyRating, 0, len(resp.Candidates))

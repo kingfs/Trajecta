@@ -28,9 +28,9 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
 
@@ -380,9 +380,9 @@ func ptrTime(v time.Time) *time.Time { return &v }
 func newTargetStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New(target) error = %v", err)
+		t.Fatalf("newTestStore(target) error = %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
 	return st

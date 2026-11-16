@@ -3,13 +3,11 @@ package cli
 import (
 	"io"
 	"log/slog"
-	"os"
 
 	"github.com/kingfs/Trajecta/internal/appdb"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/migrate"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 type migrateOptions struct {
@@ -46,24 +44,6 @@ func newMigrateCommand(runtime *Runtime) *cobra.Command {
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview migration without changing cassette files or the metadata index")
 	return cmd
-}
-
-func runMigrate(args []string) int {
-	fs := pflag.NewFlagSet("migrate", pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	rewriteV2 := fs.Bool("rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
-	rebuildIndex := fs.Bool("rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(NormalizeLegacyFlagArgs(args)); err != nil {
-		return 2
-	}
-	return runMigrateWithOptions(migrateOptions{
-		configPath:   *configPath,
-		rewriteV2:    *rewriteV2,
-		rebuildIndex: *rebuildIndex,
-		format:       "text",
-		stdout:       os.Stdout,
-	})
 }
 
 func runMigrateWithOptions(opts migrateOptions) int {

@@ -16,18 +16,15 @@ import (
 )
 
 func TestSnapshotDriftTablesAreDocumented(t *testing.T) {
-	got := SnapshotDriftTables()
-	want := []string{"upstream_models", "upstream_targets"}
-	if len(got) != len(want) {
-		t.Fatalf("SnapshotDriftTables() = %v, want %v", got, want)
-	}
-	for i, name := range want {
-		if got[i] != name {
-			t.Fatalf("SnapshotDriftTables() = %v, want %v", got, want)
-		}
+	// The snapshot tables are the runtime projections the archive gate may
+	// excuse; each must carry an explainable reason.
+	for _, name := range []string{"upstream_models", "upstream_targets"} {
 		if reason := SnapshotDriftReason(name); strings.TrimSpace(reason) == "" {
 			t.Errorf("SnapshotDriftReason(%q) is empty; the excuse must be explainable", name)
 		}
+	}
+	if reason := SnapshotDriftReason("logs"); reason != "" {
+		t.Errorf("SnapshotDriftReason(logs) = %q; an authoritative table must have no excuse", reason)
 	}
 }
 
@@ -35,14 +32,14 @@ func TestSnapshotDriftTablesAreDocumented(t *testing.T) {
 // snapshot tables and is off unless the operator asks for it.
 func TestToleratesMissingKeys(t *testing.T) {
 	strict := CopyOptions{VerifyOnly: true}
-	for _, table := range append(SnapshotDriftTables(), "logs", "semantic_nodes", "parse_jobs") {
+	for _, table := range []string{"upstream_models", "upstream_targets", "logs", "semantic_nodes", "parse_jobs"} {
 		if strict.toleratesMissingKeys(table) {
 			t.Errorf("toleratesMissingKeys(%q) = true without TolerateSnapshotDrift", table)
 		}
 	}
 
 	tolerant := CopyOptions{VerifyOnly: true, TolerateSnapshotDrift: true}
-	for _, table := range SnapshotDriftTables() {
+	for _, table := range []string{"upstream_models", "upstream_targets"} {
 		if !tolerant.toleratesMissingKeys(table) {
 			t.Errorf("toleratesMissingKeys(%q) = false with TolerateSnapshotDrift", table)
 		}

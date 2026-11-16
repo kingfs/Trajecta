@@ -9,9 +9,9 @@ import "testing"
 func TestListChannelConfigMetadataSkipsUndecryptableSecrets(t *testing.T) {
 	t.Parallel()
 
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

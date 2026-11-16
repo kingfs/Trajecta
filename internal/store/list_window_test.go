@@ -17,7 +17,7 @@ import (
 // A window that reached only one of them would show a list whose own total
 // disagreed with it, or a session list that ignored the control entirely.
 func TestListWindowBoundsTracesCountersAndSessions(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

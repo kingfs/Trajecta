@@ -55,6 +55,9 @@ func (s *Store) EnqueueParseJob(traceID string) error {
 	return err
 }
 
+// ListParseJobs is a test seam: the production worker claims jobs through
+// ClaimParseJobs, and tests use this read-only query to assert queue states
+// (for example failed jobs) without mutating them.
 func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error) {
 	if limit <= 0 {
 		limit = 50
@@ -93,16 +96,6 @@ func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 		return ParseJobRecord{}, err
 	}
 	return job, nil
-}
-
-func (s *Store) MarkParseJobRunning(id int64) error {
-	s.notifyChange(ChangeTraffic)
-	_, err := s.db.Exec(`
-		UPDATE parse_jobs
-		SET status = 'running', attempts = attempts + 1, updated_at = ?
-		WHERE id = ?
-	`, time.Now().UTC(), id)
-	return err
 }
 
 // ClaimParseJobs moves up to limit queued parse jobs to running in one statement
@@ -267,25 +260,6 @@ func (s *Store) ListAnalysisJobs(status string, targetType string, targetID stri
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanAnalysisJobs(rows)
-}
-
-func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	rows, err := s.db.Query(`
-		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
-			attempts, created_at, updated_at, started_at, finished_at
-		FROM analysis_jobs
-		WHERE status = 'queued'
-		ORDER BY updated_at ASC, id ASC
-		LIMIT ?
-	`, limit)
 	if err != nil {
 		return nil, err
 	}

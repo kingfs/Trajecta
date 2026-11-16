@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/netproxy"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestNetworkProxySettingsDefaultsToOff(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -38,9 +37,9 @@ func TestNetworkProxySettingsPatchPersistsAndPublishes(t *testing.T) {
 	// parallel set and restore the default policy when it finishes.
 	t.Cleanup(func() { _ = netproxy.Configure(netproxy.DefaultSettings()) })
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -91,9 +90,9 @@ func TestNetworkProxySettingsPatchPersistsAndPublishes(t *testing.T) {
 func TestNetworkProxySettingsRejectsInvalidPolicy(t *testing.T) {
 	t.Cleanup(func() { _ = netproxy.Configure(netproxy.DefaultSettings()) })
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -119,9 +118,9 @@ func TestNetworkProxySettingsRejectsInvalidPolicy(t *testing.T) {
 func TestNetworkProxySettingsRouteIsAdminOnly(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

@@ -24,12 +24,17 @@ func TestValidateCodingPlanCredential(t *testing.T) {
 }
 
 func TestPlanPresetMetadataMatchesPresets(t *testing.T) {
-	for _, id := range PlanPresetIDs() {
-		if _, ok := LookupPreset(id); !ok {
-			t.Fatalf("plan metadata %q has no preset", id)
+	// Every hidden preset with a Replacement feeds the derived plan metadata
+	// table; each must stay resolvable and carry a display name.
+	for _, preset := range Presets() {
+		if !preset.Hidden || preset.Replacement == nil {
+			continue
 		}
-		if PlanNameForPreset(id) == "" {
-			t.Fatalf("plan %q has no display name", id)
+		if _, ok := LookupPreset(preset.ID); !ok {
+			t.Fatalf("plan metadata %q has no preset", preset.ID)
+		}
+		if PlanNameForPreset(preset.ID) == "" {
+			t.Fatalf("plan %q has no display name", preset.ID)
 		}
 	}
 }

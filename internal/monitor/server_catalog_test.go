@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestProviderCatalogAPI(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +66,7 @@ func TestProviderCatalogAPI(t *testing.T) {
 }
 
 func TestProviderCatalogDefaultEmpty(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +86,7 @@ func TestProviderCatalogDefaultEmpty(t *testing.T) {
 }
 
 func TestProviderCatalogHidesLegacyPresets(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

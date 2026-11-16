@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestMinimalCassetteConfigReachesTheRecordedPrelude(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -33,9 +32,9 @@ func TestMinimalCassetteConfigReachesTheRecordedPrelude(t *testing.T) {
 	cfg.Debug.MaskKey = true
 	cfg.Trace.MinimalCassette = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()

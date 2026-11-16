@@ -39,17 +39,6 @@ var snapshotSourceTables = map[string]string{
 	"upstream_models":  "runtime snapshot replaced per upstream by probes and upstream refresh",
 }
 
-// SnapshotDriftTables returns the legacy tables whose missing keys the archive
-// gate may excuse when TolerateSnapshotDrift is set, sorted by name.
-func SnapshotDriftTables() []string {
-	names := make([]string, 0, len(snapshotSourceTables))
-	for name := range snapshotSourceTables {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
 // legacyTableDependencies is the complete set of cross-table foreign keys in
 // the application schema; parents are copied before children.
 var legacyTableDependencies = map[string][]string{
@@ -88,7 +77,7 @@ type CopyOptions struct {
 	// database file.
 	VerifyOnly bool
 	// TolerateSnapshotDrift excuses missing keys in the snapshotSourceTables
-	// (see SnapshotDriftTables) instead of refusing the archive. Only those
+	// (see SnapshotDriftReason) instead of refusing the archive. Only those
 	// tables are excused, and the excused key count is reported separately, so
 	// every authoritative table is still verified strictly.
 	TolerateSnapshotDrift bool

@@ -16,9 +16,9 @@ const monitorMappingTestKey = "sk-proj-" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 func newTestSecretMappingVault(t *testing.T) (*store.Store, *secretmask.Vault) {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -117,9 +117,9 @@ func TestSecretMappingAPIHandler(t *testing.T) {
 }
 
 func TestSecretMappingAPIHandlerUnavailable(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

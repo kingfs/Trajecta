@@ -362,11 +362,11 @@ func TestTransportActuallyRoutesThroughTheProxy(t *testing.T) {
 	}))
 	t.Cleanup(proxyServer.Close)
 
-	manager := NewManager()
-	if err := manager.Apply(Settings{Enabled: true, HTTPProxy: proxyServer.URL}); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	resolver, err := Compile(Settings{Enabled: true, HTTPProxy: proxyServer.URL})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
 	}
-	client := manager.Client(5 * time.Second)
+	client := ClientWith(&http.Client{Timeout: 5 * time.Second}, resolver)
 
 	// example.invalid cannot resolve, so a 200 can only have come from the
 	// proxy. httptest's proxy server also strips nothing from an absolute-form

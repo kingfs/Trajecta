@@ -15,15 +15,15 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
-	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )
 
-func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
+func TestLogResolvedTargetsIncludesRoutingDiagnostics(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	prev := slog.Default()
@@ -32,29 +32,31 @@ func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
 		slog.SetDefault(prev)
 	})
 
-	logResolvedUpstreamConfig(
-		upstream.ResolvedUpstream{
-			BaseURL:        "https://generativelanguage.googleapis.com",
-			ProviderPreset: "google_genai",
-			ProtocolFamily: upstream.ProtocolFamilyGoogleGenAI,
-			RoutingProfile: upstream.RoutingProfileGoogleAIStudio,
-		},
-		upstream.StartupDiagnostics{
-			ConnectivityEndpoint: "/v1beta/models",
-			ConnectivityURL:      "https://generativelanguage.googleapis.com/v1beta/models",
-			ModelRoutingHint:     "model is selected in the request path",
-		},
-	)
+	rtr, err := router.New(&config.Config{
+		Upstreams: []config.UpstreamTargetConfig{{
+			ID:             "google-genai",
+			ModelDiscovery: router.ModelDiscoveryStaticOnly,
+			StaticModels:   []string{"gemini-2.5-pro"},
+			Upstream: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	logResolvedTargets(rtr)
 
 	output := buf.String()
 	for _, want := range []string{
-		"Resolved upstream config",
+		"Resolved upstream target",
 		"provider_preset=google_genai",
 		"protocol_family=google_genai",
 		"routing_profile=google_ai_studio",
 		"connectivity_endpoint=/v1beta/models",
 		"connectivity_url=https://generativelanguage.googleapis.com/v1beta/models",
-		"model_routing_hint=\"model is selected in the request path\"",
+		"model_routing_hint=\"model is selected in the request path",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("log output = %q, want contain %q", output, want)
@@ -63,9 +65,9 @@ func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
 }
 
 func TestRouterConfigFromChannelsUsesDatabaseTargets(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -128,9 +130,9 @@ debug:
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	code := runServe([]string{"-c", configPath})
+	code := runServeWithConfig(configPath)
 	if code != 1 {
-		t.Fatalf("runServe() = %d, want 1", code)
+		t.Fatalf("runServeWithConfig() = %d, want 1", code)
 	}
 	output := buf.String()
 	for _, want := range []string{"YAML channel configuration is no longer supported", "application database"} {
@@ -191,9 +193,9 @@ debug:
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	code := runServe([]string{"-c", configPath})
+	code := runServeWithConfig(configPath)
 	if code != 1 {
-		t.Fatalf("runServe() = %d, want 1", code)
+		t.Fatalf("runServeWithConfig() = %d, want 1", code)
 	}
 	if output := buf.String(); !strings.Contains(output, "monitor.port is required when mcp.enabled=true") {
 		t.Fatalf("log output = %q, want monitor.port requirement", output)
@@ -229,9 +231,9 @@ debug:
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	code := runServe([]string{"-c", configPath})
+	code := runServeWithConfig(configPath)
 	if code != 1 {
-		t.Fatalf("runServe() = %d, want 1", code)
+		t.Fatalf("runServeWithConfig() = %d, want 1", code)
 	}
 	if output := buf.String(); !strings.Contains(output, "database.driver") ||
 		!strings.Contains(output, "mysql") ||
@@ -240,13 +242,13 @@ debug:
 	}
 }
 
-func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
+func TestManagementMuxServesStreamableMCP(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -255,7 +257,7 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
 
-	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -279,13 +281,13 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	}
 }
 
-func TestNewManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
+func TestManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -296,7 +298,7 @@ func TestNewManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
 	authStore := newTestAuthStore(t)
 	defer authStore.Close()
 
-	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg, authStore))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -311,13 +313,13 @@ func TestNewManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
 	}
 }
 
-func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
+func TestManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -332,7 +334,7 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
 
-	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg, authStore))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -357,16 +359,16 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 func newTestAuthStore(t *testing.T) *auth.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "auth.sqlite3")
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("auth.MigrateUp() error = %v", err)
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateDatabaseUp() error = %v", err)
 	}
-	authStore, err := auth.Open(dbPath)
+	authStore, err := auth.OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
-	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+	if _, err := authStore.CreateUserWithRole(context.Background(), "admin", "change-me-123", auth.RoleAdmin); err != nil {
 		_ = authStore.Close()
-		t.Fatalf("CreateUser() error = %v", err)
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	return authStore
 }
@@ -378,7 +380,7 @@ type authTransport struct {
 func TestRouterConfigurationReadsOnlyEnabledDatabaseChannels(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "deleted"}[deleted], func(t *testing.T) {
-			st, err := store.New(t.TempDir())
+			st, err := newTestStore(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -427,7 +429,7 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestRootCommandHelpWorksWithConfigShortcut(t *testing.T) {
 	t.Parallel()
 
-	cmd := newRootCommand()
+	cmd := newRootCommandWithRuntime(cli.NewRuntime())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -450,7 +452,7 @@ func TestRootCommandHelpWorksWithConfigShortcut(t *testing.T) {
 func TestVersionCommandSupportsJSONEnvelope(t *testing.T) {
 	t.Parallel()
 
-	cmd := newRootCommand()
+	cmd := newRootCommandWithRuntime(cli.NewRuntime())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)

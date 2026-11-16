@@ -15,9 +15,9 @@ import (
 // derived-table refresh is applied without any reader arriving.
 func TestBackgroundDerivedRefreshDrainsTheQueue(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -43,9 +43,9 @@ func TestBackgroundDerivedRefreshDrainsTheQueue(t *testing.T) {
 // DerivedRefreshInterval so a regression to ticker-only draining fails here.
 func TestBackgroundDerivedRefreshDrainsOnTheWriteSignal(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	st.StartDerivedRefresh()
@@ -67,9 +67,9 @@ func TestBackgroundDerivedRefreshDrainsOnTheWriteSignal(t *testing.T) {
 // background flusher - not the reader - is what empties it.
 func TestReaderDoesNotFlushWhenTheBackgroundFlusherOwnsTheQueue(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	st.StartDerivedRefresh()
@@ -110,9 +110,9 @@ func TestReaderDoesNotFlushWhenTheBackgroundFlusherOwnsTheQueue(t *testing.T) {
 // that preceded it, because the reader applies the queue itself.
 func TestReaderFlushesWhenNoBackgroundFlusherIsRunning(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -133,9 +133,9 @@ func TestReaderFlushesWhenNoBackgroundFlusherIsRunning(t *testing.T) {
 // started.
 func TestStartDerivedRefreshIsIdempotentAndStopIsSafe(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 

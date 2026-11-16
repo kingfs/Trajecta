@@ -41,9 +41,9 @@ func seedRateLog(t *testing.T, st *Store, dir string, name string, at time.Time,
 // comes from the per-minute buckets of the timeline scan.
 func TestOverviewRates(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -143,9 +143,9 @@ func TestOverviewRates(t *testing.T) {
 // rate the traffic actually sustained.
 func TestStatsAvgUsesLatestRow(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -190,9 +190,9 @@ func TestRateWindowMinutes(t *testing.T) {
 // rates, and trends normalize each bucket by its span.
 func TestUsageRates(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -241,9 +241,9 @@ func TestUsageRates(t *testing.T) {
 // and, since this change, zero RPM/TPM - on its card.
 func TestModelCatalogRatesTreatModelCasingAsOneModel(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -294,9 +294,9 @@ func TestModelCatalogRatesTreatModelCasingAsOneModel(t *testing.T) {
 // the aggregate's own MAX(recorded_at)).
 func TestStatsAvgEmptyWindow(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 

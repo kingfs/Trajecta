@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,7 +42,7 @@ func TestLLMRequest_ToGemini(t *testing.T) {
 	assert.Equal(t, &temp, gReq.GenerationConfig.Temperature)
 	assert.Equal(t, &maxTokens, gReq.GenerationConfig.MaxOutputTokens)
 }
-func TestGeminiToLLM(t *testing.T) {
+func TestGeminiParseResponse(t *testing.T) {
 	resp := GeminiResponse{
 		Candidates: []GeminiCandidate{
 			{
@@ -64,7 +65,10 @@ func TestGeminiToLLM(t *testing.T) {
 		},
 	}
 
-	llmResp := GeminiToLLM(resp)
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	llmResp, err := ParseResponse(ProviderGoogleGenAI, "/v1beta/models:generateContent", body)
+	require.NoError(t, err)
 
 	assert.Equal(t, 1, len(llmResp.Candidates))
 	assert.Equal(t, "model", llmResp.Candidates[0].Role)
@@ -79,7 +83,7 @@ func TestGeminiToLLM(t *testing.T) {
 	assert.Equal(t, "HATE", llmResp.Safety[0].Category)
 }
 
-func TestGeminiToLLMBlockedPromptFeedback(t *testing.T) {
+func TestGeminiParseResponseBlockedPromptFeedback(t *testing.T) {
 	resp := GeminiResponse{
 		PromptFeedback: map[string]any{
 			"blockReason": "SAFETY",
@@ -91,7 +95,10 @@ func TestGeminiToLLMBlockedPromptFeedback(t *testing.T) {
 		},
 	}
 
-	llmResp := GeminiToLLM(resp)
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	llmResp, err := ParseResponse(ProviderGoogleGenAI, "/v1beta/models:generateContent", body)
+	require.NoError(t, err)
 
 	require.Len(t, llmResp.Candidates, 1)
 	require.NotNil(t, llmResp.Candidates[0].Refusal)
@@ -106,7 +113,8 @@ func TestGeminiStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]},\"finishReason\":\"SAFETY\",\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
 	)
 
-	resp, err := ParseStreamResponseForPath("/v1beta/models/gemini-2.5-flash:streamGenerateContent", "https://generativelanguage.googleapis.com", body)
+	semantics := ClassifyPath("/v1beta/models/gemini-2.5-flash:streamGenerateContent", "https://generativelanguage.googleapis.com")
+	resp, err := ParseStreamResponse(semantics.Provider, semantics.Endpoint, body)
 	require.NoError(t, err)
 	require.Len(t, resp.Candidates, 1)
 	require.NotNil(t, resp.Candidates[0].Refusal)
@@ -125,7 +133,8 @@ func TestVertexStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"vertex partial\"}]},\"finishReason\":\"SAFETY\",\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
 	)
 
-	resp, err := ParseStreamResponseForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", "https://us-central1-aiplatform.googleapis.com", body)
+	semantics := ClassifyPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", "https://us-central1-aiplatform.googleapis.com")
+	resp, err := ParseStreamResponse(semantics.Provider, semantics.Endpoint, body)
 	require.NoError(t, err)
 	require.Len(t, resp.Candidates, 1)
 	require.NotNil(t, resp.Candidates[0].Refusal)

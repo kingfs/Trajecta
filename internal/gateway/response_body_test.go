@@ -12,7 +12,9 @@ func TestResponseBodyPassthrough(t *testing.T) {
 	if body.ClientReader() != upstream {
 		t.Fatal("passthrough client is not upstream")
 	}
-	if err := body.Close(); err != nil {
+	// The production close path goes through the client reader (UsageSniffer
+	// owns that chain in the forwarding path).
+	if err := body.ClientReader().Close(); err != nil {
 		t.Fatal(err)
 	}
 }

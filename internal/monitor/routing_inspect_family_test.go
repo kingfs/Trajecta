@@ -66,9 +66,9 @@ func TestRoutingInspectCapabilitiesFollowTheProtocolFamily(t *testing.T) {
 		{"chat", "anthropic_messages", false},
 	} {
 		t.Run(tc.channel+"/"+tc.endpoint, func(t *testing.T) {
-			st, err := store.New(t.TempDir())
+			st, err := newTestStore(t.TempDir())
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 

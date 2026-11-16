@@ -15,10 +15,12 @@ import (
 // raw SQL and ent operations share one transaction. The callback must commit
 // explicitly, after preparing its runtime snapshot; all other exits roll back.
 //
-// It holds the upstream write lock for its whole duration, serializing against
-// the channel probe's upstream_models projection (ReplaceUpstreamModels) and
-// bundle imports. upstream_targets/upstream_models are legacy projections: the
-// router no longer writes them and publishes routing state in memory only.
+// It holds the upstream write lock (upstreamMu) for its whole duration,
+// serializing Monitor configuration writes against bundle imports, which hold
+// the same lock for the whole merge. upstream_targets/upstream_models are
+// legacy projection tables with no writer left: neither the router nor the
+// channel probe writes them any more, and routing state is published in memory
+// only. The lock is kept so the two transaction writers stay serialized.
 func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store, func() error) error) error {
 	if s == nil || s.db == nil || s.shared == nil {
 		return fmt.Errorf("configuration transaction: %w", errorsNewStoreClosed())
@@ -79,41 +81,6 @@ func (s *Store) txView(tx *sql.Tx) *Store {
 // already holds the configuration and upstream write locks.
 func (s *Store) TransactionScoped() bool {
 	return s != nil && s.db != nil && s.db.tx != nil
-}
-
-// LockUpstreamWrites blocks until this process may write upstream_targets and
-// upstream_models on its own, and returns the release function.
-//
-// ConfigurationTransaction holds the same lock for its whole duration, so a
-// store that already runs inside one must not call this again; that case
-// reports ErrNestedTransaction instead of deadlocking.
-func (s *Store) LockUpstreamWrites() (func(), error) {
-	if s == nil || s.shared == nil {
-		return nil, fmt.Errorf("lock upstream writes: %w", errorsNewStoreClosed())
-	}
-	if s.TransactionScoped() {
-		return nil, fmt.Errorf("lock upstream writes: %w", ErrNestedTransaction)
-	}
-	s.shared.upstreamMu.Lock()
-	return s.shared.upstreamMu.Unlock, nil
-}
-
-// TryLockUpstreamWrites is the non-blocking form of LockUpstreamWrites. It
-// reports locked=false when a configuration change currently owns the lock,
-// which lets best-effort refresh persistence skip the write and stay
-// up-to-date in memory instead of stalling its caller (for example a proxy
-// retry).
-func (s *Store) TryLockUpstreamWrites() (release func(), locked bool, err error) {
-	if s == nil || s.shared == nil {
-		return nil, false, fmt.Errorf("lock upstream writes: %w", errorsNewStoreClosed())
-	}
-	if s.TransactionScoped() {
-		return nil, false, fmt.Errorf("lock upstream writes: %w", ErrNestedTransaction)
-	}
-	if !s.shared.upstreamMu.TryLock() {
-		return nil, false, nil
-	}
-	return s.shared.upstreamMu.Unlock, true, nil
 }
 
 // Store helpers may open nested ent transactions. Their commits are scoped to

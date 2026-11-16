@@ -11,7 +11,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // TestManagementMuxKeepsProxyTokensOffMCP pins the audience split: the token an
@@ -21,9 +20,9 @@ import (
 func TestManagementMuxKeepsProxyTokensOffMCP(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -44,7 +43,7 @@ func TestManagementMuxKeepsProxyTokensOffMCP(t *testing.T) {
 		t.Fatalf("CreateToken(mcp) error = %v", err)
 	}
 
-	mux := newManagementMux(st, nil, cfg, authStore)
+	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore)
 	postMCP := func(token string) int {
 		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -69,9 +68,9 @@ func TestManagementMuxKeepsProxyTokensOffMCP(t *testing.T) {
 func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -79,7 +78,7 @@ func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	authStore := newTestAuthStore(t)
 	defer authStore.Close()
-	mux := newManagementMux(st, nil, cfg, authStore)
+	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore)
 
 	login := func(password string) string {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"`+password+`"}`))

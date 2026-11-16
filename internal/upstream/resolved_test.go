@@ -235,11 +235,11 @@ func TestResolveKeepsAPISurface(t *testing.T) {
 	if resolved.SupportsToolCalling() {
 		t.Fatalf("SupportsToolCalling() = true, want false")
 	}
-	if !resolved.NativeResponsesServerMode() {
-		t.Fatalf("NativeResponsesServerMode() = false, want true")
+	if !resolved.SupportsResponsesAPIForModel("gpt-5") {
+		t.Fatalf("SupportsResponsesAPIForModel() = false, want true")
 	}
-	if resolved.ChatCompletionsServerMode() {
-		t.Fatalf("ChatCompletionsServerMode() = true, want false")
+	if resolved.SupportsChatCompletionsAPIForModel("gpt-5") {
+		t.Fatalf("SupportsChatCompletionsAPIForModel() = true, want false")
 	}
 }
 

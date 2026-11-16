@@ -12,6 +12,9 @@ import "testing"
 // 基线测量值：0 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 0（零分配路径不允许任何余量）。提高上限必须在 PR 说明理由。
 func TestAllocGateScanCleanBody(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(largeNoSecretBody())
 	const limit = 0
 	got := testing.AllocsPerRun(100, func() {
@@ -29,6 +32,9 @@ func TestAllocGateScanCleanBody(t *testing.T) {
 // 基线测量值：2 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 3。提高上限必须在 PR 说明理由。
 func TestAllocGateScanCredentialBody(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := benchJSONBody(4<<10, 8)
 	const limit = 3
 	got := testing.AllocsPerRun(100, func() {

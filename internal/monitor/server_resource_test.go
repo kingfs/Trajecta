@@ -22,15 +22,16 @@ func TestTraceResourcesAndCatalogueAPI(t *testing.T) {
 		`{"choices":[{"message":{"content":"done"}}]}`)
 	writeTraceFixture(t, outputDir, "resources.http", content)
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
-	traces, err := st.ListRecent(10)
+	tracesPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
+	traces := tracesPage.Items
 	if err != nil || len(traces) == 0 {
-		t.Fatalf("ListRecent() = %v, %v", traces, err)
+		t.Fatalf("ListRoutingPage() = %v, %v", traces, err)
 	}
 	traceID := traces[0].ID
 	if err := st.SaveTraceResources(traceID, []store.ResourceAccess{
@@ -42,7 +43,7 @@ func TestTraceResourcesAndCatalogueAPI(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID+"/resources", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("trace resources status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -60,7 +61,7 @@ func TestTraceResourcesAndCatalogueAPI(t *testing.T) {
 	// The detail response carries the count the tab badge uses.
 	detailReq := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID, nil)
 	detailRR := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(detailRR, detailReq)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(detailRR, detailReq)
 	if detailRR.Code != http.StatusOK {
 		t.Fatalf("trace detail status = %d, body=%s", detailRR.Code, detailRR.Body.String())
 	}
@@ -111,15 +112,16 @@ func TestTraceResourceLocateAPI(t *testing.T) {
 		})
 	writeTraceFixture(t, outputDir, "locate.http", content)
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
-	traces, err := st.ListRecent(10)
+	tracesPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
+	traces := tracesPage.Items
 	if err != nil || len(traces) == 0 {
-		t.Fatalf("ListRecent() = %v, %v", traces, err)
+		t.Fatalf("ListRoutingPage() = %v, %v", traces, err)
 	}
 	traceID := traces[0].ID
 
@@ -128,7 +130,7 @@ func TestTraceResourceLocateAPI(t *testing.T) {
 		target := "/api/traces/" + traceID + "/resources/locate?kind=" + url.QueryEscape(kind) + "&value=" + url.QueryEscape(value)
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		rr := httptest.NewRecorder()
-		traceAPIHandler(st, nil).ServeHTTP(rr, req)
+		traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 		var payload resourceLocateResponse
 		if rr.Code == http.StatusOK {
 			if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {

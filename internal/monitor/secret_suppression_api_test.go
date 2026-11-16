@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestSecretSuppressionAPIHandler(t *testing.T) {
@@ -162,9 +160,9 @@ func TestSecretSuppressionAPIHandler(t *testing.T) {
 }
 
 func TestSecretSuppressionAPIHandlerUnavailable(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

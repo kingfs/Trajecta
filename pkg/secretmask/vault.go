@@ -214,6 +214,10 @@ func (v *Vault) Len() int {
 // Restorer itself withholds only the runs and tails its scan cannot yet judge,
 // which is normally no more than the stand-in it is waiting on. It is zero
 // while the vault is empty, so a request that masked nothing pays nothing.
+//
+// Test seam: the production streaming Restorer derives its own withholding from
+// the scan state and does not call Holdback. It is kept as the sizing oracle
+// the stream tests assert against; do not remove it as dead code.
 func (v *Vault) Holdback() int {
 	v.mu.RLock()
 	defer v.mu.RUnlock()

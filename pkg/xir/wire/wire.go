@@ -482,12 +482,3 @@ func Apply(raw []byte, edits []Edit) ([]byte, error) {
 	}
 	return out, nil
 }
-
-// MustParse is Parse for tests and static fixtures.
-func MustParse(raw []byte) *Node {
-	n, err := Parse(raw)
-	if err != nil {
-		panic(err)
-	}
-	return n
-}

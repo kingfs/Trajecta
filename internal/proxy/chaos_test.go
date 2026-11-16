@@ -10,7 +10,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // chaosProxy builds a proxy whose only upstream is a stub, with the given fault-injection
@@ -31,9 +30,9 @@ func chaosProxy(t *testing.T, rules []config.ChaosRule) (*httptest.Server, func(
 	}))
 	t.Cleanup(upstream.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -56,9 +55,9 @@ func chaosProxy(t *testing.T, rules []config.ChaosRule) (*httptest.Server, func(
 	cfg.Debug.MaskKey = true
 	cfg.Chaos.Enabled = true
 	cfg.Chaos.Rules = rules
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

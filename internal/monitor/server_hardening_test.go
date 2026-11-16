@@ -26,9 +26,9 @@ func (v fixedPrincipalVerifier) VerifyToken(context.Context, string) (auth.Princ
 
 func newHardeningTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
@@ -197,16 +197,16 @@ func TestLoginRejectsRepeatedFailuresAndOversizedBodies(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("auth.MigrateUp() error = %v", err)
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateDatabaseUp() error = %v", err)
 	}
-	authStore, err := auth.Open(dbPath)
+	authStore, err := auth.OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
 	t.Cleanup(func() { _ = authStore.Close() })
-	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := authStore.CreateUserWithRole(context.Background(), "admin", "change-me-123", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	jwtManager, err := auth.NewJWTManager(auth.JWTOptions{Secret: []byte("0123456789abcdef0123456789abcdef"), TTL: time.Hour})
 	if err != nil {

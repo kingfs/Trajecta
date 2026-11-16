@@ -10,6 +10,10 @@ import "io"
 // restored/client stream), matching the existing masking contract. Upstream is
 // retained so a future response transform can name the raw side without
 // reconstructing it from a comment.
+//
+// Close ownership: the forwarding path closes through UsageSniffer, which owns
+// the client chain (ClientReader); ResponseBody itself is a value holder and
+// exposes no Close.
 type ResponseBody struct {
 	Upstream io.ReadCloser
 	Client   io.ReadCloser
@@ -43,20 +47,4 @@ func (b *ResponseBody) ClientReader() io.ReadCloser {
 		return b.Upstream
 	}
 	return b.Client
-}
-
-// Close closes the client stream (and only closes Upstream separately when the
-// two differ and the client stream does not already own it). The forwarding
-// path normally closes through UsageSniffer, which owns the client chain.
-func (b *ResponseBody) Close() error {
-	if b == nil {
-		return nil
-	}
-	if b.Client != nil && b.Client != b.Upstream {
-		return b.Client.Close()
-	}
-	if b.Upstream != nil {
-		return b.Upstream.Close()
-	}
-	return nil
 }

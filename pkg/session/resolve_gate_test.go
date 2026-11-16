@@ -127,6 +127,9 @@ func gateResolveHeader() http.Header {
 // 唯一分配是 fingerprint 的 "sha256:"+hex 拼接）。
 // 上限 = 基线 + 约 25% 余量取整 = 2。提高上限必须在 PR 说明理由。
 func TestAllocGateResolveHeaderFastPath(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	h := gateResolveHeader()
 	const limit = 2
 	got := testing.AllocsPerRun(100, func() {
@@ -144,6 +147,9 @@ func TestAllocGateResolveHeaderFastPath(t *testing.T) {
 // 基线测量值：4 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 5。提高上限必须在 PR 说明理由。
 func TestAllocGateResolveBodyFallback(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(`{"model":"gpt-5","previous_response_id":"resp_gate_1","messages":[{"role":"user","content":"hello"}]}`)
 	const limit = 5
 	got := testing.AllocsPerRun(100, func() {

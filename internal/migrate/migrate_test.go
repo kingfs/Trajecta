@@ -2,13 +2,13 @@ package migrate
 
 import (
 	"encoding/json"
+	"github.com/kingfs/Trajecta/internal/store"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +20,7 @@ func TestRunConvertsV2AndRebuildsIndex(t *testing.T) {
 	payload := []byte("POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\n\r\n{\"model\":\"gpt-4.1\"}\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\":\"resp_1\"}")
 	writeLegacyRecord(t, v2Path, payload)
 
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -43,8 +43,9 @@ func TestRunConvertsV2AndRebuildsIndex(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "LLM_PROXY_V3", parsed.Header.Version)
 
-	entries, err := st.ListRecent(10)
+	page, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	require.NoError(t, err)
+	entries := page.Items
 	require.Len(t, entries, 1)
 	assert.Equal(t, "LLM_PROXY_V3", entries[0].Header.Version)
 }

@@ -36,7 +36,7 @@ func (k Kind) Valid() bool {
 // A preset is data, not a configured channel: endpoints are base URLs, Auth is
 // the default authentication specification, Plans are endpoint variants layered
 // on top (a coding plan, for example) and Models describes how to list models.
-// Resolve merges this data with a caller's Config.
+// Callers assemble a Resolved value from this data.
 type Preset struct {
 	// ID is the stable canonical preset identifier.
 	ID string
@@ -58,7 +58,7 @@ type Preset struct {
 	Endpoints map[xir.Protocol]string
 	// Auth is the default authentication specification.
 	Auth AuthSpec
-	// Plans are endpoint variants selected with Config.Plan.
+	// Plans are endpoint variants selected with Preset.Plan.
 	Plans []PlanVariant
 	// Models declares how the provider can list models.
 	Models ModelSource

@@ -15,7 +15,7 @@ import (
 
 func configurationFixture(t *testing.T) (*store.Store, *router.Router, *channel.Service) {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestDeleteChannelRollbackRestoresItsModels(t *testing.T) {
 }
 
 func TestChannelBootstrapSettingsReportAndResetTheMarker(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestChannelBootstrapSettingsReportAndResetTheMarker(t *testing.T) {
 }
 
 func TestChannelCreateAcceptsModels(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

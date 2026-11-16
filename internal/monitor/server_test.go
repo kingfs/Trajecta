@@ -492,9 +492,9 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 func TestResponsesFunctionExecutorsAPIHandlerApplyPersistsSafeSnapshot(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -646,9 +646,9 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testi
 }
 
 func TestResponsesAuditTraceAPIHandler(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -779,9 +779,9 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 }
 
 func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -855,9 +855,9 @@ func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
 }
 
 func TestSystemEventListAndSummaryAPIHandlers(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -923,9 +923,9 @@ func TestSystemEventListAndSummaryAPIHandlers(t *testing.T) {
 }
 
 func TestSystemEventStatusAPIHandlers(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1014,9 +1014,9 @@ func TestSystemEventStatusAPIHandlers(t *testing.T) {
 // ones": running it under the all view used to match every status and turn a
 // resolved row back into a read one, losing the resolution the reader recorded.
 func TestSystemEventReadAllTreatsAllAsUnread(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1071,9 +1071,9 @@ func TestSystemEventReadAllTreatsAllAsUnread(t *testing.T) {
 }
 
 func TestSystemEventStreamAPIHandlerPushesUpdates(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1160,9 +1160,9 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1221,9 +1221,9 @@ func TestListAPIHandlerFiltersByObservationStatus(t *testing.T) {
 			header.Meta.Model = "gpt-5.1"
 		}))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1268,9 +1268,9 @@ func TestListAPIHandlerDoesNotSyncFilesystem(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1300,17 +1300,18 @@ func TestOverviewAPIHandlerReturnsDashboardFromIndexedData(t *testing.T) {
 		header.Meta.RoutingFailureReason = "http_5xx"
 	}))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
 
-	items, err := st.ListRecent(2)
+	itemsPage, err := st.ListRoutingPage(1, 2, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 	if len(items) != 2 {
 		t.Fatalf("len(items) = %d, want 2", len(items))
 	}
@@ -1440,16 +1441,16 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("auth.MigrateUp() error = %v", err)
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateDatabaseUp() error = %v", err)
 	}
-	authStore, err := auth.Open(dbPath)
+	authStore, err := auth.OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
 	defer authStore.Close()
-	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := authStore.CreateUserWithRole(context.Background(), "admin", "change-me-123", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	apiToken, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
 	if err != nil {
@@ -1516,19 +1517,19 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("auth.MigrateUp() error = %v", err)
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateDatabaseUp() error = %v", err)
 	}
-	authStore, err := auth.Open(dbPath)
+	authStore, err := auth.OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
 	defer authStore.Close()
-	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser(admin) error = %v", err)
+	if _, err := authStore.CreateUserWithRole(context.Background(), "admin", "change-me-123", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole(admin) error = %v", err)
 	}
-	if _, err := authStore.CreateUser(context.Background(), "other", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser(other) error = %v", err)
+	if _, err := authStore.CreateUserWithRole(context.Background(), "other", "change-me-123", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole(other) error = %v", err)
 	}
 	jwtManager := testJWTManager(t, time.Hour)
 	loginToken, err := jwtManager.IssueToken(auth.Principal{
@@ -1616,16 +1617,16 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("auth.MigrateUp() error = %v", err)
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateDatabaseUp() error = %v", err)
 	}
-	authStore, err := auth.Open(dbPath)
+	authStore, err := auth.OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
 	defer authStore.Close()
-	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := authStore.CreateUserWithRole(context.Background(), "admin", "change-me-123", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -1741,9 +1742,9 @@ func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
 		t.Fatalf("WriteFile(traceB) error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1799,9 +1800,9 @@ func TestSessionListAPIHandlerAppliesFilters(t *testing.T) {
 		t.Fatalf("WriteFile(traceB) error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1843,9 +1844,9 @@ func TestSessionDetailAPIHandlerReturnsTraceList(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1906,9 +1907,9 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 		t.Fatalf("WriteFile(traceB) error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -1972,9 +1973,9 @@ func TestSessionAnalysisAPIHandlerReturnsAnalysisRuns(t *testing.T) {
 	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -2105,9 +2106,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	defer upstreamServer.Close()
 
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2353,8 +2354,8 @@ func TestChannelManagementAPI(t *testing.T) {
 		if statusCode >= 400 {
 			header.Meta.Error = "upstream overloaded"
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, store.GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 	writeChannelLog("channel-success.http", "gpt-4.1", 200, 120)
@@ -2494,9 +2495,9 @@ func TestProviderSetupValidateDoesNotPersistAndRedactsSecrets(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2555,9 +2556,9 @@ func TestProviderSetupApplyPersistsNormalizedProvider(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2609,9 +2610,9 @@ func TestProviderSetupApplyDoesNotPersistWhenProbeFails(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2649,9 +2650,9 @@ func TestProviderSetupApplyAllowsExplicitSurfaceWhenProbeFails(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2691,9 +2692,9 @@ func TestProviderSetupApplyAllowsVLLMWithoutAPIKeyWhenExplicit(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2748,9 +2749,9 @@ func TestProviderSetupSuggestionsDoNotOverrideExplicitFields(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2804,9 +2805,9 @@ func TestProviderProbeReportAPIUsesChannelsReadOnly(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
@@ -2865,9 +2866,9 @@ func TestProviderProbeReportApplyAPIAppliesSafeSuggestions(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	disabled := false
@@ -2938,9 +2939,9 @@ func TestChannelProbeFailureResponseIncludesClassification(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
@@ -2985,9 +2986,9 @@ func TestChannelProbeFailureResponseIncludesClassification(t *testing.T) {
 
 func TestLocalSecretKeyAPI(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
@@ -3056,9 +3057,9 @@ func TestModelCatalogAPI(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3098,8 +3099,8 @@ func TestModelCatalogAPI(t *testing.T) {
 		},
 		Usage: recordfile.UsageInfo{TotalTokens: 42},
 	}
-	if err := st.UpsertLog(path, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(path, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	slashedPath := filepath.Join(dir, "model-slashed-api.http")
 	if err := os.WriteFile(slashedPath, []byte("test"), 0o644); err != nil {
@@ -3120,8 +3121,8 @@ func TestModelCatalogAPI(t *testing.T) {
 		},
 		Usage: recordfile.UsageInfo{TotalTokens: 11},
 	}
-	if err := st.UpsertLog(slashedPath, slashedHeader); err != nil {
-		t.Fatalf("UpsertLog(slashed) error = %v", err)
+	if err := st.UpsertLogWithGrouping(slashedPath, slashedHeader, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(slashed) error = %v", err)
 	}
 	traceOnlyPath := filepath.Join(dir, "model-trace-only-api.http")
 	if err := os.WriteFile(traceOnlyPath, []byte("test"), 0o644); err != nil {
@@ -3142,8 +3143,8 @@ func TestModelCatalogAPI(t *testing.T) {
 		},
 		Usage: recordfile.UsageInfo{TotalTokens: 24},
 	}
-	if err := st.UpsertLog(traceOnlyPath, traceOnlyHeader); err != nil {
-		t.Fatalf("UpsertLog(traceOnly) error = %v", err)
+	if err := st.UpsertLogWithGrouping(traceOnlyPath, traceOnlyHeader, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(traceOnly) error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/models?window=24h", nil)
@@ -3258,9 +3259,9 @@ func TestModelCatalogAPI(t *testing.T) {
 func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3317,9 +3318,9 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 func TestChannelModelCapabilityExplicitNullClearsToInherit(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3405,9 +3406,9 @@ func TestChannelModelCapabilityExplicitNullClearsToInherit(t *testing.T) {
 func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3473,9 +3474,9 @@ func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
 func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3584,36 +3585,20 @@ func intPtr(value int) *int {
 	return &value
 }
 
-func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
+// TestUpstreamListAPIHandlerWithoutRouterReturnsEmptyList pins the retired
+// projection fallback: the list endpoint reads router snapshots only, so a
+// deployment without a router serves an empty list instead of the legacy
+// upstream_targets/upstream_models rows. The endpoint itself stays available
+// (the MCP tool surface uses it).
+func TestUpstreamListAPIHandlerWithoutRouterReturnsEmptyList(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
-
-	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
-		ID:                "openrouter-fallback",
-		BaseURL:           "https://openrouter.ai/api/v1",
-		ProviderPreset:    "openrouter",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          90,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC),
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
-	if err := st.ReplaceUpstreamModels("openrouter-fallback", []store.UpstreamModelRecord{
-		{UpstreamID: "openrouter-fallback", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC)},
-	}); err != nil {
-		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
-	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=all", nil)
 	rr := httptest.NewRecorder()
@@ -3626,14 +3611,8 @@ func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if len(payload.Items) != 1 {
-		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
-	}
-	if payload.Items[0].ID != "openrouter-fallback" {
-		t.Fatalf("ID = %q, want openrouter-fallback", payload.Items[0].ID)
-	}
-	if len(payload.Items[0].Models) != 1 || payload.Items[0].Models[0] != "gpt-5" {
-		t.Fatalf("Models = %#v, want [gpt-5]", payload.Items[0].Models)
+	if len(payload.Items) != 0 {
+		t.Fatalf("len(payload.Items) = %d, want 0 without a router", len(payload.Items))
 	}
 }
 
@@ -3641,32 +3620,13 @@ func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
-	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
-		ID:                "openai-primary",
-		BaseURL:           "https://api.openai.com/v1",
-		ProviderPreset:    "openai",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          100,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC),
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
-	if err := st.ReplaceUpstreamModels("openai-primary", []store.UpstreamModelRecord{
-		{UpstreamID: "openai-primary", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC)},
-	}); err != nil {
-		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
-	}
+	rtr := newUpstreamListTestRouter(t, "openai-primary", "gpt-5")
 
 	logPath := filepath.Join(outputDir, "trace.http")
 	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
@@ -3699,13 +3659,13 @@ func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
 			TotalTokens:      16,
 		},
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=all", nil)
 	rr := httptest.NewRecorder()
-	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	upstreamListAPIHandler(st, rtr).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -3739,9 +3699,9 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3773,34 +3733,20 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 				RoutingPolicy:                  "p2c",
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, store.GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
 	now := startOfDisplayDay(time.Now()).Add(2 * time.Hour)
-	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
-		ID:                "openai-primary",
-		BaseURL:           "https://api.openai.com/v1",
-		ProviderPreset:    "openai",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          100,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     now,
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
+	rtr := newUpstreamListTestRouter(t, "openai-primary", "gpt-5")
 	writeLog("recent-match.http", now.Add(-30*time.Minute), "gpt-5", 503)
 	writeLog("old-match.http", now.Add(-48*time.Hour), "gpt-5", 200)
 	writeLog("recent-other.http", now.Add(-20*time.Minute), "gemini-2.5-flash", 200)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=today&model=gpt-5", nil)
 	rr := httptest.NewRecorder()
-	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	upstreamListAPIHandler(st, rtr).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -3828,9 +3774,9 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3861,8 +3807,8 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 				RoutingFailureReason: reason,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, store.GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -3948,9 +3894,9 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	})
 	writeLegacyRoutingSummaryTrace(t, outputDir, "legacy.http", reqBody, resBody)
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -4032,9 +3978,9 @@ func TestRoutingSummaryCountsTracesNotBuckets(t *testing.T) {
 		}},
 	})
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -4083,27 +4029,11 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
-
-	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
-		ID:                "openai-primary",
-		BaseURL:           "https://api.openai.com/v1",
-		ProviderPreset:    "openai",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          100,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     time.Now().UTC(),
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
 
 	writeLog := func(name string, recordedAt time.Time, endpoint string, model string, statusCode int, errText string) {
 		t.Helper()
@@ -4134,8 +4064,8 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 				RoutingPolicy:                  "p2c",
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, store.GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -4207,9 +4137,9 @@ func TestUpstreamDetailAPIHandlerReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4236,22 +4166,23 @@ func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4303,9 +4234,9 @@ func TestTraceListAndDetailIncludeUpstreamCalls(t *testing.T) {
 			header.Meta.URL = "/v1/chat/completions"
 		}))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -4329,7 +4260,7 @@ func TestTraceListAndDetailIncludeUpstreamCalls(t *testing.T) {
 
 	detailReq := httptest.NewRequest(http.MethodGet, "/api/traces/"+listPayload.Items[0].ID, nil)
 	detailRR := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(detailRR, detailReq)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(detailRR, detailReq)
 	if detailRR.Code != http.StatusOK {
 		t.Fatalf("detail status = %d, want 200", detailRR.Code)
 	}
@@ -4363,22 +4294,23 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4411,18 +4343,19 @@ func TestTraceDetailAPIHandlerIncludesResponsesAuditReference(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 	traceID := items[0].ID
 	recorderRequestID := items[0].Header.Meta.RequestID
 	if recorderRequestID == "" {
@@ -4450,7 +4383,7 @@ func TestTraceDetailAPIHandlerIncludesResponsesAuditReference(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -4480,22 +4413,23 @@ func TestTraceDetailAPIHandlerOmitsResponsesAuditReferenceWhenUnlinked(t *testin
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -4534,20 +4468,21 @@ func TestTracePerformanceAPIHandlerReturnsMetrics(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
-	items, err := st.ListRecent(1)
+	itemsPage, err := st.ListRoutingPage(1, 1, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/performance", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -4589,18 +4524,19 @@ func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
@@ -4627,7 +4563,7 @@ func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, rtr).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, rtr, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4660,22 +4596,23 @@ func TestTraceRawAPIHandlerReturnsProtocolAndMeta(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4722,22 +4659,23 @@ func TestTraceRawAPIHandlerReturnsEventAttributes(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4799,22 +4737,23 @@ func TestTraceDetailAPIHandlerFiltersNoisyDeltaEvents(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4855,22 +4794,23 @@ func TestTraceDetailAPIHandlerEnrichesRequestAndResponseTimeline(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -4946,22 +4886,23 @@ func TestTraceDetailAPIHandlerSurfacesProviderErrorBlocks(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -5014,22 +4955,23 @@ func TestTraceDetailAPIHandlerSurfacesRefusalBlocks(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -5077,22 +5019,23 @@ func TestTraceDownloadAPIHandlerSetsAttachmentDisposition(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	items, err := st.ListRecent(10)
+	itemsPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	items := itemsPage.Items
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/download", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -5105,15 +5048,15 @@ func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/missing/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
@@ -5121,9 +5064,9 @@ func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 
 func TestTraceAPIHandlerReanalysisActions(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5144,7 +5087,7 @@ func TestTraceAPIHandlerReanalysisActions(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/traces/"+entry.ID+"/reanalyze", bytes.NewBufferString(`{}`))
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -5169,9 +5112,9 @@ func TestTraceAPIHandlerReanalysisActions(t *testing.T) {
 
 func TestAnalysisJobAPIHandlerListsDetailsAndCancels(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5185,7 +5128,7 @@ func TestAnalysisJobAPIHandlerListsDetailsAndCancels(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/traces/"+entry.ID+"/reparse", bytes.NewBufferString(`{"mode":"async","scan":true}`))
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -5235,9 +5178,9 @@ func TestAnalysisJobAPIHandlerListsDetailsAndCancels(t *testing.T) {
 
 func TestAnalysisBatchReanalyzeAPIHandlerCreatesBatchJob(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5329,9 +5272,9 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 // returns its tree, because the handler rebuilds it from the cassette.
 func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5354,8 +5297,8 @@ func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-observation")
 	if err != nil {
@@ -5369,7 +5312,7 @@ func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -5404,9 +5347,9 @@ func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 // cassette is reported as a server-side parse failure with the reason.
 func TestTraceObservationAPIHandlerReportsUnreadableCassette(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5428,8 +5371,8 @@ func TestTraceObservationAPIHandlerReportsUnreadableCassette(t *testing.T) {
 			StatusCode: 200,
 		},
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-no-observation")
 	if err != nil {
@@ -5438,7 +5381,7 @@ func TestTraceObservationAPIHandlerReportsUnreadableCassette(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 body=%s", rr.Code, rr.Body.String())
 	}
@@ -5449,9 +5392,9 @@ func TestTraceObservationAPIHandlerReportsUnreadableCassette(t *testing.T) {
 
 func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5474,8 +5417,8 @@ func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-observation-e2e")
 	if err != nil {
@@ -5488,7 +5431,7 @@ func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -5516,9 +5459,9 @@ func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 
 func TestTraceFindingsAPIHandlerReturnsFilteredFindings(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5540,8 +5483,8 @@ func TestTraceFindingsAPIHandlerReturnsFilteredFindings(t *testing.T) {
 			StatusCode: 200,
 		},
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-findings")
 	if err != nil {
@@ -5577,7 +5520,7 @@ func TestTraceFindingsAPIHandlerReturnsFilteredFindings(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/findings?category=credential_leak", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -5767,9 +5710,9 @@ func parseStatusCode(status string) int {
 }
 
 func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5804,9 +5747,9 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 }
 
 func TestModelAliasAPIHandlerCRUD(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5855,9 +5798,9 @@ func TestModelAliasAPIHandlerCRUD(t *testing.T) {
 }
 
 func TestModelAliasAPIHandlerValidationFailures(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5891,9 +5834,9 @@ func TestModelAliasAPIHandlerValidationFailures(t *testing.T) {
 }
 
 func TestModelAliasValidateAPIHandlerWarnings(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5949,9 +5892,9 @@ func TestModelAliasValidateAPIHandlerWarnings(t *testing.T) {
 }
 
 func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5991,9 +5934,9 @@ func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 // state), and that a rejected plan still carries the attempted execution mode
 // and endpoint the frontend renders.
 func TestRoutingInspectMatchesTheRoutersDryRun(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6177,9 +6120,9 @@ func TestRoutingSummaryReadsPreludesNotWholeCassettes(t *testing.T) {
 			})
 	}
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -6212,9 +6155,9 @@ func TestRoutingSummaryReadsPreludesNotWholeCassettes(t *testing.T) {
 // the list response carries the matched trace so the detail panel reads the pair
 // for the trace the reader searched, not the newest occurrence's pair.
 func TestSystemEventListResolvesCredentialMaskTraceQuery(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6286,9 +6229,9 @@ func TestSystemEventListResolvesCredentialMaskTraceQuery(t *testing.T) {
 // same rule in another trace, and the trace_id query parameter selects the
 // occurrence the event id addresses.
 func TestCredentialMaskEventActionsAreTraceScoped(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6395,9 +6338,9 @@ func TestCredentialMaskEventActionsAreTraceScoped(t *testing.T) {
 // TestTraceScopedMarkAllReadOnlyThatTrace pins the bulk action to the same
 // occurrence scope as the single-row actions.
 func TestTraceScopedMarkAllReadOnlyThatTrace(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6490,9 +6433,9 @@ func TestListAPIHandlerExposesAndFiltersClientHarness(t *testing.T) {
 		`{"messages":[{"role":"user","content":"hi"}]}`,
 		`{"choices":[{"message":{"content":"ok"}}]}`))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)

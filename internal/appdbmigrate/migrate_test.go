@@ -24,12 +24,10 @@ func TestMigrateUpSQLiteUsesStoreInit(t *testing.T) {
 	}
 }
 
-func TestMigrateDownSQLiteUsesStoreInit(t *testing.T) {
-	err := MigrateDown("sqlite", "ignored.sqlite3", 1, false)
-	if !errors.Is(err, ErrSQLiteUsesStoreInit) {
-		t.Fatalf("MigrateDown(sqlite) error = %v, want ErrSQLiteUsesStoreInit", err)
-	}
-}
+// There is deliberately no MigrateDown here: `db migrate down` is a refusal
+// stub in internal/cli, and its exit code and UNSUPPORTED_DB_MIGRATE_DOWN
+// envelope are asserted by TestRunMigrateDownReportsTheUnsupportedMessageOnce
+// and TestRunMigrateDownJSONStderrIsOnlyAnEnvelope in cli_contract_test.go.
 
 func TestCheckStatusSQLiteReportsSchemaInitFallback(t *testing.T) {
 	status, err := CheckStatus("sqlite", "ignored.sqlite3")
@@ -173,16 +171,6 @@ func TestMigrateUpPostgresRequiresDSN(t *testing.T) {
 	}
 }
 
-func TestMigrateDownPostgresRequiresDSN(t *testing.T) {
-	err := MigrateDown("postgresql", "", 1, false)
-	if err == nil {
-		t.Fatalf("MigrateDown(postgresql empty dsn) error = nil")
-	}
-	if !strings.Contains(err.Error(), "postgres application database dsn is required") {
-		t.Fatalf("MigrateDown(postgresql empty dsn) error = %q", err.Error())
-	}
-}
-
 func TestMigrateUpRejectsUnsupportedDriver(t *testing.T) {
 	err := MigrateUp("mysql", "mysql://example", 0)
 	if err == nil {
@@ -190,16 +178,6 @@ func TestMigrateUpRejectsUnsupportedDriver(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `application database driver "mysql" is not supported`) {
 		t.Fatalf("MigrateUp(mysql) error = %q", err.Error())
-	}
-}
-
-func TestMigrateDownRejectsUnsupportedDriver(t *testing.T) {
-	err := MigrateDown("mysql", "mysql://example", 1, false)
-	if err == nil {
-		t.Fatalf("MigrateDown(mysql) error = nil")
-	}
-	if !strings.Contains(err.Error(), `application database driver "mysql" is not supported`) {
-		t.Fatalf("MigrateDown(mysql) error = %q", err.Error())
 	}
 }
 

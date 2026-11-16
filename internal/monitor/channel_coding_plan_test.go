@@ -6,12 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestChannelCreateRejectsWrongQwenCodingPlanKey(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +52,7 @@ func TestChannelCreateRejectsWrongQwenCodingPlanKey(t *testing.T) {
 }
 
 func TestChannelPatchValidatesExistingCodingPlanKey(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

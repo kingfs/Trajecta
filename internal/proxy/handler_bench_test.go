@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/config"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func BenchmarkHandlerNonStreamProxy(b *testing.B) {
@@ -24,7 +23,7 @@ func BenchmarkHandlerNonStreamProxy(b *testing.B) {
 	defer upstream.Close()
 
 	outputDir := b.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -36,7 +35,7 @@ func BenchmarkHandlerNonStreamProxy(b *testing.B) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
 		b.Fatal(err)
 	}

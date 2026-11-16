@@ -255,9 +255,9 @@ func TestSanitizeSlowQueryCollapsesWhitespaceAndKeepsShortSQL(t *testing.T) {
 }
 
 func TestStorePoolStatsAndDriverFacts(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -292,9 +292,9 @@ func TestStoreSlowQuerySnapshotReflectsTheProcessSwitch(t *testing.T) {
 	SetSlowQueryThreshold(0)
 	ResetSlowQueries()
 
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -334,9 +334,9 @@ func TestStoreSlowQuerySnapshotReflectsTheProcessSwitch(t *testing.T) {
 }
 
 func TestSystemDatabaseSnapshotIsUnsupportedOutsidePostgres(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

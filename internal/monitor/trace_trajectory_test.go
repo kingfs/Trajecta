@@ -15,7 +15,7 @@ import (
 
 func TestTraceTrajectoryExportsOneTrace(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestTraceTrajectoryExportsOneTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertLog(path, prelude.Header); err != nil {
+	if err := st.UpsertLogWithGrouping(path, prelude.Header, store.GroupingInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := st.GetByRequestID(prelude.Header.Meta.RequestID)
@@ -42,7 +42,7 @@ func TestTraceTrajectoryExportsOneTrace(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/trajectory", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}

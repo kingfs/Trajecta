@@ -10,9 +10,9 @@ import (
 // one parse job. EnqueueParseJob (recording) and SaveObservation (parsing) both
 // wrote a row, so every parsed trace appeared twice and the queue table doubled.
 func TestParseJobsHoldOneRowPerTrace(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -49,9 +49,9 @@ func TestParseJobsHoldOneRowPerTrace(t *testing.T) {
 // TestSaveObservationWithoutEnqueueCreatesTheJob keeps the path where a trace is
 // parsed without ever being queued working.
 func TestSaveObservationWithoutEnqueueCreatesTheJob(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 

@@ -74,15 +74,6 @@ func (p *ResponsePipeline) Reader() io.ReadCloser {
 	return p.sniffer
 }
 
-// Close finalizes the pipeline. It is safe to call more than once only if the
-// underlying reader tolerates it; the HTTP path calls it once.
-func (p *ResponsePipeline) Close() error {
-	if p == nil || p.sniffer.Source == nil {
-		return nil
-	}
-	return p.sniffer.Close()
-}
-
 // Restored reports how many masked stand-ins were restored for the client.
 func (p *ResponsePipeline) Restored() int {
 	if p == nil || p.restorer == nil {

@@ -15,30 +15,14 @@ import (
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
-	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.Config, authStore ...*auth.Store) *http.ServeMux {
-	return newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, nil, authStore...)
-}
-
-func newManagementMuxWithFunctionExecutorManager(
-	traceStore *store.Store,
-	rtr *router.Router,
-	cfg *config.Config,
-	functionExecutorManager *functionexec.Manager,
-	authStore ...*auth.Store,
-) *http.ServeMux {
-	return newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, nil, nil, nil, authStore...)
-}
-
 // newManagementMuxWithSecretMappings is the serve-time constructor. Both admin
 // values are surfaces of the proxy handler's live vault, which does not exist in
-// the test callers of the function above; nil is a valid answer and makes the
-// mapping and suppression endpoints report that the store is unavailable.
-// detectorRuntime is the detection-plugin runtime; nil falls back to builtin
-// detectors in the test callers.
+// test callers; nil is a valid answer and makes the mapping and suppression
+// endpoints report that the store is unavailable. detectorRuntime is the
+// detection-plugin runtime; nil falls back to builtin detectors in test callers.
 func newManagementMuxWithSecretMappings(
 	traceStore *store.Store,
 	rtr *router.Router,
@@ -171,19 +155,4 @@ func logResolvedTargets(rtr *router.Router) {
 			"model_routing_hint", diagnostics.ModelRoutingHint,
 		)
 	}
-}
-
-func logResolvedUpstreamConfig(resolvedUpstream upstream.ResolvedUpstream, diagnostics upstream.StartupDiagnostics) {
-	slog.Info(
-		"Resolved upstream config",
-		"base_url", resolvedUpstream.BaseURL,
-		"provider_preset", resolvedUpstream.ProviderPreset,
-		"protocol_family", resolvedUpstream.ProtocolFamily,
-		"routing_profile", resolvedUpstream.RoutingProfile,
-		"api_version", resolvedUpstream.APIVersion,
-		"deployment", resolvedUpstream.Deployment,
-		"connectivity_endpoint", diagnostics.ConnectivityEndpoint,
-		"connectivity_url", diagnostics.ConnectivityURL,
-		"model_routing_hint", diagnostics.ModelRoutingHint,
-	)
 }

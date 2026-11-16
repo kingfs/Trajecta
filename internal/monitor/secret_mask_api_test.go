@@ -22,9 +22,9 @@ import (
 // The rows are dated in the past on purpose, because the default read is not
 // time-bounded and an explicit window still is. Both halves are asserted.
 func TestCredentialMaskAuditAPIHandler(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

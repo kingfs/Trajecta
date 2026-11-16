@@ -37,9 +37,9 @@ func equalLengthPair(prefix, realFill, fakeFill string) secretmask.Mapping {
 // side in the clear.
 func TestSecretMappingStoreRoundTrip(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := New(outputDir)
+	st, err := newSQLiteTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -115,9 +115,9 @@ func TestSecretMappingStoreRoundTrip(t *testing.T) {
 // which is what bounds a restart's memory.
 func TestSecretMappingStoreLoadLimit(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := New(outputDir)
+	st, err := newSQLiteTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -156,9 +156,9 @@ func TestSecretMappingStoreLoadLimit(t *testing.T) {
 // a batch yet is still durable when the process shuts down cleanly.
 func TestSecretMappingStoreFlushesOnClose(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := New(outputDir)
+	st, err := newSQLiteTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -193,9 +193,9 @@ func TestSecretMappingStoreFlushesOnClose(t *testing.T) {
 
 func TestSecretMappingStoreRejectsMalformedPair(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := New(outputDir)
+	st, err := newSQLiteTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	ms, _ := openTestSecretMappingStore(t, st, outputDir)
@@ -219,9 +219,9 @@ func TestSecretMappingStoreRejectsMalformedPair(t *testing.T) {
 // can produce, and that closing under that burst still flushes everything.
 func TestSecretMappingStoreConcurrentAppends(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := New(outputDir)
+	st, err := newSQLiteTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	ms, path := openTestSecretMappingStore(t, st, outputDir)

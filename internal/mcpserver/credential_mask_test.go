@@ -19,9 +19,9 @@ func TestServerListsCredentialMasks(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

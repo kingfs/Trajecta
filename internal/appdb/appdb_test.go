@@ -31,8 +31,8 @@ func TestOpenAuthStoreAutoMigrateSQLiteCreatesAuthSchemaAndInitUser(t *testing.T
 	}
 	defer st.Close()
 
-	if _, err := st.CreateUser(context.Background(), "admin", "correct horse battery staple"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(context.Background(), "admin", "correct horse battery staple", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	if err := st.VerifyPassword(context.Background(), "admin", "correct horse battery staple"); err != nil {
 		t.Fatalf("VerifyPassword() error = %v", err)

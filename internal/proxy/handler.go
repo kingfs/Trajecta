@@ -144,11 +144,6 @@ type proxyRoutingSettings struct {
 
 const proxyRoutingSettingsKey = "routing.settings"
 
-// ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
-func ensureStreamOptions(req *http.Request) {
-	_, _ = readAndNormalizeRequestBody(req)
-}
-
 // maxRequestBodyBytes is the finite guard against an unbounded request body that the
 // proxy buffers on the forwarding path. It reports the configured limit, or zero when
 // the handler has no configuration, in which case the caller applies no bound.
@@ -331,10 +326,6 @@ func (h *Handler) hotPathProtocol(protocol string) string {
 		return protocol
 	}
 	return ""
-}
-
-func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
-	return newHandler(cfg, st, nil, provided...)
 }
 
 // hopByHopHeaders are connection-scoped headers that must not be forwarded to
@@ -1684,17 +1675,11 @@ func upstreamErrorSnippet(raw string) string {
 	return text
 }
 
-// upstreamFailureHint turns the provider's own answer into the next action,
-// which is the difference between "404" and "the model id is wrong" or "the
-// base URL points at the wrong path".
-//
-// The signature is kept for callers that only have the displayed snippet; the
-// hot path passes the untruncated body to upstreamFailureHintForBody so a long
-// JSON envelope is classified before upstreamErrorSnippet shortens it.
-func upstreamFailureHint(resp *http.Response, snippet string) string {
-	return upstreamFailureHintForBody(resp, snippet)
-}
-
+// upstreamFailureHintForBody turns the provider's own answer into the next
+// action, which is the difference between "404" and "the model id is wrong" or
+// "the base URL points at the wrong path". The hot path passes the untruncated
+// body so a long JSON envelope is classified before upstreamErrorSnippet
+// shortens it.
 func upstreamFailureHintForBody(resp *http.Response, body string) string {
 	if resp == nil || resp.StatusCode != http.StatusNotFound {
 		return ""

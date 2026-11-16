@@ -41,9 +41,9 @@ func TestAttachTraceAuditCountsMaskEventsAndFindings(t *testing.T) {
 		},
 	))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -113,9 +113,9 @@ func TestAttachTraceAuditLeavesCleanTracesNil(t *testing.T) {
 			header.Meta.RequestID = "req-clean"
 		},
 	))
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -148,9 +148,9 @@ func TestTraceDetailAuditMatchesListTally(t *testing.T) {
 		},
 	))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -222,9 +222,9 @@ func TestAttachTracePreviewsShowsFirstUserTurn(t *testing.T) {
 		},
 	))
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
@@ -244,10 +244,11 @@ func TestAttachTracePreviewsShowsFirstUserTurn(t *testing.T) {
 
 func mustListRecent(t *testing.T, st *store.Store, limit int) []store.LogEntry {
 	t.Helper()
-	entries, err := st.ListRecent(limit)
+	entriesPage, err := st.ListRoutingPage(1, limit, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	entries := entriesPage.Items
 	return entries
 }
 

@@ -16,12 +16,6 @@ func run(args []string) int {
 	return cli.Execute(args, cmd, runtime)
 }
 
-// newRootCommand builds the server command tree. It exists for the tests; the
-// process entry point builds the tree with its own runtime.
-func newRootCommand() *cobra.Command {
-	return newRootCommandWithRuntime(cli.NewRuntime())
-}
-
 // newRootCommandWithRuntime wires the server binary: the bare invocation and
 // `serve` start the proxy, and completion and version describe this artifact.
 //

@@ -25,7 +25,7 @@ const geminiKindBody = `{
 // TestGeminiPartKindsAgreeAcrossParsers measures the observer against the llm mapper on one response.
 //
 // They are independent readers of the same bytes: the observation IR feeds analysis and the Monitor's
-// Gemini decoration, while `llm.GeminiToLLM` feeds the parsed response and the recorder timeline. The
+// Gemini decoration, while `llm.ParseResponse` feeds the parsed response and the recorder timeline. The
 // llm side used to read only `text`, so it reported the reasoning as answer text and dropped the tool
 // call, while the observation reported both correctly. This gate keeps the two readings of one body
 // identical instead of asserting each side against a hand-written expectation.

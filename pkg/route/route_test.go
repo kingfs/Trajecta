@@ -2,13 +2,13 @@ package route
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/pkg/session"
 	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
@@ -45,8 +45,8 @@ func testRequest(protocol xir.Protocol) Request {
 	}
 }
 
-func bindingsFor(session, model, targetID string) map[string]string {
-	return map[string]string{BindingKey(session, model): targetID}
+func bindingsFor(sess, model, targetID string) map[string]string {
+	return map[string]string{session.Fingerprint(session.Compose(sess, model)): targetID}
 }
 
 func planErrorSentinel(reason string) error {
@@ -71,8 +71,9 @@ func requirePlanError(t *testing.T, plan *PlanResult, err error, want string) {
 	if err == nil {
 		t.Fatalf("Plan() error = nil, want reason %q", want)
 	}
-	if got := ReasonOf(err); got != want {
-		t.Fatalf("ReasonOf(error) = %q, want %q (error: %v)", got, want, err)
+	var planErr *PlanError
+	if !errors.As(err, &planErr) || planErr.Reason != want {
+		t.Fatalf("Plan() error = %v, want *PlanError with reason %q", err, want)
 	}
 	if plan == nil {
 		t.Fatalf("Plan() plan = nil, want diagnostic plan for %q", want)
@@ -83,10 +84,6 @@ func requirePlanError(t *testing.T, plan *PlanResult, err error, want string) {
 	sentinel := planErrorSentinel(want)
 	if sentinel != nil && !errors.Is(err, sentinel) {
 		t.Fatalf("errors.Is(err, %v) = false for %v", sentinel, err)
-	}
-	var typed *PlanError
-	if !errors.As(err, &typed) || typed.Reason != want {
-		t.Fatalf("errors.As(*PlanError) = %#v, want reason %q", typed, want)
 	}
 }
 
@@ -394,8 +391,8 @@ func TestSoftAffinity(t *testing.T) {
 		if plan.Affinity.TargetID != "slow" {
 			t.Fatalf("plan.Affinity.TargetID = %q, want slow", plan.Affinity.TargetID)
 		}
-		if plan.Affinity.KeyFingerprint != BindingKey(request.Session, request.Model) {
-			t.Fatalf("plan.Affinity.KeyFingerprint = %q, want BindingKey result", plan.Affinity.KeyFingerprint)
+		if plan.Affinity.KeyFingerprint != session.Fingerprint(session.Compose(request.Session, request.Model)) {
+			t.Fatalf("plan.Affinity.KeyFingerprint = %q, want the canonical session binding fingerprint", plan.Affinity.KeyFingerprint)
 		}
 		if strings.Contains(plan.Affinity.KeyFingerprint, request.Session) {
 			t.Fatal("affinity fingerprint leaked the raw session")
@@ -739,7 +736,7 @@ func TestConversionOnlyLast(t *testing.T) {
 	})
 }
 
-func TestExplainMatchesPlanAndDoesNotMutateSnapshot(t *testing.T) {
+func TestPlanIsDeterministicAndDoesNotMutateSnapshot(t *testing.T) {
 	targets := []Target{
 		testTarget("one", 100, xir.ProtocolChatCompletions, xir.ProtocolMessages),
 		testTarget("two", 10, xir.ProtocolChatCompletions),
@@ -755,50 +752,22 @@ func TestExplainMatchesPlanAndDoesNotMutateSnapshot(t *testing.T) {
 	request.Session = "session"
 	policy := Policy{PriorityMode: PriorityStrict, AllowConversion: true}
 
-	planFromPlan, err := Plan(context.Background(), request, snapshot, policy)
+	first, err := Plan(context.Background(), request, snapshot, policy)
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	planFromExplain, err := Explain(context.Background(), request, snapshot, policy)
+	second, err := Plan(context.Background(), request, snapshot, policy)
 	if err != nil {
-		t.Fatalf("Explain() error = %v", err)
+		t.Fatalf("Plan() error = %v", err)
 	}
-	if !reflect.DeepEqual(planFromPlan, planFromExplain) {
-		t.Fatalf("Plan() = %#v, Explain() = %#v", planFromPlan, planFromExplain)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("Plan() = %#v, repeated Plan() = %#v", first, second)
 	}
 	if !reflect.DeepEqual(snapshot.Targets, targets) {
 		t.Fatalf("snapshot targets mutated: got %#v, want %#v", snapshot.Targets, targets)
 	}
 	if !reflect.DeepEqual(snapshot.Bindings, bindings) {
 		t.Fatalf("snapshot bindings mutated: got %#v, want %#v", snapshot.Bindings, bindings)
-	}
-}
-
-func TestBindingKeyFingerprint(t *testing.T) {
-	key := BindingKey("raw-session", "gpt-4o")
-	if len(key) != 64 {
-		t.Fatalf("len(BindingKey) = %d, want 64", len(key))
-	}
-	if _, err := hex.DecodeString(key); err != nil {
-		t.Fatalf("BindingKey is not hex: %v", err)
-	}
-	if strings.Contains(key, "raw-session") {
-		t.Fatal("BindingKey contains the raw session")
-	}
-	if key != BindingKey("raw-session", "gpt-4o") {
-		t.Fatal("BindingKey is not stable")
-	}
-	if key != BindingKey(" raw-session ", " GPT-4O ") {
-		t.Fatal("BindingKey should trim and case-fold model")
-	}
-	if key == BindingKey("raw-session", "gpt-4.1") {
-		t.Fatal("BindingKey must depend on the model")
-	}
-	if key == BindingKey("another-session", "gpt-4o") {
-		t.Fatal("BindingKey must depend on the session")
-	}
-	if len(BindingKey("", "model")) != 64 {
-		t.Fatal("BindingKey with an empty session should still be a fingerprint")
 	}
 }
 
@@ -913,7 +882,8 @@ func TestPlanErrorFormatting(t *testing.T) {
 	if !errors.Is(detailed, ErrModelUnknown) {
 		t.Fatal("errors.Is(detailed, ErrModelUnknown) = false")
 	}
-	if ReasonOf(errors.New("unrelated")) != "" {
-		t.Fatal("ReasonOf(unrelated) should be empty")
+	var unrelated *PlanError
+	if errors.As(errors.New("unrelated"), &unrelated) {
+		t.Fatal("an unrelated error must not carry a *PlanError")
 	}
 }

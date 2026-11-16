@@ -72,9 +72,8 @@ type Decision struct {
 	Reason           string
 }
 
-func (d Decision) Passthrough() bool { return d.Action == ActionPassthrough }
-func (d Decision) Convert() bool     { return d.Action == ActionConvert }
-func (d Decision) Reject() bool      { return d.Action == ActionReject }
+func (d Decision) Convert() bool { return d.Action == ActionConvert }
+func (d Decision) Reject() bool  { return d.Action == ActionReject }
 
 // PlanRequest is the full input to PlanForRequest: the same triple as Plan
 // plus whether the client asked for a stream.

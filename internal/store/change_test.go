@@ -16,7 +16,7 @@ import (
 // background rather than from a click - the reanalysis pass that fills in a
 // usage trailer, and the parse worker that moves a job - so both are pinned here.
 func TestBackgroundWritesPublishTrafficChanges(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

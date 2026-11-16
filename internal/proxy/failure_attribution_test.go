@@ -24,9 +24,9 @@ import (
 // channel, so the trace could not be joined back to the provider it blamed.
 func TestExhaustedUpstreamFailureKeepsAttemptedTargetAttribution(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -62,9 +62,9 @@ func TestExhaustedUpstreamFailureKeepsAttemptedTargetAttribution(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -193,7 +193,8 @@ func waitForLatestTraceEntry(t *testing.T, st *store.Store, timeout time.Duratio
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		entries, err := st.ListRecent(1)
+		page, err := st.ListRoutingPage(1, 1, store.ListFilter{})
+		entries := page.Items
 		if err == nil && len(entries) > 0 {
 			return entries[0]
 		}

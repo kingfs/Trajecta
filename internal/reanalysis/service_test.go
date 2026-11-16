@@ -16,9 +16,9 @@ import (
 
 func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -73,9 +73,9 @@ func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 // fail here because a rescan read the node table, which nothing had filled yet.
 func TestServiceRescanTraceParsesCassetteWithoutStoringObservation(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -101,9 +101,9 @@ func TestServiceRescanTraceParsesCassetteWithoutStoringObservation(t *testing.T)
 
 func TestServiceRepairTraceUsageUpdatesIndex(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -129,9 +129,9 @@ func TestServiceRepairTraceUsageUpdatesIndex(t *testing.T) {
 
 func TestServiceRepairTraceUsageCanRewriteV3Prelude(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -178,9 +178,9 @@ func TestServiceRepairTraceUsageCanRewriteV3Prelude(t *testing.T) {
 
 func TestWorkerExecutesQueuedTraceReanalyzeJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -212,9 +212,9 @@ func TestWorkerExecutesQueuedTraceReanalyzeJob(t *testing.T) {
 
 func TestServiceReanalyzeBatchExpandsTraceJobs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -242,9 +242,9 @@ func TestServiceReanalyzeBatchExpandsTraceJobs(t *testing.T) {
 
 func TestServiceReanalyzeSessionSavesAnalysisRun(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -256,7 +256,7 @@ func TestServiceReanalyzeSessionSavesAnalysisRun(t *testing.T) {
 	header := entry.Header
 	header.Meta.RequestID = "req-reanalysis-session"
 	if err := st.UpsertLogWithGrouping(entry.LogPath, header, store.GroupingInfo{SessionID: "sess-reanalysis", SessionSource: "test"}); err != nil {
-		t.Fatalf("UpsertLog(session) error = %v", err)
+		t.Fatalf("UpsertLogWithGrouping(session) error = %v", err)
 	}
 	entry, err = st.GetByRequestID("req-reanalysis-session")
 	if err != nil {
@@ -322,8 +322,8 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(trace) error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-reanalysis")
 	if err != nil {

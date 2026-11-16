@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func mustParse(t *testing.T, raw []byte) *Node {
+	t.Helper()
+	n, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse(%s): %v", raw, err)
+	}
+	return n
+}
+
 func TestParseObjectPreservesOrderAndUnknowns(t *testing.T) {
 	raw := []byte(`{"b":2,"a":1,"nested":{"x":true},"unknown":[1,"two",null]}`)
 	n, err := Parse(raw)
@@ -52,7 +61,7 @@ func TestParseStringEscapes(t *testing.T) {
 }
 
 func TestDuplicateKeyLastWins(t *testing.T) {
-	n := MustParse([]byte(`{"k":1,"k":2}`))
+	n := mustParse(t, []byte(`{"k":1,"k":2}`))
 	if v, _ := n.IntField("k"); v != 2 {
 		t.Fatalf("k = %d, want 2", v)
 	}
@@ -76,7 +85,7 @@ func TestParseRejectsTrailingAndInvalid(t *testing.T) {
 
 func TestApplyReplacesAndPreserves(t *testing.T) {
 	raw := []byte(`{"a":"secret","b":2}`)
-	secret, _ := MustParse(raw).Get("a")
+	secret, _ := mustParse(t, raw).Get("a")
 	edits := []Edit{{
 		Span:   secret.Span,
 		Bytes:  []byte("xxxxxx"),
@@ -97,7 +106,7 @@ func TestApplyReplacesAndPreserves(t *testing.T) {
 
 func TestApplyPreserveLengthRejects(t *testing.T) {
 	raw := []byte(`{"a":"secret"}`)
-	secret, _ := MustParse(raw).Get("a")
+	secret, _ := mustParse(t, raw).Get("a")
 	_, err := Apply(raw, []Edit{{
 		Span:           secret.Span,
 		Bytes:          []byte("x"),
@@ -122,8 +131,8 @@ func TestApplyOverlapRejects(t *testing.T) {
 
 func TestApplyDelete(t *testing.T) {
 	raw := []byte(`{"a":1,"b":2}`)
-	b, _ := MustParse(raw).Get("b")
-	member, _ := MustParse(raw).ObjectElem("b")
+	b, _ := mustParse(t, raw).Get("b")
+	member, _ := mustParse(t, raw).ObjectElem("b")
 	_ = b
 	// Delete the comma and the whole b member by covering from the comma
 	// after "a" through the value. Simpler: delete the member value only and

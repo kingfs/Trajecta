@@ -59,9 +59,9 @@ func modelProbeTestUpstream(t *testing.T) (*httptest.Server, *int32) {
 
 func newModelProbeTestStore(t *testing.T, baseURL string) (*store.Store, time.Time) {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -199,9 +199,9 @@ func TestProviderModelTestAPIReportsDeclaredResponsesWithoutNativePassThrough(t 
 	// native_responses=false while still probing the declared Responses route, because
 	// that route is what the operator needs to see is broken.
 	upstreamServer, responsesCalls := modelProbeTestUpstream(t)
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
@@ -335,9 +335,9 @@ func TestProviderModelTestAPIRejectsBadRequests(t *testing.T) {
 }
 
 func TestProviderModelTestAPIMapsUnresolvableConfigToBadRequest(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{

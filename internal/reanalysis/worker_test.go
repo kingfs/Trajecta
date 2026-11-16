@@ -20,9 +20,9 @@ import (
 func newWorkerTestStore(t *testing.T) (*store.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st, dir
@@ -67,8 +67,8 @@ func writeWorkerTestTrace(t *testing.T, st *store.Store, dir, requestID string) 
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(trace) error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID(requestID)
 	if err != nil {

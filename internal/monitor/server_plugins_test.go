@@ -13,12 +13,17 @@ import (
 )
 
 func pluginIDsForTest() []string {
-	return pkgupstream.PluginIDs()
+	plugins := pkgupstream.Plugins()
+	ids := make([]string, 0, len(plugins))
+	for _, plugin := range plugins {
+		ids = append(ids, plugin.ID)
+	}
+	return ids
 }
 
 func newPluginTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

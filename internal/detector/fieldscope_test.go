@@ -27,9 +27,9 @@ func TestHotScannerPointScoping(t *testing.T) {
 	body := []byte(`{"model":"gpt-5","messages":[` +
 		`{"role":"user","content":"hello"},` +
 		`{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"run","arguments":"{\"cmd\":\"ls\"}"}}]}]}`)
-	scope, ok := ParseRequestScope("chat_completions", body, ScopeOptions{RequireFields: true})
-	if !ok {
-		t.Fatal("scope required")
+	scope, outcome := ParseRequestScopeWithOutcome("chat_completions", body, ScopeOptions{RequireFields: true})
+	if outcome != ScopeProjected {
+		t.Fatalf("scope required, outcome = %q", outcome)
 	}
 	rec := &recordingScanner{}
 	snap := &Snapshot{hotScanners: []hotScanner{{scanner: rec, points: []hook.Point{hook.PointRequestToolCall}}}}
@@ -56,9 +56,9 @@ func TestHotScannerPointScoping(t *testing.T) {
 // A plugin without Points keeps whole-body coverage.
 func TestHotScannerWithoutPointsScansBody(t *testing.T) {
 	body := []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`)
-	scope, ok := ParseRequestScope("chat_completions", body, ScopeOptions{RequireFields: true})
-	if !ok {
-		t.Fatal("scope required")
+	scope, outcome := ParseRequestScopeWithOutcome("chat_completions", body, ScopeOptions{RequireFields: true})
+	if outcome != ScopeProjected {
+		t.Fatalf("scope required, outcome = %q", outcome)
 	}
 	rec := &recordingScanner{}
 	snap := &Snapshot{hotScanners: []hotScanner{{scanner: rec}}}

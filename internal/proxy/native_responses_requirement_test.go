@@ -13,7 +13,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // TestNativePassThroughDoesNotFallBackToAChatOnlyUpstream pins what a failing native
@@ -59,9 +58,9 @@ func TestNativePassThroughDoesNotFallBackToAChatOnlyUpstream(t *testing.T) {
 	defer nativeSrv.Close()
 
 	responsesEnabled, chatDisabled, chatEnabled := true, false, true
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": "auto"}); err != nil {
@@ -88,9 +87,9 @@ func TestNativePassThroughDoesNotFallBackToAChatOnlyUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxySrv := httptest.NewServer(handler)
 	defer proxySrv.Close()

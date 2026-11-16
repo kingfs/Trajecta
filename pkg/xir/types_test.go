@@ -5,47 +5,6 @@ import (
 	"testing"
 )
 
-func TestParseProtocolAliases(t *testing.T) {
-	cases := map[string]Protocol{
-		"chat":             ProtocolChatCompletions,
-		"chat_completions": ProtocolChatCompletions,
-		"openai-chat":      ProtocolChatCompletions,
-		"responses":        ProtocolResponses,
-		"messages":         ProtocolMessages,
-		"anthropic":        ProtocolMessages,
-		"claude":           ProtocolMessages,
-		"gemini":           ProtocolGemini,
-		"generate_content": ProtocolGemini,
-		"vertex":           ProtocolGemini,
-	}
-	for in, want := range cases {
-		got, err := ParseProtocol(in)
-		if err != nil {
-			t.Fatalf("ParseProtocol(%q): %v", in, err)
-		}
-		if got != want {
-			t.Fatalf("ParseProtocol(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if _, err := ParseProtocol("unknown"); err == nil {
-		t.Fatal("unknown protocol accepted")
-	}
-}
-
-func TestCapabilities(t *testing.T) {
-	c := Capabilities{ChatCompletions: true, Messages: true}
-	if !c.Has(ProtocolChatCompletions) || !c.Has(ProtocolMessages) {
-		t.Fatal("expected protocols missing")
-	}
-	if c.Has(ProtocolResponses) {
-		t.Fatal("unexpected responses capability")
-	}
-	got := c.Protocols()
-	if len(got) != 2 || got[0] != ProtocolChatCompletions || got[1] != ProtocolMessages {
-		t.Fatalf("Protocols() = %v", got)
-	}
-}
-
 func TestStateRefsHasServerState(t *testing.T) {
 	if (StateRefs{PromptCacheKey: "x"}).HasServerState() {
 		t.Fatal("prompt cache key must not be server state")

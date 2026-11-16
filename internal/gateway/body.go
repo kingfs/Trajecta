@@ -40,7 +40,8 @@ func (b *Body) SetWire(wire []byte) {
 }
 
 // WireBytes returns the bytes to send upstream. It never returns nil for an
-// empty client body; callers that need "was it changed" use Changed.
+// empty client body; in the passthrough state it returns Client itself, so
+// callers that need "was it changed" compare it with Client.
 func (b *Body) WireBytes() []byte {
 	if b == nil {
 		return nil
@@ -50,6 +51,3 @@ func (b *Body) WireBytes() []byte {
 	}
 	return b.wire
 }
-
-// Changed reports whether the upstream body differs from the client body.
-func (b *Body) Changed() bool { return b != nil && b.wire != nil }

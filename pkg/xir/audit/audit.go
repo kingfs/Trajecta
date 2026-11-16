@@ -192,21 +192,6 @@ func StableNodeID(section, path, protocolType string, index int) string {
 	return "node_" + hex.EncodeToString(sum[:])[:16]
 }
 
-// EvidencePath returns the stable evidence locator for a node:
-// trace#<traceID>#node#<nodeID>#path#<path>. An empty node ID or path omits
-// that pair, mirroring the node shape a caller may hold before building.
-func EvidencePath(traceID string, node Node) string {
-	parts := make([]string, 0, 6)
-	parts = append(parts, "trace", traceID)
-	if node.ID != "" {
-		parts = append(parts, "node", node.ID)
-	}
-	if node.Path != "" {
-		parts = append(parts, "path", node.Path)
-	}
-	return strings.Join(parts, "#")
-}
-
 type builder struct {
 	nodes []Node
 }

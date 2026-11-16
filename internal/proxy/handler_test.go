@@ -18,7 +18,6 @@ import (
 	"github.com/kingfs/Trajecta/internal/recorder"
 	"github.com/kingfs/Trajecta/internal/redaction"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	usagepkg "github.com/kingfs/Trajecta/pkg/usage"
 )
@@ -83,9 +82,9 @@ func TestExtractResponsesEntryResponseID(t *testing.T) {
 }
 
 func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -93,9 +92,9 @@ func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Trace.OutputDir = cfg.Debug.OutputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	rec := httptest.NewRecorder()
@@ -111,9 +110,9 @@ func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 
 func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -121,9 +120,9 @@ func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/qwen3.6-35b-a3b", nil)
 	rec := httptest.NewRecorder()
@@ -155,9 +154,9 @@ func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
 
 func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -165,9 +164,9 @@ func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/show", bytes.NewBufferString(`{"name":"qwen3.6-35b-a3b"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -248,7 +247,9 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	ensureStreamOptions(req)
+	if _, err := readAndNormalizeRequestBody(req); err != nil {
+		t.Fatalf("readAndNormalizeRequestBody() error = %v", err)
+	}
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -659,15 +660,15 @@ func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
 	cfg.Upstream.BaseURL = "https://api.openai.com/v1"
 	cfg.Upstream.ApiKey = "sk-test"
 	cfg.Upstream.ProviderPreset = "openai"
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	transport := handler.transport
 	if transport == nil {

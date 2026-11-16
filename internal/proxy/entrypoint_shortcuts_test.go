@@ -31,9 +31,9 @@ func newEntrypointShortcutHandler(t *testing.T) (*Handler, *store.Store, string,
 	t.Helper()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -65,9 +65,9 @@ func newEntrypointShortcutHandler(t *testing.T) (*Handler, *store.Store, string,
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	return handler, st, outputDir, &called
 }
@@ -220,18 +220,18 @@ func TestHandlerPreSelectionRateLimitRejectsBeforeForwarding(t *testing.T) {
 // envelope and records it instead of attempting a selection.
 func TestHandlerWithoutUpstreamTargetsAnswersWithASelectionFailure(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
 	cfg := &config.Config{}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 
 	rec := httptest.NewRecorder()
@@ -304,9 +304,9 @@ func recordedPreludesByStatus(t *testing.T, root string) map[int]*recordfile.Par
 // the recorded trace is what the Monitor lists, so it is asserted here.
 func TestHandlerRecordsTheFailureWhenEveryUpstreamIsExhausted(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -342,9 +342,9 @@ func TestHandlerRecordsTheFailureWhenEveryUpstreamIsExhausted(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	t.Cleanup(proxyServer.Close)

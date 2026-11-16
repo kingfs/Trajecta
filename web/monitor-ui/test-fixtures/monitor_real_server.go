@@ -51,7 +51,7 @@ func run() error {
 	}))
 	defer upstream.Close()
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func writeTrace(outputDir string, st *store.Store, header recordfile.RecordHeade
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return err
 	}
-	return st.UpsertLog(path, header)
+	return st.UpsertLogWithGrouping(path, header, store.GroupingInfo{})
 }
 
 func traceLayout(url string, reqBody string, resBody string, stream bool) recordfile.LayoutInfo {
@@ -314,4 +314,10 @@ func traceLayout(url string, reqBody string, resBody string, stream bool) record
 func init() {
 	log.SetFlags(0)
 	log.SetPrefix(strings.TrimSpace(os.Args[0]) + ": ")
+}
+
+// newTestStore opens the production SQLite constructor with the historical
+// fixture defaults (explicit driver, trace_index.sqlite3, 4/4 pool).
+func newTestStore(dir string) (*store.Store, error) {
+	return store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 4, 4)
 }

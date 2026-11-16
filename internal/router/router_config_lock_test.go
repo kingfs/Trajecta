@@ -1,11 +1,11 @@
 package router
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/config"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func staticRefreshTarget(id string, models ...string) config.UpstreamTargetConfig {
@@ -69,7 +69,7 @@ func TestReloadWithCommitReleasesRouterLockWhileCommitting(t *testing.T) {
 // The router is a projection of channel configuration, not its owner: a reload
 // and a background refresh must leave the legacy snapshot tables untouched.
 func TestRouterNeverWritesTheApplicationDatabase(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +85,17 @@ func TestRouterNeverWritesTheApplicationDatabase(t *testing.T) {
 	if _, err := rtr.refreshTargets(rtr.Targets()); err != nil {
 		t.Fatalf("refreshTargets() error = %v", err)
 	}
-	if rows, err := st.ListUpstreamTargets(); err != nil {
+	// The legacy projection tables are retired (no code writes them); assert
+	// directly against the retained schema that the router stayed out of them.
+	ctx := context.Background()
+	if n, err := st.EntClient().UpstreamTarget.Query().Count(ctx); err != nil {
 		t.Fatal(err)
-	} else if len(rows) != 0 {
-		t.Fatalf("router wrote %d upstream_targets rows", len(rows))
+	} else if n != 0 {
+		t.Fatalf("router wrote %d upstream_targets rows", n)
 	}
-	if rows, err := st.ListUpstreamModels(); err != nil {
+	if n, err := st.EntClient().UpstreamModel.Query().Count(ctx); err != nil {
 		t.Fatal(err)
-	} else if len(rows) != 0 {
-		t.Fatalf("router wrote %d upstream_models rows", len(rows))
+	} else if n != 0 {
+		t.Fatalf("router wrote %d upstream_models rows", n)
 	}
 }

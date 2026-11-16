@@ -32,7 +32,7 @@ func TestPlanPassthroughPreferred(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decision.Passthrough() || decision.UpstreamProtocol != ProtocolResponses {
+	if decision.Action != ActionPassthrough || decision.UpstreamProtocol != ProtocolResponses {
 		t.Errorf("native support should passthrough, got %+v", decision)
 	}
 
@@ -147,17 +147,23 @@ func TestRoundTripChatResponsesChat(t *testing.T) {
 	}
 }
 
-func TestParseProtocolAliases(t *testing.T) {
-	p, err := ParseProtocol("generate_content")
-	if err != nil || p != ProtocolGemini {
-		t.Errorf("generate_content -> %q, %v", p, err)
+// TestProtocolGenerateContentAlias keeps the alias coverage the old
+// ParseProtocol test asserted, on the live vocabulary surface: the
+// generate_content spelling is a valid Gemini protocol, and an unknown
+// protocol name is not convertible.
+func TestProtocolGenerateContentAlias(t *testing.T) {
+	alias := ProtocolGenerateContent
+	if !alias.Valid() {
+		t.Error("generate_content should be a valid protocol alias")
 	}
-	p, err = ParseProtocol("chat-completions")
-	if err != nil || p != ProtocolChatCompletions {
-		t.Errorf("chat-completions -> %q, %v", p, err)
+	if got := alias.Endpoint(); got != ProtocolGemini.Endpoint() {
+		t.Errorf("generate_content endpoint = %q, want %q", got, ProtocolGemini.Endpoint())
 	}
-	if _, err = ParseProtocol("embeddings"); err == nil {
-		t.Error("embeddings should error")
+	if got := alias.Provider(); got != ProtocolGemini.Provider() {
+		t.Errorf("generate_content provider = %q, want %q", got, ProtocolGemini.Provider())
+	}
+	if Protocol("embeddings").Valid() {
+		t.Error("embeddings should not be a convertible protocol")
 	}
 }
 

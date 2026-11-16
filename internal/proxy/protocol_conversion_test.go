@@ -18,7 +18,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
 )
@@ -40,9 +39,9 @@ func TestHandlerConvertsMessagesToChatWhenEnabled(t *testing.T) {
 	defer upstream.Close()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -65,9 +64,9 @@ func TestHandlerConvertsMessagesToChatWhenEnabled(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Router.Selection.ProtocolConversion = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -139,9 +138,9 @@ func TestHandlerRejectsMessagesWhenConversionDisabled(t *testing.T) {
 	defer upstream.Close()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -164,9 +163,9 @@ func TestHandlerRejectsMessagesWhenConversionDisabled(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	// ProtocolConversion left at its zero value (false).
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -298,9 +297,9 @@ func TestHandlerConversionFailureIs400AndDoesNotPoisonHealth(t *testing.T) {
 	defer upstream.Close()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -321,9 +320,9 @@ func TestHandlerConversionFailureIs400AndDoesNotPoisonHealth(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Router.Selection.ProtocolConversion = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -394,9 +393,9 @@ func TestHandlerMessagesToolLoopAgainstChatUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -417,9 +416,9 @@ func TestHandlerMessagesToolLoopAgainstChatUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Router.Selection.ProtocolConversion = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
@@ -476,9 +475,9 @@ func TestResponsesEntrypointNeverConverts(t *testing.T) {
 	defer upstream.Close()
 
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -499,9 +498,9 @@ func TestResponsesEntrypointNeverConverts(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Router.Selection.ProtocolConversion = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()

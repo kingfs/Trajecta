@@ -21,16 +21,17 @@ func TestPrepareLogFileUsesAdapterModelExtraction(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, true, nil)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -46,16 +47,17 @@ func TestPrepareLogFilePersistsResponsesAuditCorrelation(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, false, nil)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req = req.WithContext(responsesaudit.ContextWithRequestAuditID(req.Context(), "reqaudit-recorder-1"))
 	req.Header.Set("X-Client-Request-Id", "client-recorder-1")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -71,12 +73,13 @@ func TestPrepareLogFilePersistsExchangeMetadata(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, false, nil)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 
-	info, err := rec.PrepareLogFileWithOptions(req, PrepareOptions{
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{
 		SiteURL:          "https://api.openai.com",
 		ExchangeID:       "exchange-model-1",
 		ExchangeKind:     "model",
@@ -84,9 +87,9 @@ func TestPrepareLogFilePersistsExchangeMetadata(t *testing.T) {
 		ParentExchangeID: "exchange-entry-1",
 		SequenceIndex:    3,
 		TraceID:          "trace-model-1",
-	})
+	}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFileWithOptions() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -100,15 +103,16 @@ func TestUpdateLogFilePersistsPipelineEvents(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, false, nil)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 
 	info.Header.Meta.StatusCode = 200
@@ -160,15 +164,16 @@ func TestUpdateLogFilePersistsPipelineEvents(t *testing.T) {
 
 func TestUpdateLogFileIndexesGroupingFromCodexHeaders(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	rec := New(dir, false, st)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.4","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5.4","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
@@ -177,9 +182,9 @@ func TestUpdateLogFileIndexesGroupingFromCodexHeaders(t *testing.T) {
 	req.Header.Set("X-Client-Request-Id", "req-codex-live")
 	req.Header.Set("X-Codex-Window-Id", "sess-codex-live:3")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 
 	info.Header.Meta.StatusCode = 200
@@ -215,21 +220,22 @@ func TestUpdateLogFileIndexesGroupingFromCodexHeaders(t *testing.T) {
 
 func TestUpdateLogFileEnqueuesParseJob(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	rec := New(dir, false, st)
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.1","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5.1","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[]}`
@@ -288,9 +294,9 @@ func TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot(t *testing.T) {
 			}
 			req.Header.Set("Content-Type", "application/json")
 
-			info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+			info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, []byte(body))
 			if err != nil {
-				t.Fatalf("PrepareLogFile(%q) error = %v", tc.model, err)
+				t.Fatalf("PrepareLogFileWithOptionsAndBody(%q) error = %v", tc.model, err)
 			}
 			defer info.File.Close()
 
@@ -321,15 +327,16 @@ func TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot(t *testing.T) {
 func TestPrepareLogFileAcceptsAModelWithANULByte(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, true, nil)
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString("{\"model\":\"nulprobe\\u0000trajecta\",\"messages\":[]}"))
+	requestBody := []byte("{\"model\":\"nulprobe\\u0000trajecta\",\"messages\":[]}")
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile(NUL model) error = %v, want the trace to be recorded", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody(NUL model) error = %v, want the trace to be recorded", err)
 	}
 	defer info.File.Close()
 
@@ -375,9 +382,9 @@ func TestUpdateLogFileStreamsTheRecordInsteadOfBufferingIt(t *testing.T) {
 	const recordSize = 8 << 20
 
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -392,9 +399,9 @@ func TestUpdateLogFileStreamsTheRecordInsteadOfBufferingIt(t *testing.T) {
 	req.Header.Set("Session_id", "sess-stream")
 	req.Header.Set("X-Codex-Window-Id", "sess-stream:1")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 
 	// A response body large enough that buffering it shows up clearly against the
@@ -479,7 +486,8 @@ func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testin
 	dir := t.TempDir()
 	rec := New(dir, true, nil)
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	requestBody := []byte(`{"model":"gpt-5"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
@@ -497,9 +505,9 @@ func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testin
 	// make the recording useless for diagnosing what the client actually sent.
 	req.Header.Set("X-Keep-Me", "keep-me-visible")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	if err := info.File.Close(); err != nil {
 		t.Fatalf("close cassette error = %v", err)
@@ -543,9 +551,9 @@ func TestPrepareLogFileRecordsHarnessDetection(t *testing.T) {
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-stainless-lang", "js")
 
-	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.anthropic.com"}, []byte(body))
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -588,12 +596,12 @@ func TestPrepareLogFileSkipsHarnessDetectionForModelChild(t *testing.T) {
 	}
 	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
 
-	info, err := rec.PrepareLogFileWithOptions(req, PrepareOptions{
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{
 		SiteURL:      "https://api.openai.com",
 		ExchangeKind: "model",
-	})
+	}, []byte(body))
 	if err != nil {
-		t.Fatalf("PrepareLogFileWithOptions() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -617,9 +625,9 @@ func TestPrepareLogFileRecordsSDKTagsWithoutHarness(t *testing.T) {
 	req.Header.Set("User-Agent", "OpenAI/Python 1.40.0")
 	req.Header.Set("x-stainless-lang", "python")
 
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, []byte(body))
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	defer info.File.Close()
 
@@ -646,9 +654,9 @@ func TestUpdateLogFilePersistsHarnessEvent(t *testing.T) {
 	req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.anthropic.com"}, []byte(body))
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	info.Header.Meta.StatusCode = 200
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
@@ -693,9 +701,9 @@ func TestUpdateLogFilePersistsHarnessEvent(t *testing.T) {
 // unit-tested separately; this pins the hand-off between them.
 func TestUpdateLogFileIndexesClientHarness(t *testing.T) {
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -711,9 +719,9 @@ func TestUpdateLogFileIndexesClientHarness(t *testing.T) {
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-stainless-lang", "js")
 
-	info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.anthropic.com"}, []byte(body))
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	info.Header.Meta.StatusCode = 200
 	info.Header.Meta.DurationMs = 12
@@ -764,9 +772,9 @@ func TestPrepareLogFileHarnessDetectionIgnoresBody(t *testing.T) {
 		}
 		req.Header.Set("User-Agent", "claude-cli/2.0.14 (external, cli)")
 		req.Header.Set("anthropic-beta", "claude-code-20250219")
-		info, err := rec.PrepareLogFile(req, "https://api.anthropic.com")
+		info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.anthropic.com"}, []byte(body))
 		if err != nil {
-			t.Fatalf("PrepareLogFile() error = %v", err)
+			t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 		}
 		defer info.File.Close()
 		return info.Header.Meta

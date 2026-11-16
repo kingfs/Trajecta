@@ -315,9 +315,9 @@ func TestSecretMappingFingerprintIsKeyed(t *testing.T) {
 	openStore := func(t *testing.T) (*SecretMappingStore, string) {
 		t.Helper()
 		outputDir := t.TempDir()
-		st, err := New(outputDir)
+		st, err := newSQLiteTestStore(outputDir)
 		if err != nil {
-			t.Fatalf("New() error = %v", err)
+			t.Fatalf("newSQLiteTestStore() error = %v", err)
 		}
 		t.Cleanup(func() { _ = st.Close() })
 		ms, err := st.OpenSecretMappingStore(filepath.Join(outputDir, SecretMappingFileName))

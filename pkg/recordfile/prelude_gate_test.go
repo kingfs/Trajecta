@@ -71,6 +71,9 @@ func gatePreludeV2Content(tb testing.TB) []byte {
 // 基线测量值：6 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 8。提高上限必须在 PR 说明理由。
 func TestAllocGateParsePreludeV3(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	content := gatePreludeV3Content(t)
 	const limit = 8
 	got := testing.AllocsPerRun(100, func() {
@@ -88,6 +91,9 @@ func TestAllocGateParsePreludeV3(t *testing.T) {
 // 基线测量值：2 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 3。提高上限必须在 PR 说明理由。
 func TestAllocGateParsePreludeV2(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	content := gatePreludeV2Content(t)
 	const limit = 3
 	got := testing.AllocsPerRun(100, func() {

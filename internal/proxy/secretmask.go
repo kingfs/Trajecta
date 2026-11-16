@@ -82,7 +82,7 @@ func secretMaskEvents(events []secretmask.MaskEvent, at time.Time) []recorder.Re
 // separate rendering from secretMaskEvents: a RecordEvent is serialized into the
 // cassette prelude, and these values must never be.
 //
-// TraceID is left empty because PrepareLogFile runs before the trace is indexed.
+// TraceID is left empty because PrepareLogFileWithOptionsAndBody runs before the trace is indexed.
 // The recorder fills it in when the recording is finalized, which is also the
 // moment the row is written.
 func secretMaskAuditRecords(events []secretmask.MaskEvent) []store.CredentialMaskAuditRecord {

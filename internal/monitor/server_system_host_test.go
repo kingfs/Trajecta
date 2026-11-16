@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // systemHostTopLevelKeys are the keys the page reads unconditionally. A missing
@@ -22,9 +20,9 @@ var systemHostTopLevelKeys = []string{
 func TestSystemHostAPIRouteIsAdminOnly(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -49,9 +47,9 @@ func TestSystemHostAPIRouteIsAdminOnly(t *testing.T) {
 func TestSystemHostAPIReportsHostMetrics(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

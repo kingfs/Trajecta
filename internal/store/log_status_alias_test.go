@@ -22,9 +22,9 @@ import (
 // builders agrees with itself - the totals invariant next door cannot see this bug.
 func TestTraceStatusFilterAcceptsTheFailedAlias(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -35,7 +35,7 @@ func TestTraceStatusFilterAcceptsTheFailedAlias(t *testing.T) {
 		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", name, err)
 		}
-		if err := st.UpsertLog(path, recordfile.RecordHeader{
+		if err := st.UpsertLogWithGrouping(path, recordfile.RecordHeader{
 			Version: "LLM_PROXY_V3",
 			Meta: recordfile.MetaData{
 				RequestID:    name,
@@ -49,8 +49,8 @@ func TestTraceStatusFilterAcceptsTheFailedAlias(t *testing.T) {
 				Error:        errorText,
 				ExchangeKind: kind,
 			},
-		}); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 	write("ok.http", http.StatusOK, "", "entry")

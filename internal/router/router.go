@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/protocolconvert"
+	"github.com/kingfs/Trajecta/pkg/session"
 	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
@@ -1203,8 +1204,8 @@ func (r *Router) selectTargetsWith(req *http.Request, body []byte, excludeIDs []
 		// each other's target. The raw session value never leaves this function; the
 		// decision trace only carries its fingerprint. A nil store means the operator
 		// turned affinity off, in which case no sticky state is read or written at all.
-		stickyKey = composeStickyKey(extractStickyKey(req, body), model)
-		stickyFingerprint = stickyKeyFingerprint(stickyKey)
+		stickyKey = session.Compose(extractStickyKey(req, body), model)
+		stickyFingerprint = session.Fingerprint(stickyKey)
 		stickyTargetID, hasStickyBinding = r.sticky.Lookup(stickyKey)
 	}
 

@@ -18,7 +18,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
@@ -282,9 +281,9 @@ func newMatrixHandler(t *testing.T, targets ...config.UpstreamTargetConfig) *htt
 func newMatrixHandlerWithOutputDir(t *testing.T, targets ...config.UpstreamTargetConfig) (*httptest.Server, string) {
 	t.Helper()
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -295,9 +294,9 @@ func newMatrixHandlerWithOutputDir(t *testing.T, targets ...config.UpstreamTarge
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -446,9 +445,9 @@ func TestHandlerResponsesExecutionModeRecorded(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -462,9 +461,9 @@ func TestHandlerResponsesExecutionModeRecorded(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			server := httptest.NewServer(handler)
 			defer server.Close()
@@ -550,9 +549,9 @@ func TestHandlerResponsesStrategyUpstreamCombinationMatrix(t *testing.T) {
 			}
 
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 			if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": tt.strategy}); err != nil {
@@ -572,9 +571,9 @@ func TestHandlerResponsesStrategyUpstreamCombinationMatrix(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			server := httptest.NewServer(handler)
 			defer server.Close()
@@ -711,9 +710,9 @@ func TestHandlerResponsesExecutionModeNeedsNoSwitch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			st, err := store.New(outputDir)
+			st, err := newTestStore(outputDir)
 			if err != nil {
-				t.Fatalf("store.New() error = %v", err)
+				t.Fatalf("newTestStore() error = %v", err)
 			}
 			defer st.Close()
 
@@ -728,9 +727,9 @@ func TestHandlerResponsesExecutionModeNeedsNoSwitch(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandler(cfg, st)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 			if err != nil {
-				t.Fatalf("NewHandler() error = %v", err)
+				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
 			server := httptest.NewServer(handler)
 			defer server.Close()
@@ -768,9 +767,9 @@ func TestHandlerResponsesExecutionModeNeedsNoSwitch(t *testing.T) {
 // working.
 func TestHandlerLocalResponsesProviderConfigIsLazy(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -787,9 +786,9 @@ func TestHandlerLocalResponsesProviderConfigIsLazy(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v, want nil; optional provider config must not block startup", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v, want nil; optional provider config must not block startup", err)
 	}
 	server := httptest.NewServer(handler)
 	defer server.Close()

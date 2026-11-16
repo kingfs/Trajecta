@@ -6,70 +6,80 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
 func newAuthRequest() *http.Request {
 	return httptest.NewRequest(http.MethodPost, "https://example.test/v1/chat/completions", nil)
 }
 
+// presetResolved assembles the Resolved view the production callers build from
+// a catalog preset: internal/upstream constructs Resolved literals and delegates
+// BuildURL/ApplyAuth to this package. LookupPreset returns a deep copy, so the
+// returned value is safe to mutate per test.
+func presetResolved(t *testing.T, presetID string) Resolved {
+	t.Helper()
+	preset, ok := LookupPreset(presetID)
+	if !ok {
+		t.Fatalf("LookupPreset(%q) failed", presetID)
+	}
+	return Resolved{Preset: preset, Endpoints: preset.Endpoints, Auth: preset.Auth, Headers: preset.Headers}
+}
+
 func TestApplyAuth(t *testing.T) {
 	tests := []struct {
 		name       string
-		cfg        Config
+		preset     string
+		auth       *AuthSpec
 		cred       Credential
 		wantHeader string
 		wantValue  string
 	}{
 		{
 			name:       "openai api key",
-			cfg:        Config{PresetID: "openai"},
+			preset:     "openai",
 			cred:       Credential{APIKey: "sk-openai"},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer sk-openai",
 		},
 		{
 			name:       "authorization header defaults to bearer",
-			cfg:        Config{PresetID: "openai", Auth: AuthSpec{Header: "Authorization"}},
+			preset:     "openai",
+			auth:       &AuthSpec{Mode: AuthModeAPIKey, Header: "Authorization"},
 			cred:       Credential{APIKey: "sk-openai"},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer sk-openai",
 		},
 		{
 			name:       "deepseek oauth access token",
-			cfg:        Config{PresetID: "deepseek"},
+			preset:     "deepseek",
 			cred:       Credential{Mode: AuthModeOAuth, AccessToken: "oauth-token"},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer oauth-token",
 		},
 		{
 			name:       "anthropic api key",
-			cfg:        Config{PresetID: "anthropic"},
+			preset:     "anthropic",
 			cred:       Credential{APIKey: "sk-ant"},
 			wantHeader: "x-api-key",
 			wantValue:  "sk-ant",
 		},
 		{
 			name:       "google api key",
-			cfg:        Config{PresetID: "google"},
+			preset:     "google",
 			cred:       Credential{APIKey: "google-key"},
 			wantHeader: "x-goog-api-key",
 			wantValue:  "google-key",
 		},
 		{
-			name: "azure api key",
-			cfg: Config{
-				PresetID:  "azure",
-				Endpoints: map[xir.Protocol]string{xir.ProtocolChatCompletions: "https://resource.openai.azure.com/openai/v1"},
-			},
+			name:       "azure api key",
+			preset:     "azure",
 			cred:       Credential{APIKey: "azure-key"},
 			wantHeader: "api-key",
 			wantValue:  "azure-key",
 		},
 		{
 			name:       "cli credential access token",
-			cfg:        Config{PresetID: "openai"},
+			preset:     "openai",
 			cred:       Credential{Mode: AuthModeCLICredential, AccessToken: "cli-token"},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer cli-token",
@@ -77,9 +87,9 @@ func TestApplyAuth(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			resolved, err := Resolve(test.cfg)
-			if err != nil {
-				t.Fatalf("Resolve: %v", err)
+			resolved := presetResolved(t, test.preset)
+			if test.auth != nil {
+				resolved.Auth = *test.auth
 			}
 			req := newAuthRequest()
 			if err := resolved.ApplyAuth(test.cred, req); err != nil {
@@ -93,7 +103,7 @@ func TestApplyAuth(t *testing.T) {
 }
 
 func TestApplyAuthClearsCompetingHeaders(t *testing.T) {
-	resolved := mustResolve(t, Config{PresetID: "openai"})
+	resolved := presetResolved(t, "openai")
 	req := newAuthRequest()
 	for _, name := range []string{"Authorization", "x-api-key", "x-goog-api-key", "api-key"} {
 		req.Header.Set(name, "client-"+name)
@@ -112,7 +122,7 @@ func TestApplyAuthClearsCompetingHeaders(t *testing.T) {
 }
 
 func TestApplyAuthAnthropicVersionTemplate(t *testing.T) {
-	resolved := mustResolve(t, Config{PresetID: "anthropic"})
+	resolved := presetResolved(t, "anthropic")
 
 	req := newAuthRequest()
 	if err := resolved.ApplyAuth(Credential{APIKey: "sk-ant"}, req); err != nil {
@@ -133,20 +143,18 @@ func TestApplyAuthAnthropicVersionTemplate(t *testing.T) {
 }
 
 func TestApplyAuthTemplatesAndStaticHeaders(t *testing.T) {
-	resolved := mustResolve(t, Config{
-		PresetID:   "openai",
-		APIVersion: "2024-10-21",
-		Auth: AuthSpec{
-			Mode:   AuthModeAPIKey,
-			Header: "Authorization",
-			Scheme: "Bearer",
-			Headers: []HeaderTemplate{
-				{Name: "X-Account", Value: "acct-{{account_id}}"},
-				{Name: "X-Plan", Value: "{{plan}}"},
-				{Name: "X-Version", Value: "{{api_version}}"},
-			},
+	resolved := presetResolved(t, "openai")
+	resolved.APIVersion = "2024-10-21"
+	resolved.Auth = AuthSpec{
+		Mode:   AuthModeAPIKey,
+		Header: "Authorization",
+		Scheme: "Bearer",
+		Headers: []HeaderTemplate{
+			{Name: "X-Account", Value: "acct-{{account_id}}"},
+			{Name: "X-Plan", Value: "{{plan}}"},
+			{Name: "X-Version", Value: "{{api_version}}"},
 		},
-	})
+	}
 	resolved.Headers = map[string]string{"X-Static": "yes", "Authorization": "Static override"}
 	req := newAuthRequest()
 	cred := Credential{APIKey: "sk", AccountID: "acct-1", Plan: "pro"}
@@ -171,7 +179,7 @@ func TestApplyAuthTemplatesAndStaticHeaders(t *testing.T) {
 }
 
 func TestApplyAuthNoneDropsClientCredentialHeaders(t *testing.T) {
-	resolved := mustResolve(t, Config{PresetID: "ollama"})
+	resolved := presetResolved(t, "ollama")
 	resolved.Headers = map[string]string{"X-Local": "1"}
 	req := newAuthRequest()
 	req.Header.Set("Authorization", "Bearer client-key")
@@ -197,7 +205,7 @@ func TestApplyAuthNoneDropsClientCredentialHeaders(t *testing.T) {
 // A configured static header is the operator explicitly asking for a value on
 // the wire, so it is applied after the clear and must survive.
 func TestApplyAuthNoneKeepsConfiguredStaticAuthHeader(t *testing.T) {
-	resolved := mustResolve(t, Config{PresetID: "ollama"})
+	resolved := presetResolved(t, "ollama")
 	resolved.Headers = map[string]string{"Authorization": "Bearer static-key"}
 	req := newAuthRequest()
 	req.Header.Set("Authorization", "Bearer client-key")
@@ -210,7 +218,7 @@ func TestApplyAuthNoneKeepsConfiguredStaticAuthHeader(t *testing.T) {
 }
 
 func TestApplyAuthNoneCredentialOverridesPresetMode(t *testing.T) {
-	resolved := mustResolve(t, Config{PresetID: "openai"})
+	resolved := presetResolved(t, "openai")
 	req := newAuthRequest()
 	if err := resolved.ApplyAuth(Credential{Mode: AuthModeNone}, req); err != nil {
 		t.Fatal(err)
@@ -221,7 +229,7 @@ func TestApplyAuthNoneCredentialOverridesPresetMode(t *testing.T) {
 }
 
 func TestApplyAuthErrors(t *testing.T) {
-	openai := mustResolve(t, Config{PresetID: "openai"})
+	openai := presetResolved(t, "openai")
 	if err := openai.ApplyAuth(Credential{}, newAuthRequest()); !errors.Is(err, ErrMissingCredential) {
 		t.Errorf("missing API key error = %v", err)
 	}

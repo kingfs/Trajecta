@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kingfs/Trajecta/pkg/session"
 )
 
 // TestStickyBindingsAreReclaimedWhenExpired pins that bindings do not
@@ -192,9 +194,9 @@ func TestExtractStickyKeyBodyFallbacks(t *testing.T) {
 	}
 }
 
-// TestComposeStickyKey pins the per-model binding key: one session keeps one
-// provider route per model, and the model half is normalised so `gpt-5` and
-// `GPT-5` name the same binding.
+// TestComposeStickyKey pins the per-model binding key the router builds with
+// session.Compose: one session keeps one provider route per model, and the
+// model half is normalised so `gpt-5` and `GPT-5` name the same binding.
 func TestComposeStickyKey(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -202,40 +204,45 @@ func TestComposeStickyKey(t *testing.T) {
 		model   string
 		want    string
 	}{
-		{name: "session and model", session: "session-a", model: "gpt-5", want: "session-a" + stickyKeySeparator + "gpt-5"},
-		{name: "model is case-insensitive", session: "session-a", model: "GPT-5", want: "session-a" + stickyKeySeparator + "gpt-5"},
-		{name: "both sides trimmed", session: "  session-a  ", model: "  gpt-5  ", want: "session-a" + stickyKeySeparator + "gpt-5"},
+		{name: "session and model", session: "session-a", model: "gpt-5", want: "session-a\x1fgpt-5"},
+		{name: "model is case-insensitive", session: "session-a", model: "GPT-5", want: "session-a\x1fgpt-5"},
+		{name: "both sides trimmed", session: "  session-a  ", model: "  gpt-5  ", want: "session-a\x1fgpt-5"},
 		{name: "no model keeps the session key", session: "session-a", model: "", want: "session-a"},
 		{name: "no session means no binding", session: "", model: "gpt-5", want: ""},
 		{name: "nothing", session: "", model: "", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := composeStickyKey(tt.session, tt.model); got != tt.want {
-				t.Fatalf("composeStickyKey(%q, %q) = %q, want %q", tt.session, tt.model, got, tt.want)
+			if got := session.Compose(tt.session, tt.model); got != tt.want {
+				t.Fatalf("session.Compose(%q, %q) = %q, want %q", tt.session, tt.model, got, tt.want)
 			}
 		})
 	}
 }
 
 // TestStickyKeyFingerprintHidesTheSessionValue pins that diagnostics can identify
-// a binding without carrying the client's session value.
+// a binding without carrying the client's session value. The router records
+// session.Fingerprint of the composed key; the format is "sha256:" plus 16 hex
+// characters.
 func TestStickyKeyFingerprintHidesTheSessionValue(t *testing.T) {
-	key := composeStickyKey("session-secret-value", "gpt-5")
-	fingerprint := stickyKeyFingerprint(key)
+	key := session.Compose("session-secret-value", "gpt-5")
+	fingerprint := session.Fingerprint(key)
 	if fingerprint == "" {
-		t.Fatal("stickyKeyFingerprint() = empty, want a fingerprint")
+		t.Fatal("session.Fingerprint() = empty, want a fingerprint")
 	}
 	if strings.Contains(fingerprint, "session-secret-value") {
 		t.Fatalf("fingerprint %q exposes the session value", fingerprint)
 	}
-	if again := stickyKeyFingerprint(key); again != fingerprint {
+	if !strings.HasPrefix(fingerprint, "sha256:") || len(fingerprint) != len("sha256:")+16 {
+		t.Fatalf("fingerprint %q is not sha256:<16 hex chars>", fingerprint)
+	}
+	if again := session.Fingerprint(key); again != fingerprint {
 		t.Fatalf("fingerprint is not stable: %q != %q", again, fingerprint)
 	}
-	if other := stickyKeyFingerprint(composeStickyKey("session-secret-value", "gpt-4o")); other == fingerprint {
+	if other := session.Fingerprint(session.Compose("session-secret-value", "gpt-4o")); other == fingerprint {
 		t.Fatal("different models produced the same fingerprint")
 	}
-	if empty := stickyKeyFingerprint(""); empty != "" {
-		t.Fatalf("stickyKeyFingerprint(\"\") = %q, want empty", empty)
+	if empty := session.Fingerprint(""); empty != "" {
+		t.Fatalf("session.Fingerprint(\"\") = %q, want empty", empty)
 	}
 }

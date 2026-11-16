@@ -617,16 +617,6 @@ func (u ResolvedUpstream) Capability(name string) (bool, bool) {
 	}
 }
 
-func (u ResolvedUpstream) NativeResponsesServerMode() bool {
-	enabled, configured := u.Capability(CapabilityResponses)
-	return isResponsesAPIType(u.APIType) && isServerMode(u.Mode) && (!configured || enabled)
-}
-
-func (u ResolvedUpstream) ChatCompletionsServerMode() bool {
-	enabled, configured := u.Capability(CapabilityChatCompletions)
-	return u.SupportsChatCompletionsAPI() && isServerMode(u.Mode) && (!configured || enabled)
-}
-
 func (u ResolvedUpstream) SupportsChatCompletionsAPI() bool {
 	enabled, configured := u.Capability(CapabilityChatCompletions)
 	if configured && !enabled {
@@ -1115,10 +1105,6 @@ func validateAPISurface(resolved ResolvedUpstream) error {
 
 func isResponsesAPIType(apiType string) bool {
 	return apiType == APITypeResponses || apiType == APITypeResponsesNative
-}
-
-func isServerMode(mode string) bool {
-	return mode == APIModeServer || mode == APIModeResponsesServer
 }
 
 func validateOpenAIBasePath(resolved ResolvedUpstream) error {

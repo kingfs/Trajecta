@@ -21,9 +21,9 @@ const modelDetectTestProbeAt = "2026-11-01T12:00:00Z"
 
 func newModelDetectTestStore(t *testing.T, baseURL, apiType, protocolFamily, routingProfile, modelResource, capabilitiesJSON string, models []store.ChannelModelRecord) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	probeAt, err := time.Parse(time.RFC3339, modelDetectTestProbeAt)

@@ -90,6 +90,11 @@ type streamState struct {
 // Restore rewrites every fake in src back to its real value and returns a new
 // slice. It is the whole-body counterpart of Restorer, for callers that hold
 // the body in memory.
+//
+// Test seam: the production response path restores through the streaming
+// Restorer (under the UsageSniffer), never through this whole-body entry point.
+// Restore is kept as the in-memory oracle the restore tests and benchmarks
+// assert against; do not remove it as dead code.
 func (v *Vault) Restore(src []byte) []byte {
 	if len(src) == 0 {
 		return src

@@ -12,16 +12,16 @@ func newSessionTestStore(t *testing.T) (*Store, *JWTManager) {
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
-	if err := MigrateUp(dbPath, 0); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
 	}
-	st, err := Open(dbPath)
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenDatabase() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
 	manager, err := NewJWTManager(JWTOptions{
 		Secret: []byte("0123456789abcdef0123456789abcdef"),

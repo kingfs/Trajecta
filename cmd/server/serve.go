@@ -27,7 +27,6 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 func newServeCommand(runtime *cli.Runtime) *cobra.Command {
@@ -41,24 +40,6 @@ func newServeCommand(runtime *cli.Runtime) *cobra.Command {
 			})
 		},
 	}
-}
-
-func runServe(args []string) int {
-	configPath, code := parseConfigPath("serve", args)
-	if code != 0 {
-		return code
-	}
-	return runServeWithConfig(configPath)
-}
-
-func parseConfigPath(name string, args []string) (string, int) {
-	fs := pflag.NewFlagSet(name, pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(cli.NormalizeLegacyFlagArgs(args)); err != nil {
-		return "", 2
-	}
-	return *configPath, 0
 }
 
 func runServeWithConfig(configPath string) int {

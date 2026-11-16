@@ -36,7 +36,6 @@ type Store interface {
 	UpsertChannelModels(channelID string, records []store.ChannelModelRecord) ([]store.ChannelModelRecord, error)
 	UpsertModelCatalog(store.ModelCatalogRecord) error
 	CreateChannelProbeRun(store.ChannelProbeRunRecord) (store.ChannelProbeRunRecord, error)
-	ReplaceUpstreamModels(upstreamID string, records []store.UpstreamModelRecord) error
 }
 
 type Service struct {
@@ -401,10 +400,6 @@ func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report pro
 	return updated, fields, nil
 }
 
-func (s *Service) Probe(channelID string) (ProbeResult, error) {
-	return s.ProbeWithOptions(channelID, ProbeOptions{})
-}
-
 func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (ProbeResult, error) {
 	if s == nil || s.store == nil {
 		return ProbeResult{}, errors.New("channel service store is required")
@@ -454,8 +449,10 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		result.FailureReason, result.RetryHint = classifyProbeFailure(probeErr)
 	}
 
+	// The probe persists only the channel-scoped rows (channel_models and the
+	// model catalog). The upstream_models projection write was retired: that
+	// table has no writer left and routing reads the router's in-memory state.
 	channelModels := make([]store.ChannelModelRecord, 0, len(result.Models))
-	upstreamModels := make([]store.UpstreamModelRecord, 0, len(result.Models))
 	for _, model := range result.Models {
 		channelModels = append(channelModels, store.ChannelModelRecord{
 			ChannelID:   result.ChannelID,
@@ -466,12 +463,6 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 			FirstSeenAt: completedAt,
 			LastSeenAt:  completedAt,
 			LastProbeAt: completedAt,
-		})
-		upstreamModels = append(upstreamModels, store.UpstreamModelRecord{
-			UpstreamID: result.ChannelID,
-			Model:      model,
-			Source:     "discovered",
-			SeenAt:     completedAt,
 		})
 		if err := s.store.UpsertModelCatalog(store.ModelCatalogRecord{
 			Model:       model,
@@ -490,9 +481,6 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		result.AddedCount = added
 		result.RemovedCount = removed
 		result.EnabledCount = countEnabledModels(merged)
-		if err := s.store.ReplaceUpstreamModels(result.ChannelID, upstreamModels); err != nil {
-			return result, err
-		}
 	}
 	// The channel's last_probe_at is the availability anchor: ModelAvailability
 	// compares channel_models.last_probe_at against it. A failed probe records

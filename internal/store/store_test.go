@@ -27,9 +27,9 @@ import (
 )
 
 func TestNewConfiguresSQLiteRuntimePragmas(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -56,9 +56,9 @@ func TestNewConfiguresSQLiteRuntimePragmas(t *testing.T) {
 }
 
 func TestNewInitializesResponsesStateSchema(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -84,9 +84,9 @@ func TestNewInitializesResponsesStateSchema(t *testing.T) {
 // CREATE INDEX IF NOT EXISTS, so a dropped statement would stay silent, and the
 // column list is the part that has to match Postgres.
 func TestNewInitializesAnalyticsIndexes(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -130,9 +130,9 @@ func TestNewInitializesAnalyticsIndexes(t *testing.T) {
 }
 
 func TestNewInitializesAppSettingsSchema(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -147,9 +147,9 @@ func TestNewInitializesAppSettingsSchema(t *testing.T) {
 
 func TestOverviewPercentilesIgnoreZeroSamples(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -222,9 +222,9 @@ func TestOverviewPercentilesIgnoreZeroSamples(t *testing.T) {
 // nothing to do with the window.
 func TestOverviewFindingCategoriesFollowTheLogWindow(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -296,9 +296,9 @@ func TestOverviewFindingCategoriesFollowTheLogWindow(t *testing.T) {
 
 func TestBackfillExchangeMetadataUpdatesMissingModelFromV3Cassette(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -367,9 +367,9 @@ func TestBackfillExchangeMetadataUpdatesMissingModelFromV3Cassette(t *testing.T)
 
 func TestBackfillExchangeMetadataCountsMissingAndConflicts(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -432,9 +432,9 @@ func writeBackfillCassetteForTest(t *testing.T, path string, header recordfile.R
 }
 
 func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -488,9 +488,9 @@ func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
 }
 
 func TestResponsesFunctionExecutorConfigSnapshotMissing(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -507,9 +507,9 @@ func TestResponsesFunctionExecutorConfigSnapshotMissing(t *testing.T) {
 }
 
 func TestResponsesFunctionExecutorConfigSnapshotRoundTripSQLite(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -596,9 +596,9 @@ func TestResponsesFunctionExecutorConfigSnapshotRoundTripSQLite(t *testing.T) {
 }
 
 func TestResponsesFunctionExecutorConfigSnapshotDoesNotPersistSensitiveFields(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -640,9 +640,9 @@ func TestResponsesFunctionExecutorConfigSnapshotDoesNotPersistSensitiveFields(t 
 }
 
 func TestAppSettingJSONRoundTrip(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -681,9 +681,9 @@ func TestAppSettingJSONRoundTrip(t *testing.T) {
 }
 
 func TestAppSettingJSONMissingAndValidation(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -704,9 +704,9 @@ func TestAppSettingJSONMissingAndValidation(t *testing.T) {
 }
 
 func TestNewInitializesSQLiteApplicationSchemaMarker(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1092,8 +1092,8 @@ func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
 		header.Meta.Provider = "openai_compatible"
 		header.Meta.Operation = "responses"
 		header.Meta.Model = "gpt-postgres-readmodel"
-		if err := st.UpsertLog(recordPath, header); err != nil {
-			t.Fatalf("UpsertLog(%s) error = %v", status, err)
+		if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%s) error = %v", status, err)
 		}
 		entry, err := st.GetByRequestID(requestID)
 		if err != nil {
@@ -1122,42 +1122,43 @@ func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
 	if err := st.EnqueueParseJob(queuedTraceID); err != nil {
 		t.Fatalf("EnqueueParseJob(queued) error = %v", err)
 	}
-	queuedJobs, err := st.ListParseJobs("queued", 10000)
-	if err != nil {
-		t.Fatalf("ListParseJobs(queued) error = %v", err)
-	}
-	if !parseJobListContains(queuedJobs, queuedTraceID, "queued") {
-		t.Fatalf("queued parse jobs = %+v, want trace %s", queuedJobs, queuedTraceID)
-	}
-
 	if err := st.EnqueueParseJob(runningTraceID); err != nil {
 		t.Fatalf("EnqueueParseJob(running) error = %v", err)
 	}
-	runningJobs, err := st.ListParseJobs("queued", 10000)
-	if err != nil {
-		t.Fatalf("ListParseJobs(before running) error = %v", err)
-	}
-	runningJob, ok := findParseJob(runningJobs, runningTraceID)
-	if !ok {
-		t.Fatalf("queued parse jobs = %+v, want trace %s before running", runningJobs, runningTraceID)
-	}
-	if err := st.MarkParseJobRunning(runningJob.ID); err != nil {
-		t.Fatalf("MarkParseJobRunning(postgres) error = %v", err)
-	}
-
 	if err := st.EnqueueParseJob(failedTraceID); err != nil {
 		t.Fatalf("EnqueueParseJob(failed) error = %v", err)
 	}
-	failedJobs, err := st.ListParseJobs("queued", 10000)
+	// The worker picks jobs up through the atomic claim, which flips them to
+	// running and increments attempts in one statement.
+	claimedJobs, err := st.ClaimParseJobs(10000)
 	if err != nil {
-		t.Fatalf("ListParseJobs(before failed) error = %v", err)
+		t.Fatalf("ClaimParseJobs(postgres) error = %v", err)
 	}
-	failedJob, ok := findParseJob(failedJobs, failedTraceID)
+	runningJob, ok := findParseJob(claimedJobs, runningTraceID)
 	if !ok {
-		t.Fatalf("queued parse jobs = %+v, want trace %s before failure", failedJobs, failedTraceID)
+		t.Fatalf("claimed parse jobs = %+v, want trace %s", claimedJobs, runningTraceID)
+	}
+	if runningJob.Status != "running" || runningJob.Attempts != 1 {
+		t.Fatalf("claimed job = %+v, want running with one attempt", runningJob)
+	}
+	failedJob, ok := findParseJob(claimedJobs, failedTraceID)
+	if !ok {
+		t.Fatalf("claimed parse jobs = %+v, want trace %s before failure", claimedJobs, failedTraceID)
 	}
 	if err := st.MarkParseJobFailed(failedJob.ID, "postgres readmodel parse failure"); err != nil {
 		t.Fatalf("MarkParseJobFailed(postgres) error = %v", err)
+	}
+	// The claim also picked up the queued trace; re-enqueueing resets it to
+	// queued so the read models below still see one queued job.
+	if err := st.EnqueueParseJob(queuedTraceID); err != nil {
+		t.Fatalf("EnqueueParseJob(queued reset) error = %v", err)
+	}
+	queuedMetadata, err := st.LoadObservationMetadata([]string{queuedTraceID})
+	if err != nil {
+		t.Fatalf("LoadObservationMetadata(queued) error = %v", err)
+	}
+	if queuedMetadata[queuedTraceID].Status != "queued" {
+		t.Fatalf("queued metadata = %+v, want queued", queuedMetadata[queuedTraceID])
 	}
 
 	metadata, err := st.LoadObservationMetadata([]string{parsedEntry.ID, queuedTraceID, unparsedEntry.ID})
@@ -1189,9 +1190,9 @@ func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
 	if err := st.SaveFindings(parsedEntry.ID, []observe.Finding{finding}); err != nil {
 		t.Fatalf("SaveFindings(postgres) error = %v", err)
 	}
-	allFindings, err := st.ListAllFindings(FindingFilter{Category: "postgres_readmodel", Severity: string(observe.SeverityCritical)}, 100)
+	allFindings, _, err := st.ListAllFindingsPage(FindingFilter{Category: "postgres_readmodel", Severity: string(observe.SeverityCritical)}, 100, 0)
 	if err != nil {
-		t.Fatalf("ListAllFindings(postgres) error = %v", err)
+		t.Fatalf("ListAllFindingsPage(postgres) error = %v", err)
 	}
 	if !findingListContains(allFindings, finding.ID) {
 		t.Fatalf("all findings = %+v, want finding %s", allFindings, finding.ID)
@@ -1361,8 +1362,8 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 			TotalTokens: 42,
 		},
 	}
-	if err := st.UpsertLog(recordPath, header); err != nil {
-		t.Fatalf("UpsertLog(postgres) error = %v", err)
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(postgres) error = %v", err)
 	}
 	entry, err := st.GetByRequestID(requestID)
 	if err != nil {
@@ -1681,14 +1682,14 @@ func TestPostgresAnalysisJobReadModelsRoundTrip(t *testing.T) {
 	}
 	failedJobID = failedJob.ID
 
-	workerJobs, err := st.ListAnalysisJobsForWorker(10000)
+	queuedJobs, err := st.ListAnalysisJobs("queued", "", "", 10000)
 	if err != nil {
-		t.Fatalf("ListAnalysisJobsForWorker(postgres) error = %v", err)
+		t.Fatalf("ListAnalysisJobs(queued postgres) error = %v", err)
 	}
-	if !analysisJobListContains(workerJobs, queuedJob.ID, "queued") ||
-		!analysisJobListContains(workerJobs, completedJob.ID, "queued") ||
-		!analysisJobListContains(workerJobs, failedJob.ID, "queued") {
-		t.Fatalf("worker jobs = %+v, want all inserted queued postgres jobs", workerJobs)
+	if !analysisJobListContains(queuedJobs, queuedJob.ID, "queued") ||
+		!analysisJobListContains(queuedJobs, completedJob.ID, "queued") ||
+		!analysisJobListContains(queuedJobs, failedJob.ID, "queued") {
+		t.Fatalf("queued jobs = %+v, want all inserted queued postgres jobs", queuedJobs)
 	}
 
 	if err := st.MarkAnalysisJobRunning(completedJob.ID); err != nil {
@@ -2190,8 +2191,8 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 				TotalTokens:      12,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
 		}
 	}
 
@@ -2540,9 +2541,9 @@ func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
 
 func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2595,9 +2596,9 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 		t.Fatalf("raw api surface = %q/%q/%s", rawAPIType, rawMode, rawCapabilities)
 	}
 
-	reopened, err := New(dir)
+	reopened, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("reopen New() error = %v", err)
+		t.Fatalf("reopen newSQLiteTestStore() error = %v", err)
 	}
 	defer reopened.Close()
 	reopenedRecord, err := reopened.GetChannelConfig("openai-primary")
@@ -2678,9 +2679,9 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 
 func TestListAdoptedChannelModelProfilesSkipsChatCompletionFalse(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2728,9 +2729,9 @@ func TestListAdoptedChannelModelProfilesSkipsChatCompletionFalse(t *testing.T) {
 
 func TestSecretStatusAndExportLocalSecretKey(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2773,9 +2774,9 @@ func TestSecretStatusAndExportLocalSecretKey(t *testing.T) {
 
 func TestRotateLocalSecretKeyReencryptsChannelSecrets(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2835,9 +2836,9 @@ func TestRotateLocalSecretKeyReencryptsChannelSecrets(t *testing.T) {
 		t.Fatalf("decrypted record after rotate = api_key %q headers %q", string(record.APIKeyCiphertext), record.HeadersJSON)
 	}
 
-	reopened, err := New(dir)
+	reopened, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New(reopen) error = %v", err)
+		t.Fatalf("newSQLiteTestStore(reopen) error = %v", err)
 	}
 	defer reopened.Close()
 	reopenedRecord, err := reopened.GetChannelConfig("openai-primary")
@@ -2851,9 +2852,9 @@ func TestRotateLocalSecretKeyReencryptsChannelSecrets(t *testing.T) {
 
 func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -2893,8 +2894,8 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 			},
 			Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 	now := time.Now().UTC()
@@ -2957,16 +2958,16 @@ func writeModelLog(t *testing.T, st *Store, dir string, name string, model strin
 		},
 		Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
 	}
-	if err := st.UpsertLog(path, header); err != nil {
-		t.Fatalf("UpsertLog(%q) error = %v", name, err)
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 	}
 }
 
 func TestModelCatalogAnalyticsSummarizesEveryModel(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3049,9 +3050,9 @@ func TestModelCatalogAnalyticsSummarizesEveryModel(t *testing.T) {
 
 func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3127,9 +3128,9 @@ func TestChannelUsageBatchMatchesPerChannelQueries(t *testing.T) {
 
 func TestUpstreamAnalyticsBatchMatchesPerUpstreamQueries(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3166,9 +3167,9 @@ func TestUpstreamAnalyticsBatchMatchesPerUpstreamQueries(t *testing.T) {
 			}
 
 			for _, upstreamID := range []string{"up-a", "up-b", "up-c"} {
-				wantModels, wantLastModel, err := st.upstreamModelCoverage(upstreamID, limitModels, since, modelFilter)
+				wantModels, wantLastModel, err := upstreamModelCoverageForParity(st, upstreamID, limitModels, since, modelFilter)
 				if err != nil {
-					t.Fatalf("upstreamModelCoverage(%s) error = %v", upstreamID, err)
+					t.Fatalf("upstreamModelCoverageForParity(%s) error = %v", upstreamID, err)
 				}
 				coverage := coverages[upstreamID]
 				if !reflect.DeepEqual(coverage.Models, wantModels) {
@@ -3178,9 +3179,9 @@ func TestUpstreamAnalyticsBatchMatchesPerUpstreamQueries(t *testing.T) {
 					t.Fatalf("batched last model for %s = %q, want %q", upstreamID, coverage.LastModel, wantLastModel)
 				}
 
-				wantErrors, err := st.upstreamRecentErrors(upstreamID, limitErrors, since, modelFilter)
+				wantErrors, err := upstreamRecentErrorsForParity(st, upstreamID, limitErrors, since, modelFilter)
 				if err != nil {
-					t.Fatalf("upstreamRecentErrors(%s) error = %v", upstreamID, err)
+					t.Fatalf("upstreamRecentErrorsForParity(%s) error = %v", upstreamID, err)
 				}
 				if got := errorsByUpstream[upstreamID]; !reflect.DeepEqual(got, wantErrors) {
 					t.Fatalf("batched errors for %s = %#v, want %#v", upstreamID, got, wantErrors)
@@ -3274,9 +3275,9 @@ func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 		t.Fatalf("db.Close() error = %v", err)
 	}
 
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3323,9 +3324,9 @@ func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 
 func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3357,8 +3358,8 @@ func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 			},
 		}
 
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
 		}
 	}
 
@@ -3390,9 +3391,9 @@ func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 
 func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3433,8 +3434,8 @@ func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
 			},
 		}
 
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
 		}
 	}
 
@@ -3474,9 +3475,9 @@ func TestStatsHandlesEmptyAndNonClientVisibleRows(t *testing.T) {
 
 func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3530,10 +3531,11 @@ func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	entries, err := st.ListRecent(10)
+	page, err := st.ListRoutingPage(1, 10, ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	entries := page.Items
 	if len(entries) != 1 {
 		t.Fatalf("len(entries) = %d, want 1", len(entries))
 	}
@@ -3590,9 +3592,9 @@ func writeSyncCassetteForTest(t testing.TB, dir string, name string, sessionID s
 
 func TestDerivedRefreshIsDeferredAndAppliedOnRead(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3644,9 +3646,9 @@ func TestDerivedRefreshIsDeferredAndAppliedOnRead(t *testing.T) {
 
 func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3692,9 +3694,9 @@ func TestSyncRefreshesDerivedTablesOncePerSession(t *testing.T) {
 
 func TestSyncSanitizesBytesPostgresCannotStore(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -3926,6 +3928,10 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 	if _, err := db.Exec(legacyInsert); err != nil {
 		t.Fatalf("db.Exec(schema) error = %v", err)
 	}
+	isStream := 0
+	if header.Layout.IsStream {
+		isStream = 1
+	}
 	if _, err := db.Exec(`
 		INSERT INTO logs (
 			path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
@@ -3962,7 +3968,7 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 		header.Layout.ReqBodyLen,
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
-		boolToInt(header.Layout.IsStream),
+		isStream,
 		"",
 		"none",
 		"",
@@ -3974,9 +3980,9 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 		t.Fatalf("db.Close() error = %v", err)
 	}
 
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4035,9 +4041,9 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 
 func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4066,8 +4072,8 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 				ContentLength: 4,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
 		}
 		entry, err := st.GetByRequestID(requestID)
 		if err != nil {
@@ -4153,9 +4159,9 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 
 func TestStatsFollowsListFilterAndInvalidatesCache(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4165,7 +4171,7 @@ func TestStatsFollowsListFilterAndInvalidatesCache(t *testing.T) {
 		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", name, err)
 		}
-		if err := st.UpsertLog(path, recordfile.RecordHeader{
+		if err := st.UpsertLogWithGrouping(path, recordfile.RecordHeader{
 			Version: "LLM_PROXY_V3",
 			Meta: recordfile.MetaData{
 				RequestID:  name,
@@ -4178,8 +4184,8 @@ func TestStatsFollowsListFilterAndInvalidatesCache(t *testing.T) {
 				StatusCode: statusCode,
 			},
 			Usage: recordfile.UsageInfo{TotalTokens: tokens},
-		}); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -4234,9 +4240,9 @@ func TestStatsFollowsListFilterAndInvalidatesCache(t *testing.T) {
 
 func TestGetByRequestIDsReturnsNewestRowPerRequestID(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4261,8 +4267,8 @@ func TestGetByRequestIDsReturnsNewestRowPerRequestID(t *testing.T) {
 				StatusCode: 200,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 		entry, err := st.GetByRequestID(requestID)
 		if err != nil {
@@ -4300,9 +4306,9 @@ func TestGetByRequestIDsReturnsNewestRowPerRequestID(t *testing.T) {
 }
 
 func TestUpsertChannelModelsGroupsWritesAndKeepsProbeTimes(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4397,9 +4403,9 @@ func TestUpsertChannelModelsGroupsWritesAndKeepsProbeTimes(t *testing.T) {
 
 func TestGetDatasetExamplesSkipsExamplesWithoutTraceRows(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4441,9 +4447,9 @@ func TestGetDatasetExamplesSkipsExamplesWithoutTraceRows(t *testing.T) {
 
 func TestAppendDatasetExamplesRejectsBatchWithUnknownTrace(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4490,9 +4496,9 @@ func TestAppendDatasetExamplesRejectsBatchWithUnknownTrace(t *testing.T) {
 
 func TestEvalRunAndScoresRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4518,8 +4524,8 @@ func TestEvalRunAndScoresRoundTrip(t *testing.T) {
 			ContentLength: 4,
 		},
 	}
-	if err := st.UpsertLog(path, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	entry, err := st.GetByRequestID("req-score")
 	if err != nil {
@@ -4587,9 +4593,9 @@ func TestEvalRunAndScoresRoundTrip(t *testing.T) {
 
 func TestExperimentRunRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4642,9 +4648,9 @@ func TestExperimentRunRoundTrip(t *testing.T) {
 
 func TestListSessionPageAggregatesBySession(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4731,9 +4737,9 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 
 func TestSessionSummariesMaintainedAndReadBehindFlag(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4794,9 +4800,9 @@ func TestSessionSummariesMaintainedAndReadBehindFlag(t *testing.T) {
 
 func TestRebuildSessionSummariesFromLogs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4852,9 +4858,9 @@ func TestRebuildSessionSummariesFromLogs(t *testing.T) {
 
 func TestSessionSummaryRebuildStatsAreReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -4929,9 +4935,9 @@ func writeSessionSummaryTestLog(t *testing.T, st *Store, dir string, name string
 
 func TestClientVisibleListsExcludeInternalModelExchanges(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5033,9 +5039,9 @@ func TestClientVisibleListsExcludeInternalModelExchanges(t *testing.T) {
 
 func TestListPageAppliesFilters(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5088,9 +5094,9 @@ func TestListPageAppliesFilters(t *testing.T) {
 
 func TestListPageAppliesRoutingDecisionFilters(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5156,9 +5162,9 @@ func TestListPageAppliesRoutingDecisionFilters(t *testing.T) {
 
 func TestListPageAppliesObservationStatusFilter(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5182,8 +5188,8 @@ func TestListPageAppliesObservationStatusFilter(t *testing.T) {
 				StatusCode: 200,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
 		}
 		entry, err := st.GetByRequestID(name)
 		if err != nil {
@@ -5225,9 +5231,9 @@ func TestListPageAppliesObservationStatusFilter(t *testing.T) {
 
 func TestListSessionPageAppliesFilters(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5282,35 +5288,17 @@ func len64(v string) int64 {
 	return int64(len(v))
 }
 
-func TestUpstreamCatalogPersistenceAndRoutingMetadata(t *testing.T) {
+// TestLogRoutingMetadataPersistence pins that the routing facts recorded on a
+// trace survive the index round trip. The upstream_targets/upstream_models
+// projection writes this test used to seed were retired: those tables have no
+// writer left and routing state is published from the router's memory only.
+func TestLogRoutingMetadataPersistence(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
-
-	if err := st.UpsertUpstreamTarget(UpstreamTargetRecord{
-		ID:                "openai-primary",
-		BaseURL:           "https://api.openai.com/v1",
-		ProviderPreset:    "openai",
-		ProtocolFamily:    "openai_compatible",
-		RoutingProfile:    "openai_default",
-		Enabled:           true,
-		Priority:          100,
-		Weight:            1,
-		CapacityHint:      1,
-		LastRefreshAt:     time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC),
-		LastRefreshStatus: "ready",
-	}); err != nil {
-		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
-	}
-	if err := st.ReplaceUpstreamModels("openai-primary", []UpstreamModelRecord{
-		{UpstreamID: "openai-primary", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC)},
-		{UpstreamID: "openai-primary", Model: "gpt-4.1", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC)},
-	}); err != nil {
-		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
-	}
 
 	logPath := filepath.Join(dir, "trace.http")
 	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
@@ -5340,8 +5328,8 @@ func TestUpstreamCatalogPersistenceAndRoutingMetadata(t *testing.T) {
 			RoutingCandidateCount:          2,
 		},
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 
 	entry, err := st.GetByID(mustTraceID(t, st, logPath))
@@ -5357,21 +5345,13 @@ func TestUpstreamCatalogPersistenceAndRoutingMetadata(t *testing.T) {
 	if entry.Header.Meta.RoutingCandidateCount != 2 {
 		t.Fatalf("RoutingCandidateCount = %d, want 2", entry.Header.Meta.RoutingCandidateCount)
 	}
-
-	var count int
-	if err := st.db.QueryRow(`SELECT COUNT(*) FROM upstream_models WHERE upstream_id = ?`, "openai-primary").Scan(&count); err != nil {
-		t.Fatalf("QueryRow() error = %v", err)
-	}
-	if count != 2 {
-		t.Fatalf("upstream_models count = %d, want 2", count)
-	}
 }
 
 func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5409,8 +5389,8 @@ func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 				TotalTokens:      tokens,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -5451,9 +5431,9 @@ func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 
 func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5491,8 +5471,8 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 				TotalTokens:      tokens,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -5543,9 +5523,9 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 
 func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5576,8 +5556,8 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 				RoutingFailureReason: reason,
 			},
 		}
-		if err := st.UpsertLog(path, header); err != nil {
-			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", name, err)
 		}
 	}
 
@@ -5619,9 +5599,9 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 }
 
 func TestSaveObservationPersistsSummaryOnly(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5667,21 +5647,18 @@ func TestSaveObservationPersistsSummaryOnly(t *testing.T) {
 
 	// The node tree used to be written here too. It is no longer stored - the
 	// detail view parses it from the cassette - so the summary is all this write
-	// owes the database, and the tree is rebuilt in memory from the observation.
+	// owes the database; the tree stays an in-memory projection of the
+	// observation.
 	nodes := observe.FlattenObservationNodes(obs)
 	if len(nodes) != 2 {
 		t.Fatalf("nodes = %d, want 2", len(nodes))
 	}
-	tree := observe.RebuildNodeTree(nodes)
-	if len(tree) != 1 || len(tree[0].Children) != 1 || tree[0].Children[0].Text != "hello" {
-		t.Fatalf("tree = %+v", tree)
-	}
 }
 
 func TestSaveObservationStoresNoSemanticNodes(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5730,9 +5707,9 @@ func TestSaveObservationStoresNoSemanticNodes(t *testing.T) {
 }
 
 func TestSystemEventUpsertDeduplicatesAndReopens(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5789,9 +5766,9 @@ func TestSystemEventUpsertDeduplicatesAndReopens(t *testing.T) {
 }
 
 func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5883,9 +5860,9 @@ func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
 }
 
 func TestListSystemEventsCursorPagination(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -5964,21 +5941,21 @@ func stringSlicesEqual(a []string, b []string) bool {
 }
 
 func TestMarkParseJobFailedCreatesSystemEvent(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
 	if err := st.EnqueueParseJob("trace-parse-failed"); err != nil {
 		t.Fatalf("EnqueueParseJob() error = %v", err)
 	}
-	jobs, err := st.ListParseJobs("queued", 10)
+	jobs, err := st.ClaimParseJobs(10)
 	if err != nil {
-		t.Fatalf("ListParseJobs() error = %v", err)
+		t.Fatalf("ClaimParseJobs() error = %v", err)
 	}
 	if len(jobs) != 1 {
-		t.Fatalf("jobs = %+v, want one queued job", jobs)
+		t.Fatalf("jobs = %+v, want one claimed job", jobs)
 	}
 
 	const parseError = "constraint failed: UNIQUE constraint failed: semantic_nodes.trace_id, semantic_nodes.node_id (2067)"
@@ -6009,9 +5986,9 @@ func TestMarkParseJobFailedCreatesSystemEvent(t *testing.T) {
 }
 
 func TestSaveAnalysisRunFailureCreatesSystemEvent(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6057,9 +6034,9 @@ func TestSaveAnalysisRunFailureCreatesSystemEvent(t *testing.T) {
 
 func TestUpsertLogWithGroupingCreatesRoutingFailureSystemEvents(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6117,9 +6094,9 @@ func TestUpsertLogWithGroupingCreatesRoutingFailureSystemEvents(t *testing.T) {
 
 func TestUpsertLogWithGroupingCreatesTransportSystemEvent(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6171,9 +6148,9 @@ func TestUpsertLogWithGroupingCreatesTransportSystemEvent(t *testing.T) {
 }
 
 func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6219,9 +6196,9 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	if len(findings) != 1 || findings[0].ID != "finding-2" {
 		t.Fatalf("findings after rebuild = %+v", findings)
 	}
-	allFindings, err := st.ListAllFindings(FindingFilter{Category: "tool_result_error"}, 10)
+	allFindings, _, err := st.ListAllFindingsPage(FindingFilter{Category: "tool_result_error"}, 10, 0)
 	if err != nil {
-		t.Fatalf("ListAllFindings() error = %v", err)
+		t.Fatalf("ListAllFindingsPage() error = %v", err)
 	}
 	if len(allFindings) != 1 || allFindings[0].TraceID != "trace-findings" {
 		t.Fatalf("all findings = %+v", allFindings)
@@ -6254,9 +6231,9 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 // parameter-bounded chunk, duplicate (trace_id, finding_id) keys folded with the
 // last occurrence winning, and an empty list still clearing the trace's findings.
 func TestSaveFindingsBatchesRepeatedKeys(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6353,9 +6330,9 @@ func TestFlattenObservationNodesFoldsRepeatedIDs(t *testing.T) {
 // TestClaimParseJobsIsExclusive checks the single-statement claim hands each
 // queued job to exactly one caller and moves it to running with one attempt.
 func TestClaimParseJobsIsExclusive(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6416,9 +6393,9 @@ func TestClaimParseJobsIsExclusive(t *testing.T) {
 }
 
 func TestClaimAnalysisJobsForWorkerIsExclusive(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6465,9 +6442,9 @@ func TestClaimAnalysisJobsForWorkerIsExclusive(t *testing.T) {
 }
 
 func TestSaveAndListAnalysisRuns(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6503,9 +6480,9 @@ func TestSaveAndListAnalysisRuns(t *testing.T) {
 }
 
 func TestAnalysisJobLifecycle(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6555,9 +6532,9 @@ func TestAnalysisJobLifecycle(t *testing.T) {
 }
 
 func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6579,8 +6556,8 @@ func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
 	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(path, header); err != nil {
-		t.Fatalf("UpsertLog(missing) error = %v", err)
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(missing) error = %v", err)
 	}
 	header.Meta.RequestID = "req-batch-usage"
 	header.Usage = recordfile.UsageInfo{TotalTokens: 3}
@@ -6588,8 +6565,8 @@ func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
 	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(path, header); err != nil {
-		t.Fatalf("UpsertLog(usage) error = %v", err)
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(usage) error = %v", err)
 	}
 
 	ids, err := st.ListTraceIDs(ListFilter{Endpoint: "responses", MissingUsage: true}, 10)
@@ -6610,9 +6587,9 @@ func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
 }
 
 func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6634,8 +6611,8 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 	if err := os.WriteFile(unparsedPath, []byte("payload"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(unparsedPath, header); err != nil {
-		t.Fatalf("UpsertLog(unparsed) error = %v", err)
+	if err := st.UpsertLogWithGrouping(unparsedPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(unparsed) error = %v", err)
 	}
 	unparsedEntry, err := st.GetByRequestID("req-batch-unparsed")
 	if err != nil {
@@ -6647,8 +6624,8 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 	if err := os.WriteFile(parsedPath, []byte("payload"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(parsedPath, header); err != nil {
-		t.Fatalf("UpsertLog(parsed) error = %v", err)
+	if err := st.UpsertLogWithGrouping(parsedPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(parsed) error = %v", err)
 	}
 	parsedEntry, err := st.GetByRequestID("req-batch-parsed")
 	if err != nil {
@@ -6685,8 +6662,8 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 	if err := os.WriteFile(failedPath, []byte("payload"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if err := st.UpsertLog(failedPath, header); err != nil {
-		t.Fatalf("UpsertLog(failed) error = %v", err)
+	if err := st.UpsertLogWithGrouping(failedPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(failed) error = %v", err)
 	}
 	failedEntry, err := st.GetByRequestID("req-batch-failed")
 	if err != nil {
@@ -6732,9 +6709,9 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 }
 
 func TestMarkAnalysisJobFailedCreatesSystemEvent(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6768,9 +6745,9 @@ func TestClassifyUpstreamFailureSeparatesRetryQueueSaturation(t *testing.T) {
 }
 
 func TestModelAliasStoreCRUD(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6813,8 +6790,10 @@ func TestModelAliasStoreCRUD(t *testing.T) {
 		t.Fatalf("updated alias = %+v", updated)
 	}
 
-	if err := st.SetModelAliasEnabled(created.ID, false); err != nil {
-		t.Fatalf("SetModelAliasEnabled(false) error = %v", err)
+	disabled := updated
+	disabled.Enabled = false
+	if _, err := st.UpsertModelAlias(disabled); err != nil {
+		t.Fatalf("UpsertModelAlias(disable) error = %v", err)
 	}
 	enabled, err := st.ListModelAliases("abc", true)
 	if err != nil {
@@ -6833,9 +6812,9 @@ func TestModelAliasStoreCRUD(t *testing.T) {
 }
 
 func TestModelAliasStoreChannelScoped(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6867,9 +6846,9 @@ func TestModelAliasStoreChannelScoped(t *testing.T) {
 }
 
 func TestModelAliasStoreValidation(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -6894,8 +6873,8 @@ func TestModelAliasStoreValidation(t *testing.T) {
 	if _, err := st.UpsertModelAlias(ModelAliasRecord{ID: "disabled-duplicate", Alias: "a", TargetModel: "b", Enabled: false}); err != nil {
 		t.Fatalf("UpsertModelAlias(disabled duplicate) error = %v", err)
 	}
-	if err := st.SetModelAliasEnabled("missing", false); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("SetModelAliasEnabled(missing) error = %v, want sql.ErrNoRows", err)
+	if _, err := st.GetModelAlias("missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetModelAlias(missing) error = %v, want sql.ErrNoRows", err)
 	}
 	if err := st.DeleteModelAlias("missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("DeleteModelAlias(missing) error = %v, want sql.ErrNoRows", err)
@@ -7068,9 +7047,9 @@ func TestSyncReadsPreludesAndRequestHeadersNotWholeCassettes(t *testing.T) {
 		writeLargeCassetteForTest(t, dir, fmt.Sprintf("large-%03d", i), fmt.Sprintf("sess-%03d", i), bodyPerTrace)
 	}
 
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -7082,12 +7061,12 @@ func TestSyncReadsPreludesAndRequestHeadersNotWholeCassettes(t *testing.T) {
 	}
 	runtime.ReadMemStats(&after)
 
-	entries, err := st.ListRecent(traces + 5)
+	page, err := st.ListRoutingPage(1, traces+5, ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
-	if len(entries) != traces {
-		t.Fatalf("len(entries) = %d, want %d; the corpus must still be indexed in full", len(entries), traces)
+	if len(page.Items) != traces {
+		t.Fatalf("len(entries) = %d, want %d; the corpus must still be indexed in full", len(page.Items), traces)
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocationLimit {
 		t.Fatalf("Sync() allocated %.1f MiB over a %d MiB corpus, want it to read preludes rather than whole recordings",
@@ -7157,9 +7136,9 @@ func TestIndexingDerivesGroupingFromRequestHeadersAlone(t *testing.T) {
 	}
 
 	// And Sync() itself must record the same thing.
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
@@ -7212,9 +7191,9 @@ func TestSyncIndexesLegacyFixedHeaderCassettes(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if err := st.Sync(); err != nil {
@@ -7241,9 +7220,9 @@ func TestSyncIndexesLegacyFixedHeaderCassettes(t *testing.T) {
 // carried part of its count and could push a different model out of the top-N cut.
 func TestUpstreamModelCoverageTreatsModelCasingAsOneModel(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -7257,25 +7236,15 @@ func TestUpstreamModelCoverageTreatsModelCasingAsOneModel(t *testing.T) {
 
 	since := now.Add(-time.Hour)
 	const limitModels = 2
-	models, lastModel, err := st.upstreamModelCoverage("up-case", limitModels, since, "")
-	if err != nil {
-		t.Fatalf("upstreamModelCoverage() error = %v", err)
-	}
-	if !reflect.DeepEqual(models, []string{"gpt-5", "zeta"}) {
-		t.Fatalf("models = %#v, want [gpt-5 zeta]; one model recorded twice must not fill the top-N cut", models)
-	}
-	if lastModel != "gpt-5" {
-		t.Fatalf("lastModel = %q, want gpt-5", lastModel)
-	}
-
 	batched, err := st.upstreamModelCoverageAll(limitModels, since, "")
 	if err != nil {
 		t.Fatalf("upstreamModelCoverageAll() error = %v", err)
 	}
-	if !reflect.DeepEqual(batched["up-case"].Models, models) {
-		t.Fatalf("batched models = %#v, want %#v", batched["up-case"].Models, models)
+	coverage := batched["up-case"]
+	if !reflect.DeepEqual(coverage.Models, []string{"gpt-5", "zeta"}) {
+		t.Fatalf("models = %#v, want [gpt-5 zeta]; one model recorded twice must not fill the top-N cut", coverage.Models)
 	}
-	if batched["up-case"].LastModel != lastModel {
-		t.Fatalf("batched last model = %q, want %q", batched["up-case"].LastModel, lastModel)
+	if coverage.LastModel != "gpt-5" {
+		t.Fatalf("lastModel = %q, want gpt-5", coverage.LastModel)
 	}
 }

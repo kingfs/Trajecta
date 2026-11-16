@@ -120,11 +120,12 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				}
 			}
 
+			semantics := llm.ClassifyPath(tt.spec.url, "https://upstream.example")
 			var llmResp llm.LLMResponse
 			if tt.spec.isStream {
-				llmResp, err = llm.ParseStreamResponseForPath(tt.spec.url, "https://upstream.example", resBody)
+				llmResp, err = llm.ParseStreamResponse(semantics.Provider, semantics.Endpoint, resBody)
 			} else {
-				llmResp, err = llm.ParseResponseForPath(tt.spec.url, "https://upstream.example", resBody)
+				llmResp, err = llm.ParseResponse(semantics.Provider, semantics.Endpoint, resBody)
 			}
 			if err != nil {
 				t.Fatalf("parse response error = %v", err)

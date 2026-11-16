@@ -102,12 +102,6 @@ type Credential struct {
 	Scopes       []string
 }
 
-// IsZero reports whether c carries no credential data at all.
-func (c Credential) IsZero() bool {
-	return c.Mode == "" && c.APIKey == "" && c.AccessToken == "" && c.RefreshToken == "" &&
-		c.ExpiresAt.IsZero() && c.AccountID == "" && c.Plan == "" && len(c.Scopes) == 0
-}
-
 // CredentialStatus is the coarse status an AuthDriver reports for a credential.
 type CredentialStatus string
 

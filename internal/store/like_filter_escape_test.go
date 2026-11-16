@@ -22,9 +22,9 @@ import (
 // Postgres, whose LIKE escapes with a backslash by default. The free-text `q` filter always
 // declared ESCAPE, which is the behaviour every filter here has to share.
 func TestLogFiltersTreatLikeWildcardsLiterally(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

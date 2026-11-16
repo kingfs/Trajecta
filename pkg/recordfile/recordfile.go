@@ -34,13 +34,6 @@ const (
 	LegacyHeaderLen = 2048
 )
 
-// HasFileMagic reports whether content starts with a supported V3 prelude
-// magic, current or legacy.
-func HasFileMagic(content []byte) bool {
-	return bytes.HasPrefix(content, []byte(FileMagic)) ||
-		bytes.HasPrefix(content, []byte(LegacyFileMagic))
-}
-
 // IsV3Prelude reports whether content starts with a supported V3 prelude magic
 // followed by the newline that terminates the magic line.
 func IsV3Prelude(content []byte) bool {

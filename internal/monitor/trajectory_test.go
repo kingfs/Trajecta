@@ -24,7 +24,7 @@ func TestSessionTrajectoryDownload(t *testing.T) {
 	if err := os.WriteFile(path, content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestSessionTrajectoryDefaultCapAndFullExport(t *testing.T) {
 	dir := t.TempDir()
 	sessionID := "cap-session"
 	writeTrajectorySession(t, dir, sessionID, 3)
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSessionTrajectoryStreamNDJSON(t *testing.T) {
 	dir := t.TempDir()
 	sessionID := "stream-session"
 	writeTrajectorySession(t, dir, sessionID, 3)
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestSessionTrajectoryCacheHitSkipsRebuild(t *testing.T) {
 	dir := t.TempDir()
 	sessionID := "cache-hit-session"
 	writeTrajectorySession(t, dir, sessionID, 1)
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestSessionTrajectoryCacheKeyTracksAppendedTrace(t *testing.T) {
 	dir := t.TempDir()
 	sessionID := "cache-append-session"
 	writeTrajectorySession(t, dir, sessionID, 1)
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

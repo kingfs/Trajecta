@@ -528,9 +528,9 @@ func TestEntStorePostgresPersistenceRoundTrip(t *testing.T) {
 
 func newEntStoreForTest(t *testing.T) *EntStore {
 	t.Helper()
-	st, err := tracestore.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() {
 		if err := st.Close(); err != nil {

@@ -16,15 +16,15 @@ import (
 // vocabulary as the events filters next to them.
 //
 // The audit page sends lowercase values, so the UI never noticed that `?severity=High` and
-// `?severity=all` matched nothing: ListAllFindings and ListFindings compared the raw query value
+// `?severity=all` matched nothing: ListAllFindingsPage and ListFindings compared the raw query value
 // against the stored lowercase severity, while the events API normalizes its enum-like filters
 // (case-insensitively, with `all` meaning "no filter"). An agent calling the MCP tool with `High`,
 // or an operator reusing `all` from the events API, got an empty finding list - a false "no findings"
 // answer. Both read paths are asserted, because they agree with each other either way.
 func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -33,7 +33,7 @@ func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
 	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
-	if err := st.UpsertLog(path, recordfile.RecordHeader{
+	if err := st.UpsertLogWithGrouping(path, recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",
 		Meta: recordfile.MetaData{
 			RequestID:  "findings.http",
@@ -45,8 +45,8 @@ func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
 			Method:     http.MethodPost,
 			StatusCode: http.StatusOK,
 		},
-	}); err != nil {
-		t.Fatalf("UpsertLog error = %v", err)
+	}, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping error = %v", err)
 	}
 	entry, err := st.GetByRequestID("findings.http")
 	if err != nil {
@@ -93,9 +93,9 @@ func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			all, err := st.ListAllFindings(tc.filter, 50)
+			all, _, err := st.ListAllFindingsPage(tc.filter, 50, 0)
 			if err != nil {
-				t.Fatalf("ListAllFindings(%+v) error = %v", tc.filter, err)
+				t.Fatalf("ListAllFindingsPage(%+v) error = %v", tc.filter, err)
 			}
 			perTrace, err := st.ListFindings(entry.ID, tc.filter)
 			if err != nil {
@@ -103,7 +103,7 @@ func TestFindingFiltersNormalizeSeverityAndCategory(t *testing.T) {
 			}
 			global := findingIDsOf(all)
 			if !equalStringSlices(global, tc.want) {
-				t.Fatalf("ListAllFindings(%+v) = %v, want %v", tc.filter, global, tc.want)
+				t.Fatalf("ListAllFindingsPage(%+v) = %v, want %v", tc.filter, global, tc.want)
 			}
 			if trace := findingIDsOf(perTrace); !equalStringSlices(trace, tc.want) {
 				t.Fatalf("ListFindings(%+v) = %v, want %v: the global and per-trace finding lists must apply the same filter", tc.filter, trace, tc.want)

@@ -11,7 +11,7 @@ import (
 )
 
 func TestChannelModelProtocolsRoundTrip(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestChannelModelProtocolsRoundTrip(t *testing.T) {
 }
 
 func TestChannelDetailIncludesModelProtocols(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestChannelDetailIncludesModelProtocols(t *testing.T) {
 }
 
 func TestChannelModelProtocolPatchMergesEntries(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

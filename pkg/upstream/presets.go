@@ -1,7 +1,6 @@
 package upstream
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/kingfs/Trajecta/pkg/xir"
@@ -807,16 +806,6 @@ func Presets() []Preset {
 		out[i] = clonePreset(builtinPresets[i])
 	}
 	return out
-}
-
-// PresetIDs returns the canonical preset IDs in sorted order.
-func PresetIDs() []string {
-	ids := make([]string, 0, len(builtinPresets))
-	for _, preset := range builtinPresets {
-		ids = append(ids, preset.ID)
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 // LookupPreset returns the preset with the given canonical ID or alias. The

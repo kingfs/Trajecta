@@ -10,7 +10,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 func TestPerProtocolEndpointRoutesMessagesToItsOwnBaseURL(t *testing.T) {
@@ -39,7 +38,7 @@ func TestPerProtocolEndpointRoutesMessagesToItsOwnBaseURL(t *testing.T) {
 	}))
 	defer messages.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +64,7 @@ func TestPerProtocolEndpointRoutesMessagesToItsOwnBaseURL(t *testing.T) {
 	}
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Debug.MaskKey = true
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 func BenchmarkUpsertLogWithGrouping(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func BenchmarkSyncSingleSessionVault(b *testing.B) {
 		)
 	}
 
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func BenchmarkSyncSingleSessionVault(b *testing.B) {
 // page needs per catalog entry: the per-key form issues one query per model per
 // window, the grouped form issues one query per window.
 func BenchmarkOverviewTimeline(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func BenchmarkOverviewTimeline(b *testing.B) {
 			header.Meta.Error = "upstream error"
 		}
 		header.Usage.TotalTokens = 42
-		if err := st.UpsertLog(path, header); err != nil {
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -175,7 +175,7 @@ func BenchmarkOverviewTimeline(b *testing.B) {
 }
 
 func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
 			header.Meta.Model = model
 			header.Meta.Time = now.Add(-time.Duration(i) * time.Minute)
 			header.Usage.TotalTokens = 10
-			if err := st.UpsertLog(path, header); err != nil {
+			if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -232,7 +232,7 @@ func BenchmarkModelCatalogUsageSummaries(b *testing.B) {
 // configured channel: the per-channel form asks for one summary and one trend
 // series per channel, the batched form asks for both in one grouped pass each.
 func BenchmarkChannelUsageAnalytics(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func BenchmarkChannelUsageAnalytics(b *testing.B) {
 			header.Meta.Time = now.Add(-time.Duration(i%10) * time.Hour)
 			header.Meta.SelectedUpstreamID = channelID
 			header.Usage.TotalTokens = 10
-			if err := st.UpsertLog(path, header); err != nil {
+			if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -292,11 +292,12 @@ func BenchmarkChannelUsageAnalytics(b *testing.B) {
 	})
 }
 
-// BenchmarkUpstreamAnalytics measures what the analytics page needs per upstream:
-// the per-upstream form ranks the models, the last model, the recent errors and
-// the recent failures once per upstream, the batched form once for all of them.
+// BenchmarkUpstreamAnalytics measures what the analytics page needs: the batched
+// reads rank the models, the last model, the recent errors and the recent
+// failures of every upstream in one pass. The per-upstream coverage/errors arm
+// was retired with the single-upstream queries it measured.
 func BenchmarkUpstreamAnalytics(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -323,33 +324,13 @@ func BenchmarkUpstreamAnalytics(b *testing.B) {
 			}
 			header.Meta.SelectedUpstreamID = upstreamID
 			header.Usage.TotalTokens = 10
-			if err := st.UpsertLog(path, header); err != nil {
+			if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
 				b.Fatal(err)
 			}
 		}
 	}
 	since := now.Add(-24 * time.Hour)
-	ids := make([]string, 0, upstreams)
-	for u := 0; u < upstreams; u++ {
-		ids = append(ids, fmt.Sprintf("bench-upstream-%02d", u))
-	}
 
-	b.Run("per-upstream", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			for _, upstreamID := range ids {
-				if _, _, err := st.upstreamModelCoverage(upstreamID, 5, since, ""); err != nil {
-					b.Fatal(err)
-				}
-				if _, err := st.upstreamRecentErrors(upstreamID, 3, since, ""); err != nil {
-					b.Fatal(err)
-				}
-				if _, err := st.upstreamRecentFailures(upstreamID, 3, since, ""); err != nil {
-					b.Fatal(err)
-				}
-			}
-		}
-	})
 	b.Run("batched", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -371,7 +352,7 @@ func BenchmarkUpstreamAnalytics(b *testing.B) {
 // per-model arm is the upsert loop the discovery used, the batched arm the
 // grouped write.
 func BenchmarkUpsertChannelModels(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -416,7 +397,7 @@ func BenchmarkUpsertChannelModels(b *testing.B) {
 // this replaced issued one INSERT per finding (120 statements here); the batched
 // form issues one DELETE plus one INSERT per 69-row parameter chunk.
 func BenchmarkSaveFindings(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -450,7 +431,7 @@ func BenchmarkSaveFindings(b *testing.B) {
 // row-by-row form this replaced issued one INSERT per node (200 statements here);
 // the batched form issues one INSERT per 64-node parameter chunk.
 func BenchmarkSaveObservationNodes(b *testing.B) {
-	st, err := New(b.TempDir())
+	st, err := newSQLiteTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}

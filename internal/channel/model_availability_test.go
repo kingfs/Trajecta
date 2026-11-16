@@ -94,7 +94,7 @@ func TestModelAvailabilityClassifiesAgainstTheLatestSuccessfulSync(t *testing.T)
 }
 
 func TestRuntimeTargetsExcludeRemovedModelsButKeepTheirSwitch(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestFailedProbeKeepsTheLatestSuccessfulSnapshot(t *testing.T) {
 	}))
 	t.Cleanup(upstreamServer.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestLegacyStaleProbeAnchorIsRepairedByTheNextSuccessfulProbe(t *testing.T) 
 	}))
 	t.Cleanup(upstreamServer.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestBootstrapStaticModelsSurviveSuccessfulSync(t *testing.T) {
 	}))
 	t.Cleanup(upstreamServer.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestProbeReportsAddedAndRemovedModels(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

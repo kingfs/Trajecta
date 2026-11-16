@@ -93,17 +93,9 @@ func WithToolCallAuditRecorder(recorder audit.ToolCallAuditRecorder) Option {
 	}
 }
 
-func WithFunctionToolExecutor(name string, executor FunctionToolExecutor) Option {
-	return WithFunctionToolExecutorPolicy(name, executor, FunctionToolExecutorPolicy{})
-}
-
-func WithFunctionToolExecutorPolicy(name string, executor FunctionToolExecutor, policy FunctionToolExecutorPolicy) Option {
-	return func(r *Runtime) {
-		registry := r.ensureFunctionToolExecutorRegistry()
-		registry.Set(name, executor, policy)
-	}
-}
-
+// WithFunctionToolExecutorRegistry installs the function-tool registry built
+// by functionexec.Manager (or NewFunctionToolExecutorRegistry in tests). It is
+// the only wiring path: the registry replaces the runtime's default wholesale.
 func WithFunctionToolExecutorRegistry(registry *FunctionToolExecutorRegistry) Option {
 	return func(r *Runtime) {
 		r.ReplaceFunctionToolExecutorRegistry(registry)
@@ -120,18 +112,6 @@ func (r *Runtime) ReplaceFunctionToolExecutorRegistry(registry *FunctionToolExec
 	r.functionExecutorsMu.Lock()
 	defer r.functionExecutorsMu.Unlock()
 	r.functionExecutors = registry
-}
-
-func (r *Runtime) ensureFunctionToolExecutorRegistry() *FunctionToolExecutorRegistry {
-	if r == nil {
-		return nil
-	}
-	r.functionExecutorsMu.Lock()
-	defer r.functionExecutorsMu.Unlock()
-	if r.functionExecutors == nil {
-		r.functionExecutors = NewFunctionToolExecutorRegistry(nil)
-	}
-	return r.functionExecutors
 }
 
 func (r *Runtime) functionToolExecutorSnapshot() map[string]configuredFunctionToolExecutor {

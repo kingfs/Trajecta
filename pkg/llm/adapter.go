@@ -129,26 +129,6 @@ func ParseStreamResponse(provider string, endpoint string, body []byte) (LLMResp
 	return streamAdapter.ParseStreamResponse(body)
 }
 
-func ParseResponseForPath(rawPath string, upstreamBaseURL string, body []byte) (LLMResponse, error) {
-	adapter, err := AdapterForPath(rawPath, upstreamBaseURL)
-	if err != nil {
-		return LLMResponse{}, err
-	}
-	return adapter.ParseResponse(body)
-}
-
-func ParseStreamResponseForPath(rawPath string, upstreamBaseURL string, body []byte) (LLMResponse, error) {
-	adapter, err := AdapterForPath(rawPath, upstreamBaseURL)
-	if err != nil {
-		return LLMResponse{}, err
-	}
-	streamAdapter, ok := adapter.(StreamAdapter)
-	if !ok {
-		return LLMResponse{}, UnsupportedEndpointError{Provider: adapter.Semantics().Provider, Endpoint: adapter.Semantics().Endpoint}
-	}
-	return streamAdapter.ParseStreamResponse(body)
-}
-
 type openAIChatAdapter struct {
 	semantics TraceSemantics
 }

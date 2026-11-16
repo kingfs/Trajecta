@@ -12,12 +12,6 @@ type FunctionToolExecutor interface {
 	ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error)
 }
 
-type FunctionToolExecutorFunc func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error)
-
-func (f FunctionToolExecutorFunc) ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
-	return f(ctx, call)
-}
-
 type FunctionToolCall struct {
 	CallID    string
 	Name      string
@@ -78,25 +72,6 @@ func NewFunctionToolExecutorRegistry(registrations map[string]FunctionToolExecut
 	registry := &FunctionToolExecutorRegistry{}
 	registry.Replace(registrations)
 	return registry
-}
-
-func (r *FunctionToolExecutorRegistry) Set(name string, executor FunctionToolExecutor, policy FunctionToolExecutorPolicy) {
-	if r == nil {
-		return
-	}
-	name = normalizeFunctionToolName(name)
-	if name == "" || executor == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.executors == nil {
-		r.executors = map[string]configuredFunctionToolExecutor{}
-	}
-	r.executors[name] = configuredFunctionToolExecutor{
-		executor: executor,
-		policy:   policy,
-	}
 }
 
 func (r *FunctionToolExecutorRegistry) Replace(registrations map[string]FunctionToolExecutorRegistration) {

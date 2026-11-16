@@ -17,9 +17,9 @@ import (
 // model is reported as model_not_enabled, and a name no channel declares is
 // reported as model_not_matched. Nothing is forwarded in either rejection.
 func TestRoutingInspectDescribesStrictModelAuthorization(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

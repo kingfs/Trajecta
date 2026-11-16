@@ -15,13 +15,11 @@ package route
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/pkg/session"
 	"github.com/kingfs/Trajecta/pkg/xir"
 )
 
@@ -75,10 +73,11 @@ type Target struct {
 
 // Snapshot is the immutable view of the routing world Plan works on.
 //
-// Bindings maps BindingKey(session, model) to a target ID. The package only
-// reads the map; establishing, refreshing and expiring bindings is the
-// caller's job. A binding must already be live when it is present in the map:
-// the Snapshot carries no binding timestamps, so StickyTTL is not evaluated
+// Bindings maps the canonical session binding fingerprint
+// (session.Fingerprint(session.Compose(session, model))) to a target ID. The
+// package only reads the map; establishing, refreshing and expiring bindings is
+// the caller's job. A binding must already be live when it is present in the
+// map: the Snapshot carries no binding timestamps, so StickyTTL is not evaluated
 // here (see the limitation on Policy.StickyTTL).
 type Snapshot struct {
 	Targets  []Target
@@ -86,18 +85,6 @@ type Snapshot struct {
 	// Now supplies the single clock reading used by one Plan call. Nil means
 	// time.Now.
 	Now func() time.Time
-}
-
-// BindingKey returns the stable affinity key for a session and model.
-//
-// The raw session value never becomes a key: it is hashed with SHA-256 together
-// with the case-folded, trimmed model name, and the result is lower-case hex.
-// The model is folded because model matching is case-insensitive; the session
-// is only trimmed. Callers must use this helper rather than constructing the
-// key themselves so the fingerprint stays consistent across processes.
-func BindingKey(session, model string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(session) + "\x00" + strings.ToLower(strings.TrimSpace(model))))
-	return hex.EncodeToString(sum[:])
 }
 
 // Request is the routing-relevant part of an inbound model request.
@@ -177,11 +164,13 @@ type Affinity struct {
 	Status string
 	// Failed is true when a hard (server-state) affinity could not be honoured.
 	Failed bool
-	// KeyFingerprint is BindingKey(session, model), or empty when no session was
-	// supplied. It is always a SHA-256 fingerprint, never the raw session.
+	// KeyFingerprint is the canonical session binding fingerprint
+	// (session.Fingerprint(session.Compose(session, model))), or empty when no
+	// session was supplied. It is always a SHA-256 fingerprint, never the raw
+	// session.
 	KeyFingerprint string
 	// TargetID is the bound target. It is filled even when the binding was not
-	// selected (soft spill or hard failure) so Explain can show the conflict.
+	// selected (soft spill or hard failure) so callers can show the conflict.
 	TargetID string
 }
 
@@ -256,16 +245,6 @@ var (
 	ErrSessionUpstreamUnavailable = &PlanError{Reason: ReasonSessionUpstreamUnavailable}
 	ErrConversionUnsupported      = &PlanError{Reason: ReasonConversionUnsupported}
 )
-
-// ReasonOf returns the stable routing reason carried by err, or "" when err is
-// not a *PlanError (including context cancellation and unrelated errors).
-func ReasonOf(err error) string {
-	var planErr *PlanError
-	if errors.As(err, &planErr) && planErr != nil {
-		return planErr.Reason
-	}
-	return ""
-}
 
 // Plan selects one target for req.
 //
@@ -368,13 +347,6 @@ func Plan(ctx context.Context, req Request, snap Snapshot, policy Policy) (*Plan
 		}
 	}
 	return selectedPlan(evaluated[best], affinity, evaluated), nil
-}
-
-// Explain runs the same core as Plan. It exists so the inspector and the
-// forwarding path cannot diverge. It does not mutate Snapshot and never writes
-// bindings or inflight counters.
-func Explain(ctx context.Context, req Request, snapshot Snapshot, policy Policy) (*PlanResult, error) {
-	return Plan(ctx, req, snapshot, policy)
 }
 
 // planHardAffinity enforces server-side state affinity.
@@ -665,7 +637,7 @@ func lookupBinding(req Request, snap Snapshot) (key, targetID string, ok bool) {
 	if strings.TrimSpace(req.Session) == "" {
 		return "", "", false
 	}
-	key = BindingKey(req.Session, req.Model)
+	key = session.Fingerprint(session.Compose(req.Session, req.Model))
 	if snap.Bindings == nil {
 		return key, "", false
 	}

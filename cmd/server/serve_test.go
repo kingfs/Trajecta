@@ -80,9 +80,9 @@ func TestManagementHTTPServerHasNoWriteDeadline(t *testing.T) {
 // marker stops a later restart from undoing an ignore the reader makes under
 // the new per-occurrence semantics.
 func TestCredentialMaskVisibilityRepairRunsOnce(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

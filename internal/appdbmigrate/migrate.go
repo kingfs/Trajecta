@@ -98,18 +98,6 @@ func MigrateUp(driver string, dsn string, steps int) error {
 
 var ErrSQLiteUsesStoreInit = errors.New("sqlite application versioned migration is not implemented; startup schema fallback remains active")
 
-func MigrateDown(driver string, dsn string, steps int, all bool) error {
-	driver = normalizeDriver(driver)
-	switch driver {
-	case "postgres":
-		return migratePostgresDown(dsn, steps, all)
-	case "sqlite":
-		return ErrSQLiteUsesStoreInit
-	default:
-		return fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
-	}
-}
-
 func PostgresIndexOptimizationStatements() []IndexOptimizationStatement {
 	return append([]IndexOptimizationStatement(nil), postgresIndexOptimizationStatements...)
 }
@@ -309,19 +297,6 @@ func migratePostgresUp(dsn string, steps int) error {
 			return m.Steps(steps)
 		}
 		return m.Up()
-	})
-}
-
-func migratePostgresDown(dsn string, steps int, all bool) error {
-	return migratePostgres(dsn, func(m *gomigrate.Migrate) error {
-		switch {
-		case all:
-			return m.Down()
-		case steps > 0:
-			return m.Steps(-steps)
-		default:
-			return m.Steps(-1)
-		}
 	})
 }
 

@@ -24,9 +24,9 @@ import (
 // string) are all properties of the assembled handler.
 func newRealtimeTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st

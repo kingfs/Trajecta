@@ -1,7 +1,6 @@
 package recorder
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -156,10 +155,6 @@ func (r *Recorder) persistMaskAudit(records []store.CredentialMaskAuditRecord) e
 	return r.store.UpsertCredentialMaskAudits(records)
 }
 
-func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, error) {
-	return r.PrepareLogFileWithOptions(req, PrepareOptions{SiteURL: siteURL})
-}
-
 // tracePathSegment turns an untrusted value into a path below the trace root.
 //
 // The model name is read from the request body, so it is client input on a
@@ -214,15 +209,10 @@ func tracePathSegment(value string, limit int) string {
 	return joined
 }
 
-func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOptions) (*LogInfo, error) {
-	var bodyBytes []byte
-	if req.Body != nil {
-		bodyBytes, _ = io.ReadAll(req.Body)
-		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	}
-	return r.PrepareLogFileWithOptionsAndBody(req, opts, bodyBytes)
-}
-
+// PrepareLogFileWithOptionsAndBody prepares the cassette for one exchange. The
+// caller passes the request body it already read for routing/masking; the
+// recorder never reads req.Body itself, so the recorded body and the wire body
+// cannot diverge.
 func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts PrepareOptions, bodyBytes []byte) (*LogInfo, error) {
 	modelName := strings.TrimSpace(opts.WireModel)
 	if modelName == "" && len(bodyBytes) > 0 {

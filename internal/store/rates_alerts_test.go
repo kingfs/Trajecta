@@ -10,9 +10,9 @@ import (
 // Disabled alerts never breach.
 func TestRatesAlertsDisabledNeverBreaches(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -39,9 +39,9 @@ func TestRatesAlertsDisabledNeverBreaches(t *testing.T) {
 // Validation and persistence round-trip.
 func TestRatesAlertsSettingsValidationAndPersistence(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -76,9 +76,9 @@ func TestRatesAlertsSettingsValidationAndPersistence(t *testing.T) {
 // pinned through the store surface with the events API in monitor tests.
 func TestRatesAlertsEvaluateGlobalAndModel(t *testing.T) {
 	dir := t.TempDir()
-	st, err := New(dir)
+	st, err := newSQLiteTestStore(dir)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
 

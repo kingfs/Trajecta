@@ -18,7 +18,7 @@ func resourceTestTrace(t *testing.T, st *Store, requestID string, at time.Time) 
 	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 		t.Fatalf("write cassette: %v", err)
 	}
-	if err := st.UpsertLog(path, recordfile.RecordHeader{
+	if err := st.UpsertLogWithGrouping(path, recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",
 		Meta: recordfile.MetaData{
 			RequestID:  requestID,
@@ -30,7 +30,7 @@ func resourceTestTrace(t *testing.T, st *Store, requestID string, at time.Time) 
 			Method:     http.MethodPost,
 			StatusCode: http.StatusOK,
 		},
-	}); err != nil {
+	}, GroupingInfo{}); err != nil {
 		t.Fatalf("upsert log: %v", err)
 	}
 	entry, err := st.GetByRequestID(requestID)
@@ -175,12 +175,12 @@ func TestResourceBackfillQueuesOnlyUnindexedTraces(t *testing.T) {
 	if queued != 1 {
 		t.Fatalf("queued = %d, want 1 (only the unindexed trace)", queued)
 	}
-	jobs, err := st.ListParseJobs("queued", 10)
+	jobs, err := st.ClaimParseJobs(10)
 	if err != nil {
-		t.Fatalf("list parse jobs: %v", err)
+		t.Fatalf("claim parse jobs: %v", err)
 	}
 	if len(jobs) != 1 || jobs[0].TraceID != missing.ID {
-		t.Fatalf("queued jobs = %+v, want the unindexed trace", jobs)
+		t.Fatalf("claimed jobs = %+v, want the unindexed trace", jobs)
 	}
 }
 
@@ -202,11 +202,11 @@ func TestResourceBackfillSkipsMissingCassettes(t *testing.T) {
 	if queued != 0 {
 		t.Fatalf("queued = %d, want 0 for a missing cassette", queued)
 	}
-	jobs, err := st.ListParseJobs("queued", 10)
+	jobs, err := st.ClaimParseJobs(10)
 	if err != nil {
-		t.Fatalf("list parse jobs: %v", err)
+		t.Fatalf("claim parse jobs: %v", err)
 	}
 	if len(jobs) != 0 {
-		t.Fatalf("queued jobs = %+v, want none", jobs)
+		t.Fatalf("claimed jobs = %+v, want none", jobs)
 	}
 }

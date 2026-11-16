@@ -15,20 +15,13 @@ func TestNewRegistryHasBuiltins(t *testing.T) {
 		xir.ProtocolMessages,
 		xir.ProtocolGemini,
 	}
-	got := r.Protocols()
-	if len(got) != len(want) {
-		t.Fatalf("Protocols() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("Protocols()[%d] = %q, want %q", i, got[i], want[i])
-		}
-		codec, ok := r.Lookup(want[i])
+	for _, protocol := range want {
+		codec, ok := r.Lookup(protocol)
 		if !ok || codec == nil {
-			t.Fatalf("Lookup(%q) = %v, %v", want[i], codec, ok)
+			t.Fatalf("Lookup(%q) = %v, %v", protocol, codec, ok)
 		}
-		if codec.Protocol() != want[i] {
-			t.Fatalf("codec.Protocol() = %q, want %q", codec.Protocol(), want[i])
+		if codec.Protocol() != protocol {
+			t.Fatalf("codec.Protocol() = %q, want %q", codec.Protocol(), protocol)
 		}
 	}
 }

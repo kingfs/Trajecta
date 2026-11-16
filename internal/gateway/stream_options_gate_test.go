@@ -21,6 +21,9 @@ const (
 // 基线测量值：49 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 62。提高上限必须在 PR 说明理由。
 func TestAllocGateInjectStreamOptionsInsert(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
 	body := []byte(gateStreamBodyAbsent)
@@ -40,6 +43,9 @@ func TestAllocGateInjectStreamOptionsInsert(t *testing.T) {
 // 上限 = 基线 + 约 25% 余量取整 = 63。提高上限必须在 PR 说明理由；
 // 若未来加了字节级早退（不解析即判定已含），应下调本上限。
 func TestAllocGateInjectStreamOptionsPresent(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
 	req.Header.Set("Content-Type", "application/json")
 	body := []byte(gateStreamBodyPresent)
@@ -60,6 +66,9 @@ func TestAllocGateInjectStreamOptionsPresent(t *testing.T) {
 // 基线测量值：36 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 45。提高上限必须在 PR 说明理由。
 func TestAllocGateEnsureStreamIncludeUsageInsert(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(gateStreamBodyAbsent)
 	const limit = 45
 	got := testing.AllocsPerRun(100, func() {
@@ -78,6 +87,9 @@ func TestAllocGateEnsureStreamIncludeUsageInsert(t *testing.T) {
 // 基线测量值：37 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 47。提高上限必须在 PR 说明理由。
 func TestAllocGateEnsureStreamIncludeUsagePresent(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(gateStreamBodyPresent)
 	const limit = 47
 	got := testing.AllocsPerRun(100, func() {

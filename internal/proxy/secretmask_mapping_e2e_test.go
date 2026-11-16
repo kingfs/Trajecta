@@ -26,9 +26,9 @@ import (
 // still restoring it on the way back.
 func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -76,9 +76,9 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		return upstreamBody
 	}
 
-	first, err := NewHandler(cfg(), st)
+	first, err := NewHandlerWithAuth(cfg(), st, nil, nil)
 	if err != nil {
-		t.Fatalf("first NewHandler() error = %v", err)
+		t.Fatalf("first NewHandlerWithAuth() error = %v", err)
 	}
 	firstServer := httptest.NewServer(first)
 	clientBody := post(t, firstServer.URL, bodyFor(testOpenAIProjectKey))
@@ -99,9 +99,9 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		t.Fatalf("first handler Close() error = %v", err)
 	}
 
-	second, err := NewHandler(cfg(), st)
+	second, err := NewHandlerWithAuth(cfg(), st, nil, nil)
 	if err != nil {
-		t.Fatalf("second NewHandler() error = %v", err)
+		t.Fatalf("second NewHandlerWithAuth() error = %v", err)
 	}
 	defer second.Close()
 	secondServer := httptest.NewServer(second)
@@ -152,9 +152,9 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 // opened and flushed on Close.
 func TestNewSecretVaultMappingStoreConfig(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

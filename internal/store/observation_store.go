@@ -536,12 +536,7 @@ func (s *Store) CountFindingsByTraceIDs(traceIDs []string) (map[string][]Finding
 	return out, nil
 }
 
-func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Finding, error) {
-	findings, _, err := s.ListAllFindingsPage(filter, limit, 0)
-	return findings, err
-}
-
-// ListAllFindingsPage is the same read with a page offset and the unfiltered
+// ListAllFindingsPage is the global findings read with a page offset and the unfiltered
 // total, so the Monitor can offer page jumps over the global findings list
 // instead of silently serving the same first 50 rows.
 func (s *Store) ListAllFindingsPage(filter FindingFilter, limit, offset int) ([]observe.Finding, int, error) {

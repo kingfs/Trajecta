@@ -82,24 +82,3 @@ func (r *Registry) Lookup(protocol xir.Protocol) (xir.Codec, bool) {
 	codec, ok := r.codecs[protocol]
 	return codec, ok
 }
-
-// Protocols returns the registered protocols in their canonical order.
-func (r *Registry) Protocols() []xir.Protocol {
-	if r == nil {
-		return nil
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]xir.Protocol, 0, len(r.codecs))
-	for _, protocol := range []xir.Protocol{
-		xir.ProtocolChatCompletions,
-		xir.ProtocolResponses,
-		xir.ProtocolMessages,
-		xir.ProtocolGemini,
-	} {
-		if _, ok := r.codecs[protocol]; ok {
-			out = append(out, protocol)
-		}
-	}
-	return out
-}

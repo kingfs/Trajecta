@@ -21,6 +21,9 @@ const gateChatBody = `{"model":"gpt-5.1","stream":true,"stream_options":{"includ
 // 基线测量值：176 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
 // 上限 = 基线 + 约 25% 余量取整 = 220。提高上限必须在 PR 说明理由。
 func TestAllocGateParseEnvelope(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(gateChatBody)
 	const limit = 220
 	got := testing.AllocsPerRun(100, func() {

@@ -33,23 +33,6 @@ const (
 	ProtocolGemini          Protocol = "gemini"
 )
 
-// ParseProtocol normalizes a protocol name. It accepts the aliases used by
-// the existing codebase (chat, claude, generate_content, vertex).
-func ParseProtocol(s string) (Protocol, error) {
-	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), "-", "_")) {
-	case "chat", "chat_completions", "openai_chat", "chatcompletions":
-		return ProtocolChatCompletions, nil
-	case "responses", "openai_responses":
-		return ProtocolResponses, nil
-	case "messages", "anthropic", "anthropic_messages", "claude":
-		return ProtocolMessages, nil
-	case "gemini", "generate_content", "google", "vertex":
-		return ProtocolGemini, nil
-	default:
-		return "", fmt.Errorf("xir: unknown protocol %q", s)
-	}
-}
-
 // Valid reports whether p is a supported protocol.
 func (p Protocol) Valid() bool {
 	switch p {
@@ -432,32 +415,6 @@ type Capabilities struct {
 	Responses       bool
 	Messages        bool
 	Gemini          bool
-}
-
-// Has reports whether p is served natively.
-func (c Capabilities) Has(p Protocol) bool {
-	switch p {
-	case ProtocolChatCompletions:
-		return c.ChatCompletions
-	case ProtocolResponses:
-		return c.Responses
-	case ProtocolMessages:
-		return c.Messages
-	case ProtocolGemini:
-		return c.Gemini
-	}
-	return false
-}
-
-// Protocols returns the served protocols in a stable order.
-func (c Capabilities) Protocols() []Protocol {
-	out := make([]Protocol, 0, 4)
-	for _, p := range []Protocol{ProtocolChatCompletions, ProtocolResponses, ProtocolMessages, ProtocolGemini} {
-		if c.Has(p) {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // StreamEventKind is the kind of one streamed event.

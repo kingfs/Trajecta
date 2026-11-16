@@ -205,18 +205,6 @@ func (r *Registry) Plugins() []Plugin {
 	return out
 }
 
-// IDs returns every registered plugin ID in sorted order.
-func (r *Registry) IDs() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]string, 0, len(r.regs))
-	for id := range r.regs {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // defaultRegistry holds the compiled builtin catalog. Third-party plugins may
 // register into it at startup; the enablement list still gates what runs.
 var defaultRegistry = &Registry{}
@@ -238,6 +226,3 @@ func AlwaysOn(id string) bool {
 
 // Plugins returns the default catalog's descriptors sorted by ID.
 func Plugins() []Plugin { return defaultRegistry.Plugins() }
-
-// IDs returns the default catalog's plugin IDs sorted.
-func IDs() []string { return defaultRegistry.IDs() }

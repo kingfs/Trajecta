@@ -1,8 +1,6 @@
 package router
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -21,11 +19,6 @@ const (
 	// binding to hardware that is several times slower. Operators can raise,
 	// lower or disable the check with router.selection.sticky_max_cost_ratio.
 	defaultStickyMaxCostRatio = 2.0
-
-	// stickyKeySeparator joins the session value and the model name in one
-	// binding key. It is a control character no client id or model name
-	// contains, so the composed key cannot collide with a bare session value.
-	stickyKeySeparator = "\x1f"
 
 	// maxStickyBindings caps the live binding map.
 	//
@@ -163,47 +156,14 @@ func (s *StickyBindingStore) Bind(key string, targetID string) {
 // The signal set lives in pkg/session so the router, the recorder and audit
 // consumers cannot drift on which headers or body fields name a conversation.
 // The value is client-supplied, so it must never be written to a log line, a
-// cassette, or the application database; diagnostics use
-// stickyKeyFingerprint instead.
+// cassette, or the application database; diagnostics use session.Fingerprint
+// instead. The per-model binding key is session.Compose; both are the single
+// canonical implementation shared with pkg/route and the recorder.
 func extractStickyKey(req *http.Request, body []byte) string {
 	if req == nil {
 		return extractStickyKeyFromBody(body)
 	}
 	return session.Resolve(req.Header, body).Key
-}
-
-// composeStickyKey binds one session per model: `session + "\x1f" + model`.
-//
-// The model has to be part of the key because the binding chooses the route
-// target - and therefore the provider-side prompt cache - for one model only.
-// A request for a second model on the same session must not rewrite the first
-// model's binding (which would break its cache locality) and must get its own
-// binding so it can keep that model's cache warm on its own provider.
-//
-// A session without a model keeps the historical session-only key; no session
-// means no binding at all.
-func composeStickyKey(session string, model string) string {
-	session = strings.TrimSpace(session)
-	if session == "" {
-		return ""
-	}
-	model = strings.ToLower(strings.TrimSpace(model))
-	if model == "" {
-		return session
-	}
-	return session + stickyKeySeparator + model
-}
-
-// stickyKeyFingerprint renders a sticky key for diagnostics without exposing the
-// client's session value. Every recorded routing event and every persisted
-// routing summary stores this fingerprint, never the key itself.
-func stickyKeyFingerprint(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("sha256:%x", sum[:8])
 }
 
 // extractStickyKeyFromBody resolves a session from the body alone. It is kept

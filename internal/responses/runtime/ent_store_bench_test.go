@@ -8,7 +8,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
 	"github.com/kingfs/Trajecta/internal/responses/protocol"
-	tracestore "github.com/kingfs/Trajecta/internal/store"
 )
 
 // BenchmarkEntStoreItemHistoryIO measures the two directions of the Responses
@@ -17,7 +16,7 @@ import (
 // statement per chunk on the write side and one query on the read side.
 func BenchmarkEntStoreItemHistoryIO(b *testing.B) {
 	ctx := context.Background()
-	traces, err := tracestore.New(b.TempDir())
+	traces, err := newTestStore(b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}

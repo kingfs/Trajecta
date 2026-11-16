@@ -493,11 +493,6 @@ func TestBuildDeterministicIDsAndEvidence(t *testing.T) {
 		t.Fatalf("part parent = %q, want %q", part.ParentID, message.ID)
 	}
 
-	wantEvidence := "trace#trace-1#node#" + part.ID + "#path#" + part.Path
-	if got := audit.EvidencePath("trace-1", part); got != wantEvidence {
-		t.Fatalf("evidence path = %q, want %q", got, wantEvidence)
-	}
-
 	other := &xir.Request{Messages: []xir.Message{
 		{Role: xir.RoleUser, Parts: []xir.Part{{Kind: xir.PartText, Text: "first"}}},
 		{Role: xir.RoleUser, Parts: []xir.Part{{Kind: xir.PartText, Text: "second"}}},

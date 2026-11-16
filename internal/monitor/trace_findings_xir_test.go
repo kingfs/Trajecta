@@ -14,7 +14,7 @@ import (
 
 func TestTraceFindingsMergesXIRDetections(t *testing.T) {
 	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestTraceFindingsMergesXIRDetections(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := st.GetByRequestID("req-xir-findings")

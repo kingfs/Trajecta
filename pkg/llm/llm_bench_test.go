@@ -126,8 +126,8 @@ func BenchmarkAnthropicToLLM(b *testing.B) {
 	}
 }
 
-func BenchmarkGeminiToLLM(b *testing.B) {
+func BenchmarkFromGenerateContentResponse(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = GeminiToLLM(geminiResp)
+		_ = fromGenerateContentResponse(geminiResp)
 	}
 }

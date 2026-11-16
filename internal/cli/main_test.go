@@ -3599,9 +3599,9 @@ trace:
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
 		ID:               "openai-local",
@@ -3693,9 +3693,9 @@ trace:
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
 		ID:               "openai-report",
@@ -3936,9 +3936,9 @@ debug:
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	code := runMigrate([]string{"-c", configPath, "-rewrite-v2=false", "-rebuild-index=false"})
+	code := runMigrateWithOptions(migrateOptions{configPath: configPath, rewriteV2: false, rebuildIndex: false, format: "text", stdout: os.Stdout})
 	if code != 0 {
-		t.Fatalf("runMigrate() = %d, want 0", code)
+		t.Fatalf("runMigrateWithOptions() = %d, want 0", code)
 	}
 
 	output := buf.String()
@@ -4529,10 +4529,11 @@ debug:
 
 func mustTraceIDFromStore(t *testing.T, st *store.Store, path string) string {
 	t.Helper()
-	entry, err := st.ListRecent(1)
+	page, err := st.ListRoutingPage(1, 1, store.ListFilter{})
 	if err != nil {
-		t.Fatalf("ListRecent() error = %v", err)
+		t.Fatalf("ListRoutingPage() error = %v", err)
 	}
+	entry := page.Items
 	if len(entry) != 1 || entry[0].LogPath != path {
 		t.Fatalf("recent entries = %+v, want path %q", entry, path)
 	}
@@ -4589,9 +4590,9 @@ debug:
 		t.Fatalf("auth create-token code = %d, want 0", code)
 	}
 
-	st, err := auth.Open(filepath.Join(dir, "control.sqlite3"))
+	st, err := auth.OpenDatabase("sqlite", filepath.Join(dir, "control.sqlite3"), 4, 4)
 	if err != nil {
-		t.Fatalf("auth.Open() error = %v", err)
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
 	}
 	defer st.Close()
 	if _, err := st.Login(context.Background(), "admin", "change-me-123", 0); err != nil {
@@ -4671,8 +4672,8 @@ debug:
 	if code := run([]string{"auth", "init-user", "-c", configPath, "--username", "admin", "--password", "change-me-123"}); code != 0 {
 		t.Fatalf("auth init-user code = %d, want 0", code)
 	}
-	if code := runMigrate([]string{"-c", configPath, "-rewrite-v2=false", "-rebuild-index=false"}); code != 0 {
-		t.Fatalf("runMigrate() = %d, want 0", code)
+	if code := runMigrateWithOptions(migrateOptions{configPath: configPath, rewriteV2: false, rebuildIndex: false, format: "text", stdout: os.Stdout}); code != 0 {
+		t.Fatalf("runMigrateWithOptions() = %d, want 0", code)
 	}
 
 	authStore, err := auth.OpenDatabase("sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)

@@ -27,6 +27,9 @@ const routerGateChatBody = `{"model":"gpt-5.1","stream":true,"stream_options":{"
 // 注意：基线包含 ParseEnvelope 两遍的已知低效（见文件头注释）；P4 合并为
 // 一次解析后应下调本上限，而不是沿用 458。
 func TestAllocGateExtractRequestFeatures(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
 	body := []byte(routerGateChatBody)
 	const limit = 458
 	got := testing.AllocsPerRun(100, func() {

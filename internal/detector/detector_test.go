@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,7 +25,8 @@ const (
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	dir := t.TempDir()
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 4, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +35,11 @@ func newTestStore(t *testing.T) *store.Store {
 }
 
 func TestCatalogBuiltins(t *testing.T) {
-	ids := IDs()
+	plugins := Plugins()
+	ids := make([]string, 0, len(plugins))
+	for _, plugin := range plugins {
+		ids = append(ids, plugin.ID)
+	}
 	want := []string{
 		PluginSecretmask, PluginIndicators, PluginDangerousShell,
 		PluginCredentialRe, PluginPIIObservation, PluginProviderSafety, PluginToolError,

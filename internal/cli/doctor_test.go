@@ -1416,9 +1416,9 @@ func writeDoctorTestConfigInDir(t *testing.T, dir string, body string) string {
 
 func seedDoctorChannel(t *testing.T, dir string, record store.ChannelConfigRecord) {
 	t.Helper()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	if _, err := st.UpsertChannelConfig(record); err != nil {
 		t.Fatalf("UpsertChannelConfig() error = %v", err)

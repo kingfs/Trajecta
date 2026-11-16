@@ -34,10 +34,6 @@ func RequiredTables() []string {
 	return cloneStrings(authRequiredTables)
 }
 
-func MigrateUp(dbPath string, steps int) error {
-	return MigrateDatabaseUp("sqlite", dbPath, steps)
-}
-
 func MigrateDatabaseUp(driver string, dsn string, steps int) error {
 	if normalizeDriver(driver) == "postgres" {
 		return appdbmigrate.MigrateUp(driver, dsn, steps)

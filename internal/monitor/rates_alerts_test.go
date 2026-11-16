@@ -17,9 +17,9 @@ import (
 func TestRatesAlertsSettingsAPI(t *testing.T) {
 	t.Parallel()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	manager := testJWTManager(t, time.Hour)
@@ -91,9 +91,9 @@ func TestMaybeEvaluateRatesAlertsWritesAndResolves(t *testing.T) {
 	// This test swaps the package-global evaluator; keeping it serial avoids racing
 	// the other evaluator test over the same variable.
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if _, err := st.SaveRatesAlertsSettings(t.Context(), store.RatesAlertsSettings{Enabled: true, MaxRPM: 1, MaxTPM: 1000000, Severity: "warning"}); err != nil {
@@ -183,9 +183,9 @@ func TestMaybeEvaluateRatesAlertsSilentScope(t *testing.T) {
 	// This test swaps the package-global evaluator; keeping it serial avoids racing
 	// the other evaluator test over the same variable.
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if _, err := st.SaveRatesAlertsSettings(t.Context(), store.RatesAlertsSettings{Enabled: true, MaxRPM: 1, MaxTPM: 1000000, Severity: "warning"}); err != nil {
@@ -242,9 +242,9 @@ func TestMaybeEvaluateRatesAlertsSilentScope(t *testing.T) {
 // resolves unread rate events (the settings that produced them no longer exist)
 // while leaving a deliberate read alone.
 func TestMaybeEvaluateRatesAlertsResolvesStaleWhenDisabled(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 

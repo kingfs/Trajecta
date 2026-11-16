@@ -1,7 +1,6 @@
 package detect
 
 import (
-	"reflect"
 	"testing"
 )
 
@@ -65,58 +64,5 @@ func TestContainsSpan(t *testing.T) {
 	}
 	if ContainsSpan(nil, Span{Start: 0, End: 1}) {
 		t.Fatal("ContainsSpan(nil, ...) = true, want false")
-	}
-}
-
-func TestMergeMatches(t *testing.T) {
-	t.Parallel()
-	a := []Match{
-		{Span: Span{Start: 5, End: 9}, Rule: "b", Value: "a-second"},
-		{Span: Span{Start: 0, End: 2}, Rule: "a", Value: "a-first"},
-		{Span: Span{Start: 5, End: 7}, Rule: "b", Value: "a-short"},
-	}
-	b := []Match{
-		{Span: Span{Start: 5, End: 9}, Rule: "b", Value: "b-duplicate"},
-		{Span: Span{Start: 5, End: 9}, Rule: "a", Value: "b-same-span-other-rule"},
-		{Span: Span{Start: 0, End: 2}, Rule: "a", Value: "b-duplicate"},
-		{Span: Span{Start: 5, End: 7}, Rule: "a", Value: "b-short"},
-	}
-	aCopy := make([]Match, len(a))
-	copy(aCopy, a)
-	bCopy := make([]Match, len(b))
-	copy(bCopy, b)
-
-	got := MergeMatches(a, b)
-
-	want := []Match{
-		{Span: Span{Start: 0, End: 2}, Rule: "a", Value: "a-first"},
-		{Span: Span{Start: 5, End: 7}, Rule: "a", Value: "b-short"},
-		{Span: Span{Start: 5, End: 7}, Rule: "b", Value: "a-short"},
-		{Span: Span{Start: 5, End: 9}, Rule: "a", Value: "b-same-span-other-rule"},
-		{Span: Span{Start: 5, End: 9}, Rule: "b", Value: "a-second"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("MergeMatches() = %+v, want %+v", got, want)
-	}
-	if len(a) != len(aCopy) || !reflect.DeepEqual(a, aCopy) {
-		t.Fatalf("MergeMatches mutated a: %+v", a)
-	}
-	if len(b) != len(bCopy) || !reflect.DeepEqual(b, bCopy) {
-		t.Fatalf("MergeMatches mutated b: %+v", b)
-	}
-
-	if got := MergeMatches(nil, nil); got != nil {
-		t.Fatalf("MergeMatches(nil, nil) = %+v, want nil", got)
-	}
-}
-
-func TestMergeMatchesDoesNotAliasInput(t *testing.T) {
-	t.Parallel()
-	a := []Match{{Span: Span{Start: 1, End: 2}, Rule: "r"}}
-	b := []Match{{Span: Span{Start: 3, End: 4}, Rule: "r"}}
-	got := MergeMatches(a, b)
-	got[0].Rule = "changed"
-	if a[0].Rule != "r" {
-		t.Fatal("MergeMatches result aliases the input backing array")
 	}
 }

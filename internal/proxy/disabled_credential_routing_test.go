@@ -10,7 +10,6 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
-	"github.com/kingfs/Trajecta/internal/store"
 )
 
 // TestDisabledCredentialNeverReceivesTraffic pins the client-visible half of the rule the router
@@ -42,9 +41,9 @@ func TestDisabledCredentialNeverReceivesTraffic(t *testing.T) {
 	}))
 	t.Cleanup(fallbackUpstream.Close)
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
@@ -84,9 +83,9 @@ func TestDisabledCredentialNeverReceivesTraffic(t *testing.T) {
 	}
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Debug.MaskKey = true
-	handler, err := NewHandler(cfg, st)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
 	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 	proxySrv := newStubProxyServer(t, handler)
 

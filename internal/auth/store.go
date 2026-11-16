@@ -58,10 +58,6 @@ type TokenRecord struct {
 	LastUsedAt *time.Time
 }
 
-func Open(path string) (*Store, error) {
-	return OpenDatabase("sqlite", path, 4, 4)
-}
-
 func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
 	driver = normalizeDriver(driver)
 	if driver != "sqlite" && driver != "postgres" {
@@ -207,11 +203,6 @@ func normalizeRole(role string) (string, error) {
 	}
 }
 
-// CreateUser keeps the historical behaviour and creates an admin.
-func (s *Store) CreateUser(ctx context.Context, username string, password string) (*dao.User, error) {
-	return s.CreateUserWithRole(ctx, username, password, RoleAdmin)
-}
-
 // CreateUserWithRole is CreateUser with an explicit role. The role is validated
 // here rather than in the CLI so every caller (including tests and future
 // management code) gets the same set.
@@ -279,8 +270,13 @@ func (s *Store) SetUserEnabled(ctx context.Context, username string, enabled boo
 	return nil
 }
 
-// DeleteUser removes a user and its tokens. It exists for test fixtures and
-// operator cleanup so a long-lived database can be reused without collisions.
+// DeleteUser removes a user and its tokens.
+//
+// Test seam: no production code path deletes users (the CLI and Monitor only
+// create, disable and re-role them). It stays because tests genuinely need a
+// deletion - the session verifier must reject a deleted user's JWT, and the
+// Postgres integration fixture must clean up its unique username - and there is
+// no production API to migrate those assertions to.
 func (s *Store) DeleteUser(ctx context.Context, username string) error {
 	username = normalizeUsername(username)
 	if username == "" {

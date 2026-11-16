@@ -1,10 +1,10 @@
 package recorder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,9 +62,9 @@ func TestMaskAuditSideQueueWritesRowsAndEvents(t *testing.T) {
 	const standIn = "110101195001011234"
 
 	dir := t.TempDir()
-	st, err := store.New(dir)
+	st, err := newTestStore(dir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -76,14 +76,15 @@ func TestMaskAuditSideQueueWritesRowsAndEvents(t *testing.T) {
 		}
 	}()
 
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	requestBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
 	if err != nil {
-		t.Fatalf("PrepareLogFile() error = %v", err)
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
 	info.Header.Meta.StatusCode = 200
 	info.Header.Meta.DurationMs = 12

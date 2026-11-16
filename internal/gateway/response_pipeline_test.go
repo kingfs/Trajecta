@@ -27,7 +27,7 @@ func TestResponsePipelineTeesClientBytes(t *testing.T) {
 	if string(got) != "hello" || written.String() != "hello" || count != 5 {
 		t.Fatalf("got=%q written=%q count=%d", got, written.String(), count)
 	}
-	if err := pipeline.Close(); err != nil {
+	if err := pipeline.Reader().Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -53,7 +53,7 @@ func TestResponsePipelineRestoresClientBytes(t *testing.T) {
 	if pipeline.Restored() == 0 {
 		t.Fatal("Restored() = 0")
 	}
-	if err := pipeline.Close(); err != nil {
+	if err := pipeline.Reader().Close(); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -61,16 +61,6 @@ func Plugins() []Plugin {
 	return out
 }
 
-// PluginIDs returns the canonical plugin IDs in sorted order.
-func PluginIDs() []string {
-	plugins := Plugins()
-	ids := make([]string, 0, len(plugins))
-	for _, plugin := range plugins {
-		ids = append(ids, plugin.ID)
-	}
-	return ids
-}
-
 // LookupPlugin returns the plugin with the given canonical ID or alias. The
 // lookup is case-insensitive and treats '-' and ' ' as '_'.
 func LookupPlugin(id string) (Plugin, bool) {

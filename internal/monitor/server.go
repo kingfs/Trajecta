@@ -1552,7 +1552,9 @@ func secretHint(secret string) string {
 }
 
 func buildUpstreamItems(st *store.Store, rtr *router.Router, since time.Time, modelFilter string) ([]upstreamItem, error) {
-	var items []upstreamItem
+	// Always a non-nil slice so the API answers [] rather than null when no
+	// router is configured.
+	items := make([]upstreamItem, 0)
 	analyticsByID := map[string]store.UpstreamAnalyticsRecord{}
 	if st != nil {
 		analytics, err := st.ListUpstreamAnalytics(5, 3, since, modelFilter)
@@ -1564,30 +1566,14 @@ func buildUpstreamItems(st *store.Store, rtr *router.Router, since time.Time, mo
 		}
 	}
 
-	switch {
-	case rtr != nil:
+	// Routing state lives in the router's published snapshots only. The
+	// upstream_targets/upstream_models projection fallback was retired with the
+	// projection writes: without a router there are no upstreams to list, and
+	// legacy rows in those tables are never served.
+	if rtr != nil {
 		for _, snapshot := range rtr.Snapshots() {
 			items = append(items, newUpstreamItemFromSnapshot(snapshot, analyticsByID[snapshot.ID]))
 		}
-	case st != nil:
-		targets, err := st.ListUpstreamTargets()
-		if err != nil {
-			return nil, fmt.Errorf("query upstream targets: %w", err)
-		}
-		models, err := st.ListUpstreamModels()
-		if err != nil {
-			return nil, fmt.Errorf("query upstream models: %w", err)
-		}
-		modelMap := make(map[string][]string)
-		for _, model := range models {
-			modelMap[model.UpstreamID] = append(modelMap[model.UpstreamID], model.Model)
-		}
-		for _, target := range targets {
-			sort.Strings(modelMap[target.ID])
-			items = append(items, newUpstreamItemFromStore(target, modelMap[target.ID], analyticsByID[target.ID]))
-		}
-	default:
-		return nil, errors.New("router not configured")
 	}
 	return items, nil
 }
@@ -1672,39 +1658,6 @@ func selectedUpstreamHealthView(rtr *router.Router, upstreamID string) *traceUps
 		}
 	}
 	return nil
-}
-
-func newUpstreamItemFromStore(target store.UpstreamTargetRecord, models []string, analytics store.UpstreamAnalyticsRecord) upstreamItem {
-	return upstreamItem{
-		ID:                target.ID,
-		Enabled:           target.Enabled,
-		Priority:          target.Priority,
-		Weight:            target.Weight,
-		CapacityHint:      target.CapacityHint,
-		BaseURL:           target.BaseURL,
-		ProviderPreset:    target.ProviderPreset,
-		ProtocolFamily:    target.ProtocolFamily,
-		RoutingProfile:    target.RoutingProfile,
-		HealthState:       "unknown",
-		LastRefreshAt:     target.LastRefreshAt,
-		LastRefreshStatus: target.LastRefreshStatus,
-		LastRefreshError:  target.LastRefreshError,
-		Models:            models,
-		RequestCount:      analytics.RequestCount,
-		SuccessRequest:    analytics.SuccessRequest,
-		FailedRequest:     analytics.FailedRequest,
-		SuccessRate:       analytics.SuccessRate,
-		TotalTokens:       analytics.TotalTokens,
-		AvgTTFT:           analytics.AvgTTFT,
-		LastSeen:          analytics.LastSeen,
-		CurrentRPM:        analytics.CurrentRPM,
-		CurrentTPM:        analytics.CurrentTPM,
-		RatesSampledAt:    analytics.RatesSampledAt,
-		RecentModels:      analytics.Models,
-		LastModel:         analytics.LastModel,
-		RecentErrors:      analytics.RecentErrors,
-		RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
-	}
 }
 
 func toUpstreamFailureItems(records []store.UpstreamFailureRecord) []upstreamFailureItem {
@@ -2097,10 +2050,6 @@ func overviewAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
-}
-
-func traceAPIHandler(st *store.Store, rtr *router.Router, detectors ...*detector.Runtime) http.HandlerFunc {
-	return traceAPIHandlerWithSuppression(st, rtr, nil, detectors...)
 }
 
 // suppressionCheckerFrom adapts the vault's suppression list to the audit

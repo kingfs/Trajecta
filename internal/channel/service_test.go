@@ -33,9 +33,9 @@ func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -70,12 +70,14 @@ func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("len(channel models) = %d, want 2", len(models))
 	}
-	upstreamModels, err := st.ListUpstreamModels()
+	// The probe no longer writes the retired upstream_models projection table:
+	// a successful discovery must leave it untouched (empty on a fresh store).
+	upstreamModels, err := st.EntClient().UpstreamModel.Query().Count(context.Background())
 	if err != nil {
-		t.Fatalf("ListUpstreamModels() error = %v", err)
+		t.Fatalf("count upstream_models error = %v", err)
 	}
-	if len(upstreamModels) != 2 {
-		t.Fatalf("len(upstream models) = %d, want 2", len(upstreamModels))
+	if upstreamModels != 0 {
+		t.Fatalf("len(upstream models) = %d, want 0: the probe must not write the legacy projection", upstreamModels)
 	}
 	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
 	if err != nil {
@@ -100,9 +102,9 @@ func TestProbeWithOptionsDetectsProviderSurface(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -154,9 +156,9 @@ func TestProviderProbeReportDetectsChannelsReadOnly(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -220,9 +222,9 @@ func TestApplyProviderProbeReportFillsOnlyMissingNonSensitiveSuggestions(t *test
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -304,9 +306,9 @@ func TestApplyProviderProbeReportSkipsNonDetectedAndSupportsChannelSelection(t *
 	unknownServer := httptest.NewServer(http.NotFoundHandler())
 	defer unknownServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -357,9 +359,9 @@ func TestProbeFailureRecordsRunAndKeepsExistingModels(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -379,9 +381,9 @@ func TestProbeFailureRecordsRunAndKeepsExistingModels(t *testing.T) {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}
 
-	result, err := NewService(st).Probe("probe-channel")
+	result, err := NewService(st).ProbeWithOptions("probe-channel", ProbeOptions{})
 	if err == nil {
-		t.Fatalf("Probe() error = nil, want failure")
+		t.Fatalf("ProbeWithOptions() error = nil, want failure")
 	}
 	if result.Status != "failed" {
 		t.Fatalf("Status = %q, want failed", result.Status)
@@ -416,9 +418,9 @@ func TestProbeWithOptionsDiscoversDisabledModelsWithoutReplacingManual(t *testin
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
@@ -468,9 +470,9 @@ func TestProbeWithOptionsDiscoversDisabledModelsWithoutReplacingManual(t *testin
 }
 
 func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -545,9 +547,9 @@ func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 }
 
 func TestRuntimeTargetsProjectsEnabledModelAliases(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -591,9 +593,9 @@ func TestRuntimeTargetsProjectsEnabledModelAliases(t *testing.T) {
 }
 
 func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -636,9 +638,9 @@ func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
 }
 
 func TestRuntimeTargetsProjectsPerModelCapabilities(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -697,7 +699,7 @@ func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"new"},{"id":"enabled"},{"id":"disabled"}]}`))
 	}))
 	defer upstreamServer.Close()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +713,7 @@ func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := NewService(st).Probe("p"); err != nil {
+	if _, err := NewService(st).ProbeWithOptions("p", ProbeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	models, err := st.ListChannelModels("p", false)
@@ -732,9 +734,9 @@ func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 }
 
 func TestServiceBuildersLeaveTheirReceiverUntouched(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -845,9 +847,9 @@ func TestApplyProviderProbeSuggestionsGatesResponsesCapability(t *testing.T) {
 }
 
 func TestModelProbeTargetResolvesModelAndDeclaredProtocols(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -936,9 +938,9 @@ func TestModelProbeTargetDeclaresChannelResponsesWithoutNativeSupport(t *testing
 	if err != nil {
 		t.Fatalf("json.Marshal(capabilities) error = %v", err)
 	}
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -979,9 +981,9 @@ func TestModelProbeTargetDeclaresChannelResponsesWithoutNativeSupport(t *testing
 }
 
 func TestModelProbeTargetMapsUnresolvableChannelConfig(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1006,9 +1008,9 @@ func TestModelProbeTargetMapsUnresolvableChannelConfig(t *testing.T) {
 
 func newInterfaceTestStore(t *testing.T, baseURL, apiType, protocolFamily, routingProfile, modelResource string, capabilities config.UpstreamCapabilitiesConfig, models []store.ChannelModelRecord) *store.Store {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	capabilitiesJSON, err := json.Marshal(capabilities)
@@ -1353,9 +1355,9 @@ func TestEffectiveModelInterfacesUnresolvableChannelDegradesToFamily(t *testing.
 }
 
 func TestChannelProxySettingsFlowThroughRuntimeTargets(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 
@@ -1392,7 +1394,7 @@ func TestChannelProxySettingsFlowThroughRuntimeTargets(t *testing.T) {
 }
 
 func TestRuntimeTargetsProjectsPerProtocolWireNames(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

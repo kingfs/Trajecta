@@ -25,9 +25,9 @@ import (
 // The two requests below resolve to the same upstream model with the same capabilities, so the
 // inspector has to describe them identically.
 func TestRoutingInspectResolvesAliasedModelCapabilities(t *testing.T) {
-	st, err := store.New(t.TempDir())
+	st, err := newTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 

@@ -33,15 +33,16 @@ func TestTraceFindingLocateAPI(t *testing.T) {
 		})
 	writeTraceFixture(t, outputDir, "finding-locate.http", content)
 
-	st, err := store.New(outputDir)
+	st, err := newTestStore(outputDir)
 	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+		t.Fatalf("newTestStore() error = %v", err)
 	}
 	defer st.Close()
 	syncStore(t, st)
-	traces, err := st.ListRecent(10)
+	tracesPage, err := st.ListRoutingPage(1, 10, store.ListFilter{})
+	traces := tracesPage.Items
 	if err != nil || len(traces) == 0 {
-		t.Fatalf("ListRecent() = %v, %v", traces, err)
+		t.Fatalf("ListRoutingPage() = %v, %v", traces, err)
 	}
 	traceID := traces[0].ID
 
@@ -95,7 +96,7 @@ func TestTraceFindingLocateAPI(t *testing.T) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID+"/findings/"+findingID+"/locate", nil)
 		rr := httptest.NewRecorder()
-		traceAPIHandler(st, nil).ServeHTTP(rr, req)
+		traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, req)
 		var payload findingLocateResponse
 		if rr.Code == http.StatusOK {
 			if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {

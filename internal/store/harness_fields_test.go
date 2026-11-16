@@ -17,9 +17,9 @@ import (
 // filter must select exactly the classified rows on both read paths (the ent
 // page and the raw counters above it).
 func TestLogClientHarnessRoundTripAndFilter(t *testing.T) {
-	st, err := New(t.TempDir())
+	st, err := newSQLiteTestStore(t.TempDir())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
