@@ -112,7 +112,15 @@ func (h *Handler) conversionForSelection(r *http.Request, selection *router.Sele
 	}
 	wireModel := llm.ModelFromBody(upstreamBodyBytes)
 	if wireModel == "" {
-		wireModel = selection.Request.ModelName
+		// Path-model protocols (Gemini/Vertex) carry the model in the URL, not
+		// the body, so ModelFromBody finds nothing. Resolve the target's wire
+		// name exactly like the native path's path-segment rewrite does; an
+		// empty result means no mapping exists and the client name stays.
+		if resolved := selection.Target.ResolveModelAliasForProtocol(selection.Request.ModelName, string(selection.Request.Protocol)); resolved != "" {
+			wireModel = resolved
+		} else {
+			wireModel = selection.Request.ModelName
+		}
 	}
 	wireModel = strings.TrimSpace(wireModel)
 	if wireModel == "" {
