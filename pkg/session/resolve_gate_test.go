@@ -143,22 +143,47 @@ func TestAllocGateResolveHeaderFastPath(t *testing.T) {
 }
 
 // TestAllocGateResolveBodyFallback 是 Resolve body 回退路径的分配门禁。
-// 被测函数：session.Resolve（无头信号，body previous_response_id 命中）。
-// 基线测量值：4 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
-// 上限 = 基线 + 约 25% 余量取整 = 5。提高上限必须在 PR 说明理由。
+// 被测函数：session.Resolve（无头信号，body previous_response_id 命中，
+// 定向扫描发现候选键后走精确 json.Unmarshal 回退）。
+// 基线测量值：2 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x；
+// P4 去重：bytes.TrimSpace 取代 string/[]byte 双重全量拷贝，4 -> 2，
+// 剩余分配为解码命中字符串与 fingerprint 拼接）。
+// 上限 = 基线 + 约 25% 余量取整 = 3。提高上限必须在 PR 说明理由。
 func TestAllocGateResolveBodyFallback(t *testing.T) {
 	if allocGateInstrumented {
 		t.Skip("allocation gates are measured without -race instrumentation")
 	}
 	body := []byte(`{"model":"gpt-5","previous_response_id":"resp_gate_1","messages":[{"role":"user","content":"hello"}]}`)
-	const limit = 5
+	const limit = 3
 	got := testing.AllocsPerRun(100, func() {
 		if ref := Resolve(nil, body); ref.Key != "resp_gate_1" {
 			t.Fatalf("unexpected key %q", ref.Key)
 		}
 	})
 	if got > limit {
-		t.Fatalf("Resolve(body) allocs/op = %.0f, gate limit %d (baseline 4, arm64 2026-11-16); 提高上限必须在 PR 说明理由", got, limit)
+		t.Fatalf("Resolve(body) allocs/op = %.0f, gate limit %d (baseline 2, arm64 2026-11-16, P4 免拷贝); 提高上限必须在 PR 说明理由", got, limit)
+	}
+}
+
+// TestAllocGateResolveBodyNoSignal 是 Resolve 无信号 body 快路径的分配门禁。
+// 被测函数：session.Resolve（无头信号，body 不含任何 session 键——多数 SDK
+// 流量的形态；P4 定向扫描直接证明无信号，不做全量 json.Unmarshal）。
+// 基线测量值：0 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x；
+// P4 之前同形 body 为 5 allocs/op、约 1133 B/op 的全量解码）。
+// 上限 = 0：快路径必须保持零分配。提高上限必须在 PR 说明理由。
+func TestAllocGateResolveBodyNoSignal(t *testing.T) {
+	if allocGateInstrumented {
+		t.Skip("allocation gates are measured without -race instrumentation")
+	}
+	body := []byte(gateResolveNoSignalBody)
+	const limit = 0
+	got := testing.AllocsPerRun(100, func() {
+		if ref := Resolve(nil, body); ref.Valid() {
+			t.Fatalf("unexpected session ref: %+v", ref)
+		}
+	})
+	if got > limit {
+		t.Fatalf("Resolve(no-signal body) allocs/op = %.0f, gate limit %d (baseline 0, arm64 2026-11-16, P4 定向扫描); 提高上限必须在 PR 说明理由", got, limit)
 	}
 }
 
@@ -182,6 +207,27 @@ func BenchmarkResolveBodyFallback(b *testing.B) {
 		ref := Resolve(nil, body)
 		if ref.Key != "resp_gate_1" {
 			b.Fatal("unexpected key")
+		}
+	}
+}
+
+// gateResolveNoSignalBody 是不含任何 session 信号的典型 SDK 请求体（Anthropic
+// messages 形状，metadata 只有 user_id）。多数 SDK 流量走这条路径：P4 之前
+// fromBody 对它做全量 json.Unmarshal，P4 之后顶层键定向扫描即可证明无信号。
+const gateResolveNoSignalBody = `{"model":"claude-sonnet-4-5","max_tokens":1024,"stream":true,` +
+	`"metadata":{"user_id":"user_9f2c"},"system":[{"type":"text","text":"You are a helpful coding assistant."}],` +
+	`"messages":[{"role":"user","content":[{"type":"text","text":"Please read the config file and summarize it."}]},` +
+	`{"role":"assistant","content":[{"type":"text","text":"I will read the file now."}]},` +
+	`{"role":"user","content":[{"type":"text","text":"Thanks, also check the logs directory."}]}]}`
+
+func BenchmarkResolveBodyNoSignal(b *testing.B) {
+	body := []byte(gateResolveNoSignalBody)
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if ref := Resolve(nil, body); ref.Valid() {
+			b.Fatalf("unexpected session ref: %+v", ref)
 		}
 	}
 }

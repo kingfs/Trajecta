@@ -2617,14 +2617,29 @@ func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 	return true
 }
 
+// requestModel resolves the request model with a single envelope parse. It is
+// the entry point for callers that have no envelope yet; the selection hot path
+// calls modelFromEnvelope with the envelope extractRequestFeatures already
+// parsed, so the body is never parsed twice for one routing decision.
 func requestModel(rawPath string, body []byte) string {
+	env, err := xir.ParseEnvelope(body)
+	return modelFromEnvelope(rawPath, body, env, err)
+}
+
+// modelFromEnvelope resolves the request model from an already-parsed routing
+// envelope, preserving the historical precedence exactly: the Gemini/Vertex
+// path model is authoritative, then the envelope's body model, then /v1/models
+// normalises to list_models, and finally llm.ModelFromBody covers endpoints no
+// adapter parses (embeddings and friends). envErr != nil means the body could
+// not be parsed, so the envelope contributes nothing.
+func modelFromEnvelope(rawPath string, body []byte, env xir.Envelope, envErr error) string {
 	// The model in a Gemini/Vertex path is authoritative; a body model is the
 	// normal case everywhere else. Reading the body through the span-preserving
 	// envelope avoids the full adapter decode the router used to do here.
 	if inferred := llm.ModelFromPath(rawPath); inferred != "" {
 		return inferred
 	}
-	if env, err := xir.ParseEnvelope(body); err == nil && strings.TrimSpace(env.Model) != "" {
+	if envErr == nil && strings.TrimSpace(env.Model) != "" {
 		return strings.TrimSpace(env.Model)
 	}
 	if llm.NormalizeEndpoint(rawPath) == "/v1/models" {
@@ -2639,7 +2654,6 @@ func requestModel(rawPath string, body []byte) string {
 
 func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	features := RequestFeatures{
-		ModelName:       requestModel(rawPath, body),
 		RequestBytes:    int64(len(body)),
 		EstPromptTokens: maxFloat(float64(len(body))/4.0, 1),
 		MaxTokens:       256,
@@ -2647,11 +2661,16 @@ func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
 	if protocol, err := protocolconvert.DetectFromPath(rawPath); err == nil {
 		features.Protocol = xir.Protocol(protocol)
 	}
+	// P4 dedup: parse the routing envelope once and share it between the model
+	// resolution and the feature extraction below. requestModel used to parse
+	// the same body a second time on every selection entrypoint, Explain and
+	// retry round.
+	env, envErr := xir.ParseEnvelope(body)
+	features.ModelName = modelFromEnvelope(rawPath, body, env, envErr)
 	if len(body) == 0 {
 		return features
 	}
-	env, err := xir.ParseEnvelope(body)
-	if err != nil {
+	if envErr != nil {
 		// A body that cannot be parsed cannot be proven non-streaming.
 		// Treat it as streaming so protocol conversion stays disabled for
 		// it (fail closed): converting an opaque body would either fail

@@ -75,10 +75,13 @@ func (r *Router) explainProxyEntrypoint(rawPath string, body []byte, entrypoint 
 	if err != nil {
 		return ExplainResult{Error: err.Error()}
 	}
+	// P4 dedup: one feature extraction (one envelope parse) feeds both the
+	// plan's requested model and the conversion annotation; requestModel and a
+	// second extractRequestFeatures call used to re-parse the same body here.
+	features := extractRequestFeatures(rawPath, body)
 	selection, selErr := r.selectTargetsWith(req, body, nil, selectOptions{DryRun: true})
-	model := requestModel(rawPath, body)
-	result := r.explainResultForSelection(entrypoint, routeplan.ExecutionModeProxyPass, endpoint, model, "", selection, selErr)
-	return r.annotateProtocolConversion(result, selection, rawPath, extractRequestFeatures(rawPath, body))
+	result := r.explainResultForSelection(entrypoint, routeplan.ExecutionModeProxyPass, endpoint, features.ModelName, "", selection, selErr)
+	return r.annotateProtocolConversion(result, selection, rawPath, features)
 }
 
 // annotateProtocolConversion makes the dry run name the wire protocol a

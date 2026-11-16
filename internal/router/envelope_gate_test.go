@@ -2,10 +2,9 @@ package router
 
 // extractRequestFeatures 的分配门禁与基准。
 //
-// 已知低效点（P4 修复目标）：extractRequestFeatures 目前会 ParseEnvelope
-// 两遍——requestModel(rawPath, body) 内部解析一次取 model，随后本函数再
-// 解析一次取 stream/tools/max_tokens。本门禁锁住现状防止恶化，不修改生产
-// 代码；P4 合并为一次解析后应下调上限（并在 PR 中说明新基线）。
+// P4 已修复双解析：extractRequestFeatures 现在只 ParseEnvelope 一次，
+// model 解析（modelFromEnvelope）与 stream/tools/max_tokens 提取复用同一个
+// env；Explain 的 dry-run 也改为一次特征提取。本门禁锁住单解析基线防止恶化。
 
 import "testing"
 
@@ -22,21 +21,21 @@ const routerGateChatBody = `{"model":"gpt-5.1","stream":true,"stream_options":{"
 
 // TestAllocGateExtractRequestFeatures 是 extractRequestFeatures 的分配门禁。
 // 被测函数：router.extractRequestFeatures（routerGateChatBody，/v1/chat/completions）。
-// 基线测量值：366 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x）。
-// 上限 = 基线 + 约 25% 余量取整 = 458。提高上限必须在 PR 说明理由。
-// 注意：基线包含 ParseEnvelope 两遍的已知低效（见文件头注释）；P4 合并为
-// 一次解析后应下调本上限，而不是沿用 458。
+// 基线测量值：190 allocs/op（本机 linux/arm64，2026-11-16，-benchtime=100x；
+// P4 去重：ParseEnvelope 两遍合并为一遍，366 -> 190，约等于单次 ParseEnvelope
+// 的 176 加特征组装开销）。上限 = 基线 + 约 25% 余量取整 = 238。
+// 提高上限必须在 PR 说明理由。
 func TestAllocGateExtractRequestFeatures(t *testing.T) {
 	if allocGateInstrumented {
 		t.Skip("allocation gates are measured without -race instrumentation")
 	}
 	body := []byte(routerGateChatBody)
-	const limit = 458
+	const limit = 238
 	got := testing.AllocsPerRun(100, func() {
 		_ = extractRequestFeatures("/v1/chat/completions", body)
 	})
 	if got > limit {
-		t.Fatalf("extractRequestFeatures allocs/op = %.0f, gate limit %d (baseline 366, arm64 2026-11-16); 提高上限必须在 PR 说明理由", got, limit)
+		t.Fatalf("extractRequestFeatures allocs/op = %.0f, gate limit %d (baseline 190, arm64 2026-11-16, P4 单解析); 提高上限必须在 PR 说明理由", got, limit)
 	}
 }
 

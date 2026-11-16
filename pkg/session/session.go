@@ -5,6 +5,7 @@
 package session
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -101,8 +102,19 @@ func fromHeaders(headers http.Header) (Ref, bool) {
 }
 
 func fromBody(body []byte) Ref {
-	body = []byte(strings.TrimSpace(string(body)))
+	// bytes.TrimSpace trims the same Unicode white space as the historical
+	// strings.TrimSpace(string(body)) round trip, without copying the body.
+	body = bytes.TrimSpace(body)
 	if len(body) == 0 || body[0] != '{' {
+		return Ref{}
+	}
+	// P4: most SDK requests carry no session signal at all. The structural
+	// pre-scan proves that no top-level member can feed the decode below, so
+	// the full json.Unmarshal is skipped entirely on that common path. When a
+	// candidate key exists the exact historical decode runs unchanged, keeping
+	// encoding/json's semantics (case-insensitive field matching, duplicate
+	// keys, type-error rejection, UTF-8 sanitisation) byte for byte.
+	if !bodyHasSessionKey(body) {
 		return Ref{}
 	}
 	var payload struct {
