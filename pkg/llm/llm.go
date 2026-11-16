@@ -142,38 +142,51 @@ func (c LLMCandidate) ResponseText() string {
 
 // ResponseToolCalls returns the candidate's tool calls, merging the two places
 // an adapter may have put them: Candidate.ToolCalls (Chat/Responses/Gemini) and
-// "tool_use" content blocks (Anthropic). The merge is deduplicated by call id
-// and name, so an adapter that populated both does not emit the call twice.
+// "tool_use" content blocks (Anthropic). The adapter's own ToolCalls list is
+// authoritative and kept whole: Gemini delivers parallel calls without ids and
+// often with the same function name, so deduplicating within that list dropped
+// every call after the first. Only the content-block spelling is deduplicated
+// against it (by id, name and normalized arguments), so an adapter that
+// populated both places does not emit the call twice.
 func (c LLMCandidate) ResponseToolCalls() []LLMToolCall {
 	out := make([]LLMToolCall, 0, len(c.ToolCalls))
 	seen := make(map[string]struct{}, len(c.ToolCalls))
-	add := func(call LLMToolCall) {
-		key := call.ID + "\x00" + call.Name
-		if call.ID == "" && call.Name == "" {
-			key = "\x00\x00" + call.ArgsText
-		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, call)
-	}
 	for _, call := range c.ToolCalls {
-		add(call)
+		seen[toolCallMergeKey(call)] = struct{}{}
+		out = append(out, call)
 	}
 	for _, content := range c.Content {
 		if content.Type != "tool_use" {
 			continue
 		}
-		add(LLMToolCall{
+		call := LLMToolCall{
 			ID:       firstNonEmpty(content.ToolCallID, content.ID),
 			Type:     "function",
 			Name:     content.ToolName,
 			Args:     content.ToolArgs,
 			ArgsText: marshalCompactString(content.ToolArgs),
-		})
+		}
+		key := toolCallMergeKey(call)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, call)
 	}
 	return out
+}
+
+// toolCallMergeKey identifies one call across the two adapter spellings. The
+// arguments are normalized to compact JSON so a raw upstream arguments string
+// and its parsed map form compare equal.
+func toolCallMergeKey(call LLMToolCall) string {
+	args := call.ArgsText
+	if parsed := parseJSONObject(args); parsed != nil {
+		args = marshalCompactString(parsed)
+	} else if args == "" {
+		args = marshalCompactString(call.Args)
+	}
+	return call.ID + "\x00" + call.Name + "\x00" + args
 }
 
 // ToolResultText renders a tool_result block as the plain text every protocol

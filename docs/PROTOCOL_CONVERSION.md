@@ -87,3 +87,5 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 ## 验证
 
 `pkg/protocolconvert` 的测试覆盖：四种协议请求/响应全矩阵（文本、模型、finish reason）、工具调用与工具结果的双向映射、Anthropic system block 数组、Chat→Responses 的 item 形状、tool_choice 四种拼写、Chat→Gemini / Gemini→Chat 工具流、结构化多模态拒绝、语义字段 fatal、流式拒绝、模型名校验；`internal/proxy` 覆盖端到端 Messages→Chat 文本与工具循环、400 且不污染健康、Responses 入口不转换；`internal/upstream` 覆盖 Vertex express/project 的转换短路径展开。
+
+**跨引擎 parity 语料**（`pkg/xir/convert/parity_test.go` + `testdata/parity/`）：168 个样本 × 16 个有序协议对 = 672 个对拍 cell，legacy 与 xir 引擎按生产配置（xir 用 Strict）对拍接受/拒绝决策与语义 JSON 等价。已收敛的 cell 是常驻 CI 断言；未收敛的分歧逐 cell 钉住复现（`t.Skip` 附根因），引擎修复后钉住测试会失败以强制把该 cell 晋升为常驻断言。全量分歧证据可用 `TRAJECTA_PARITY_DUMP=<path> go test -run TestParityDump ./pkg/xir/convert` 复现。**xir 目前不具备默认切换条件**（Responses envelope 建模、Messages max_tokens 默认值、静默丢弃台账等阻断项待修），默认引擎仍是 legacy。

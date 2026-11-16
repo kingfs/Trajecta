@@ -391,10 +391,16 @@ func fromGenerateContentResponse(resp GeminiResponse) LLMResponse {
 				// Gemini delivers a whole call in one part. Dropping it here (the part only carried
 				// `text` before) left the parsed response and the cassette events without the tool
 				// call while the observation parser recorded one.
+				argsText := p.FunctionCall.argsText()
 				toolCalls = append(toolCalls, LLMToolCall{
-					Type:     "function",
-					Name:     p.FunctionCall.Name,
-					ArgsText: p.FunctionCall.argsText(),
+					Type: "function",
+					Name: p.FunctionCall.Name,
+					// Carry the argument object in both spellings, like the
+					// Chat/Responses adapters do: encoders that read Args
+					// (Anthropic tool_use.input) must not see an empty object
+					// just because Gemini spelled the args as raw JSON.
+					Args:     parseJSONObject(argsText),
+					ArgsText: argsText,
 				})
 			case p.FunctionResponse != nil:
 				content = append(content, LLMContent{

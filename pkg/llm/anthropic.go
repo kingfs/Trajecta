@@ -5,6 +5,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 )
 
 type AnthropicContentBlock struct {
@@ -397,10 +398,20 @@ func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
 		// answer instead of returning an empty content array.
 		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: candidate.Refusal.Message})
 	}
-	for _, call := range candidate.ResponseToolCalls() {
+	for i, call := range candidate.ResponseToolCalls() {
+		id := call.ID
+		if id == "" {
+			// Gemini calls arrive without ids. A single call keeps the
+			// historical synthesized id; parallel calls must stay distinct so
+			// each tool_result can reference its own call.
+			id = "toolu_converted"
+			if i > 0 {
+				id = fmt.Sprintf("toolu_converted_%d", i+1)
+			}
+		}
 		blocks = append(blocks, AnthropicContentBlock{
 			Type:  "tool_use",
-			ID:    firstNonEmpty(call.ID, "toolu_converted"),
+			ID:    id,
 			Name:  call.Name,
 			Input: nonNilMap(call.Args),
 		})

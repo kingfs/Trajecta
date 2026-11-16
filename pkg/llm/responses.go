@@ -8,7 +8,12 @@ import (
 )
 
 type OpenAIResponsesContentPart struct {
-	Type       string                       `json:"type"`
+	Type string `json:"type"`
+	// Text is the wire member for input_text/output_text parts: the Responses
+	// API spells the payload {"type":"input_text","text":"..."} (and likewise
+	// output_text), never a member named after the part type. Encoders must
+	// fill Text; InputText/OutputText below are decode-only tolerance for
+	// older cassettes recorded with the wrong member key.
 	Text       string                       `json:"text,omitempty"`
 	InputText  string                       `json:"input_text,omitempty"`
 	OutputText string                       `json:"output_text,omitempty"`
@@ -304,9 +309,9 @@ func (r *LLMRequest) ToOpenAIResponses() OpenAIResponsesRequest {
 				if content.Text == "" {
 					continue
 				}
-				part := OpenAIResponsesContentPart{Type: "input_text", InputText: content.Text}
+				part := OpenAIResponsesContentPart{Type: "input_text", Text: content.Text}
 				if role == "assistant" {
-					part = OpenAIResponsesContentPart{Type: "output_text", OutputText: content.Text}
+					part = OpenAIResponsesContentPart{Type: "output_text", Text: content.Text}
 				}
 				textParts = append(textParts, part)
 			case "tool_use":
@@ -418,7 +423,7 @@ func (r *LLMResponse) ToOpenAIResponsesResponse() OpenAIResponsesResponse {
 		candidate := r.Candidates[0]
 		parts := make([]OpenAIResponsesContentPart, 0, 2)
 		if text := candidate.ResponseText(); text != "" {
-			parts = append(parts, OpenAIResponsesContentPart{Type: "output_text", OutputText: text})
+			parts = append(parts, OpenAIResponsesContentPart{Type: "output_text", Text: text})
 			resp.OutputText = text
 		}
 		if candidate.Refusal != nil && candidate.Refusal.Message != "" {
