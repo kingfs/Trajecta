@@ -856,20 +856,14 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	if bucketCount <= 0 {
 		bucketCount = 12
 	}
-	analytics, err := s.ListUpstreamAnalytics(8, 5, since, modelFilter)
+	// The detail read asks for one upstream, so every aggregate and supporting
+	// query is restricted to that id instead of ranking every upstream's rows
+	// and linearly picking the target out of the full list.
+	analytics, err := s.upstreamAnalyticsForID(upstreamID, 8, 5, since, modelFilter)
 	if err != nil {
 		return UpstreamDetail{}, err
 	}
-	var detail UpstreamDetail
-	for _, item := range analytics {
-		if item.UpstreamID == upstreamID {
-			detail.Analytics = item
-			break
-		}
-	}
-	if detail.Analytics.UpstreamID == "" {
-		return UpstreamDetail{}, sql.ErrNoRows
-	}
+	detail := UpstreamDetail{Analytics: analytics}
 
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	queryArgs := append([]any{upstreamID}, whereArgs...)

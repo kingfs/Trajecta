@@ -2483,24 +2483,63 @@ func syntheticCountTokensReason(selectErr error, retryEvents []recorder.RecordEv
 	return "fallback"
 }
 
+// estimateAnthropicCountTokensInput synthesizes the input-token count for
+// /v1/messages/count_tokens when no upstream serves the endpoint. The body is
+// parsed once: the same decoded value yields both the canonical re-encoded
+// length and the structural overhead. Only a body the generic decoder rejects
+// (for example a number that overflows float64, which the raw-map decode still
+// accepts) falls back to the second, raw-map parse.
 func estimateAnthropicCountTokensInput(body []byte) int {
 	if len(body) == 0 {
 		return 1
 	}
-	canonical := body
+	canonicalLen := len(body)
+	overhead := 8
 	var payload any
 	if err := json.Unmarshal(body, &payload); err == nil {
 		if encoded, marshalErr := json.Marshal(payload); marshalErr == nil && len(encoded) > 0 {
-			canonical = encoded
+			canonicalLen = len(encoded)
 		}
+		overhead = anthropicCountTokensOverheadFromPayload(payload)
+	} else {
+		overhead = anthropicCountTokensStructuralOverhead(body)
 	}
-	estimated := (len(canonical) + 3) / 4
+	estimated := (canonicalLen + 3) / 4
 	if estimated < 1 {
 		return 1
 	}
-	return estimated + anthropicCountTokensStructuralOverhead(body)
+	return estimated + overhead
 }
 
+// anthropicCountTokensOverheadFromPayload derives the structural overhead from
+// the already-decoded body, matching anthropicCountTokensStructuralOverhead
+// byte for byte: a present key always carried a non-empty RawMessage, a null
+// `messages` decodes to a nil slice (zero extra), and a non-array `messages`
+// failed the []RawMessage decode exactly when the []any assertion fails here.
+// A payload that is not a JSON object (including null) keeps the base overhead,
+// which is what the raw-map decode produced for both its failure and its nil
+// map success.
+func anthropicCountTokensOverheadFromPayload(payload any) int {
+	object, ok := payload.(map[string]any)
+	if !ok {
+		return 8
+	}
+	overhead := 8
+	if _, ok := object["system"]; ok {
+		overhead += 4
+	}
+	if _, ok := object["tools"]; ok {
+		overhead += 8
+	}
+	if messages, ok := object["messages"].([]any); ok {
+		overhead += len(messages) * 4
+	}
+	return overhead
+}
+
+// anthropicCountTokensStructuralOverhead is the raw-map fallback for bodies the
+// generic any-decoder rejects; the fast path reads the overhead from the single
+// decoded payload instead.
 func anthropicCountTokensStructuralOverhead(body []byte) int {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {

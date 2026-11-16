@@ -248,7 +248,47 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
-	rows, err := s.db.Query(`
+	rows, err := s.db.Query(upstreamAnalyticsSelectSQL(`selected_upstream_id <> ''`+whereSQL), whereArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.collectUpstreamAnalytics(rows, `selected_upstream_id <> ''`, nil, limitModels, limitErrors, since, modelFilter)
+}
+
+// upstreamAnalyticsForID returns the one record ListUpstreamAnalytics would
+// produce for upstreamID, with the aggregate and every supporting batch query
+// restricted to that id instead of ranking every upstream's rows. It is the
+// detail page's read path; the batched list itself stays for the Overview and
+// list pages. An upstream with no rows in the window yields sql.ErrNoRows,
+// matching the linear scan's miss over the full list.
+func (s *Store) upstreamAnalyticsForID(upstreamID string, limitModels int, limitErrors int, since time.Time, modelFilter string) (UpstreamAnalyticsRecord, error) {
+	if upstreamID == "" {
+		return UpstreamAnalyticsRecord{}, sql.ErrNoRows
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	scopeArgs := []any{upstreamID}
+	args := append(append([]any(nil), scopeArgs...), whereArgs...)
+	rows, err := s.db.Query(upstreamAnalyticsSelectSQL(`selected_upstream_id = ?`+whereSQL), args...)
+	if err != nil {
+		return UpstreamAnalyticsRecord{}, err
+	}
+	defer rows.Close()
+	records, err := s.collectUpstreamAnalytics(rows, `selected_upstream_id = ?`, scopeArgs, limitModels, limitErrors, since, modelFilter)
+	if err != nil {
+		return UpstreamAnalyticsRecord{}, err
+	}
+	if len(records) == 0 {
+		return UpstreamAnalyticsRecord{}, sql.ErrNoRows
+	}
+	return records[0], nil
+}
+
+// upstreamAnalyticsSelectSQL is the grouped aggregate shared by the page-wide
+// list and the single-upstream detail read; scopeSQL is the upstream-id
+// predicate, whose args the caller passes separately.
+func upstreamAnalyticsSelectSQL(scopeSQL string) string {
+	return `
 		SELECT
 			selected_upstream_id,
 			COUNT(*) AS request_count,
@@ -261,31 +301,34 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 			COALESCE(AVG(CASE WHEN status_code BETWEEN 200 AND 299 THEN ttft_ms END), 0) AS avg_ttft,
 			MAX(recorded_at) AS last_seen
 		FROM logs
-		WHERE selected_upstream_id <> ''`+whereSQL+`
+		WHERE ` + scopeSQL + `
 		GROUP BY selected_upstream_id
 		ORDER BY request_count DESC, selected_upstream_id ASC
-	`, whereArgs...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	`
+}
 
-	// The per-upstream lists come from three grouped queries for the whole page
-	// instead of four per upstream, which is what the loop below used to run.
-	coverages, err := s.upstreamModelCoverageAll(limitModels, since, modelFilter)
+// collectUpstreamAnalytics runs the supporting batch queries under the same
+// upstream-id scope as the aggregate rows and assembles one record per row.
+func (s *Store) collectUpstreamAnalytics(rows *sql.Rows, scopeSQL string, scopeArgs []any, limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
+	// The per-upstream lists come from three grouped queries for the whole
+	// scope instead of four per upstream, which is what the loop below used to
+	// run.
+	coverages, err := s.upstreamModelCoverageScoped(scopeSQL, scopeArgs, limitModels, since, modelFilter)
 	if err != nil {
 		return nil, err
 	}
-	errorsByUpstream, err := s.upstreamRecentErrorsAll(limitErrors, since, modelFilter)
+	errorsByUpstream, err := s.upstreamRecentErrorsScoped(scopeSQL, scopeArgs, limitErrors, since, modelFilter)
 	if err != nil {
 		return nil, err
 	}
-	failuresByUpstream, err := s.upstreamRecentFailuresAll(limitErrors, since, modelFilter)
+	failuresByUpstream, err := s.upstreamRecentFailuresScoped(scopeSQL, scopeArgs, limitErrors, since, modelFilter)
 	if err != nil {
 		return nil, err
 	}
-	// Trailing-60s rates per upstream, fetched once for the whole page.
-	currentRates, err := s.currentRatesSuccessTokensByGroup("selected_upstream_id", "selected_upstream_id <> ''"+whereSQL, whereArgs)
+	// Trailing-60s rates per upstream, fetched once for the whole scope.
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	rateArgs := append(append([]any(nil), scopeArgs...), whereArgs...)
+	currentRates, err := s.currentRatesSuccessTokensByGroup("selected_upstream_id", scopeSQL+whereSQL, rateArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -523,13 +566,20 @@ type upstreamModelCoverageRecord struct {
 // so the model order and the top-N cut keep the collation the per-upstream query
 // used.
 func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter string) (map[string]upstreamModelCoverageRecord, error) {
+	return s.upstreamModelCoverageScoped(`selected_upstream_id <> ''`, nil, limit, since, modelFilter)
+}
+
+// upstreamModelCoverageScoped is upstreamModelCoverageAll with the upstream-id
+// predicate parameterised: the detail read passes `selected_upstream_id = ?`
+// so both ranking queries touch only the target upstream's rows.
+func (s *Store) upstreamModelCoverageScoped(scopeSQL string, scopeArgs []any, limit int, since time.Time, modelFilter string) (map[string]upstreamModelCoverageRecord, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	out := map[string]upstreamModelCoverageRecord{}
 
-	rankedArgs := append([]any(nil), whereArgs...)
+	rankedArgs := append(append([]any(nil), scopeArgs...), whereArgs...)
 	rankedArgs = append(rankedArgs, limit)
 	rows, err := s.db.Query(`
 		SELECT selected_upstream_id, model
@@ -542,7 +592,7 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 					ORDER BY COUNT(*) DESC, LOWER(model) ASC
 				) AS model_rank
 			FROM logs
-			WHERE selected_upstream_id <> '' AND model <> ''`+whereSQL+`
+			WHERE `+scopeSQL+` AND model <> ''`+whereSQL+`
 			GROUP BY selected_upstream_id, LOWER(model)
 		) ranked
 		WHERE model_rank <= ?
@@ -570,6 +620,7 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 		return nil, err
 	}
 
+	lastArgs := append(append([]any(nil), scopeArgs...), whereArgs...)
 	lastRows, err := s.db.Query(`
 		SELECT selected_upstream_id, model
 		FROM (
@@ -581,10 +632,10 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 					ORDER BY recorded_at DESC, trace_id DESC
 				) AS row_number
 			FROM logs
-			WHERE selected_upstream_id <> '' AND model <> ''`+whereSQL+`
+			WHERE `+scopeSQL+` AND model <> ''`+whereSQL+`
 		) ranked
 		WHERE row_number = 1
-	`, whereArgs...)
+	`, lastArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -607,11 +658,17 @@ func (s *Store) upstreamModelCoverageAll(limit int, since time.Time, modelFilter
 // upstreamRecentErrorsAll computes the recent errors of every upstream in one
 // query, ranking the last limit rows of each upstream inside the database.
 func (s *Store) upstreamRecentErrorsAll(limit int, since time.Time, modelFilter string) (map[string][]string, error) {
+	return s.upstreamRecentErrorsScoped(`selected_upstream_id <> ''`, nil, limit, since, modelFilter)
+}
+
+// upstreamRecentErrorsScoped is upstreamRecentErrorsAll with the upstream-id
+// predicate parameterised, so the detail read ranks only the target upstream.
+func (s *Store) upstreamRecentErrorsScoped(scopeSQL string, scopeArgs []any, limit int, since time.Time, modelFilter string) (map[string][]string, error) {
 	if limit <= 0 {
 		limit = 3
 	}
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
-	args := append([]any(nil), whereArgs...)
+	args := append(append([]any(nil), scopeArgs...), whereArgs...)
 	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT selected_upstream_id, error_text, status_code, endpoint
@@ -626,7 +683,7 @@ func (s *Store) upstreamRecentErrorsAll(limit int, since time.Time, modelFilter 
 					ORDER BY recorded_at DESC, trace_id DESC
 				) AS row_number
 			FROM logs
-			WHERE selected_upstream_id <> ''`+whereSQL+`
+			WHERE `+scopeSQL+whereSQL+`
 			  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
 		) ranked
 		WHERE row_number <= ?
@@ -663,11 +720,18 @@ func (s *Store) upstreamRecentErrorsAll(limit int, since time.Time, modelFilter 
 // upstreamRecentFailuresAll computes upstreamRecentFailures for every upstream
 // in one query, ranking the last limit rows of each upstream inside the database.
 func (s *Store) upstreamRecentFailuresAll(limit int, since time.Time, modelFilter string) (map[string][]UpstreamFailureRecord, error) {
+	return s.upstreamRecentFailuresScoped(`selected_upstream_id <> ''`, nil, limit, since, modelFilter)
+}
+
+// upstreamRecentFailuresScoped is upstreamRecentFailuresAll with the
+// upstream-id predicate parameterised, so the detail read ranks only the
+// target upstream.
+func (s *Store) upstreamRecentFailuresScoped(scopeSQL string, scopeArgs []any, limit int, since time.Time, modelFilter string) (map[string][]UpstreamFailureRecord, error) {
 	if limit <= 0 {
 		limit = 3
 	}
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
-	args := append([]any(nil), whereArgs...)
+	args := append(append([]any(nil), scopeArgs...), whereArgs...)
 	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT selected_upstream_id, trace_id, model, endpoint, status_code, recorded_at, error_text
@@ -685,7 +749,7 @@ func (s *Store) upstreamRecentFailuresAll(limit int, since time.Time, modelFilte
 					ORDER BY recorded_at DESC, trace_id DESC
 				) AS row_number
 			FROM logs
-			WHERE selected_upstream_id <> ''`+whereSQL+`
+			WHERE `+scopeSQL+whereSQL+`
 			  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
 		) ranked
 		WHERE row_number <= ?
