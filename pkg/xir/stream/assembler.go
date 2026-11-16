@@ -2,6 +2,7 @@ package stream
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/kingfs/Trajecta/pkg/usage"
 	"github.com/kingfs/Trajecta/pkg/xir"
@@ -28,6 +29,46 @@ type Assembler struct {
 	// currentTool indexes response.Parts while a tool call is open. -1 means
 	// no call is currently accepting argument deltas.
 	currentTool int
+
+	// Deltas accumulate in builders instead of being concatenated onto the
+	// part string on every event; a 256 KiB text stream arrived as thousands
+	// of deltas, and `part.Text += delta` made assembly quadratic. A builder is
+	// active only while the last part is of its kind, and flush() materializes
+	// it into the part so Response() keeps returning the live value.
+	text      *strings.Builder
+	reasoning *strings.Builder
+	toolArgs  *strings.Builder
+}
+
+// flush materializes every open builder into its part. It is called before a
+// different kind of part is appended and at the start of Response(), so a
+// caller that reads mid-stream still sees the text received so far.
+func (a *Assembler) flush() {
+	if a.text != nil {
+		if n := len(a.response.Parts); n > 0 {
+			if last := &a.response.Parts[n-1]; last.Kind == xir.PartText {
+				// The builder always holds the part text plus the deltas, so it
+				// replaces the materialized value instead of appending to it.
+				last.Text = a.text.String()
+			}
+		}
+		a.text = nil
+	}
+	if a.reasoning != nil {
+		if n := len(a.response.Parts); n > 0 {
+			if last := &a.response.Parts[n-1]; last.Kind == xir.PartReasoning && last.Reasoning != nil {
+				last.Reasoning.Text = a.reasoning.String()
+			}
+		}
+		a.reasoning = nil
+	}
+	if a.toolArgs != nil {
+		if call := a.currentToolCall(&xir.StreamEvent{}); call != nil {
+			call.ArgsText = a.toolArgs.String()
+			setToolArgs(call)
+		}
+		a.toolArgs = nil
+	}
 }
 
 // NewAssembler returns an Assembler for events decoded from protocol. The
@@ -104,6 +145,7 @@ func (a *Assembler) Response() *xir.Response {
 	if a == nil {
 		return &xir.Response{}
 	}
+	a.flush()
 	return &a.response
 }
 
@@ -130,11 +172,18 @@ func (a *Assembler) applyStart(ev *xir.StreamEvent) {
 func (a *Assembler) appendText(text string) {
 	if n := len(a.response.Parts); n > 0 {
 		if last := &a.response.Parts[n-1]; last.Kind == xir.PartText {
-			last.Text += text
+			if a.text == nil {
+				a.text = &strings.Builder{}
+				a.text.WriteString(last.Text)
+			}
+			a.text.WriteString(text)
 			return
 		}
 	}
-	a.response.Parts = append(a.response.Parts, xir.Part{Kind: xir.PartText, Text: text})
+	a.flush()
+	a.response.Parts = append(a.response.Parts, xir.Part{Kind: xir.PartText})
+	a.text = &strings.Builder{}
+	a.text.WriteString(text)
 }
 
 func (a *Assembler) applyReasoning(ev *xir.StreamEvent) {
@@ -150,7 +199,11 @@ func (a *Assembler) applyReasoning(ev *xir.StreamEvent) {
 	if r != nil && r.Text != "" {
 		delta = r.Text
 	}
-	reasoning.Text += delta
+	if a.reasoning == nil {
+		a.reasoning = &strings.Builder{}
+		a.reasoning.WriteString(reasoning.Text)
+	}
+	a.reasoning.WriteString(delta)
 
 	if r == nil {
 		return
@@ -180,6 +233,7 @@ func (a *Assembler) reasoningPart() *xir.Part {
 			return last
 		}
 	}
+	a.flush()
 	a.response.Parts = append(a.response.Parts, xir.Part{
 		Kind:      xir.PartReasoning,
 		Reasoning: &xir.Reasoning{},
@@ -196,6 +250,7 @@ func (a *Assembler) applyToolStart(ev *xir.StreamEvent) {
 		// travel through this event and therefore cannot be assembled.
 		Type: "function",
 	}
+	a.flush()
 	if ev.Text != "" {
 		call.ArgsText = ev.Text
 		setToolArgs(call)
@@ -207,6 +262,7 @@ func (a *Assembler) applyToolStart(ev *xir.StreamEvent) {
 func (a *Assembler) applyToolArgs(ev *xir.StreamEvent) {
 	call := a.currentToolCall(ev)
 	if call == nil {
+		a.flush()
 		call = &xir.ToolCall{Type: "function"}
 		a.response.Parts = append(a.response.Parts, xir.Part{Kind: xir.PartToolCall, ToolCall: call})
 		a.currentTool = len(a.response.Parts) - 1
@@ -220,10 +276,13 @@ func (a *Assembler) applyToolArgs(ev *xir.StreamEvent) {
 	if ev.Text == "" {
 		return
 	}
-	// Argument deltas are byte fragments of one JSON document and are
-	// concatenated, never parsed and re-marshalled.
-	call.ArgsText += ev.Text
-	setToolArgs(call)
+	// Argument deltas are byte fragments of one JSON document: accumulate them
+	// in a builder (never parse per fragment) and validate once the call ends.
+	if a.toolArgs == nil {
+		a.toolArgs = &strings.Builder{}
+		a.toolArgs.WriteString(call.ArgsText)
+	}
+	a.toolArgs.WriteString(ev.Text)
 }
 
 func (a *Assembler) applyToolEnd(ev *xir.StreamEvent) {
@@ -232,6 +291,7 @@ func (a *Assembler) applyToolEnd(ev *xir.StreamEvent) {
 		if ev.ToolID == "" && ev.ToolName == "" && ev.Text == "" {
 			return
 		}
+		a.flush()
 		call = &xir.ToolCall{Type: "function"}
 		a.response.Parts = append(a.response.Parts, xir.Part{Kind: xir.PartToolCall, ToolCall: call})
 		a.currentTool = len(a.response.Parts) - 1
@@ -243,6 +303,10 @@ func (a *Assembler) applyToolEnd(ev *xir.StreamEvent) {
 		call.Name = ev.ToolName
 	}
 	// A protocol that carries the last fragment on the end event keeps it.
+	if a.toolArgs != nil {
+		call.ArgsText = a.toolArgs.String()
+		a.toolArgs = nil
+	}
 	if ev.Text != "" {
 		call.ArgsText += ev.Text
 	}
@@ -328,6 +392,7 @@ func (a *Assembler) applyError(ev *xir.StreamEvent) {
 }
 
 func (a *Assembler) applySealed(ev *xir.StreamEvent) {
+	a.flush()
 	sealed := ev.Sealed
 	if sealed == nil && ev.Reasoning != nil {
 		sealed = ev.Reasoning.Sealed

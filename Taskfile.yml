@@ -179,6 +179,20 @@ tasks:
     cmds:
       - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./internal/gateway ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask ./pkg/session ./pkg/xir
 
+  bench:xir:
+    desc: Run the realistic agent-traffic benchmarks (conversion, parse, audit, masking, 256 KiB e2e)
+    cmds:
+      - go test -run '^$' -bench 'BenchmarkCorpus' -benchmem ./pkg/xir/convert
+      - go test -run '^$' -bench 'BenchmarkCorpusParseDecode|BenchmarkCorpusAuditBuild|BenchmarkCorpusStreamAssemble' -benchmem ./pkg/xir
+      - go test -run '^$' -bench 'BenchmarkAuditDetectCorpus' -benchmem ./internal/audit
+      - go test -run '^$' -bench 'BenchmarkMaskCorpus' -benchmem ./internal/detector
+      - go test -run '^$' -bench 'BenchmarkHandlerAgentTrajectory256K' -benchmem ./internal/proxy
+
+  bench:xir:trend:
+    desc: Snapshot the agent-traffic benchmarks and compare with the previous snapshot
+    cmds:
+      - scripts/bench-xir-trend.sh
+
   bench:convert:
     desc: Compare the legacy and XIR protocol-conversion engines on the same bodies
     cmds:
@@ -198,7 +212,7 @@ tasks:
   bench:smoke:
     desc: Smoke-run hot-path benchmarks once so they stay compilable and runnable
     cmds:
-      - go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/xir/convert ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router
+      - go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/xir/convert ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router ./internal/audit ./internal/detector
 
   deps:verify:
     desc: Verify module dependencies without editing go.mod or go.sum

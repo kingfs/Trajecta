@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/benchcorpus"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 )
@@ -152,4 +153,23 @@ func BenchmarkHandlerConversionLargeBody(b *testing.B) {
 func benchLongPrompt() string {
 	repeated := bytes.Repeat([]byte("The quick brown fox jumps over the lazy dog. "), 6000)
 	return string(repeated)
+}
+
+// BenchmarkHandlerAgentTrajectory256K drives a 256 KiB multi-step agent request
+// through the whole handler (auth, routing, chat -> Messages conversion,
+// recording) for both engines. This is the deployment-shape cost a converted
+// long-context request pays; the library benchmarks isolate the conversion part.
+func BenchmarkHandlerAgentTrajectory256K(b *testing.B) {
+	trajectory := benchcorpus.Agent(benchcorpus.Agent256KBytes, benchcorpus.Options{Secrets: true})
+	trajectory.Model = "bench-model" // the benchmark channel's declared model
+	body := string(benchcorpus.EncodeChat(trajectory))
+	for _, engine := range []string{"legacy", "xir"} {
+		b.Run(engine, func(b *testing.B) {
+			server := conversionBenchHandler(b, engine, "messages", benchMessagesBody)
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			b.ResetTimer()
+			runBenchRequests(b, server, "/v1/chat/completions", body)
+		})
+	}
 }

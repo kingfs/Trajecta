@@ -33,3 +33,6 @@ __pycache__/
 # Local Go module caches used by sandboxed test runs
 .gomodcache/
 .gopath/
+
+# 本地性能趋势快照（不入库）
+bench-results/

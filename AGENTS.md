@@ -114,7 +114,7 @@ The byte layout is owned by `docs/ARCHITECTURE.md:114-130` (section `## 录制�
 - Race tests: `task test:race`
 - ATIF-v1.8 export and offline official-model validator: `task test:atif`
 - ATIF-v1.8 JSONL validation with the pinned Harbor models (install `scripts/atif-requirements.txt` first): `task atif:validate`
-- Benchmarks: `task bench:core`
+- Benchmarks: `task bench:core`; realistic agent-traffic suite (conversion, parse, audit detection, masking, 256 KiB end-to-end): `task bench:xir`; trend snapshot vs the previous run: `task bench:xir:trend`
 - Build backend only: `task build:go` (builds `server` from `cmd/server` and `trajecta` from `cmd/trajecta`)
 - Build everything: `task build`
 - Run locally: `task run`
