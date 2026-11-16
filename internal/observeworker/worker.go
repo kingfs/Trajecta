@@ -13,6 +13,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
+	"github.com/kingfs/Trajecta/internal/xirobserve"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
@@ -28,6 +29,10 @@ type Worker struct {
 	// cover normal traffic instead of waiting for a manual reanalysis.
 	detectors *detector.Runtime
 	autoScan  bool
+	// parserEngine selects the observation parser: "observe" (default) or
+	// "xir". The XIR engine falls back to observe when it reports
+	// ErrUnsupported (streamed responses, client entry exchanges).
+	parserEngine string
 }
 
 type Options struct {
@@ -38,6 +43,9 @@ type Options struct {
 	// AutoScan runs the observation detectors after a successful parse. It is
 	// normally cfg.Analysis.AutoScanFindings.
 	AutoScan bool
+	// ParserEngine selects the observation parser: "observe" (default) or
+	// "xir" (cfg.Analysis.ParserEngine).
+	ParserEngine string
 }
 
 func New(st *store.Store, opts Options) *Worker {
@@ -54,12 +62,13 @@ func New(st *store.Store, opts Options) *Worker {
 		registry = observe.NewDefaultRegistry()
 	}
 	return &Worker{
-		store:     st,
-		registry:  registry,
-		interval:  interval,
-		batchSize: batchSize,
-		detectors: opts.Detectors,
-		autoScan:  opts.AutoScan,
+		store:        st,
+		registry:     registry,
+		interval:     interval,
+		batchSize:    batchSize,
+		detectors:    opts.Detectors,
+		autoScan:     opts.AutoScan,
+		parserEngine: normalizeParserEngine(opts.ParserEngine),
 	}
 }
 
@@ -105,7 +114,7 @@ func (w *Worker) runOnce(ctx context.Context) {
 // processJob parses one already-claimed job. The claim moved the row to running
 // and incremented its attempt count, so there is no separate mark-running step.
 func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error {
-	obs, err := ReparseTrace(ctx, w.store, w.registry, job.TraceID)
+	obs, err := ReparseTraceWithEngine(ctx, w.store, w.registry, w.parserEngine, job.TraceID)
 	if err != nil {
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
 		return err
@@ -172,6 +181,14 @@ func StoreResourceAccesses(obs observe.TraceObservation) []store.ResourceAccess 
 }
 
 func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Registry, traceID string) (observe.TraceObservation, error) {
+	return ReparseTraceWithEngine(ctx, st, registry, "observe", traceID)
+}
+
+// ReparseTraceWithEngine parses one cassette with the selected observation
+// engine. The XIR engine returns ErrUnsupported for the exchanges it does not
+// model yet (streamed responses, client entry exchanges); those fall back to
+// the observe registry instead of failing the parse job.
+func ReparseTraceWithEngine(ctx context.Context, st *store.Store, registry *observe.Registry, engine, traceID string) (observe.TraceObservation, error) {
 	if st == nil {
 		return observe.TraceObservation{}, errors.New("trace store is nil")
 	}
@@ -211,6 +228,17 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		RequestAuditID:   exchange.RequestAuditID,
 		ResponseID:       exchange.ResponseID,
 	}
+	if normalizeParserEngine(engine) == "xir" {
+		obs, xirErr := xirobserve.Parse(ctx, input)
+		if xirErr == nil {
+			return obs, nil
+		}
+		if !errors.Is(xirErr, xirobserve.ErrUnsupported) {
+			return obs, xirErr
+		}
+		// Unsupported exchange: keep the observe parser as the fallback so a
+		// stream or entry exchange is still observed.
+	}
 	obs, err := registry.Parse(ctx, input)
 	if errors.Is(err, observe.ErrNoParser) {
 		// The exchange is well-formed traffic for an operation this build does not
@@ -220,6 +248,13 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		return observe.UnsupportedObservation(input), nil
 	}
 	return obs, err
+}
+
+func normalizeParserEngine(engine string) string {
+	if strings.EqualFold(strings.TrimSpace(engine), "xir") {
+		return "xir"
+	}
+	return "observe"
 }
 
 func mergeExchangeMetadata(dst *recordfile.MetaData, src recordfile.MetaData) {

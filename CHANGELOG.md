@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-11-16
+
+### Added
+- Observation parser engine selection: `analysis.parser_engine` chooses `observe` (default) or `xir`. The new `internal/xirobserve` projects the XIR-decoded request/response onto the same stored `observe.TraceObservation` shape, so the Monitor, detectors, resources and session analysis need no branch; streamed responses and client entry exchanges currently fall back to observe. Findings/tools/usage parity over all four protocols is pinned by `internal/xirobserve/parity_test.go`; the default stays observe until the remaining streaming/entry coverage lands in the next release.
+- `analysis.parser_engine` is also exposed as `TRAJECTA_ANALYSIS_PARSER_ENGINE` and validated at load time.
+
+### Changed
+- `router.selection.protocol_conversion` now defaults to **on** with the XIR engine. Native passthrough still always wins; conversion is only the fallback when no native candidate is selectable. Set `protocol_conversion: false` to restore passthrough-only routing, or `protocol_conversion_engine: legacy` for the rollback engine. The tracked config, AGENTS.md, docs/PROTOCOL_CONVERSION.md and docs/IMPLEMENTATION_STATUS.md were updated.
 ## [3.5.0] - 2026-11-16
 
 ### Added

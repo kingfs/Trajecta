@@ -403,7 +403,7 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 	}
 	defer traceStore.Close()
 
-	reanalysisResult, err := reanalysis.New(traceStore, reanalysis.Options{}).ReparseTrace(context.Background(), opts.traceID, reanalysis.TraceOptions{})
+	reanalysisResult, err := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine}).ReparseTrace(context.Background(), opts.traceID, reanalysis.TraceOptions{})
 	if err != nil {
 		slog.Error("Failed to reparse trace", "trace_id", opts.traceID, "error", err)
 		return 1
@@ -442,7 +442,7 @@ func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
 	}
 	defer traceStore.Close()
 
-	result, err := reanalysis.New(traceStore, reanalysis.Options{}).RepairTraceUsage(context.Background(), opts.traceID, reanalysis.RepairUsageOptions{
+	result, err := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine}).RepairTraceUsage(context.Background(), opts.traceID, reanalysis.RepairUsageOptions{
 		RewriteCassette: opts.rewriteCassette,
 	})
 	if err != nil {
@@ -514,7 +514,7 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 	}
 	defer traceStore.Close()
 
-	svc := reanalysis.New(traceStore, reanalysis.Options{})
+	svc := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine})
 	if opts.traceID != "" {
 		var result reanalysis.Result
 		if opts.repairUsage {
@@ -597,7 +597,7 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		slog.Error("Failed to resolve batch traces", "error", err)
 		return 1
 	}
-	svc := reanalysis.New(traceStore, reanalysis.Options{})
+	svc := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine})
 	results, completed, enqueued, failed := runAnalyzeBatchTraces(context.Background(), svc, traceIDs, opts, normalizeAnalyzeWorkers(opts.workers, cfg.DatabaseMaxOpenConns()))
 	output := map[string]any{
 		"trace_count":  len(traceIDs),
@@ -732,7 +732,7 @@ func runAnalyzeRefresh(opts analyzeBatchOptions) int {
 		return 1
 	}
 	defer traceStore.Close()
-	svc := reanalysis.New(traceStore, reanalysis.Options{})
+	svc := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine})
 	if opts.enqueue {
 		job, err := svc.EnqueueSessionReanalyze(opts.sessionID, reanalysis.SessionOptions{Reparse: true, Scan: true})
 		if err != nil {
@@ -1023,7 +1023,7 @@ func runAnalyzeScan(opts analyzeScanOptions) int {
 	}
 	defer traceStore.Close()
 
-	result, err := reanalysis.New(traceStore, reanalysis.Options{}).RescanTrace(context.Background(), opts.traceID)
+	result, err := reanalysis.New(traceStore, reanalysis.Options{ParserEngine: cfg.Analysis.ParserEngine}).RescanTrace(context.Background(), opts.traceID)
 	if err != nil {
 		slog.Error("Failed to scan trace", "trace_id", opts.traceID, "error", err)
 		return 1

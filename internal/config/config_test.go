@@ -1631,3 +1631,58 @@ func TestLoadRejectsYAMLChannelConfiguration(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadProtocolConversionDefaultsOn pins the 3.6.0 default: conversion is
+// enabled out of the box (the router still prefers a native candidate) and the
+// engine is xir. An explicit false restores the historical passthrough-only
+// behaviour, and an explicit legacy keeps the rollback engine.
+func TestLoadProtocolConversionDefaultsOn(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, "server:\n  port: \"8080\"\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Router.Selection.ProtocolConversion {
+		t.Fatal("protocol_conversion = false, want the default true")
+	}
+	if cfg.Router.Selection.ProtocolConversionEngine != "xir" {
+		t.Fatalf("protocol_conversion_engine = %q, want xir", cfg.Router.Selection.ProtocolConversionEngine)
+	}
+
+	off, err := Load(writeTempConfig(t, "router:\n  selection:\n    protocol_conversion: false\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if off.Router.Selection.ProtocolConversion {
+		t.Fatal("explicit protocol_conversion: false was overridden")
+	}
+
+	legacy, err := Load(writeTempConfig(t, "router:\n  selection:\n    protocol_conversion_engine: legacy\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if legacy.Router.Selection.ProtocolConversionEngine != "legacy" {
+		t.Fatalf("explicit legacy engine = %q", legacy.Router.Selection.ProtocolConversionEngine)
+	}
+}
+
+func TestLoadAnalysisParserEngine(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, "server:\n  port: \"8080\"\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Analysis.ParserEngine != "observe" {
+		t.Fatalf("analysis.parser_engine = %q, want the observe default", cfg.Analysis.ParserEngine)
+	}
+
+	next, err := Load(writeTempConfig(t, "analysis:\n  parser_engine: XIR\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if next.Analysis.ParserEngine != "xir" {
+		t.Fatalf("analysis.parser_engine = %q, want xir", next.Analysis.ParserEngine)
+	}
+
+	if _, err := Load(writeTempConfig(t, "analysis:\n  parser_engine: native\n")); err == nil {
+		t.Fatal("Load() accepted an unknown parser engine")
+	}
+}

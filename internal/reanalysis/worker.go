@@ -23,6 +23,8 @@ type WorkerOptions struct {
 	// DetectorRuntime supplies the plugin-driven observation runner when no
 	// explicit Service is given.
 	DetectorRuntime *detector.Runtime
+	// ParserEngine is forwarded to the service built from these options.
+	ParserEngine string
 }
 
 func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
@@ -36,7 +38,7 @@ func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
 	}
 	service := opts.Service
 	if service == nil {
-		service = New(st, Options{DetectorRuntime: opts.DetectorRuntime})
+		service = New(st, Options{DetectorRuntime: opts.DetectorRuntime, ParserEngine: opts.ParserEngine})
 	}
 	return &Worker{
 		store:     st,

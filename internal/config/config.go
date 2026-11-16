@@ -43,6 +43,12 @@ type Config struct {
 		// reanalysis. It defaults to true; an explicit `false` keeps the old
 		// on-demand behaviour.
 		AutoScanFindings bool `yaml:"auto_scan_findings"`
+		// ParserEngine selects the observation parser: "observe" (the
+		// per-protocol parsers, default while the XIR projection is validated)
+		// or "xir" (the XIR codecs projected onto the same observation IR).
+		// The XIR engine falls back to observe for streamed responses and
+		// client entry exchanges until those are ported.
+		ParserEngine string `yaml:"parser_engine"`
 	} `yaml:"analysis"`
 
 	Monitor struct {
@@ -597,6 +603,18 @@ func Load(path string) (*Config, error) {
 	// the parser runs them; seed the auto-scan so an omitted key keeps the
 	// "default on" promise instead of silently idling five plugins.
 	cfg.Analysis.AutoScanFindings = true
+	// The observation parser stays on the per-protocol observe engine for this
+	// release; the XIR projection is available as an opt-in and is being
+	// validated before it becomes the default. normalizeAnalysisEngine also
+	// validates the value after the YAML and environment overrides are applied.
+	cfg.Analysis.ParserEngine = "observe"
+	// Protocol conversion is on by default: the router prefers a native
+	// candidate whenever one is selectable, so this only changes the fallback
+	// for a model that no native target serves (previously a 502/404). Seed the
+	// field before the decode so an explicit `protocol_conversion: false` keeps
+	// its historical passthrough-only behaviour. The engine defaults to xir
+	// (see the normalization after validation).
+	cfg.Router.Selection.ProtocolConversion = true
 	if err := rejectLegacyChannelConfig(data); err != nil {
 		return nil, err
 	}
@@ -605,6 +623,9 @@ func Load(path string) (*Config, error) {
 	}
 	warnUnknownConfigKeys(data)
 	applyEnvOverrides(&cfg)
+	if err := normalizeAnalysisEngine(&cfg); err != nil {
+		return nil, err
+	}
 	warnLegacyChannelEnv()
 	if err := expandEnvRefs(&cfg); err != nil {
 		return nil, err
@@ -880,6 +901,21 @@ func validateRouterSelection(cfg *Config) error {
 	return nil
 }
 
+// normalizeAnalysisEngine lowercases and validates analysis.parser_engine.
+// An empty value after the environment overrides still means the observe
+// default.
+func normalizeAnalysisEngine(cfg *Config) error {
+	value := strings.ToLower(strings.TrimSpace(cfg.Analysis.ParserEngine))
+	if value == "" {
+		value = "observe"
+	}
+	if value != "observe" && value != "xir" {
+		return fmt.Errorf("analysis.parser_engine %q is not supported; use observe or xir", cfg.Analysis.ParserEngine)
+	}
+	cfg.Analysis.ParserEngine = value
+	return nil
+}
+
 // validateRouterEnums rejects routing values that no consumer recognises.
 //
 // The router reads these through normalizing helpers (normalizePolicy,
@@ -967,6 +1003,7 @@ func applyEnvOverrides(cfg *Config) {
 	envBool(&cfg.Debug.MaskKey, "TRAJECTA_MASK_KEY")
 	envBool(&cfg.SecretMasking.Enabled, "TRAJECTA_SECRET_MASKING_ENABLED")
 	envBool(&cfg.Analysis.AutoScanFindings, "TRAJECTA_ANALYSIS_AUTO_SCAN_FINDINGS")
+	envString(&cfg.Analysis.ParserEngine, "TRAJECTA_ANALYSIS_PARSER_ENGINE")
 	envString(&cfg.SecretMasking.HotPathScope, "TRAJECTA_SECRET_MASKING_HOT_PATH_SCOPE")
 	envInt(&cfg.SecretMasking.IRMaxBodyBytes, "TRAJECTA_SECRET_MASKING_IR_MAX_BODY_BYTES")
 	envBool(&cfg.SecretMasking.MappingStore.Enabled, "TRAJECTA_SECRET_MASKING_MAPPING_STORE_ENABLED")

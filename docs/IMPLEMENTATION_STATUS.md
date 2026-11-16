@@ -7,14 +7,14 @@
 Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用的 Postgres 应用库存放结构化状态与观测数据。当前核心闭环已实现：
 
 1. SDK 或 CLI 流量经 gateway 转发。
-2. 代理按协议族选择上游并透传请求；开启 `router.selection.protocol_conversion` 后，只在没有可用原生候选时对非流式 chat/messages/gemini 请求做协议转换（协议感知，默认仍是透传代理）。
+2. 代理按协议族选择上游并透传请求；`router.selection.protocol_conversion` 默认开启（可显式关闭），只在没有可用原生候选时对非流式 chat/messages/gemini 请求做协议转换（原生候选始终优先）。
 3. 原始 HTTP 请求/响应写入 `.http` cassette。
 4. 生产部署用 Postgres 索引请求元数据、路由、会话、渠道/模型配置、Responses state、audit 与派生分析结果。
 5. Monitor Web 展示请求、会话、模型、渠道、路由、事件、发现和分析任务。
 6. MCP 工具向 AI agent 暴露只读排障、trace 查询、失败聚类、系统事件与受控重分析。
 7. `pkg/replay` 在测试中基于 cassette 回放响应，不访问上游网络。
 
-下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages` 与 `/v1/messages/count_tokens`。其中 `/v1/embeddings` 只被分类与追踪，不参与路由：`pkg/llm.AdapterFor` 没有 embeddings 分支，选路因此得到零个候选并报选路失败，`capabilities.embeddings` 也不会被查询；`/v1/messages/count_tokens` 在无匹配上游或上游返回 404 时由代理返回合成计数响应并照常录制。转发热路径默认不做跨协议请求转换；`router.selection.protocol_conversion: true` 时只在没有可用原生候选时对非流式 chat/messages/gemini 请求做转换，`/v1/responses` 始终交给本地 runtime（详见 [协议转换](./PROTOCOL_CONVERSION.md)）。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
+下游入口按协议族受理：OpenAI-compatible 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`，以及 Anthropic 的 `/v1/messages` 与 `/v1/messages/count_tokens`。其中 `/v1/embeddings` 只被分类与追踪，不参与路由：`pkg/llm.AdapterFor` 没有 embeddings 分支，选路因此得到零个候选并报选路失败，`capabilities.embeddings` 也不会被查询；`/v1/messages/count_tokens` 在无匹配上游或上游返回 404 时由代理返回合成计数响应并照常录制。转发热路径默认开启协议转换（`router.selection.protocol_conversion: true`，可显式关闭），只在没有可用原生候选时对非流式 chat/messages/gemini 请求做转换，`/v1/responses` 始终交给本地 runtime（详见 [协议转换](./PROTOCOL_CONVERSION.md)）。原始 cassette 始终是回放与详情页的事实源，应用数据库只是列表、过滤和聚合的派生索引。
 
 详见 [./README.md](./README.md)、[./ARCHITECTURE.md](./ARCHITECTURE.md)、[./PROTOCOLS_AND_PROVIDERS.md](./PROTOCOLS_AND_PROVIDERS.md)、[./PROXY_USAGE_EXAMPLES.md](./PROXY_USAGE_EXAMPLES.md)。
 
@@ -27,7 +27,7 @@ Trajecta 是本地优先的 LLM API 录制/回放代理，同时用生产可用�
 - `google_genai`：Gemini `generateContent`、`streamGenerateContent`、模型列表。
 - `vertex_native`：Vertex Gemini 的 `generateContent`、`streamGenerateContent` 与模型发现路径。
 
-代理可以识别、记录并把这些协议解析为统一观测结构；默认不在转发热路径中跨协议转换。开启 `router.selection.protocol_conversion` 后，非流式的 chat/messages/gemini 入口可以在没有可用原生候选时转换（工具调用、system、tool_choice 与 stop reason 均有映射），`/v1/responses` 不转换，流式请求与 IR 无法承载的内容会被拒绝。
+代理可以识别、记录并把这些协议解析为统一观测结构；默认在无原生候选时做跨协议转换（`router.selection.protocol_conversion` 默认开启，可显式关闭）。非流式的 chat/messages/gemini 入口可以在没有可用原生候选时转换（工具调用、system、tool_choice 与 stop reason 均有映射），`/v1/responses` 不转换，流式请求与 IR 无法承载的内容会被拒绝。
 
 能力声明与路由约束：upstream/channel 用 `api_type`、`mode`、`protocol_family` 和 `capabilities`（`responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize`）描述 API surface。`api_type` 默认按协议族推断（OpenAI-compatible → `chat_completions`，Anthropic → `messages`，Google GenAI / Vertex → `gemini_generate_content`）。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被本地 Responses runtime 的内部 Chat Completions 调用选中；`capabilities.tool_calling: false` 的 target 在请求体包含非空 `tools` 或非空 `functions`（OpenAI 已废弃的同义字段）时不被选中，routing decision trace 标记 `unsupported_tools`。
 
@@ -234,6 +234,7 @@ Responses audit 属于部分实现，职责边界如下：
 - proxy/gateway：`Body{Client,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`（canonical `pkg/usage` + recorder 投影）、`ResponsePipeline`、`ResponseTransform`；
 - upstream：`capabilities.endpoints` 按协议选择 base URL，`BuildURLForProtocol` 在 conversion 后显式选择；
 - audit：cassette → `pkg/xir/audit` → `GET /api/traces/<id>/xir`，Chat SSE 装配，`pkg/detect` advisory `detections`（不含明文值），单 trace ATIF；
+- observation parser 引擎：`analysis.parser_engine: observe`（默认）|`xir`；xir 引擎把 Exchange IR 投影成同一份 observation IR，当前对 streamed response 与 entry exchange 回退 observe，findings/资源对账通过后再切换默认（`internal/xirobserve`）；
 - recorder：`trace.minimal_cassette` 仓库默认开启，raw HTTP + layout/identity 入 cassette，routing/harness/usage 留 DB。
 
 明确的边界/未完成：

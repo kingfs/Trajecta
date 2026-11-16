@@ -146,17 +146,23 @@ func runServeWithConfig(configPath string) int {
 		}
 	}
 	parseWorker := observeworker.New(traceStore, observeworker.Options{
-		Interval:  5 * time.Second,
-		BatchSize: 10,
-		Detectors: detectorRuntime,
-		AutoScan:  cfg.Analysis.AutoScanFindings,
+		Interval:     5 * time.Second,
+		BatchSize:    10,
+		Detectors:    detectorRuntime,
+		AutoScan:     cfg.Analysis.AutoScanFindings,
+		ParserEngine: cfg.Analysis.ParserEngine,
 	})
 	background.Add(1)
 	go func() {
 		defer background.Done()
 		parseWorker.Run(syncCtx)
 	}()
-	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{Interval: 5 * time.Second, BatchSize: 5, DetectorRuntime: detectorRuntime})
+	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{
+		Interval:        5 * time.Second,
+		BatchSize:       5,
+		DetectorRuntime: detectorRuntime,
+		ParserEngine:    cfg.Analysis.ParserEngine,
+	})
 	background.Add(1)
 	go func() {
 		defer background.Done()

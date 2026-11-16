@@ -6,6 +6,13 @@ server:
 # the old manual-reanalysis-only behaviour.
 analysis:
   auto_scan_findings: true
+  # Observation parser: observe (per-protocol parsers, default) or xir (the
+  # Exchange IR projection). The XIR engine currently falls back to observe for
+  # streamed responses and client entry exchanges; it becomes the default once
+  # that coverage and the findings/resources parity gate pass. The setting is
+  # read by the parse worker, the reanalysis workers and `trajecta analyze`;
+  # Monitor/MCP on-demand locate/reanalysis still use observe until the switch.
+  parser_engine: observe
 
 monitor:
   port: "8081"
@@ -141,10 +148,12 @@ router:
     # upstream that cannot serve the client's protocol natively, and the proxy
     # converts the request/response between protocols,
     # selected by protocol_conversion_engine.
-    # Default false: native passthrough only. A selectable native candidate
-    # always wins; streaming requests and the /v1/responses entrypoint never
-    # convert, and content the IR cannot carry is rejected with 400.
-    protocol_conversion: false
+    # Default true. A selectable native candidate always wins, so conversion is
+    # only a fallback for a model no native target serves. Set false to restore
+    # passthrough-only behaviour. Streaming requests and the /v1/responses
+    # entrypoint never convert, and content the IR cannot carry is rejected
+    # with 400.
+    protocol_conversion: true
     # xir (default) uses the Exchange IR hub (pkg/xir/convert); legacy keeps
     # pkg/protocolconvert's pkg/llm adapters as the rollback path for one
     # release cycle. Both are non-streaming only.

@@ -44,11 +44,17 @@ type Service struct {
 	runner    *analyzer.Runner
 	detectors *detector.Runtime
 	now       func() time.Time
+	// parserEngine is the selected observation parser; empty defaults to
+	// observe.
+	parserEngine string
 }
 
 type Options struct {
 	Registry *observe.Registry
 	Runner   *analyzer.Runner
+	// ParserEngine selects the observation parser ("observe" default, "xir"
+	// opt-in); the XIR engine falls back to observe for unsupported exchanges.
+	ParserEngine string
 	// DetectorRuntime, when set, supplies the observation runner from the
 	// published detection-plugin snapshot, so enabling/disabling a detector
 	// plugin takes effect on the next job without a restart. An explicit Runner
@@ -140,7 +146,11 @@ func New(st *store.Store, opts Options) *Service {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Service{store: st, registry: registry, runner: runner, detectors: opts.DetectorRuntime, now: now}
+	parserEngine := "observe"
+	if strings.EqualFold(strings.TrimSpace(opts.ParserEngine), "xir") {
+		parserEngine = "xir"
+	}
+	return &Service{store: st, registry: registry, runner: runner, detectors: opts.DetectorRuntime, now: now, parserEngine: parserEngine}
 }
 
 // currentRunner resolves the observation runner for one job. An explicit Runner
@@ -509,7 +519,7 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 	// Both job types parse the cassette. A rescan only differs in that it does not
 	// write the observation back, so it is the same read either way; the semantic
 	// nodes are no longer stored, which is why reading them back is not an option.
-	obs, err = observeworker.ReparseTrace(ctx, s.store, s.registry, job.TargetID)
+	obs, err = observeworker.ReparseTraceWithEngine(ctx, s.store, s.registry, s.parserEngine, job.TargetID)
 	if err == nil && job.JobType != JobTypeTraceRescan {
 		err = s.store.SaveObservation(obs)
 	}
