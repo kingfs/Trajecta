@@ -179,6 +179,12 @@ tasks:
     cmds:
       - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./internal/gateway ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask ./pkg/session ./pkg/xir
 
+  bench:convert:
+    desc: Compare the legacy and XIR protocol-conversion engines on the same bodies
+    cmds:
+      - go test -run '^$' -bench 'BenchmarkConversion' -benchmem ./pkg/xir/convert
+      - go test -run '^$' -bench 'BenchmarkHandlerConversion|BenchmarkHandlerNativePassthrough' -benchmem ./internal/proxy
+
   bench:secretmask:
     desc: Run credential/PII detection, masking and restore benchmarks
     cmds:
@@ -192,7 +198,7 @@ tasks:
   bench:smoke:
     desc: Smoke-run hot-path benchmarks once so they stay compilable and runnable
     cmds:
-      - go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router
+      - go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/xir/convert ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router
 
   deps:verify:
     desc: Verify module dependencies without editing go.mod or go.sum

@@ -24,6 +24,7 @@
 | `task test:codex-fixtures` | `env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1` |
 | `task bench` | `go test -bench=. -benchmem ./...` |
 | `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./internal/gateway ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask ./pkg/session ./pkg/xir` |
+| `task bench:convert` | `go test -run '^$' -bench 'BenchmarkConversion' -benchmem ./pkg/xir/convert` + `go test -run '^$' -bench 'BenchmarkHandlerConversion\|BenchmarkHandlerNativePassthrough' -benchmem ./internal/proxy` |
 | `task bench:secretmask` | `go test -count=1 -run '^$' -bench=. -benchmem ./pkg/secretmask` |
 | `task bench:gate` | `go test -run 'AllocGate' ./pkg/... ./internal/gateway ./internal/router -count=1` |
 | `task bench:smoke` | `go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router` |
@@ -72,7 +73,7 @@ task run
 - `task test:race`：全套单元测试加 Go race detector；代理、路由、录制、存储或 streaming 改动必须补跑。
 - `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`cmd/trajecta`、`unittest`，不依赖外部网络。
 - `task test:cover`：写 `coverage.out`。
-- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`internal/gateway`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`、`pkg/secretmask`、`pkg/session`、`pkg/xir`）。`task bench:secretmask` 只跑检测、遮蔽与还原，覆盖 4 KiB–512 KiB 请求、凭据密度、流式分片与一次完整往返，用来量化代理开启 `secret_masking` 后每个请求增加的耗时。`task bench:gate` 与 `task bench:smoke` 是分配门禁与基准冒烟，见下文[性能与分配门禁](#性能与分配门禁)。
+- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`internal/gateway`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`、`pkg/secretmask`、`pkg/session`、`pkg/xir`）。`task bench:convert` 在同一批请求体上对比 legacy 与 xir 两个转换引擎（库级 `pkg/xir/convert` + 处理器级 `internal/proxy`，含原生直通基线）；`task bench:secretmask` 只跑检测、遮蔽与还原，覆盖 4 KiB–512 KiB 请求、凭据密度、流式分片与一次完整往返，用来量化代理开启 `secret_masking` 后每个请求增加的耗时。`task bench:gate` 与 `task bench:smoke` 是分配门禁与基准冒烟，见下文[性能与分配门禁](#性能与分配门禁)。
 - `task lint:vet`：单独跑 `go vet ./...`，与 golangci-lint 互补。
 - `task test:codex-fixtures`：离线 Codex Responses fixture runner；fixture 清单、覆盖范围与 runner 契约见 [Codex Responses fixtures](../tests/fixtures/codex/README.md)。
 

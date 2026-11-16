@@ -189,21 +189,33 @@ func documentRoot(doc *xir.Document, kind string) (*wire.Node, error) {
 
 // collectExtras returns every top-level member except the modeled ones. It
 // returns nil when there is nothing left.
+// collectExtras returns the top-level members the semantic model does not
+// carry. It walks the already-parsed wire members instead of unmarshalling the
+// whole document a second time: a Responses body can contain a very large
+// "output"/"input" subtree that the extras collection must not reparse.
 func collectExtras(root *wire.Node, modeled []string) map[string]json.RawMessage {
 	if root == nil || root.Kind != wire.Object {
 		return nil
 	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(root.Raw(), &all); err != nil {
-		return nil
-	}
+	known := make(map[string]struct{}, len(modeled))
 	for _, key := range modeled {
-		delete(all, key)
+		known[key] = struct{}{}
 	}
-	if len(all) == 0 {
-		return nil
+	var extras map[string]json.RawMessage
+	for i := range root.Members {
+		member := &root.Members[i]
+		if _, ok := known[member.Key]; ok {
+			continue
+		}
+		if member.Value == nil {
+			continue
+		}
+		if extras == nil {
+			extras = make(map[string]json.RawMessage)
+		}
+		extras[member.Key] = cloneRaw(member.Value.Raw())
 	}
-	return all
+	return extras
 }
 
 // cloneRaw copies raw so a decoded value never aliases a caller's buffer.

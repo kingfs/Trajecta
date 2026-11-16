@@ -947,3 +947,27 @@ func TestDecodeResponseToleratesWrongOptionalTypes(t *testing.T) {
 		t.Fatalf("stop = %s", resp.StopReason)
 	}
 }
+
+func TestMembersRawEscapesAndEmbedsVerbatim(t *testing.T) {
+	m := newMembers()
+	m.setString(`key"with\quote`, "value")
+	m.setString("中文", "text")
+	m.setRaw("control\nkey", json.RawMessage(`{"nested":[1,2]}`))
+	raw := m.raw()
+	if !json.Valid(raw) {
+		t.Fatalf("raw members are not valid JSON: %s", raw)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := decoded[`key"with\quote`]; !ok {
+		t.Fatalf("quoted key missing: %s", raw)
+	}
+	if _, ok := decoded["中文"]; !ok {
+		t.Fatalf("unicode key missing: %s", raw)
+	}
+	if got := string(decoded["control\nkey"]); got != `{"nested":[1,2]}` {
+		t.Fatalf("raw value = %s", got)
+	}
+}

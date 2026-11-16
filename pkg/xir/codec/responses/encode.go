@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kingfs/Trajecta/pkg/usage"
@@ -58,12 +59,64 @@ func (m members) setFloatPtr(key string, value *float64) {
 	}
 }
 
+// raw concatenates the already-encoded members into one object. Every value in
+// m is valid JSON by construction (set/setRaw/mergeExtras only insert validated
+// bytes), so re-encoding the map through encoding/json would scan and compact
+// each nested subtree again — the dominant cost of a nested Responses body,
+// which nests an input item, its content and its parts. Keys are sorted so the
+// bytes stay deterministic.
 func (m members) raw() json.RawMessage {
-	raw, err := marshalValueErr(map[string]json.RawMessage(m))
-	if err != nil {
-		return nil
+	if len(m) == 0 {
+		return json.RawMessage("{}")
 	}
-	return raw
+	keys := make([]string, 0, len(m))
+	size := 2
+	for key, value := range m {
+		keys = append(keys, key)
+		size += len(key) + len(value) + 4
+	}
+	sort.Strings(keys)
+	out := make([]byte, 0, size)
+	out = append(out, '{')
+	for i, key := range keys {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = appendJSONString(out, key)
+		out = append(out, ':')
+		out = append(out, m[key]...)
+	}
+	out = append(out, '}')
+	return out
+}
+
+// appendJSONString encodes a JSON object key. Keys are normally ASCII field
+// names, but mergeExtras can copy any member name from the source body, so the
+// escaper handles the mandatory escapes (quote, backslash, control characters).
+// UTF-8 passes through, which JSON allows.
+func appendJSONString(dst []byte, value string) []byte {
+	const hex = "0123456789abcdef"
+	dst = append(dst, '"')
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch c {
+		case '"', '\\':
+			dst = append(dst, '\\', c)
+		case '\n':
+			dst = append(dst, '\\', 'n')
+		case '\r':
+			dst = append(dst, '\\', 'r')
+		case '\t':
+			dst = append(dst, '\\', 't')
+		default:
+			if c < 0x20 {
+				dst = append(dst, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xF])
+				continue
+			}
+			dst = append(dst, c)
+		}
+	}
+	return append(dst, '"')
 }
 
 // mergeExtras copies unmodeled protocol members into m unless a modeled field
