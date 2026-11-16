@@ -194,16 +194,6 @@ func ResetSlowQueries() {
 	processSlowQueries.reset()
 }
 
-// SlowQueries reports up to limit recorded statements, newest first.
-func (s *Store) SlowQueries(limit int) []SlowQueryRecord {
-	return SlowQueries(limit)
-}
-
-// SlowQueryThreshold reports the armed slow-statement threshold.
-func (s *Store) SlowQueryThreshold() time.Duration {
-	return SlowQueryThreshold()
-}
-
 // SlowQuerySnapshot is the /api/system/slow-queries payload for this store.
 func (s *Store) SlowQuerySnapshot(limit int) SlowQuerySnapshot {
 	threshold := SlowQueryThreshold()

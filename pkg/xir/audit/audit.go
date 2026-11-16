@@ -183,12 +183,6 @@ func Build(protocol xir.Protocol, operation xir.Operation, req *xir.Request, res
 	return observation
 }
 
-// BuildObservation is an alias for Build, matching the entry-point name used
-// by the architecture design. Build is the canonical name for new callers.
-func BuildObservation(protocol xir.Protocol, operation xir.Operation, req *xir.Request, resp *xir.Response) *Observation {
-	return Build(protocol, operation, req, resp)
-}
-
 // StableNodeID returns the deterministic ID for one node position. The key is
 // section|path|protocolType|index; the ID is "node_" plus the first 16 hex
 // characters of its SHA-1 digest. Identical input always yields the same ID.

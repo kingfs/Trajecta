@@ -196,10 +196,6 @@ func latestEmbeddedMigrationVersion() (int, error) {
 	return latest, nil
 }
 
-func MigrateDown(dbPath string, steps int, all bool) error {
-	return MigrateDatabaseDown("sqlite", dbPath, steps, all)
-}
-
 func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
 	if normalizeDriver(driver) == "postgres" {
 		return ErrPostgresAuthRollbackUnsupported

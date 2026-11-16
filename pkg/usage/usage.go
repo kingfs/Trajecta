@@ -108,6 +108,3 @@ func Merge(a, b Usage) Usage {
 	}
 	return out
 }
-
-// Add is Merge under a narrower name for callers that accumulate a stream.
-func Add(a, b Usage) Usage { return Merge(a, b) }

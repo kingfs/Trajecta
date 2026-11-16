@@ -352,12 +352,6 @@ type SettingLoader interface {
 
 var defaultManager = NewManager()
 
-// Default returns the process-wide manager the server publishes its settings
-// into and the integrations read.
-func Default() *Manager {
-	return defaultManager
-}
-
 // Configure publishes settings on the process-wide manager.
 func Configure(settings Settings) error {
 	return defaultManager.Apply(settings)
@@ -381,11 +375,6 @@ func ProxyFunc(req *http.Request) (*url.URL, error) {
 // Transport returns the process-wide transport.
 func Transport() *http.Transport {
 	return defaultManager.Transport()
-}
-
-// Client returns a client on the process-wide transport.
-func Client(timeout time.Duration) *http.Client {
-	return defaultManager.Client(timeout)
 }
 
 // InstallDefaultTransport makes http.DefaultTransport follow this policy.

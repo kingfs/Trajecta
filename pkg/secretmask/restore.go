@@ -105,27 +105,6 @@ func (v *Vault) Restore(src []byte) []byte {
 	return out
 }
 
-// RestoreInPlace rewrites every fake in buf back to its real value, starting
-// the search at from, and reports how many values it replaced. Bytes before
-// from are left alone, which lets a caller that appends to buf restore only
-// what it just added.
-//
-// A caller that streams should use a Restorer instead: this call drops the scan
-// state, so a stand-in split across two calls is only restored when the second
-// call happens to carry enough of it to match a whole value.
-func (v *Vault) RestoreInPlace(buf []byte, from int) int {
-	if len(buf) == 0 {
-		return 0
-	}
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-	if len(v.byFake) == 0 {
-		return 0
-	}
-	_, replaced := v.restoreScan(buf, &streamState{cursor: from})
-	return replaced
-}
-
 // restoreScan walks buf from the state's cursor, rewriting complete fakes and
 // opening a chain when a stand-in looks cut short. It returns the offset up to
 // which buf is settled along with the number of values it replaced.

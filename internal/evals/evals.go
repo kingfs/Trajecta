@@ -94,20 +94,6 @@ var profiles = map[string]Profile{
 	},
 }
 
-func ListProfiles() []Profile {
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	out := make([]Profile, 0, len(names))
-	for _, name := range names {
-		out = append(out, profiles[name])
-	}
-	return out
-}
-
 func GetProfile(name string) (Profile, bool) {
 	profile, ok := profiles[strings.TrimSpace(name)]
 	return profile, ok
