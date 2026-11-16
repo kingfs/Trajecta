@@ -13,11 +13,6 @@ export const XIR_COL_W = XIR_CARD_W + 96;
 export const XIR_ROW_H = XIR_CARD_H + 18;
 export const XIR_PAD = 28;
 
-// The section hues. Request runs on the console's signal copper, response on
-// the info cyan, stream on violet; the exchange root keeps the warm accent.
-// They are CSS custom properties so both themes resolve through tokens.css.
-export const XIR_SECTIONS = ["request", "response", "stream"];
-
 // Plugin identity colours. The seven builtin families each own one hue of the
 // console's status vocabulary; an unknown future plugin cycles the same list.
 // Colour is never the only carrier: every badge also has the plugin name.

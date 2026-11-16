@@ -183,16 +183,6 @@ export function RatesAlertsPanel() {
             </SelectContent>
           </Select>
         </label>
-        <label className="filter-label">
-          {t("routing.planEngine")}
-          <Select value={settings.plan_engine || "legacy"} onValueChange={(next) => update("plan_engine", next)}>
-            <SelectTrigger aria-label={t("routing.planEngine")} className="min-w-[180px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="legacy">{t("routing.planLegacy")}</SelectItem>
-              <SelectItem value="route">{t("routing.planRoute")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </label>
         <Button variant="ghost" type="submit" disabled={save.isPending}>{t("common.save")}</Button>
         {save.isPending ? <InlineTag tone="gold">{t("common.saving")}</InlineTag> : null}
       </form>

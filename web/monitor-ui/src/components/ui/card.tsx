@@ -20,18 +20,3 @@ export function Card({ className, as, ...props }: React.ComponentProps<"div"> & 
   return <Tag data-slot="card" className={cn("rounded-lg border border-border-subtle bg-card p-5", className)} {...props} />;
 }
 
-export function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("mb-3 flex items-start justify-between gap-3", className)} {...props} />;
-}
-
-export function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
-  return <h3 className={cn("m-0 font-sans text-md font-semibold text-foreground", className)} {...props} />;
-}
-
-export function CardDescription({ className, ...props }: React.ComponentProps<"p">) {
-  return <p className={cn("m-0 font-sans text-xs text-muted-foreground", className)} {...props} />;
-}
-
-export function CardContent({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("font-sans text-sm text-foreground", className)} {...props} />;
-}

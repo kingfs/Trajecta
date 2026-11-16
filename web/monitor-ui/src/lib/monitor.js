@@ -466,14 +466,6 @@ export function formatTokenRate(tokens = 0, durationMs = 0) {
   return formatRate(totalTokensPerSecond(tokens, durationMs));
 }
 
-export function formatPrefillSpeed(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
-  return formatRate(prefillTokensPerSecond(promptTokens, ttftMs, durationMs, isStream));
-}
-
-export function formatGenerationSpeed(completionTokens = 0, durationMs = 0, ttftMs = 0, isStream = false) {
-  return formatRate(generationTokensPerSecond(completionTokens, durationMs, ttftMs, isStream));
-}
-
 export function formatCacheRate(cachedTokens = 0, totalTokens = 0) {
   const cached = Number(cachedTokens || 0);
   const total = Number(totalTokens || 0);

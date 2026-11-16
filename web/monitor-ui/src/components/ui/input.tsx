@@ -26,18 +26,6 @@ export function Input({ className, type = "text", ...props }: React.ComponentPro
   );
 }
 
-export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
-  return (
-    <textarea
-      className={cn(
-        "rounded-md border border-border bg-secondary px-3 py-2 font-sans text-sm leading-[1.4] text-foreground outline-none transition-colors placeholder:text-faint hover:border-border-strong focus:border-[color:var(--accent-solid)] focus:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 export function Label({ className, ...props }: React.ComponentProps<"label">) {
   return <label className={cn("font-sans text-xs font-medium text-muted-foreground", className)} {...props} />;
 }

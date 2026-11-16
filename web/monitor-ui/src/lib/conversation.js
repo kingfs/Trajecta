@@ -13,31 +13,6 @@
  * and the target-string grammar. The component next to it only draws.
  */
 
-// Node kinds that are a step of the conversation. The IR knows more than these
-// (tool declarations, usage, and whatever a provider invented this week); a
-// declaration belongs to the request's tool list and the rest has no place in a
-// dialogue, so they are filtered out by the two sets below rather than by
-// name-matching each renderer.
-export const CONVERSATION_KINDS = [
-  "instruction",
-  "message",
-  "text",
-  "reasoning",
-  "refusal",
-  "code",
-  "code_result",
-  "file",
-  "image",
-  "citation",
-  "safety",
-  "error",
-  "tool_call",
-  "tool_result",
-  "server_tool_call",
-  "server_tool_result",
-  "unknown",
-];
-
 const CALL_KINDS = new Set(["tool_call", "server_tool_call", "code"]);
 const RESULT_KINDS = new Set(["tool_result", "server_tool_result", "code_result"]);
 

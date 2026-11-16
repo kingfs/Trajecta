@@ -12,12 +12,6 @@ import { cn } from "../../lib/utils";
  * control that opened it, so the page stays live and focus can leave by tabbing,
  * which is what a settings panel hanging off a toolbar button should do.
  *
- * The distinction from `dropdown-menu.tsx` is semantics. That one renders
- * `role="menu"` with `menuitem` children, which announces "a list of commands"
- * and promises arrow-key navigation between them; it is right for a list of
- * actions and wrong for a panel holding radio groups, where the arrows belong to
- * the group rather than to the panel.
- *
  * Radix portals the content and positions it with popper, so the panel is
  * measured against the viewport instead of against whatever the trigger happens
  * to sit inside - a rail, a scroll container, or a table cell with `overflow:
@@ -26,8 +20,7 @@ import { cn } from "../../lib/utils";
  */
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
-export const PopoverAnchor = PopoverPrimitive.Anchor;
-export const PopoverClose = PopoverPrimitive.Close;
+
 
 export function PopoverContent({
   className,

@@ -71,11 +71,6 @@
   font-size: var(--text-sm);
 }
 
-.auth-success {
-  color: var(--success);
-  font-size: var(--text-sm);
-}
-
 .session-trajectory-panel {
   margin-bottom: var(--space-5);
 }

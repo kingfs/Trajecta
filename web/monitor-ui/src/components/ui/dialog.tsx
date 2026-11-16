@@ -26,7 +26,6 @@ import { useI18n } from "../../lib/i18n";
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogClose = DialogPrimitive.Close;
-export const DialogPortal = DialogPrimitive.Portal;
 
 type DialogContentProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
   /** Render the corner close button the legacy modals all had. */

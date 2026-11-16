@@ -79,13 +79,7 @@
 
 /* ---------------------------------------------------------- stat tiles */
 
-.hero-grid,
-.overview-health-grid,
-.session-breakdown-grid,
-.overview-breakdown-grid,
-.overview-chart-grid,
-.overview-attention-grid,
-.overview-provider-grid {
+.hero-grid, .overview-health-grid, .session-breakdown-grid, .overview-chart-grid, .overview-attention-grid {
   display: grid;
   gap: var(--space-3);
 }
@@ -125,8 +119,7 @@
   display: none;
 }
 
-.stat-card span,
-.stat-card .stat-label {
+.stat-card span {
   color: var(--text-tertiary);
   font-family: var(--font-sans);
   font-size: var(--text-label);
@@ -186,17 +179,7 @@
   color: var(--warning);
 }
 
-.stat-card.accent-blue strong {
-  color: var(--accent);
-}
-
-.panel.accent-green,
-.panel.accent-red,
-.panel.accent-gold,
-.stat-card.accent-green,
-.stat-card.accent-red,
-.stat-card.accent-gold,
-.stat-card.accent-blue {
+.panel.accent-green, .panel.accent-red, .panel.accent-gold, .stat-card.accent-green, .stat-card.accent-red, .stat-card.accent-gold {
   border-color: var(--border-subtle);
 }
 
@@ -500,14 +483,6 @@ input[type="radio"] {
 
 .filter-input {
   min-width: 180px;
-}
-
-.filter-input-wide {
-  min-width: 260px;
-}
-
-.filter-input-small {
-  min-width: 120px;
 }
 
 .filter-label {
@@ -1000,8 +975,7 @@ input[type="radio"] {
 }
 
 /* Detail pages keep their own tab-like card grid; it now matches the strip. */
-.session-tab-strip,
-.trace-reading-grid {
+.session-tab-strip {
   display: grid;
   gap: var(--space-2);
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1120,15 +1094,13 @@ input[type="radio"] {
 }
 
 /* Metric tiles inside detail toolbars. */
-.latency-metric-icon,
 .metric-icon-wrap {
   display: inline-grid;
   place-items: center;
   color: var(--text-tertiary);
 }
 
-.metric-icon-wrap svg,
-.latency-metric-icon svg {
+.metric-icon-wrap svg {
   width: 13px;
   height: 13px;
 }

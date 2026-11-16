@@ -27,8 +27,6 @@ export const Select = SelectPrimitive.Root;
 export function SelectValue({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Value>) {
   return <SelectPrimitive.Value className={cn("data-[placeholder]:text-faint", className)} {...props} />;
 }
-export const SelectGroup = SelectPrimitive.Group;
-
 export function SelectTrigger({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
   return (
     <SelectPrimitive.Trigger
@@ -87,10 +85,3 @@ export function SelectItem({ className, children, ...props }: React.ComponentPro
   );
 }
 
-export function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
-  return <SelectPrimitive.Label className={cn("px-2 py-1.5 font-sans text-label text-faint", className)} {...props} />;
-}
-
-export function SelectSeparator({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Separator>) {
-  return <SelectPrimitive.Separator className={cn("my-1 h-px bg-border-subtle", className)} {...props} />;
-}

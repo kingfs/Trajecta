@@ -25,9 +25,6 @@ export const apiPaths = {
   eventIgnore: (eventID) => `/api/events/${encodeURIComponent(eventID)}/ignore`,
   traces: "/api/traces",
   findings: "/api/findings",
-  // The deduplicated path/URL catalogue behind the 资源 page.
-  resources: "/api/resources",
-  resourcesBackfill: "/api/resources/backfill",
   // The credential-masking audit table. It is the only read that returns the
   // masked value next to the stand-in that replaced it; the event feed
   // deliberately carries neither.
@@ -95,8 +92,6 @@ export const apiPaths = {
   providerProbePreview: "/api/provider-probe",
   providerProbeReport: "/api/provider-probe/report",
   providerProbeApply: "/api/provider-probe/report/apply",
-  providerSetupValidate: "/api/provider-setup/validate",
-  providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",
   providerCatalog: "/api/catalog/providers",
   // Channel plugins: the vendor catalog units gated by the plugins page.
@@ -112,8 +107,6 @@ export const apiPaths = {
   // Metadata only: no traffic and no store reads; the plugin overlay comes
   // from the detector-plugins catalog above.
   xirStructure: "/api/xir/structure",
-  routingExchanges: "/api/routing/exchanges",
-  routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",
   routingSettings: "/api/settings/routing",
   networkProxySettings: "/api/settings/network-proxy",
@@ -200,6 +193,3 @@ export async function downloadBlob(path) {
   return response.blob();
 }
 
-export function listItems(payload) {
-  return Array.isArray(payload?.items) ? payload.items : [];
-}

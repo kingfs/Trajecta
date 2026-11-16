@@ -2,9 +2,9 @@
  * The navigation model, in one place.
  *
  * It used to live inside PrimaryNav, which was fine while the rail was the only
- * thing that rendered it. The page header now names the group a page belongs to,
- * and that label has to come from the same declaration the rail uses - a second
- * copy would be a second thing to keep in step with the routes.
+ * thing that rendered it. The page header no longer names the group a page
+ * belongs to, so the rail is again the only renderer; the declaration stays
+ * here as the single source of the navigation model.
  *
  * The grouping is by what the operator is doing, not by which table the data
  * comes from: 监控 answers "what is happening", 配置 answers "what is it pointed
@@ -107,22 +107,3 @@ export function isLegacyActive(to) {
   return (LEGACY_ACTIVE_PATHS[to] || []).some((alias) => pathMatches(current, alias));
 }
 
-/*
- * Which rail entry a URL belongs to, including the pre-relocation aliases and
- * the detail routes that hang off a list page. Every item may name extra
- * `legacyPaths` that belong to it without being a destination of their own. The
- * longest matching prefix wins, so /models/foo does not also match /models.
- */
-export function navItemForPath(pathname) {
-  const path = String(pathname || "/");
-  let match = null;
-  for (const group of NAV_GROUPS) {
-    for (const item of group.items) {
-      const belongs = pathMatches(path, item.to) || (item.legacyPaths || []).some((legacy) => pathMatches(path, legacy));
-      if (belongs && (!match || item.to.length > match.item.to.length)) {
-        match = { group, item };
-      }
-    }
-  }
-  return match;
-}

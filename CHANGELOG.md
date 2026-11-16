@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+- The rate-alerts panel no longer renders a dead "plan engine" select. The dropdown updated local state but the save mutation never submitted it and the rates-alerts settings API does not accept it; the live control is, and stays, the routing settings panel (`PATCH /api/settings/routing`).
+
+### Removed
+- The `design/` archive (2.0 refactor plans, phase designs, progress tracking and test reports) and `scripts/migrate-to-trajecta.sh`. The repository policy keeps no plans or archives; the streaming-conversion non-goal rationale moved into `docs/PROTOCOL_CONVERSION.md`, and `trajecta upgrade` is the single migration path (the script's cassette rewrite was non-atomic and dropped mtimes, which triggered a full vault re-index).
+- Fully-dead exported symbols with zero callers including tests: `auth.MigrateDown`, `netproxy.Default`/`netproxy.Client`, `evals.ListProfiles`, `Store.SlowQueries`/`Store.SlowQueryThreshold` methods (the package-level functions and `SlowQuerySnapshot` stay), `usage.Add`, `xir/audit.BuildObservation`, `secretmask.Vault.RestoreInPlace`.
+- Monitor UI dead code: four unreferenced primitives (`badge`, `dropdown-menu`, `radio-group`, `tooltip`) and their unused Radix dependencies (`react-label`, `react-dropdown-menu`, `react-tooltip`); six zero-call API wrappers (`resources`, `resourcesBackfill`, `providerSetupValidate`, `providerSetupApply`, `routingExchanges`, `routingSummary`); dead exports (`listItems`, `formatPrefillSpeed`, `formatGenerationSpeed`, `navItemForPath`, `CONVERSATION_KINDS`, `XIR_SECTIONS`, shadcn boilerplate); 100 dead locale keys per language (zh/en stay in parity); 32 dead CSS classes. `vite` and `@vitejs/plugin-react` moved to devDependencies.
+
 ## [3.4.2] - 2026-11-13
 
 ### Added

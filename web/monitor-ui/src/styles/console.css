@@ -1059,11 +1059,6 @@ body {
 
 /* The routing page keeps the 200-row summary read but paints 50 rows at a
  * time; the pager sits above the list, not inside the summary card. */
-.routing-pager {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--space-3);
-}
 
 /* The pager field is a small numeric input, not another full form control. */
 .pager-jump {
