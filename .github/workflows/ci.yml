@@ -61,6 +61,12 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+    # AllocGate 分配门禁（TestAllocGate*）是普通 Go 测试，已随上一步
+    # go test ./... 执行，无需重复。这里只把热路径基准各跑一次，
+    # 保证 benchmark 可编译可运行、不腐烂；时间不做硬门禁。
+    - name: Benchmark smoke
+      run: go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router
+
     - uses: actions/setup-python@v5
       with:
         python-version: '3.12'

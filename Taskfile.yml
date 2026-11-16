@@ -175,14 +175,24 @@ tasks:
       - go test -bench=. -benchmem ./...
 
   bench:core:
-    desc: Run benchmarks for core proxy, record/replay, router, store, secretmask, and LLM packages
+    desc: Run benchmarks for core proxy, record/replay, router, store, secretmask, LLM, xir, session, and gateway packages
     cmds:
-      - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask
+      - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./internal/gateway ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask ./pkg/session ./pkg/xir
 
   bench:secretmask:
     desc: Run credential/PII detection, masking and restore benchmarks
     cmds:
       - go test -count=1 -run '^$' -bench=. -benchmem ./pkg/secretmask
+
+  bench:gate:
+    desc: Run hot-path allocation gates (TestAllocGate* ordinary tests, also run by go test ./...)
+    cmds:
+      - go test -run 'AllocGate' ./pkg/... ./internal/gateway ./internal/router -count=1
+
+  bench:smoke:
+    desc: Smoke-run hot-path benchmarks once so they stay compilable and runnable
+    cmds:
+      - go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router
 
   deps:verify:
     desc: Verify module dependencies without editing go.mod or go.sum

@@ -23,8 +23,10 @@
 | `task test:atif` | `go test ./internal/trajectory ./internal/monitor` + `python3 -m unittest discover -s scripts/atif_tests` |
 | `task test:codex-fixtures` | `env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1` |
 | `task bench` | `go test -bench=. -benchmem ./...` |
-| `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask` |
+| `task bench:core` | `go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./internal/gateway ./pkg/llm ./pkg/recordfile ./pkg/replay ./pkg/secretmask ./pkg/session ./pkg/xir` |
 | `task bench:secretmask` | `go test -count=1 -run '^$' -bench=. -benchmem ./pkg/secretmask` |
+| `task bench:gate` | `go test -run 'AllocGate' ./pkg/... ./internal/gateway ./internal/router -count=1` |
+| `task bench:smoke` | `go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router` |
 | `task deps:verify` | `go mod verify` + `go list -mod=readonly ./...` |
 | `task deps:tidy` | `go mod tidy` |
 | `task build:go` | `go build -trimpath -ldflags=... -o server ./cmd/server` 以及 `-o trajecta ./cmd/trajecta` |
@@ -70,7 +72,7 @@ task run
 - `task test:race`：全套单元测试加 Go race detector；代理、路由、录制、存储或 streaming 改动必须补跑。
 - `task test:e2e`：本地端到端测试，覆盖 `internal/proxy`、`internal/monitor`、`cmd/server`、`cmd/trajecta`、`unittest`，不依赖外部网络。
 - `task test:cover`：写 `coverage.out`。
-- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`、`pkg/secretmask`）。`task bench:secretmask` 只跑检测、遮蔽与还原，覆盖 4 KiB–512 KiB 请求、凭据密度、流式分片与一次完整往返，用来量化代理开启 `secret_masking` 后每个请求增加的耗时。
+- `task bench`：全部 benchmark；`task bench:core` 只跑热路径包（`internal/proxy`、`internal/router`、`internal/store`、`internal/gateway`、`pkg/llm`、`pkg/recordfile`、`pkg/replay`、`pkg/secretmask`、`pkg/session`、`pkg/xir`）。`task bench:secretmask` 只跑检测、遮蔽与还原，覆盖 4 KiB–512 KiB 请求、凭据密度、流式分片与一次完整往返，用来量化代理开启 `secret_masking` 后每个请求增加的耗时。`task bench:gate` 与 `task bench:smoke` 是分配门禁与基准冒烟，见下文[性能与分配门禁](#性能与分配门禁)。
 - `task lint:vet`：单独跑 `go vet ./...`，与 golangci-lint 互补。
 - `task test:codex-fixtures`：离线 Codex Responses fixture runner；fixture 清单、覆盖范围与 runner 契约见 [Codex Responses fixtures](../tests/fixtures/codex/README.md)。
 
@@ -83,6 +85,45 @@ task run
 - 需要真实出网的少数套件（`tests/live`）有自己的 `TestMain` 范围之外，未安装该护栏；若某个默认套件确实要出网，用 `TRAJECTA_TEST_ALLOW_NETWORK=1 go test ...` 显式放开，不要把它写进默认测试环境。
 - 断言该护栏自身行为的用例在 `internal/testnet/guard_test.go`。
 - 新增「生产代码默认走 `http.DefaultClient`」的包时，应同时补上这个 `TestMain`。
+
+## 性能与分配门禁
+
+热路径函数的质量门禁用**分配数（allocs/op）**而不是时间：allocs/op 跨机器稳定，时间受硬件与负载影响，只做参考、不做硬门禁。
+
+**机制**：
+
+- 分配门禁是普通 Go 测试，命名为 `TestAllocGate*`，用 `testing.AllocsPerRun` 实测每次调用的堆分配次数，超过上限即失败。它们随 CI 的 `go test ./...` 自动执行，不需要额外步骤。
+- 每个门禁的注释写明：被测函数、基线测量值（测量机器与日期）、上限（基线 + 约 25% 余量取整）。零分配路径（如 `secretmask` prefilter 早退）上限为 0，不留余量。
+- 每个门禁配套同名基准（`Benchmark*`），fixture 与门禁完全一致，便于复测基线。
+- 已知低效点也先锁住现状防恶化：如 `internal/router` 的 `extractRequestFeatures` 目前 `ParseEnvelope` 两遍，门禁注释标注了这一点，P4 修复后应下调上限。
+
+**当前门禁覆盖**（文件均为 `*_gate_test.go`）：
+
+| 包 | 被测函数 |
+| --- | --- |
+| `pkg/xir` | `ParseEnvelope`（典型 chat body，含 tools/stream_options） |
+| `internal/router` | `extractRequestFeatures`（含双解析现状） |
+| `internal/gateway` | `InjectStreamOptions` / `xir.EnsureStreamIncludeUsage`（注入与已含两条路径） |
+| `pkg/secretmask` | `Detector.Scan`（清洁 body 零分配早退 / 含凭据 body） |
+| `pkg/recordfile` | `ParsePrelude`（V3 与 V2 各一） |
+| `pkg/session` | `Resolve`（头快路径 / body 回退） |
+
+**如何本地跑**：
+
+```bash
+task bench:gate    # 只跑全部分配门禁（go test -run 'AllocGate' ./pkg/... ./internal/gateway ./internal/router -count=1）
+task bench:smoke   # 热路径基准各跑一次（-benchtime 1x），保证基准可编译可运行
+task bench:core    # 热路径包完整基准（含 -benchmem）
+```
+
+CI 在 `go test -v ./...` 之后另有一步 benchmark smoke（`-benchtime 1x`），保证基准不腐烂；AllocGate 已随 `go test ./...` 执行，不重复跑。
+
+**如何更新上限**：
+
+1. 先复测基线：`go test ./<包> -run '^$' -bench <对应基准> -benchtime=100x -benchmem -count=1`，记录 allocs/op 与机器/日期。
+2. 上限 = 新基线 + 约 25% 余量向上取整；零分配路径保持 0。
+3. 同步更新门禁注释里的基线、上限与测量日期。
+4. **提高上限必须在 PR 说明理由**（为什么新增分配是必要的、考虑过哪些替代方案）；优化降低了分配时则应主动下调上限，而不是留着旧余量。
 
 ## 前端开发与 UI 测试
 
@@ -234,21 +275,22 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 4. `go mod download`。
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
-7. `go build -v -o server ./cmd/server` 与 `go build -v -o trajecta ./cmd/trajecta`（同时产出服务端与 CLI，供第 17 步上传）。
+7. `go build -v -o server ./cmd/server` 与 `go build -v -o trajecta ./cmd/trajecta`（同时产出服务端与 CLI，供第 18 步上传）。
 8. gofmt 检查：对 `./cmd ./internal ./pkg ./tests ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
 9. `go vet ./...`。
 10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.15.0`（首个支持 Go 1.27 的系列为 v2.13+，此处与本地 `task lint` 使用同一版本）。
-11. `go test -v ./...`。
-12. `actions/setup-python@v5`（Python `3.12`）。
-13. ATIF v1.8 校验：`python -m pip install -r scripts/atif-requirements.txt`、`python -m unittest discover -s scripts/atif_tests`、`ATIF_TEST_OUTPUT_DIR="$RUNNER_TEMP" go test ./internal/trajectory -run TestBuildCumulativeHistoryAndHumanCorrection -count=1`、`python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"`。
-14. 在 `web/monitor-ui` 执行 `bunx playwright install --with-deps chromium`。
-15. 在 `web/monitor-ui` 执行 `bun run test:ui`（mock 套件）。
-16. 在 `web/monitor-ui` 执行 `bun run test:ui:real`（真实 Go Monitor fixture 套件）。
-17. `actions/upload-artifact@v4` 上传构建产物 `trajecta-linux-amd64`。
+11. `go test -v ./...`（`TestAllocGate*` 分配门禁是普通测试，随这一步执行）。
+12. Benchmark smoke：`go test -run '^$' -bench . -benchtime 1x ./pkg/xir ./pkg/session ./pkg/recordfile ./pkg/secretmask ./internal/gateway ./internal/router`，保证热路径基准可编译可运行、不腐烂；时间不做硬门禁。
+13. `actions/setup-python@v5`（Python `3.12`）。
+14. ATIF v1.8 校验：`python -m pip install -r scripts/atif-requirements.txt`、`python -m unittest discover -s scripts/atif_tests`、`ATIF_TEST_OUTPUT_DIR="$RUNNER_TEMP" go test ./internal/trajectory -run TestBuildCumulativeHistoryAndHumanCorrection -count=1`、`python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"`。
+15. 在 `web/monitor-ui` 执行 `bunx playwright install --with-deps chromium`。
+16. 在 `web/monitor-ui` 执行 `bun run test:ui`（mock 套件）。
+17. 在 `web/monitor-ui` 执行 `bun run test:ui:real`（真实 Go Monitor fixture 套件）。
+18. `actions/upload-artifact@v4` 上传构建产物 `trajecta-linux-amd64`。
 
 另有 `docker` job，仅在 push 事件运行、依赖 `build` job：登录 Docker Hub 后构建并推送 `linux/amd64` 与 `linux/arm64` 多架构镜像，tag 由 `docker/metadata-action` 生成（`latest`、`sha`、版本 tag），并启用 gha 构建缓存。
 
-CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，与 `task fmt:check` 的覆盖范围相同；CI 跑 `go test -v ./...` 而不跑 `test:race`、`test:e2e` 和 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
+CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，与 `task fmt:check` 的覆盖范围相同；CI 跑 `go test -v ./...`（含 `TestAllocGate*` 分配门禁）加一步 `-benchtime 1x` 的 benchmark smoke（与 `task bench:smoke` 同范围），而不跑 `test:race`、`test:e2e` 和完整 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
 
 ## 给 AI Agent 的默认选择
 
