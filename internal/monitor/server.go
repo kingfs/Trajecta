@@ -1328,7 +1328,20 @@ func appHandler() http.Handler {
 			return
 		}
 		if _, err := fs.Stat(distFS, clean); err == nil {
+			if strings.HasPrefix(clean, "assets/") {
+				// Content-hashed build output: a new build changes the name,
+				// so the bytes under one name never change.
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// A missing build asset must 404, not fall back to index.html: a
+		// browser holding a cached pre-rebuild index asks for the old hashed
+		// names, and answering a module-script request with HTML makes the
+		// browser reject it on MIME type and white-screen the console.
+		if strings.HasPrefix(clean, "assets/") {
+			http.NotFound(w, r)
 			return
 		}
 		serveEmbeddedIndex(distFS, w, r)
@@ -1820,6 +1833,9 @@ func serveEmbeddedIndex(distFS fs.FS, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The entry point names the current hashed assets; a cached copy from a
+	// previous build would request names this binary no longer carries.
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(content)
 }
 

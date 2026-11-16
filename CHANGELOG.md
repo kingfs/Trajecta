@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Fixed
+- The Monitor console no longer white-screens after a UI rebuild when a browser (or an intermediate proxy) holds a cached pre-rebuild `index.html`. The entry point is now served with `Cache-Control: no-cache` so it is always revalidated, content-hashed `/assets/*` files are served as `immutable`, and a missing asset answers 404 instead of falling back to `index.html` — the old fallback answered module-script requests with `text/html`, which the browser rejects on MIME type. Pinned by `TestEmbeddedIndexIsNotCacheable`, `TestEmbeddedHashedAssetsAreImmutable`, `TestMissingAssetIs404NotIndexFallback` and `TestSPAFallbackStillServesIndexForRoutes`.
 - The rate-alerts panel no longer renders a dead "plan engine" select. The dropdown updated local state but the save mutation never submitted it and the rates-alerts settings API does not accept it; the live control is, and stays, the routing settings panel (`PATCH /api/settings/routing`).
 
 ### Removed
