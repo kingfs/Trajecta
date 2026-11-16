@@ -174,7 +174,7 @@ func TestChat(t *testing.T) {
 
 | 上游 / 接口面 | provider preset | 支持级别 |
 | --- | --- | --- |
-| OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`groq`、`xai`、`github`、`deepseek`、`moonshot`、`cerebras`、`perplexity` 等 | verified / compatible |
+| OpenAI-compatible | `openai`、`openrouter`、`fireworks`、`together`、`groq`、`xai`、`deepseek`、`moonshot`、`cerebras`、`perplexity` 等 | verified / compatible |
 | OpenAI Responses | 原生 `/v1/responses` 上游直通，或由本地 runtime 翻译为 chat completions | verified |
 | Anthropic Messages | `anthropic` | verified |
 | Google GenAI | `google_genai`、`google`、`gemini` | verified |

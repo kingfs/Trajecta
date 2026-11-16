@@ -164,25 +164,17 @@ debug:
 update_check:
   enabled: true
 
-# The anonymous install ping the Monitor UI sends. OFF: with no endpoint set the
-# browser contacts nothing. When it is on, the page reports the version, the
-# commit, the platform and this deployment's random install id (generated once,
-# kept in the application database under app_settings key "telemetry.install_id",
-# and shared by everyone who opens this Monitor, so the count is installations
-# rather than browsers), at most once per browser per `interval` - never what was
-# proxied, which models were used or who signed in.
+# Anonymous install telemetry. The Monitor UI sender was removed: no page sends
+# an install ping any more. These keys are kept for configuration compatibility
+# (they are still validated and returned verbatim by /api/about, together with
+# the server-generated install_id under app_settings key "telemetry.install_id"),
+# but with no sender, configuring them produces no outbound request.
 #
-#   provider: "custom"  POST the JSON payload (your own collector)
-#   provider: "ga4"     POST a Google Analytics 4 Measurement Protocol body;
-#                       put measurement_id and api_secret in the endpoint's
-#                       query string. Note that google-analytics.com is
-#                       unreachable from mainland China and is blocked by most
-#                       ad blockers, so the count only ever covers a subset.
-#   provider: "pixel"   GET an image at "<path_prefix>/<version>"; a hosted
-#                       GoatCounter-style counter reports the per-version split
-#                       straight from that path.
+#   provider: "custom"  POST a JSON payload (your own collector)
+#   provider: "ga4"     Google Analytics 4 Measurement Protocol
+#   provider: "pixel"   GET an image at "<path_prefix>/<version>"
 #
-# See docs/MONITOR_GUIDE.md for the exact payload and the collector contract.
+# See docs/MONITOR_GUIDE.md (匿名装机上报) for the current compatibility facts.
 telemetry:
   enabled: false
   provider: "custom"

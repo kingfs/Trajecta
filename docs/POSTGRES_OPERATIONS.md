@@ -288,7 +288,7 @@ LIMIT 50;
 
 ### 扩展手查（脚本不覆盖的表）
 
-`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句。注意下面这份表集合是示例而非全集：`semantic_nodes`（旧部署里最大的表；运行时代码已不再写入它，但 Postgres 的历史迁移仍会建表，所以只有运维手工 `DROP` 之后它才消失——把这个名字留在 `IN (...)` 里不会报错，`relname IN` 中的不存在表名只是匹配不到行，也可以直接删掉）、`responses`、`response_items`、`upstream_targets`、`upstream_models`、`channel_probe_runs`、`datasets`、`dataset_examples`、`scores`、`experiment_runs`、`parser_versions`、`users`、`api_tokens` 既不在脚本里，也不在下面这份列表里，需要时把它们加进 `IN (...)`。
+`scripts/postgres-baseline.sh` 固定覆盖上面的表集合，不包含 routing/model 配置表、`tool_call_audits`、`analysis_jobs`，也不把 `request_audits`、`execution_events`、`upstream_exchanges` 纳入索引使用查询。需要这些数据时手工执行以下语句。注意下面这份表集合是示例而非全集：`semantic_nodes`（旧部署里最大的表；运行时代码已不再写入它，且迁移 `20261111000000_drop_semantic_nodes` 已正式 DROP——新库不再有该表，只有尚未升级的旧部署可能仍有——把这个名字留在 `IN (...)` 里不会报错，`relname IN` 中的不存在表名只是匹配不到行，也可以直接删掉）、`responses`、`response_items`、`upstream_targets`、`upstream_models`、`channel_probe_runs`、`datasets`、`dataset_examples`、`scores`、`experiment_runs`、`parser_versions`、`users`、`api_tokens` 既不在脚本里，也不在下面这份列表里，需要时把它们加进 `IN (...)`。
 
 表大小（脚本外）：
 
@@ -473,7 +473,7 @@ Trajecta 热表优先级：
 
 ## 大表聚合的内存与并行度
 
-`semantic_nodes` 说明：本节与后面的「派生表修复里最容易踩的…」「第二容易踩的…」两节，都用旧库的 `semantic_nodes`（旧部署里最大的表）做实测。运行时代码已不再写入该表，但 Postgres 的历史迁移仍会建表且没有 drop 迁移，所以除非运维手工 `DROP`，它仍在；`trajecta upgrade db --reconcile-derived-trace-ids` 通过 `targetTableColumns` 从当前 Postgres 的 `information_schema` 动态发现带 `trace_id` 的派生表，所以只要表还在，下面的结论就继续适用；运维按 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 手工 `DROP TABLE semantic_nodes` 之后，这些章节随之作废。
+`semantic_nodes` 说明：本节与后面的「派生表修复里最容易踩的…」「第二容易踩的…」两节，都用旧库的 `semantic_nodes`（旧部署里最大的表）做实测。运行时代码已不再写入该表，且迁移 `20261111000000_drop_semantic_nodes` 已正式 DROP：新库不再有该表，只有尚未升级的旧部署可能仍有；`trajecta upgrade db --reconcile-derived-trace-ids` 通过 `targetTableColumns` 从当前 Postgres 的 `information_schema` 动态发现带 `trace_id` 的派生表，所以只要表还在，下面的结论就继续适用；旧库运行该 drop 迁移（或运维手工 `DROP TABLE semantic_nodes`）之后，这些章节随之作废。
 
 `/dev/shm` 决定并行查询能申请多少共享内存。容器默认只有 64 MB，`work_mem` 给得高、并行 worker 又多时，hash 聚合会直接失败：
 

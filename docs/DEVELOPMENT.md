@@ -235,7 +235,7 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 5. 在 `web/monitor-ui` 执行 `bun install --frozen-lockfile`。
 6. 在 `web/monitor-ui` 执行 `bun run build` 构建 Monitor UI。
 7. `go build -v -o server ./cmd/server` 与 `go build -v -o trajecta ./cmd/trajecta`（同时产出服务端与 CLI，供第 17 步上传）。
-8. gofmt 检查：对 `./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
+8. gofmt 检查：对 `./cmd ./internal ./pkg ./tests ./unittest ./web/monitor-ui/test-fixtures` 跑 `gofmt -l`，有未格式化文件即失败。
 9. `go vet ./...`。
 10. golangci-lint：`golangci/golangci-lint-action@v8`，版本 `v2.15.0`（首个支持 Go 1.27 的系列为 v2.13+，此处与本地 `task lint` 使用同一版本）。
 11. `go test -v ./...`。

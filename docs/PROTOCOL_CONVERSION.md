@@ -44,7 +44,7 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 - `Protocol.RequestPath(model, stream, vertex) (string, error)`：转换后请求应发往的上游路径。Gemini 的模型在路径里，`ValidateModelName` 只接受字母/数字/`-_.@/`，拒绝 `:`、`..`、空段和前后空白，避免 action 后缀被改写或路径逃逸；其余协议模型在 body 里。
 - `DetectFromPath`：只从请求头（路径）判定客户端协议，不读 body。`/v1/messages/count_tokens` 明确不可转换（语义/响应形状不同）。
 - `Result.Warnings`：转换丢掉的信息。`Fatal` 表示“丢弃会改变答案”，热路径据此拒绝请求；`Result.FatalWarnings()` 可直接取出。
-- **没有 `ConvertStreamResponse`**：流式转换是明确的非目标，已从库中移除；调用方不得用聚合式重编码代替逐帧翻译。流式请求需要原生直通上游。
+- **没有 `ConvertStreamResponse`**：流式转换是明确的非目标，已从库中移除；调用方不得用聚合式重编码代替逐帧翻译。流式请求需要原生直通上游。`xir` 引擎同样显式拒绝：`pkg/xir/convert` 对 `Stream:true`、请求体 `stream:true` 与 SSE 响应返回 `ErrStreamingConversion`。保持非目标的原因：流式转换需要一套独立的逐帧状态机、协议事件映射、工具/推理/usage 终止语义与回退策略，塞进现有非流式 API 会引入静默截断与首字节延迟；若未来立项，必须是独立入口与独立开关，不得复用 `protocol_conversion` 直接打开。
 
 ## 内容与字段映射
 

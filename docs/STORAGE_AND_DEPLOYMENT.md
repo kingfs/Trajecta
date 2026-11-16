@@ -100,7 +100,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`trajecta` 通过 `depends_on` 等待其 healthcheck 通过。
 - `searxng`：可选 hosted `web_search` provider 容器，只在 Compose `search` profile 下启动。
 - 卷：`trajecta-data` 挂到 `/app/data`（cassette 与显式选择的 SQLite 库都在这里），另有 `postgres-data`、`searxng-data`。
-- 镜像自身声明 `VOLUME ["/app/config", "/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；宿主端口由 compose 的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 映射。
+- 镜像自身声明 `VOLUME ["/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；`/app/config` 刻意不做 volume（匿名卷曾长期遮蔽镜像内配置，见 `Dockerfile` 注释），配置由 compose 以只读 bind mount 挂入；宿主端口由 compose 的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 映射。
 
 compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
 
@@ -125,9 +125,9 @@ docker compose up -d
 迁移与首个用户（手动等价路径）：
 
 ```bash
-docker compose run --rm trajecta -c /app/config/config.yaml db migrate up
+docker compose run --rm --entrypoint /app/bin/trajecta trajecta -c /app/config/config.yaml db migrate up
 docker compose up -d
-docker compose exec trajecta /app/bin/server -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
 从 `llm-tracelab` 升级已有部署：
@@ -233,7 +233,7 @@ trajecta db cleanup requests --status 404 [--apply] [--keep-cassettes]
 ## 明确不支持的生产能力
 
 - 公共多租户 relay、计费、订阅或配额转售平台：明确不做。
-- proxy 热路径的跨协议转换：不做；非 Responses 流量保持 protocol-aware pass-through + recording。
+- proxy 热路径的跨协议转换：默认关闭；显式开启 `router.selection.protocol_conversion` 后，仅在本轮没有可选原生候选时对非流式 chat/messages/gemini 请求兜底转换（见 [协议转换](./PROTOCOL_CONVERSION.md)）。`/v1/responses` 永不被转发路径转换，流式转换是非目标；默认行为仍是 protocol-aware pass-through + recording。
 - 对所有 upstream 的 native Responses 语义介入：未实现；当前本地 Responses runtime 以 OpenAI 兼容 Chat Completions 为后端。
 - 独立的 Postgres auth 迁移命名空间：未实现；auth 表仍共享应用迁移集，`auth migrate down` 被阻止。
 - SQLite 版本化应用迁移：未实现；SQLite 只在显式选择时作本地启动建表，生产唯一版本化路径是 Postgres。
@@ -248,8 +248,8 @@ trajecta db cleanup requests --status 404 [--apply] [--keep-cassettes]
 部署自检只列容器内的部署特定入口：
 
 ```bash
-docker compose run --rm trajecta -c /app/config/config.yaml config inspect
-docker compose run --rm trajecta -c /app/config/config.yaml doctor --check-db
+docker compose run --rm --entrypoint /app/bin/trajecta trajecta -c /app/config/config.yaml config inspect
+docker compose run --rm --entrypoint /app/bin/trajecta trajecta -c /app/config/config.yaml doctor --check-db
 ```
 
 - `doctor --probe-providers` 会显式发起网络探测；默认检查保持保守，不应静默访问 upstream provider。

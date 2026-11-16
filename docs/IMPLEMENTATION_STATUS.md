@@ -123,7 +123,7 @@ Codex 兼容性：`tests/fixtures/codex/` 存放离线 fixture，`task test:code
 
 ## Monitor
 
-Monitor 是 Go embed 的 React/Vite 前端。左侧导航分 监控（Overview、Traces、Events、Audit）、配置（Channels、Models、Connect）、系统（System 仅 admin、About 所有已登录角色）三组，导航底部显示当前版本并链到 About、同时给出仓库链接；Traces 用 tab 区分 Requests/Sessions，Audit 用 tab 区分 Findings/Request lineage/Analysis jobs/Data health，Connect 用 tab 区分 Client setup/API tokens，System 用 tab 区分 Host/Server/Network proxy/Database/Slow queries/Server-side tools。合并掉的旧入口保留重定向并保留查询参数：`/requests` → `/traces`、`/sessions` → `/traces?tab=sessions`、`/analysis` → `/audit?tab=analysis`、`/tokens` → `/connect?tab=tokens`、`/providers*` 与 `/routing` → `/channels`。另有一级入口「渠道」（canonical `/channels`）与 trace／session／channel／model／upstream 详情页；独立 Routing 页已移除，设置/检查器在渠道页，别名在模型页。模型页用 tab 区分模型广场（默认，列出所有渠道配置的模型及 Argus 元数据）与实时统计（仅窗口内有流量的模型）；模型详情用 tab 区分概览（模型信息、渠道覆盖、Codex 配置）与实时统计（用量、趋势、渠道用量）。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
+Monitor 是 Go embed 的 React/Vite 前端。左侧导航分 监控（Overview、流量、Events、质量）、配置（Channels、Models、Plugins〔仅 admin〕、Connect）、系统（System 仅 admin、About 所有已登录角色）三组，导航底部显示当前版本并链到 About、同时给出仓库链接；流量用 tab 区分 Requests/Sessions，质量用 tab 区分 发现项/遮蔽映射/抑制名单/请求链路/分析任务/数据健康/XIR 结构，Connect 用 tab 区分 Client setup/API tokens，System 用 tab 区分 Host/Server/Network proxy/Database/Slow queries/Server-side tools。合并掉的旧入口保留重定向并保留查询参数：`/requests` → `/traces`、`/sessions` → `/traces?tab=sessions`、`/analysis` → `/audit?tab=analysis`、`/tokens` → `/connect?tab=tokens`、`/providers*` 与 `/routing` → `/channels`。另有一级入口「渠道」（canonical `/channels`）与 trace／session／channel／model／upstream 详情页；独立 Routing 页已移除，设置/检查器在渠道页，别名在模型页。模型页用 tab 区分模型广场（默认，列出所有渠道配置的模型及 Argus 元数据）与实时统计（仅窗口内有流量的模型）；模型详情用 tab 区分概览（模型信息、渠道覆盖、Codex 配置）与实时统计（用量、趋势、渠道用量）。Trace detail 的 Reading guide 在 payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id` 时，提供 Responses audit 跳转入口。
 
 Session 详情页提供默认（带上限）与完整流式两种导出（UI 标签 `导出轨迹 (ATIF)` / `完整导出 (NDJSON 流)`），从该会话的客户端可见 cassette 重建轨迹并在浏览器下载 `session-<id>.atif.jsonl`（流式为 `session-<id>.atif.ndjson`）：格式固定为 ATIF-v1.8，默认只重建最早的 500 条 trace 并在响应 `extra` 里给出 `trace_count` / `included_traces` / `truncated` / `trace_cap`，`?full=1` 取消上限，`?stream=1` 走 NDJSON 流式输出；不调用模型、不修改 cassette。接口契约见 [Monitor 指南](./MONITOR_GUIDE.md)。
 
@@ -183,7 +183,7 @@ MCP 通过 management server 的 streamable HTTP 暴露，定位是只读排障�
 语义解析与派生分析层已实现：
 
 - `pkg/observe` 的 parser registry，含 OpenAI、Anthropic、Gemini/Vertex parser；`trace_observations` 持久化紧凑摘要（parser、status、usage、warnings 等）并可在 trace detail 展示；节点树不落库，Protocol/详情视图打开单条 trace 时用 `observeworker.ReparseTrace` 从 cassette 重解析；parser 失败写入 system events。
-- 资源索引：`internal/resources` 在解析 worker 每次成功解析后，从模型自己产生的工具调用（响应侧、请求侧 assistant 历史、entry 的原始请求/响应）的参数、shell 操作数与 patch 头部提取本地路径与 URL（消息正文、工具结果与代码内容不参与），路径 key 与 shell 操作数里的相对目录没有扩展名也算（`/dev/null` 等设备 sink 不计），按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；trace 详情的 资源 tab 通过 `GET /api/traces/{id}/resources` 读取，详情页「解析资源」按钮触发一次 reparse 写入索引。全局「质量 → 资源」页已移除（质量页现有 6 个 tab：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康）；后端 `GET /api/resources` 与 `POST /api/resources/backfill` 仍保留，但没有 UI 入口，历史 trace 也可直接用 backfill 端点排队重解析。
+- 资源索引：`internal/resources` 在解析 worker 每次成功解析后，从模型自己产生的工具调用（响应侧、请求侧 assistant 历史、entry 的原始请求/响应）的参数、shell 操作数与 patch 头部提取本地路径与 URL（消息正文、工具结果与代码内容不参与），路径 key 与 shell 操作数里的相对目录没有扩展名也算（`/dev/null` 等设备 sink 不计），按值去重后写入 `resources`（全局目录，`(kind, value_hash)` 唯一）与 `trace_resources`（trace 关系，含首次出现顺序与出现步骤数）；只记录访问对象，不保存文件内容，也不写 `secret_mask_mappings.db`。计数读取时从关系聚合，重解析替换该 trace 的关系；trace 详情的 资源 tab 通过 `GET /api/traces/{id}/resources` 读取，详情页「解析资源」按钮触发一次 reparse 写入索引。全局「质量 → 资源」页已移除（质量页现有 7 个 tab：发现项、遮蔽映射、抑制名单、请求链路、分析任务、数据健康、XIR 结构）；后端 `GET /api/resources` 与 `POST /api/resources/backfill` 仍保留，但没有 UI 入口，历史 trace 也可直接用 backfill 端点排队重解析。
 - deterministic audit detectors（经 `internal/detector` 以观测插件暴露，runner 由插件快照提供）：危险 shell/命令、凭据与敏感信息、provider safety signal、tool error，以及复用 `pkg/secretmask` 的个人数据检测（`pii`，只报可改写档的身份证号与手机号，evidence 里的命中值替换为 `[redacted]`）；结果写入 `trace_findings`，可通过 Monitor 和 MCP 查询。审计 XIR 投影的检测引擎由插件快照按 Point 提供（`Inspector.Detectors`，缺省回退内置 secretmask 扫描器）。
 - 重分析 job 类型：`trace_reparse`、`trace_rescan`、`trace_repair_usage`、`trace_reanalyze`、`session_reanalyze`、`batch_reanalyze`，状态持久化在 `analysis_jobs`。
 - parser/analyzer/router/upstream 事件写入 system events。
@@ -231,14 +231,14 @@ Responses audit 属于部分实现，职责边界如下：
 已接入的 core 路径：
 
 - router：`xir.ParseEnvelope` 读取请求 envelope；`pkg/session` 解析 sticky；`pkg/route` 可通过 `router.selection.plan_engine=route` 参与最终排序（默认 `legacy`，`priority_mode=compat` 不变）；
-- proxy/gateway：`Body{Client,Record,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`（canonical `pkg/usage` + recorder 投影）、`ResponsePipeline`、`ResponseTransform`；
+- proxy/gateway：`Body{Client,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`（canonical `pkg/usage` + recorder 投影）、`ResponsePipeline`、`ResponseTransform`；
 - upstream：`capabilities.endpoints` 按协议选择 base URL，`BuildURLForProtocol` 在 conversion 后显式选择；
 - audit：cassette → `pkg/xir/audit` → `GET /api/traces/<id>/xir`，Chat SSE 装配，`pkg/detect` advisory `detections`（不含明文值），单 trace ATIF；
 - recorder：`trace.minimal_cassette` 仓库默认开启，raw HTTP + layout/identity 入 cassette，routing/harness/usage 留 DB。
 
 明确的边界/未完成：
 
-- 跨协议 streaming conversion 仍是 non-goal；只有非流式 conversion；评估见 `design/STREAMING_CONVERSION_ASSESSMENT.md`；
+- 跨协议 streaming conversion 仍是 non-goal；只有非流式 conversion；边界与原因见 [协议转换](./PROTOCOL_CONVERSION.md)；
 - OAuth 只有类型/接口预留，没有网络流程与凭据表；
 - per-model 多协议 wire name 尚未建模；
 - `plan_engine=route` 尚未设为默认，需继续对比后再决定。

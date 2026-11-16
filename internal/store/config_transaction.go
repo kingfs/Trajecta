@@ -15,9 +15,10 @@ import (
 // raw SQL and ent operations share one transaction. The callback must commit
 // explicitly, after preparing its runtime snapshot; all other exits roll back.
 //
-// The transaction is also the only writer of upstream_targets/upstream_models,
-// so it holds the upstream write lock for its whole duration. See
-// LockUpstreamWrites and TryLockUpstreamWrites for the refresh path.
+// It holds the upstream write lock for its whole duration, serializing against
+// the channel probe's upstream_models projection (ReplaceUpstreamModels) and
+// bundle imports. upstream_targets/upstream_models are legacy projections: the
+// router no longer writes them and publishes routing state in memory only.
 func (s *Store) ConfigurationTransaction(ctx context.Context, apply func(*Store, func() error) error) error {
 	if s == nil || s.db == nil || s.shared == nil {
 		return fmt.Errorf("configuration transaction: %w", errorsNewStoreClosed())

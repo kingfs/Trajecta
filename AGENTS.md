@@ -58,7 +58,7 @@ Structured state (trace index, sessions, channel/provider config, upstream targe
 - Management writes (channels, models, aliases, provider setup, probe apply) must go through one `store.ConfigurationTransaction`; runtime routing is published only after the commit succeeds, and background upstream refresh persists best-effort through the same upstream write lock. A bundle import is the other writer of that transaction: it holds the same lock for the whole merge, so it cannot interleave with a Monitor channel write.
 - `trajecta export`/`import` move the non-derivable set (`channel_*`, `model_aliases`, `model_catalog`, `logs`, `upstream_exchanges`, `credential_mask_audits`, `analysis_runs`, the evaluation and audit tables, `system_events`) plus the cassettes they reference. Derived tables (`trace_observations`, `trace_findings`, `parse_jobs`, `analysis_jobs`, `session_summaries`, `resources`, `trace_resources`) are deliberately not transported and are rebuilt from cassettes by the target. `semantic_nodes` was dropped by migration `20261111000000_drop_semantic_nodes`.
 
-Lock ordering, transaction scope, and marker reset semantics are owned by `docs/ARCHITECTURE.md:118-156` (sections `## 存储边界`, `## 并发与一致性`).
+Lock ordering, transaction scope, and marker reset semantics are owned by `docs/ARCHITECTURE.md:132-169` (sections `## 存储边界`, `## 并发与一致性`).
 
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing. With `router.selection.protocol_conversion` enabled (default off) it can translate a non-streaming chat/messages/gemini request to another protocol family when, and only when, no native candidate is selectable; `/v1/responses` keeps using the local Responses runtime and is never translated in the forwarding path.
@@ -66,7 +66,7 @@ The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions
 
 ## Record File Format
 
-The byte layout is owned by `docs/ARCHITECTURE.md:102-117` (section `## 录制格式`). Binding invariants:
+The byte layout is owned by `docs/ARCHITECTURE.md:114-130` (section `## 录制格式`). Binding invariants:
 
 - writers emit V3 only, unless a migration task explicitly says otherwise
 - `trace.minimal_cassette` is a prelude shape switch: raw HTTP + layout/identity only, no events; the database index keeps the full header and the raw exchange remains the source of truth. The tracked `config/config.yaml` enables it; a config without the key (older deployment) keeps the full prelude.

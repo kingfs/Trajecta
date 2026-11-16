@@ -24,8 +24,8 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 顶层目录与包职责：
 
 - `cmd/server`：服务端二进制入口与 `serve` 装配。`main.go` 只通过 `run` 退出，`root.go` 只接线 `serve`、`version`、`completion` 与 `--config`/`--format`——除 `serve` 外不再承载运维子命令。`management.go` 提供 serve 与测试共用的管理 HTTP/MCP 装配。
-- `cmd/trajecta`：运维 CLI 入口。除既有的 `upgrade`、`layout`、`version` 外，还通过 `internal/cli` 暴露全部不需要代理进程的运维命令组：`analyze`、`audit`、`auth`、`config`、`db`、`doctor`、`migrate`、`models`、`provider`、`schema`、`tools`。`root.go` 用 viper 绑定 `--config`/`--format` 后交给 `internal/cli.Register`。
-- `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`doctor.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
+- `cmd/trajecta`：运维 CLI 入口。除既有的 `upgrade`、`layout`、`version` 外，还通过 `internal/cli` 暴露全部不需要代理进程的运维命令组：`analyze`、`audit`、`auth`、`config`、`db`、`doctor`、`export`、`import`、`migrate`、`models`、`provider`、`schema`、`tools`。`root.go` 用 viper 绑定 `--config`/`--format` 后交给 `internal/cli.Register`。
+- `internal/cli`：两个二进制共用的 CLI 契约与运维命令实现。契约是退出码表、JSON envelope、`Runtime`（`--config`/`--format`）、`Execute` 顶层错误路径与 ERROR 日志 recorder；命令文件是 `analyze.go`、`audit.go`、`auth.go`、`config.go`、`db.go`、`db_cleanup.go`、`db_secret_mapping.go`、`doctor.go`、`export.go`、`import.go`、`migrate.go`、`models.go`、`provider.go`、`schema.go`、`tools.go`。`cmd/server` 只引用契约，不注册其中任何命令。
 - `internal/appdb`：按配置打开 application database 的共用入口——驱动规范化、迁移模式判定、`MigrateUp`/`OptimizeIndexes`、`Open`/`Initialize` 与 auth store 打开；serve 启动与 trajecta 的 `db`/`auth`/`audit`/`analyze` 都走这里。
 - `internal/proxy`：反向代理与 `/v1/responses` 入口，负责鉴权、转发、响应截获与协议感知透传调整。
 - `internal/gateway`：转发 core 的协议无关类型；`Body{Client,Wire}` 保证 cassette/record 字节与上游 wire 字节不混用，`RequestTransform` 固定 alias → conversion → masking 顺序并返回 record/wire 两套字节；`ResponseBody{Upstream,Client}` 对应响应侧原始流/客户端流；`UsageSniffer` 负责响应流 tee、计数、usage pipeline 与 cassette 写入；`ResponsePipeline` 固定 upstream → Restorer → UsageSniffer → client 的顺序；`ResponseTransform` 负责响应缓冲/转换/header 重写。
@@ -149,7 +149,7 @@ application DB 是结构化查询源：
 
 会话汇总（`session_summaries`）是唯一仍由写入路径增量维护的派生表。录制路径只把待重建的 session 记进进程内队列，不自己做整会话聚合；`serve` 通过 `Store.StartDerivedRefresh()` 让后台 goroutine 成为唯一消费者（写入直接唤醒，2 秒 ticker 兜底），因此派生重建不再由读取请求买单，读取端最多观察到亚秒级滞后。未启动 flusher 的调用方保持同步语义（读取端先 flush）。
 
-派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表里，`overview_metric_buckets` / `overview_metric_bucket_members` 已由 Postgres 迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP（SQLite 启动 schema 同样不再创建）；`semantic_nodes` 仍由 Postgres 历史迁移创建（没有 drop 迁移），代码不读取也不写入它，回收空间是运维的手工决定（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
+派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表里，`overview_metric_buckets` / `overview_metric_bucket_members` 已由 Postgres 迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP（SQLite 启动 schema 同样不再创建）；`semantic_nodes` 已由 Postgres 迁移 `20261111000000_drop_semantic_nodes` 正式 DROP（SQLite 启动 schema 同样不再创建）：新库不会建表，旧库升级时数据随表删除，down 迁移只重建空表、不恢复数据（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
 
 Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个有界磁盘缓存：键为 `(session_id, last_trace_id, trace_count, limit)`，条目以临时文件加 rename 原子写入，最多保留 512 条 / 512 MiB。它是纯派生数据，任何时候都可以删除并按下述 cassette 重建；`?full=1` 与 `?stream=1` 不读写该缓存。
 

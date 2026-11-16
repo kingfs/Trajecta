@@ -174,7 +174,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 
 | Upstream / surface | Provider presets | Support |
 | --- | --- | --- |
-| OpenAI-compatible | `openai`, `openrouter`, `fireworks`, `together`, `groq`, `xai`, `github`, `deepseek`, `moonshot`, `cerebras`, `perplexity` and more | verified / compatible |
+| OpenAI-compatible | `openai`, `openrouter`, `fireworks`, `together`, `groq`, `xai`, `deepseek`, `moonshot`, `cerebras`, `perplexity` and more | verified / compatible |
 | OpenAI Responses | native `/v1/responses` pass-through, or translated to chat completions by the local runtime | verified |
 | Anthropic Messages | `anthropic` | verified |
 | Google GenAI | `google_genai`, `google`, `gemini` | verified |
