@@ -196,11 +196,9 @@ TRAJECTA_DATABASE_DSN='postgres://user:pass@127.0.0.1:5432/llm_tracelab?sslmode=
 | `prelude_unterminated` / `layout_mismatch` | 录制被中断，前言没有空行或长度不自洽 | 用 `--tolerate-partial` 降级为 warning，或删除该录制后重建索引 |
 | compose 里旧前缀变量被忽略 | 二进制只读 `TRAJECTA_*` | 同步更新 `docker-compose.yml` 的 `environment:` |
 
-## 与 `scripts/migrate-to-trajecta.sh` 的关系
+## 与旧轻量脚本的关系
 
-`scripts/migrate-to-trajecta.sh` 仍然可用，适合只做「`.env` 前缀改写 + SQLite 文件改名 + 人工确认清单」的轻量场景（它默认 dry-run，并在写入前备份 `.env`）。它不适合大库：cassette 阶段为每个文件起一个 `head` 进程，数十万文件会非常慢。
-
-CLI `trajecta upgrade` 是当前推荐路径：它读同一份 `.env`、并发处理 cassette、把 SQLite 条目真正合并进 Postgres，并在验证通过后归档文件。
+旧的 `scripts/migrate-to-trajecta.sh` 已移除。它提供的 `.env` 前缀改写、SQLite 改名与 cassette magic 统计全部由 `trajecta upgrade`（`env` / `db` / `cassettes census`）覆盖，CLI 是唯一推荐路径：它读同一份 `.env`、并发处理 cassette、把 SQLite 条目真正合并进 Postgres，并在验证通过后归档文件。脚本的 cassette 重写用跨目录临时文件加 `mv`，非原子且不保留 mtime，会触发 `Store.Sync` 对整个 vault 重新索引；CLI 的 `cassettes rewrite` 是同目录临时文件加 fsync 加原子 rename，并保留 mtime。
 
 ## 整理 cassette 目录布局（可选）
 
