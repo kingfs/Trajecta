@@ -1,0 +1,61 @@
+name: Live smoke (real upstream)
+
+# Black-box suite against a real LLM gateway: proxy entry, recording, index,
+# Monitor read/write surfaces, MCP, observation analysis, record->replay
+# fidelity, failover and outage contracts (tests/live). Costs real tokens, so
+# it is opt-in: it runs on manual dispatch and on a nightly schedule, and
+# skips itself gracefully until the repository secrets below are configured.
+#
+# Required secrets:
+#   TRAJECTA_LIVE_API_KEY        upstream API key (seeded into the channel)
+#   TRAJECTA_LIVE_CHAT_BASE      OpenAI-compatible base, incl. API prefix
+#   TRAJECTA_LIVE_MESSAGES_BASE  Anthropic-compatible base, incl. API prefix
+# Optional variables:
+#   TRAJECTA_LIVE_MODEL          default deepseek-flash
+#
+# Cassettes recorded by the suite contain raw request bodies (credentials by
+# design); nothing from the workdir is uploaded as an artifact.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 19 * * *'  # 03:00 Asia/Shanghai
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.27.x'
+        cache: true
+
+    - name: Check live credentials
+      id: guard
+      env:
+        LIVE_KEY: ${{ secrets.TRAJECTA_LIVE_API_KEY }}
+      run: |
+        if [ -z "$LIVE_KEY" ]; then
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::TRAJECTA_LIVE_API_KEY is not configured; skipping the live smoke suite."
+        else
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run live suite (compose stack + seed + black-box tests)
+      if: steps.guard.outputs.ready == 'true'
+      env:
+        TRAJECTA_LIVE_API_KEY: ${{ secrets.TRAJECTA_LIVE_API_KEY }}
+        TRAJECTA_LIVE_CHAT_BASE: ${{ secrets.TRAJECTA_LIVE_CHAT_BASE }}
+        TRAJECTA_LIVE_MESSAGES_BASE: ${{ secrets.TRAJECTA_LIVE_MESSAGES_BASE }}
+        TRAJECTA_LIVE_MODEL: ${{ vars.TRAJECTA_LIVE_MODEL || 'deepseek-flash' }}
+        TRAJECTA_LIVE_WORKDIR: ${{ runner.temp }}/trajecta-live
+      run: tests/live/run-live.sh
+
+    - name: Tear down stack
+      if: always() && steps.guard.outputs.ready == 'true'
+      run: docker compose -f tests/live/docker-compose.live.yml down -v

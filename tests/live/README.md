@@ -15,9 +15,8 @@
 ```bash
 # 1) 准备上游凭据
 export TRAJECTA_LIVE_API_KEY=sk-...
-export TRAJECTA_LIVE_CHAT_API_BASE=https://<gateway>/api/openai
-export TRAJECTA_LIVE_RESPONSES_API_BASE=https://<gateway>/api/openai
-export TRAJECTA_LIVE_MESSAGES_API_BASE=https://<gateway>/api/anthropic
+export TRAJECTA_LIVE_CHAT_BASE=https://<gateway>/api/openai
+export TRAJECTA_LIVE_MESSAGES_BASE=https://<gateway>/api/anthropic
 export TRAJECTA_LIVE_MODEL=deepseek-flash
 
 # 2) 构建镜像
@@ -37,9 +36,8 @@ tests/live/run-live.sh
 |---|---|---|
 | `TRAJECTA_LIVE_UPSTREAM` | 是 | 置 `1` 才运行；否则所有用例 `t.Skip` |
 | `TRAJECTA_LIVE_API_KEY` | 是 | 上游 API key；由 `seed-channels.sh` 写入应用数据库的渠道记录 |
-| `TRAJECTA_LIVE_CHAT_API_BASE` | 是 | Chat Completions 上游 base（需含 API 前缀） |
-| `TRAJECTA_LIVE_RESPONSES_API_BASE` | 是 | Responses 上游 base |
-| `TRAJECTA_LIVE_MESSAGES_API_BASE` | 是 | Anthropic Messages 上游 base |
+| `TRAJECTA_LIVE_CHAT_BASE` | 是 | Chat Completions 上游 base（需含 API 前缀）；Responses 能力种在同一渠道上，无独立 base 变量 |
+| `TRAJECTA_LIVE_MESSAGES_BASE` | 是 | Anthropic Messages 上游 base |
 | `TRAJECTA_LIVE_MODEL` | 否 | 默认 `deepseek-flash` |
 | `TRAJECTA_LIVE_SERVER_URL` | 否 | 默认 `http://127.0.0.1:18080` |
 | `TRAJECTA_LIVE_MONITOR_URL` | 否 | 默认 `http://127.0.0.1:18081` |

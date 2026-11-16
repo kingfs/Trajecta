@@ -203,7 +203,20 @@ trajecta -c config/config.yaml --format json db secret status
 - `status` 只输出路径、可读性与 fingerprint，不打印密钥；`export --out` 以 `0600` 权限写备份文件，不带 `--out` 时把 key 写到 stdout。
 - `rotate --yes` 缺少 `--yes` 会拒绝执行；确认后备份旧 key、写入新 key，并重加密渠道 API key 与敏感 header。
 
-## 集成测试与 smoke test
+## 集成测试分层
+
+| 层 | 资产 | 触发 | 依赖 |
+| --- | --- | --- | --- |
+| 离线单元/e2e | `go test ./...`（72 包，含 proxy 全链路 e2e、分配门禁、parity 常驻断言） | 每次 CI / 本地 | 无网络、无外部服务 |
+| Postgres 集成 | `TRAJECTA_TEST_POSTGRES_DSN` 门控测试（版本化迁移与幂等、read pool/语句超时、Overview GROUPING SETS 奇偶、rpm/tpm 读模型、secret-mapping 管理、Responses runtime store、SQLite→Postgres 合并与 layout apply 的 PG 路径） | CI `postgres-integration` job（postgres:17-alpine 服务容器，`-p 1` 串行——多个套件对同一 DSN 应用迁移） | 一次性 PG 库；本地导出 DSN 即可跑 |
+| 转换接线级 e2e | `internal/proxy/protocol_conversion_matrix_e2e_test.go`：9 个跨协议转换对 + 同协议直通对照 + native 优先 + 流式拒绝 + responses 入口不转换（stub 上游，离线） | 随 `go test ./...` | 无 |
+| 转换引擎级 parity | `pkg/xir/convert/parity_test.go`（672 cell，见 [协议转换](./PROTOCOL_CONVERSION.md)） | 随 `go test ./...` | 无 |
+| 浏览器 mock/real | `task ui:test` / `ui:test:real` | 每次 CI | Chromium |
+| Live 黑盒（真实上游） | `tests/live`（录制→回放保真、Monitor/MCP、故障切换/断供契约） | `.github/workflows/live-smoke.yml`：手动 dispatch + 每晚 03:00（Asia/Shanghai）；**未配置密钥时优雅跳过** | 仓库 secrets：`TRAJECTA_LIVE_API_KEY`、`TRAJECTA_LIVE_CHAT_BASE`、`TRAJECTA_LIVE_MESSAGES_BASE`；可选 variable `TRAJECTA_LIVE_MODEL`。花费真实 token；cassette 含原始请求体，**不上传任何工作区 artifact** |
+
+**升级演练（llm-tracelab → trajecta）**：Go 级路径已由 PG 集成 job 覆盖（`internal/legacymigrate` 的合并/布局 PG 测试 + `internal/appdbmigrate` 迁移链）。整栈演练按 [从 llm-tracelab 迁移](./LEGACY_MIGRATION.md) 手工执行：起 `tests/live/run-live.sh` 栈或生产 compose → 用旧品牌 `.env`/SQLite/cassette 布置旧部署形态 → `trajecta upgrade env/db/cassettes`（默认 dry-run，`--apply` 写入）→ `scripts/postgres/acceptance.sh` 做 PG 侧验收。仓库不含旧部署的整栈 fixture，演练是运维步骤而非 CI job。
+
+## 集成 smoke test（Codex + hosted tools）
 
 用于在目标实例（例如 `http://<your-host>:<port>`）上验证 Codex + 本地 Responses runtime + hosted tools 链路。
 
@@ -289,7 +302,11 @@ trajecta -c config/config.yaml --format json audit tool-calls --latest-by-call -
 17. 在 `web/monitor-ui` 执行 `bun run test:ui:real`（真实 Go Monitor fixture 套件）。
 18. `actions/upload-artifact@v4` 上传构建产物 `trajecta-linux-amd64`。
 
+另有 `postgres-integration` job（与 `build` 并行）：postgres:17-alpine 服务容器 + `TRAJECTA_TEST_POSTGRES_DSN`，以 `-p 1` 串行跑 DSN 门控的集成测试（见[集成测试分层](#集成测试分层)）。
+
 另有 `docker` job，仅在 push 事件运行、依赖 `build` job：登录 Docker Hub 后构建并推送 `linux/amd64` 与 `linux/arm64` 多架构镜像，tag 由 `docker/metadata-action` 生成（`latest`、`sha`、版本 tag），并启用 gha 构建缓存。
+
+`.github/workflows/live-smoke.yml` 独立于 ci.yml：手动 dispatch 与每晚定时触发，跑 `tests/live/run-live.sh` 整栈黑盒套件；未配置 `TRAJECTA_LIVE_API_KEY` 等 secrets 时打印 notice 并跳过，不产生失败。
 
 CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/test-fixtures`，与 `task fmt:check` 的覆盖范围相同；CI 跑 `go test -v ./...`（含 `TestAllocGate*` 分配门禁）加一步 `-benchtime 1x` 的 benchmark smoke（与 `task bench:smoke` 同范围），而不跑 `test:race`、`test:e2e` 和完整 `bench`；CI 也做 ATIF v1.8 校验，覆盖 `task test:atif` 的两半（`python -m unittest discover -s scripts/atif_tests` 与 `go test ./internal/trajectory`），但 Go 那半带 `ATIF_TEST_OUTPUT_DIR` 且用 `-run TestBuildCumulativeHistoryAndHumanCorrection` 只跑该用例、不跑 `./internal/monitor`，随后直接调用 `python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"` 校验生成的 JSONL。
 

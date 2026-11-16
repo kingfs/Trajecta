@@ -355,17 +355,22 @@ func TestPostgresRateQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usageSummariesByModel(postgres) error = %v", err)
 	}
-	if got := grouped[model]; got.RequestCount != 2 || got.CurrentRPM != 1 || got.CurrentTPM != 40 {
+	// Model groups are keyed by LOWER(model) (see usageSummaryGroupKeys); the
+	// unique model name carries uppercase letters from t.Name().
+	if got := grouped[strings.ToLower(model)]; got.RequestCount != 2 || got.CurrentRPM != 1 || got.CurrentTPM != 40 {
 		t.Fatalf("postgres grouped summary = %+v, want requests 2 and rates 1/40", got)
 	}
 
-	breaches, _, err := st.EvaluateRatesAlerts(RatesAlertsSettings{Enabled: true, MaxRPM: 1, MaxTPM: 1000000, Severity: "warning"})
+	// Breach semantics are strictly-greater (ratesBreachFor): the model's
+	// trailing-60s rates are RPM 1 / TPM 40, so MaxRPM 1 does not breach but
+	// MaxTPM 39 does.
+	breaches, _, err := st.EvaluateRatesAlerts(RatesAlertsSettings{Enabled: true, MaxRPM: 1, MaxTPM: 39, Severity: "warning"})
 	if err != nil {
 		t.Fatalf("EvaluateRatesAlerts(postgres) error = %v", err)
 	}
 	var modelBreach *RatesBreach
 	for index := range breaches {
-		if breaches[index].Scope == RatesAlertScopeModel && breaches[index].Key == model {
+		if breaches[index].Scope == RatesAlertScopeModel && strings.EqualFold(breaches[index].Key, model) {
 			modelBreach = &breaches[index]
 		}
 	}
