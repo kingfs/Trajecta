@@ -2,7 +2,17 @@
 
 Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致时，请求字节原样转发，不做任何转换。协议转换是**可选兜底**（`router.selection.protocol_conversion: true`，默认关闭）：只有上游无法原生承接客户端协议时，才把请求/响应在四种协议之间翻译。
 
-转换引擎由 `router.selection.protocol_conversion_engine` 选择：`legacy`（默认，`pkg/protocolconvert` 的 `pkg/llm` adapter 路径）或 `xir`（`pkg/xir/convert` 的 Exchange IR hub）。两条路径都只处理非流式请求；`xir` 引擎的 loss 会映射到现有的 `protocol_conversion`/`protocol_conversion_response` cassette 事件。未知引擎值在 `config.Load` 时拒绝。
+转换引擎由 `router.selection.protocol_conversion_engine` 选择：`xir`（默认，`pkg/xir/convert` 的 Exchange IR hub）或 `legacy`（`pkg/protocolconvert` 的 `pkg/llm` adapter 路径，保留一个发布周期作为回退）。省略该键等价于 `xir`；未知引擎值在 `config.Load` 时拒绝。两条路径都只处理非流式请求；`xir` 引擎的 loss 会映射到现有的 `protocol_conversion`/`protocol_conversion_response` cassette 事件。
+
+回退操作：把 `router.selection.protocol_conversion_engine` 改为 `legacy` 并重启 `serve`（该键在启动时读取，没有热更新）。两套引擎的请求/响应转换均不改变 cassette 格式与录制语义，回退只影响转换实现本身。
+
+`xir` 引擎的语义策略（1.0 默认切换时确定）：
+
+- 未知/未建模的协议成员（例如 Responses envelope 的 `created_at`）不再 fatal：丢弃并以 loss 台账记录，避免真实 Responses 响应整条 502。
+- 响应侧的 sealed/encrypted reasoning（thinking、`redacted_thinking`、`encrypted_content`、`thoughtSignature`）降级为**丢弃 + 台账**；请求侧保持 fatal，协议私有字节仍不外传、不重签。
+- 转 Messages 时总是补必填 `max_tokens`（缺省 4096，`max_completion_tokens` 优先）。
+- `n`、`logit_bias`、未知 `tool_choice`、`stream` 的字符串/数字拼写不再静默丢弃：能携带的携带（Chat `n`/`logit_bias`，Gemini `candidateCount`），不能携带的 fatal 拒绝，`stream` 的任意拼写都按流式拒绝转换。
+- Gemini 源的工具调用合成确定性 id（`call_1`…），工具结果与调用 id 配对；多个 candidate 转为多个 Chat choice。
 
 | 协议 | 客户端入口 | 上游路径 |
 | --- | --- | --- |
@@ -88,4 +98,6 @@ Trajecta 默认走**模型直通**：客户端协议与上游原生协议一致�
 
 `pkg/protocolconvert` 的测试覆盖：四种协议请求/响应全矩阵（文本、模型、finish reason）、工具调用与工具结果的双向映射、Anthropic system block 数组、Chat→Responses 的 item 形状、tool_choice 四种拼写、Chat→Gemini / Gemini→Chat 工具流、结构化多模态拒绝、语义字段 fatal、流式拒绝、模型名校验；`internal/proxy` 覆盖端到端 Messages→Chat 文本与工具循环、400 且不污染健康、Responses 入口不转换；`internal/upstream` 覆盖 Vertex express/project 的转换短路径展开。
 
-**跨引擎 parity 语料**（`pkg/xir/convert/parity_test.go` + `testdata/parity/`）：168 个样本 × 16 个有序协议对 = 672 个对拍 cell，legacy 与 xir 引擎按生产配置（xir 用 Strict）对拍接受/拒绝决策与语义 JSON 等价。已收敛的 cell 是常驻 CI 断言；未收敛的分歧逐 cell 钉住复现（`t.Skip` 附根因），引擎修复后钉住测试会失败以强制把该 cell 晋升为常驻断言。全量分歧证据可用 `TRAJECTA_PARITY_DUMP=<path> go test -run TestParityDump ./pkg/xir/convert` 复现。**xir 目前不具备默认切换条件**（Responses envelope 建模、Messages max_tokens 默认值、静默丢弃台账等阻断项待修），默认引擎仍是 legacy。
+**跨引擎 parity 语料**（`pkg/xir/convert/parity_test.go` + `testdata/parity/`）：168 个样本 × 16 个有序协议对 = 672 个对拍 cell，legacy 与 xir 引擎按生产配置（xir 用 Strict）对拍接受/拒绝决策与语义 JSON 等价。已收敛的 cell 是常驻 CI 断言；未收敛的分歧逐 cell 钉住复现（`t.Skip` 附根因），引擎修复后钉住测试会失败以强制把该 cell 晋升为常驻断言。全量分歧证据可用 `TRAJECTA_PARITY_DUMP=<path> go test -run TestParityDump ./pkg/xir/convert` 复现。
+
+默认切换（2026-11-16）前已消除全部“xir 拒绝、legacy 放行”的阻断项：Responses envelope 成员、Messages `max_tokens`、静默丢弃台账、流式拼写、Gemini 工具 id/多 candidate、响应侧 sealed。当前剩余分歧只有两类：一是 xir 放行而 legacy 拒绝的能力扩张（多模态、字段映射、hosted tool 等，均有 loss 台账），二是两套合法 wire 表示之间的 envelope/content 表示差。二者都不改变“legacy 能服务的请求 xir 也能服务”这一安全性质。

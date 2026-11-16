@@ -16,10 +16,8 @@ import (
 //
 // Fatal:
 //   - previous_response_id / conversation when the target is not Responses;
-//   - a non-empty source-protocol Extensions object (unmodeled members cannot
-//     be proven harmless);
 //   - sealed reasoning/parts, encrypted reasoning, and foreign reasoning
-//     signatures (protocol-owned bytes are never re-signed);
+//     signatures on the REQUEST side (protocol-owned bytes are never re-signed);
 //   - a non-function tool call type, and hosted tool declarations the target
 //     cannot express;
 //   - response_format/responseSchema when the target has no mapped equivalent
@@ -27,9 +25,18 @@ import (
 //     fields the target does not define;
 //   - seed, presence/frequency penalties and logprobs when the target has no
 //     field for them;
+//   - multiple-choice counts (n) the target cannot express, token bias when
+//     the target is not Chat Completions, an unknown tool_choice shape, and a
+//     parallel-tool prohibition the target cannot express;
 //   - media kinds or media payload shapes the target codec cannot encode.
 //
 // Non-fatal:
+//   - unmodeled protocol-specific members (both directions; they are dropped
+//     and recorded, because a real Responses envelope always carries members
+//     such as created_at that no other protocol has);
+//   - sealed reasoning/parts in a RESPONSE: the answer already exists, and
+//     dropping the protocol-owned reasoning bytes is what the legacy engine
+//     does, so the converted answer is still delivered;
 //   - prompt_cache_key/store, metadata and user identifiers, message roles
 //     the target normalizes, reasoning text the target omits, citations and
 //     search metadata, media filename/type details, and unsupported parallel
@@ -114,6 +121,10 @@ func responseLosses(from, to xir.Protocol, response *xir.Response) []xir.Loss {
 		set.add("status", xir.LossDegraded, false, "target protocol does not expose the response status")
 	}
 	addExtensionLosses(response.Extensions, set)
+	if n := len(response.Alternatives); n > 0 && to != xir.ProtocolChatCompletions {
+		set.add("response.alternatives", xir.LossDegraded, false,
+			fmt.Sprintf("%d additional completion(s) are not carried by the target protocol", n))
+	}
 	addPartLosses(response.Parts, from, to, partScope{inResponse: true}, "response", set)
 	return set.list()
 }
@@ -151,9 +162,24 @@ func addRoleLosses(role xir.Role, to xir.Protocol, path string, set *lossSet) {
 func addParamLosses(params xir.Params, choice xir.ToolChoice, set *lossSet) {
 	to := set.to
 
-	if len(params.ResponseFormat) > 0 && to != xir.ProtocolChatCompletions && to != xir.ProtocolResponses {
+	if len(params.ResponseFormat) > 0 && !isDefaultResponseFormat(params.ResponseFormat) && to != xir.ProtocolChatCompletions && to != xir.ProtocolResponses {
 		set.add("params.response_format", xir.LossUnsupported, true,
 			"target protocol has no structured-output equivalent")
+	}
+	// n is carried by Chat Completions (`n`) and Gemini
+	// (`generationConfig.candidateCount`); Messages and Responses have no
+	// multiple-completion count.
+	if params.N != nil && *params.N > 1 && to != xir.ProtocolChatCompletions && to != xir.ProtocolGemini {
+		set.add("params.n", xir.LossUnsupported, true,
+			"target protocol cannot return multiple completions")
+	}
+	if len(params.LogitBias) > 0 && to != xir.ProtocolChatCompletions {
+		set.add("params.logit_bias", xir.LossUnsupported, true,
+			"target protocol has no token-bias field")
+	}
+	if params.TopK != nil && (to == xir.ProtocolChatCompletions || to == xir.ProtocolResponses) {
+		set.add("params.top_k", xir.LossDegraded, false,
+			"target protocol has no top_k sampling field")
 	}
 	// Gemini's structured-output fields live in Params.Extra; the other codecs
 	// do not emit them.
@@ -193,10 +219,18 @@ func addParamLosses(params xir.Params, choice xir.ToolChoice, set *lossSet) {
 	if params.ParallelTools != nil {
 		switch to {
 		case xir.ProtocolGemini:
-			set.add("params.parallel_tool_calls", xir.LossDegraded, false,
-				"Gemini function calling has no parallel-tool flag")
+			if !*params.ParallelTools {
+				set.add("params.parallel_tool_calls", xir.LossUnsupported, true,
+					"Gemini function calling has no way to forbid parallel calls")
+			} else {
+				set.add("params.parallel_tool_calls", xir.LossDegraded, false,
+					"Gemini function calling has no parallel-tool flag")
+			}
 		case xir.ProtocolMessages:
-			if choice.Mode == "" {
+			if !*params.ParallelTools && choice.Mode == "" {
+				set.add("params.parallel_tool_calls", xir.LossUnsupported, true,
+					"Messages can only forbid parallel calls alongside tool_choice")
+			} else if choice.Mode == "" {
 				set.add("params.parallel_tool_calls", xir.LossDegraded, false,
 					"Messages can only express this flag alongside tool_choice")
 			}
@@ -213,6 +247,14 @@ func addParamLosses(params xir.Params, choice xir.ToolChoice, set *lossSet) {
 
 	for key, raw := range params.Extra {
 		if len(raw) == 0 || key == "responseMimeType" || key == "responseSchema" {
+			continue
+		}
+		if key == "tool_choice" {
+			// The chat codec parks an unrecognized tool_choice shape here. It
+			// changes what the model is allowed to call, so it cannot be
+			// dropped silently.
+			set.add("tool_choice", xir.LossUnsupported, true,
+				"tool_choice shape cannot be represented by the target protocol")
 			continue
 		}
 		if targetCarriesParamExtra(to, key) {
@@ -249,9 +291,31 @@ func addExtensionLosses(extensions map[string]json.RawMessage, set *lossSet) {
 		if protocol == string(set.to) {
 			continue
 		}
-		set.add("extensions."+protocol, xir.LossUnsupported, true,
-			"protocol-specific extension members cannot be carried to another protocol")
+		// Unmodeled members are dropped and recorded, not refused: a real
+		// Responses envelope always carries created_at and similar members no
+		// other protocol has, and treating that as fatal rejected every real
+		// Responses response. The ledger names the source protocol so an
+		// operator can audit what was dropped.
+		set.add("extensions."+protocol, xir.LossDegraded, false,
+			"unmodeled "+protocol+" members are not carried by the target protocol")
 	}
+}
+
+// isDefaultResponseFormat reports whether raw is the protocol's default text
+// format ("text" or {"type":"text"}). It carries no semantics, so converting it
+// to a protocol without structured output is not a loss.
+func isDefaultResponseFormat(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == `"text"` {
+		return true
+	}
+	var typed struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(typed.Type), "text")
 }
 
 func addToolLosses(tool *xir.Tool, from, to xir.Protocol, path string, set *lossSet) {
@@ -313,8 +377,13 @@ func addPartLoss(part *xir.Part, from, to xir.Protocol, scope partScope, path st
 		return
 	}
 	if part.Sealed != nil && part.Sealed.Protocol != to {
-		set.add(path+".sealed", xir.LossUnsupported, true,
-			fmt.Sprintf("sealed %q data may only be emitted by its source protocol", part.Sealed.Kind))
+		if scope.inResponse {
+			set.add(path+".sealed", xir.LossDegraded, false,
+				fmt.Sprintf("sealed %q data is dropped from the response: only its source protocol can emit it", part.Sealed.Kind))
+		} else {
+			set.add(path+".sealed", xir.LossUnsupported, true,
+				fmt.Sprintf("sealed %q data may only be emitted by its source protocol", part.Sealed.Kind))
+		}
 	}
 
 	switch part.Kind {
@@ -331,7 +400,7 @@ func addPartLoss(part *xir.Part, from, to xir.Protocol, scope partScope, path st
 			}
 		}
 	case xir.PartReasoning:
-		addReasoningLosses(part, from, to, path, set)
+		addReasoningLosses(part, from, to, scope.inResponse, path, set)
 	case xir.PartCitation:
 		set.add(path+".citation", xir.LossDegraded, false, "citation metadata is not carried")
 	case xir.PartSearch:
@@ -347,7 +416,7 @@ func addPartLoss(part *xir.Part, from, to xir.Protocol, scope partScope, path st
 	}
 }
 
-func addReasoningLosses(part *xir.Part, from, to xir.Protocol, path string, set *lossSet) {
+func addReasoningLosses(part *xir.Part, from, to xir.Protocol, inResponse bool, path string, set *lossSet) {
 	reasoning := part.Reasoning
 	if reasoning == nil {
 		if part.Sealed == nil && part.Text != "" {
@@ -355,17 +424,35 @@ func addReasoningLosses(part *xir.Part, from, to xir.Protocol, path string, set 
 		}
 		return
 	}
+	severity := xir.LossUnsupported
+	message := "sealed reasoning may only be emitted by its source protocol"
+	if inResponse {
+		// A response's reasoning bytes are protocol-owned but the answer is
+		// already produced: drop them and deliver the answer, recording the
+		// drop, instead of failing the whole conversion.
+		severity = xir.LossDegraded
+		message = "sealed reasoning is dropped from the response and only delivered by its source protocol"
+	}
 	if reasoning.Sealed != nil && reasoning.Sealed.Protocol != to {
-		set.add(path+".sealed", xir.LossUnsupported, true,
-			"sealed reasoning may only be emitted by its source protocol")
+		set.add(path+".sealed", severity, !inResponse, message)
 	}
 	if reasoning.EncryptedContent != "" && to != xir.ProtocolResponses {
-		set.add(path+".encrypted_content", xir.LossUnsupported, true,
-			"encrypted reasoning cannot be carried by the target protocol")
+		if inResponse {
+			set.add(path+".encrypted_content", xir.LossDegraded, false,
+				"encrypted reasoning is dropped from the response")
+		} else {
+			set.add(path+".encrypted_content", xir.LossUnsupported, true,
+				"encrypted reasoning cannot be carried by the target protocol")
+		}
 	}
 	if reasoning.Signature != "" {
-		set.add(path+".signature", xir.LossUnsupported, true,
-			"reasoning signature is protocol-owned and cannot be transferred")
+		if inResponse {
+			set.add(path+".signature", xir.LossDegraded, false,
+				"reasoning signature is dropped from the response")
+		} else {
+			set.add(path+".signature", xir.LossUnsupported, true,
+				"reasoning signature is protocol-owned and cannot be transferred")
+		}
 	}
 	if to == xir.ProtocolChatCompletions {
 		if reasoning.Text != "" || len(reasoning.Summary) > 0 {
@@ -378,6 +465,15 @@ func addReasoningLosses(part *xir.Part, from, to xir.Protocol, path string, set 
 	}
 	if reasoning.Text != "" {
 		addReasoningTextLoss(reasoning.Text, to, path, set)
+	}
+	// Anthropic requires a signed thinking block in assistant history. A
+	// request-side reasoning text with no signature cannot be replayed as
+	// thinking, and rewriting it into an unsigned thinking block is rejected
+	// upstream, so refuse instead of silently degrading the turn.
+	if !inResponse && to == xir.ProtocolMessages && reasoning.Text != "" &&
+		reasoning.Signature == "" && reasoning.Sealed == nil && reasoning.EncryptedContent == "" {
+		set.add(path+".reasoning", xir.LossUnsupported, true,
+			"Messages requires a signed thinking block in assistant history; unsigned reasoning cannot be replayed")
 	}
 }
 

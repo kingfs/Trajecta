@@ -39,6 +39,8 @@ func (c *Codec) EncodeRequest(ctx context.Context, req *xir.Request, opts xir.En
 		TopK:                req.Params.TopK,
 		MaxTokens:           req.Params.MaxTokens,
 		MaxCompletionTokens: req.Params.MaxCompletion,
+		N:                   req.Params.N,
+		LogitBias:           req.Params.LogitBias,
 		Stop:                encodeStop(req.Params.Stop),
 		Seed:                req.Params.Seed,
 		PresencePenalty:     req.Params.PresencePenalty,
@@ -82,23 +84,29 @@ func (c *Codec) EncodeResponse(ctx context.Context, resp *xir.Response, opts xir
 		model = opts.Model
 	}
 
-	content, calls, refusal := encodeMessageContent(resp.Parts, true)
-	message := responseMessageWire{
-		Role:      "assistant",
-		Content:   content,
-		ToolCalls: calls,
-		Refusal:   refusal,
+	choices := make([]choiceWire, 0, 1+len(resp.Alternatives))
+	for _, completion := range append([]*xir.Response{resp}, resp.Alternatives...) {
+		if completion == nil {
+			continue
+		}
+		content, calls, refusal := encodeMessageContent(completion.Parts, true)
+		choices = append(choices, choiceWire{
+			Index: len(choices),
+			Message: responseMessageWire{
+				Role:      "assistant",
+				Content:   content,
+				ToolCalls: calls,
+				Refusal:   refusal,
+			},
+			FinishReason: encodeFinishReason(completion.StopReason),
+		})
 	}
 	out := responseWire{
-		ID:     resp.ID,
-		Object: "chat.completion",
-		Model:  model,
-		Choices: []choiceWire{{
-			Index:        0,
-			Message:      message,
-			FinishReason: encodeFinishReason(resp.StopReason),
-		}},
-		Usage: encodeUsage(resp.Usage),
+		ID:      resp.ID,
+		Object:  "chat.completion",
+		Model:   model,
+		Choices: choices,
+		Usage:   encodeUsage(resp.Usage),
 	}
 	return json.Marshal(out)
 }
@@ -113,6 +121,8 @@ type requestWire struct {
 	TopK                *int            `json:"top_k,omitempty"`
 	MaxTokens           *int            `json:"max_tokens,omitempty"`
 	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
+	N                   *int            `json:"n,omitempty"`
+	LogitBias           json.RawMessage `json:"logit_bias,omitempty"`
 	Stop                any             `json:"stop,omitempty"`
 	Seed                *int64          `json:"seed,omitempty"`
 	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`
@@ -529,8 +539,9 @@ func encodeFinishReason(reason xir.FinishReason) *string {
 	case xir.FinishContentFilter:
 		value = "content_filter"
 	case xir.FinishRefusal:
-		// Chat reports a refusal as a normal stop with a refusal message.
-		value = "stop"
+		// The Chat contract for a refusal is content_filter, matching the
+		// legacy engine and what downstream safety/retry logic keys on.
+		value = "content_filter"
 	default:
 		return nil
 	}

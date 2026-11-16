@@ -145,9 +145,10 @@ router:
     # always wins; streaming requests and the /v1/responses entrypoint never
     # convert, and content the IR cannot carry is rejected with 400.
     protocol_conversion: false
-    # legacy (default) uses pkg/protocolconvert's pkg/llm adapters; xir uses
-    # the Exchange IR hub (pkg/xir/convert). Both are non-streaming only.
-    protocol_conversion_engine: legacy
+    # xir (default) uses the Exchange IR hub (pkg/xir/convert); legacy keeps
+    # pkg/protocolconvert's pkg/llm adapters as the rollback path for one
+    # release cycle. Both are non-streaming only.
+    protocol_conversion_engine: xir
     # Candidate ranking engine: legacy (default) keeps the router's cost
     # comparison. route ranks the already-filtered candidates with
     # pkg/route.Plan; it is opt-in while the pure planner is compared.

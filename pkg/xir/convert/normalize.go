@@ -25,15 +25,37 @@ func prepareRequest(request *xir.Request, to xir.Protocol) {
 		request.Messages = splitToolResultTurns(request.Messages)
 	case xir.ProtocolMessages:
 		liftSystemMessages(request)
+		// Anthropic Messages requires max_tokens. The source protocol makes it
+		// optional, and max_completion_tokens means exactly the same thing, so
+		// a converted request supplies the value itself instead of leaving the
+		// upstream to reject it (legacy injects 4096 the same way).
+		if request.Params.MaxTokens == nil {
+			value := 4096
+			if request.Params.MaxCompletion != nil {
+				value = *request.Params.MaxCompletion
+			}
+			request.Params.MaxTokens = &value
+		}
 	}
 }
 
 // prepareResponse removes protocol-owned or unrepresentable response parts.
 func prepareResponse(response *xir.Response, to xir.Protocol) {
 	response.Parts = sanitizeParts(response.Parts, to, partScope{inResponse: true})
+	for _, alternative := range response.Alternatives {
+		if alternative == nil {
+			continue
+		}
+		alternative.Parts = sanitizeParts(alternative.Parts, to, partScope{inResponse: true})
+	}
 }
 
 func sanitizeParams(params *xir.Params, to xir.Protocol) {
+	// Chat Completions and Responses have no top_k field; sending one to a
+	// strict OpenAI-compatible upstream is a 400.
+	if to == xir.ProtocolChatCompletions || to == xir.ProtocolResponses {
+		params.TopK = nil
+	}
 	if len(params.Extra) == 0 {
 		return
 	}

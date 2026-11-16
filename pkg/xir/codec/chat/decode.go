@@ -55,7 +55,11 @@ func (c *Codec) DecodeRequest(ctx context.Context, doc *xir.Document, opts xir.D
 		State:  decodeState(root),
 		Ref:    root,
 	}
-	if stream, ok := root.BoolField("stream"); ok {
+	// Clients spell the stream flag several ways: a JSON boolean (the
+	// documented shape), the string "true"/"false", or 1/0. Treating only the
+	// boolean as streaming let a stream:"true" request be converted as if it
+	// were non-streaming, so the client waited for SSE and got one JSON body.
+	if stream, ok := decodeStreamFlag(root); ok {
 		req.Stream = stream
 	}
 	if msgs, ok := root.Get("messages"); ok && msgs != nil && msgs.Kind != wire.Null {
@@ -85,14 +89,76 @@ func (c *Codec) DecodeRequest(ctx context.Context, doc *xir.Document, opts xir.D
 	}
 	if choice, ok := root.Get("tool_choice"); ok && choice != nil && choice.Kind != wire.Null {
 		req.ToolChoice = decodeToolChoice(choice)
+		if req.ToolChoice.Mode == "" && unmodeledToolChoice(choice) {
+			// The shape is not one of the documented directives (for example
+			// {"type":"allowed_tools",...}). It constrains what the model may
+			// call, so the conversion ledger reports it instead of dropping it.
+			if req.Params.Extra == nil {
+				req.Params.Extra = map[string]json.RawMessage{}
+			}
+			req.Params.Extra["tool_choice"] = choice.Raw()
+		}
+	} else if fn, ok := root.Get("function_call"); ok && fn != nil && fn.Kind != wire.Null {
+		// Legacy function_call is the pre-tools spelling of tool_choice.
+		req.ToolChoice = decodeFunctionCallChoice(fn)
 	}
 	return req, nil
 }
 
+// decodeStreamFlag reads the stream member in every spelling clients use.
+func decodeStreamFlag(root *wire.Node) (bool, bool) {
+	node, ok := root.Get("stream")
+	if !ok || node == nil {
+		return false, false
+	}
+	switch node.Kind {
+	case wire.Bool:
+		return strings.TrimSpace(string(node.Raw())) == "true", true
+	case wire.String:
+		return strings.EqualFold(strings.TrimSpace(node.Str), "true"), true
+	case wire.Number:
+		raw := strings.TrimSpace(string(node.Raw()))
+		return raw == "1", true
+	}
+	return false, false
+}
+
+// unmodeledToolChoice reports whether a tool_choice node is a non-empty shape
+// the decoder did not recognize.
+func unmodeledToolChoice(node *wire.Node) bool {
+	switch node.Kind {
+	case wire.Object:
+		return len(node.Members) > 0
+	case wire.Array:
+		return len(node.Items) > 0
+	default:
+		return false
+	}
+}
+
+// decodeFunctionCallChoice maps the legacy function_call member onto the
+// normalized tool choice.
+func decodeFunctionCallChoice(node *wire.Node) xir.ToolChoice {
+	switch node.Kind {
+	case wire.String:
+		mode := strings.ToLower(strings.TrimSpace(node.Str))
+		switch mode {
+		case "auto", "none", "required":
+			return xir.ToolChoice{Mode: mode}
+		}
+	case wire.Object:
+		if name, ok := node.StringField("name"); ok && name != "" {
+			return xir.ToolChoice{Mode: "tool", Name: name}
+		}
+	}
+	return xir.ToolChoice{}
+}
+
 // DecodeResponse projects a Chat Completions response document onto the
 // semantic IR. An {"error":{...}} envelope produces a Response whose Error is
-// set and whose Parts are empty; otherwise choices[0] is decoded and any
-// further choices are ignored.
+// set and whose Parts are empty; otherwise choices[0] is decoded into the
+// response and any further choices become Response.Alternatives so a codec
+// that can carry several completions still receives them.
 func (c *Codec) DecodeResponse(ctx context.Context, doc *xir.Document, opts xir.DecodeOptions) (*xir.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -117,31 +183,49 @@ func (c *Codec) DecodeResponse(ctx context.Context, doc *xir.Document, opts xir.
 	if !ok || choices == nil || choices.Kind != wire.Array {
 		return nil, fmt.Errorf("chat: response has no choices array")
 	}
-	if len(choices.Items) == 0 {
-		return nil, fmt.Errorf("chat: response choices array is empty")
-	}
-	choice := choices.Items[0]
-	if choice == nil || choice.Kind != wire.Object {
-		return nil, fmt.Errorf("chat: response choice is not an object")
-	}
 
 	resp := &xir.Response{
 		ID:    fieldString(root, "id"),
 		Model: fieldString(root, "model"),
 		Ref:   root,
 	}
-	if reason, ok := choice.StringField("finish_reason"); ok {
-		resp.StopReason = decodeFinishReason(reason)
+	if len(choices.Items) == 0 {
+		return nil, fmt.Errorf("chat: response choices array is empty")
 	}
-	if msg, ok := choice.Get("message"); ok && msg != nil && msg.Kind == wire.Object {
-		decodeResponseMessage(resp, msg)
-	} else if msg != nil && msg.Kind != wire.Null {
-		return nil, fmt.Errorf("chat: response choice message is not an object")
+	if choices.Items[0] == nil || choices.Items[0].Kind != wire.Object {
+		return nil, fmt.Errorf("chat: response choice is not an object")
+	}
+	if err := decodeChoice(choices.Items[0], resp); err != nil {
+		return nil, err
+	}
+	for _, item := range choices.Items[1:] {
+		if item == nil || item.Kind != wire.Object {
+			continue
+		}
+		alternative := &xir.Response{Ref: item}
+		if err := decodeChoice(item, alternative); err != nil {
+			return nil, err
+		}
+		resp.Alternatives = append(resp.Alternatives, alternative)
 	}
 	if u, ok := root.Get("usage"); ok && u != nil && u.Kind == wire.Object {
 		resp.Usage = decodeUsage(u)
 	}
 	return resp, nil
+}
+
+// decodeChoice fills the parts, stop reason and status of one choice.
+func decodeChoice(choice *wire.Node, resp *xir.Response) error {
+	if reason, ok := choice.StringField("finish_reason"); ok {
+		resp.StopReason = decodeFinishReason(reason)
+	}
+	if msg, ok := choice.Get("message"); ok && msg != nil && msg.Kind == wire.Object {
+		decodeResponseMessage(resp, msg)
+		return nil
+	} else if msg != nil && msg.Kind != wire.Null {
+		return fmt.Errorf("chat: response choice message is not an object")
+	}
+	return nil
 }
 
 func decodeMessages(n *wire.Node) ([]xir.Message, error) {
@@ -483,6 +567,7 @@ func decodeParams(root *wire.Node) xir.Params {
 	p.TopK = intFieldPtr(root, "top_k")
 	p.MaxTokens = intFieldPtr(root, "max_tokens")
 	p.MaxCompletion = intFieldPtr(root, "max_completion_tokens")
+	p.N = intFieldPtr(root, "n")
 	p.Seed = int64FieldPtr(root, "seed")
 	p.PresencePenalty = floatFieldPtr(root, "presence_penalty")
 	p.FrequencyPenalty = floatFieldPtr(root, "frequency_penalty")
@@ -500,6 +585,9 @@ func decodeParams(root *wire.Node) xir.Params {
 	}
 	if v, ok := root.Get("metadata"); ok && v != nil && v.Kind != wire.Null && v.Kind == wire.Object {
 		p.Metadata = v.Raw()
+	}
+	if v, ok := root.Get("logit_bias"); ok && v != nil && v.Kind != wire.Null && v.Kind == wire.Object {
+		p.LogitBias = v.Raw()
 	}
 	// Top-level reasoning is not part of the semantic parameter set; keep the
 	// raw value so a same-protocol re-encode can carry it back.

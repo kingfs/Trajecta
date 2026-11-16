@@ -263,14 +263,21 @@ type ToolChoice struct {
 // Params is the protocol-neutral generation parameter set. A nil pointer
 // means the client did not send the field.
 type Params struct {
-	Temperature    *float64
-	TopP           *float64
-	TopK           *int
-	MaxTokens      *int
-	MaxCompletion  *int
+	Temperature   *float64
+	TopP          *float64
+	TopK          *int
+	MaxTokens     *int
+	MaxCompletion *int
+	// N is the requested number of independent completions. Chat carries it
+	// as `n`; Gemini carries it as generationConfig.candidateCount.
+	N              *int
 	Stop           []string
 	ParallelTools  *bool
 	ResponseFormat json.RawMessage
+	// LogitBias is the Chat Completions token-bias object. No other protocol
+	// has an equivalent, so the loss ledger reports it when the target is not
+	// Chat Completions.
+	LogitBias json.RawMessage
 
 	ReasoningEffort string
 	ThinkingBudget  *int
@@ -311,8 +318,13 @@ type Response struct {
 	StopReason FinishReason
 	StopDetail string
 	Error      *Error
-	Extensions map[string]json.RawMessage
-	Ref        *wire.Node
+	// Alternatives holds additional independent completions (Chat choices
+	// after the first, Gemini candidates after the first). The first
+	// completion is Response itself; codecs that can carry several encode
+	// them all, the others drop them and the loss ledger records it.
+	Alternatives []*Response
+	Extensions   map[string]json.RawMessage
+	Ref          *wire.Node
 }
 
 // Error is a normalized provider/proxy error.

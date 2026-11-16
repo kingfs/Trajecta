@@ -308,10 +308,10 @@ type RouterConfig struct {
 		// never convert; they require a native passthrough upstream.
 		ProtocolConversion bool `yaml:"protocol_conversion"`
 		// ProtocolConversionEngine selects the conversion implementation.
-		// "legacy" (default) uses pkg/protocolconvert's pkg/llm adapters;
-		// "xir" uses the Exchange IR hub (pkg/xir/convert) and is opt-in
-		// while the two engines are compared. Streaming conversion remains
-		// unsupported by both.
+		// "xir" (default) uses the Exchange IR hub (pkg/xir/convert);
+		// "legacy" keeps pkg/protocolconvert's pkg/llm adapters as the
+		// rollback path for one release cycle. An omitted key means "xir".
+		// Streaming conversion remains unsupported by both.
 		ProtocolConversionEngine string `yaml:"protocol_conversion_engine"`
 		// PriorityMode controls how Target.Priority is interpreted.
 		//
@@ -611,6 +611,13 @@ func Load(path string) (*Config, error) {
 	}
 	if err := validateLimits(&cfg); err != nil {
 		return nil, err
+	}
+	// The XIR engine is the default. An omitted key (or an empty value) used to
+	// mean "legacy"; the legacy engine stays selectable as the rollback path
+	// for one release cycle. Defaulting here rather than in the proxy keeps the
+	// effective setting visible in the loaded configuration and in the Monitor.
+	if strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine) == "" {
+		cfg.Router.Selection.ProtocolConversionEngine = "xir"
 	}
 	if err := validateRouterEnums(&cfg); err != nil {
 		return nil, err

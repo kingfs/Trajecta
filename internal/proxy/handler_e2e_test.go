@@ -1443,7 +1443,7 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 	}
 }
 
-func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing.T) {
+func TestHandlerResponsesAutoUsesLocalWhenNativeTargetDoesNotServeModel(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := newTestStore(outputDir)
 	if err != nil {
@@ -1454,14 +1454,15 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 	var nativeCalls atomic.Int32
 	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nativeCalls.Add(1)
-		http.Error(w, "native should not receive filtered model", http.StatusTeapot)
+		http.Error(w, "native does not serve this model", http.StatusTeapot)
 	}))
 	defer nativeServer.Close()
 
 	var chatCalls atomic.Int32
 	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chatCalls.Add(1)
-		http.Error(w, "local responses fallback must not be used", http.StatusTeapot)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"chatcmpl-local-1","object":"chat.completion","created":1,"model":"gpt-filtered","choices":[{"index":0,"message":{"role":"assistant","content":"local answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}))
 	defer chatServer.Close()
 
@@ -1525,17 +1526,20 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502; body=%s", resp.StatusCode, body)
+	// The native channel serves a different model, so it is not a native target
+	// for this request; the local Responses runtime answers through the chat
+	// backend instead of rejecting the request.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "native Responses upstream exists but is not selectable") {
-		t.Fatalf("body = %q, want native filtered rejection", body)
+	if !strings.Contains(string(body), "local answer") {
+		t.Fatalf("body = %q, want the local runtime answer", body)
 	}
 	if got := nativeCalls.Load(); got != 0 {
 		t.Fatalf("native calls = %d, want 0", got)
 	}
-	if got := chatCalls.Load(); got != 0 {
-		t.Fatalf("chat calls = %d, want 0", got)
+	if got := chatCalls.Load(); got != 1 {
+		t.Fatalf("chat calls = %d, want 1", got)
 	}
 
 	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
@@ -1544,11 +1548,8 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
 	}
 	plan := routePlanAttrsFromPrelude(t, parsed)
-	if plan["execution_mode"] != "responses_server" || plan["native_present"] != true || plan["native_available"] != false {
-		t.Fatalf("route plan attrs = %+v, want rejected local route with native_present true/native_available false", plan)
-	}
-	if !strings.Contains(fmt.Sprint(plan["failure_reason"]), "native Responses upstream exists but is not selectable") {
-		t.Fatalf("failure_reason = %q, want native filtered rejection", plan["failure_reason"])
+	if plan["execution_mode"] != "responses_server" || plan["native_present"] != false || plan["native_available"] != false {
+		t.Fatalf("route plan attrs = %+v, want local route with native_present false/native_available false", plan)
 	}
 }
 

@@ -372,6 +372,11 @@ func decodeGenerationConfig(root *wire.Node, params *xir.Params) error {
 	} else if ok {
 		params.MaxTokens = &v
 	}
+	if v, ok, err := intField(config, "candidateCount", path); err != nil {
+		return err
+	} else if ok {
+		params.N = &v
+	}
 	if values, ok, err := stringArrayField(config, "stopSequences", path); err != nil {
 		return err
 	} else if ok {

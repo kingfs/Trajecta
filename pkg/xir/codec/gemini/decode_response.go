@@ -55,6 +55,7 @@ func (c Codec) DecodeResponse(ctx context.Context, doc *xir.Document, opts xir.D
 	if err != nil {
 		return nil, err
 	}
+	callSeq := 0
 	if ok && len(candidates) > 0 {
 		candidate := candidates[0]
 		if candidate.Kind != wire.Object {
@@ -62,6 +63,20 @@ func (c Codec) DecodeResponse(ctx context.Context, doc *xir.Document, opts xir.D
 		}
 		if err := decodeCandidate(candidate, "$.candidates[0]", resp); err != nil {
 			return nil, err
+		}
+		assignToolCallIDs(resp, &callSeq)
+		for i := 1; i < len(candidates); i++ {
+			alternativeNode := candidates[i]
+			if alternativeNode == nil || alternativeNode.Kind != wire.Object {
+				continue
+			}
+			alternative := &xir.Response{Ref: alternativeNode}
+			path := fmt.Sprintf("$.candidates[%d]", i)
+			if err := decodeCandidate(alternativeNode, path, alternative); err != nil {
+				return nil, err
+			}
+			assignToolCallIDs(alternative, &callSeq)
+			resp.Alternatives = append(resp.Alternatives, alternative)
 		}
 	}
 
@@ -86,10 +101,9 @@ func (c Codec) DecodeResponse(ctx context.Context, doc *xir.Document, opts xir.D
 		}
 	}
 
-	if resp.StopReason == xir.FinishStop && hasToolCall(resp.Parts) {
-		// Gemini reports a completed function-call turn as STOP. The neutral
-		// finish reason says the turn is asking the client to run a tool.
-		resp.StopReason = xir.FinishToolUse
+	normalizeToolTurnStop(resp)
+	for _, alternative := range resp.Alternatives {
+		normalizeToolTurnStop(alternative)
 	}
 
 	if usageNode, ok, err := objectField(root, "usageMetadata", "$"); err != nil {
@@ -216,4 +230,27 @@ func decodeErrorNode(node *wire.Node, path string) (*xir.Error, error) {
 		Message: message,
 		Raw:     cloneRaw(node.Raw()),
 	}, nil
+}
+
+// normalizeToolTurnStop marks a completed Gemini function-call turn as a tool
+// turn so the target protocol reports the right finish reason.
+func normalizeToolTurnStop(resp *xir.Response) {
+	if resp.StopReason == xir.FinishStop && hasToolCall(resp.Parts) {
+		resp.StopReason = xir.FinishToolUse
+	}
+}
+
+// assignToolCallIDs fills the ids Gemini does not carry. Gemini identifies a
+// call only by its function name, while Chat and Messages require an id the
+// client quotes back in the tool result. A sequential id keeps the next turn
+// of the tool loop addressable.
+func assignToolCallIDs(resp *xir.Response, seq *int) {
+	for i := range resp.Parts {
+		part := &resp.Parts[i]
+		if part.Kind != xir.PartToolCall || part.ToolCall == nil || part.ToolCall.ID != "" {
+			continue
+		}
+		*seq++
+		part.ToolCall.ID = fmt.Sprintf("call_%d", *seq)
+	}
 }

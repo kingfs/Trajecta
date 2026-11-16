@@ -530,6 +530,9 @@ func encodeGenerationConfig(params xir.Params) (json.RawMessage, error) {
 	addFloat(fields, "temperature", params.Temperature)
 	addFloat(fields, "topP", params.TopP)
 	addInt(fields, "topK", params.TopK)
+	if params.N != nil && *params.N > 1 {
+		addInt(fields, "candidateCount", params.N)
+	}
 	maxTokens := params.MaxTokens
 	if maxTokens == nil {
 		maxTokens = params.MaxCompletion
@@ -601,6 +604,7 @@ func encodeGenerationConfig(params xir.Params) (json.RawMessage, error) {
 		"topP":                true,
 		"topK":                true,
 		"maxOutputTokens":     true,
+		"candidateCount":      true,
 		"stopSequences":       true,
 		ParamResponseMimeType: true,
 		ParamResponseSchema:   true,

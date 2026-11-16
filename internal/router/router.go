@@ -1104,7 +1104,18 @@ func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, target := range r.targets {
-		if target == nil || !target.Upstream.SupportsResponsesAPIForModel(features.ModelName) {
+		if target == nil {
+			continue
+		}
+		// A responses-capable channel is only a native target for the models it
+		// actually serves. Without this check a responses channel that declared
+		// some other model made every chat-only model look like it had a native
+		// Responses upstream, so the local Responses runtime was never selected
+		// and /v1/responses answered 502 instead of translating.
+		target.mu.Lock()
+		servesModel := target.supportsModelLocked(features.ModelName)
+		target.mu.Unlock()
+		if !servesModel || !target.Upstream.SupportsResponsesAPIForModel(features.ModelName) {
 			continue
 		}
 		if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {

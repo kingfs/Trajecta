@@ -27,7 +27,7 @@
 
 | 策略 | 行为 |
 | --- | --- |
-| `auto` | 有可被选中的 native Responses upstream 时直通；存在 native Responses target 但本次请求不可选中时以 502 拒绝；两者都不成立时才回退本地 runtime。 |
+| `auto` | 有可被选中的 native Responses upstream 时直通；存在**服务该模型**的 native Responses target 但本次请求不可选中（例如熔断/并发过滤）时以 502 拒绝；两者都不成立时才回退本地 runtime。未声明该模型的 responses 渠道不算该模型的 native target，不会阻止本地 runtime。 |
 | `prefer_native` | 当前实现与 `auto` 行为相同。 |
 | `prefer_local_server` | 有可用 Chat Completions backend 时用本地 runtime；否则回退 native 直通。 |
 | `native_only` | 只用 native Responses upstream；没有匹配目标时拒绝本地翻译。 |

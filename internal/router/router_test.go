@@ -3017,3 +3017,128 @@ func TestRouterSelectWithoutSessionStillHasNoBinding(t *testing.T) {
 		t.Fatalf("bindings = %d, want 0 without a session source", size)
 	}
 }
+
+// TestNativeResponsesTargetIsScopedToDeclaredModels pins the model dimension of
+// the native-presence guard: a responses-capable channel is a native target only
+// for the models it declares. Before this was scoped, any responses channel in
+// the snapshot made every chat-only model look like it had a native Responses
+// upstream, so /v1/responses answered 502 instead of using the local runtime.
+func TestNativeResponsesTargetIsScopedToDeclaredModels(t *testing.T) {
+	enabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "responses-only",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"native-model"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://responses.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: &enabled},
+				},
+			},
+			{
+				ID:             "chat-only",
+				Enabled:        boolPtr(true),
+				Priority:       50,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"chat-model"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://chat.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	responsesRequest := func(model string) *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"`+model+`","input":"hello"}`))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		return req
+	}
+
+	for _, tc := range []struct {
+		model      string
+		want       bool
+		selectable bool
+	}{
+		{model: "native-model", want: true, selectable: true},
+		{model: "chat-model", want: false, selectable: false},
+		{model: "unknown-model", want: false, selectable: false},
+	} {
+		body := []byte(`{"model":"` + tc.model + `","input":"hello"}`)
+		if got := rtr.HasNativeResponsesTargetWithBody(responsesRequest(tc.model), body); got != tc.want {
+			t.Errorf("HasNativeResponsesTargetWithBody(%q) = %v, want %v", tc.model, got, tc.want)
+		}
+		if got := rtr.HasSelectableNativeResponsesCandidateWithBody(responsesRequest(tc.model), body); got != tc.selectable {
+			t.Errorf("HasSelectableNativeResponsesCandidateWithBody(%q) = %v, want %v", tc.model, got, tc.selectable)
+		}
+	}
+}
+
+// TestNativeResponsesTargetPresentButUnselectable keeps the deliberate guard:
+// when a channel DOES serve the requested model over the Responses API but the
+// target is filtered (an open circuit here), the target is still "present" and
+// the local runtime must not silently replace it.
+func TestNativeResponsesTargetPresentButUnselectable(t *testing.T) {
+	enabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "responses-only",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"native-model"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://responses.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: &enabled},
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+	rtr, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	rtr.mu.Lock()
+	for _, target := range rtr.targets {
+		target.mu.Lock()
+		target.healthState = HealthOpen
+		target.openUntil = time.Now().Add(time.Minute)
+		target.mu.Unlock()
+	}
+	rtr.mu.Unlock()
+
+	body := []byte(`{"model":"native-model","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	if !rtr.HasNativeResponsesTargetWithBody(req, body) {
+		t.Fatal("HasNativeResponsesTargetWithBody = false, want true for a served model with an open circuit")
+	}
+	if rtr.HasSelectableNativeResponsesCandidateWithBody(req, body) {
+		t.Fatal("HasSelectableNativeResponsesCandidateWithBody = true, want false for an open circuit")
+	}
+}

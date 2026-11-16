@@ -196,8 +196,46 @@ func (c Codec) DecodeRequestWithMeta(ctx context.Context, doc *xir.Document, opt
 	if err := validateSafetySettings(root); err != nil {
 		return nil, err
 	}
+	synthesizeRequestToolCallIDs(req)
 	req.Extensions = extensionMap(root, requestKnownKeys)
 	return req, nil
+}
+
+// synthesizeRequestToolCallIDs gives every functionCall in a decoded history a
+// deterministic id and pairs a functionResponse with the call it answers.
+// Gemini carries neither: a call is identified by its name alone. A conversion
+// to Chat or Messages needs an id the client can quote back in the tool result,
+// so leaving it empty broke the next turn of the tool loop.
+func synthesizeRequestToolCallIDs(req *xir.Request) {
+	pending := make(map[string][]string)
+	next := 0
+	for mi := range req.Messages {
+		for pi := range req.Messages[mi].Parts {
+			part := &req.Messages[mi].Parts[pi]
+			switch {
+			case part.ToolCall != nil && part.Kind == xir.PartToolCall:
+				next++
+				if part.ToolCall.ID == "" {
+					part.ToolCall.ID = fmt.Sprintf("call_%d", next)
+				}
+				if name := part.ToolCall.Name; name != "" {
+					pending[name] = append(pending[name], part.ToolCall.ID)
+				}
+			case part.ToolResult != nil && part.Kind == xir.PartToolResult && part.ToolResult.CallID == "":
+				name := part.ToolResult.Name
+				ids := pending[name]
+				if len(ids) == 0 {
+					// No call of that name in the history: still give the
+					// result an id so the target can encode the turn.
+					next++
+					part.ToolResult.CallID = fmt.Sprintf("call_%d", next)
+					continue
+				}
+				part.ToolResult.CallID = ids[0]
+				pending[name] = ids[1:]
+			}
+		}
+	}
 }
 
 // ModelFromPath extracts a Gemini model name from a generateContent path.
