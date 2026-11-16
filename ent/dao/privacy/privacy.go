@@ -279,78 +279,6 @@ func (f CredentialMaskAuditMutationRuleFunc) EvalMutation(ctx context.Context, m
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.CredentialMaskAuditMutation", m)
 }
 
-// The DatasetQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type DatasetQueryRuleFunc func(context.Context, *dao.DatasetQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f DatasetQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.DatasetQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.DatasetQuery", q)
-}
-
-// The DatasetMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type DatasetMutationRuleFunc func(context.Context, *dao.DatasetMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f DatasetMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.DatasetMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.DatasetMutation", m)
-}
-
-// The DatasetExampleQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type DatasetExampleQueryRuleFunc func(context.Context, *dao.DatasetExampleQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f DatasetExampleQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.DatasetExampleQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.DatasetExampleQuery", q)
-}
-
-// The DatasetExampleMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type DatasetExampleMutationRuleFunc func(context.Context, *dao.DatasetExampleMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f DatasetExampleMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.DatasetExampleMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.DatasetExampleMutation", m)
-}
-
-// The EvalRunQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type EvalRunQueryRuleFunc func(context.Context, *dao.EvalRunQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f EvalRunQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.EvalRunQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.EvalRunQuery", q)
-}
-
-// The EvalRunMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type EvalRunMutationRuleFunc func(context.Context, *dao.EvalRunMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f EvalRunMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.EvalRunMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.EvalRunMutation", m)
-}
-
 // The ExecutionEventQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type ExecutionEventQueryRuleFunc func(context.Context, *dao.ExecutionEventQuery) error
@@ -373,30 +301,6 @@ func (f ExecutionEventMutationRuleFunc) EvalMutation(ctx context.Context, m dao.
 		return f(ctx, m)
 	}
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ExecutionEventMutation", m)
-}
-
-// The ExperimentRunQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type ExperimentRunQueryRuleFunc func(context.Context, *dao.ExperimentRunQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f ExperimentRunQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.ExperimentRunQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ExperimentRunQuery", q)
-}
-
-// The ExperimentRunMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type ExperimentRunMutationRuleFunc func(context.Context, *dao.ExperimentRunMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f ExperimentRunMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.ExperimentRunMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ExperimentRunMutation", m)
 }
 
 // The ModelCatalogQueryRuleFunc type is an adapter to allow the use of ordinary
@@ -541,30 +445,6 @@ func (f ResponseItemMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mu
 		return f(ctx, m)
 	}
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ResponseItemMutation", m)
-}
-
-// The ScoreQueryRuleFunc type is an adapter to allow the use of ordinary
-// functions as a query rule.
-type ScoreQueryRuleFunc func(context.Context, *dao.ScoreQuery) error
-
-// EvalQuery return f(ctx, q).
-func (f ScoreQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
-	if q, ok := q.(*dao.ScoreQuery); ok {
-		return f(ctx, q)
-	}
-	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ScoreQuery", q)
-}
-
-// The ScoreMutationRuleFunc type is an adapter to allow the use of ordinary
-// functions as a mutation rule.
-type ScoreMutationRuleFunc func(context.Context, *dao.ScoreMutation) error
-
-// EvalMutation calls f(ctx, m).
-func (f ScoreMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
-	if m, ok := m.(*dao.ScoreMutation); ok {
-		return f(ctx, m)
-	}
-	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ScoreMutation", m)
 }
 
 // The SystemEventQueryRuleFunc type is an adapter to allow the use of ordinary
@@ -832,15 +712,7 @@ func queryFilter(q dao.Query) (Filter, error) {
 		return q.Filter(), nil
 	case *dao.CredentialMaskAuditQuery:
 		return q.Filter(), nil
-	case *dao.DatasetQuery:
-		return q.Filter(), nil
-	case *dao.DatasetExampleQuery:
-		return q.Filter(), nil
-	case *dao.EvalRunQuery:
-		return q.Filter(), nil
 	case *dao.ExecutionEventQuery:
-		return q.Filter(), nil
-	case *dao.ExperimentRunQuery:
 		return q.Filter(), nil
 	case *dao.ModelCatalogQuery:
 		return q.Filter(), nil
@@ -853,8 +725,6 @@ func queryFilter(q dao.Query) (Filter, error) {
 	case *dao.ResponseQuery:
 		return q.Filter(), nil
 	case *dao.ResponseItemQuery:
-		return q.Filter(), nil
-	case *dao.ScoreQuery:
 		return q.Filter(), nil
 	case *dao.SystemEventQuery:
 		return q.Filter(), nil
@@ -895,15 +765,7 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 		return m.Filter(), nil
 	case *dao.CredentialMaskAuditMutation:
 		return m.Filter(), nil
-	case *dao.DatasetMutation:
-		return m.Filter(), nil
-	case *dao.DatasetExampleMutation:
-		return m.Filter(), nil
-	case *dao.EvalRunMutation:
-		return m.Filter(), nil
 	case *dao.ExecutionEventMutation:
-		return m.Filter(), nil
-	case *dao.ExperimentRunMutation:
 		return m.Filter(), nil
 	case *dao.ModelCatalogMutation:
 		return m.Filter(), nil
@@ -916,8 +778,6 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.ResponseMutation:
 		return m.Filter(), nil
 	case *dao.ResponseItemMutation:
-		return m.Filter(), nil
-	case *dao.ScoreMutation:
 		return m.Filter(), nil
 	case *dao.SystemEventMutation:
 		return m.Filter(), nil

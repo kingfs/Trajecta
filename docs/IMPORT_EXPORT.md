@@ -63,7 +63,6 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 | 上游 exchange 索引 | `upstream_exchanges` | 导出；`cassette_path` 在导入时重写 |
 | 遮蔽审计 | `credential_mask_audits`、`credential_mask_event_states` | 导出；真值/假值在导出时解密、导入时用目标密钥重加密 |
 | LLM 分析结果 | `analysis_runs` | 导出；数字自增主键在导入时重新分配 |
-| 评测体系 | `datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs` | 导出 |
 | Responses 运行时状态 | `responses`、`response_items` | 导出 |
 | 审计轨迹 | `request_audits`、`execution_events`、`tool_call_audits` | 导出 |
 | 运维事件 | `system_events` | 导出；按 `fingerprint` 合并，保留目标的已读/已解决状态 |
@@ -73,6 +72,7 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 
 - `trace_observations`、`trace_findings`、`parse_jobs`、`analysis_jobs`、`parser_versions`、`session_summaries`、`resources`、`trace_resources`：都能由 cassette 重建，目标侧部署后由 `Sync` / `analyze refresh` 重新生成；
 - `semantic_nodes`：已由迁移 `20261111000000_drop_semantic_nodes` 废弃，运行时代码不再读写；
+- `datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`：eval 功能已整体退役，导出不再产出这五张表；旧版本导出的 bundle 若仍携带它们，导入时**容忍跳过**（见下文「冲突与跳过」），不报错也不写库；
 - `users`、`api_tokens`：每套部署独立鉴权，不做合并；
 - `upstream_targets`、`upstream_models`：legacy 投影，运行时不写；
 - `app_settings` 中的 `telemetry.install_id`、`network.proxy` 与两条 `system_events.credential_mask_*_repaired_v1` 修复标记：属于单机身份或环境状态，导入无意义；
@@ -128,7 +128,8 @@ cassettes/<相对路径>.http           # 位于最后，流式复制
 | `upstream_exchanges.id` / `request_audits.id` 等已存在 | 跳过 |
 | `system_events.fingerprint` 已存在 | 合并时间戳；仅当源事件更新时才累加 `occurrence_count`，保留目标已读/已解决状态 |
 | `model_catalog.model` 已存在 | 取更早的首次出现、更晚的最后出现/最后使用 |
-| `datasets` / `eval_runs` / `responses` / `analysis_runs` 已存在 | 跳过（`analysis_runs` 以 `trace_id+kind+analyzer+analyzer_version+created_at` 判重） |
+| `responses` / `analysis_runs` 已存在 | 跳过（`analysis_runs` 以 `trace_id+kind+analyzer+analyzer_version+created_at` 判重） |
+| 旧 bundle 携带已退役的 eval 表（`datasets` / `dataset_examples` / `eval_runs` / `scores` / `experiment_runs`） | 容忍跳过：整表读尽、按表记一条 legacy-skipped 日志，行数计入报告的 `skipped_legacy`，不写库、不报错；其余表正常合并 |
 | cassette 文件已存在且大小与 mtime 一致 | 跳过 |
 | cassette 文件已存在但内容不同 | 覆盖并计为 updated；`--keep-existing-files` 改为保留目标并记冲突 |
 
@@ -155,4 +156,5 @@ cassettes/<相对路径>.http           # 位于最后，流式复制
 - 不迁移 `users` / `api_tokens`：集中分析实例自带鉴权。
 - 不迁移 `secret_mask_mappings.db`：它绑定本机密钥，且 bbolt 只允许单进程打开。
 - `semantic_nodes` 的历史数据不迁移：该表已废弃，迁移会直接 DROP。
-- bundle 中 `analysis_runs`、`channel_models`、`dataset_examples` 的数字自增主键会被重新分配；这些表没有外部按该 id 的引用，重分配是安全的。
+- eval 表的历史数据不迁移：eval 功能已整体退役，旧 bundle 的 eval 表导入时容忍跳过；旧库里已有的 eval 表与数据原样保留（Postgres 历史迁移不重写，SQLite 新库不再建表）。
+- bundle 中 `analysis_runs`、`channel_models` 的数字自增主键会被重新分配；这些表没有外部按该 id 的引用，重分配是安全的。

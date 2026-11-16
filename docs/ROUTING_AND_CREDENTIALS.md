@@ -64,7 +64,6 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 - `POST /api/provider-probe`
 - `POST /api/provider-probe/report`
 - `POST /api/provider-probe/report/apply`
-- `POST /api/provider-setup/validate`、`POST /api/provider-setup/apply`
 
 模型与别名：
 
@@ -76,15 +75,13 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 
 `GET /api/models` 只返回当前窗口内 `request_count > 0` 的模型；模型详情的渠道覆盖来自 `channel_models`。
 
-设置、路由解释与本地密钥：
+设置与路由解释：
 
 - `GET /api/settings/routing`、`PATCH /api/settings/routing`
 - `GET /api/settings/channels`、`DELETE /api/settings/channels`
 - `POST /api/routing/inspect`
 - `POST /api/provider-model-test`（按模型、按协议的最小请求连通性测试，只读，不写库、不录制）
 - `POST /api/provider-model-detect`（按模型自动识别接口：chat/responses/messages/generateContent，写入该模型的 `supports_*`；不带 model 时识别所有已启用模型）
-- `GET /api/routing/exchanges`、`GET /api/routing/summary`
-- `GET /api/secrets/local-key`（`?export=1` 下载备份）、`POST /api/secrets/local-key?rotate=1`（admin API-only，Monitor UI 无入口；CLI `db secret` 直读 store）
 - 旧运行时诊断：`GET /api/upstreams`、`GET /api/upstreams/{id}`
 
 `PATCH /api/settings/routing` 的字段、校验与持久化位置（应用库 `app_settings` 键 `routing.settings`）见 [MONITOR_GUIDE.md](./MONITOR_GUIDE.md) 与 [RESPONSES_RUNTIME.md](./RESPONSES_RUNTIME.md)。
@@ -177,7 +174,7 @@ V3 cassette routing event 实际会写入的安全字段包括：`route_target_i
 - 渠道 API 返回值中的 `headers` 会对敏感 header 名（如 `Authorization`、`api-key`、`token` 类）掩码为 `***`；写路径接受 `{ "keep": true }` 表示保留原值，避免 UI 回传掩码覆盖真实密钥。
 - 渠道 API 始终不返回明文 API key，只返回 `api_key_hint` 与 `secret_storage_mode`；`base_url` 按配置原样返回，路由事件里的候选 base URL 才会做 URL 脱敏。
 - 本地 secret：API key 与敏感 header 以 `tlsec:v1:` envelope 保存，主密钥文件是 `{{output_dir}}/trace_index.secret`（权限 `0600`，本地 AES-GCM）；历史明文保持可读，下次写入时转为加密 envelope。
-- 运维入口：`trajecta db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）；对应的管理 API 是 `/api/secrets/local-key`（状态、导出与轮换；API-only，Monitor UI 无入口）。
+- 运维入口：`trajecta db secret status`（检查 key 文件、可读性与 fingerprint）、`db secret export --out backup.key`、`db secret rotate --yes`（备份旧 key、生成新 key、全量重加密）。CLI 直读 store，不经 HTTP；原管理 API `/api/secrets/local-key` 已退役（P3 API-only 死端点处置）。
 - 没有加密能力时 `secret_storage_mode` 为 `plaintext-local`，UI 据此提示本地风险。
 
 ## Monitor 与 MCP 的管理入口

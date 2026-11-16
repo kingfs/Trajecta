@@ -39,10 +39,47 @@ var requestCleanupDerivedTables = []string{
 // on purpose - curated datasets, eval scores, the event feed. They are only
 // deleted when the caller explicitly opts in, because dropping them changes
 // durable operator data rather than rebuildable index state.
+//
+// dataset_examples and scores belong to the retired eval feature: a new
+// database never creates them, but an old deployment may still hold reference
+// rows. Every access is therefore guarded by tableExists, and a missing table
+// is silently treated as zero references rather than an error.
 var requestCleanupReferenceTables = []string{
 	"dataset_examples",
 	"scores",
 	"system_events",
+}
+
+// tableExists reports whether the application database currently has the
+// table. It is the guard that lets cleanup keep its legacy eval-reference
+// capability on old databases while a new database (which never creates the
+// retired tables) runs the same code path without error.
+func (s *Store) tableExists(table string) (bool, error) {
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`
+	if s.driver == "postgres" {
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?`
+	}
+	var n int
+	if err := s.db.QueryRow(query, table).Scan(&n); err != nil {
+		return false, fmt.Errorf("check table %s exists: %w", table, err)
+	}
+	return n > 0, nil
+}
+
+// existingReferenceTables filters requestCleanupReferenceTables down to the
+// tables this database actually has, preserving the list order.
+func (s *Store) existingReferenceTables() ([]string, error) {
+	var tables []string
+	for _, table := range requestCleanupReferenceTables {
+		exists, err := s.tableExists(table)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			tables = append(tables, table)
+		}
+	}
+	return tables, nil
 }
 
 // requestCleanupSampleLimit caps how many matched requests a plan carries for
@@ -261,14 +298,19 @@ func (s *Store) PlanRequestCleanup(filter RequestCleanupFilter) (RequestCleanupP
 
 // requestCleanupReferenceCounts answers how much curated data still points at
 // the selected traces. The tables are the ones requestCleanupReferenceTables
-// lists, so the report and the optional purge stay in step.
+// lists that this database actually has, so the report and the optional purge
+// stay in step; a retired eval table that was never created counts as zero.
 func (s *Store) requestCleanupReferenceCounts(traceIDs []string) (map[string]int, error) {
 	traceIDs = dedupeNonEmptyStrings(traceIDs)
 	if len(traceIDs) == 0 {
 		return nil, nil
 	}
+	tables, err := s.existingReferenceTables()
+	if err != nil {
+		return nil, err
+	}
 	counts := map[string]int{}
-	for _, table := range requestCleanupReferenceTables {
+	for _, table := range tables {
 		total := 0
 		for _, chunk := range chunkStrings(traceIDs, storeSQLParamChunk) {
 			var count int
@@ -342,8 +384,12 @@ func (s *Store) ApplyRequestCleanup(filter RequestCleanupFilter, opts RequestCle
 	}
 
 	if opts.PurgeReferences {
+		tables, err := s.existingReferenceTables()
+		if err != nil {
+			return result, err
+		}
 		result.DeletedReferences = map[string]int{}
-		for _, table := range requestCleanupReferenceTables {
+		for _, table := range tables {
 			deleted, err := requestCleanupDeleteByColumn(tx, s, table, "trace_id", plan.TraceIDs)
 			if err != nil {
 				return result, err
@@ -417,7 +463,7 @@ func requestCleanupScopeSQL(filter RequestCleanupFilter) (string, []any, error) 
 	// must use the same layout: a raw time.Time binds as "2006-01-02 15:04:05
 	// +0000 UTC" and the text comparison then silently widens --since to the
 	// whole calendar day and drops --until's day. Postgres parses the same
-	// string as a timestamptz, which is how RoutingSummary binds its window.
+	// string as a timestamptz, which is how the analytics window queries bind it.
 	if !filter.Since.IsZero() {
 		clauses = append(clauses, `recorded_at >= ?`)
 		args = append(args, filter.Since.UTC().Format(timeLayout))

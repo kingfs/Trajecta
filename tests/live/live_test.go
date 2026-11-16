@@ -656,7 +656,6 @@ func TestLiveMonitorReadSurface(t *testing.T) {
 		"/api/upstreams",
 		"/api/events",
 		"/api/findings",
-		"/api/routing/summary",
 		"/api/settings/channels",
 		"/api/model-aliases",
 		"/api/provider-presets",

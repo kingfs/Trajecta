@@ -66,8 +66,9 @@ upstream_exchanges rows, the per-trace derived rows (observations, findings,
 resources, credential-mask audits, analysis runs, parse jobs), the trace-targeted
 analysis jobs, and the matching cassette files; it then rebuilds session_summaries
 from the remaining logs. --keep-cassettes limits an applied run to the database.
---purge-references also removes curated rows that point at the traces (dataset
-examples, eval scores, system events).
+--purge-references also removes curated rows that point at the traces (system
+events, plus legacy dataset examples and eval scores on databases that still
+have the retired eval tables; tables that do not exist are skipped).
 
 Stop serve before applying: the proxy is the only writer, and a run against a
 running SQLite database may fail on its lock.`,
@@ -104,7 +105,7 @@ running SQLite database may fail on its lock.`,
 	cmd.Flags().StringVar(&opts.until, "until", "", "Only requests recorded at or before this RFC3339 timestamp")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Delete at most this many matched requests (0 means all)")
 	cmd.Flags().BoolVar(&opts.keepCassettes, "keep-cassettes", false, "Keep the .http cassette files and only clean the database")
-	cmd.Flags().BoolVar(&opts.purgeReferences, "purge-references", false, "Also delete dataset examples, eval scores and system events that point at the traces")
+	cmd.Flags().BoolVar(&opts.purgeReferences, "purge-references", false, "Also delete system events and legacy eval reference rows (dataset examples, scores) that point at the traces; retired eval tables missing from the database are skipped")
 	cmd.Flags().BoolVar(&opts.apply, "apply", false, "Actually delete; without it the command is a dry run")
 	return cmd
 }
@@ -227,7 +228,7 @@ func runDBCleanupRequestsWithOptions(opts dbCleanupRequestsOptions, filter store
 
 	warnings := cassettes.warnings(keepCassettes)
 	if len(result.Plan.ReferenceCounts) > 0 && !opts.purgeReferences {
-		warnings = append(warnings, "curated rows still point at the selected traces (dataset_examples/scores/system_events); rerun with --purge-references to remove them")
+		warnings = append(warnings, "curated rows still point at the selected traces (system_events, plus legacy dataset_examples/scores where those retired tables exist); rerun with --purge-references to remove them")
 	}
 	ok := len(cassettes.failures) == 0
 	if err := WriteResultWithState(stdoutOrDefault(opts.stdout), opts.format, "db.cleanup.requests", ok, report, warnings, func(w io.Writer) error {

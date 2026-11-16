@@ -12,18 +12,13 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
 	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
-	"github.com/kingfs/Trajecta/ent/dao/dataset"
-	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
-	"github.com/kingfs/Trajecta/ent/dao/evalrun"
 	"github.com/kingfs/Trajecta/ent/dao/executionevent"
-	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
 	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 	"github.com/kingfs/Trajecta/ent/dao/parserversion"
 	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
-	"github.com/kingfs/Trajecta/ent/dao/score"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -450,104 +445,6 @@ func init() {
 	credentialmaskauditDescID := credentialmaskauditFields[0].Descriptor()
 	// credentialmaskaudit.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	credentialmaskaudit.IDValidator = credentialmaskauditDescID.Validators[0].(func(string) error)
-	datasetFields := schema.Dataset{}.Fields()
-	_ = datasetFields
-	// datasetDescName is the schema descriptor for name field.
-	datasetDescName := datasetFields[1].Descriptor()
-	// dataset.NameValidator is a validator for the "name" field. It is called by the builders before save.
-	dataset.NameValidator = datasetDescName.Validators[0].(func(string) error)
-	// datasetDescDescription is the schema descriptor for description field.
-	datasetDescDescription := datasetFields[2].Descriptor()
-	// dataset.DefaultDescription holds the default value on creation for the description field.
-	dataset.DefaultDescription = datasetDescDescription.Default.(string)
-	// datasetDescCreatedAt is the schema descriptor for created_at field.
-	datasetDescCreatedAt := datasetFields[3].Descriptor()
-	// dataset.DefaultCreatedAt holds the default value on creation for the created_at field.
-	dataset.DefaultCreatedAt = datasetDescCreatedAt.Default.(func() time.Time)
-	// datasetDescUpdatedAt is the schema descriptor for updated_at field.
-	datasetDescUpdatedAt := datasetFields[4].Descriptor()
-	// dataset.DefaultUpdatedAt holds the default value on creation for the updated_at field.
-	dataset.DefaultUpdatedAt = datasetDescUpdatedAt.Default.(func() time.Time)
-	// datasetDescID is the schema descriptor for id field.
-	datasetDescID := datasetFields[0].Descriptor()
-	// dataset.IDValidator is a validator for the "id" field. It is called by the builders before save.
-	dataset.IDValidator = datasetDescID.Validators[0].(func(string) error)
-	datasetexampleFields := schema.DatasetExample{}.Fields()
-	_ = datasetexampleFields
-	// datasetexampleDescDatasetID is the schema descriptor for dataset_id field.
-	datasetexampleDescDatasetID := datasetexampleFields[0].Descriptor()
-	// datasetexample.DatasetIDValidator is a validator for the "dataset_id" field. It is called by the builders before save.
-	datasetexample.DatasetIDValidator = datasetexampleDescDatasetID.Validators[0].(func(string) error)
-	// datasetexampleDescTraceID is the schema descriptor for trace_id field.
-	datasetexampleDescTraceID := datasetexampleFields[1].Descriptor()
-	// datasetexample.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
-	datasetexample.TraceIDValidator = datasetexampleDescTraceID.Validators[0].(func(string) error)
-	// datasetexampleDescPosition is the schema descriptor for position field.
-	datasetexampleDescPosition := datasetexampleFields[2].Descriptor()
-	// datasetexample.DefaultPosition holds the default value on creation for the position field.
-	datasetexample.DefaultPosition = datasetexampleDescPosition.Default.(int)
-	// datasetexampleDescAddedAt is the schema descriptor for added_at field.
-	datasetexampleDescAddedAt := datasetexampleFields[3].Descriptor()
-	// datasetexample.DefaultAddedAt holds the default value on creation for the added_at field.
-	datasetexample.DefaultAddedAt = datasetexampleDescAddedAt.Default.(func() time.Time)
-	// datasetexampleDescSourceType is the schema descriptor for source_type field.
-	datasetexampleDescSourceType := datasetexampleFields[4].Descriptor()
-	// datasetexample.DefaultSourceType holds the default value on creation for the source_type field.
-	datasetexample.DefaultSourceType = datasetexampleDescSourceType.Default.(string)
-	// datasetexampleDescSourceID is the schema descriptor for source_id field.
-	datasetexampleDescSourceID := datasetexampleFields[5].Descriptor()
-	// datasetexample.DefaultSourceID holds the default value on creation for the source_id field.
-	datasetexample.DefaultSourceID = datasetexampleDescSourceID.Default.(string)
-	// datasetexampleDescNote is the schema descriptor for note field.
-	datasetexampleDescNote := datasetexampleFields[6].Descriptor()
-	// datasetexample.DefaultNote holds the default value on creation for the note field.
-	datasetexample.DefaultNote = datasetexampleDescNote.Default.(string)
-	evalrunFields := schema.EvalRun{}.Fields()
-	_ = evalrunFields
-	// evalrunDescDatasetID is the schema descriptor for dataset_id field.
-	evalrunDescDatasetID := evalrunFields[1].Descriptor()
-	// evalrun.DefaultDatasetID holds the default value on creation for the dataset_id field.
-	evalrun.DefaultDatasetID = evalrunDescDatasetID.Default.(string)
-	// evalrunDescSourceType is the schema descriptor for source_type field.
-	evalrunDescSourceType := evalrunFields[2].Descriptor()
-	// evalrun.DefaultSourceType holds the default value on creation for the source_type field.
-	evalrun.DefaultSourceType = evalrunDescSourceType.Default.(string)
-	// evalrunDescSourceID is the schema descriptor for source_id field.
-	evalrunDescSourceID := evalrunFields[3].Descriptor()
-	// evalrun.DefaultSourceID holds the default value on creation for the source_id field.
-	evalrun.DefaultSourceID = evalrunDescSourceID.Default.(string)
-	// evalrunDescEvaluatorSet is the schema descriptor for evaluator_set field.
-	evalrunDescEvaluatorSet := evalrunFields[4].Descriptor()
-	// evalrun.EvaluatorSetValidator is a validator for the "evaluator_set" field. It is called by the builders before save.
-	evalrun.EvaluatorSetValidator = evalrunDescEvaluatorSet.Validators[0].(func(string) error)
-	// evalrunDescCreatedAt is the schema descriptor for created_at field.
-	evalrunDescCreatedAt := evalrunFields[5].Descriptor()
-	// evalrun.DefaultCreatedAt holds the default value on creation for the created_at field.
-	evalrun.DefaultCreatedAt = evalrunDescCreatedAt.Default.(func() time.Time)
-	// evalrunDescCompletedAt is the schema descriptor for completed_at field.
-	evalrunDescCompletedAt := evalrunFields[6].Descriptor()
-	// evalrun.DefaultCompletedAt holds the default value on creation for the completed_at field.
-	evalrun.DefaultCompletedAt = evalrunDescCompletedAt.Default.(func() time.Time)
-	// evalrunDescTraceCount is the schema descriptor for trace_count field.
-	evalrunDescTraceCount := evalrunFields[7].Descriptor()
-	// evalrun.DefaultTraceCount holds the default value on creation for the trace_count field.
-	evalrun.DefaultTraceCount = evalrunDescTraceCount.Default.(int)
-	// evalrunDescScoreCount is the schema descriptor for score_count field.
-	evalrunDescScoreCount := evalrunFields[8].Descriptor()
-	// evalrun.DefaultScoreCount holds the default value on creation for the score_count field.
-	evalrun.DefaultScoreCount = evalrunDescScoreCount.Default.(int)
-	// evalrunDescPassCount is the schema descriptor for pass_count field.
-	evalrunDescPassCount := evalrunFields[9].Descriptor()
-	// evalrun.DefaultPassCount holds the default value on creation for the pass_count field.
-	evalrun.DefaultPassCount = evalrunDescPassCount.Default.(int)
-	// evalrunDescFailCount is the schema descriptor for fail_count field.
-	evalrunDescFailCount := evalrunFields[10].Descriptor()
-	// evalrun.DefaultFailCount holds the default value on creation for the fail_count field.
-	evalrun.DefaultFailCount = evalrunDescFailCount.Default.(int)
-	// evalrunDescID is the schema descriptor for id field.
-	evalrunDescID := evalrunFields[0].Descriptor()
-	// evalrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
-	evalrun.IDValidator = evalrunDescID.Validators[0].(func(string) error)
 	executioneventFields := schema.ExecutionEvent{}.Fields()
 	_ = executioneventFields
 	// executioneventDescEventType is the schema descriptor for event_type field.
@@ -570,64 +467,6 @@ func init() {
 	executioneventDescID := executioneventFields[0].Descriptor()
 	// executionevent.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	executionevent.IDValidator = executioneventDescID.Validators[0].(func(string) error)
-	experimentrunFields := schema.ExperimentRun{}.Fields()
-	_ = experimentrunFields
-	// experimentrunDescName is the schema descriptor for name field.
-	experimentrunDescName := experimentrunFields[1].Descriptor()
-	// experimentrun.DefaultName holds the default value on creation for the name field.
-	experimentrun.DefaultName = experimentrunDescName.Default.(string)
-	// experimentrunDescDescription is the schema descriptor for description field.
-	experimentrunDescDescription := experimentrunFields[2].Descriptor()
-	// experimentrun.DefaultDescription holds the default value on creation for the description field.
-	experimentrun.DefaultDescription = experimentrunDescDescription.Default.(string)
-	// experimentrunDescBaselineEvalRunID is the schema descriptor for baseline_eval_run_id field.
-	experimentrunDescBaselineEvalRunID := experimentrunFields[3].Descriptor()
-	// experimentrun.BaselineEvalRunIDValidator is a validator for the "baseline_eval_run_id" field. It is called by the builders before save.
-	experimentrun.BaselineEvalRunIDValidator = experimentrunDescBaselineEvalRunID.Validators[0].(func(string) error)
-	// experimentrunDescCandidateEvalRunID is the schema descriptor for candidate_eval_run_id field.
-	experimentrunDescCandidateEvalRunID := experimentrunFields[4].Descriptor()
-	// experimentrun.CandidateEvalRunIDValidator is a validator for the "candidate_eval_run_id" field. It is called by the builders before save.
-	experimentrun.CandidateEvalRunIDValidator = experimentrunDescCandidateEvalRunID.Validators[0].(func(string) error)
-	// experimentrunDescCreatedAt is the schema descriptor for created_at field.
-	experimentrunDescCreatedAt := experimentrunFields[5].Descriptor()
-	// experimentrun.DefaultCreatedAt holds the default value on creation for the created_at field.
-	experimentrun.DefaultCreatedAt = experimentrunDescCreatedAt.Default.(func() time.Time)
-	// experimentrunDescBaselineScoreCount is the schema descriptor for baseline_score_count field.
-	experimentrunDescBaselineScoreCount := experimentrunFields[6].Descriptor()
-	// experimentrun.DefaultBaselineScoreCount holds the default value on creation for the baseline_score_count field.
-	experimentrun.DefaultBaselineScoreCount = experimentrunDescBaselineScoreCount.Default.(int)
-	// experimentrunDescCandidateScoreCount is the schema descriptor for candidate_score_count field.
-	experimentrunDescCandidateScoreCount := experimentrunFields[7].Descriptor()
-	// experimentrun.DefaultCandidateScoreCount holds the default value on creation for the candidate_score_count field.
-	experimentrun.DefaultCandidateScoreCount = experimentrunDescCandidateScoreCount.Default.(int)
-	// experimentrunDescBaselinePassRate is the schema descriptor for baseline_pass_rate field.
-	experimentrunDescBaselinePassRate := experimentrunFields[8].Descriptor()
-	// experimentrun.DefaultBaselinePassRate holds the default value on creation for the baseline_pass_rate field.
-	experimentrun.DefaultBaselinePassRate = experimentrunDescBaselinePassRate.Default.(float64)
-	// experimentrunDescCandidatePassRate is the schema descriptor for candidate_pass_rate field.
-	experimentrunDescCandidatePassRate := experimentrunFields[9].Descriptor()
-	// experimentrun.DefaultCandidatePassRate holds the default value on creation for the candidate_pass_rate field.
-	experimentrun.DefaultCandidatePassRate = experimentrunDescCandidatePassRate.Default.(float64)
-	// experimentrunDescPassRateDelta is the schema descriptor for pass_rate_delta field.
-	experimentrunDescPassRateDelta := experimentrunFields[10].Descriptor()
-	// experimentrun.DefaultPassRateDelta holds the default value on creation for the pass_rate_delta field.
-	experimentrun.DefaultPassRateDelta = experimentrunDescPassRateDelta.Default.(float64)
-	// experimentrunDescMatchedScoreCount is the schema descriptor for matched_score_count field.
-	experimentrunDescMatchedScoreCount := experimentrunFields[11].Descriptor()
-	// experimentrun.DefaultMatchedScoreCount holds the default value on creation for the matched_score_count field.
-	experimentrun.DefaultMatchedScoreCount = experimentrunDescMatchedScoreCount.Default.(int)
-	// experimentrunDescImprovementCount is the schema descriptor for improvement_count field.
-	experimentrunDescImprovementCount := experimentrunFields[12].Descriptor()
-	// experimentrun.DefaultImprovementCount holds the default value on creation for the improvement_count field.
-	experimentrun.DefaultImprovementCount = experimentrunDescImprovementCount.Default.(int)
-	// experimentrunDescRegressionCount is the schema descriptor for regression_count field.
-	experimentrunDescRegressionCount := experimentrunFields[13].Descriptor()
-	// experimentrun.DefaultRegressionCount holds the default value on creation for the regression_count field.
-	experimentrun.DefaultRegressionCount = experimentrunDescRegressionCount.Default.(int)
-	// experimentrunDescID is the schema descriptor for id field.
-	experimentrunDescID := experimentrunFields[0].Descriptor()
-	// experimentrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
-	experimentrun.IDValidator = experimentrunDescID.Validators[0].(func(string) error)
 	modelcatalogFields := schema.ModelCatalog{}.Fields()
 	_ = modelcatalogFields
 	// modelcatalogDescDisplayName is the schema descriptor for display_name field.
@@ -780,52 +619,6 @@ func init() {
 	responseitemDescID := responseitemFields[0].Descriptor()
 	// responseitem.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	responseitem.IDValidator = responseitemDescID.Validators[0].(func(string) error)
-	scoreFields := schema.Score{}.Fields()
-	_ = scoreFields
-	// scoreDescTraceID is the schema descriptor for trace_id field.
-	scoreDescTraceID := scoreFields[1].Descriptor()
-	// score.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
-	score.TraceIDValidator = scoreDescTraceID.Validators[0].(func(string) error)
-	// scoreDescSessionID is the schema descriptor for session_id field.
-	scoreDescSessionID := scoreFields[2].Descriptor()
-	// score.DefaultSessionID holds the default value on creation for the session_id field.
-	score.DefaultSessionID = scoreDescSessionID.Default.(string)
-	// scoreDescDatasetID is the schema descriptor for dataset_id field.
-	scoreDescDatasetID := scoreFields[3].Descriptor()
-	// score.DefaultDatasetID holds the default value on creation for the dataset_id field.
-	score.DefaultDatasetID = scoreDescDatasetID.Default.(string)
-	// scoreDescEvalRunID is the schema descriptor for eval_run_id field.
-	scoreDescEvalRunID := scoreFields[4].Descriptor()
-	// score.DefaultEvalRunID holds the default value on creation for the eval_run_id field.
-	score.DefaultEvalRunID = scoreDescEvalRunID.Default.(string)
-	// scoreDescEvaluatorKey is the schema descriptor for evaluator_key field.
-	scoreDescEvaluatorKey := scoreFields[5].Descriptor()
-	// score.EvaluatorKeyValidator is a validator for the "evaluator_key" field. It is called by the builders before save.
-	score.EvaluatorKeyValidator = scoreDescEvaluatorKey.Validators[0].(func(string) error)
-	// scoreDescValue is the schema descriptor for value field.
-	scoreDescValue := scoreFields[6].Descriptor()
-	// score.DefaultValue holds the default value on creation for the value field.
-	score.DefaultValue = scoreDescValue.Default.(float64)
-	// scoreDescStatus is the schema descriptor for status field.
-	scoreDescStatus := scoreFields[7].Descriptor()
-	// score.DefaultStatus holds the default value on creation for the status field.
-	score.DefaultStatus = scoreDescStatus.Default.(string)
-	// scoreDescLabel is the schema descriptor for label field.
-	scoreDescLabel := scoreFields[8].Descriptor()
-	// score.DefaultLabel holds the default value on creation for the label field.
-	score.DefaultLabel = scoreDescLabel.Default.(string)
-	// scoreDescExplanation is the schema descriptor for explanation field.
-	scoreDescExplanation := scoreFields[9].Descriptor()
-	// score.DefaultExplanation holds the default value on creation for the explanation field.
-	score.DefaultExplanation = scoreDescExplanation.Default.(string)
-	// scoreDescCreatedAt is the schema descriptor for created_at field.
-	scoreDescCreatedAt := scoreFields[10].Descriptor()
-	// score.DefaultCreatedAt holds the default value on creation for the created_at field.
-	score.DefaultCreatedAt = scoreDescCreatedAt.Default.(func() time.Time)
-	// scoreDescID is the schema descriptor for id field.
-	scoreDescID := scoreFields[0].Descriptor()
-	// score.IDValidator is a validator for the "id" field. It is called by the builders before save.
-	score.IDValidator = scoreDescID.Validators[0].(func(string) error)
 	systemeventFields := schema.SystemEvent{}.Fields()
 	_ = systemeventFields
 	// systemeventDescFingerprint is the schema descriptor for fingerprint field.

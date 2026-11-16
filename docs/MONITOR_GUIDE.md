@@ -47,7 +47,7 @@ Monitor 同时使用两类数据：
 - application database（生产环境为 Postgres，本地 fallback 为 SQLite，默认文件 `{{output_dir}}/trajecta.sqlite3`）：trace 索引、session、列表/过滤/分页/聚合、渠道与模型配置、模型别名、路由设置、事件、analysis run/job、Responses 状态和 audit 表。
 - raw `.http` cassette：trace 详情、raw protocol 与 replay-safe 检查的事实来源。路由事实在数据库里是 `logs` 上的派生列，原始 `routing.*` 事件仍记录在 cassette prelude 中。
 
-因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。`GET /api/routing/summary` 也完全走数据库：`buildRoutingSummary` 调 `store.RoutingSummary(since, model)`，对 `logs` 上的路由列做一次 `GROUP BY`，不再打开任何 cassette。计数是**按 trace** 而不是按路由事件：每条 trace 只保留每个事实的最后一个非空值（`internal/recorder/recorder.go` 的 `setLastNonEmpty`），所以同一条 trace 里的多次 sticky 事件折叠成最后一次。只要 `selected_upstream_id`、`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`routing_failure_reason` 任一非空，这条 trace 就算「有事件」；`legacy_or_missing_events = total_traces - eventful_traces`。迁移前的行不一定算 legacy：`selected_upstream_id` 是迁移前就有的列，这类 trace 仍算有事件，只是 `route_target_id` / `channel_id` / `credential_id` 与 sticky 拆分为空，直到一次重索引从 prelude 重新推导这五列。
+因此列表页只读数据库索引、响应很快，详情页仍能回到原始 HTTP 证据。路由统计（Overview/分析视图）也完全走数据库：对 `logs` 上的路由列做一次 `GROUP BY`，不再打开任何 cassette（旧的 `/api/routing/summary` 端点已退役）。计数是**按 trace** 而不是按路由事件：每条 trace 只保留每个事实的最后一个非空值（`internal/recorder/recorder.go` 的 `setLastNonEmpty`），所以同一条 trace 里的多次 sticky 事件折叠成最后一次。只要 `selected_upstream_id`、`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`routing_failure_reason` 任一非空，这条 trace 就算「有事件」；`legacy_or_missing_events = total_traces - eventful_traces`。迁移前的行不一定算 legacy：`selected_upstream_id` 是迁移前就有的列，这类 trace 仍算有事件，只是 `route_target_id` / `channel_id` / `credential_id` 与 sticky 拆分为空，直到一次重索引从 prelude 重新推导这五列。
 
 ## 页面
 
@@ -204,8 +204,7 @@ Trajecta 自身的事件收件箱：
 创建前可以先做探测：
 
 - `POST /api/provider-probe` 返回只读的 Detect provider 建议，不落库。
-- `POST /api/provider-setup/validate` 组合 base URL、API key、preset、模型发现与 capability 字段做一次探测，并把归一化配置写回表单，但不落库；响应不回显 API key，只返回 `api_key_hint`、secret storage mode 和脱敏 header 状态。表单字段变化会清空旧验证结果。
-- `POST /api/provider-setup/apply` 才真正把配置写入 store。
+- 创建/编辑直接走渠道 CRUD（`POST /api/channels` 等），表单归一化后的字段一次写入应用数据库；API key 不回显，只返回 `api_key_hint`、secret storage mode 和脱敏 header 状态。旧的 `provider-setup/validate|apply` 两步端点已退役。
 - 列表页的 Batch probe and apply 先跑 `POST /api/provider-probe/report` 预览，再用 `POST /api/provider-probe/report/apply` 对 detected 且存在可补字段的 provider 批量应用；批量应用只补缺失的 `api_type`、`protocol_family` 和未设置的 capability，不覆盖显式配置，也不覆盖显式 `false`。
 - provider probe 只检查路由是否存在：它给 `/v1/responses` 发空 body，`400 missing model` 也会被算作 endpoint 存在，所以不能证明某个模型在该协议上可用。因此 Chat Completions 渠道的 `capabilities.responses` 不再由 route-only probe 自动写入；模型级支持用按模型自动识别/连通性测试实测确认。
 
@@ -236,7 +235,7 @@ Trajecta 自身的事件收件箱：
 - 路由设置（`PATCH /api/settings/routing`：`responses_strategy`、`selection_policy`、`priority_mode`、`plan_engine`、`route_plan_log_level`）作为渠道页底部「路由设置」折叠卡片；缺失模型没有回退开关：未开启的模型统一由代理回答 404。
 - 模型别名（`/api/model-aliases`、`/api/model-aliases/validate`）作为模型页底部的「模型别名」折叠卡片。
 - 路由检查器（`POST /api/routing/inspect`）作为渠道页底部的「路由检查器」折叠卡片。它不再使用独立的 planner：handler 构造 prospective request 后调用 `router.Explain` 的 dry-run，候选过滤、健康/熔断、执行模式与选择都与转发路径同一实现（dry-run 不读写 sticky、不增加 inflight，因此可重复且不影响线上）。候选的能力判定与转发热路径共用同一个谓词（`upstream.ResolvedUpstream.SupportsRawPath`：协议族 → API surface → adapter），因此「只写 provider preset、不写 `api_type`」的渠道（如 `config/examples/anthropic.yaml`、`google_genai.yaml`、`vertex.yaml`）会按解析后的协议族回答，而不是按空的 `api_type` 被当成 Chat Completions 渠道：Anthropic 渠道对 `/v1/messages` 报可服务、对 `/v1/chat/completions` 报 `requires_chat_completions`，Google/Vertex 渠道对这三个可预演 endpoint 都报不可服务。模型级能力覆盖同样按转发路径的投影读取（`channel.ChannelModelCapabilities`：别名键携带其目标模型行的覆盖），因此「别名名恰好也是该渠道已声明模型名」时，Inspector 与代理都会用别名目标行的覆盖，而不会用被遮蔽模型行自己的声明。未开启模型的可路由性也按同一条规则判断：候选会以 `model_not_enabled`（渠道声明过但已关闭/已被上游移除）或 `model_not_matched`（没有任何渠道声明）被排除——与转发热路径一致，不会因为该渠道的模型集合暂时为空就放行。
-- 最近选中的路由记录不再单独成页：它们作为每条 trace 自身的事实留在流量页与 trace 详情；`GET /api/routing/exchanges`、`GET /api/routing/summary` 仍保留给 API/MCP/CLI 使用。
+- 最近选中的路由记录不再单独成页：它们作为每条 trace 自身的事实留在流量页与 trace 详情；旧的 `GET /api/routing/exchanges`、`GET /api/routing/summary` 端点已退役（无 UI/CLI/MCP 调用方）。
 
 ### 系统
 

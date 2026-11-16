@@ -22,18 +22,13 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
 	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
-	"github.com/kingfs/Trajecta/ent/dao/dataset"
-	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
-	"github.com/kingfs/Trajecta/ent/dao/evalrun"
 	"github.com/kingfs/Trajecta/ent/dao/executionevent"
-	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
 	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 	"github.com/kingfs/Trajecta/ent/dao/parserversion"
 	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
-	"github.com/kingfs/Trajecta/ent/dao/score"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -68,16 +63,8 @@ type Client struct {
 	ChannelProbeRun *ChannelProbeRunClient
 	// CredentialMaskAudit is the client for interacting with the CredentialMaskAudit builders.
 	CredentialMaskAudit *CredentialMaskAuditClient
-	// Dataset is the client for interacting with the Dataset builders.
-	Dataset *DatasetClient
-	// DatasetExample is the client for interacting with the DatasetExample builders.
-	DatasetExample *DatasetExampleClient
-	// EvalRun is the client for interacting with the EvalRun builders.
-	EvalRun *EvalRunClient
 	// ExecutionEvent is the client for interacting with the ExecutionEvent builders.
 	ExecutionEvent *ExecutionEventClient
-	// ExperimentRun is the client for interacting with the ExperimentRun builders.
-	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
 	// ParseJob is the client for interacting with the ParseJob builders.
@@ -90,8 +77,6 @@ type Client struct {
 	Response *ResponseClient
 	// ResponseItem is the client for interacting with the ResponseItem builders.
 	ResponseItem *ResponseItemClient
-	// Score is the client for interacting with the Score builders.
-	Score *ScoreClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
 	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
@@ -128,18 +113,13 @@ func (c *Client) init() {
 	c.ChannelModel = NewChannelModelClient(c.config)
 	c.ChannelProbeRun = NewChannelProbeRunClient(c.config)
 	c.CredentialMaskAudit = NewCredentialMaskAuditClient(c.config)
-	c.Dataset = NewDatasetClient(c.config)
-	c.DatasetExample = NewDatasetExampleClient(c.config)
-	c.EvalRun = NewEvalRunClient(c.config)
 	c.ExecutionEvent = NewExecutionEventClient(c.config)
-	c.ExperimentRun = NewExperimentRunClient(c.config)
 	c.ModelCatalog = NewModelCatalogClient(c.config)
 	c.ParseJob = NewParseJobClient(c.config)
 	c.ParserVersion = NewParserVersionClient(c.config)
 	c.RequestAudit = NewRequestAuditClient(c.config)
 	c.Response = NewResponseClient(c.config)
 	c.ResponseItem = NewResponseItemClient(c.config)
-	c.Score = NewScoreClient(c.config)
 	c.SystemEvent = NewSystemEventClient(c.config)
 	c.ToolCallAudit = NewToolCallAuditClient(c.config)
 	c.TraceFinding = NewTraceFindingClient(c.config)
@@ -250,18 +230,13 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ChannelModel:        NewChannelModelClient(cfg),
 		ChannelProbeRun:     NewChannelProbeRunClient(cfg),
 		CredentialMaskAudit: NewCredentialMaskAuditClient(cfg),
-		Dataset:             NewDatasetClient(cfg),
-		DatasetExample:      NewDatasetExampleClient(cfg),
-		EvalRun:             NewEvalRunClient(cfg),
 		ExecutionEvent:      NewExecutionEventClient(cfg),
-		ExperimentRun:       NewExperimentRunClient(cfg),
 		ModelCatalog:        NewModelCatalogClient(cfg),
 		ParseJob:            NewParseJobClient(cfg),
 		ParserVersion:       NewParserVersionClient(cfg),
 		RequestAudit:        NewRequestAuditClient(cfg),
 		Response:            NewResponseClient(cfg),
 		ResponseItem:        NewResponseItemClient(cfg),
-		Score:               NewScoreClient(cfg),
 		SystemEvent:         NewSystemEventClient(cfg),
 		ToolCallAudit:       NewToolCallAuditClient(cfg),
 		TraceFinding:        NewTraceFindingClient(cfg),
@@ -297,18 +272,13 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ChannelModel:        NewChannelModelClient(cfg),
 		ChannelProbeRun:     NewChannelProbeRunClient(cfg),
 		CredentialMaskAudit: NewCredentialMaskAuditClient(cfg),
-		Dataset:             NewDatasetClient(cfg),
-		DatasetExample:      NewDatasetExampleClient(cfg),
-		EvalRun:             NewEvalRunClient(cfg),
 		ExecutionEvent:      NewExecutionEventClient(cfg),
-		ExperimentRun:       NewExperimentRunClient(cfg),
 		ModelCatalog:        NewModelCatalogClient(cfg),
 		ParseJob:            NewParseJobClient(cfg),
 		ParserVersion:       NewParserVersionClient(cfg),
 		RequestAudit:        NewRequestAuditClient(cfg),
 		Response:            NewResponseClient(cfg),
 		ResponseItem:        NewResponseItemClient(cfg),
-		Score:               NewScoreClient(cfg),
 		SystemEvent:         NewSystemEventClient(cfg),
 		ToolCallAudit:       NewToolCallAuditClient(cfg),
 		TraceFinding:        NewTraceFindingClient(cfg),
@@ -348,9 +318,8 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
-		c.ChannelProbeRun, c.CredentialMaskAudit, c.Dataset, c.DatasetExample,
-		c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog, c.ParseJob,
-		c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem, c.Score,
+		c.ChannelProbeRun, c.CredentialMaskAudit, c.ExecutionEvent, c.ModelCatalog,
+		c.ParseJob, c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem,
 		c.SystemEvent, c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
 		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
@@ -363,9 +332,8 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
-		c.ChannelProbeRun, c.CredentialMaskAudit, c.Dataset, c.DatasetExample,
-		c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog, c.ParseJob,
-		c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem, c.Score,
+		c.ChannelProbeRun, c.CredentialMaskAudit, c.ExecutionEvent, c.ModelCatalog,
+		c.ParseJob, c.ParserVersion, c.RequestAudit, c.Response, c.ResponseItem,
 		c.SystemEvent, c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
 		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
@@ -390,16 +358,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ChannelProbeRun.mutate(ctx, m)
 	case *CredentialMaskAuditMutation:
 		return c.CredentialMaskAudit.mutate(ctx, m)
-	case *DatasetMutation:
-		return c.Dataset.mutate(ctx, m)
-	case *DatasetExampleMutation:
-		return c.DatasetExample.mutate(ctx, m)
-	case *EvalRunMutation:
-		return c.EvalRun.mutate(ctx, m)
 	case *ExecutionEventMutation:
 		return c.ExecutionEvent.mutate(ctx, m)
-	case *ExperimentRunMutation:
-		return c.ExperimentRun.mutate(ctx, m)
 	case *ModelCatalogMutation:
 		return c.ModelCatalog.mutate(ctx, m)
 	case *ParseJobMutation:
@@ -412,8 +372,6 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Response.mutate(ctx, m)
 	case *ResponseItemMutation:
 		return c.ResponseItem.mutate(ctx, m)
-	case *ScoreMutation:
-		return c.Score.mutate(ctx, m)
 	case *SystemEventMutation:
 		return c.SystemEvent.mutate(ctx, m)
 	case *ToolCallAuditMutation:
@@ -1387,405 +1345,6 @@ func (c *CredentialMaskAuditClient) mutate(ctx context.Context, m *CredentialMas
 	}
 }
 
-// DatasetClient is a client for the Dataset schema.
-type DatasetClient struct {
-	config
-}
-
-// NewDatasetClient returns a client for the Dataset from the given config.
-func NewDatasetClient(c config) *DatasetClient {
-	return &DatasetClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `dataset.Hooks(f(g(h())))`.
-func (c *DatasetClient) Use(hooks ...Hook) {
-	c.hooks.Dataset = append(c.hooks.Dataset, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `dataset.Intercept(f(g(h())))`.
-func (c *DatasetClient) Intercept(interceptors ...Interceptor) {
-	c.inters.Dataset = append(c.inters.Dataset, interceptors...)
-}
-
-// Create returns a builder for creating a Dataset entity.
-func (c *DatasetClient) Create() *DatasetCreate {
-	mutation := newDatasetMutation(c.config, OpCreate)
-	return &DatasetCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of Dataset entities.
-func (c *DatasetClient) CreateBulk(builders ...*DatasetCreate) *DatasetCreateBulk {
-	return &DatasetCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *DatasetClient) MapCreateBulk(slice any, setFunc func(*DatasetCreate, int)) *DatasetCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &DatasetCreateBulk{err: fmt.Errorf("calling to DatasetClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*DatasetCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &DatasetCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for Dataset.
-func (c *DatasetClient) Update() *DatasetUpdate {
-	mutation := newDatasetMutation(c.config, OpUpdate)
-	return &DatasetUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *DatasetClient) UpdateOne(_m *Dataset) *DatasetUpdateOne {
-	mutation := newDatasetMutation(c.config, OpUpdateOne, withDataset(_m))
-	return &DatasetUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *DatasetClient) UpdateOneID(id string) *DatasetUpdateOne {
-	mutation := newDatasetMutation(c.config, OpUpdateOne, withDatasetID(id))
-	return &DatasetUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for Dataset.
-func (c *DatasetClient) Delete() *DatasetDelete {
-	mutation := newDatasetMutation(c.config, OpDelete)
-	return &DatasetDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *DatasetClient) DeleteOne(_m *Dataset) *DatasetDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *DatasetClient) DeleteOneID(id string) *DatasetDeleteOne {
-	builder := c.Delete().Where(dataset.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &DatasetDeleteOne{builder}
-}
-
-// Query returns a query builder for Dataset.
-func (c *DatasetClient) Query() *DatasetQuery {
-	return &DatasetQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeDataset},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a Dataset entity by its id.
-func (c *DatasetClient) Get(ctx context.Context, id string) (*Dataset, error) {
-	return c.Query().Where(dataset.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *DatasetClient) GetX(ctx context.Context, id string) *Dataset {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *DatasetClient) Hooks() []Hook {
-	return c.hooks.Dataset
-}
-
-// Interceptors returns the client interceptors.
-func (c *DatasetClient) Interceptors() []Interceptor {
-	return c.inters.Dataset
-}
-
-func (c *DatasetClient) mutate(ctx context.Context, m *DatasetMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&DatasetCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&DatasetUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&DatasetUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&DatasetDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown Dataset mutation op: %q", m.Op())
-	}
-}
-
-// DatasetExampleClient is a client for the DatasetExample schema.
-type DatasetExampleClient struct {
-	config
-}
-
-// NewDatasetExampleClient returns a client for the DatasetExample from the given config.
-func NewDatasetExampleClient(c config) *DatasetExampleClient {
-	return &DatasetExampleClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `datasetexample.Hooks(f(g(h())))`.
-func (c *DatasetExampleClient) Use(hooks ...Hook) {
-	c.hooks.DatasetExample = append(c.hooks.DatasetExample, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `datasetexample.Intercept(f(g(h())))`.
-func (c *DatasetExampleClient) Intercept(interceptors ...Interceptor) {
-	c.inters.DatasetExample = append(c.inters.DatasetExample, interceptors...)
-}
-
-// Create returns a builder for creating a DatasetExample entity.
-func (c *DatasetExampleClient) Create() *DatasetExampleCreate {
-	mutation := newDatasetExampleMutation(c.config, OpCreate)
-	return &DatasetExampleCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of DatasetExample entities.
-func (c *DatasetExampleClient) CreateBulk(builders ...*DatasetExampleCreate) *DatasetExampleCreateBulk {
-	return &DatasetExampleCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *DatasetExampleClient) MapCreateBulk(slice any, setFunc func(*DatasetExampleCreate, int)) *DatasetExampleCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &DatasetExampleCreateBulk{err: fmt.Errorf("calling to DatasetExampleClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*DatasetExampleCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &DatasetExampleCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for DatasetExample.
-func (c *DatasetExampleClient) Update() *DatasetExampleUpdate {
-	mutation := newDatasetExampleMutation(c.config, OpUpdate)
-	return &DatasetExampleUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *DatasetExampleClient) UpdateOne(_m *DatasetExample) *DatasetExampleUpdateOne {
-	mutation := newDatasetExampleMutation(c.config, OpUpdateOne, withDatasetExample(_m))
-	return &DatasetExampleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *DatasetExampleClient) UpdateOneID(id int) *DatasetExampleUpdateOne {
-	mutation := newDatasetExampleMutation(c.config, OpUpdateOne, withDatasetExampleID(id))
-	return &DatasetExampleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for DatasetExample.
-func (c *DatasetExampleClient) Delete() *DatasetExampleDelete {
-	mutation := newDatasetExampleMutation(c.config, OpDelete)
-	return &DatasetExampleDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *DatasetExampleClient) DeleteOne(_m *DatasetExample) *DatasetExampleDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *DatasetExampleClient) DeleteOneID(id int) *DatasetExampleDeleteOne {
-	builder := c.Delete().Where(datasetexample.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &DatasetExampleDeleteOne{builder}
-}
-
-// Query returns a query builder for DatasetExample.
-func (c *DatasetExampleClient) Query() *DatasetExampleQuery {
-	return &DatasetExampleQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeDatasetExample},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a DatasetExample entity by its id.
-func (c *DatasetExampleClient) Get(ctx context.Context, id int) (*DatasetExample, error) {
-	return c.Query().Where(datasetexample.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *DatasetExampleClient) GetX(ctx context.Context, id int) *DatasetExample {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *DatasetExampleClient) Hooks() []Hook {
-	return c.hooks.DatasetExample
-}
-
-// Interceptors returns the client interceptors.
-func (c *DatasetExampleClient) Interceptors() []Interceptor {
-	return c.inters.DatasetExample
-}
-
-func (c *DatasetExampleClient) mutate(ctx context.Context, m *DatasetExampleMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&DatasetExampleCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&DatasetExampleUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&DatasetExampleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&DatasetExampleDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown DatasetExample mutation op: %q", m.Op())
-	}
-}
-
-// EvalRunClient is a client for the EvalRun schema.
-type EvalRunClient struct {
-	config
-}
-
-// NewEvalRunClient returns a client for the EvalRun from the given config.
-func NewEvalRunClient(c config) *EvalRunClient {
-	return &EvalRunClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `evalrun.Hooks(f(g(h())))`.
-func (c *EvalRunClient) Use(hooks ...Hook) {
-	c.hooks.EvalRun = append(c.hooks.EvalRun, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `evalrun.Intercept(f(g(h())))`.
-func (c *EvalRunClient) Intercept(interceptors ...Interceptor) {
-	c.inters.EvalRun = append(c.inters.EvalRun, interceptors...)
-}
-
-// Create returns a builder for creating a EvalRun entity.
-func (c *EvalRunClient) Create() *EvalRunCreate {
-	mutation := newEvalRunMutation(c.config, OpCreate)
-	return &EvalRunCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of EvalRun entities.
-func (c *EvalRunClient) CreateBulk(builders ...*EvalRunCreate) *EvalRunCreateBulk {
-	return &EvalRunCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *EvalRunClient) MapCreateBulk(slice any, setFunc func(*EvalRunCreate, int)) *EvalRunCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &EvalRunCreateBulk{err: fmt.Errorf("calling to EvalRunClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*EvalRunCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &EvalRunCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for EvalRun.
-func (c *EvalRunClient) Update() *EvalRunUpdate {
-	mutation := newEvalRunMutation(c.config, OpUpdate)
-	return &EvalRunUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *EvalRunClient) UpdateOne(_m *EvalRun) *EvalRunUpdateOne {
-	mutation := newEvalRunMutation(c.config, OpUpdateOne, withEvalRun(_m))
-	return &EvalRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *EvalRunClient) UpdateOneID(id string) *EvalRunUpdateOne {
-	mutation := newEvalRunMutation(c.config, OpUpdateOne, withEvalRunID(id))
-	return &EvalRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for EvalRun.
-func (c *EvalRunClient) Delete() *EvalRunDelete {
-	mutation := newEvalRunMutation(c.config, OpDelete)
-	return &EvalRunDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *EvalRunClient) DeleteOne(_m *EvalRun) *EvalRunDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *EvalRunClient) DeleteOneID(id string) *EvalRunDeleteOne {
-	builder := c.Delete().Where(evalrun.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &EvalRunDeleteOne{builder}
-}
-
-// Query returns a query builder for EvalRun.
-func (c *EvalRunClient) Query() *EvalRunQuery {
-	return &EvalRunQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeEvalRun},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a EvalRun entity by its id.
-func (c *EvalRunClient) Get(ctx context.Context, id string) (*EvalRun, error) {
-	return c.Query().Where(evalrun.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *EvalRunClient) GetX(ctx context.Context, id string) *EvalRun {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *EvalRunClient) Hooks() []Hook {
-	return c.hooks.EvalRun
-}
-
-// Interceptors returns the client interceptors.
-func (c *EvalRunClient) Interceptors() []Interceptor {
-	return c.inters.EvalRun
-}
-
-func (c *EvalRunClient) mutate(ctx context.Context, m *EvalRunMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&EvalRunCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&EvalRunUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&EvalRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&EvalRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown EvalRun mutation op: %q", m.Op())
-	}
-}
-
 // ExecutionEventClient is a client for the ExecutionEvent schema.
 type ExecutionEventClient struct {
 	config
@@ -1916,139 +1475,6 @@ func (c *ExecutionEventClient) mutate(ctx context.Context, m *ExecutionEventMuta
 		return (&ExecutionEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown ExecutionEvent mutation op: %q", m.Op())
-	}
-}
-
-// ExperimentRunClient is a client for the ExperimentRun schema.
-type ExperimentRunClient struct {
-	config
-}
-
-// NewExperimentRunClient returns a client for the ExperimentRun from the given config.
-func NewExperimentRunClient(c config) *ExperimentRunClient {
-	return &ExperimentRunClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `experimentrun.Hooks(f(g(h())))`.
-func (c *ExperimentRunClient) Use(hooks ...Hook) {
-	c.hooks.ExperimentRun = append(c.hooks.ExperimentRun, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `experimentrun.Intercept(f(g(h())))`.
-func (c *ExperimentRunClient) Intercept(interceptors ...Interceptor) {
-	c.inters.ExperimentRun = append(c.inters.ExperimentRun, interceptors...)
-}
-
-// Create returns a builder for creating a ExperimentRun entity.
-func (c *ExperimentRunClient) Create() *ExperimentRunCreate {
-	mutation := newExperimentRunMutation(c.config, OpCreate)
-	return &ExperimentRunCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of ExperimentRun entities.
-func (c *ExperimentRunClient) CreateBulk(builders ...*ExperimentRunCreate) *ExperimentRunCreateBulk {
-	return &ExperimentRunCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *ExperimentRunClient) MapCreateBulk(slice any, setFunc func(*ExperimentRunCreate, int)) *ExperimentRunCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &ExperimentRunCreateBulk{err: fmt.Errorf("calling to ExperimentRunClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*ExperimentRunCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &ExperimentRunCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for ExperimentRun.
-func (c *ExperimentRunClient) Update() *ExperimentRunUpdate {
-	mutation := newExperimentRunMutation(c.config, OpUpdate)
-	return &ExperimentRunUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *ExperimentRunClient) UpdateOne(_m *ExperimentRun) *ExperimentRunUpdateOne {
-	mutation := newExperimentRunMutation(c.config, OpUpdateOne, withExperimentRun(_m))
-	return &ExperimentRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *ExperimentRunClient) UpdateOneID(id string) *ExperimentRunUpdateOne {
-	mutation := newExperimentRunMutation(c.config, OpUpdateOne, withExperimentRunID(id))
-	return &ExperimentRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for ExperimentRun.
-func (c *ExperimentRunClient) Delete() *ExperimentRunDelete {
-	mutation := newExperimentRunMutation(c.config, OpDelete)
-	return &ExperimentRunDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *ExperimentRunClient) DeleteOne(_m *ExperimentRun) *ExperimentRunDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *ExperimentRunClient) DeleteOneID(id string) *ExperimentRunDeleteOne {
-	builder := c.Delete().Where(experimentrun.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &ExperimentRunDeleteOne{builder}
-}
-
-// Query returns a query builder for ExperimentRun.
-func (c *ExperimentRunClient) Query() *ExperimentRunQuery {
-	return &ExperimentRunQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeExperimentRun},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a ExperimentRun entity by its id.
-func (c *ExperimentRunClient) Get(ctx context.Context, id string) (*ExperimentRun, error) {
-	return c.Query().Where(experimentrun.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *ExperimentRunClient) GetX(ctx context.Context, id string) *ExperimentRun {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *ExperimentRunClient) Hooks() []Hook {
-	return c.hooks.ExperimentRun
-}
-
-// Interceptors returns the client interceptors.
-func (c *ExperimentRunClient) Interceptors() []Interceptor {
-	return c.inters.ExperimentRun
-}
-
-func (c *ExperimentRunClient) mutate(ctx context.Context, m *ExperimentRunMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&ExperimentRunCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&ExperimentRunUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&ExperimentRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&ExperimentRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown ExperimentRun mutation op: %q", m.Op())
 	}
 }
 
@@ -2847,139 +2273,6 @@ func (c *ResponseItemClient) mutate(ctx context.Context, m *ResponseItemMutation
 		return (&ResponseItemDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown ResponseItem mutation op: %q", m.Op())
-	}
-}
-
-// ScoreClient is a client for the Score schema.
-type ScoreClient struct {
-	config
-}
-
-// NewScoreClient returns a client for the Score from the given config.
-func NewScoreClient(c config) *ScoreClient {
-	return &ScoreClient{config: c}
-}
-
-// Use adds a list of mutation hooks to the hooks stack.
-// A call to `Use(f, g, h)` equals to `score.Hooks(f(g(h())))`.
-func (c *ScoreClient) Use(hooks ...Hook) {
-	c.hooks.Score = append(c.hooks.Score, hooks...)
-}
-
-// Intercept adds a list of query interceptors to the interceptors stack.
-// A call to `Intercept(f, g, h)` equals to `score.Intercept(f(g(h())))`.
-func (c *ScoreClient) Intercept(interceptors ...Interceptor) {
-	c.inters.Score = append(c.inters.Score, interceptors...)
-}
-
-// Create returns a builder for creating a Score entity.
-func (c *ScoreClient) Create() *ScoreCreate {
-	mutation := newScoreMutation(c.config, OpCreate)
-	return &ScoreCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// CreateBulk returns a builder for creating a bulk of Score entities.
-func (c *ScoreClient) CreateBulk(builders ...*ScoreCreate) *ScoreCreateBulk {
-	return &ScoreCreateBulk{config: c.config, builders: builders}
-}
-
-// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
-// a builder and applies setFunc on it.
-func (c *ScoreClient) MapCreateBulk(slice any, setFunc func(*ScoreCreate, int)) *ScoreCreateBulk {
-	rv := reflect.ValueOf(slice)
-	if rv.Kind() != reflect.Slice {
-		return &ScoreCreateBulk{err: fmt.Errorf("calling to ScoreClient.MapCreateBulk with wrong type %T, need slice", slice)}
-	}
-	builders := make([]*ScoreCreate, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		builders[i] = c.Create()
-		setFunc(builders[i], i)
-	}
-	return &ScoreCreateBulk{config: c.config, builders: builders}
-}
-
-// Update returns an update builder for Score.
-func (c *ScoreClient) Update() *ScoreUpdate {
-	mutation := newScoreMutation(c.config, OpUpdate)
-	return &ScoreUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOne returns an update builder for the given entity.
-func (c *ScoreClient) UpdateOne(_m *Score) *ScoreUpdateOne {
-	mutation := newScoreMutation(c.config, OpUpdateOne, withScore(_m))
-	return &ScoreUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// UpdateOneID returns an update builder for the given id.
-func (c *ScoreClient) UpdateOneID(id string) *ScoreUpdateOne {
-	mutation := newScoreMutation(c.config, OpUpdateOne, withScoreID(id))
-	return &ScoreUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// Delete returns a delete builder for Score.
-func (c *ScoreClient) Delete() *ScoreDelete {
-	mutation := newScoreMutation(c.config, OpDelete)
-	return &ScoreDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
-}
-
-// DeleteOne returns a builder for deleting the given entity.
-func (c *ScoreClient) DeleteOne(_m *Score) *ScoreDeleteOne {
-	return c.DeleteOneID(_m.ID)
-}
-
-// DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *ScoreClient) DeleteOneID(id string) *ScoreDeleteOne {
-	builder := c.Delete().Where(score.ID(id))
-	builder.mutation.id = &id
-	builder.mutation.op = OpDeleteOne
-	return &ScoreDeleteOne{builder}
-}
-
-// Query returns a query builder for Score.
-func (c *ScoreClient) Query() *ScoreQuery {
-	return &ScoreQuery{
-		config: c.config,
-		ctx:    &QueryContext{Type: TypeScore},
-		inters: c.Interceptors(),
-	}
-}
-
-// Get returns a Score entity by its id.
-func (c *ScoreClient) Get(ctx context.Context, id string) (*Score, error) {
-	return c.Query().Where(score.ID(id)).Only(ctx)
-}
-
-// GetX is like Get, but panics if an error occurs.
-func (c *ScoreClient) GetX(ctx context.Context, id string) *Score {
-	obj, err := c.Get(ctx, id)
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-// Hooks returns the client hooks.
-func (c *ScoreClient) Hooks() []Hook {
-	return c.hooks.Score
-}
-
-// Interceptors returns the client interceptors.
-func (c *ScoreClient) Interceptors() []Interceptor {
-	return c.inters.Score
-}
-
-func (c *ScoreClient) mutate(ctx context.Context, m *ScoreMutation) (Value, error) {
-	switch m.Op() {
-	case OpCreate:
-		return (&ScoreCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdate:
-		return (&ScoreUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpUpdateOne:
-		return (&ScoreUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
-	case OpDelete, OpDeleteOne:
-		return (&ScoreDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
-	default:
-		return nil, fmt.Errorf("dao: unknown Score mutation op: %q", m.Op())
 	}
 }
 
@@ -4203,19 +3496,17 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 type (
 	hooks struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
-		ChannelProbeRun, CredentialMaskAudit, Dataset, DatasetExample, EvalRun,
-		ExecutionEvent, ExperimentRun, ModelCatalog, ParseJob, ParserVersion,
-		RequestAudit, Response, ResponseItem, Score, SystemEvent, ToolCallAudit,
-		TraceFinding, TraceLog, TraceObservation, UpstreamExchange, UpstreamModel,
-		UpstreamTarget, User []ent.Hook
+		ChannelProbeRun, CredentialMaskAudit, ExecutionEvent, ModelCatalog, ParseJob,
+		ParserVersion, RequestAudit, Response, ResponseItem, SystemEvent,
+		ToolCallAudit, TraceFinding, TraceLog, TraceObservation, UpstreamExchange,
+		UpstreamModel, UpstreamTarget, User []ent.Hook
 	}
 	inters struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
-		ChannelProbeRun, CredentialMaskAudit, Dataset, DatasetExample, EvalRun,
-		ExecutionEvent, ExperimentRun, ModelCatalog, ParseJob, ParserVersion,
-		RequestAudit, Response, ResponseItem, Score, SystemEvent, ToolCallAudit,
-		TraceFinding, TraceLog, TraceObservation, UpstreamExchange, UpstreamModel,
-		UpstreamTarget, User []ent.Interceptor
+		ChannelProbeRun, CredentialMaskAudit, ExecutionEvent, ModelCatalog, ParseJob,
+		ParserVersion, RequestAudit, Response, ResponseItem, SystemEvent,
+		ToolCallAudit, TraceFinding, TraceLog, TraceObservation, UpstreamExchange,
+		UpstreamModel, UpstreamTarget, User []ent.Interceptor
 	}
 )
 

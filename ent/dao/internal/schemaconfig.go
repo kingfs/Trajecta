@@ -14,18 +14,13 @@ type SchemaConfig struct {
 	ChannelModel        string // ChannelModel table.
 	ChannelProbeRun     string // ChannelProbeRun table.
 	CredentialMaskAudit string // CredentialMaskAudit table.
-	Dataset             string // Dataset table.
-	DatasetExample      string // DatasetExample table.
-	EvalRun             string // EvalRun table.
 	ExecutionEvent      string // ExecutionEvent table.
-	ExperimentRun       string // ExperimentRun table.
 	ModelCatalog        string // ModelCatalog table.
 	ParseJob            string // ParseJob table.
 	ParserVersion       string // ParserVersion table.
 	RequestAudit        string // RequestAudit table.
 	Response            string // Response table.
 	ResponseItem        string // ResponseItem table.
-	Score               string // Score table.
 	SystemEvent         string // SystemEvent table.
 	ToolCallAudit       string // ToolCallAudit table.
 	TraceFinding        string // TraceFinding table.

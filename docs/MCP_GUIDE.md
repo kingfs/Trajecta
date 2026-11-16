@@ -164,16 +164,9 @@ CODEX_HOME="$PWD/.codex" codex mcp add trajecta-remote \
   --bearer-token-env-var TRAJECTA_MCP_TOKEN
 ```
 
-## Evaluator
+## Evaluator（已退役）
 
-仓库内置的 deterministic evaluator profile 定义在 `internal/evals`，默认 profile 是 `baseline_v4`：
-
-- `baseline_v1`：HTTP 状态 2xx、记录错误、响应 body 是否存在。
-- `baseline_v2`：在 v1 基础上加入 TTFT 与 total token 预算。
-- `baseline_v3`：在 v2 基础上加入响应 tool call 必须已在请求中声明。
-- `baseline_v4`：在 v3 基础上加入 tool call arguments 必须是合法 JSON。
-
-这些 profile 是客观、低成本、可复现的信号，不替代人工质量判断或模型评分。MCP 工具面本身不包含 evaluator 工具；MCP 侧可查询的是 `list_trace_findings` 等 deterministic audit findings，语义见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。
+确定性评测功能（`internal/evals` 与 baseline_v1–v4 profile：HTTP 状态、TTFT/token 预算、tool-call 声明与参数 JSON 校验）已整体退役——它从未有过 UI/CLI/MCP 入口。旧部署数据库里的 eval 表数据原样保留，`trajecta import` 对旧 bundle 携带的 eval 表容忍跳过。MCP 工具面从不包含 evaluator 工具；MCP 侧可查询的确定性信号是 `list_trace_findings` 等 deterministic audit findings，语义见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。
 
 ## 设计约束
 

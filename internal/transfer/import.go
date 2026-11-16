@@ -244,16 +244,10 @@ func dispatchTable(s *importState, table string, body io.Reader, size int64, tar
 		return s.handleAppSettings(body, size)
 	case "channel_probe_runs":
 		return s.handleChannelProbeRuns(body, size)
-	case "datasets":
-		return s.handleDatasets(body, size)
-	case "eval_runs":
-		return s.handleEvalRuns(body, size)
-	case "experiment_runs":
-		return s.handleExperimentRuns(body, size)
-	case "dataset_examples":
-		return s.handleDatasetExamples(body, size)
-	case "scores":
-		return s.handleScores(body, size)
+	case "datasets", "eval_runs", "experiment_runs", "dataset_examples", "scores":
+		// Retired eval tables: an old bundle still carries them. Read the
+		// entry to the end, report it as legacy-skipped and keep going.
+		return s.skipLegacyEvalTable(table, body, size)
 	case "responses":
 		return s.handleResponses(body, size)
 	case "response_items":

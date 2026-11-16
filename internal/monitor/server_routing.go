@@ -1,6 +1,7 @@
-// Routing surface of the monitor API: the routing summary and its aggregate, the
-// routing settings the UI reads and writes, the route inspection endpoints, and the
-// failure views built from them.
+// Routing surface of the monitor API: the routing settings the UI reads and
+// writes, the route inspection endpoint, and the failure views built from the
+// stored routing facts. The former /api/routing/exchanges and
+// /api/routing/summary endpoints were retired (P3 API-only dead-endpoint audit).
 
 package monitor
 
@@ -16,35 +17,6 @@ import (
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
 )
-
-type routingSummaryResponse struct {
-	Window                string                    `json:"window"`
-	Model                 string                    `json:"model,omitempty"`
-	RefreshedAt           time.Time                 `json:"refreshed_at"`
-	TotalTraces           int                       `json:"total_traces"`
-	ScannedTraces         int                       `json:"scanned_traces"`
-	EventfulTraces        int                       `json:"eventful_traces"`
-	LegacyOrMissingEvents int                       `json:"legacy_or_missing_events"`
-	FailureReasons        []sessionCountItem        `json:"failure_reasons"`
-	SelectedUpstreams     []sessionCountItem        `json:"selected_upstreams"`
-	SelectedRouteTargets  []sessionCountItem        `json:"selected_route_targets"`
-	SelectedChannels      []sessionCountItem        `json:"selected_channels"`
-	SelectedCredentials   []sessionCountItem        `json:"selected_credentials"`
-	StickyStatuses        []sessionCountItem        `json:"sticky_statuses"`
-	StickyBreaks          routingStickyBreakSummary `json:"sticky_breaks"`
-}
-
-type routingStickyBreakSummary struct {
-	Total                int                `json:"total"`
-	PreviousUpstreams    []sessionCountItem `json:"previous_upstreams"`
-	NextUpstreams        []sessionCountItem `json:"next_upstreams"`
-	PreviousRouteTargets []sessionCountItem `json:"previous_route_targets"`
-	NextRouteTargets     []sessionCountItem `json:"next_route_targets"`
-	PreviousChannels     []sessionCountItem `json:"previous_channels"`
-	NextChannels         []sessionCountItem `json:"next_channels"`
-	PreviousCredentials  []sessionCountItem `json:"previous_credentials"`
-	NextCredentials      []sessionCountItem `json:"next_credentials"`
-}
 
 type routingFailureSummaryView struct {
 	Total    int                        `json:"total"`
@@ -89,31 +61,6 @@ type routingInspectResponse struct {
 	Result      *routeplan.Result     `json:"result,omitempty"`
 	Error       string                `json:"error,omitempty"`
 	RefreshedAt time.Time             `json:"refreshed_at"`
-}
-
-func routingSummaryAPIHandler(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.NotFound(w, r)
-			return
-		}
-		if st == nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
-			return
-		}
-
-		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
-		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
-		summary, err := buildRoutingSummary(st, since, modelFilter)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "routing summary error: " + err.Error()})
-			return
-		}
-		summary.Window = windowLabel
-		summary.Model = modelFilter
-		summary.RefreshedAt = time.Now().UTC()
-		writeJSON(w, http.StatusOK, summary)
-	}
 }
 
 const routingSettingsKey = "routing.settings"
@@ -385,114 +332,4 @@ func routingFailureBucketSpec(window string) (time.Duration, int) {
 	default:
 		return time.Hour, 24
 	}
-}
-
-func routingExchangeListAPIHandler(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if st == nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
-			return
-		}
-
-		page := parseInt(r.URL.Query().Get("page"), 1)
-		pageSize := parsePageSize(r.URL.Query().Get("page_size"))
-		filter := parseListFilter(r)
-		result, err := st.ListRoutingPage(page, pageSize, filter)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
-			return
-		}
-
-		resp := listResponse{
-			Page:        result.Page,
-			PageSize:    result.PageSize,
-			Total:       result.Total,
-			TotalPages:  result.TotalPages,
-			RefreshedAt: time.Now().UTC(),
-		}
-		for _, entry := range result.Items {
-			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
-		}
-		if err := attachTraceAudit(st, resp.Items); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace audit: " + err.Error()})
-			return
-		}
-		attachTracePreviews(resp.Items)
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-// buildRoutingSummary aggregates the routing decisions recorded in the window.
-//
-// It reads the routing facts the index row already carries rather than opening
-// every cassette in the window, which is what made this endpoint take 49 s on
-// the default window: one random read per trace, each dominated by the seek.
-// See store.RoutingSummary.
-func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (routingSummaryResponse, error) {
-	aggregate, err := st.RoutingSummary(since, modelFilter)
-	if err != nil {
-		return routingSummaryResponse{}, err
-	}
-
-	failureReasons := map[string]int{}
-	selectedUpstreams := map[string]int{}
-	selectedRouteTargets := map[string]int{}
-	selectedChannels := map[string]int{}
-	selectedCredentials := map[string]int{}
-	stickyStatuses := map[string]int{}
-	stickyPrevious := map[string]int{}
-	stickyNext := map[string]int{}
-	stickyNextRouteTargets := map[string]int{}
-	stickyNextChannels := map[string]int{}
-	stickyNextCredentials := map[string]int{}
-	// The previous-side route target, channel and credential are counted from
-	// `previous_route_target_id` and friends, which no producer has ever written:
-	// the sticky events carry the identity of the target being switched to, not
-	// the one being left. These stay empty and are kept for response-shape
-	// compatibility; see routingDecisionEvents in internal/proxy.
-	stickyPreviousRouteTargets := map[string]int{}
-	stickyPreviousChannels := map[string]int{}
-	stickyPreviousCredentials := map[string]int{}
-
-	stickyBreaks := 0
-	for _, bucket := range aggregate.Buckets {
-		count := int(bucket.TraceCount)
-		addStringCount(selectedUpstreams, bucket.SelectedUpstreamID, count)
-		addStringCount(selectedRouteTargets, bucket.RouteTargetID, count)
-		addStringCount(selectedChannels, bucket.ChannelID, count)
-		addStringCount(selectedCredentials, bucket.CredentialID, count)
-		addStringCount(stickyStatuses, bucket.StickyStatus, count)
-		addStringCount(failureReasons, bucket.RoutingFailureReason, count)
-		if bucket.StickyStatus == "break" {
-			stickyBreaks += count
-			addStringCount(stickyPrevious, bucket.StickyPreviousUpstreamID, count)
-			addStringCount(stickyNext, bucket.SelectedUpstreamID, count)
-			addStringCount(stickyNextRouteTargets, bucket.RouteTargetID, count)
-			addStringCount(stickyNextChannels, bucket.ChannelID, count)
-			addStringCount(stickyNextCredentials, bucket.CredentialID, count)
-		}
-	}
-
-	response := routingSummaryResponse{
-		TotalTraces:           int(aggregate.TotalTraces),
-		ScannedTraces:         int(aggregate.TotalTraces),
-		EventfulTraces:        int(aggregate.EventfulTraces),
-		LegacyOrMissingEvents: int(aggregate.LegacyOrMissingEvents()),
-		FailureReasons:        countMapToItems(failureReasons),
-		SelectedUpstreams:     countMapToItems(selectedUpstreams),
-		SelectedRouteTargets:  countMapToItems(selectedRouteTargets),
-		SelectedChannels:      countMapToItems(selectedChannels),
-		SelectedCredentials:   countMapToItems(selectedCredentials),
-		StickyStatuses:        countMapToItems(stickyStatuses),
-	}
-	response.StickyBreaks.Total = stickyBreaks
-	response.StickyBreaks.PreviousUpstreams = countMapToItems(stickyPrevious)
-	response.StickyBreaks.NextUpstreams = countMapToItems(stickyNext)
-	response.StickyBreaks.PreviousRouteTargets = countMapToItems(stickyPreviousRouteTargets)
-	response.StickyBreaks.NextRouteTargets = countMapToItems(stickyNextRouteTargets)
-	response.StickyBreaks.PreviousChannels = countMapToItems(stickyPreviousChannels)
-	response.StickyBreaks.NextChannels = countMapToItems(stickyNextChannels)
-	response.StickyBreaks.PreviousCredentials = countMapToItems(stickyPreviousCredentials)
-	response.StickyBreaks.NextCredentials = countMapToItems(stickyNextCredentials)
-	return response, nil
 }

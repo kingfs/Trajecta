@@ -74,12 +74,10 @@ func TestSensitiveMonitorRoutesRequireAdmin(t *testing.T) {
 	paths := []string{
 		"/api/channels",
 		"/api/settings/routing",
-		"/api/secrets/local-key",
 		"/api/secret-masks",
 		"/api/secret-mappings",
 		"/api/secret-suppressions",
 		"/api/provider-probe",
-		"/api/provider-setup/probe",
 		"/api/provider-model-test",
 		"/api/provider-model-detect",
 		"/api/model-aliases",

@@ -95,10 +95,6 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, svc *channel.S
 	return configurationAPIHandler(st, rtr, svc, channelDetailAPIHandlerUncommitted)
 }
 
-func providerSetupAPIHandler(st *store.Store, rtr *router.Router, svc *channel.Service) http.HandlerFunc {
-	return configurationAPIHandler(st, rtr, svc, providerSetupAPIHandlerUncommitted)
-}
-
 func providerProbeReportApplyAPIHandler(st *store.Store, rtr *router.Router, svc *channel.Service) http.HandlerFunc {
 	return configurationAPIHandler(st, rtr, svc, providerProbeReportApplyAPIHandlerUncommitted)
 }

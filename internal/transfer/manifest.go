@@ -60,11 +60,6 @@ var tableExportOrder = []string{
 	"model_catalog",
 	"app_settings",
 	"channel_probe_runs",
-	"datasets",
-	"eval_runs",
-	"experiment_runs",
-	"dataset_examples",
-	"scores",
 	"responses",
 	"response_items",
 	"request_audits",
@@ -76,4 +71,26 @@ var tableExportOrder = []string{
 	"upstream_exchanges",
 	"credential_mask_audits",
 	"credential_mask_event_states",
+}
+
+// legacyEvalImportTables are the retired evaluation tables. Export no longer
+// produces them, but a bundle written by an older Trajecta still carries them;
+// import reads each entry to the end, counts its rows as legacy-skipped and
+// moves on instead of failing on an unknown table. The order here only fixes
+// the report order of the skipped tables.
+var legacyEvalImportTables = []string{
+	"datasets",
+	"eval_runs",
+	"experiment_runs",
+	"dataset_examples",
+	"scores",
+}
+
+func isLegacyEvalTable(name string) bool {
+	for _, table := range legacyEvalImportTables {
+		if table == name {
+			return true
+		}
+	}
+	return false
 }

@@ -14,7 +14,8 @@ type TableImportReport struct {
 	MergedModels     int64  `json:"merged_models,omitempty"`
 	SkippedUnchanged int64  `json:"skipped_unchanged"`
 	SkippedConflict  int64  `json:"skipped_conflict"`
-	SkippedTrace     int64  `json:"skipped_trace"` // rows skipped because their trace or path was skipped
+	SkippedTrace     int64  `json:"skipped_trace"`            // rows skipped because their trace or path was skipped
+	SkippedLegacy    int64  `json:"skipped_legacy,omitempty"` // rows of a retired eval table, read and skipped on a legacy bundle
 	Deduped          int64  `json:"deduped,omitempty"`
 }
 

@@ -10,11 +10,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
 	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
-	"github.com/kingfs/Trajecta/ent/dao/dataset"
-	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
-	"github.com/kingfs/Trajecta/ent/dao/evalrun"
 	"github.com/kingfs/Trajecta/ent/dao/executionevent"
-	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
 	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 	"github.com/kingfs/Trajecta/ent/dao/parserversion"
@@ -22,7 +18,6 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
-	"github.com/kingfs/Trajecta/ent/dao/score"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -41,7 +36,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 28)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 23)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -246,66 +241,6 @@ var schemaGraph = func() *sqlgraph.Schema {
 	}
 	graph.Nodes[7] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
-			Table:   dataset.Table,
-			Columns: dataset.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeString,
-				Column: dataset.FieldID,
-			},
-		},
-		Type: "Dataset",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			dataset.FieldName:        {Type: field.TypeString, Column: dataset.FieldName},
-			dataset.FieldDescription: {Type: field.TypeString, Column: dataset.FieldDescription},
-			dataset.FieldCreatedAt:   {Type: field.TypeTime, Column: dataset.FieldCreatedAt},
-			dataset.FieldUpdatedAt:   {Type: field.TypeTime, Column: dataset.FieldUpdatedAt},
-		},
-	}
-	graph.Nodes[8] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
-			Table:   datasetexample.Table,
-			Columns: datasetexample.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeInt,
-				Column: datasetexample.FieldID,
-			},
-		},
-		Type: "DatasetExample",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			datasetexample.FieldDatasetID:  {Type: field.TypeString, Column: datasetexample.FieldDatasetID},
-			datasetexample.FieldTraceID:    {Type: field.TypeString, Column: datasetexample.FieldTraceID},
-			datasetexample.FieldPosition:   {Type: field.TypeInt, Column: datasetexample.FieldPosition},
-			datasetexample.FieldAddedAt:    {Type: field.TypeTime, Column: datasetexample.FieldAddedAt},
-			datasetexample.FieldSourceType: {Type: field.TypeString, Column: datasetexample.FieldSourceType},
-			datasetexample.FieldSourceID:   {Type: field.TypeString, Column: datasetexample.FieldSourceID},
-			datasetexample.FieldNote:       {Type: field.TypeString, Column: datasetexample.FieldNote},
-		},
-	}
-	graph.Nodes[9] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
-			Table:   evalrun.Table,
-			Columns: evalrun.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeString,
-				Column: evalrun.FieldID,
-			},
-		},
-		Type: "EvalRun",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			evalrun.FieldDatasetID:    {Type: field.TypeString, Column: evalrun.FieldDatasetID},
-			evalrun.FieldSourceType:   {Type: field.TypeString, Column: evalrun.FieldSourceType},
-			evalrun.FieldSourceID:     {Type: field.TypeString, Column: evalrun.FieldSourceID},
-			evalrun.FieldEvaluatorSet: {Type: field.TypeString, Column: evalrun.FieldEvaluatorSet},
-			evalrun.FieldCreatedAt:    {Type: field.TypeTime, Column: evalrun.FieldCreatedAt},
-			evalrun.FieldCompletedAt:  {Type: field.TypeTime, Column: evalrun.FieldCompletedAt},
-			evalrun.FieldTraceCount:   {Type: field.TypeInt, Column: evalrun.FieldTraceCount},
-			evalrun.FieldScoreCount:   {Type: field.TypeInt, Column: evalrun.FieldScoreCount},
-			evalrun.FieldPassCount:    {Type: field.TypeInt, Column: evalrun.FieldPassCount},
-			evalrun.FieldFailCount:    {Type: field.TypeInt, Column: evalrun.FieldFailCount},
-		},
-	}
-	graph.Nodes[10] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
 			Table:   executionevent.Table,
 			Columns: executionevent.Columns,
 			ID: &sqlgraph.FieldSpec{
@@ -326,33 +261,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			executionevent.FieldOccurredAt:     {Type: field.TypeTime, Column: executionevent.FieldOccurredAt},
 		},
 	}
-	graph.Nodes[11] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
-			Table:   experimentrun.Table,
-			Columns: experimentrun.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeString,
-				Column: experimentrun.FieldID,
-			},
-		},
-		Type: "ExperimentRun",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			experimentrun.FieldName:                {Type: field.TypeString, Column: experimentrun.FieldName},
-			experimentrun.FieldDescription:         {Type: field.TypeString, Column: experimentrun.FieldDescription},
-			experimentrun.FieldBaselineEvalRunID:   {Type: field.TypeString, Column: experimentrun.FieldBaselineEvalRunID},
-			experimentrun.FieldCandidateEvalRunID:  {Type: field.TypeString, Column: experimentrun.FieldCandidateEvalRunID},
-			experimentrun.FieldCreatedAt:           {Type: field.TypeTime, Column: experimentrun.FieldCreatedAt},
-			experimentrun.FieldBaselineScoreCount:  {Type: field.TypeInt, Column: experimentrun.FieldBaselineScoreCount},
-			experimentrun.FieldCandidateScoreCount: {Type: field.TypeInt, Column: experimentrun.FieldCandidateScoreCount},
-			experimentrun.FieldBaselinePassRate:    {Type: field.TypeFloat64, Column: experimentrun.FieldBaselinePassRate},
-			experimentrun.FieldCandidatePassRate:   {Type: field.TypeFloat64, Column: experimentrun.FieldCandidatePassRate},
-			experimentrun.FieldPassRateDelta:       {Type: field.TypeFloat64, Column: experimentrun.FieldPassRateDelta},
-			experimentrun.FieldMatchedScoreCount:   {Type: field.TypeInt, Column: experimentrun.FieldMatchedScoreCount},
-			experimentrun.FieldImprovementCount:    {Type: field.TypeInt, Column: experimentrun.FieldImprovementCount},
-			experimentrun.FieldRegressionCount:     {Type: field.TypeInt, Column: experimentrun.FieldRegressionCount},
-		},
-	}
-	graph.Nodes[12] = &sqlgraph.Node{
+	graph.Nodes[8] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   modelcatalog.Table,
 			Columns: modelcatalog.Columns,
@@ -373,7 +282,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			modelcatalog.FieldLastUsedAt:  {Type: field.TypeTime, Column: modelcatalog.FieldLastUsedAt},
 		},
 	}
-	graph.Nodes[13] = &sqlgraph.Node{
+	graph.Nodes[9] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   parsejob.Table,
 			Columns: parsejob.Columns,
@@ -392,7 +301,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			parsejob.FieldUpdatedAt: {Type: field.TypeTime, Column: parsejob.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[14] = &sqlgraph.Node{
+	graph.Nodes[10] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   parserversion.Table,
 			Columns: parserversion.Columns,
@@ -409,7 +318,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			parserversion.FieldCreatedAt:   {Type: field.TypeTime, Column: parserversion.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[15] = &sqlgraph.Node{
+	graph.Nodes[11] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   requestaudit.Table,
 			Columns: requestaudit.Columns,
@@ -434,7 +343,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			requestaudit.FieldCreatedAt:       {Type: field.TypeTime, Column: requestaudit.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[16] = &sqlgraph.Node{
+	graph.Nodes[12] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   response.Table,
 			Columns: response.Columns,
@@ -459,7 +368,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			response.FieldUpdatedAt:          {Type: field.TypeTime, Column: response.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[17] = &sqlgraph.Node{
+	graph.Nodes[13] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   responseitem.Table,
 			Columns: responseitem.Columns,
@@ -478,30 +387,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			responseitem.FieldUpdatedAt:      {Type: field.TypeTime, Column: responseitem.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[18] = &sqlgraph.Node{
-		NodeSpec: sqlgraph.NodeSpec{
-			Table:   score.Table,
-			Columns: score.Columns,
-			ID: &sqlgraph.FieldSpec{
-				Type:   field.TypeString,
-				Column: score.FieldID,
-			},
-		},
-		Type: "Score",
-		Fields: map[string]*sqlgraph.FieldSpec{
-			score.FieldTraceID:      {Type: field.TypeString, Column: score.FieldTraceID},
-			score.FieldSessionID:    {Type: field.TypeString, Column: score.FieldSessionID},
-			score.FieldDatasetID:    {Type: field.TypeString, Column: score.FieldDatasetID},
-			score.FieldEvalRunID:    {Type: field.TypeString, Column: score.FieldEvalRunID},
-			score.FieldEvaluatorKey: {Type: field.TypeString, Column: score.FieldEvaluatorKey},
-			score.FieldValue:        {Type: field.TypeFloat64, Column: score.FieldValue},
-			score.FieldStatus:       {Type: field.TypeString, Column: score.FieldStatus},
-			score.FieldLabel:        {Type: field.TypeString, Column: score.FieldLabel},
-			score.FieldExplanation:  {Type: field.TypeString, Column: score.FieldExplanation},
-			score.FieldCreatedAt:    {Type: field.TypeTime, Column: score.FieldCreatedAt},
-		},
-	}
-	graph.Nodes[19] = &sqlgraph.Node{
+	graph.Nodes[14] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   systemevent.Table,
 			Columns: systemevent.Columns,
@@ -534,7 +420,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			systemevent.FieldResolvedAt:      {Type: field.TypeTime, Column: systemevent.FieldResolvedAt},
 		},
 	}
-	graph.Nodes[20] = &sqlgraph.Node{
+	graph.Nodes[15] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   toolcallaudit.Table,
 			Columns: toolcallaudit.Columns,
@@ -563,7 +449,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			toolcallaudit.FieldCreatedAt:      {Type: field.TypeTime, Column: toolcallaudit.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[21] = &sqlgraph.Node{
+	graph.Nodes[16] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracefinding.Table,
 			Columns: tracefinding.Columns,
@@ -589,7 +475,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracefinding.FieldCreatedAt:       {Type: field.TypeTime, Column: tracefinding.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[22] = &sqlgraph.Node{
+	graph.Nodes[17] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracelog.Table,
 			Columns: tracelog.Columns,
@@ -658,7 +544,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldClientHarnessTagsJSON:          {Type: field.TypeString, Column: tracelog.FieldClientHarnessTagsJSON},
 		},
 	}
-	graph.Nodes[23] = &sqlgraph.Node{
+	graph.Nodes[18] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   traceobservation.Table,
 			Columns: traceobservation.Columns,
@@ -687,7 +573,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			traceobservation.FieldUpdatedAt:        {Type: field.TypeTime, Column: traceobservation.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[24] = &sqlgraph.Node{
+	graph.Nodes[19] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamexchange.Table,
 			Columns: upstreamexchange.Columns,
@@ -718,7 +604,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamexchange.FieldErrorText:        {Type: field.TypeString, Column: upstreamexchange.FieldErrorText},
 		},
 	}
-	graph.Nodes[25] = &sqlgraph.Node{
+	graph.Nodes[20] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreammodel.Table,
 			Columns: upstreammodel.Columns,
@@ -735,7 +621,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
 		},
 	}
-	graph.Nodes[26] = &sqlgraph.Node{
+	graph.Nodes[21] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamtarget.Table,
 			Columns: upstreamtarget.Columns,
@@ -759,7 +645,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
 		},
 	}
-	graph.Nodes[27] = &sqlgraph.Node{
+	graph.Nodes[22] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -1662,231 +1548,6 @@ func (f *CredentialMaskAuditFilter) WhereCreatedAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
-func (_q *DatasetQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the DatasetQuery builder.
-func (_q *DatasetQuery) Filter() *DatasetFilter {
-	return &DatasetFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *DatasetMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the DatasetMutation builder.
-func (m *DatasetMutation) Filter() *DatasetFilter {
-	return &DatasetFilter{config: m.config, predicateAdder: m}
-}
-
-// DatasetFilter provides a generic filtering capability at runtime for DatasetQuery.
-type DatasetFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *DatasetFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[7].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql string predicate on the id field.
-func (f *DatasetFilter) WhereID(p entql.StringP) {
-	f.Where(p.Field(dataset.FieldID))
-}
-
-// WhereName applies the entql string predicate on the name field.
-func (f *DatasetFilter) WhereName(p entql.StringP) {
-	f.Where(p.Field(dataset.FieldName))
-}
-
-// WhereDescription applies the entql string predicate on the description field.
-func (f *DatasetFilter) WhereDescription(p entql.StringP) {
-	f.Where(p.Field(dataset.FieldDescription))
-}
-
-// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
-func (f *DatasetFilter) WhereCreatedAt(p entql.TimeP) {
-	f.Where(p.Field(dataset.FieldCreatedAt))
-}
-
-// WhereUpdatedAt applies the entql time.Time predicate on the updated_at field.
-func (f *DatasetFilter) WhereUpdatedAt(p entql.TimeP) {
-	f.Where(p.Field(dataset.FieldUpdatedAt))
-}
-
-// addPredicate implements the predicateAdder interface.
-func (_q *DatasetExampleQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the DatasetExampleQuery builder.
-func (_q *DatasetExampleQuery) Filter() *DatasetExampleFilter {
-	return &DatasetExampleFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *DatasetExampleMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the DatasetExampleMutation builder.
-func (m *DatasetExampleMutation) Filter() *DatasetExampleFilter {
-	return &DatasetExampleFilter{config: m.config, predicateAdder: m}
-}
-
-// DatasetExampleFilter provides a generic filtering capability at runtime for DatasetExampleQuery.
-type DatasetExampleFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *DatasetExampleFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[8].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql int predicate on the id field.
-func (f *DatasetExampleFilter) WhereID(p entql.IntP) {
-	f.Where(p.Field(datasetexample.FieldID))
-}
-
-// WhereDatasetID applies the entql string predicate on the dataset_id field.
-func (f *DatasetExampleFilter) WhereDatasetID(p entql.StringP) {
-	f.Where(p.Field(datasetexample.FieldDatasetID))
-}
-
-// WhereTraceID applies the entql string predicate on the trace_id field.
-func (f *DatasetExampleFilter) WhereTraceID(p entql.StringP) {
-	f.Where(p.Field(datasetexample.FieldTraceID))
-}
-
-// WherePosition applies the entql int predicate on the position field.
-func (f *DatasetExampleFilter) WherePosition(p entql.IntP) {
-	f.Where(p.Field(datasetexample.FieldPosition))
-}
-
-// WhereAddedAt applies the entql time.Time predicate on the added_at field.
-func (f *DatasetExampleFilter) WhereAddedAt(p entql.TimeP) {
-	f.Where(p.Field(datasetexample.FieldAddedAt))
-}
-
-// WhereSourceType applies the entql string predicate on the source_type field.
-func (f *DatasetExampleFilter) WhereSourceType(p entql.StringP) {
-	f.Where(p.Field(datasetexample.FieldSourceType))
-}
-
-// WhereSourceID applies the entql string predicate on the source_id field.
-func (f *DatasetExampleFilter) WhereSourceID(p entql.StringP) {
-	f.Where(p.Field(datasetexample.FieldSourceID))
-}
-
-// WhereNote applies the entql string predicate on the note field.
-func (f *DatasetExampleFilter) WhereNote(p entql.StringP) {
-	f.Where(p.Field(datasetexample.FieldNote))
-}
-
-// addPredicate implements the predicateAdder interface.
-func (_q *EvalRunQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the EvalRunQuery builder.
-func (_q *EvalRunQuery) Filter() *EvalRunFilter {
-	return &EvalRunFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *EvalRunMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the EvalRunMutation builder.
-func (m *EvalRunMutation) Filter() *EvalRunFilter {
-	return &EvalRunFilter{config: m.config, predicateAdder: m}
-}
-
-// EvalRunFilter provides a generic filtering capability at runtime for EvalRunQuery.
-type EvalRunFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *EvalRunFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql string predicate on the id field.
-func (f *EvalRunFilter) WhereID(p entql.StringP) {
-	f.Where(p.Field(evalrun.FieldID))
-}
-
-// WhereDatasetID applies the entql string predicate on the dataset_id field.
-func (f *EvalRunFilter) WhereDatasetID(p entql.StringP) {
-	f.Where(p.Field(evalrun.FieldDatasetID))
-}
-
-// WhereSourceType applies the entql string predicate on the source_type field.
-func (f *EvalRunFilter) WhereSourceType(p entql.StringP) {
-	f.Where(p.Field(evalrun.FieldSourceType))
-}
-
-// WhereSourceID applies the entql string predicate on the source_id field.
-func (f *EvalRunFilter) WhereSourceID(p entql.StringP) {
-	f.Where(p.Field(evalrun.FieldSourceID))
-}
-
-// WhereEvaluatorSet applies the entql string predicate on the evaluator_set field.
-func (f *EvalRunFilter) WhereEvaluatorSet(p entql.StringP) {
-	f.Where(p.Field(evalrun.FieldEvaluatorSet))
-}
-
-// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
-func (f *EvalRunFilter) WhereCreatedAt(p entql.TimeP) {
-	f.Where(p.Field(evalrun.FieldCreatedAt))
-}
-
-// WhereCompletedAt applies the entql time.Time predicate on the completed_at field.
-func (f *EvalRunFilter) WhereCompletedAt(p entql.TimeP) {
-	f.Where(p.Field(evalrun.FieldCompletedAt))
-}
-
-// WhereTraceCount applies the entql int predicate on the trace_count field.
-func (f *EvalRunFilter) WhereTraceCount(p entql.IntP) {
-	f.Where(p.Field(evalrun.FieldTraceCount))
-}
-
-// WhereScoreCount applies the entql int predicate on the score_count field.
-func (f *EvalRunFilter) WhereScoreCount(p entql.IntP) {
-	f.Where(p.Field(evalrun.FieldScoreCount))
-}
-
-// WherePassCount applies the entql int predicate on the pass_count field.
-func (f *EvalRunFilter) WherePassCount(p entql.IntP) {
-	f.Where(p.Field(evalrun.FieldPassCount))
-}
-
-// WhereFailCount applies the entql int predicate on the fail_count field.
-func (f *EvalRunFilter) WhereFailCount(p entql.IntP) {
-	f.Where(p.Field(evalrun.FieldFailCount))
-}
-
-// addPredicate implements the predicateAdder interface.
 func (_q *ExecutionEventQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -1915,7 +1576,7 @@ type ExecutionEventFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ExecutionEventFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[10].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[7].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1972,111 +1633,6 @@ func (f *ExecutionEventFilter) WhereOccurredAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
-func (_q *ExperimentRunQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the ExperimentRunQuery builder.
-func (_q *ExperimentRunQuery) Filter() *ExperimentRunFilter {
-	return &ExperimentRunFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *ExperimentRunMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the ExperimentRunMutation builder.
-func (m *ExperimentRunMutation) Filter() *ExperimentRunFilter {
-	return &ExperimentRunFilter{config: m.config, predicateAdder: m}
-}
-
-// ExperimentRunFilter provides a generic filtering capability at runtime for ExperimentRunQuery.
-type ExperimentRunFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *ExperimentRunFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[11].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql string predicate on the id field.
-func (f *ExperimentRunFilter) WhereID(p entql.StringP) {
-	f.Where(p.Field(experimentrun.FieldID))
-}
-
-// WhereName applies the entql string predicate on the name field.
-func (f *ExperimentRunFilter) WhereName(p entql.StringP) {
-	f.Where(p.Field(experimentrun.FieldName))
-}
-
-// WhereDescription applies the entql string predicate on the description field.
-func (f *ExperimentRunFilter) WhereDescription(p entql.StringP) {
-	f.Where(p.Field(experimentrun.FieldDescription))
-}
-
-// WhereBaselineEvalRunID applies the entql string predicate on the baseline_eval_run_id field.
-func (f *ExperimentRunFilter) WhereBaselineEvalRunID(p entql.StringP) {
-	f.Where(p.Field(experimentrun.FieldBaselineEvalRunID))
-}
-
-// WhereCandidateEvalRunID applies the entql string predicate on the candidate_eval_run_id field.
-func (f *ExperimentRunFilter) WhereCandidateEvalRunID(p entql.StringP) {
-	f.Where(p.Field(experimentrun.FieldCandidateEvalRunID))
-}
-
-// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
-func (f *ExperimentRunFilter) WhereCreatedAt(p entql.TimeP) {
-	f.Where(p.Field(experimentrun.FieldCreatedAt))
-}
-
-// WhereBaselineScoreCount applies the entql int predicate on the baseline_score_count field.
-func (f *ExperimentRunFilter) WhereBaselineScoreCount(p entql.IntP) {
-	f.Where(p.Field(experimentrun.FieldBaselineScoreCount))
-}
-
-// WhereCandidateScoreCount applies the entql int predicate on the candidate_score_count field.
-func (f *ExperimentRunFilter) WhereCandidateScoreCount(p entql.IntP) {
-	f.Where(p.Field(experimentrun.FieldCandidateScoreCount))
-}
-
-// WhereBaselinePassRate applies the entql float64 predicate on the baseline_pass_rate field.
-func (f *ExperimentRunFilter) WhereBaselinePassRate(p entql.Float64P) {
-	f.Where(p.Field(experimentrun.FieldBaselinePassRate))
-}
-
-// WhereCandidatePassRate applies the entql float64 predicate on the candidate_pass_rate field.
-func (f *ExperimentRunFilter) WhereCandidatePassRate(p entql.Float64P) {
-	f.Where(p.Field(experimentrun.FieldCandidatePassRate))
-}
-
-// WherePassRateDelta applies the entql float64 predicate on the pass_rate_delta field.
-func (f *ExperimentRunFilter) WherePassRateDelta(p entql.Float64P) {
-	f.Where(p.Field(experimentrun.FieldPassRateDelta))
-}
-
-// WhereMatchedScoreCount applies the entql int predicate on the matched_score_count field.
-func (f *ExperimentRunFilter) WhereMatchedScoreCount(p entql.IntP) {
-	f.Where(p.Field(experimentrun.FieldMatchedScoreCount))
-}
-
-// WhereImprovementCount applies the entql int predicate on the improvement_count field.
-func (f *ExperimentRunFilter) WhereImprovementCount(p entql.IntP) {
-	f.Where(p.Field(experimentrun.FieldImprovementCount))
-}
-
-// WhereRegressionCount applies the entql int predicate on the regression_count field.
-func (f *ExperimentRunFilter) WhereRegressionCount(p entql.IntP) {
-	f.Where(p.Field(experimentrun.FieldRegressionCount))
-}
-
-// addPredicate implements the predicateAdder interface.
 func (_q *ModelCatalogQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -2105,7 +1661,7 @@ type ModelCatalogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ModelCatalogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[12].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[8].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2185,7 +1741,7 @@ type ParseJobFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ParseJobFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[13].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2255,7 +1811,7 @@ type ParserVersionFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ParserVersionFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[14].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[10].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2315,7 +1871,7 @@ type RequestAuditFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *RequestAuditFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[15].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[11].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2415,7 +1971,7 @@ type ResponseFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ResponseFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[16].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[12].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2515,7 +2071,7 @@ type ResponseItemFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ResponseItemFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[17].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[13].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2557,96 +2113,6 @@ func (f *ResponseItemFilter) WhereUpdatedAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
-func (_q *ScoreQuery) addPredicate(pred func(s *sql.Selector)) {
-	_q.predicates = append(_q.predicates, pred)
-}
-
-// Filter returns a Filter implementation to apply filters on the ScoreQuery builder.
-func (_q *ScoreQuery) Filter() *ScoreFilter {
-	return &ScoreFilter{config: _q.config, predicateAdder: _q}
-}
-
-// addPredicate implements the predicateAdder interface.
-func (m *ScoreMutation) addPredicate(pred func(s *sql.Selector)) {
-	m.predicates = append(m.predicates, pred)
-}
-
-// Filter returns an entql.Where implementation to apply filters on the ScoreMutation builder.
-func (m *ScoreMutation) Filter() *ScoreFilter {
-	return &ScoreFilter{config: m.config, predicateAdder: m}
-}
-
-// ScoreFilter provides a generic filtering capability at runtime for ScoreQuery.
-type ScoreFilter struct {
-	predicateAdder
-	config
-}
-
-// Where applies the entql predicate on the query filter.
-func (f *ScoreFilter) Where(p entql.P) {
-	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[18].Type, p, s); err != nil {
-			s.AddError(err)
-		}
-	})
-}
-
-// WhereID applies the entql string predicate on the id field.
-func (f *ScoreFilter) WhereID(p entql.StringP) {
-	f.Where(p.Field(score.FieldID))
-}
-
-// WhereTraceID applies the entql string predicate on the trace_id field.
-func (f *ScoreFilter) WhereTraceID(p entql.StringP) {
-	f.Where(p.Field(score.FieldTraceID))
-}
-
-// WhereSessionID applies the entql string predicate on the session_id field.
-func (f *ScoreFilter) WhereSessionID(p entql.StringP) {
-	f.Where(p.Field(score.FieldSessionID))
-}
-
-// WhereDatasetID applies the entql string predicate on the dataset_id field.
-func (f *ScoreFilter) WhereDatasetID(p entql.StringP) {
-	f.Where(p.Field(score.FieldDatasetID))
-}
-
-// WhereEvalRunID applies the entql string predicate on the eval_run_id field.
-func (f *ScoreFilter) WhereEvalRunID(p entql.StringP) {
-	f.Where(p.Field(score.FieldEvalRunID))
-}
-
-// WhereEvaluatorKey applies the entql string predicate on the evaluator_key field.
-func (f *ScoreFilter) WhereEvaluatorKey(p entql.StringP) {
-	f.Where(p.Field(score.FieldEvaluatorKey))
-}
-
-// WhereValue applies the entql float64 predicate on the value field.
-func (f *ScoreFilter) WhereValue(p entql.Float64P) {
-	f.Where(p.Field(score.FieldValue))
-}
-
-// WhereStatus applies the entql string predicate on the status field.
-func (f *ScoreFilter) WhereStatus(p entql.StringP) {
-	f.Where(p.Field(score.FieldStatus))
-}
-
-// WhereLabel applies the entql string predicate on the label field.
-func (f *ScoreFilter) WhereLabel(p entql.StringP) {
-	f.Where(p.Field(score.FieldLabel))
-}
-
-// WhereExplanation applies the entql string predicate on the explanation field.
-func (f *ScoreFilter) WhereExplanation(p entql.StringP) {
-	f.Where(p.Field(score.FieldExplanation))
-}
-
-// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
-func (f *ScoreFilter) WhereCreatedAt(p entql.TimeP) {
-	f.Where(p.Field(score.FieldCreatedAt))
-}
-
-// addPredicate implements the predicateAdder interface.
 func (_q *SystemEventQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -2675,7 +2141,7 @@ type SystemEventFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *SystemEventFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[19].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[14].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2815,7 +2281,7 @@ type ToolCallAuditFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ToolCallAuditFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[15].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2935,7 +2401,7 @@ type TraceFindingFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceFindingFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[16].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3040,7 +2506,7 @@ type TraceLogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceLogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[17].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3360,7 +2826,7 @@ type TraceObservationFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceObservationFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[23].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[18].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3480,7 +2946,7 @@ type UpstreamExchangeFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamExchangeFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[24].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[19].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3610,7 +3076,7 @@ type UpstreamModelFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamModelFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[25].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3670,7 +3136,7 @@ type UpstreamTargetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamTargetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[26].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3765,7 +3231,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[27].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

@@ -28,16 +28,8 @@ type Tx struct {
 	ChannelProbeRun *ChannelProbeRunClient
 	// CredentialMaskAudit is the client for interacting with the CredentialMaskAudit builders.
 	CredentialMaskAudit *CredentialMaskAuditClient
-	// Dataset is the client for interacting with the Dataset builders.
-	Dataset *DatasetClient
-	// DatasetExample is the client for interacting with the DatasetExample builders.
-	DatasetExample *DatasetExampleClient
-	// EvalRun is the client for interacting with the EvalRun builders.
-	EvalRun *EvalRunClient
 	// ExecutionEvent is the client for interacting with the ExecutionEvent builders.
 	ExecutionEvent *ExecutionEventClient
-	// ExperimentRun is the client for interacting with the ExperimentRun builders.
-	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
 	// ParseJob is the client for interacting with the ParseJob builders.
@@ -50,8 +42,6 @@ type Tx struct {
 	Response *ResponseClient
 	// ResponseItem is the client for interacting with the ResponseItem builders.
 	ResponseItem *ResponseItemClient
-	// Score is the client for interacting with the Score builders.
-	Score *ScoreClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
 	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
@@ -208,18 +198,13 @@ func (tx *Tx) init() {
 	tx.ChannelModel = NewChannelModelClient(tx.config)
 	tx.ChannelProbeRun = NewChannelProbeRunClient(tx.config)
 	tx.CredentialMaskAudit = NewCredentialMaskAuditClient(tx.config)
-	tx.Dataset = NewDatasetClient(tx.config)
-	tx.DatasetExample = NewDatasetExampleClient(tx.config)
-	tx.EvalRun = NewEvalRunClient(tx.config)
 	tx.ExecutionEvent = NewExecutionEventClient(tx.config)
-	tx.ExperimentRun = NewExperimentRunClient(tx.config)
 	tx.ModelCatalog = NewModelCatalogClient(tx.config)
 	tx.ParseJob = NewParseJobClient(tx.config)
 	tx.ParserVersion = NewParserVersionClient(tx.config)
 	tx.RequestAudit = NewRequestAuditClient(tx.config)
 	tx.Response = NewResponseClient(tx.config)
 	tx.ResponseItem = NewResponseItemClient(tx.config)
-	tx.Score = NewScoreClient(tx.config)
 	tx.SystemEvent = NewSystemEventClient(tx.config)
 	tx.ToolCallAudit = NewToolCallAuditClient(tx.config)
 	tx.TraceFinding = NewTraceFindingClient(tx.config)

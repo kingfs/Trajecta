@@ -21,15 +21,12 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/detector"
-	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
-	"github.com/kingfs/Trajecta/internal/providerprobe"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
-	"github.com/kingfs/Trajecta/internal/upstream"
 	"github.com/kingfs/Trajecta/pkg/observe"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
@@ -788,9 +785,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/responses/function-executors", monitorAdminRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
+	// /api/routing/exchanges and /api/routing/summary were retired (P3 API-only
+	// dead-endpoint audit): no UI, MCP or CLI caller remained. Unregistered
+	// /api/* paths fall through to appHandler and answer 404.
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st, opt.Router), monitorVerifier))
-	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAdminRequired(routingSettingsAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
 	// The proxy URL may carry credentials and changing it moves every outbound
@@ -821,7 +819,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// channel exposes, with its catalogue card. /api/models above stays the
 	// traffic-facing list and is unchanged.
 	mux.HandleFunc("/api/model-square", monitorAuthRequired(modelSquareAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/secrets/local-key", monitorAdminRequired(localSecretKeyAPIHandler(st), monitorVerifier))
+	// /api/secrets/local-key was retired (P3): the CLI `db secret` reads the
+	// store directly and was the only operator entry point.
 	mux.HandleFunc("/api/secret-masks", monitorAdminRequired(credentialMaskAuditListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/secret-masks/", monitorAdminRequired(credentialMaskAuditDetailAPIHandler(st), monitorVerifier))
 	// The global real-to-stand-in mapping file behind 质量 → 遮蔽映射. Unlike the
@@ -834,7 +833,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// the rule the next time the value appears.
 	mux.HandleFunc("/api/secret-suppressions", monitorAdminRequired(secretSuppressionAPIHandler(opt.SecretSuppressions), monitorVerifier))
 	mux.HandleFunc("/api/secret-suppressions/", monitorAdminRequired(secretSuppressionDeleteAPIHandler(opt.SecretSuppressions), monitorVerifier))
-	mux.HandleFunc("/api/provider-setup/", monitorAdminRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	// /api/provider-setup/ (validate/apply) was retired (P3): the create dialog
+	// now uses /api/provider-probe plus /api/channels; no live caller remained.
 	mux.HandleFunc("/api/provider-probe/report/apply", monitorAdminRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAdminRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-probe", monitorAdminRequired(providerProbeAPIHandler(), monitorVerifier))
@@ -1079,185 +1079,6 @@ func outputModalitiesFromCapabilities(features llmspecs.Capability) []string {
 	return out
 }
 
-func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, st *store.Store) (providerSetupResponse, error) {
-	baseURL, normalizationWarnings := normalizeSetupBaseURL(ctx, req)
-	req.BaseURL = baseURL
-	proxySettings := netproxy.DefaultSettings()
-	if req.Proxy != nil {
-		proxySettings = req.Proxy.Normalize()
-	}
-	report, probeErr := providerprobe.Probe(ctx, providerprobe.ProbeTarget{
-		ProviderID:              strings.TrimSpace(valueOrExisting(req.ID, req.Name)),
-		BaseURL:                 strings.TrimSpace(req.BaseURL),
-		APIKey:                  strings.TrimSpace(req.APIKey),
-		Headers:                 setupPlainHeaders(req.Headers),
-		SpecifiedAPIType:        strings.TrimSpace(req.APIType),
-		SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
-		Proxy:                   proxySettings,
-	}, nil)
-	normalizedReq := mergeProviderSetupSuggestions(req.channelUpsertRequest, report)
-	record := channelRecordFromRequest(normalizedReq, store.ChannelConfigRecord{})
-	normalized := channelItemFromSetupRecord(st, record, normalizedReq)
-	resp := providerSetupResponse{
-		Status:           report.Status,
-		NormalizedConfig: normalized,
-		Secret: providerSetupSecret{
-			APIKeySet:          strings.TrimSpace(req.APIKey) != "",
-			APIKeyHint:         secretHint(req.APIKey),
-			SecretStorageMode:  secretStorageMode(st),
-			RedactionGuarantee: "api_key is never echoed; secret headers are redacted",
-		},
-		Probe:    &report,
-		Warnings: append(append([]string(nil), report.Warnings...), normalizationWarnings...),
-	}
-	if resp.Status == "" {
-		resp.Status = "unknown"
-	}
-	return resp, probeErr
-}
-
-// providerBaseURLCandidates returns the typed URL and the /v1 sibling of the
-// same host. Operators routinely paste either form, and the two disagree on
-// where /chat/completions lives; the probe picks the one that answers.
-func providerBaseURLCandidates(raw string) []string {
-	base := strings.TrimRight(strings.TrimSpace(raw), "/")
-	if base == "" {
-		return nil
-	}
-	out := []string{base}
-	if strings.HasSuffix(base, "/v1") {
-		out = append(out, strings.TrimSuffix(base, "/v1"))
-	} else {
-		out = append(out, base+"/v1")
-	}
-	return out
-}
-
-// normalizeSetupBaseURL keeps the typed base URL when its model listing answers,
-// otherwise returns the /v1 variant that does. A provider without /models keeps
-// the typed value: discovery is optional, and a failed listing is not proof the
-// chat path is wrong.
-func normalizeSetupBaseURL(ctx context.Context, req providerSetupRequest) (string, []string) {
-	candidates := providerBaseURLCandidates(req.BaseURL)
-	if len(candidates) == 0 {
-		return strings.TrimSpace(req.BaseURL), nil
-	}
-	for i, candidate := range candidates {
-		if setupModelsReachable(ctx, req, candidate) != nil {
-			continue
-		}
-		if i == 0 {
-			return candidate, nil
-		}
-		return candidate, []string{
-			fmt.Sprintf("base_url normalized to %s: the typed value did not answer the model listing", candidate),
-		}
-	}
-	return candidates[0], nil
-}
-
-func setupModelsReachable(ctx context.Context, req providerSetupRequest, baseURL string) error {
-	proxySettings := netproxy.DefaultSettings()
-	if req.Proxy != nil {
-		proxySettings = req.Proxy.Normalize()
-	}
-	resolved, err := upstream.Resolve(config.UpstreamConfig{
-		BaseURL:        baseURL,
-		ApiKey:         strings.TrimSpace(req.APIKey),
-		Headers:        setupPlainHeaders(req.Headers),
-		ProviderPreset: strings.TrimSpace(req.ProviderPreset),
-		ProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
-		APIType:        strings.TrimSpace(req.APIType),
-		Proxy:          proxySettings,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = upstream.DiscoverModelsResolved(resolved, resolved.HTTPClient(nil))
-	return err
-}
-
-func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprobe.Report) channelUpsertRequest {
-	out := req
-	if out.Enabled == nil {
-		enabled := true
-		out.Enabled = &enabled
-	}
-	if strings.TrimSpace(out.APIType) == "" && strings.TrimSpace(report.SuggestedAPIType) != "" {
-		out.APIType = report.SuggestedAPIType
-	}
-	if strings.TrimSpace(out.ProtocolFamily) == "" && strings.TrimSpace(report.SuggestedProtocolFamily) != "" {
-		out.ProtocolFamily = report.SuggestedProtocolFamily
-	}
-	if out.Capabilities == nil {
-		out.Capabilities = &config.UpstreamCapabilitiesConfig{}
-	}
-	// The provider probe checks routes with an empty body; a 400 "missing model"
-	// counts as "the path exists". That is not evidence that the channel serves a
-	// native Responses API, and granting `capabilities.responses` here made a
-	// Chat Completions channel look like a native Responses upstream (the NVIDIA
-	// NIM incident: the model is listed and works on /v1/chat/completions, but
-	// /v1/responses answers plain-text `404 page not found`). Only a
-	// Responses-typed channel, or a probe that found no Chat Completions surface
-	// at all, may take the channel-level Responses capability. Per-model support
-	// is declared from the model card / connectivity test instead.
-	allowResponsesCapability := providerSetupAllowsResponsesCapability(out.APIType, report)
-	for _, capability := range report.Capabilities {
-		if isResponsesCapability(capability) && !allowResponsesCapability {
-			continue
-		}
-		upstream.SetCapabilityIfUnset(out.Capabilities, capability, true)
-	}
-	return out
-}
-
-// providerSetupAllowsResponsesCapability reports whether a provider-setup probe
-// may grant the channel-level Responses capability. A Responses api_type is the
-// explicit native declaration. Otherwise the probe must have found no Chat
-// Completions surface, because only such a channel has no local-runtime backend
-// and therefore needs the Responses capability to mean the native surface.
-func providerSetupAllowsResponsesCapability(apiType string, report providerprobe.Report) bool {
-	switch strings.TrimSpace(apiType) {
-	case upstream.APITypeResponses, upstream.APITypeResponsesNative:
-		return true
-	}
-	for _, capability := range report.Capabilities {
-		if strings.EqualFold(strings.TrimSpace(capability), upstream.CapabilityChatCompletions) {
-			return false
-		}
-	}
-	return true
-}
-
-func isResponsesCapability(capability string) bool {
-	return strings.EqualFold(strings.TrimSpace(capability), upstream.CapabilityResponses)
-}
-
-func secretStorageMode(st *store.Store) string {
-	if st == nil {
-		return ""
-	}
-	return st.SecretStorageMode()
-}
-
-func setupPlainHeaders(headers map[string]channelHeaderUpdate) map[string]string {
-	if len(headers) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(headers))
-	for key, update := range headers {
-		if update.Delete || update.Keep {
-			continue
-		}
-		name := strings.TrimSpace(key)
-		if name == "" {
-			continue
-		}
-		out[name] = update.Value
-	}
-	return out
-}
-
 func appliedProviderProbeSuggestions(items []channel.ProviderProbeApplyItem) bool {
 	for _, item := range items {
 		if item.Applied {
@@ -1265,46 +1086,6 @@ func appliedProviderProbeSuggestions(items []channel.ProviderProbeApplyItem) boo
 		}
 	}
 	return false
-}
-
-func localSecretKeyAPIHandler(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if st == nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			if r.URL.Query().Get("export") == "1" {
-				key, status, err := st.ExportLocalSecretKey()
-				if err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				name := "trace_index.secret." + valueOrExisting(status.Fingerprint, "backup")
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-				w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(key)
-				return
-			}
-			status := st.SecretStatus()
-			writeJSON(w, http.StatusOK, status)
-		case http.MethodPost:
-			if r.URL.Query().Get("rotate") != "1" {
-				http.NotFound(w, r)
-				return
-			}
-			result, err := st.RotateLocalSecretKey()
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, result)
-		default:
-			http.NotFound(w, r)
-		}
-	}
 }
 
 func appHandler() http.Handler {
@@ -2117,8 +1898,8 @@ func traceAPIHandlerWithSuppression(st *store.Store, rtr *router.Router, suppres
 			serveTraceDownload(w, r, absPath)
 		case len(parts) == 2 && parts[1] == "reparse" && r.Method == http.MethodPost:
 			handleTraceReparse(w, r, st, entry)
-		case len(parts) == 2 && parts[1] == "scan" && r.Method == http.MethodPost:
-			handleTraceScan(w, r, st, entry)
+		// The "scan" action was retired (P3): CLI `analyze scan` and the MCP
+		// reanalyze tool call the reanalysis service directly.
 		case len(parts) == 2 && parts[1] == "repair-usage" && r.Method == http.MethodPost:
 			handleTraceRepairUsage(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "reanalyze" && r.Method == http.MethodPost:
@@ -2138,18 +1919,6 @@ func handleTraceReparse(w http.ResponseWriter, r *http.Request, st *store.Store,
 		return svc.EnqueueTraceReparse(entry.ID, reanalysis.TraceOptions{Scan: req.Scan})
 	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
 		return svc.ReparseTrace(r.Context(), entry.ID, reanalysis.TraceOptions{Scan: req.Scan})
-	})
-}
-
-func handleTraceScan(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
-	req, ok := decodeReanalysisRequest(w, r)
-	if !ok {
-		return
-	}
-	runTraceReanalysis(w, r, st, requestMode(req.Mode, "sync"), func(svc *reanalysis.Service) (store.AnalysisJobRecord, error) {
-		return svc.EnqueueTraceRescan(entry.ID)
-	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
-		return svc.RescanTrace(r.Context(), entry.ID)
 	})
 }
 
@@ -2467,36 +2236,6 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 		payload = append(payload, row)
 	}
 	return payload
-}
-
-// addStringCount adds n to the count for value, ignoring a blank value. The
-// amount is explicit because the routing summary folds pre-aggregated buckets
-// rather than individual rows: a bucket already carries the number of traces it
-// stands for, so counting the bucket as one would report the number of distinct
-// routing-fact combinations instead of the number of traces.
-func addStringCount(counts map[string]int, value string, n int) {
-	value = strings.TrimSpace(value)
-	if value == "" || n == 0 {
-		return
-	}
-	counts[value] += n
-}
-
-func countMapToItems(counts map[string]int) []sessionCountItem {
-	items := make([]sessionCountItem, 0, len(counts))
-	for label, count := range counts {
-		if strings.TrimSpace(label) == "" || count == 0 {
-			continue
-		}
-		items = append(items, sessionCountItem{Label: label, Count: count})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Count != items[j].Count {
-			return items[i].Count > items[j].Count
-		}
-		return items[i].Label < items[j].Label
-	})
-	return items
 }
 
 func observationSummaryFromStore(summary store.ObservationSummary) observationSummaryView {

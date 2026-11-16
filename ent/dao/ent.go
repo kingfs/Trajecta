@@ -19,18 +19,13 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/channelmodel"
 	"github.com/kingfs/Trajecta/ent/dao/channelproberun"
 	"github.com/kingfs/Trajecta/ent/dao/credentialmaskaudit"
-	"github.com/kingfs/Trajecta/ent/dao/dataset"
-	"github.com/kingfs/Trajecta/ent/dao/datasetexample"
-	"github.com/kingfs/Trajecta/ent/dao/evalrun"
 	"github.com/kingfs/Trajecta/ent/dao/executionevent"
-	"github.com/kingfs/Trajecta/ent/dao/experimentrun"
 	"github.com/kingfs/Trajecta/ent/dao/modelcatalog"
 	"github.com/kingfs/Trajecta/ent/dao/parsejob"
 	"github.com/kingfs/Trajecta/ent/dao/parserversion"
 	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
 	"github.com/kingfs/Trajecta/ent/dao/response"
 	"github.com/kingfs/Trajecta/ent/dao/responseitem"
-	"github.com/kingfs/Trajecta/ent/dao/score"
 	"github.com/kingfs/Trajecta/ent/dao/systemevent"
 	"github.com/kingfs/Trajecta/ent/dao/toolcallaudit"
 	"github.com/kingfs/Trajecta/ent/dao/tracefinding"
@@ -107,18 +102,13 @@ func checkColumn(t, c string) error {
 			channelmodel.Table:        channelmodel.ValidColumn,
 			channelproberun.Table:     channelproberun.ValidColumn,
 			credentialmaskaudit.Table: credentialmaskaudit.ValidColumn,
-			dataset.Table:             dataset.ValidColumn,
-			datasetexample.Table:      datasetexample.ValidColumn,
-			evalrun.Table:             evalrun.ValidColumn,
 			executionevent.Table:      executionevent.ValidColumn,
-			experimentrun.Table:       experimentrun.ValidColumn,
 			modelcatalog.Table:        modelcatalog.ValidColumn,
 			parsejob.Table:            parsejob.ValidColumn,
 			parserversion.Table:       parserversion.ValidColumn,
 			requestaudit.Table:        requestaudit.ValidColumn,
 			response.Table:            response.ValidColumn,
 			responseitem.Table:        responseitem.ValidColumn,
-			score.Table:               score.ValidColumn,
 			systemevent.Table:         systemevent.ValidColumn,
 			toolcallaudit.Table:       toolcallaudit.ValidColumn,
 			tracefinding.Table:        tracefinding.ValidColumn,

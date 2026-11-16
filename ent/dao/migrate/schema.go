@@ -303,83 +303,6 @@ var (
 			},
 		},
 	}
-	// DatasetsColumns holds the columns for the "datasets" table.
-	DatasetsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString},
-		{Name: "name", Type: field.TypeString},
-		{Name: "description", Type: field.TypeString, Default: ""},
-		{Name: "created_at", Type: field.TypeTime},
-		{Name: "updated_at", Type: field.TypeTime},
-	}
-	// DatasetsTable holds the schema information for the "datasets" table.
-	DatasetsTable = &schema.Table{
-		Name:       "datasets",
-		Columns:    DatasetsColumns,
-		PrimaryKey: []*schema.Column{DatasetsColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "dataset_updated_at",
-				Unique:  false,
-				Columns: []*schema.Column{DatasetsColumns[4]},
-			},
-		},
-	}
-	// DatasetExamplesColumns holds the columns for the "dataset_examples" table.
-	DatasetExamplesColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt, Increment: true},
-		{Name: "dataset_id", Type: field.TypeString},
-		{Name: "trace_id", Type: field.TypeString},
-		{Name: "position", Type: field.TypeInt, Default: 0},
-		{Name: "added_at", Type: field.TypeTime},
-		{Name: "source_type", Type: field.TypeString, Default: ""},
-		{Name: "source_id", Type: field.TypeString, Default: ""},
-		{Name: "note", Type: field.TypeString, Default: ""},
-	}
-	// DatasetExamplesTable holds the schema information for the "dataset_examples" table.
-	DatasetExamplesTable = &schema.Table{
-		Name:       "dataset_examples",
-		Columns:    DatasetExamplesColumns,
-		PrimaryKey: []*schema.Column{DatasetExamplesColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "datasetexample_dataset_id_trace_id",
-				Unique:  true,
-				Columns: []*schema.Column{DatasetExamplesColumns[1], DatasetExamplesColumns[2]},
-			},
-			{
-				Name:    "datasetexample_dataset_id_position",
-				Unique:  false,
-				Columns: []*schema.Column{DatasetExamplesColumns[1], DatasetExamplesColumns[3]},
-			},
-		},
-	}
-	// EvalRunsColumns holds the columns for the "eval_runs" table.
-	EvalRunsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString},
-		{Name: "dataset_id", Type: field.TypeString, Default: ""},
-		{Name: "source_type", Type: field.TypeString, Default: ""},
-		{Name: "source_id", Type: field.TypeString, Default: ""},
-		{Name: "evaluator_set", Type: field.TypeString},
-		{Name: "created_at", Type: field.TypeTime},
-		{Name: "completed_at", Type: field.TypeTime},
-		{Name: "trace_count", Type: field.TypeInt, Default: 0},
-		{Name: "score_count", Type: field.TypeInt, Default: 0},
-		{Name: "pass_count", Type: field.TypeInt, Default: 0},
-		{Name: "fail_count", Type: field.TypeInt, Default: 0},
-	}
-	// EvalRunsTable holds the schema information for the "eval_runs" table.
-	EvalRunsTable = &schema.Table{
-		Name:       "eval_runs",
-		Columns:    EvalRunsColumns,
-		PrimaryKey: []*schema.Column{EvalRunsColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "evalrun_created_at",
-				Unique:  false,
-				Columns: []*schema.Column{EvalRunsColumns[5]},
-			},
-		},
-	}
 	// ExecutionEventsColumns holds the columns for the "execution_events" table.
 	ExecutionEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -423,36 +346,6 @@ var (
 				Name:    "executionevent_phase_status_occurred_at",
 				Unique:  false,
 				Columns: []*schema.Column{ExecutionEventsColumns[5], ExecutionEventsColumns[6], ExecutionEventsColumns[9]},
-			},
-		},
-	}
-	// ExperimentRunsColumns holds the columns for the "experiment_runs" table.
-	ExperimentRunsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString},
-		{Name: "name", Type: field.TypeString, Default: ""},
-		{Name: "description", Type: field.TypeString, Default: ""},
-		{Name: "baseline_eval_run_id", Type: field.TypeString},
-		{Name: "candidate_eval_run_id", Type: field.TypeString},
-		{Name: "created_at", Type: field.TypeTime},
-		{Name: "baseline_score_count", Type: field.TypeInt, Default: 0},
-		{Name: "candidate_score_count", Type: field.TypeInt, Default: 0},
-		{Name: "baseline_pass_rate", Type: field.TypeFloat64, Default: 0},
-		{Name: "candidate_pass_rate", Type: field.TypeFloat64, Default: 0},
-		{Name: "pass_rate_delta", Type: field.TypeFloat64, Default: 0},
-		{Name: "matched_score_count", Type: field.TypeInt, Default: 0},
-		{Name: "improvement_count", Type: field.TypeInt, Default: 0},
-		{Name: "regression_count", Type: field.TypeInt, Default: 0},
-	}
-	// ExperimentRunsTable holds the schema information for the "experiment_runs" table.
-	ExperimentRunsTable = &schema.Table{
-		Name:       "experiment_runs",
-		Columns:    ExperimentRunsColumns,
-		PrimaryKey: []*schema.Column{ExperimentRunsColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "experimentrun_created_at_id",
-				Unique:  false,
-				Columns: []*schema.Column{ExperimentRunsColumns[5], ExperimentRunsColumns[0]},
 			},
 		},
 	}
@@ -636,48 +529,6 @@ var (
 				Name:    "responseitem_response_id_kind",
 				Unique:  false,
 				Columns: []*schema.Column{ResponseItemsColumns[2], ResponseItemsColumns[1]},
-			},
-		},
-	}
-	// ScoresColumns holds the columns for the "scores" table.
-	ScoresColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeString},
-		{Name: "trace_id", Type: field.TypeString},
-		{Name: "session_id", Type: field.TypeString, Default: ""},
-		{Name: "dataset_id", Type: field.TypeString, Default: ""},
-		{Name: "eval_run_id", Type: field.TypeString, Default: ""},
-		{Name: "evaluator_key", Type: field.TypeString},
-		{Name: "value", Type: field.TypeFloat64, Default: 0},
-		{Name: "status", Type: field.TypeString, Default: ""},
-		{Name: "label", Type: field.TypeString, Default: ""},
-		{Name: "explanation", Type: field.TypeString, Default: ""},
-		{Name: "created_at", Type: field.TypeTime},
-	}
-	// ScoresTable holds the schema information for the "scores" table.
-	ScoresTable = &schema.Table{
-		Name:       "scores",
-		Columns:    ScoresColumns,
-		PrimaryKey: []*schema.Column{ScoresColumns[0]},
-		Indexes: []*schema.Index{
-			{
-				Name:    "score_trace_id_created_at",
-				Unique:  false,
-				Columns: []*schema.Column{ScoresColumns[1], ScoresColumns[10]},
-			},
-			{
-				Name:    "score_session_id_created_at",
-				Unique:  false,
-				Columns: []*schema.Column{ScoresColumns[2], ScoresColumns[10]},
-			},
-			{
-				Name:    "score_dataset_id_created_at",
-				Unique:  false,
-				Columns: []*schema.Column{ScoresColumns[3], ScoresColumns[10]},
-			},
-			{
-				Name:    "score_eval_run_id_created_at",
-				Unique:  false,
-				Columns: []*schema.Column{ScoresColumns[4], ScoresColumns[10]},
 			},
 		},
 	}
@@ -1120,18 +971,13 @@ var (
 		ChannelModelsTable,
 		ChannelProbeRunsTable,
 		CredentialMaskAuditsTable,
-		DatasetsTable,
-		DatasetExamplesTable,
-		EvalRunsTable,
 		ExecutionEventsTable,
-		ExperimentRunsTable,
 		ModelCatalogTable,
 		ParseJobsTable,
 		ParserVersionsTable,
 		RequestAuditsTable,
 		ResponsesTable,
 		ResponseItemsTable,
-		ScoresTable,
 		SystemEventsTable,
 		ToolCallAuditsTable,
 		TraceFindingsTable,
@@ -1173,25 +1019,9 @@ func init() {
 		Table:          "credential_mask_audits",
 		IncrementStart: func(i int) *int { return &i }(120259084288),
 	}
-	DatasetsTable.Annotation = &entsql.Annotation{
-		Table:          "datasets",
-		IncrementStart: func(i int) *int { return &i }(8589934592),
-	}
-	DatasetExamplesTable.Annotation = &entsql.Annotation{
-		Table:          "dataset_examples",
-		IncrementStart: func(i int) *int { return &i }(12884901888),
-	}
-	EvalRunsTable.Annotation = &entsql.Annotation{
-		Table:          "eval_runs",
-		IncrementStart: func(i int) *int { return &i }(17179869184),
-	}
 	ExecutionEventsTable.Annotation = &entsql.Annotation{
 		Table:          "execution_events",
 		IncrementStart: func(i int) *int { return &i }(68719476736),
-	}
-	ExperimentRunsTable.Annotation = &entsql.Annotation{
-		Table:          "experiment_runs",
-		IncrementStart: func(i int) *int { return &i }(21474836480),
 	}
 	ModelCatalogTable.Annotation = &entsql.Annotation{
 		Table:          "model_catalog",
@@ -1216,10 +1046,6 @@ func init() {
 	ResponseItemsTable.Annotation = &entsql.Annotation{
 		Table:          "response_items",
 		IncrementStart: func(i int) *int { return &i }(64424509440),
-	}
-	ScoresTable.Annotation = &entsql.Annotation{
-		Table:          "scores",
-		IncrementStart: func(i int) *int { return &i }(25769803776),
 	}
 	SystemEventsTable.Annotation = &entsql.Annotation{
 		Table:          "system_events",

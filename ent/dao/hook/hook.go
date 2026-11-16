@@ -93,42 +93,6 @@ func (f CredentialMaskAuditFunc) Mutate(ctx context.Context, m dao.Mutation) (da
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.CredentialMaskAuditMutation", m)
 }
 
-// The DatasetFunc type is an adapter to allow the use of ordinary
-// function as Dataset mutator.
-type DatasetFunc func(context.Context, *dao.DatasetMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f DatasetFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.DatasetMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.DatasetMutation", m)
-}
-
-// The DatasetExampleFunc type is an adapter to allow the use of ordinary
-// function as DatasetExample mutator.
-type DatasetExampleFunc func(context.Context, *dao.DatasetExampleMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f DatasetExampleFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.DatasetExampleMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.DatasetExampleMutation", m)
-}
-
-// The EvalRunFunc type is an adapter to allow the use of ordinary
-// function as EvalRun mutator.
-type EvalRunFunc func(context.Context, *dao.EvalRunMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f EvalRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.EvalRunMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.EvalRunMutation", m)
-}
-
 // The ExecutionEventFunc type is an adapter to allow the use of ordinary
 // function as ExecutionEvent mutator.
 type ExecutionEventFunc func(context.Context, *dao.ExecutionEventMutation) (dao.Value, error)
@@ -139,18 +103,6 @@ func (f ExecutionEventFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Val
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ExecutionEventMutation", m)
-}
-
-// The ExperimentRunFunc type is an adapter to allow the use of ordinary
-// function as ExperimentRun mutator.
-type ExperimentRunFunc func(context.Context, *dao.ExperimentRunMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f ExperimentRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.ExperimentRunMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ExperimentRunMutation", m)
 }
 
 // The ModelCatalogFunc type is an adapter to allow the use of ordinary
@@ -223,18 +175,6 @@ func (f ResponseItemFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ResponseItemMutation", m)
-}
-
-// The ScoreFunc type is an adapter to allow the use of ordinary
-// function as Score mutator.
-type ScoreFunc func(context.Context, *dao.ScoreMutation) (dao.Value, error)
-
-// Mutate calls f(ctx, m).
-func (f ScoreFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
-	if mv, ok := m.(*dao.ScoreMutation); ok {
-		return f(ctx, mv)
-	}
-	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ScoreMutation", m)
 }
 
 // The SystemEventFunc type is an adapter to allow the use of ordinary

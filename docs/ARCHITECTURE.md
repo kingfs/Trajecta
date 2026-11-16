@@ -52,7 +52,6 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/providerprobe`：provider 能力探测。
 - `internal/modelprobe`：按模型、按协议的最小请求连通性测试（chat/responses/messages/generateContent），把结果分类成 `ok`/`auth_failed`/`model_not_found`/`endpoint_not_supported` 等并给出可执行建议；只读，不写 store、不写 cassette、不经过 router。Monitor 的 `POST /api/provider-model-test` 与模型卡按钮使用它。
 - `internal/modelinfo`：模型广场与模型详情页的静态模型元数据，来自编译进二进制的 [Argus](https://github.com/kingfs/Argus) 注册表（供应商、系列、中英文描述、上下文/最大输出、能力位、标签、官网/模型卡链接）；`Lookup` 先按 ID/别名精确匹配，再依次尝试去掉路由前缀、点分厂商命名空间、日期/修订后缀与数字间连字符改写，未命中就返回空而不做模糊猜测。查询是内存 map 读取，不访问网络；`GET /api/model-square` 与 `GET /api/models/{model}` 的 `facts` 字段使用它；模型广场条目另有 `protocols`（可用渠道 interfaces 的并集）用于卡片协议 badge。
-- `internal/evals`：基于 replay 的确定性 eval 基线执行（HTTP 状态、TTFT/token 预算、tool-call 校验等）。
 - `internal/migrate`：把旧 V2 cassette 转换为 V3，并可选重建索引行。
 - `internal/auth`：认证 user/token 与 JWT。
 - `internal/config`：YAML/env 配置装载；`upstream` / `upstreams` 不是 YAML 键，加载时会被明确拒绝。
@@ -149,7 +148,7 @@ application DB 是结构化查询源：
 
 会话汇总（`session_summaries`）是唯一仍由写入路径增量维护的派生表。录制路径只把待重建的 session 记进进程内队列，不自己做整会话聚合；`serve` 通过 `Store.StartDerivedRefresh()` 让后台 goroutine 成为唯一消费者（写入直接唤醒，2 秒 ticker 兜底），因此派生重建不再由读取请求买单，读取端最多观察到亚秒级滞后。未启动 flusher 的调用方保持同步语义（读取端先 flush）。
 
-派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，`/api/routing/summary` 直接 `GROUP BY` 这些列。这三张旧表里，`overview_metric_buckets` / `overview_metric_bucket_members` 已由 Postgres 迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP（SQLite 启动 schema 同样不再创建）；`semantic_nodes` 已由 Postgres 迁移 `20261111000000_drop_semantic_nodes` 正式 DROP（SQLite 启动 schema 同样不再创建）：新库不会建表，旧库升级时数据随表删除，down 迁移只重建空表、不恢复数据（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
+派生数据的当前边界：语义节点树（原 `semantic_nodes`）不再落库，trace 详情按需从 cassette 重解析；Overview 直接聚合 `logs`，不再维护 `overview_metric_buckets` / `overview_metric_bucket_members`；per-request 路由事实（`route_target_id`、`channel_id`、`credential_id`、`sticky_status`、`sticky_previous_upstream_id`）是 `logs` 上的列，Overview/路由分析直接 `GROUP BY` 这些列。这三张旧表里，`overview_metric_buckets` / `overview_metric_bucket_members` 已由 Postgres 迁移 `20261009120000_drop_overview_metric_tables` 正式 DROP（SQLite 启动 schema 同样不再创建）；`semantic_nodes` 已由 Postgres 迁移 `20261111000000_drop_semantic_nodes` 正式 DROP（SQLite 启动 schema 同样不再创建）：新库不会建表，旧库升级时数据随表删除，down 迁移只重建空表、不恢复数据（见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)）。
 
 Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个有界磁盘缓存：键为 `(session_id, last_trace_id, trace_count, limit)`，条目以临时文件加 rename 原子写入，最多保留 512 条 / 512 MiB。它是纯派生数据，任何时候都可以删除并按下述 cassette 重建；`?full=1` 与 `?stream=1` 不读写该缓存。
 

@@ -118,26 +118,6 @@ func exportTable(ctx context.Context, view *store.Store, table string, window ex
 		return runTableExport(ctx, view, table, entry,
 			`SELECT `+channelProbeRunScan+` FROM channel_probe_runs`, nil, tw, log,
 			scanChannelProbeRun, nil)
-	case "datasets":
-		return runTableExport(ctx, view, table, entry,
-			`SELECT `+datasetScan+` FROM datasets`, nil, tw, log,
-			scanDataset, nil)
-	case "eval_runs":
-		return runTableExport(ctx, view, table, entry,
-			`SELECT `+evalRunScan+` FROM eval_runs`, nil, tw, log,
-			scanEvalRun, nil)
-	case "experiment_runs":
-		return runTableExport(ctx, view, table, entry,
-			`SELECT `+experimentRunScan+` FROM experiment_runs`, nil, tw, log,
-			scanExperimentRun, nil)
-	case "dataset_examples":
-		return runTableExport(ctx, view, table, entry,
-			`SELECT `+datasetExampleScan+` FROM dataset_examples`, nil, tw, log,
-			scanDatasetExample, nil)
-	case "scores":
-		return runTableExport(ctx, view, table, entry,
-			`SELECT `+scoreScan+` FROM scores`, nil, tw, log,
-			scanScore, nil)
 	case "responses":
 		return runTableExport(ctx, view, table, entry,
 			`SELECT `+responseScan+` FROM responses`, nil, tw, log,

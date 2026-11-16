@@ -229,72 +229,11 @@ var sqliteSchemaStatements = []string{
 		);`,
 	`CREATE INDEX IF NOT EXISTS channelproberun_channel_id_started_at ON channel_probe_runs(channel_id, started_at);`,
 	`CREATE INDEX IF NOT EXISTS channelproberun_status_started_at ON channel_probe_runs(status, started_at);`,
-	`CREATE TABLE IF NOT EXISTS datasets (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			created_at datetime NOT NULL,
-			updated_at datetime NOT NULL
-		);`,
-	`CREATE TABLE IF NOT EXISTS dataset_examples (
-			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			dataset_id TEXT NOT NULL,
-			trace_id TEXT NOT NULL,
-			position INTEGER NOT NULL,
-			added_at datetime NOT NULL,
-			source_type TEXT NOT NULL DEFAULT '',
-			source_id TEXT NOT NULL DEFAULT '',
-			note TEXT NOT NULL DEFAULT ''
-		);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS datasetexample_dataset_id_trace_id ON dataset_examples(dataset_id, trace_id);`,
-	`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC);`,
-	`CREATE TABLE IF NOT EXISTS eval_runs (
-			id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL DEFAULT '',
-			source_type TEXT NOT NULL DEFAULT '',
-			source_id TEXT NOT NULL DEFAULT '',
-			evaluator_set TEXT NOT NULL,
-			created_at datetime NOT NULL,
-			completed_at datetime NOT NULL,
-			trace_count INTEGER NOT NULL DEFAULT 0,
-			score_count INTEGER NOT NULL DEFAULT 0,
-			pass_count INTEGER NOT NULL DEFAULT 0,
-			fail_count INTEGER NOT NULL DEFAULT 0
-		);`,
-	`CREATE TABLE IF NOT EXISTS scores (
-			id TEXT PRIMARY KEY,
-			trace_id TEXT NOT NULL,
-			session_id TEXT NOT NULL DEFAULT '',
-			dataset_id TEXT NOT NULL DEFAULT '',
-			eval_run_id TEXT NOT NULL DEFAULT '',
-			evaluator_key TEXT NOT NULL,
-			value REAL NOT NULL,
-			status TEXT NOT NULL,
-			label TEXT NOT NULL DEFAULT '',
-			explanation TEXT NOT NULL DEFAULT '',
-			created_at datetime NOT NULL
-		);`,
-	`CREATE INDEX IF NOT EXISTS idx_scores_trace_id ON scores(trace_id, created_at DESC);`,
-	`CREATE INDEX IF NOT EXISTS idx_scores_session_id ON scores(session_id, created_at DESC) WHERE session_id <> '';`,
-	`CREATE INDEX IF NOT EXISTS idx_scores_dataset_id ON scores(dataset_id, created_at DESC) WHERE dataset_id <> '';`,
-	`CREATE INDEX IF NOT EXISTS idx_scores_eval_run_id ON scores(eval_run_id, created_at DESC) WHERE eval_run_id <> '';`,
-	`CREATE TABLE IF NOT EXISTS experiment_runs (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL DEFAULT '',
-			description TEXT NOT NULL DEFAULT '',
-			baseline_eval_run_id TEXT NOT NULL,
-			candidate_eval_run_id TEXT NOT NULL,
-			created_at datetime NOT NULL,
-			baseline_score_count INTEGER NOT NULL DEFAULT 0,
-			candidate_score_count INTEGER NOT NULL DEFAULT 0,
-			baseline_pass_rate REAL NOT NULL DEFAULT 0,
-			candidate_pass_rate REAL NOT NULL DEFAULT 0,
-			pass_rate_delta REAL NOT NULL DEFAULT 0,
-			matched_score_count INTEGER NOT NULL DEFAULT 0,
-			improvement_count INTEGER NOT NULL DEFAULT 0,
-			regression_count INTEGER NOT NULL DEFAULT 0
-		);`,
-	`CREATE INDEX IF NOT EXISTS idx_experiment_runs_created_at ON experiment_runs(created_at DESC, id DESC);`,
+	// The evaluation tables (datasets, dataset_examples, eval_runs, scores,
+	// experiment_runs) are retired: the eval feature is gone, so a new SQLite
+	// database no longer creates them. An existing database keeps whatever it
+	// already had; the Postgres migration history still creates them for old
+	// deployments, the same deliberate asymmetry semantic_nodes established.
 	`CREATE TABLE IF NOT EXISTS trace_observations (
 			trace_id TEXT PRIMARY KEY,
 			parser TEXT NOT NULL,

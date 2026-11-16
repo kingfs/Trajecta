@@ -157,160 +157,27 @@ func (s *importState) handleChannelProbeRuns(body io.Reader, size int64) error {
 }
 
 // ---------------------------------------------------------------------------
-// datasets / eval_runs / experiment_runs / dataset_examples / scores
+// datasets / eval_runs / experiment_runs / dataset_examples / scores — retired
+// eval tables, tolerated on import of an older bundle.
 // ---------------------------------------------------------------------------
 
-func (s *importState) handleDatasets(body io.Reader, size int64) error {
-	rep := s.report("datasets")
-	return s.processJSONL("datasets", size, body, func(line []byte) error {
+// skipLegacyEvalTable consumes one retired eval table entry without writing
+// anything. The eval feature is retired and export no longer produces these
+// entries, but a bundle written by an older Trajecta still carries them; the
+// import must not fail on that. Every row is read (so the tar cursor advances
+// and the manifest row count stays verifiable), counted as legacy-skipped, and
+// one log line per table records the skip.
+func (s *importState) skipLegacyEvalTable(table string, body io.Reader, size int64) error {
+	rep := s.report(table)
+	if err := s.processJSONL(table, size, body, func(line []byte) error {
 		rep.Processed++
-		src, err := decodeRow[datasetRow](line)
-		if err != nil {
-			return err
-		}
-		exists, err := s.queryRowExists(`SELECT COUNT(*) FROM datasets WHERE id = ?`, src.ID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			s.datasetIDMap[src.ID] = src.ID
-			rep.SkippedUnchanged++
-			return nil
-		}
-		s.datasetIDMap[src.ID] = src.ID
-		rep.Inserted++
-		return s.exec(`INSERT INTO datasets (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			src.ID, src.Name, src.Description, src.CreatedAt, src.UpdatedAt)
-	})
-}
-
-func (s *importState) handleEvalRuns(body io.Reader, size int64) error {
-	rep := s.report("eval_runs")
-	return s.processJSONL("eval_runs", size, body, func(line []byte) error {
-		rep.Processed++
-		src, err := decodeRow[evalRunRow](line)
-		if err != nil {
-			return err
-		}
-		if mapped, ok := s.datasetIDMap[src.DatasetID]; ok {
-			src.DatasetID = mapped
-		}
-		s.evalRunIDMap[src.ID] = src.ID
-		exists, err := s.queryRowExists(`SELECT COUNT(*) FROM eval_runs WHERE id = ?`, src.ID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			rep.SkippedUnchanged++
-			return nil
-		}
-		rep.Inserted++
-		return s.exec(`
-			INSERT INTO eval_runs (id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at, trace_count, score_count, pass_count, fail_count)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			src.ID, src.DatasetID, src.SourceType, src.SourceID, src.EvaluatorSet,
-			src.CreatedAt, src.CompletedAt, src.TraceCount, src.ScoreCount, src.PassCount, src.FailCount)
-	})
-}
-
-func (s *importState) handleExperimentRuns(body io.Reader, size int64) error {
-	rep := s.report("experiment_runs")
-	return s.processJSONL("experiment_runs", size, body, func(line []byte) error {
-		rep.Processed++
-		src, err := decodeRow[experimentRunRow](line)
-		if err != nil {
-			return err
-		}
-		if mapped, ok := s.evalRunIDMap[src.BaselineEvalRunID]; ok {
-			src.BaselineEvalRunID = mapped
-		}
-		if mapped, ok := s.evalRunIDMap[src.CandidateEvalRunID]; ok {
-			src.CandidateEvalRunID = mapped
-		}
-		exists, err := s.queryRowExists(`SELECT COUNT(*) FROM experiment_runs WHERE id = ?`, src.ID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			rep.SkippedUnchanged++
-			return nil
-		}
-		rep.Inserted++
-		return s.exec(`
-			INSERT INTO experiment_runs (id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
-				baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate, pass_rate_delta,
-				matched_score_count, improvement_count, regression_count)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			src.ID, src.Name, src.Description, src.BaselineEvalRunID, src.CandidateEvalRunID, src.CreatedAt,
-			src.BaselineScoreCount, src.CandidateScoreCount, src.BaselinePassRate, src.CandidatePassRate, src.PassRateDelta,
-			src.MatchedScoreCount, src.ImprovementCount, src.RegressionCount)
-	})
-}
-
-func (s *importState) handleDatasetExamples(body io.Reader, size int64) error {
-	rep := s.report("dataset_examples")
-	return s.processJSONL("dataset_examples", size, body, func(line []byte) error {
-		rep.Processed++
-		src, err := decodeRow[datasetExampleRow](line)
-		if err != nil {
-			return err
-		}
-		if s.skipTraces[src.TraceID] {
-			rep.SkippedTrace++
-			return nil
-		}
-		if mapped, ok := s.datasetIDMap[src.DatasetID]; ok {
-			src.DatasetID = mapped
-		}
-		exists, err := s.queryRowExists(`SELECT COUNT(*) FROM dataset_examples WHERE dataset_id = ? AND trace_id = ?`, src.DatasetID, src.TraceID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			rep.SkippedUnchanged++
-			return nil
-		}
-		rep.Inserted++
-		return s.exec(`
-			INSERT INTO dataset_examples (dataset_id, trace_id, position, added_at, source_type, source_id, note)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			src.DatasetID, src.TraceID, src.Position, src.AddedAt, src.SourceType, src.SourceID, src.Note)
-	})
-}
-
-func (s *importState) handleScores(body io.Reader, size int64) error {
-	rep := s.report("scores")
-	return s.processJSONL("scores", size, body, func(line []byte) error {
-		rep.Processed++
-		src, err := decodeRow[scoreRow](line)
-		if err != nil {
-			return err
-		}
-		if s.skipTraces[src.TraceID] {
-			rep.SkippedTrace++
-			return nil
-		}
-		if mapped, ok := s.datasetIDMap[src.DatasetID]; ok {
-			src.DatasetID = mapped
-		}
-		if mapped, ok := s.evalRunIDMap[src.EvalRunID]; ok {
-			src.EvalRunID = mapped
-		}
-		exists, err := s.queryRowExists(`SELECT COUNT(*) FROM scores WHERE id = ?`, src.ID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			rep.SkippedUnchanged++
-			return nil
-		}
-		rep.Inserted++
-		return s.exec(`
-			INSERT INTO scores (id, trace_id, session_id, dataset_id, eval_run_id, evaluator_key, value, status, label, explanation, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			src.ID, src.TraceID, src.SessionID, src.DatasetID, src.EvalRunID, src.EvaluatorKey,
-			src.Value, src.Status, src.Label, src.Explanation, src.CreatedAt)
-	})
+		rep.SkippedLegacy++
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.log.Infof("table %s belongs to the retired eval feature; %d rows read and skipped (legacy bundle)", table, rep.SkippedLegacy)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

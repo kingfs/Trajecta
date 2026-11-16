@@ -267,23 +267,10 @@ func (c *countingConn) QueryContext(ctx context.Context, query string, args []dr
 	return nil, driver.ErrSkip
 }
 
-func (c *countingConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	if queryer, ok := c.Conn.(driver.Queryer); ok {
-		c.rec.record(query)
-		return queryer.Query(query, args)
-	}
-	return nil, driver.ErrSkip
-}
-
 type countingStmt struct {
 	driver.Stmt
 	query string
 	rec   *detailQueryRecorder
-}
-
-func (s *countingStmt) Query(args []driver.Value) (driver.Rows, error) {
-	s.rec.record(s.query)
-	return s.Stmt.Query(args)
 }
 
 func (s *countingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
@@ -296,5 +283,8 @@ func (s *countingStmt) QueryContext(ctx context.Context, args []driver.NamedValu
 		values[i] = arg.Value
 	}
 	s.rec.record(s.query)
-	return s.Stmt.Query(values)
+	// Legacy fallback for a driver statement without StmtQueryContext; the
+	// modernc sqlite driver used by this test implements the context form,
+	// so this branch only keeps the wrapper correct for other drivers.
+	return s.Stmt.Query(values) //nolint:staticcheck // intentional legacy fallback
 }

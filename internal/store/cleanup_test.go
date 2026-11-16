@@ -334,6 +334,99 @@ func TestRequestCleanupPurgeReferencesRemovesCuratedRows(t *testing.T) {
 	}
 }
 
+// The eval tables are retired: a new database never creates dataset_examples
+// or scores, and --purge-references must still succeed there instead of
+// failing on a missing table.
+func TestRequestCleanupPurgeReferencesToleratesMissingEvalTables(t *testing.T) {
+	st := configTransactionTestStore(t)
+	cleanupInsertLog(t, st, cleanupLogSpec{requestID: "cleanup-noeval-404", sessionID: "s-noeval", statusCode: 404})
+
+	for _, table := range []string{"dataset_examples", "scores"} {
+		if cleanupCount(t, st, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table) != 0 {
+			t.Fatalf("new database unexpectedly has the retired table %q", table)
+		}
+	}
+
+	result, err := st.ApplyRequestCleanup(RequestCleanupFilter{StatusCodes: []int{404}}, RequestCleanupApplyOptions{PurgeReferences: true})
+	if err != nil {
+		t.Fatalf("ApplyRequestCleanup(--purge-references) on a database without the eval tables error = %v", err)
+	}
+	if _, ok := result.DeletedReferences["dataset_examples"]; ok {
+		t.Fatalf("deleted references = %v, want no entry for the absent dataset_examples table", result.DeletedReferences)
+	}
+	if _, ok := result.DeletedReferences["scores"]; ok {
+		t.Fatalf("deleted references = %v, want no entry for the absent scores table", result.DeletedReferences)
+	}
+	if _, ok := result.Plan.ReferenceCounts["dataset_examples"]; ok {
+		t.Fatalf("reference counts = %v, want no entry for the absent dataset_examples table", result.Plan.ReferenceCounts)
+	}
+}
+
+// An old deployment may still hold eval reference rows. The cleanup keeps the
+// ability to count and purge them when the tables exist, which is the other
+// half of the missing-table tolerance.
+func TestRequestCleanupPurgesLegacyEvalReferenceRows(t *testing.T) {
+	st := configTransactionTestStore(t)
+	entry := cleanupInsertLog(t, st, cleanupLogSpec{requestID: "cleanup-legacy-404", sessionID: "s-legacy", statusCode: 404})
+
+	// Recreate the retired tables the way an old SQLite database has them.
+	for _, stmt := range []string{
+		`CREATE TABLE dataset_examples (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			dataset_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			added_at datetime NOT NULL,
+			source_type TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE scores (
+			id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			dataset_id TEXT NOT NULL DEFAULT '',
+			eval_run_id TEXT NOT NULL DEFAULT '',
+			evaluator_key TEXT NOT NULL,
+			value REAL NOT NULL,
+			status TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			explanation TEXT NOT NULL DEFAULT '',
+			created_at datetime NOT NULL
+		)`,
+	} {
+		if _, err := st.db.Exec(stmt); err != nil {
+			t.Fatalf("create legacy eval table: %v", err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := st.db.Exec(`INSERT INTO dataset_examples (dataset_id, trace_id, position, added_at) VALUES ('ds-legacy', ?, 1, ?)`, entry.ID, now); err != nil {
+		t.Fatalf("insert legacy dataset example: %v", err)
+	}
+	if _, err := st.db.Exec(`INSERT INTO scores (id, trace_id, evaluator_key, value, status, created_at) VALUES ('score-legacy', ?, 'http_status_2xx', 0, 'fail', ?)`, entry.ID, now); err != nil {
+		t.Fatalf("insert legacy score: %v", err)
+	}
+
+	plan, err := st.PlanRequestCleanup(RequestCleanupFilter{StatusCodes: []int{404}})
+	if err != nil {
+		t.Fatalf("PlanRequestCleanup() error = %v", err)
+	}
+	if plan.ReferenceCounts["dataset_examples"] != 1 || plan.ReferenceCounts["scores"] != 1 {
+		t.Fatalf("reference counts = %v, want one dataset_examples and one scores row", plan.ReferenceCounts)
+	}
+
+	result, err := st.ApplyRequestCleanup(RequestCleanupFilter{StatusCodes: []int{404}}, RequestCleanupApplyOptions{PurgeReferences: true})
+	if err != nil {
+		t.Fatalf("ApplyRequestCleanup(--purge-references) error = %v", err)
+	}
+	if result.DeletedReferences["dataset_examples"] != 1 || result.DeletedReferences["scores"] != 1 {
+		t.Fatalf("deleted references = %v, want one dataset_examples and one scores row", result.DeletedReferences)
+	}
+	if cleanupCount(t, st, `SELECT COUNT(*) FROM dataset_examples`) != 0 || cleanupCount(t, st, `SELECT COUNT(*) FROM scores`) != 0 {
+		t.Fatal("--purge-references left legacy eval reference rows behind")
+	}
+}
+
 // A model-kind child exchange carries the same session_id as the entry that
 // owns it, so the summary rebuild must keep the client-visible restriction the
 // per-session rebuild uses. Without it a cleanup run double-counts every model

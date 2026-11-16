@@ -316,7 +316,7 @@ chat-completions 是零成本：codec 不产生 sealed，body-only 模式不解�
 | `rule` / `vendor` / `kind` / `confidence` / `score` / `reasons` | 判定依据，与 prelude 事件同源 |
 | `start_offset` / `end_offset` / `value_length` | 在原始请求体中的位置与长度 |
 | `original_value` / `stand_in_value` | 真值与实际上游收到的保形假值 |
-| `storage_mode` | 该行写入时的落盘形态，与 `GET /api/secrets/local-key` 报告的一致；`encrypted-local` 表示列里是 `tlsec:v1:` 本地密钥信封 |
+| `storage_mode` | 该行写入时的落盘形态，与 `trajecta db secret status` 报告的一致；`encrypted-local` 表示列里是 `tlsec:v1:` 本地密钥信封 |
 | `detected_at` | 改写时刻 |
 
 只有**真正执行了改写的那次请求**能写出这张表：假值由进程内 vault 生成，cassette 只记原始请求体，回填与重建索引的路径没有接入映射文件，所以它们**不写**这张表。因此写入发生在录制收尾（`internal/recorder` 的 finalize），而不是在后台同步里；脱离进程写入的记录一律没有 `original_value`，`UpsertCredentialMaskAudits` 会跳过它们而不是存一行空值。

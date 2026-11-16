@@ -12,7 +12,7 @@ import (
 )
 
 // importState carries everything one bundle import needs to thread through the
-// per-table handlers: the channel id map, the dataset/eval/response id maps,
+// per-table handlers: the channel id map, the response/audit id maps,
 // the rows-skipped-by-conflict bookkeeping, the target view (tx-scoped in
 // --apply mode) and the report accumulators.
 type importState struct {
@@ -25,8 +25,6 @@ type importState struct {
 
 	resolver *channelResolver
 
-	datasetIDMap      map[string]string
-	evalRunIDMap      map[string]string
 	responseIDMap     map[string]string
 	requestAuditIDMap map[string]string
 
@@ -60,8 +58,6 @@ func newImportState(ctx context.Context, view *store.Store, log *Logger, outputD
 		apply:             apply,
 		result:            result,
 		resolver:          newChannelResolver(log, channelMap),
-		datasetIDMap:      map[string]string{},
-		evalRunIDMap:      map[string]string{},
 		responseIDMap:     map[string]string{},
 		requestAuditIDMap: map[string]string{},
 		skipTraces:        map[string]bool{},
@@ -82,6 +78,13 @@ func (s *importState) report(name string) *TableImportReport {
 func (s *importState) flushTableReports() {
 	s.result.Tables = make([]TableImportReport, 0, len(s.byName))
 	for _, name := range tableExportOrder {
+		if r, ok := s.byName[name]; ok {
+			s.result.Tables = append(s.result.Tables, *r)
+		}
+	}
+	// Retired eval tables are not part of the export order any more; a legacy
+	// bundle that carried them still gets one report per skipped table.
+	for _, name := range legacyEvalImportTables {
 		if r, ok := s.byName[name]; ok {
 			s.result.Tables = append(s.result.Tables, *r)
 		}

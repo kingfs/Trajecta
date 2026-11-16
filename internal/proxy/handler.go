@@ -2486,7 +2486,7 @@ func estimateAnthropicCountTokensInput(body []byte) int {
 		return 1
 	}
 	canonicalLen := len(body)
-	overhead := 8
+	var overhead int
 	var payload any
 	if err := json.Unmarshal(body, &payload); err == nil {
 		if encoded, marshalErr := json.Marshal(payload); marshalErr == nil && len(encoded) > 0 {

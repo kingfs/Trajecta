@@ -85,17 +85,16 @@ func TestLiveRoutingInspect(t *testing.T) {
 	}
 }
 
-func TestLiveRoutingSummary(t *testing.T) {
+// TestLiveRoutingSummaryRetired pins the P3 retirement of GET
+// /api/routing/summary: the path is no longer registered, so the monitor mux
+// answers 404 for it. The routing facts stay readable per trace and through
+// /api/routing/inspect.
+func TestLiveRoutingSummaryRetired(t *testing.T) {
 	requireLive(t)
 
 	res := monitorGET(t, "/api/routing/summary")
-	if res.Status != http.StatusOK {
-		t.Fatalf("routing summary: want 200, got %s", res)
-	}
-	var parsed map[string]any
-	decodeJSON(t, res.Body, &parsed)
-	if len(parsed) == 0 {
-		t.Errorf("routing summary returned an empty object")
+	if res.Status != http.StatusNotFound {
+		t.Fatalf("routing summary (retired): want 404, got %s", res)
 	}
 }
 

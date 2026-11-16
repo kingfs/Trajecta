@@ -27,20 +27,8 @@ type ChannelProbeRun func(*sql.Selector)
 // CredentialMaskAudit is the predicate function for credentialmaskaudit builders.
 type CredentialMaskAudit func(*sql.Selector)
 
-// Dataset is the predicate function for dataset builders.
-type Dataset func(*sql.Selector)
-
-// DatasetExample is the predicate function for datasetexample builders.
-type DatasetExample func(*sql.Selector)
-
-// EvalRun is the predicate function for evalrun builders.
-type EvalRun func(*sql.Selector)
-
 // ExecutionEvent is the predicate function for executionevent builders.
 type ExecutionEvent func(*sql.Selector)
-
-// ExperimentRun is the predicate function for experimentrun builders.
-type ExperimentRun func(*sql.Selector)
 
 // ModelCatalog is the predicate function for modelcatalog builders.
 type ModelCatalog func(*sql.Selector)
@@ -59,9 +47,6 @@ type Response func(*sql.Selector)
 
 // ResponseItem is the predicate function for responseitem builders.
 type ResponseItem func(*sql.Selector)
-
-// Score is the predicate function for score builders.
-type Score func(*sql.Selector)
 
 // SystemEvent is the predicate function for systemevent builders.
 type SystemEvent func(*sql.Selector)

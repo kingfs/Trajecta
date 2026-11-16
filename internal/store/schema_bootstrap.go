@@ -125,25 +125,10 @@ func (s *Store) ensureEntCompatibleTables() error {
 	); err != nil {
 		return err
 	}
-	return s.ensureAutoIDTable(
-		"dataset_examples",
-		`CREATE TABLE dataset_examples (
-			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			dataset_id TEXT NOT NULL,
-			trace_id TEXT NOT NULL,
-			position INTEGER NOT NULL,
-			added_at TEXT NOT NULL,
-			source_type TEXT NOT NULL DEFAULT '',
-			source_id TEXT NOT NULL DEFAULT '',
-			note TEXT NOT NULL DEFAULT ''
-		)`,
-		`INSERT INTO dataset_examples (dataset_id, trace_id, position, added_at, source_type, source_id, note)
-		 SELECT dataset_id, trace_id, position, added_at, source_type, source_id, note FROM dataset_examples_old`,
-		[]string{
-			`CREATE UNIQUE INDEX IF NOT EXISTS datasetexample_dataset_id_trace_id ON dataset_examples(dataset_id, trace_id)`,
-			`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC)`,
-		},
-	)
+	// dataset_examples used to get the same auto-id rebuild here. The eval
+	// tables are retired and a new database no longer creates them, so the
+	// rebuild is gone; an old database keeps its existing table untouched.
+	return nil
 }
 
 func (s *Store) ensureUpstreamTargetsEntTable() error {
