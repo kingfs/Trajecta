@@ -409,14 +409,6 @@ func (l Loss) Error() string {
 	return fmt.Sprintf("xir: %s: %s (%s -> %s)", l.Field, l.Reason, l.From, l.To)
 }
 
-// Capabilities is the set of protocols one upstream serves natively.
-type Capabilities struct {
-	ChatCompletions bool
-	Responses       bool
-	Messages        bool
-	Gemini          bool
-}
-
 // StreamEventKind is the kind of one streamed event.
 type StreamEventKind string
 

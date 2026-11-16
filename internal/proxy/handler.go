@@ -3,7 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +41,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
 	"github.com/kingfs/Trajecta/pkg/secretmask"
+	"github.com/kingfs/Trajecta/pkg/session"
 )
 
 type aggregatedModelListResponse struct {
@@ -2024,15 +2025,6 @@ func hasRoutePlanEvent(events []recorder.RecordEvent) bool {
 	return false
 }
 
-func stickyKeyFingerprint(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("sha256:%x", sum[:8])
-}
-
 func routingOutcomeEvent(selection *router.Selection, statusCode int, duration time.Duration, errText string) recorder.RecordEvent {
 	attrs := map[string]interface{}{
 		"status_code": statusCode,
@@ -3210,7 +3202,7 @@ func limitEventAttributes(cfg config.LimitConfig, statusCode int, decision limit
 	attrs := map[string]interface{}{
 		"http_status":           statusCode,
 		"scope":                 decision.Scope,
-		"limit_key_fingerprint": stickyKeyFingerprint(decision.Key),
+		"limit_key_fingerprint": session.Fingerprint(decision.Key),
 		"max_concurrent":        cfg.MaxConcurrent,
 		"max_queued":            cfg.MaxQueued,
 	}
