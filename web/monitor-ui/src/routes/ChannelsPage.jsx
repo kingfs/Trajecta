@@ -778,6 +778,8 @@ function ProviderProbeDialog({ provider, onClose, onApplied }) {
 
 function providerSourceLabel(source) {
   switch (source) {
+    // Legacy compatibility: the bootstrap import was removed, but old
+    // databases still carry channels with source="bootstrap".
     case "bootstrap":
       return "bootstrap";
     case "manual":

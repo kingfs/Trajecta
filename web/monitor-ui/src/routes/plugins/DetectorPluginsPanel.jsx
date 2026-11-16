@@ -1,12 +1,15 @@
 import React, { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, FlaskConical } from "lucide-react";
 import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { Button } from "../../components/ui/button";
 import { InlineTag } from "../../components/common/Badges";
 import { EmptyState } from "../../components/common/EmptyState";
 import { DetectorPluginDrawer } from "../../components/monitor/DetectorPluginDrawer";
 import { DetectorPluginSwitch } from "../../components/monitor/DetectorPluginSwitch";
 import { DetectorPluginConflictDialog } from "../../components/monitor/DetectorPluginConflictDialog";
+import { DetectorStatsSection } from "../../components/monitor/DetectorStatsSection";
+import { DetectorSandboxDialog } from "../../components/monitor/DetectorSandboxDialog";
 import { useJSON } from "../../hooks/useJSON";
 import { apiPaths, patchJSON } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
@@ -25,11 +28,16 @@ import {
 // opens the detail drawer (rules, secretmask's PII setting). It mirrors the
 // channel panel: the server owns the disable check, and its 409 payload —
 // here the stand-in mapping count — drives the force confirmation.
+//
+// Two observability surfaces sit alongside the catalog: the collapsible stats
+// section (hot-path counters, 30-day per-rule replacements, suppression and
+// mapping sizes) and the read-only secretmask rule sandbox dialog.
 export function DetectorPluginsPanel() {
   const { t, language } = useI18n();
   const plugins = useJSON(apiPaths.detectorPlugins, []);
   const [detailID, setDetailID] = useState("");
   const [query, setQuery] = useState("");
+  const [sandboxOpen, setSandboxOpen] = useState(false);
   const { busyID, conflict, setConflict, enable, requestDisable, onToggle } = useDetectorPluginToggle();
 
   // The settings write replaces the plugin's opaque settings object, so the
@@ -66,6 +74,10 @@ export function DetectorPluginsPanel() {
           aria-label={t("plugins.searchPlaceholder")}
           className="plugins-search"
         />
+        <Button variant="ghost" type="button" onClick={() => setSandboxOpen(true)}>
+          <FlaskConical size={13} aria-hidden="true" />
+          <span>{t("plugins.sandbox.button")}</span>
+        </Button>
       </div>
       {capabilities.length ? (
         <Card as="section" className="detector-capabilities">
@@ -89,6 +101,7 @@ export function DetectorPluginsPanel() {
           </div>
         </Card>
       ) : null}
+      <DetectorStatsSection />
       <div className="provider-grid">
         {visibleItems.map((item) => (
           <Card
@@ -153,6 +166,8 @@ export function DetectorPluginsPanel() {
         onCancel={() => setConflict(null)}
         onConfirm={() => requestDisable(conflict.plugin, true)}
       />
+
+      <DetectorSandboxDialog open={sandboxOpen} onOpenChange={setSandboxOpen} />
     </>
   );
 }

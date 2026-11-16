@@ -103,6 +103,14 @@ export const apiPaths = {
   // plugin_in_use when a hot-lane plugin still has stand-in mappings.
   detectorPlugins: "/api/detector-plugins",
   detectorPlugin: (pluginID) => `/api/detector-plugins/${encodeURIComponent(pluginID)}`,
+  // Detection observability: hot-path counters, the 30-day per-rule replacement
+  // tally and the suppression/mapping sizes behind the detection tab's stats
+  // section. Admin-only read.
+  detectorPluginStats: "/api/detector-plugins/stats",
+  // The read-only rule sandbox: POST a body, get every finding's rule, span,
+  // confidence, suppression decision and a format-preserving stand-in rendered
+  // by a throwaway in-memory vault. It never writes the durable mapping store.
+  detectorPluginSecretmaskTest: "/api/detector-plugins/secretmask/test",
   // The static logical structure of the Exchange IR behind 质量 → XIR 结构.
   // Metadata only: no traffic and no store reads; the plugin overlay comes
   // from the detector-plugins catalog above.

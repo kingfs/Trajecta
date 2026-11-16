@@ -4745,6 +4745,70 @@ a:focus-visible {
   line-height: 1.5;
 }
 
+/* Detection stats section and the rule sandbox results. The counters reuse
+   .stat-card; the two tables share one compact chrome so the 30-day rule tally
+   and the sandbox findings read the same way. */
+.detector-stats-section {
+  margin-bottom: 16px;
+}
+
+.detector-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.detector-stats-rules-title {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+.detector-stats-table-wrap {
+  overflow-x: auto;
+}
+
+.detector-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.detector-stats-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.detector-stats-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.detector-stats-table .detector-stats-num {
+  text-align: right;
+}
+
+.detector-sandbox-form {
+  display: grid;
+  gap: 10px;
+}
+
+.detector-sandbox-input {
+  width: 100%;
+  min-height: 150px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.76rem;
+}
+
+.detector-sandbox-standin {
+  overflow-wrap: anywhere;
+}
+
 .provider-interface-fieldset {
   border: 1px solid var(--line);
   border-radius: var(--radius-control);

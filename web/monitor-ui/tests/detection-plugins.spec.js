@@ -6,9 +6,20 @@ import { expect, test } from "@playwright/test";
 // detail drawer's rule catalog plus secretmask's PII settings switch. Every
 // endpoint is mocked and the write bodies are captured, so the merged settings
 // PATCH and the explicit force flag are proven from the requests.
+//
+// The observability surfaces are mocked the same way: GET stats feeds the
+// collapsible stats section (counters, 30-day rule tally, store sizes) and
+// POST secretmask/test feeds the read-only rule sandbox dialog; the request
+// bodies are captured so the pasted body is proven to reach the endpoint.
 let detectorPatches = [];
 let detectorState;
 let mappingCount = 0;
+let statsRequests = [];
+let detectorStats;
+let statsError = "";
+let sandboxRequests = [];
+let sandboxFindings;
+let sandboxError = null;
 
 function secretmaskPlugin(overrides = {}) {
   return {
@@ -73,6 +84,60 @@ test.beforeEach(async ({ page }) => {
   detectorPatches = [];
   mappingCount = 0;
   detectorState = [secretmaskPlugin(), indicatorsPlugin(), toolErrorPlugin()];
+  statsRequests = [];
+  statsError = "";
+  detectorStats = {
+    hot: {
+      hot_calls: 120,
+      ir_projected: 30,
+      ir_skipped_no_marker: 80,
+      ir_skipped_over_size: 2,
+      ir_parse_failed: 1,
+      ir_decode_failed: 0,
+      ir_skipped_other: 0,
+      byte_fallbacks: 7,
+      field_runs: 5,
+      sealed_spans: 9,
+      mask_candidates: 14,
+      mask_events: 11,
+      scanner_errors: 0,
+      size_cap_hits: 2,
+    },
+    rules: [
+      { rule: "national_id.cn", kind: "national_id", hits: 4, last_seen: "2026-11-12T08:00:00Z" },
+      { rule: "openai.project_key", kind: "api_key", hits: 9, last_seen: "2026-11-10T08:00:00Z" },
+    ],
+    suppressions: 3,
+    mappings: 12,
+  };
+  sandboxRequests = [];
+  sandboxError = null;
+  sandboxFindings = [
+    {
+      rule: "openai.project_key",
+      vendor: "OpenAI",
+      kind: "api_key",
+      start: 15,
+      end: 66,
+      score: 90,
+      confidence: "high",
+      reasons: "prefix",
+      maskable: true,
+      suppressed: false,
+      stand_in: "sk-proj-FAKE",
+    },
+    {
+      rule: "national_id.cn",
+      kind: "national_id",
+      start: 80,
+      end: 98,
+      score: 80,
+      confidence: "high",
+      reasons: "",
+      maskable: true,
+      suppressed: true,
+    },
+  ];
   await page.addInitScript(() => {
     window.localStorage.setItem("trajecta.monitor.language", "en");
   });
@@ -93,6 +158,21 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/detector-plugins" && method === "GET") {
       return route.fulfill({ json: { items: detectorState } });
+    }
+    if (path === "/api/detector-plugins/stats" && method === "GET") {
+      statsRequests.push(path);
+      if (statsError) {
+        return route.fulfill({ status: 500, json: { error: statsError } });
+      }
+      return route.fulfill({ json: detectorStats });
+    }
+    if (path === "/api/detector-plugins/secretmask/test" && method === "POST") {
+      const body = route.request().postDataJSON();
+      sandboxRequests.push(body);
+      if (sandboxError) {
+        return route.fulfill({ status: sandboxError.status, json: { error: sandboxError.message } });
+      }
+      return route.fulfill({ json: { body_length: (body.body || "").length, findings: sandboxFindings } });
     }
     const patchMatch = path.match(/^\/api\/detector-plugins\/(.+)$/);
     if (patchMatch && method === "PATCH") {
@@ -270,4 +350,119 @@ test("Chinese console localizes the detection tab, cards and disable check", asy
   await dialog.getByRole("button", { name: "仍要停用" }).click();
   await expect(dialog).toBeHidden();
   await expect(card.getByRole("switch")).not.toBeChecked();
+});
+
+test("the stats section lazy-loads counters, the rule tally and store sizes", async ({ page }) => {
+  await page.goto("/plugins?tab=detection");
+  // Collapsed by default: the database-backed read is not paid for until the
+  // section is expanded.
+  expect(statsRequests).toEqual([]);
+  const section = page.locator(".collapse-card", { hasText: "Detection stats" });
+  await section.getByRole("button", { name: /Detection stats/ }).click();
+  await expect(section.locator(".stat-card", { hasText: "Hot-path calls" }).locator("strong")).toHaveText("120");
+  await expect(section.locator(".stat-card", { hasText: "IR projected" }).locator("strong")).toHaveText("30");
+  await expect(section.locator(".stat-card", { hasText: "Mask candidates" }).locator("strong")).toHaveText("14");
+  await expect(section.locator(".stat-card", { hasText: "Replacements" }).locator("strong")).toHaveText("11");
+  await expect(section.locator(".stat-card", { hasText: "Suppression entries" }).locator("strong")).toHaveText("3");
+  await expect(section.locator(".stat-card", { hasText: "Stand-in mappings" }).locator("strong")).toHaveText("12");
+  expect(statsRequests.length).toBeGreaterThan(0);
+  // The tally is sorted by replacement count descending, not by server order.
+  const rows = section.locator(".detector-stats-table tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("openai.project_key");
+  await expect(rows.nth(0)).toContainText("9");
+  await expect(rows.nth(1)).toContainText("national_id.cn");
+  await expect(rows.nth(1)).toContainText("4");
+});
+
+test("the stats section shows a friendly empty tally and reports read failures", async ({ page }) => {
+  detectorStats.rules = [];
+  await page.goto("/plugins?tab=detection");
+  const section = page.locator(".collapse-card", { hasText: "Detection stats" });
+  await section.getByRole("button", { name: /Detection stats/ }).click();
+  await expect(section.getByText("No replacements in the last 30 days")).toBeVisible();
+  await expect(section.locator(".detector-stats-table")).toHaveCount(0);
+  // A failed read keeps the section usable and names the server's message.
+  // A full reload starts a fresh query cache (the client dedupes reads for
+  // five seconds), so the second load is the one that sees the failure.
+  statsError = "rule stats unavailable";
+  await page.goto("/plugins?tab=detection");
+  await section.getByRole("button", { name: /Detection stats/ }).click();
+  await expect(section.getByText("Failed to load detection stats")).toBeVisible();
+  await expect(section.getByText("rule stats unavailable")).toBeVisible();
+});
+
+test("the rule sandbox posts the pasted body and lists rule, span, confidence and stand-in", async ({ page }) => {
+  await page.goto("/plugins?tab=detection");
+  await page.getByRole("button", { name: "Rule sandbox" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("secretmask rule sandbox")).toBeVisible();
+  // The read-only contract is stated before anything is pasted.
+  await expect(dialog.getByText(/throwaway in-memory vault/)).toBeVisible();
+  await expect(dialog.getByText(/nothing is written to the mapping store/)).toBeVisible();
+  const run = dialog.getByRole("button", { name: "Run", exact: true });
+  await expect(run).toBeDisabled();
+  const bodyText = '{"api_key":"sk-proj-REALSECRETVALUE"}';
+  await dialog.getByRole("textbox", { name: "Request body" }).fill(bodyText);
+  await run.click();
+  const rows = dialog.locator(".detector-sandbox-table tbody tr");
+  await expect(rows).toHaveCount(2);
+  expect(sandboxRequests).toEqual([{ body: bodyText }]);
+  await expect(dialog.getByText(`2 findings (body: ${bodyText.length} bytes)`)).toBeVisible();
+  const first = rows.nth(0);
+  await expect(first).toContainText("openai.project_key");
+  await expect(first).toContainText("OpenAI");
+  await expect(first).toContainText("15–66");
+  await expect(first).toContainText("high");
+  await expect(first.getByText("Replaced", { exact: true })).toBeVisible();
+  await expect(first.locator(".detector-sandbox-standin")).toHaveText("sk-proj-FAKE");
+  const second = rows.nth(1);
+  await expect(second).toContainText("national_id.cn");
+  await expect(second).toContainText("80–98");
+  await expect(second.getByText("Suppressed", { exact: true })).toBeVisible();
+  await expect(second).toContainText("value kept");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("the rule sandbox shows the no-findings state and the server error message", async ({ page }) => {
+  sandboxFindings = [];
+  await page.goto("/plugins?tab=detection");
+  await page.getByRole("button", { name: "Rule sandbox" }).click();
+  const dialog = page.getByRole("dialog");
+  const bodyText = "just a harmless sentence";
+  await dialog.getByRole("textbox", { name: "Request body" }).fill(bodyText);
+  await dialog.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(dialog.getByText("No findings", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(`This body (${bodyText.length} bytes) matched no detection rule.`)).toBeVisible();
+  // The next run fails server-side; the dialog surfaces the server's message.
+  sandboxError = { status: 413, message: "sandbox body too large" };
+  await dialog.getByRole("textbox", { name: "Request body" }).fill("x".repeat(64));
+  await dialog.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(dialog.getByText("Run failed")).toBeVisible();
+  await expect(dialog.getByText("sandbox body too large")).toBeVisible();
+  await expect(dialog.locator(".detector-sandbox-table")).toHaveCount(0);
+});
+
+test("Chinese console localizes the stats section and the rule sandbox", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("trajecta.monitor.language", "zh-CN");
+  });
+  await page.goto("/plugins?tab=detection");
+  const section = page.locator(".collapse-card", { hasText: "检测统计" });
+  await section.getByRole("button", { name: /检测统计/ }).click();
+  await expect(section.locator(".stat-card", { hasText: "热路径调用" }).locator("strong")).toHaveText("120");
+  await expect(section.getByRole("heading", { name: "近 30 天按规则替换" })).toBeVisible();
+  await expect(section.locator(".stat-card", { hasText: "抑制名单条目" }).locator("strong")).toHaveText("3");
+  await page.getByRole("button", { name: "规则沙箱" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("secretmask 规则沙箱")).toBeVisible();
+  await expect(dialog.getByText(/不写入映射表/)).toBeVisible();
+  const zhBody = '{"id":"110101199003077777"}';
+  await dialog.getByRole("textbox", { name: "请求 body" }).fill(zhBody);
+  await dialog.getByRole("button", { name: "运行", exact: true }).click();
+  const rows = dialog.locator(".detector-sandbox-table tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1).getByText("已抑制", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(`命中 2 处（body 共 ${zhBody.length} 字节）`)).toBeVisible();
 });

@@ -960,6 +960,8 @@ function sortProviderModels(items) {
 
 function providerSourceLabel(source) {
   switch (source) {
+    // Legacy compatibility: the bootstrap import was removed, but old
+    // databases still carry channels with source="bootstrap".
     case "bootstrap":
       return "bootstrap";
     case "manual":
@@ -976,7 +978,7 @@ function modelSourceLabel(source) {
     case "manual":
       return "manual";
     case "static":
-      return "bootstrap static";
+      return "static";
     case "discovered":
       return "probe discovered";
     case "trace":
