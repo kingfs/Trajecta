@@ -21,8 +21,15 @@ const (
 	finishRefusal
 )
 
+// finishReasonSeparator strips the separators protocols spell differently
+// ("end_turn", "end-turn", "END TURN") so one vocabulary table classifies them
+// all. It is package-level because strings.Replacer is safe for concurrent use
+// and building it inside classifyFinishReason allocated a fresh replacer on
+// every converted response's finish reason.
+var finishReasonSeparator = strings.NewReplacer("_", "", "-", "", " ", "")
+
 func classifyFinishReason(raw string, from Protocol) finishKind {
-	normalized := strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(raw)))
+	normalized := finishReasonSeparator.Replace(strings.ToLower(strings.TrimSpace(raw)))
 	switch normalized {
 	case "stop", "endturn", "stopsequence", "complete", "completed", "pause", "pauseturn":
 		return finishStop

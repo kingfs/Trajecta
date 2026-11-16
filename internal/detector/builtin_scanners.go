@@ -120,7 +120,21 @@ func newSecretmaskScanner(s Settings) (detect.Scanner, error) {
 	for _, name := range cfg.DisabledRules {
 		disabled[name] = true
 	}
-	return &filteredScanner{name: PluginSecretmask, base: base, disabled: disabled, disablePII: cfg.DisablePII}, nil
+	var piiKinds map[string]bool
+	if cfg.DisablePII {
+		// Precompute the PII verdict per rule name once at construction time.
+		// RuleByName is a linear scan of the ~80-rule table and used to run for
+		// every match on every request while disable_pii was on. First entry
+		// wins, matching RuleByName's first-match semantics; an unknown rule
+		// name is absent from the map and stays unfiltered, as before.
+		piiKinds = make(map[string]bool)
+		for _, r := range secretmask.Rules() {
+			if _, seen := piiKinds[r.Name]; !seen {
+				piiKinds[r.Name] = r.Kind.PII()
+			}
+		}
+	}
+	return &filteredScanner{name: PluginSecretmask, base: base, disabled: disabled, disablePII: cfg.DisablePII, piiKinds: piiKinds}, nil
 }
 
 // filteredScanner wraps a scanner and drops matches by rule name or PII kind.
@@ -131,6 +145,10 @@ type filteredScanner struct {
 	base       detect.Scanner
 	disabled   map[string]bool
 	disablePII bool
+	// piiKinds maps every compiled rule name to its Kind.PII() verdict, built
+	// once when disable_pii is on (nil otherwise). It replaces the per-match
+	// linear secretmask.RuleByName lookup with an O(1) map read.
+	piiKinds map[string]bool
 }
 
 func (s *filteredScanner) Name() string { return s.name }
@@ -145,10 +163,8 @@ func (s *filteredScanner) Scan(ctx context.Context, in detect.Input) ([]detect.M
 		if s.disabled[m.Rule] {
 			continue
 		}
-		if s.disablePII {
-			if rule, ok := secretmask.RuleByName(m.Rule); ok && rule.Kind.PII() {
-				continue
-			}
+		if s.disablePII && s.piiKinds[m.Rule] {
+			continue
 		}
 		out = append(out, m)
 	}
