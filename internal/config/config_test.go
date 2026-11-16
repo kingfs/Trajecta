@@ -1670,16 +1670,16 @@ func TestLoadAnalysisParserEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Analysis.ParserEngine != "observe" {
-		t.Fatalf("analysis.parser_engine = %q, want the observe default", cfg.Analysis.ParserEngine)
+	if cfg.Analysis.ParserEngine != "xir" {
+		t.Fatalf("analysis.parser_engine = %q, want the xir default", cfg.Analysis.ParserEngine)
 	}
 
-	next, err := Load(writeTempConfig(t, "analysis:\n  parser_engine: XIR\n"))
+	next, err := Load(writeTempConfig(t, "analysis:\n  parser_engine: OBSERVE\n"))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if next.Analysis.ParserEngine != "xir" {
-		t.Fatalf("analysis.parser_engine = %q, want xir", next.Analysis.ParserEngine)
+	if next.Analysis.ParserEngine != "observe" {
+		t.Fatalf("analysis.parser_engine = %q, want observe", next.Analysis.ParserEngine)
 	}
 
 	if _, err := Load(writeTempConfig(t, "analysis:\n  parser_engine: native\n")); err == nil {

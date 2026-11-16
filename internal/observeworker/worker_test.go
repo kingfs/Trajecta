@@ -33,7 +33,7 @@ func TestWorkerRunOnceParsesQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservationSummary() error = %v", err)
 	}
-	if summary.Parser != "openai" || summary.Status != "parsed" {
+	if summary.Parser != "xir" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
 	if summary.ExchangeKind != "model" || summary.ExchangeRole != "primary_model_call" {
@@ -152,7 +152,7 @@ func TestWorkerRunOnceParsesAnthropicQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservationSummary() error = %v", err)
 	}
-	if summary.Parser != "anthropic" || summary.Status != "parsed" {
+	if summary.Parser != "xir" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
 }
@@ -177,7 +177,7 @@ func TestWorkerRunOnceParsesGeminiQueuedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservationSummary() error = %v", err)
 	}
-	if summary.Parser != "gemini" || summary.Status != "parsed" {
+	if summary.Parser != "xir" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
 }

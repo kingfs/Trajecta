@@ -4047,7 +4047,7 @@ debug:
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
 	}
-	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "openai" {
+	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "xir" {
 		t.Fatalf("envelope = %+v, want trace id %q", envelope, traceID)
 	}
 
@@ -4060,7 +4060,7 @@ debug:
 	if err != nil {
 		t.Fatalf("GetObservationSummary() error = %v", err)
 	}
-	if summary.Parser != "openai" || summary.Status != "parsed" {
+	if summary.Parser != "xir" || summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", summary)
 	}
 	// The node tree is not persisted any more; it is rebuilt from the cassette, so
@@ -4368,7 +4368,7 @@ debug:
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
 	}
-	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "openai" || envelope.Result.Status != "parsed" {
+	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "xir" || envelope.Result.Status != "parsed" {
 		t.Fatalf("envelope = %+v", envelope)
 	}
 

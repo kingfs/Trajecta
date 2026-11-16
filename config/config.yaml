@@ -6,13 +6,12 @@ server:
 # the old manual-reanalysis-only behaviour.
 analysis:
   auto_scan_findings: true
-  # Observation parser: observe (per-protocol parsers, default) or xir (the
-  # Exchange IR projection). The XIR engine currently falls back to observe for
-  # streamed responses are assembled for all four protocols and client entry
-  # exchanges; it becomes the default once the full findings/resources parity
-  # gate passes. The setting is read by the parse/reanalysis workers,
-  # `trajecta analyze`, and the Monitor/MCP on-demand reparse paths.
-  parser_engine: observe
+  # Observation parser: xir (default, the Exchange IR projection) or observe
+  # (the per-protocol parsers, kept as the rollback path for one release
+  # cycle). The XIR engine falls back to observe for client entry exchanges,
+  # which have no XIR codec. The setting is read by the parse/reanalysis
+  # workers, `trajecta analyze`, and the Monitor/MCP on-demand reparse paths.
+  parser_engine: xir
 
 monitor:
   port: "8081"

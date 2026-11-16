@@ -35,7 +35,7 @@ func TestServiceReanalyzeTraceRebuildsObservationFindingsAndJob(t *testing.T) {
 	if result.Job.Attempts != 1 || result.Job.StartedAt.IsZero() {
 		t.Fatalf("job attempts = %d started_at = %v, want one marked attempt", result.Job.Attempts, result.Job.StartedAt)
 	}
-	if result.Observation == nil || result.Observation.Parser != "openai" || result.RequestNodes == 0 || result.ResponseNodes == 0 {
+	if result.Observation == nil || result.Observation.Parser != "xir" || result.RequestNodes == 0 || result.ResponseNodes == 0 {
 		t.Fatalf("observation result = %+v request=%d response=%d", result.Observation, result.RequestNodes, result.ResponseNodes)
 	}
 	if result.Findings == nil || result.Findings.Count != 1 || result.HighFindings != 1 {

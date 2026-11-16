@@ -4766,7 +4766,7 @@ func TestTraceObservationAPIHandlerParsesCassetteOnDemand(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.Summary.Status != string(observe.ParseStatusParsed) || payload.Summary.Parser != "openai" {
+	if payload.Summary.Status != string(observe.ParseStatusParsed) || payload.Summary.Parser != "xir" {
 		t.Fatalf("summary = %+v", payload.Summary)
 	}
 	// The detail carries the request and the response as separate trees, so the
@@ -4885,7 +4885,7 @@ func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.Summary.Parser != "openai" || payload.Summary.Status != "parsed" {
+	if payload.Summary.Parser != "xir" || payload.Summary.Status != "parsed" {
 		t.Fatalf("summary = %+v", payload.Summary)
 	}
 	if len(payload.Nodes) == 0 || len(payload.RequestTree) == 0 || len(payload.ResponseTree) == 0 {

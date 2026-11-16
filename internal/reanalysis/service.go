@@ -52,8 +52,9 @@ type Service struct {
 type Options struct {
 	Registry *observe.Registry
 	Runner   *analyzer.Runner
-	// ParserEngine selects the observation parser ("observe" default, "xir"
-	// opt-in); the XIR engine falls back to observe for unsupported exchanges.
+	// ParserEngine selects the observation parser ("xir" default, "observe"
+	// rollback); the XIR engine falls back to observe for unsupported
+	// exchanges.
 	ParserEngine string
 	// DetectorRuntime, when set, supplies the observation runner from the
 	// published detection-plugin snapshot, so enabling/disabling a detector
@@ -146,9 +147,9 @@ func New(st *store.Store, opts Options) *Service {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	parserEngine := "observe"
-	if strings.EqualFold(strings.TrimSpace(opts.ParserEngine), "xir") {
-		parserEngine = "xir"
+	parserEngine := "xir"
+	if strings.EqualFold(strings.TrimSpace(opts.ParserEngine), "observe") {
+		parserEngine = "observe"
 	}
 	return &Service{store: st, registry: registry, runner: runner, detectors: opts.DetectorRuntime, now: now, parserEngine: parserEngine}
 }

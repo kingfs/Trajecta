@@ -29,9 +29,9 @@ type Worker struct {
 	// cover normal traffic instead of waiting for a manual reanalysis.
 	detectors *detector.Runtime
 	autoScan  bool
-	// parserEngine selects the observation parser: "observe" (default) or
-	// "xir". The XIR engine falls back to observe when it reports
-	// ErrUnsupported (streamed responses, client entry exchanges).
+	// parserEngine selects the observation parser: "xir" (default) or
+	// "observe". The XIR engine falls back to observe when it reports
+	// ErrUnsupported (client entry exchanges).
 	parserEngine string
 }
 
@@ -43,8 +43,8 @@ type Options struct {
 	// AutoScan runs the observation detectors after a successful parse. It is
 	// normally cfg.Analysis.AutoScanFindings.
 	AutoScan bool
-	// ParserEngine selects the observation parser: "observe" (default) or
-	// "xir" (cfg.Analysis.ParserEngine).
+	// ParserEngine selects the observation parser: "xir" (default) or
+	// "observe" (cfg.Analysis.ParserEngine).
 	ParserEngine string
 }
 
@@ -181,7 +181,9 @@ func StoreResourceAccesses(obs observe.TraceObservation) []store.ResourceAccess 
 }
 
 func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Registry, traceID string) (observe.TraceObservation, error) {
-	return ReparseTraceWithEngine(ctx, st, registry, "observe", traceID)
+	// Empty selects the package default (xir); callers that need the rollback
+	// engine pass it explicitly through ReparseTraceWithEngine.
+	return ReparseTraceWithEngine(ctx, st, registry, "", traceID)
 }
 
 // ReparseTraceWithEngine parses one cassette with the selected observation
@@ -251,10 +253,10 @@ func ReparseTraceWithEngine(ctx context.Context, st *store.Store, registry *obse
 }
 
 func normalizeParserEngine(engine string) string {
-	if strings.EqualFold(strings.TrimSpace(engine), "xir") {
-		return "xir"
+	if strings.EqualFold(strings.TrimSpace(engine), "observe") {
+		return "observe"
 	}
-	return "observe"
+	return "xir"
 }
 
 func mergeExchangeMetadata(dst *recordfile.MetaData, src recordfile.MetaData) {

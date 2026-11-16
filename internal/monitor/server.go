@@ -441,8 +441,8 @@ type LogStats struct {
 type RouteOptions struct {
 	Router *router.Router
 	// ParserEngine selects the observation parser used by the on-demand
-	// reparse/locate paths ("observe" default, "xir" opt-in). It mirrors
-	// analysis.parser_engine; empty means observe.
+	// reparse/locate paths ("xir" default, "observe" rollback). It mirrors
+	// analysis.parser_engine; empty means xir.
 	ParserEngine                     string
 	ChannelService                   *channel.Service
 	AuthVerifier                     auth.TokenVerifier
@@ -483,22 +483,22 @@ type RouteOptions struct {
 
 // observationParserEngine is the process-wide parser engine for on-demand
 // reparse/locate paths. It is set once by RegisterRoutes from
-// analysis.parser_engine; a zero value means observe.
+// analysis.parser_engine; a zero value means xir.
 var observationParserEngine atomic.Value
 
 func setObservationParserEngine(engine string) {
-	if strings.EqualFold(strings.TrimSpace(engine), "xir") {
-		observationParserEngine.Store("xir")
+	if strings.EqualFold(strings.TrimSpace(engine), "observe") {
+		observationParserEngine.Store("observe")
 		return
 	}
-	observationParserEngine.Store("observe")
+	observationParserEngine.Store("xir")
 }
 
 func currentObservationParserEngine() string {
 	if value, ok := observationParserEngine.Load().(string); ok && value != "" {
 		return value
 	}
-	return "observe"
+	return "xir"
 }
 
 // reparseTraceWithConfiguredEngine is the shared on-demand reparse used by the

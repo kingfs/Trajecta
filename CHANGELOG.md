@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [3.5.2] - 2026-11-16
+
+### Changed
+- `analysis.parser_engine` now defaults to **xir**. The XIR observation engine covers non-streaming and streamed exchanges for all four protocols; `observe` remains selectable as the rollback parser for one release cycle, and client entry exchanges (no XIR codec) still fall back to it. The parse/reanalysis workers, `trajecta analyze`, and the Monitor/MCP on-demand reparse paths all follow the setting.
+
+### Fixed
+- Finding locate no longer returns an empty location when the stored finding's node ID predates a parser-engine change: it falls back to searching the current parse for the same evidence before answering. This keeps the Monitor's finding jump working across a reparse with a different observation engine.
+
 ## [3.5.1] - 2026-11-16
 
 ### Added

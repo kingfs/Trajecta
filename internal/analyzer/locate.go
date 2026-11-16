@@ -40,31 +40,41 @@ var dangerousShellDetectorName = DangerousShellDetector{}.Name()
 // a finding whose category has no single span - a safety block or a tool error
 // is a whole-node judgement - and for a node the current parse no longer has.
 func LocateFinding(obs observe.TraceObservation, finding observe.Finding) (FindingMatch, bool) {
+	// A finding outlives the parser that produced it (the observation engine can
+	// change between reparse runs), so a stored node ID may no longer exist.
+	// Prefer the exact node; when it is gone, search the current parse for the
+	// same evidence instead of answering with an empty location.
 	node := findNodeByID(obs, finding.NodeID)
+	candidates := []observe.SemanticNode{node}
 	if node.ID == "" {
-		return FindingMatch{}, false
+		candidates = allNodes(obs)
 	}
-	texts := nodeTexts(node)
-	for index, text := range texts {
-		if text == "" {
+	for _, candidate := range candidates {
+		if candidate.ID == "" {
 			continue
 		}
-		start, end, ok := locateInText(text, finding)
-		if !ok {
-			continue
+		texts := nodeTexts(candidate)
+		for index, text := range texts {
+			if text == "" {
+				continue
+			}
+			start, end, ok := locateInText(text, finding)
+			if !ok {
+				continue
+			}
+			view := "text"
+			if index < len(nodeTextViews) {
+				view = nodeTextViews[index]
+			}
+			return FindingMatch{
+				NodeID:   candidate.ID,
+				NodePath: candidate.Path,
+				View:     view,
+				Start:    start,
+				End:      end,
+				Text:     text[start:end],
+			}, true
 		}
-		view := "text"
-		if index < len(nodeTextViews) {
-			view = nodeTextViews[index]
-		}
-		return FindingMatch{
-			NodeID:   node.ID,
-			NodePath: node.Path,
-			View:     view,
-			Start:    start,
-			End:      end,
-			Text:     text[start:end],
-		}, true
 	}
 	return FindingMatch{}, false
 }

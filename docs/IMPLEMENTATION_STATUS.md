@@ -234,7 +234,7 @@ Responses audit 属于部分实现，职责边界如下：
 - proxy/gateway：`Body{Client,Wire}`、`RequestTransform`、`ResponseBody`、`UsageSniffer`（canonical `pkg/usage` + recorder 投影）、`ResponsePipeline`、`ResponseTransform`；
 - upstream：`capabilities.endpoints` 按协议选择 base URL，`BuildURLForProtocol` 在 conversion 后显式选择；
 - audit：cassette → `pkg/xir/audit` → `GET /api/traces/<id>/xir`，Chat SSE 装配，`pkg/detect` advisory `detections`（不含明文值），单 trace ATIF；
-- observation parser 引擎：`analysis.parser_engine: observe`（默认）|`xir`；xir 引擎把 Exchange IR 投影成同一份 observation IR，当前对 streamed response 与 entry exchange 回退 observe，findings/资源对账通过后再切换默认（`internal/xirobserve`）；
+- observation parser 引擎：`analysis.parser_engine: xir`（默认）|`observe`（回退，保留一个发布周期）；xir 引擎把 Exchange IR 投影成同一份 observation IR，非流式与流式四协议均支持，entry exchange 无 XIR codec 时回退 observe（`internal/xirobserve`）；
 - recorder：`trace.minimal_cassette` 仓库默认开启，raw HTTP + layout/identity 入 cassette，routing/harness/usage 留 DB。
 
 明确的边界/未完成：

@@ -43,11 +43,11 @@ type Config struct {
 		// reanalysis. It defaults to true; an explicit `false` keeps the old
 		// on-demand behaviour.
 		AutoScanFindings bool `yaml:"auto_scan_findings"`
-		// ParserEngine selects the observation parser: "observe" (the
-		// per-protocol parsers, default while the XIR projection is validated)
-		// or "xir" (the XIR codecs projected onto the same observation IR).
-		// The XIR engine falls back to observe for streamed responses and
-		// client entry exchanges until those are ported.
+		// ParserEngine selects the observation parser: "xir" (default, the
+		// XIR codecs projected onto the same observation IR) or "observe"
+		// (the per-protocol parsers, kept as the rollback path for one release
+		// cycle). The XIR engine falls back to observe for client entry
+		// exchanges, which have no XIR codec.
 		ParserEngine string `yaml:"parser_engine"`
 	} `yaml:"analysis"`
 
@@ -603,11 +603,12 @@ func Load(path string) (*Config, error) {
 	// the parser runs them; seed the auto-scan so an omitted key keeps the
 	// "default on" promise instead of silently idling five plugins.
 	cfg.Analysis.AutoScanFindings = true
-	// The observation parser stays on the per-protocol observe engine for this
-	// release; the XIR projection is available as an opt-in and is being
-	// validated before it becomes the default. normalizeAnalysisEngine also
-	// validates the value after the YAML and environment overrides are applied.
-	cfg.Analysis.ParserEngine = "observe"
+	// The XIR observation engine is the default. The per-protocol observe
+	// parsers stay selectable as the rollback path for one release cycle, and
+	// the XIR engine still falls back to them for client entry exchanges (no
+	// XIR codec). normalizeAnalysisEngine validates the value after the YAML
+	// and environment overrides.
+	cfg.Analysis.ParserEngine = "xir"
 	// Protocol conversion is on by default: the router prefers a native
 	// candidate whenever one is selectable, so this only changes the fallback
 	// for a model that no native target serves (previously a 502/404). Seed the
@@ -907,7 +908,7 @@ func validateRouterSelection(cfg *Config) error {
 func normalizeAnalysisEngine(cfg *Config) error {
 	value := strings.ToLower(strings.TrimSpace(cfg.Analysis.ParserEngine))
 	if value == "" {
-		value = "observe"
+		value = "xir"
 	}
 	if value != "observe" && value != "xir" {
 		return fmt.Errorf("analysis.parser_engine %q is not supported; use observe or xir", cfg.Analysis.ParserEngine)
