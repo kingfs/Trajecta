@@ -96,6 +96,7 @@ task run
 - 每个门禁的注释写明：被测函数、基线测量值（测量机器与日期）、上限（基线 + 约 25% 余量取整）。零分配路径（如 `secretmask` prefilter 早退）上限为 0，不留余量。
 - 每个门禁配套同名基准（`Benchmark*`），fixture 与门禁完全一致，便于复测基线。
 - 已知低效点也先锁住现状防恶化：如 `internal/router` 的 `extractRequestFeatures` 目前 `ParseEnvelope` 两遍，门禁注释标注了这一点，P4 修复后应下调上限。
+- `-race` 构建下门禁自动跳过（`allocgate_race_test.go`/`allocgate_plain_test.go` 的构建标签常量 `allocGateInstrumented`）：race 插桩本身增加运行时分配，上限只在无插桩时有意义；`task test:race` 因此不会误报，常规 CI 测试步仍强制执行门禁。
 
 **当前门禁覆盖**（文件均为 `*_gate_test.go`）：
 
