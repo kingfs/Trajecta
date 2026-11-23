@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { InlineTag } from "../common/Badges";
 import { Input } from "../ui/input";
 import { useI18n } from "../../lib/i18n";
-import { buildLedgerRows, filterLedgerRows, formatMillis, formatRatioPercent, formatTokens, turnKey, turnRange } from "../../lib/sessionSteps";
+import { buildLedgerRows, filterLedgerRows, filterRowsByTraceIDs, formatMillis, formatRatioPercent, formatTokens, turnKey, turnRange } from "../../lib/sessionSteps";
 
 /*
  * The 轨迹 tab: a session read as an event ledger.
@@ -17,14 +17,16 @@ import { buildLedgerRows, filterLedgerRows, formatMillis, formatRatioPercent, fo
  * is why the header carries an "推断" tag and the turn rules are explained in
  * the panel description rather than hidden.
  */
-export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
+export function TrajectoryLedger({ view, onOpenTrace, activeTraceID, focusTraceIDs, onClearFocus, query, onQueryChange }) {
   const { t } = useI18n();
-  const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
   const activeRef = useRef(null);
 
   const rows = useMemo(() => buildLedgerRows(view?.turns || []), [view]);
-  const visibleRows = useMemo(() => filterLedgerRows(rows, query), [rows, query]);
+  // The timeline's range selection narrows the ledger to the steps it touches,
+  // and the text search narrows it further.
+  const scopedRows = useMemo(() => filterRowsByTraceIDs(rows, focusTraceIDs), [rows, focusTraceIDs]);
+  const visibleRows = useMemo(() => filterLedgerRows(scopedRows, query), [scopedRows, query]);
   const searchActive = query.trim().length > 0;
   const turnKeys = useMemo(() => rows.filter((row) => row.kind === "turn").map((row) => turnKey(row.turn)), [rows]);
 
@@ -82,19 +84,31 @@ export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
   return (
     <>
       <div className="ledger-toolbar">
+        {focusTraceIDs ? (
+          <span className="ledger-focus">
+            {t("steps.timelineSelection", { count: focusTraceIDs.size })}
+            <button type="button" className="ledger-focus-clear" onClick={onClearFocus} title={t("steps.timelineClear")}>
+              ✕
+            </button>
+          </span>
+        ) : null}
         <Input
           type="search"
           value={query}
           placeholder={t("steps.ledgerSearchPlaceholder")}
           aria-label={t("steps.ledgerSearch")}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => onQueryChange(event.target.value)}
         />
         <button type="button" className="ledger-toggle" onClick={toggleAll}>
           {collapsed.size === turnKeys.length ? t("steps.expandAll") : t("steps.collapseAll")}
         </button>
         {searchActive ? <span className="ledger-count">{t("steps.ledgerMatches", { count: visibleRows.length - countTurns(visibleRows) })}</span> : null}
       </div>
-      <div className="ledger-list">{rendered}</div>
+      {focusTraceIDs && rendered.length === 0 ? (
+        <p className="ledger-empty">{t("steps.timelineSelectionEmpty")}</p>
+      ) : (
+        <div className="ledger-list">{rendered}</div>
+      )}
     </>
   );
 }

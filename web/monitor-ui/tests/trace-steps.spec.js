@@ -168,6 +168,48 @@ test("expanding a turn survives older history being prepended", async ({ page })
   await expect(page.locator('[data-trace-id="trace-2"]')).toHaveCount(0);
 });
 
+test("the timeline draws three lanes and changes width with its mode", async ({ page }) => {
+  await page.goto("/traces/trace-1?tab=trajectory");
+  await expect(page.locator(".timeline-lane")).toHaveCount(3);
+  await expect(page.locator(".timeline-lane .timeline-span-model")).toHaveCount(2);
+  await expect(page.locator(".timeline-lane .timeline-span-input")).toHaveCount(2);
+
+  const firstModel = page.locator(".timeline-lane .timeline-span-model").first();
+  const sequenceWidth = (await firstModel.boundingBox()).width;
+  await page.getByRole("button", { name: "Duration" }).click();
+  await expect(page.getByRole("button", { name: "Duration" })).toHaveAttribute("aria-pressed", "true");
+  const durationWidth = (await firstModel.boundingBox()).width;
+  expect(durationWidth, "real durations widen the model span").toBeGreaterThan(sequenceWidth);
+});
+
+test("dragging the timeline filters the ledger", async ({ page }) => {
+  await page.goto("/traces/trace-1?tab=trajectory");
+  const track = await page.locator(".timeline-track").boundingBox();
+  const y = track.y + track.height / 2;
+  await page.mouse.move(track.x + track.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(track.x + track.width * 0.45, y, { steps: 6 });
+  await page.mouse.up();
+
+  await expect(page.getByText(/Time selection/)).toBeVisible();
+  await expect(page.locator(".ledger-list [data-trace-id=\"trace-3\"]")).toHaveCount(1);
+  await expect(page.locator(".ledger-list [data-trace-id=\"trace-4\"]")).toHaveCount(0);
+
+  // Double-clicking the track clears the range and the ledger comes back.
+  await page.locator(".timeline-track").dblclick({ position: { x: 20, y: 10 } });
+  await expect(page.getByText(/Time selection/)).toHaveCount(0);
+  await expect(page.locator(".ledger-list [data-trace-id=\"trace-4\"]")).toHaveCount(1);
+});
+
+test("the timeline tooltip names the span and its clock range", async ({ page }) => {
+  await page.goto("/traces/trace-1?tab=trajectory");
+  await page.locator(".timeline-lane .timeline-span-model").first().hover();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible({ timeout: 3000 });
+  await expect(tooltip).toContainText("Model");
+  await expect(tooltip).toContainText("→");
+});
+
 test("trajectory tab renders the ledger and filters it", async ({ page }) => {
   await page.goto("/traces/trace-1?tab=trajectory");
   await expect(page.getByRole("button", { name: /Turn 1/ })).toBeVisible();
@@ -178,6 +220,21 @@ test("trajectory tab renders the ledger and filters it", async ({ page }) => {
   await page.getByRole("searchbox").fill("bash");
   await expect(page.locator(".ledger-row-tool").first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Turn 1/ })).toBeVisible();
+});
+
+test("a ledger search marks the matching spans on the timeline", async ({ page }) => {
+  await page.goto("/traces/trace-1?tab=trajectory");
+  await expect(page.locator(".timeline-span-match")).toHaveCount(0);
+
+  await page.getByRole("searchbox").fill("bash");
+  // Both steps called bash in the fixture, so every span is a match; searching
+  // something that only one step contains marks just that step.
+  await expect(page.locator(".timeline-span-match")).not.toHaveCount(0);
+  await expect(page.locator(".timeline-span-dimmed")).toHaveCount(0);
+
+  await page.getByRole("searchbox").fill("nothing-matches-this");
+  await expect(page.locator(".timeline-span-match")).toHaveCount(0);
+  await expect(page.locator(".timeline-span-dimmed")).not.toHaveCount(0);
 });
 
 test("protocol tab shows the exchange's usage and timing", async ({ page }) => {

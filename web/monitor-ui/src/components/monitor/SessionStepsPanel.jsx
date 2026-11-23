@@ -1,13 +1,14 @@
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "../ui/card";
 import { EmptyState } from "../common/EmptyState";
 import { InlineTag } from "../common/Badges";
 import { Button } from "../ui/button";
 import { StepsStatsTable } from "./StepsStatsTable";
+import { TrajectoryTimeline } from "./TrajectoryTimeline";
 import { TrajectoryLedger } from "./TrajectoryLedger";
 import { useSessionSteps } from "../../hooks/useSessionSteps";
 import { useI18n } from "../../lib/i18n";
-import { hasEstimates } from "../../lib/sessionSteps";
+import { buildLedgerRows, hasEstimates, matchedTraceIDs } from "../../lib/sessionSteps";
 
 /*
  * The shell both step views share: fetch one window, explain how it was
@@ -19,6 +20,17 @@ import { hasEstimates } from "../../lib/sessionSteps";
  * numbers but no content. Both arrive as tags on the header rather than as
  * silent gaps.
  */
+/** Whether two id sets are the same, so a re-render does not replace the state. */
+function sameIDSet(left, right) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+}
+
 export function SessionStepsPanel({ mode, traceID, sessionID, onOpenTrace, activeTraceID }) {
   const { t } = useI18n();
   const {
@@ -32,6 +44,21 @@ export function SessionStepsPanel({ mode, traceID, sessionID, onOpenTrace, activ
     loadOlder,
     loadNewer,
   } = useSessionSteps({ traceID, sessionID });
+  // The timeline's range selection, as the set of steps it touches. It is
+  // state here because both the timeline (marks) and the ledger (filter) read
+  // it, and only the timeline knows the geometry.
+  const [focusTraceIDs, setFocusTraceIDs] = useState(null);
+  // The search drives the ledger's filter and the timeline's highlight, so it
+  // lives here rather than inside the ledger.
+  const [query, setQuery] = useState("");
+  const ledgerRows = useMemo(() => (view ? buildLedgerRows(view.turns || []) : []), [view]);
+  const searchMatches = useMemo(() => matchedTraceIDs(ledgerRows, query), [ledgerRows, query]);
+  const handleSelection = useCallback((ids) => {
+    setFocusTraceIDs((current) => (sameIDSet(current, ids) ? current : ids));
+  }, []);
+  useEffect(() => {
+    setFocusTraceIDs(null);
+  }, [traceID, sessionID]);
 
   if (loading && !view) {
     return <EmptyState title={t("steps.loading")} detail={t("steps.loadingDetail")} />;
@@ -86,7 +113,26 @@ export function SessionStepsPanel({ mode, traceID, sessionID, onOpenTrace, activ
         </div>
       ) : null}
       {mode === "trajectory" ? (
-        <TrajectoryLedger view={view} onOpenTrace={onOpenTrace} activeTraceID={activeTraceID} />
+        <>
+          <TrajectoryTimeline
+            turns={view.turns}
+            activeTraceID={activeTraceID}
+            searchMatches={searchMatches}
+            onSelectionChange={handleSelection}
+            hasBefore={Boolean(window.has_before)}
+            onLoadOlder={loadOlder}
+            loadingOlder={loadingOlder}
+          />
+          <TrajectoryLedger
+            view={view}
+            onOpenTrace={onOpenTrace}
+            activeTraceID={activeTraceID}
+            focusTraceIDs={focusTraceIDs}
+            onClearFocus={() => setFocusTraceIDs(null)}
+            query={query}
+            onQueryChange={setQuery}
+          />
+        </>
       ) : (
         <StepsStatsTable view={view} onOpenTrace={onOpenTrace} activeTraceID={activeTraceID} />
       )}

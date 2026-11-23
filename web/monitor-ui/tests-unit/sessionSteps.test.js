@@ -5,9 +5,11 @@ import {
   barWidthPercent,
   buildLedgerRows,
   filterLedgerRows,
+  filterRowsByTraceIDs,
   formatRatioPercent,
   formatThroughput,
   isAnthropicExchange,
+  matchedTraceIDs,
   mergeViews,
   observedUsage,
   turnKey,
@@ -256,6 +258,27 @@ describe("ledger rows", () => {
       filtered.map((row) => row.kind),
       ["turn", "step", "tool"],
     );
+  });
+
+  it("keeps only the selected steps and their turn headers", () => {
+    const rows = buildLedgerRows(turns);
+    const filtered = filterRowsByTraceIDs(rows, new Set(["b"]));
+    assert.deepEqual(
+      filtered.map((row) => row.kind),
+      ["turn", "step", "answer"],
+      "the turn header comes back for the step that survived",
+    );
+    assert.equal(filtered[1].step.trace_id, "b");
+    // No selection at all means no filtering; an empty selection means nothing.
+    assert.equal(filterRowsByTraceIDs(rows, null).length, rows.length);
+    assert.equal(filterRowsByTraceIDs(rows, new Set()).length, 0);
+  });
+
+  it("reports the steps whose rows matched, for the timeline highlight", () => {
+    const rows = buildLedgerRows(turns);
+    assert.deepEqual([...matchedTraceIDs(rows, "bash")], ["a"], "the tool call belongs to the first step");
+    assert.equal(matchedTraceIDs(rows, "  "), null, "an empty query highlights nothing");
+    assert.equal(matchedTraceIDs(rows, "nothing-matches").size, 0);
   });
 
   it("matches a model name and keeps everything for an empty query", () => {

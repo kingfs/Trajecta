@@ -460,11 +460,71 @@ export function fillBoundaryToolWaits(turns) {
 }
 
 /**
+ * Keep the rows that belong to the given trace ids, with their turn headers.
+ *
+ * The timeline selects a range and the ledger shows what is in it; the ids are
+ * the contract between the two so neither has to know the other's geometry.
+ */
+export function filterRowsByTraceIDs(rows, ids) {
+  if (!ids) return rows;
+  const keep = new Set();
+  for (const row of rows) {
+    if (row.kind === "turn") continue;
+    if (ids.has(row.step?.trace_id)) keep.add(row.key);
+  }
+  const out = [];
+  let pendingTurn = null;
+  for (const row of rows) {
+    if (row.kind === "turn") {
+      pendingTurn = row;
+      continue;
+    }
+    if (!keep.has(row.key)) continue;
+    if (pendingTurn) {
+      out.push(pendingTurn);
+      pendingTurn = null;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
  * Keep the rows a search matches, plus the turn and step headers they belong
  * to: a matching tool call without its request would read as an orphan.
  * Matching is case-insensitive over the text a row shows, which is what a
  * reader types when they are looking for a trace id, a model or a tool name.
  */
+/** Whether one ledger row contains the query. Shared with the timeline. */
+export function rowMatchesQuery(row, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return false;
+  const haystack = [
+    row.text,
+    row.tools,
+    row.call?.name,
+    row.call?.args,
+    row.result?.text,
+    row.step?.trace_id,
+    row.step?.model,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+/** The steps whose ledger rows match the query, for the timeline highlight. */
+export function matchedTraceIDs(rows, query) {
+  if (!String(query || "").trim()) return null;
+  const ids = new Set();
+  for (const row of rows) {
+    if (row.kind === "turn") continue;
+    if (row.step?.trace_id && rowMatchesQuery(row, query)) ids.add(row.step.trace_id);
+  }
+  return ids;
+}
+
 export function filterLedgerRows(rows, query) {
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return rows;
@@ -473,19 +533,7 @@ export function filterLedgerRows(rows, query) {
   const matchedTurns = new Set();
   for (const row of rows) {
     if (row.kind === "turn") continue;
-    const haystack = [
-      row.text,
-      row.tools,
-      row.call?.name,
-      row.call?.args,
-      row.result?.text,
-      row.step?.trace_id,
-      row.step?.model,
-    ]
-      .filter(Boolean)
-      .join("\n")
-      .toLowerCase();
-    if (!haystack.includes(needle)) continue;
+    if (!rowMatchesQuery(row, needle)) continue;
     matchedRows.add(row.key);
     if (row.step?.trace_id) matchedSteps.add(row.step.trace_id);
     if (row.turn) matchedTurns.add(turnKey(row.turn));
