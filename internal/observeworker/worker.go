@@ -188,14 +188,26 @@ func PersistTraceProject(st *store.Store, traceID string, obs observe.TraceObser
 	if err != nil {
 		return err
 	}
-	decl, ok := projectid.Extract(obs)
-	var record *store.ProjectDeclaration
-	if ok {
-		record = &store.ProjectDeclaration{
-			Root:        decl.Root,
-			RootKey:     decl.Key,
-			Source:      string(decl.Source),
-			Conflicting: decl.Conflicting,
+	outcome := projectid.Extract(obs)
+	var record *store.ProjectRecord
+	switch {
+	case outcome.Declaration != nil:
+		record = &store.ProjectRecord{
+			Root:          outcome.Declaration.Root,
+			RootKey:       outcome.Declaration.Key,
+			Source:        string(outcome.Declaration.Source),
+			MultipleRoots: outcome.Declaration.MultipleRoots,
+		}
+	case len(outcome.Rejections) > 0:
+		// Keep the reason, not just the absence of a project: a harness that
+		// changed its prompt format must be distinguishable from traffic that
+		// declares nothing at all.
+		rejection := outcome.Rejections[0]
+		record = &store.ProjectRecord{
+			Rejected: true,
+			Source:   string(rejection.Source),
+			Reason:   string(rejection.Reason),
+			Evidence: rejection.Evidence,
 		}
 	}
 	if err := st.SaveTraceProject(traceID, sessionID, record); err != nil {

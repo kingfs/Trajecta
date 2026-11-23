@@ -10,10 +10,13 @@
 CREATE TABLE IF NOT EXISTS "trace_projects" (
   "trace_id" character varying NOT NULL,
   "session_id" character varying NOT NULL DEFAULT '',
+  "status" character varying NOT NULL DEFAULT 'declared',
   "root" text NOT NULL DEFAULT '',
   "root_key" text NOT NULL DEFAULT '',
   "source" character varying NOT NULL DEFAULT '',
-  "conflicting" boolean NOT NULL DEFAULT false,
+  "reason" character varying NOT NULL DEFAULT '',
+  "evidence" text NOT NULL DEFAULT '',
+  "multiple_roots" boolean NOT NULL DEFAULT false,
   "created_at" timestamptz NOT NULL,
   PRIMARY KEY ("trace_id")
 );
@@ -37,3 +40,17 @@ CREATE TABLE IF NOT EXISTS "session_projects" (
 );
 
 CREATE INDEX IF NOT EXISTS "sessionproject_root_key" ON "session_projects" ("root_key", "last_declared_at" DESC);
+
+-- Operator-maintained path equivalence. Applied when reading, so merging two
+-- projects rewrites no derived row and deleting the alias undoes the merge.
+CREATE TABLE IF NOT EXISTS "project_aliases" (
+  "alias_key" character varying NOT NULL,
+  "canonical_key" character varying NOT NULL DEFAULT '',
+  "canonical_root" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_at" timestamptz NOT NULL,
+  "updated_at" timestamptz NOT NULL,
+  PRIMARY KEY ("alias_key")
+);
+
+CREATE INDEX IF NOT EXISTS "projectalias_canonical_key" ON "project_aliases" ("canonical_key");

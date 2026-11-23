@@ -367,6 +367,33 @@ func scanModelCatalog(rows *sql.Rows) (modelCatalogRow, error) {
 }
 
 // ---------------------------------------------------------------------------
+// project_aliases
+// ---------------------------------------------------------------------------
+
+type projectAliasRow struct {
+	AliasKey      string `json:"alias_key"`
+	CanonicalKey  string `json:"canonical_key"`
+	CanonicalRoot string `json:"canonical_root"`
+	Note          string `json:"note"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+const projectAliasScan = `alias_key, canonical_key, canonical_root, note, created_at, updated_at`
+
+func scanProjectAlias(rows *sql.Rows) (projectAliasRow, error) {
+	var r projectAliasRow
+	var createdAt, updatedAt any
+	err := rows.Scan(&r.AliasKey, &r.CanonicalKey, &r.CanonicalRoot, &r.Note, &createdAt, &updatedAt)
+	if err != nil {
+		return r, err
+	}
+	r.CreatedAt = anyTimeString(createdAt)
+	r.UpdatedAt = anyTimeString(updatedAt)
+	return r, nil
+}
+
+// ---------------------------------------------------------------------------
 // app_settings (whitelist enforced at import; export keeps every row and lets
 // the import filter)
 // ---------------------------------------------------------------------------

@@ -1,12 +1,18 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
 
-func projectTestDeclaration(root string, source string) *ProjectDeclaration {
-	return &ProjectDeclaration{Root: root, RootKey: root, Source: source}
+type storeEntry struct {
+	traceID   string
+	sessionID string
+}
+
+func projectTestDeclaration(root string, source string) *ProjectRecord {
+	return &ProjectRecord{Root: root, RootKey: root, Source: source}
 }
 
 // A session keeps the project it started in, remembers the latest declaration
@@ -291,5 +297,181 @@ func TestRequestCleanupRemovesProjectAttribution(t *testing.T) {
 	}
 	if _, ok, err := st.GetSessionProject("s-cleanup"); err != nil || ok {
 		t.Fatalf("session rollup survived cleanup: ok=%v err=%v", ok, err)
+	}
+}
+
+// A rejected declaration is stored and reported for detection health, but it
+// never attributes a session: a placeholder or an unreadable block is not a
+// project.
+func TestRejectedProjectRecordIsReportedWithoutAttribution(t *testing.T) {
+	st := configTransactionTestStore(t)
+	base := time.Date(2026, 11, 23, 15, 0, 0, 0, time.UTC)
+	declared := cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID: "project-declared", sessionID: "s-declared", recordedAt: base, statusCode: 200,
+	})
+	rejected := cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID: "project-rejected", sessionID: "s-rejected", recordedAt: base.Add(time.Minute), statusCode: 200,
+	})
+	if _, err := st.db.Exec(`UPDATE logs SET client_harness = ? WHERE trace_id = ?`, "codex-cli", rejected.ID); err != nil {
+		t.Fatalf("set harness: %v", err)
+	}
+	if err := st.SaveTraceProject(declared.ID, "s-declared", projectTestDeclaration("/repo/declared", "dsh_runtime_context")); err != nil {
+		t.Fatalf("save declared: %v", err)
+	}
+	if err := st.SaveTraceProject(rejected.ID, "s-rejected", &ProjectRecord{
+		Rejected: true,
+		Source:   "codex_env",
+		Reason:   "unreadable",
+		Evidence: "<environment_context> without <cwd>",
+	}); err != nil {
+		t.Fatalf("save rejected: %v", err)
+	}
+	if err := st.RebuildSessionProject("s-declared"); err != nil {
+		t.Fatalf("rebuild declared: %v", err)
+	}
+	if err := st.RebuildSessionProject("s-rejected"); err != nil {
+		t.Fatalf("rebuild rejected: %v", err)
+	}
+
+	if _, ok, err := st.GetSessionProject("s-rejected"); err != nil || ok {
+		t.Fatalf("rejected session got an attribution: ok=%v err=%v", ok, err)
+	}
+	record, ok, err := st.GetTraceProject(rejected.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetTraceProject() ok=%v err=%v", ok, err)
+	}
+	if record.Status != ProjectRejected || record.Reason != "unreadable" || record.Evidence == "" {
+		t.Fatalf("record = %+v", record)
+	}
+
+	report, err := st.ProjectDetectionReport(ProjectDetectionFilter{})
+	if err != nil {
+		t.Fatalf("ProjectDetectionReport(): %v", err)
+	}
+	if report.Declared != 1 || report.Rejected != 1 {
+		t.Fatalf("report = %+v, want 1 declared / 1 rejected", report)
+	}
+	if len(report.ByReason) != 1 || report.ByReason[0].Label != "unreadable" || report.ByReason[0].Count != 1 {
+		t.Fatalf("by reason = %+v", report.ByReason)
+	}
+	foundHarness := false
+	for _, harness := range report.ByHarness {
+		if harness.Harness == "codex-cli" && harness.Rejected == 1 {
+			foundHarness = true
+		}
+	}
+	if !foundHarness {
+		t.Fatalf("by harness = %+v, want codex-cli with 1 rejection", report.ByHarness)
+	}
+	if len(report.Recent) != 1 || report.Recent[0].TraceID != rejected.ID {
+		t.Fatalf("recent = %+v", report.Recent)
+	}
+}
+
+// A merge is a read-time view: the alias folds the two paths into one project
+// row and one session set, and deleting it restores both.
+func TestProjectAliasesMergeReads(t *testing.T) {
+	st := configTransactionTestStore(t)
+	base := time.Date(2026, 11, 23, 16, 0, 0, 0, time.UTC)
+	container := cleanupInsertLog(t, st, cleanupLogSpec{requestID: "alias-container", sessionID: "s-container", recordedAt: base, statusCode: 200})
+	host := cleanupInsertLog(t, st, cleanupLogSpec{requestID: "alias-host", sessionID: "s-host", recordedAt: base.Add(time.Minute), statusCode: 200})
+	other := cleanupInsertLog(t, st, cleanupLogSpec{requestID: "alias-other", sessionID: "s-other", recordedAt: base.Add(2 * time.Minute), statusCode: 200})
+	for _, item := range []struct {
+		entry storeEntry
+		root  string
+	}{
+		{storeEntry{container.ID, "s-container"}, "/app"},
+		{storeEntry{host.ID, "s-host"}, "/data/src/app"},
+		{storeEntry{other.ID, "s-other"}, "/repo/other"},
+	} {
+		if err := st.SaveTraceProject(item.entry.traceID, item.entry.sessionID, projectTestDeclaration(item.root, "dsh_runtime_context")); err != nil {
+			t.Fatalf("save project %s: %v", item.root, err)
+		}
+		if err := st.RebuildSessionProject(item.entry.sessionID); err != nil {
+			t.Fatalf("rebuild %s: %v", item.entry.sessionID, err)
+		}
+	}
+
+	before, err := st.ListProjects(ProjectFilter{})
+	if err != nil {
+		t.Fatalf("ListProjects() before merge: %v", err)
+	}
+	if before.Total != 3 {
+		t.Fatalf("before merge total = %d, want 3", before.Total)
+	}
+
+	if err := st.SaveProjectAlias(ProjectAlias{
+		AliasKey: "/app", CanonicalKey: "/data/src/app", CanonicalRoot: "/data/src/app",
+	}); err != nil {
+		t.Fatalf("SaveProjectAlias(): %v", err)
+	}
+	after, err := st.ListProjects(ProjectFilter{})
+	if err != nil {
+		t.Fatalf("ListProjects() after merge: %v", err)
+	}
+	if after.Total != 2 {
+		t.Fatalf("after merge total = %d, want 2", after.Total)
+	}
+	var merged ProjectSummary
+	for _, item := range after.Items {
+		if item.RootKey == "/data/src/app" {
+			merged = item
+		}
+	}
+	if merged.SessionCount != 2 || merged.RequestCount != 2 || merged.PathCount != 2 {
+		t.Fatalf("merged = %+v, want 2 sessions / 2 requests / 2 paths", merged)
+	}
+
+	// Filtering by the canonical key or by a merged path lists both sessions.
+	for _, key := range []string{"/data/src/app", "/app"} {
+		page, err := st.ListSessionPage(1, 50, ListFilter{Project: key})
+		if err != nil {
+			t.Fatalf("ListSessionPage(%q): %v", key, err)
+		}
+		if page.Total != 2 {
+			t.Fatalf("filter %q total = %d, want the merged 2", key, page.Total)
+		}
+	}
+
+	// The session view reports the canonical project.
+	rollup, ok, err := st.GetSessionProject("s-container")
+	if err != nil || !ok {
+		t.Fatalf("GetSessionProject() ok=%v err=%v", ok, err)
+	}
+	if rollup.CanonicalRoot != "/data/src/app" || rollup.CanonicalKey != "/data/src/app" {
+		t.Fatalf("canonical = %q/%q", rollup.CanonicalRoot, rollup.CanonicalKey)
+	}
+
+	// Deleting the alias restores the separate projects.
+	if err := st.DeleteProjectAlias("/app"); err != nil {
+		t.Fatalf("DeleteProjectAlias(): %v", err)
+	}
+	restored, err := st.ListProjects(ProjectFilter{})
+	if err != nil {
+		t.Fatalf("ListProjects() after delete: %v", err)
+	}
+	if restored.Total != 3 {
+		t.Fatalf("after delete total = %d, want 3", restored.Total)
+	}
+}
+
+func TestProjectAliasValidation(t *testing.T) {
+	st := configTransactionTestStore(t)
+	if err := st.SaveProjectAlias(ProjectAlias{AliasKey: "/a", CanonicalKey: "/a"}); !errors.Is(err, ErrProjectAliasSelf) {
+		t.Fatalf("self alias error = %v, want ErrProjectAliasSelf", err)
+	}
+	if err := st.SaveProjectAlias(ProjectAlias{AliasKey: "", CanonicalKey: "/a"}); !errors.Is(err, ErrProjectAliasRequired) {
+		t.Fatalf("missing key error = %v", err)
+	}
+	if err := st.SaveProjectAlias(ProjectAlias{AliasKey: "/a", CanonicalKey: "/b"}); err != nil {
+		t.Fatalf("first alias: %v", err)
+	}
+	// /b is now a merge target, so making it an alias would chain.
+	if err := st.SaveProjectAlias(ProjectAlias{AliasKey: "/b", CanonicalKey: "/c"}); !errors.Is(err, ErrProjectAliasChain) {
+		t.Fatalf("chain error = %v, want ErrProjectAliasChain", err)
+	}
+	// /c -> /a would chain too (/c -> /a -> /b).
+	if err := st.SaveProjectAlias(ProjectAlias{AliasKey: "/c", CanonicalKey: "/a"}); !errors.Is(err, ErrProjectAliasChain) {
+		t.Fatalf("reverse chain error = %v, want ErrProjectAliasChain", err)
 	}
 }

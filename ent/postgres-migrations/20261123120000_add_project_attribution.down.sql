@@ -1,3 +1,5 @@
+DROP INDEX IF EXISTS "projectalias_canonical_key";
+DROP TABLE IF EXISTS "project_aliases";
 DROP INDEX IF EXISTS "sessionproject_root_key";
 DROP TABLE IF EXISTS "session_projects";
 DROP INDEX IF EXISTS "traceproject_root_key";

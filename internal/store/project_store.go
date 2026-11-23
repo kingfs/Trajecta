@@ -21,30 +21,63 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-// ProjectDeclaration is one trace's declared project, as the extractor found it.
-type ProjectDeclaration struct {
+// ProjectStatus is whether a trace declared a project or only carried a
+// declaration-shaped value that was rejected.
+type ProjectStatus string
+
+const (
+	// ProjectDeclared means a usable project root was extracted.
+	ProjectDeclared ProjectStatus = "declared"
+	// ProjectRejected means a declaration block was found but produced no
+	// usable root. The reason is kept so a harness that changed its prompt
+	// format is visible instead of looking like traffic with no declaration.
+	ProjectRejected ProjectStatus = "rejected"
+)
+
+// ProjectRecord is what one trace says about its project, as the extractor
+// found it: at most one effective root, or the reason a candidate was rejected.
+type ProjectRecord struct {
 	Root string
 	// RootKey is the comparison form of Root (case-folded Windows paths, POSIX
 	// kept verbatim). Two declarations with the same key are one project.
 	RootKey string
 	Source  string
-	// Conflicting reports that the request declared more than one distinct
+	// MultipleRoots reports that the request declared more than one distinct
 	// root; Root holds the effective (last) one.
-	Conflicting bool
+	MultipleRoots bool
+	// Rejected marks a record with no usable root (Root and RootKey empty).
+	Rejected bool
+	// Reason is the closed rejection vocabulary (placeholder, relative, ...).
+	Reason string
+	// Evidence is the rejected value or the block that carried no value.
+	Evidence string
+}
+
+// Status reports how the record should be stored.
+func (r ProjectRecord) Status() ProjectStatus {
+	if r.Rejected {
+		return ProjectRejected
+	}
+	return ProjectDeclared
 }
 
 // TraceProject is the project index row of one trace.
 type TraceProject struct {
-	TraceID     string
-	SessionID   string
-	Root        string
-	RootKey     string
-	Source      string
-	Conflicting bool
+	TraceID   string
+	SessionID string
+	Status    ProjectStatus
+	Root      string
+	RootKey   string
+	Source    string
+	Reason    string
+	Evidence  string
+	// MultipleRoots reports that the request declared more than one root.
+	MultipleRoots bool
 }
 
 // SessionProject is the project rollup of one session.
@@ -66,6 +99,10 @@ type SessionProject struct {
 	FirstTraceID   string
 	FirstSeen      time.Time
 	LastDeclaredAt time.Time
+	// CanonicalRoot/CanonicalKey are Root/RootKey after operator aliases: when
+	// several paths were merged, this is the project the session is counted in.
+	CanonicalRoot string
+	CanonicalKey  string
 }
 
 // ProjectFilter selects the project list page.
@@ -87,6 +124,9 @@ type ProjectSummary struct {
 	FirstSeen    time.Time
 	LastSeen     time.Time
 	Sources      []string
+	// PathCount is how many raw project paths the row merges: more than one
+	// means operator aliases folded several directories into this project.
+	PathCount int
 }
 
 // ProjectPage is one page of the project list, plus the coverage numbers the
@@ -102,10 +142,10 @@ type ProjectPage struct {
 	TotalSessions      int
 }
 
-// SaveTraceProject replaces the project declaration of one trace. decl == nil
+// SaveTraceProject replaces the project record of one trace. record == nil
 // removes any previous row, which is what a reparse that no longer finds a
 // declaration must do.
-func (s *Store) SaveTraceProject(traceID string, sessionID string, decl *ProjectDeclaration) error {
+func (s *Store) SaveTraceProject(traceID string, sessionID string, record *ProjectRecord) error {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
 		return errors.New("save trace project: trace id is required")
@@ -122,16 +162,25 @@ func (s *Store) SaveTraceProject(traceID string, sessionID string, decl *Project
 	if _, err := s.execTx(tx, `DELETE FROM trace_projects WHERE trace_id = ?`, traceID); err != nil {
 		return err
 	}
-	if decl != nil {
-		root := strings.TrimSpace(decl.Root)
-		rootKey := strings.TrimSpace(decl.RootKey)
-		if root == "" || rootKey == "" {
+	if record != nil {
+		root := strings.TrimSpace(record.Root)
+		rootKey := strings.TrimSpace(record.RootKey)
+		reason := strings.TrimSpace(record.Reason)
+		status := record.Status()
+		if status == ProjectDeclared && (root == "" || rootKey == "") {
 			return errors.New("save trace project: root and root key are required")
 		}
+		if status == ProjectRejected && reason == "" {
+			return errors.New("save trace project: a rejected record requires a reason")
+		}
 		if _, err := s.execTx(tx, `
-			INSERT INTO trace_projects (trace_id, session_id, root, root_key, source, conflicting, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, traceID, strings.TrimSpace(sessionID), root, rootKey, strings.TrimSpace(decl.Source), decl.Conflicting, time.Now().UTC()); err != nil {
+			INSERT INTO trace_projects (
+				trace_id, session_id, status, root, root_key, source, reason, evidence, multiple_roots, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, traceID, strings.TrimSpace(sessionID), string(status), root, rootKey,
+			strings.TrimSpace(record.Source), reason, strings.TrimSpace(record.Evidence),
+			record.MultipleRoots, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
@@ -140,13 +189,17 @@ func (s *Store) SaveTraceProject(traceID string, sessionID string, decl *Project
 
 // GetTraceProject returns the project declaration of one trace, if any.
 func (s *Store) GetTraceProject(traceID string) (TraceProject, bool, error) {
-	var item TraceProject
+	var (
+		item   TraceProject
+		status string
+	)
 	err := s.db.QueryRow(`
-		SELECT trace_id, session_id, root, root_key, source, conflicting
+		SELECT trace_id, session_id, status, root, root_key, source, reason, evidence, multiple_roots
 		FROM trace_projects
 		WHERE trace_id = ?
 	`, strings.TrimSpace(traceID)).Scan(
-		&item.TraceID, &item.SessionID, &item.Root, &item.RootKey, &item.Source, &item.Conflicting,
+		&item.TraceID, &item.SessionID, &status, &item.Root, &item.RootKey, &item.Source,
+		&item.Reason, &item.Evidence, &item.MultipleRoots,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TraceProject{}, false, nil
@@ -154,6 +207,7 @@ func (s *Store) GetTraceProject(traceID string) (TraceProject, bool, error) {
 	if err != nil {
 		return TraceProject{}, false, err
 	}
+	item.Status = ProjectStatus(status)
 	return item, true, nil
 }
 
@@ -231,7 +285,7 @@ func (s *Store) sessionProjectFactsTx(tx *sql.Tx, sessionID string) ([]projectFa
 		SELECT tp.trace_id, tp.root, tp.root_key, tp.source, l.recorded_at
 		FROM trace_projects tp
 		JOIN logs l ON l.trace_id = tp.trace_id
-		WHERE l.session_id = ? AND `+clientVisibleLogClause("l")+`
+		WHERE l.session_id = ? AND tp.status = 'declared' AND `+clientVisibleLogClause("l")+`
 		ORDER BY l.recorded_at ASC, tp.trace_id ASC
 	`, sessionID)
 	if err != nil {
@@ -315,6 +369,11 @@ func (s *Store) GetSessionProject(sessionID string) (SessionProject, bool, error
 	if item.LastDeclaredAt, err = timeParseValue(lastDeclaredAt); err != nil {
 		return SessionProject{}, false, err
 	}
+	aliases, err := s.ProjectAliasMap()
+	if err != nil {
+		return SessionProject{}, false, err
+	}
+	item.CanonicalKey, item.CanonicalRoot = resolveProjectAlias(aliases, item.RootKey, item.Root)
 	return item, true, nil
 }
 
@@ -383,6 +442,14 @@ func (s *Store) ListSessionProjects(sessionIDs []string) (map[string]SessionProj
 		if err != nil {
 			return nil, err
 		}
+	}
+	aliases, err := s.ProjectAliasMap()
+	if err != nil {
+		return nil, err
+	}
+	for sessionID, item := range out {
+		item.CanonicalKey, item.CanonicalRoot = resolveProjectAlias(aliases, item.RootKey, item.Root)
+		out[sessionID] = item
 	}
 	return out, nil
 }
@@ -467,6 +534,15 @@ func (s *Store) ListProjects(filter ProjectFilter) (ProjectPage, error) {
 	if err := rows.Err(); err != nil {
 		return ProjectPage{}, err
 	}
+
+	// Fold operator aliases into one row per project. The SQL groups by raw
+	// path; the merge happens here so the same alias table shapes the page, the
+	// session filter and the session views without a join in every query.
+	aliases, err := s.ProjectAliasMap()
+	if err != nil {
+		return ProjectPage{}, err
+	}
+	all = mergeProjectSummaries(all, aliases)
 
 	pageResult.Total = len(all)
 	if pageResult.Total == 0 {
@@ -596,10 +672,13 @@ func (s *Store) ensureProjectSchema() error {
 		`CREATE TABLE IF NOT EXISTS "trace_projects" (
 			"trace_id" character varying NOT NULL,
 			"session_id" character varying NOT NULL DEFAULT '',
+			"status" character varying NOT NULL DEFAULT 'declared',
 			"root" text NOT NULL DEFAULT '',
 			"root_key" text NOT NULL DEFAULT '',
 			"source" character varying NOT NULL DEFAULT '',
-			"conflicting" boolean NOT NULL DEFAULT false,
+			"reason" character varying NOT NULL DEFAULT '',
+			"evidence" text NOT NULL DEFAULT '',
+			"multiple_roots" boolean NOT NULL DEFAULT false,
 			"created_at" timestamptz NOT NULL,
 			PRIMARY KEY ("trace_id")
 		);`,
@@ -620,6 +699,16 @@ func (s *Store) ensureProjectSchema() error {
 			PRIMARY KEY ("session_id")
 		);`,
 		`CREATE INDEX IF NOT EXISTS sessionproject_root_key ON session_projects(root_key, last_declared_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS "project_aliases" (
+			"alias_key" character varying NOT NULL,
+			"canonical_key" character varying NOT NULL DEFAULT '',
+			"canonical_root" text NOT NULL DEFAULT '',
+			"note" text NOT NULL DEFAULT '',
+			"created_at" timestamptz NOT NULL,
+			"updated_at" timestamptz NOT NULL,
+			PRIMARY KEY ("alias_key")
+		);`,
+		`CREATE INDEX IF NOT EXISTS projectalias_canonical_key ON project_aliases(canonical_key)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("ensure project schema: %w", err)
@@ -659,4 +748,418 @@ func (s *Store) rebuildSessionProjectsTx(tx *sql.Tx, sessionIDs []string) error 
 		}
 	}
 	return nil
+}
+
+// ProjectDetectionCount is one labelled count in the detection-health report.
+type ProjectDetectionCount struct {
+	Label string
+	Count int
+}
+
+// ProjectDetectionHarness splits the detection counts per client harness, which
+// is how a harness that changed its prompt format becomes visible: one harness'
+// rejected count rises while the others stay flat.
+type ProjectDetectionHarness struct {
+	Harness  string
+	Declared int
+	Rejected int
+}
+
+// ProjectRejection is one recent trace whose declaration was rejected.
+type ProjectRejection struct {
+	TraceID    string
+	SessionID  string
+	Source     string
+	Reason     string
+	Evidence   string
+	Harness    string
+	RecordedAt time.Time
+}
+
+// ProjectDetection is the detection-health report of one window.
+type ProjectDetection struct {
+	Declared  int
+	Rejected  int
+	ByReason  []ProjectDetectionCount
+	ByHarness []ProjectDetectionHarness
+	Recent    []ProjectRejection
+}
+
+// ProjectDetectionReport aggregates how declaration extraction went over a
+// window: how many traces declared a project, how many carried a
+// declaration-shaped value that was rejected and why, and which harnesses those
+// rejections belong to.
+//
+// A rejected trace is the only evidence that a harness changed its prompt
+// format: without this report the extraction simply stops producing projects
+// for that client, which is indistinguishable from traffic that never declared
+// one.
+func (s *Store) ProjectDetectionReport(filter ProjectDetectionFilter) (ProjectDetection, error) {
+	window := []string{clientVisibleLogClause("l")}
+	args := []any{}
+	if !filter.Since.IsZero() {
+		window = append(window, "l.recorded_at >= ?")
+		args = append(args, filter.Since.UTC())
+	}
+	windowSQL := strings.Join(window, " AND ")
+	report := ProjectDetection{}
+
+	rows, err := s.db.Query(`
+		SELECT COALESCE(l.client_harness, '') AS harness,
+			COALESCE(SUM(CASE WHEN tp.status = 'declared' THEN 1 ELSE 0 END), 0) AS declared,
+			COALESCE(SUM(CASE WHEN tp.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected
+		FROM trace_projects tp
+		JOIN logs l ON l.trace_id = tp.trace_id
+		WHERE `+windowSQL+`
+		GROUP BY COALESCE(l.client_harness, '')
+		ORDER BY rejected DESC, declared DESC, harness ASC
+	`, args...)
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+	for rows.Next() {
+		var item ProjectDetectionHarness
+		if err := rows.Scan(&item.Harness, &item.Declared, &item.Rejected); err != nil {
+			rows.Close()
+			return ProjectDetection{}, err
+		}
+		report.Declared += item.Declared
+		report.Rejected += item.Rejected
+		report.ByHarness = append(report.ByHarness, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+
+	rows, err = s.db.Query(`
+		SELECT tp.reason, COUNT(*) AS count
+		FROM trace_projects tp
+		JOIN logs l ON l.trace_id = tp.trace_id
+		WHERE tp.status = 'rejected' AND `+windowSQL+`
+		GROUP BY tp.reason
+		ORDER BY count DESC, tp.reason ASC
+	`, args...)
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+	for rows.Next() {
+		var item ProjectDetectionCount
+		if err := rows.Scan(&item.Label, &item.Count); err != nil {
+			rows.Close()
+			return ProjectDetection{}, err
+		}
+		report.ByReason = append(report.ByReason, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+
+	rows, err = s.db.Query(`
+		SELECT tp.trace_id, tp.session_id, tp.source, tp.reason, tp.evidence,
+			COALESCE(l.client_harness, ''), l.recorded_at
+		FROM trace_projects tp
+		JOIN logs l ON l.trace_id = tp.trace_id
+		WHERE tp.status = 'rejected' AND `+windowSQL+`
+		ORDER BY l.recorded_at DESC, tp.trace_id DESC
+		LIMIT 20
+	`, args...)
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+	for rows.Next() {
+		var (
+			item     ProjectRejection
+			recorded any
+		)
+		if err := rows.Scan(&item.TraceID, &item.SessionID, &item.Source, &item.Reason,
+			&item.Evidence, &item.Harness, &recorded); err != nil {
+			rows.Close()
+			return ProjectDetection{}, err
+		}
+		if item.RecordedAt, err = timeParseValue(recorded); err != nil {
+			rows.Close()
+			return ProjectDetection{}, err
+		}
+		report.Recent = append(report.Recent, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return ProjectDetection{}, err
+	}
+	return report, nil
+}
+
+// ProjectDetectionFilter bounds the detection-health window.
+type ProjectDetectionFilter struct {
+	Since time.Time
+}
+
+// ErrProjectAliasRequired / ErrProjectAliasSelf / ErrProjectAliasChain are the
+// operator errors a merge can produce. They are sentinels so the HTTP layer can
+// answer a precise 400 instead of a generic database failure.
+var (
+	ErrProjectAliasRequired = errors.New("project alias: alias key and canonical key are required")
+	ErrProjectAliasSelf     = errors.New("project alias: a project cannot be merged into itself")
+	ErrProjectAliasChain    = errors.New("project alias: aliases cannot chain; point the alias at the final project")
+)
+
+// ProjectAlias maps one raw project root key onto the project it belongs to.
+//
+// Aliases are applied when reading, never by rewriting session_projects: a
+// merge is a view decision (the same repository seen through a container path,
+// a worktree or a different mount), so it must be reversible and must not
+// touch derived rows a reparse would rebuild anyway.
+type ProjectAlias struct {
+	AliasKey      string
+	CanonicalKey  string
+	CanonicalRoot string
+	Note          string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// ListProjectAliases returns every alias, oldest first.
+func (s *Store) ListProjectAliases() ([]ProjectAlias, error) {
+	rows, err := s.db.Query(`
+		SELECT alias_key, canonical_key, canonical_root, note, created_at, updated_at
+		FROM project_aliases
+		ORDER BY created_at ASC, alias_key ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ProjectAlias, 0, 8)
+	for rows.Next() {
+		var (
+			item                 ProjectAlias
+			createdAt, updatedAt any
+		)
+		if err := rows.Scan(&item.AliasKey, &item.CanonicalKey, &item.CanonicalRoot, &item.Note, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		if item.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		if item.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ProjectAliasMap returns the aliases keyed by alias key for read-time
+// resolution.
+func (s *Store) ProjectAliasMap() (map[string]ProjectAlias, error) {
+	items, err := s.ListProjectAliases()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ProjectAlias, len(items))
+	for _, item := range items {
+		out[item.AliasKey] = item
+	}
+	return out, nil
+}
+
+// SaveProjectAlias creates or updates one alias after checking that it cannot
+// form a chain: the target must not itself be an alias, and the source must not
+// be a merge target of another alias. One hop is all the reader applies, so a
+// chain would silently drop part of a merge.
+func (s *Store) SaveProjectAlias(alias ProjectAlias) error {
+	alias.AliasKey = strings.TrimSpace(alias.AliasKey)
+	alias.CanonicalKey = strings.TrimSpace(alias.CanonicalKey)
+	alias.CanonicalRoot = strings.TrimSpace(alias.CanonicalRoot)
+	alias.Note = strings.TrimSpace(alias.Note)
+	if alias.AliasKey == "" || alias.CanonicalKey == "" {
+		return ErrProjectAliasRequired
+	}
+	if alias.AliasKey == alias.CanonicalKey {
+		return ErrProjectAliasSelf
+	}
+	if alias.CanonicalRoot == "" {
+		alias.CanonicalRoot = alias.CanonicalKey
+	}
+	var chains int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM project_aliases
+		WHERE alias_key = ? OR canonical_key = ?
+	`, alias.CanonicalKey, alias.AliasKey).Scan(&chains); err != nil {
+		return err
+	}
+	if chains > 0 {
+		return ErrProjectAliasChain
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		INSERT INTO project_aliases (alias_key, canonical_key, canonical_root, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (alias_key) DO UPDATE SET
+			canonical_key = excluded.canonical_key,
+			canonical_root = excluded.canonical_root,
+			note = excluded.note,
+			updated_at = excluded.updated_at
+	`, alias.AliasKey, alias.CanonicalKey, alias.CanonicalRoot, alias.Note, now, now)
+	return err
+}
+
+// DeleteProjectAlias removes one alias, undoing its merge.
+func (s *Store) DeleteProjectAlias(aliasKey string) error {
+	_, err := s.db.Exec(`DELETE FROM project_aliases WHERE alias_key = ?`, strings.TrimSpace(aliasKey))
+	return err
+}
+
+// resolveProjectAlias applies one alias hop to a raw root key.
+func resolveProjectAlias(aliases map[string]ProjectAlias, rootKey string, root string) (canonicalKey string, canonicalRoot string) {
+	canonicalKey, canonicalRoot = rootKey, root
+	if alias, ok := aliases[rootKey]; ok {
+		if alias.CanonicalKey != "" {
+			canonicalKey = alias.CanonicalKey
+		}
+		if alias.CanonicalRoot != "" {
+			canonicalRoot = alias.CanonicalRoot
+		}
+	}
+	return canonicalKey, canonicalRoot
+}
+
+// projectFilterKeys expands one requested project key into every raw root key
+// of its merged group: the key itself, its canonical key, and each alias
+// pointing at that canonical key. Filtering by either the canonical path or one
+// of the merged paths therefore lists the whole project.
+func (s *Store) projectFilterKeys(key string) ([]string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, nil
+	}
+	aliases, err := s.ProjectAliasMap()
+	if err != nil {
+		return nil, err
+	}
+	canonical := key
+	if alias, ok := aliases[key]; ok && alias.CanonicalKey != "" {
+		canonical = alias.CanonicalKey
+	}
+	keys := []string{canonical}
+	seen := map[string]struct{}{canonical: {}}
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, duplicate := seen[candidate]; duplicate {
+			return
+		}
+		seen[candidate] = struct{}{}
+		keys = append(keys, candidate)
+	}
+	add(key)
+	for aliasKey, alias := range aliases {
+		if alias.CanonicalKey == canonical {
+			add(aliasKey)
+		}
+	}
+	return keys, nil
+}
+
+// mergeProjectSummaries folds alias-resolved rows into one row per project.
+func mergeProjectSummaries(rows []ProjectSummary, aliases map[string]ProjectAlias) []ProjectSummary {
+	type merged struct {
+		summary ProjectSummary
+		paths   map[string]struct{}
+		sources map[string]struct{}
+	}
+	byKey := make(map[string]*merged, len(rows))
+	order := make([]string, 0, len(rows))
+	for _, row := range rows {
+		key, root := resolveProjectAlias(aliases, row.RootKey, row.Root)
+		entry, ok := byKey[key]
+		if !ok {
+			entry = &merged{
+				summary: ProjectSummary{RootKey: key, Root: root, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen},
+				paths:   map[string]struct{}{},
+				sources: map[string]struct{}{},
+			}
+			byKey[key] = entry
+			order = append(order, key)
+		}
+		if row.Root < entry.summary.Root {
+			entry.summary.Root = row.Root
+		}
+		entry.summary.SessionCount += row.SessionCount
+		entry.summary.RequestCount += row.RequestCount
+		entry.summary.TotalTokens += row.TotalTokens
+		if row.FirstSeen.Before(entry.summary.FirstSeen) {
+			entry.summary.FirstSeen = row.FirstSeen
+		}
+		if row.LastSeen.After(entry.summary.LastSeen) {
+			entry.summary.LastSeen = row.LastSeen
+		}
+		entry.paths[row.RootKey] = struct{}{}
+		for _, source := range row.Sources {
+			entry.sources[source] = struct{}{}
+		}
+	}
+	out := make([]ProjectSummary, 0, len(order))
+	for _, key := range order {
+		entry := byKey[key]
+		entry.summary.PathCount = len(entry.paths)
+		entry.summary.Sources = sortedStringSet(entry.sources)
+		out = append(out, entry.summary)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SessionCount != out[j].SessionCount {
+			return out[i].SessionCount > out[j].SessionCount
+		}
+		if !out[i].LastSeen.Equal(out[j].LastSeen) {
+			return out[i].LastSeen.After(out[j].LastSeen)
+		}
+		return out[i].RootKey < out[j].RootKey
+	})
+	return out
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// projectFilterKeys returns the resolved project keys of a filter, falling back
+// to the unexpanded key for a caller that never went through ListSessionPage.
+func projectFilterKeys(filter ListFilter) []string {
+	if len(filter.ProjectKeys) > 0 {
+		return filter.ProjectKeys
+	}
+	if key := strings.TrimSpace(filter.Project); key != "" {
+		return []string{key}
+	}
+	return nil
+}
+
+// sessionProjectClause builds the session-level project predicate over a set of
+// raw root keys.
+func sessionProjectClause(keys []string, alias string) (string, []any) {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	args := make([]any, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	return `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = ` + prefix +
+		`session_id AND spj.root_key IN (` + placeholders(len(keys)) + `))`, args
 }

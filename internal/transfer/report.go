@@ -40,8 +40,12 @@ type ImportResult struct {
 	Cassettes         FileImportReport    `json:"cassettes"`
 	SessionRebuilt    bool                `json:"session_rebuilt"`
 	SessionRebuildDur time.Duration       `json:"session_rebuild_ms"`
-	Warnings          []string            `json:"warnings,omitempty"`
-	Duration          time.Duration       `json:"duration_ms"`
+	// ProjectBackfillQueued is how many parse jobs were queued so the derived
+	// project attribution (which a bundle does not carry) is rebuilt by the
+	// parse worker on the next `serve`.
+	ProjectBackfillQueued int           `json:"project_backfill_queued,omitempty"`
+	Warnings              []string      `json:"warnings,omitempty"`
+	Duration              time.Duration `json:"duration_ms"`
 }
 
 func (r *ImportResult) warn(format string, args ...any) {

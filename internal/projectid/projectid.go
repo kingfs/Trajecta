@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kingfs/Trajecta/pkg/observe"
 )
@@ -65,12 +66,58 @@ type Declaration struct {
 	Key string
 	// Source is the declaration shape that produced Root.
 	Source Source
-	// Conflicting reports that this request declared more than one distinct
+	// MultipleRoots reports that this request declared more than one distinct
 	// root. Root still holds the last one, which is the effective value: the
 	// harnesses that re-declare (DeepSeek Harness, Codex) append the update and
-	// supersede the older block.
-	Conflicting bool
+	// supersede the older block. It is an event, not an error.
+	MultipleRoots bool
 }
+
+// Reason names why a declaration-shaped value was not accepted, or why a block
+// the harness uses for its environment carried no readable declaration.
+//
+// Rejections exist so a harness that changes its prompt format is visible: the
+// extraction stops producing projects, and without a recorded reason that looks
+// exactly like traffic that simply has no declaration. The reason is a closed
+// vocabulary because it is stored and aggregated.
+type Reason string
+
+const (
+	// ReasonEmpty is a declaration whose value was blank.
+	ReasonEmpty Reason = "empty"
+	// ReasonPlaceholder is a templated value ("/path/to/repo", "<repo>").
+	ReasonPlaceholder Reason = "placeholder"
+	// ReasonRelative is a value that is not rooted.
+	ReasonRelative Reason = "relative"
+	// ReasonHomeRelative is a "~/repo" value, which cannot be resolved here.
+	ReasonHomeRelative Reason = "home_relative"
+	// ReasonSystemRoot is a directory that is never a project ("/", "/tmp").
+	ReasonSystemRoot Reason = "system_root"
+	// ReasonUnreadable is a known environment block or label that carried no
+	// parseable value - the signal that a harness changed its wording.
+	ReasonUnreadable Reason = "unreadable"
+)
+
+// Rejection is one declaration-shaped value that was not accepted.
+type Rejection struct {
+	Source Source
+	Reason Reason
+	// Evidence is the value that was rejected (bounded), or the label/block
+	// that was seen without a value. It is what makes a rejection actionable:
+	// "/path/to/…" points at a placeholder, "<environment_context>" points at a
+	// format that no longer carries <cwd>.
+	Evidence string
+}
+
+// Outcome is everything one request said about its project: at most one
+// effective declaration, plus the reasons any rejected candidate was dropped.
+type Outcome struct {
+	Declaration *Declaration
+	Rejections  []Rejection
+}
+
+// maxEvidenceBytes bounds a stored rejection value.
+const maxEvidenceBytes = 200
 
 const (
 	// maxRootBytes bounds an accepted declaration. No real project path is
@@ -78,23 +125,30 @@ const (
 	maxRootBytes = 4096
 )
 
-// Extract returns the project directory obs declares, if any.
+// Extract returns what obs declares about its project.
 //
 // Only instruction and message text is read, in request order, and tool calls,
 // tool results, reasoning and response text are never inspected: a project
 // declaration is something a harness says about itself, not something a model
 // said about a file. The last declaration wins because the harnesses that can
 // re-declare append an update, and the update supersedes the earlier block.
-func Extract(obs observe.TraceObservation) (Declaration, bool) {
+//
+// A candidate that is rejected is returned as a Rejection rather than dropped
+// silently, and a known environment block with no readable value is rejected as
+// ReasonUnreadable. That is the difference between "this traffic declares
+// nothing" and "this harness stopped declaring in the shape we know", which the
+// Monitor surfaces as detection health.
+func Extract(obs observe.TraceObservation) Outcome {
 	var (
 		best  Declaration
 		found bool
+		out   Outcome
 	)
 
 	// One node can be reachable from more than one list (Request.Nodes repeats
 	// the typed lists), and a node can carry the same text in more than one
 	// view. Visiting each node once is what keeps a single declaration from
-	// counting as a conflict with itself.
+	// counting as two declarations.
 	seen := make(map[string]struct{}, len(obs.Request.Nodes))
 	var visit func([]observe.SemanticNode)
 	visit = func(nodes []observe.SemanticNode) {
@@ -109,19 +163,31 @@ func Extract(obs observe.TraceObservation) (Declaration, bool) {
 			seen[key] = struct{}{}
 			if declaresProject(node) {
 				for _, text := range declarationTexts(node) {
+					matched := false
 					for _, candidate := range matchText(text) {
-						root, rootKey, ok := Normalize(candidate.value)
+						matched = true
+						root, rootKey, reason, ok := Classify(candidate.value)
 						if !ok {
+							out.Rejections = append(out.Rejections, Rejection{
+								Source:   candidate.source,
+								Reason:   reason,
+								Evidence: truncateEvidence(candidate.value),
+							})
 							continue
 						}
 						if found && rootKey != best.Key {
 							// Two different roots in one request is expected when
 							// the client changed directory mid-session: the last
 							// block is the current one.
-							best.Conflicting = true
+							best.MultipleRoots = true
 						}
-						best = Declaration{Root: root, Key: rootKey, Source: candidate.source, Conflicting: best.Conflicting}
+						best = Declaration{Root: root, Key: rootKey, Source: candidate.source, MultipleRoots: best.MultipleRoots}
 						found = true
+					}
+					if !matched {
+						if rejection, ok := nearMiss(text); ok {
+							out.Rejections = append(out.Rejections, rejection)
+						}
 					}
 				}
 			}
@@ -135,7 +201,43 @@ func Extract(obs observe.TraceObservation) (Declaration, bool) {
 	visit(obs.Request.Messages)
 	visit(obs.Request.Inputs)
 	visit(obs.Request.Nodes)
-	return best, found
+	if found {
+		out.Declaration = &best
+	}
+	return out
+}
+
+// nearMiss reports a known environment block that carried no parseable
+// declaration: the harness wrote something, but not the value we look for.
+//
+// This is the format-drift signal. It is deliberately narrow - the block tag
+// must be one we know, or the label must be present - so ordinary prompt text
+// cannot create a rejection.
+func nearMiss(text string) (Rejection, bool) {
+	lowered := strings.ToLower(text)
+	switch {
+	case strings.Contains(text, "<environment_context>") && !strings.Contains(text, "<cwd>"):
+		return Rejection{Source: SourceCodexEnv, Reason: ReasonUnreadable, Evidence: "<environment_context> without <cwd>"}, true
+	case strings.Contains(text, "<env>") && strings.Contains(lowered, "working directory"):
+		return Rejection{Source: SourceClaudeEnv, Reason: ReasonUnreadable, Evidence: "<env> working-directory line not in a known shape"}, true
+	case strings.Contains(lowered, "current working directory") && !strings.Contains(text, "<system-reminder>"):
+		return Rejection{Source: SourceDSHRuntimeContext, Reason: ReasonUnreadable, Evidence: "current working directory label outside the runtime-context block"}, true
+	}
+	return Rejection{}, false
+}
+
+// truncateEvidence bounds one stored rejection value.
+func truncateEvidence(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= maxEvidenceBytes {
+		return value
+	}
+	// Cut on a rune boundary so the value stays valid UTF-8.
+	cut := maxEvidenceBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut] + "…"
 }
 
 // declaresProject reports whether a node can carry a harness declaration.
@@ -465,26 +567,36 @@ var systemRoots = map[string]struct{}{
 }
 
 // Normalize validates one declared path and returns its display form and its
-// comparison key.
+// comparison key, discarding the reason on failure.
+func Normalize(path string) (root string, key string, ok bool) {
+	root, key, _, ok = Classify(path)
+	return root, key, ok
+}
+
+// Classify validates one declared path, returning its display form, its
+// comparison key, and - when it is rejected - the reason.
 //
 // The validation is what keeps a placeholder or a system directory out of the
 // index; it is not a guess about where the project "really" is. A value that is
-// relative, templated ("/path/to/repo"), home-relative ("~/repo") or a system
-// root yields ok=false, and the caller records no project.
-func Normalize(path string) (root string, key string, ok bool) {
+// relative, templated, home-relative or a system root is rejected with the
+// reason the Monitor reports as detection health.
+func Classify(path string) (root string, key string, reason Reason, ok bool) {
 	value := strings.TrimSpace(path)
 	value = strings.Trim(value, `"'`)
 	if value == "" || len(value) > maxRootBytes {
-		return "", "", false
+		return "", "", ReasonEmpty, false
 	}
 	if strings.ContainsAny(value, "<>{}$*?\x00") || strings.Contains(value, "…") {
-		return "", "", false
+		return "", "", ReasonPlaceholder, false
 	}
 	lower := strings.ToLower(value)
 	for _, fragment := range []string{"/path/to/", "/your/", "/your-project", "\\path\\to\\", "c:\\path\\"} {
 		if strings.Contains(lower, fragment) {
-			return "", "", false
+			return "", "", ReasonPlaceholder, false
 		}
+	}
+	if value == "~" || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, `~\`) {
+		return "", "", ReasonHomeRelative, false
 	}
 	windows := isWindowsPath(value)
 	switch {
@@ -496,11 +608,11 @@ func Normalize(path string) (root string, key string, ok bool) {
 		value = strings.ReplaceAll(value, `\\`, `\`)
 	}
 	if !isAbsolutePath(value, windows) {
-		return "", "", false
+		return "", "", ReasonRelative, false
 	}
 	root = strings.TrimRight(value, `/\`)
 	if root == "" {
-		return "", "", false
+		return "", "", ReasonRelative, false
 	}
 	if windows {
 		key = strings.ToLower(strings.ReplaceAll(root, `\`, "/"))
@@ -508,9 +620,9 @@ func Normalize(path string) (root string, key string, ok bool) {
 		key = root
 	}
 	if _, reserved := systemRoots[key]; reserved {
-		return "", "", false
+		return "", "", ReasonSystemRoot, false
 	}
-	return root, key, true
+	return root, key, "", true
 }
 
 // isWindowsPath reports whether value names a Windows drive or UNC path.

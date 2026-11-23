@@ -2061,16 +2061,116 @@ a:focus-visible {
 
 .project-row {
   width: 100%;
-  border: 0;
   border-top: 1px solid var(--line);
   background: transparent;
   color: inherit;
   font: inherit;
-  cursor: pointer;
 }
 
 .project-row:hover {
   background: var(--surface-3);
+}
+
+.project-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-detection-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.project-detection-count strong {
+  margin-left: 6px;
+  color: var(--text);
+}
+
+.project-detection-count.is-warn strong {
+  color: var(--danger);
+}
+
+.project-detection-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.project-rejection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 12px;
+  list-style: none;
+}
+
+.project-rejection {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.5fr) minmax(0, 1.6fr) minmax(150px, 0.9fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.project-rejection-evidence {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-rejection-link {
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.project-alias-list {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.project-alias-list h3 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+.project-alias-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.project-alias-row .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-merge-modal {
+  max-width: 560px;
+}
+
+.project-merge-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 0.9rem;
 }
 
 .project-path-cell {

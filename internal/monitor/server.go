@@ -849,6 +849,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// Project attribution: the directory a harness declared in its prompt, per
 	// session (the list this page reads) and per trace (the detail field).
 	mux.HandleFunc("/api/projects", monitorAuthRequired(projectsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/projects/detection", monitorAuthRequired(projectDetectionAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/project-aliases", monitorAdminRequired(projectAliasesAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/projects/backfill", monitorAdminRequired(projectBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))

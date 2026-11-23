@@ -397,6 +397,10 @@ type ListFilter struct {
 	// both session read paths answer it from session_projects rather than from
 	// a per-request declaration.
 	Project string
+	// ProjectKeys is Project expanded to every raw root key that resolves to
+	// it, including operator aliases. The store fills it in before querying;
+	// callers set Project only.
+	ProjectKeys []string
 }
 
 type GroupingInfo struct {

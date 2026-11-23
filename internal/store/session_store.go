@@ -324,11 +324,12 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 		clauses = append(clauses, `s.last_seen >= ?`)
 		args = append(args, filter.Since.UTC().Format(timeLayout))
 	}
-	if project := strings.TrimSpace(filter.Project); project != "" {
+	if keys := projectFilterKeys(filter); len(keys) > 0 {
 		// One session belongs to one project, so this is a session-level
 		// predicate, expressible from the summary row's session id alone.
-		clauses = append(clauses, `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = s.session_id AND spj.root_key = ?)`)
-		args = append(args, project)
+		clause, clauseArgs := sessionProjectClause(keys, "s")
+		clauses = append(clauses, clause)
+		args = append(args, clauseArgs...)
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
@@ -343,6 +344,15 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
+	// Operator aliases are applied before either read path runs, so both answer
+	// the same set: the requested key plus every raw path merged into it.
+	if len(filter.ProjectKeys) == 0 && strings.TrimSpace(filter.Project) != "" {
+		keys, err := s.projectFilterKeys(filter.Project)
+		if err != nil {
+			return SessionPageResult{}, err
+		}
+		filter.ProjectKeys = keys
+	}
 	// The summary read path is a derived read model. In a served process the
 	// background flusher keeps it current and this is a no-op, so a page render
 	// does not pay for a whole-session rebuild; a test or CLI caller that never
@@ -379,9 +389,10 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 	sessionWhere = andSQL(sessionWhere, whereSQL)
 	// Appended last so the placeholder order matches whereArgs, which the count
 	// and the per-session aggregate both reuse.
-	if project := strings.TrimSpace(filter.Project); project != "" {
-		sessionWhere = andSQL(sessionWhere, `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = s.session_id AND spj.root_key = ?)`)
-		whereArgs = append(whereArgs, project)
+	if keys := projectFilterKeys(filter); len(keys) > 0 {
+		clause, clauseArgs := sessionProjectClause(keys, "s")
+		sessionWhere = andSQL(sessionWhere, clause)
+		whereArgs = append(whereArgs, clauseArgs...)
 	}
 	sessionIDs, total, err := s.listSessionPageIDs(sessionWhere, whereArgs, page, pageSize)
 	if err != nil {

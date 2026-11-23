@@ -29,6 +29,22 @@ func observation(messages ...observe.SemanticNode) observe.TraceObservation {
 	}
 }
 
+// declarationOf returns the accepted declaration, failing with the rejections
+// when the extractor found none.
+func declarationOf(t *testing.T, obs observe.TraceObservation) Declaration {
+	t.Helper()
+	outcome := Extract(obs)
+	if outcome.Declaration == nil {
+		t.Fatalf("Extract() found no declaration (rejections: %+v)", outcome.Rejections)
+	}
+	return *outcome.Declaration
+}
+
+// hasDeclaration reports whether the request produced a usable project.
+func hasDeclaration(obs observe.TraceObservation) bool {
+	return Extract(obs).Declaration != nil
+}
+
 const dshSnapshot = `<system-reminder>
 The following information describes your current session:
 
@@ -36,21 +52,18 @@ Current working directory: "/data/src/github.com/kingfs/Trajecta".
 </system-reminder>`
 
 func TestExtractDeepSeekHarnessRuntimeContext(t *testing.T) {
-	decl, ok := Extract(observation(
+	decl := declarationOf(t, observation(
 		userMessage("0", "user", "please fix the bug"),
 		userMessage("1", "user", dshSnapshot),
 	))
-	if !ok {
-		t.Fatal("Extract() found no declaration")
-	}
 	if decl.Root != "/data/src/github.com/kingfs/Trajecta" {
 		t.Fatalf("Root = %q", decl.Root)
 	}
 	if decl.Source != SourceDSHRuntimeContext {
 		t.Fatalf("Source = %q", decl.Source)
 	}
-	if decl.Conflicting {
-		t.Fatal("Conflicting = true for a single declaration")
+	if decl.MultipleRoots {
+		t.Fatal("MultipleRoots = true for a single declaration")
 	}
 }
 
@@ -67,15 +80,12 @@ The following information describes your current session. It replaces earlier ve
 
 Current working directory: "/repo/two".
 </system-reminder>`
-	decl, ok := Extract(observation(userMessage("0", "user", older), userMessage("1", "user", newer)))
-	if !ok {
-		t.Fatal("Extract() found no declaration")
-	}
+	decl := declarationOf(t, observation(userMessage("0", "user", older), userMessage("1", "user", newer)))
 	if decl.Root != "/repo/two" {
 		t.Fatalf("Root = %q, want the superseding snapshot", decl.Root)
 	}
-	if !decl.Conflicting {
-		t.Fatal("Conflicting = false, want true for two distinct roots")
+	if !decl.MultipleRoots {
+		t.Fatal("MultipleRoots = false, want true for two distinct roots")
 	}
 }
 
@@ -98,13 +108,10 @@ func TestExtractClaudeEnvBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			decl, ok := Extract(observation(
+			decl := declarationOf(t, observation(
 				userMessage("0", "system", "You are Claude Code."),
 				userMessage("1", "user", tc.body),
 			))
-			if !ok {
-				t.Fatal("Extract() found no declaration")
-			}
 			if decl.Root != tc.want || decl.Source != SourceClaudeEnv {
 				t.Fatalf("got %q from %q", decl.Root, decl.Source)
 			}
@@ -119,10 +126,7 @@ func TestExtractCodexEnvironmentContext(t *testing.T) {
   <current_date>2026-11-23</current_date>
   <workspace_roots><root>/data/src/github.com/kingfs/Trajecta</root></workspace_roots>
 </environment_context>`
-	decl, ok := Extract(observation(userMessage("0", "user", body)))
-	if !ok {
-		t.Fatal("Extract() found no declaration")
-	}
+	decl := declarationOf(t, observation(userMessage("0", "user", body)))
 	if decl.Root != "/data/src/github.com/kingfs/Trajecta" || decl.Source != SourceCodexEnv {
 		t.Fatalf("got %q from %q", decl.Root, decl.Source)
 	}
@@ -134,10 +138,7 @@ func TestExtractCodexWorkspaceRootsOnly(t *testing.T) {
   <shell>bash</shell>
   <workspace_roots><root>/work/mono</root><root>/work/other</root></workspace_roots>
 </environment_context>`
-	decl, ok := Extract(observation(userMessage("0", "user", body)))
-	if !ok {
-		t.Fatal("Extract() found no declaration")
-	}
+	decl := declarationOf(t, observation(userMessage("0", "user", body)))
 	if decl.Root != "/work/mono" || decl.Source != SourceCodexWorkspaceRoots {
 		t.Fatalf("got %q from %q", decl.Root, decl.Source)
 	}
@@ -150,7 +151,7 @@ func TestExtractIgnoresToolMessages(t *testing.T) {
   <cwd>/somewhere/else</cwd>
 </environment_context>`
 	for _, role := range []string{"tool", "function"} {
-		if _, ok := Extract(observation(userMessage("0", role, body))); ok {
+		if hasDeclaration(observation(userMessage("0", role, body))) {
 			t.Fatalf("role %q produced a declaration", role)
 		}
 	}
@@ -161,9 +162,9 @@ func TestExtractIgnoresToolMessages(t *testing.T) {
 		Path:           "$.messages[1]",
 		Text:           body,
 	}
-	if _, ok := Extract(observe.TraceObservation{Request: observe.ObservationRequest{
+	if hasDeclaration(observe.TraceObservation{Request: observe.ObservationRequest{
 		Messages: []observe.SemanticNode{toolResult}, Nodes: []observe.SemanticNode{toolResult},
-	}}); ok {
+	}}) {
 		t.Fatal("tool_result node produced a declaration")
 	}
 }
@@ -172,7 +173,7 @@ func TestExtractIgnoresToolMessages(t *testing.T) {
 // talking, not the harness.
 func TestExtractIgnoresAssistantMessages(t *testing.T) {
 	body := "<env>\nWorking directory: /quoted/by/model\n</env>"
-	if _, ok := Extract(observation(userMessage("0", "assistant", body))); ok {
+	if hasDeclaration(observation(userMessage("0", "assistant", body))) {
 		t.Fatal("assistant message produced a declaration")
 	}
 }
@@ -186,7 +187,7 @@ func TestExtractIgnoresProse(t *testing.T) {
 		"<environment_context><shell>bash</shell></environment_context>",
 	}
 	for _, text := range texts {
-		if _, ok := Extract(observation(userMessage("0", "user", text))); ok {
+		if hasDeclaration(observation(userMessage("0", "user", text))) {
 			t.Fatalf("%q produced a declaration", text)
 		}
 	}
@@ -250,9 +251,9 @@ func TestExtractFromParsedChatRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	decl, ok := Extract(obs)
-	if !ok || decl.Root != "/data/src/app" {
-		t.Fatalf("got %q ok=%v", decl.Root, ok)
+	decl := declarationOf(t, obs)
+	if decl.Root != "/data/src/app" {
+		t.Fatalf("got %q", decl.Root)
 	}
 }
 
@@ -270,9 +271,9 @@ func TestExtractFromEntryRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	decl, ok := Extract(obs)
-	if !ok || decl.Root != "/repo/entry" || decl.Source != SourceClaudeEnv {
-		t.Fatalf("got %q from %q ok=%v", decl.Root, decl.Source, ok)
+	decl := declarationOf(t, obs)
+	if decl.Root != "/repo/entry" || decl.Source != SourceClaudeEnv {
+		t.Fatalf("got %q from %q", decl.Root, decl.Source)
 	}
 }
 
@@ -288,5 +289,82 @@ func observeParseInput(t *testing.T, request string, response string) observe.Pa
 		}},
 		RequestBody:  []byte(request),
 		ResponseBody: []byte(response),
+	}
+}
+
+// A declaration-shaped value that the validator refuses is reported with the
+// reason, not silently dropped: that is what makes a placeholder or a sudden
+// relative path visible in the detection report.
+func TestExtractReportsRejections(t *testing.T) {
+	cases := []struct {
+		name       string
+		text       string
+		wantReason Reason
+		wantSource Source
+	}{
+		{"placeholder", "<env>\nPrimary working directory: /path/to/repo\n</env>", ReasonPlaceholder, SourceClaudeEnv},
+		{"relative", "<environment_context><cwd>web/dist</cwd></environment_context>", ReasonRelative, SourceCodexEnv},
+		{"home relative", "<system-reminder>\nCurrent working directory: \"~/repo\".\n</system-reminder>", ReasonHomeRelative, SourceDSHRuntimeContext},
+		{"system root", "<environment_context><cwd>/tmp</cwd></environment_context>", ReasonSystemRoot, SourceCodexEnv},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := Extract(observation(userMessage("0", "user", tc.text)))
+			if outcome.Declaration != nil {
+				t.Fatalf("declaration = %+v, want none", outcome.Declaration)
+			}
+			found := false
+			for _, rejection := range outcome.Rejections {
+				if rejection.Source == tc.wantSource && rejection.Reason == tc.wantReason {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("rejections = %+v, want %s/%s", outcome.Rejections, tc.wantSource, tc.wantReason)
+			}
+		})
+	}
+}
+
+// A known environment block that carries no readable value is the format-drift
+// signal: the harness still sends its block, but not the line we parse.
+func TestExtractReportsUnreadableBlocks(t *testing.T) {
+	cases := []struct {
+		name       string
+		text       string
+		wantSource Source
+	}{
+		{"codex without cwd", "<environment_context>\n<shell>bash</shell>\n</environment_context>", SourceCodexEnv},
+		{"claude changed wording", "<env>\nPrimary Working Directory: /repo/x\n</env>", SourceClaudeEnv},
+		{"dsh label moved", "Current working directory: /repo/x", SourceDSHRuntimeContext},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := Extract(observation(userMessage("0", "user", tc.text)))
+			if outcome.Declaration != nil {
+				t.Fatalf("declaration = %+v, want none", outcome.Declaration)
+			}
+			if len(outcome.Rejections) == 0 {
+				t.Fatal("no rejection recorded for an unreadable declaration block")
+			}
+			if outcome.Rejections[0].Source != tc.wantSource || outcome.Rejections[0].Reason != ReasonUnreadable {
+				t.Fatalf("rejection = %+v, want %s/unreadable", outcome.Rejections[0], tc.wantSource)
+			}
+		})
+	}
+}
+
+// A real declaration wins over a rejection in the same request: the rejected
+// value is reported, but the project is still recorded.
+func TestExtractDeclarationWinsOverRejection(t *testing.T) {
+	outcome := Extract(observation(
+		userMessage("0", "user", "<env>\nPrimary working directory: /path/to/repo\n</env>"),
+		userMessage("1", "user", "<env>\nPrimary working directory: /repo/real\n</env>"),
+	))
+	if outcome.Declaration == nil || outcome.Declaration.Root != "/repo/real" {
+		t.Fatalf("declaration = %+v", outcome.Declaration)
+	}
+	if len(outcome.Rejections) != 1 || outcome.Rejections[0].Reason != ReasonPlaceholder {
+		t.Fatalf("rejections = %+v", outcome.Rejections)
 	}
 }

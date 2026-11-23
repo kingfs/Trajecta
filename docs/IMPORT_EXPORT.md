@@ -58,6 +58,7 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 | 类别 | 表 | 处理 |
 | --- | --- | --- |
 | 渠道配置 | `channel_configs`、`channel_models`、`model_aliases`、`model_catalog`、`channel_probe_runs` | 导出；API key 与 `headers_json` 中的密钥在导出时解密 |
+| 项目合并 | `project_aliases` | 导出；操作员维护的路径等价关系（把容器路径/挂载路径并到同一项目），属于配置而非派生数据 |
 | 应用设置（白名单） | `app_settings` 的 `routing.settings`、`rates.alerts`、`responses.function_executors.config_snapshot`、`plugins.channels`、`plugins.detectors` | 导出；导入时只在目标缺失该键时写入 |
 | 原始录制索引 | `logs` | 导出，保留原 `trace_id`、`mod_time_ns`、`file_size` |
 | 上游 exchange 索引 | `upstream_exchanges` | 导出；`cassette_path` 在导入时重写 |
@@ -70,7 +71,7 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 
 不导出：
 
-- `trace_observations`、`trace_findings`、`parse_jobs`、`analysis_jobs`、`parser_versions`、`session_summaries`、`resources`、`trace_resources`：都能由 cassette 重建，目标侧部署后由 `Sync` / `analyze refresh` 重新生成；
+- `trace_observations`、`trace_findings`、`parse_jobs`、`analysis_jobs`、`parser_versions`、`session_summaries`、`resources`、`trace_resources`、`trace_projects`、`session_projects`：都能由 cassette 重建（项目归属由解析时的 prompt 声明推导），目标侧部署后由 `Sync` / `analyze refresh` 重新生成；导入结束后会自动为最近 5000 条 trace 排队一次项目回填，`serve` 启动后由解析 worker 消费；
 - `semantic_nodes`：已由迁移 `20261111000000_drop_semantic_nodes` 废弃，运行时代码不再读写；
 - `datasets`、`dataset_examples`、`eval_runs`、`scores`、`experiment_runs`：eval 功能已整体退役，导出不再产出这五张表；旧版本导出的 bundle 若仍携带它们，导入时**容忍跳过**（见下文「冲突与跳过」），不报错也不写库；
 - `users`、`api_tokens`：每套部署独立鉴权，不做合并；

@@ -63,6 +63,11 @@ export const apiPaths = {
   // sessions attributed to it. `project` on /api/sessions filters by root_key.
   projects: "/api/projects",
   projectsBackfill: "/api/projects/backfill",
+  // Detection health: declared vs rejected declarations, why they were
+  // rejected, and which harness they came from. The drift alarm.
+  projectsDetection: "/api/projects/detection",
+  // Operator merges: one raw path counted as another project. Read-time only.
+  projectAliases: "/api/project-aliases",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
   // The trajectory endpoint caps the default view (about 500 traces) and can
   // stream the complete session as NDJSON instead of buffering it.

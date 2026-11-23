@@ -223,6 +223,7 @@ func TestSQLiteAndPostgresSchemasAgree(t *testing.T) {
 		"trace_resources",
 		"trace_projects",
 		"session_projects",
+		"project_aliases",
 		"credential_mask_event_states",
 	}
 

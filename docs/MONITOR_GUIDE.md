@@ -103,7 +103,9 @@ session ID 的抽取顺序为：
 
 - 归属规则：会话的项目取该会话**最早一条带声明**的 trace（按 `recorded_at`，与解析完成顺序无关），因此中途 `cd` 或 compaction 把早期声明摘掉都不会改变主项目；`latest_root` 与 `switch_count` 记录之后的变更。没有声明的会话（纯 SDK 流量、未识别的 harness 格式）不属于任何项目。
 - 页面顶部给出归属覆盖率（窗口内已归属会话 / 窗口内会话总数），没有声明的会话不会被算成 0。窗口判定与会话页一致（会话在窗口内至少有一条请求即计入），每行的请求数与 token 覆盖该会话的整段历史，因此与点进去看到的会话行同源；聚合直接读 `logs`，不依赖 `session_summaries` 是否回填。行内显示声明来源，点击一行跳到会话标签页并按该项目过滤（`?tab=sessions&project=<root_key>`），会话行的标签组里也会显示所属项目。
-- 端点：`GET /api/projects?window=&page=&page_size=&q=`（默认窗口为「全部」），会话列表 `GET /api/sessions?project=<root_key>` 在两条读路径上语义一致；trace 详情与会话详情分别返回 trace 级声明与会话回滚。历史数据用 `POST /api/projects/backfill`（管理员，`{window,limit}`）排队重解析回填，与资源索引的回填同一机制：没有声明的 trace 不会留下行，因此重复调用会重新解析它们。
+- **合并**：同一仓库在容器、宿主机、worktree 里是不同字符串，会显示成多个项目。管理员可以对一行点「合并」并选择目标项目，服务端写入一条 `project_aliases`（读时生效）：该路径下的会话从此计入目标项目，历史事实与派生行都不改写，随时可「解除合并」。过滤目标项目时，用规范路径或用被合并的任一路径都会列出整组会话。合并会在项目列表里以「N 条路径」标注。
+- **识别健康**：项目页底部单独统计「明确声明并识别」与「看到了声明块却没解析出可用路径」的请求数，并按拒收原因（占位符、相对路径、系统目录、`~/`、声明块无可读值）与客户端 harness 分组，附最近 20 条未识别请求的入口。后者突然变多通常意味着某个 harness 改了提示词格式——这是格式漂移的早期告警。
+- 端点：`GET /api/projects?window=&page=&page_size=&q=`（默认窗口为「全部」）、`GET /api/projects/detection?window=`、`GET|POST /api/project-aliases`、`DELETE /api/project-aliases?alias_key=`（管理员）；会话列表 `GET /api/sessions?project=<root_key>` 在两条读路径上语义一致；trace 详情与会话详情分别返回 trace 级声明与会话回滚（会话侧返回合并后的规范路径）。历史数据用页头的「回填历史」按钮或 `POST /api/projects/backfill`（管理员，`{window,limit}`）排队重解析，与资源索引的回填同一机制：没有声明的 trace 不会留下行，因此重复调用会重新解析它们。
 
 ##### trace 详情：轨迹与统计
 

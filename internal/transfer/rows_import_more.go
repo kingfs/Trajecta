@@ -693,3 +693,37 @@ func jsonOrNil(v *string) any {
 	}
 	return *v
 }
+
+// ---------------------------------------------------------------------------
+// project_aliases — operator merges; the bundle carries them because they are
+// configuration, not a value a cassette reparse can rebuild.
+// ---------------------------------------------------------------------------
+
+func (s *importState) handleProjectAliases(body io.Reader, size int64) error {
+	rep := s.report("project_aliases")
+	return s.processJSONL("project_aliases", size, body, func(line []byte) error {
+		rep.Processed++
+		src, err := decodeRow[projectAliasRow](line)
+		if err != nil {
+			return err
+		}
+		var existingCanonical, existingRoot, existingNote any
+		err = s.view.TransferQueryRow(s.ctx,
+			`SELECT canonical_key, canonical_root, note FROM project_aliases WHERE alias_key = ?`, src.AliasKey).
+			Scan(&existingCanonical, &existingRoot, &existingNote)
+		if err == nil {
+			if anyString(existingCanonical) == src.CanonicalKey &&
+				anyString(existingRoot) == src.CanonicalRoot &&
+				anyString(existingNote) == src.Note {
+				rep.SkippedUnchanged++
+				return nil
+			}
+			rep.Updated++
+			return s.exec(`UPDATE project_aliases SET canonical_key = ?, canonical_root = ?, note = ?, updated_at = ? WHERE alias_key = ?`,
+				src.CanonicalKey, src.CanonicalRoot, src.Note, src.UpdatedAt, src.AliasKey)
+		}
+		rep.Inserted++
+		return s.exec(`INSERT INTO project_aliases (alias_key, canonical_key, canonical_root, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			src.AliasKey, src.CanonicalKey, src.CanonicalRoot, src.Note, src.CreatedAt, src.UpdatedAt)
+	})
+}

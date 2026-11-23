@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,7 +74,7 @@ func TestProjectsAPIAndSessionFilter(t *testing.T) {
 
 	alpha := projectTestLog(t, st, outputDir, "project-api-alpha", "s-alpha")
 	projectTestLog(t, st, outputDir, "project-api-beta", "s-beta")
-	if err := st.SaveTraceProject(alpha.ID, "s-alpha", &store.ProjectDeclaration{
+	if err := st.SaveTraceProject(alpha.ID, "s-alpha", &store.ProjectRecord{
 		Root: "/repo/alpha", RootKey: "/repo/alpha", Source: "dsh_runtime_context",
 	}); err != nil {
 		t.Fatalf("SaveTraceProject() error = %v", err)
@@ -168,5 +170,186 @@ func TestProjectsAPIAndSessionFilter(t *testing.T) {
 	}
 	if sessionDetail.Project == nil || sessionDetail.Project.Root != "/repo/alpha" {
 		t.Fatalf("session detail project = %+v", sessionDetail.Project)
+	}
+}
+
+// The detection report surfaces the rejections that the project list cannot
+// show (a rejected trace has no project), and the trace detail says why.
+func TestProjectDetectionAPI(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := newTestStore(outputDir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	rejected := projectTestLog(t, st, outputDir, "project-detect-rejected", "s-detect")
+	if err := st.SaveTraceProject(rejected.ID, "s-detect", &store.ProjectRecord{
+		Rejected: true,
+		Source:   "codex_env",
+		Reason:   "unreadable",
+		Evidence: "<environment_context> without <cwd>",
+	}); err != nil {
+		t.Fatalf("SaveTraceProject() error = %v", err)
+	}
+	if err := st.RebuildSessionProject("s-detect"); err != nil {
+		t.Fatalf("RebuildSessionProject() error = %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	projectDetectionAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/projects/detection?window=all", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detection status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detection projectDetectionResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &detection); err != nil {
+		t.Fatalf("decode detection: %v", err)
+	}
+	if detection.Declared != 0 || detection.Rejected != 1 {
+		t.Fatalf("detection = %+v, want 1 rejection", detection)
+	}
+	if len(detection.ByReason) != 1 || detection.ByReason[0].Label != "unreadable" {
+		t.Fatalf("by reason = %+v", detection.ByReason)
+	}
+	if len(detection.Recent) != 1 || detection.Recent[0].TraceID != rejected.ID {
+		t.Fatalf("recent = %+v", detection.Recent)
+	}
+
+	// A rejected trace is not a project, so the project list stays empty.
+	rr = httptest.NewRecorder()
+	projectsAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/projects?window=all", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("projects status = %d", rr.Code)
+	}
+	var projects projectListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &projects); err != nil {
+		t.Fatalf("decode projects: %v", err)
+	}
+	if len(projects.Items) != 0 {
+		t.Fatalf("projects = %+v, want none", projects.Items)
+	}
+
+	// The trace detail carries the rejection and its reason.
+	rr = httptest.NewRecorder()
+	traceAPIHandlerWithSuppression(st, nil, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traces/"+rejected.ID, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trace detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detail detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.Project == nil || detail.Project.Status != "rejected" || detail.Project.Reason != "unreadable" {
+		t.Fatalf("detail project = %+v", detail.Project)
+	}
+	if detail.Project.Root != "" {
+		t.Fatalf("rejected project root = %q, want empty", detail.Project.Root)
+	}
+}
+
+// The alias API creates, lists and deletes a merge; the projects page and the
+// session filter both see the merged view.
+func TestProjectAliasAPI(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := newTestStore(outputDir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	container := projectTestLog(t, st, outputDir, "project-alias-container", "s-container")
+	host := projectTestLog(t, st, outputDir, "project-alias-host", "s-host")
+	for _, item := range []struct {
+		entry store.LogEntry
+		root  string
+	}{
+		{container, "/app"},
+		{host, "/data/src/app"},
+	} {
+		if err := st.SaveTraceProject(item.entry.ID, item.entry.SessionID, &store.ProjectRecord{
+			Root: item.root, RootKey: item.root, Source: "dsh_runtime_context",
+		}); err != nil {
+			t.Fatalf("SaveTraceProject(%s): %v", item.root, err)
+		}
+		if err := st.RebuildSessionProject(item.entry.SessionID); err != nil {
+			t.Fatalf("RebuildSessionProject(%s): %v", item.root, err)
+		}
+	}
+
+	body := `{"alias_key":"/app","canonical_key":"/data/src/app","canonical_root":"/data/src/app","note":"container mount"}`
+	rr := httptest.NewRecorder()
+	projectAliasesAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/project-aliases", strings.NewReader(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create alias status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	projectAliasesAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project-aliases", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list aliases status = %d", rr.Code)
+	}
+	var aliases projectAliasListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &aliases); err != nil {
+		t.Fatalf("decode aliases: %v", err)
+	}
+	if len(aliases.Items) != 1 || aliases.Items[0].AliasKey != "/app" {
+		t.Fatalf("aliases = %+v", aliases.Items)
+	}
+
+	rr = httptest.NewRecorder()
+	projectsAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/projects?window=all", nil))
+	var projects projectListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &projects); err != nil {
+		t.Fatalf("decode projects: %v", err)
+	}
+	if projects.Total != 1 || len(projects.Items) != 1 {
+		t.Fatalf("merged projects = %+v", projects.Items)
+	}
+	if projects.Items[0].SessionCount != 2 || projects.Items[0].PathCount != 2 || projects.Items[0].RootKey != "/data/src/app" {
+		t.Fatalf("merged row = %+v", projects.Items[0])
+	}
+
+	// Both the canonical key and the merged path list the whole project.
+	for _, key := range []string{"/data/src/app", "/app"} {
+		rr = httptest.NewRecorder()
+		sessionListAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sessions?window=all&project="+url.QueryEscape(key), nil))
+		var sessions sessionListResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &sessions); err != nil {
+			t.Fatalf("decode sessions for %q: %v", key, err)
+		}
+		if sessions.Total != 2 {
+			t.Fatalf("filter %q total = %d, want 2", key, sessions.Total)
+		}
+	}
+
+	// Self-merge and chained merges are rejected with precise codes.
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"alias_key":"/x","canonical_key":"/x"}`, http.StatusBadRequest},
+		{`{"alias_key":"/data/src/app","canonical_key":"/y"}`, http.StatusConflict},
+	} {
+		rr = httptest.NewRecorder()
+		projectAliasesAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/project-aliases", strings.NewReader(tc.body)))
+		if rr.Code != tc.want {
+			t.Fatalf("body %s status = %d, want %d", tc.body, rr.Code, tc.want)
+		}
+	}
+
+	// Deleting the alias restores the separate projects.
+	rr = httptest.NewRecorder()
+	projectAliasesDeleteAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/api/project-aliases?alias_key="+url.QueryEscape("/app"), nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete alias status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	projectsAPIHandler(st).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/projects?window=all", nil))
+	projects = projectListResponse{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &projects); err != nil {
+		t.Fatalf("decode projects after delete: %v", err)
+	}
+	if projects.Total != 2 {
+		t.Fatalf("after delete total = %d, want 2", projects.Total)
 	}
 }
