@@ -901,12 +901,22 @@ test("the conversation tab collapses a long recorded message until asked", async
   await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
 });
 
-// One trace, six readings, one visible at a time. The tabs replaced a grid of
+// One trace, nine readings, one visible at a time. The tabs replaced a grid of
 // cards that made the reader walk past every summary to reach the one they came
 // for, and 已选路由目标 left the conversation for the request's tab.
-test("a trace is read through seven tabs, one panel at a time", async ({ page }) => {
+test("a trace is read through nine tabs, one panel at a time", async ({ page }) => {
   await page.goto("/traces/trace-parsed");
-  await expect(page.getByRole("tab")).toHaveText([/^Conversation$/, /^Protocol$/, /^Tool calls$/, /^Audit/, /^Resources$/, /^Request info$/, /^Raw data$/]);
+  await expect(page.getByRole("tab")).toHaveText([
+    /^Conversation$/,
+    /^Protocol$/,
+    /^Trajectory$/,
+    /^Statistics$/,
+    /^Tool calls$/,
+    /^Audit/,
+    /^Resources$/,
+    /^Request info$/,
+    /^Raw data$/,
+  ]);
   // The strip is the page-level row every other page renders, not a card of its
   // own: it has no titled frame around it.
   expect(await page.getByRole("tablist").evaluate((element) => element.closest('[data-slot="card"]') === null)).toBe(true);

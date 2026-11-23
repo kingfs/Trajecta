@@ -44,6 +44,7 @@ func sessionStepsOptions(r *http.Request, focus string) sessionsteps.Options {
 		}
 	}
 	options.BeforeTraceID = strings.TrimSpace(query.Get("before"))
+	options.AfterTraceID = strings.TrimSpace(query.Get("after"))
 	if value := strings.TrimSpace(query.Get("budget_ms")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 && parsed <= 10000 {
 			options.Budget = time.Duration(parsed) * time.Millisecond

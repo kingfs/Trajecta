@@ -72,15 +72,19 @@ export const apiPaths = {
   // The step model behind the trace page's 轨迹 and 统计 tabs. It is derived on
   // demand from the index rows plus the cassettes; nothing is persisted, so the
   // only parameter that matters is how many steps the window returns.
-  traceSessionSteps: (traceID, { limit = 0 } = {}) => {
+  traceSessionSteps: (traceID, { limit = 0, before = "", after = "" } = {}) => {
     const params = new URLSearchParams();
     if (limit > 0) params.set("limit", String(limit));
+    if (before) params.set("before", before);
+    if (after) params.set("after", after);
     const query = params.toString();
     return `/api/traces/${encodeURIComponent(traceID)}/session-steps${query ? `?${query}` : ""}`;
   },
-  sessionSteps: (sessionID, { limit = 0 } = {}) => {
+  sessionSteps: (sessionID, { limit = 0, before = "", after = "" } = {}) => {
     const params = new URLSearchParams();
     if (limit > 0) params.set("limit", String(limit));
+    if (before) params.set("before", before);
+    if (after) params.set("after", after);
     const query = params.toString();
     return `/api/sessions/${encodeURIComponent(sessionID)}/steps${query ? `?${query}` : ""}`;
   },

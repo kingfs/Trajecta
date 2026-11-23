@@ -351,6 +351,30 @@ type observationDetailResponse struct {
 	// had parsed nothing but the last turn.
 	RequestTree  []observationNodeView `json:"request_tree"`
 	ResponseTree []observationNodeView `json:"response_tree"`
+	// Usage and Timings are the same facts the 统计 tab shows for one step, so
+	// the protocol view can answer "what did this exchange cost" without
+	// switching tabs. They come from the parsed body, with the indexed row
+	// filling in what a minimal cassette does not carry.
+	Usage   *observationUsageView   `json:"usage,omitempty"`
+	Timings *observationTimingsView `json:"timings,omitempty"`
+}
+
+// observationUsageView keeps the provider's own counters apart: OpenAI's input
+// count already includes the cache read while Anthropic's does not, and only
+// the client can label them correctly once it knows the protocol.
+type observationUsageView struct {
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	TotalTokens         int `json:"total_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+}
+
+type observationTimingsView struct {
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	DurationMs int64     `json:"duration_ms"`
+	TTFTMs     int64     `json:"ttft_ms,omitempty"`
 }
 
 type findingListResponse struct {
@@ -2029,8 +2053,65 @@ func handleTraceObservation(w http.ResponseWriter, r *http.Request, st *store.St
 		Nodes:        observationNodeViewsFromFlat(nodes),
 		RequestTree:  observationNodeViewsFromTree(observation.Request.Nodes, 0),
 		ResponseTree: observationNodeViewsFromTree(observation.Response.Nodes, 0),
+		Usage:        observationUsageViewFor(observation, entry),
+		Timings:      observationTimingsViewFor(observation, entry),
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// observationUsageViewFor prefers the parsed body's counters and falls back to
+// the index row. The body is the only place cache creation and reasoning tokens
+// survive, and the index row is the only place timing and usage survive when
+// `trace.minimal_cassette` cleared them from the prelude.
+func observationUsageViewFor(observation observe.TraceObservation, entry store.LogEntry) *observationUsageView {
+	usage := observation.Usage
+	reported := usage.InputTokens != 0 || usage.OutputTokens != 0 ||
+		usage.CacheReadTokens != 0 || usage.CacheCreationTokens != 0 || usage.ReasoningTokens != 0
+	if !reported {
+		indexed := entry.Header.Usage
+		if indexed.PromptTokens == 0 && indexed.CompletionTokens == 0 {
+			return nil
+		}
+		cached := 0
+		if indexed.PromptTokenDetails != nil {
+			cached = indexed.PromptTokenDetails.CachedTokens
+		}
+		return &observationUsageView{
+			InputTokens:     indexed.PromptTokens,
+			OutputTokens:    indexed.CompletionTokens,
+			TotalTokens:     indexed.TotalTokens,
+			CacheReadTokens: cached,
+		}
+	}
+	return &observationUsageView{
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		TotalTokens:         usage.TotalTokens,
+		ReasoningTokens:     usage.ReasoningTokens,
+		CacheReadTokens:     usage.CacheReadTokens,
+		CacheCreationTokens: usage.CacheCreationTokens,
+	}
+}
+
+// observationTimingsViewFor fills the same gaps for the timing half.
+func observationTimingsViewFor(observation observe.TraceObservation, entry store.LogEntry) *observationTimingsView {
+	meta := entry.Header.Meta
+	started := observation.Timings.StartedAt
+	if started.IsZero() {
+		started = meta.Time
+	}
+	duration := observation.Timings.DurationMs
+	if duration == 0 {
+		duration = meta.DurationMs
+	}
+	ttft := observation.Timings.TTFTMs
+	if ttft == 0 {
+		ttft = meta.TTFTMs
+	}
+	if duration == 0 && ttft == 0 && started.IsZero() {
+		return nil
+	}
+	return &observationTimingsView{StartedAt: started, DurationMs: duration, TTFTMs: ttft}
 }
 
 // handleTraceXIR returns the Exchange IR audit projection of one cassette.

@@ -58,6 +58,9 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
 test("session ATIF export shows a failure and allows retry", async ({ page }) => {
   await page.route("**/api/sessions/export-session/trajectory", (route) => route.fulfill({ status: 404, json: { error: "Session has no recorded requests" } }));
   await page.goto("/sessions/export-session");
+  // The ATIF preview lives in the 轨迹 tab now (collapsed unless the read
+  // failed), so the page-level error is asserted after opening that tab.
+  await page.getByRole("button", { name: /^Trajectory/ }).first().click();
   const button = page.getByRole("button", { name: "Export trajectory (ATIF)" });
   await button.click();
   // The panel's read runs into the same 404 as the click, so the message shows

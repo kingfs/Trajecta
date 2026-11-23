@@ -32,6 +32,8 @@ type Options struct {
 	Limit int
 	// BeforeTraceID pages backwards: the window ends just before this trace.
 	BeforeTraceID string
+	// AfterTraceID pages forwards: the window starts just after this trace.
+	AfterTraceID string
 	// FocusTraceID ends the window at this trace, so opening a trace deep in a
 	// session shows the steps that led to it.
 	FocusTraceID string
@@ -166,7 +168,7 @@ func extractAll(ctx context.Context, items []stepInput, opts Options) {
 				if ctx.Err() != nil {
 					return
 				}
-				items[index].facts = readFacts(ctx, opts.Registry, items[index].entry)
+				items[index].facts = readFactsFn(ctx, opts.Registry, items[index].entry)
 			}
 		}()
 	}
@@ -415,26 +417,51 @@ func triggerFor(item *stepInput, hasLastUser bool, lastUser, previousLastUser [1
 }
 
 // selectWindow returns the half-open [start,end) range of entries to render.
+//
+// The default window is the tail of the session, and the cursor parameters page
+// in either direction from a known step: `before` ends the window just before
+// that trace, `after` starts it just after. A cursor wins over the focus, which
+// is still in the URL of the trace page, because the request asked for a
+// specific page.
 func selectWindow(entries []store.LogEntry, opts Options) (int, int) {
-	end := len(entries)
+	total := len(entries)
+	limit := opts.Limit
 	if before := strings.TrimSpace(opts.BeforeTraceID); before != "" {
+		end := total
 		if at := indexOfTrace(entries, before); at >= 0 {
 			end = at
 		}
-	} else if focus := strings.TrimSpace(opts.FocusTraceID); focus != "" {
+		return clampWindow(end-limit, end, total)
+	}
+	if after := strings.TrimSpace(opts.AfterTraceID); after != "" {
+		start := 0
+		if at := indexOfTrace(entries, after); at >= 0 {
+			start = at + 1
+		}
+		return clampWindow(start, start+limit, total)
+	}
+	end := total
+	if focus := strings.TrimSpace(opts.FocusTraceID); focus != "" {
 		if at := indexOfTrace(entries, focus); at >= 0 {
 			end = at + 1
 		}
 	}
-	if end < 0 {
-		end = 0
-	}
-	if end > len(entries) {
-		end = len(entries)
-	}
-	start := end - opts.Limit
+	return clampWindow(end-limit, end, total)
+}
+
+// clampWindow keeps the half-open range inside [0,total] and non-inverted.
+func clampWindow(start, end, total int) (int, int) {
 	if start < 0 {
 		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	if end < start {
+		end = start
+	}
+	if end > total {
+		end = total
 	}
 	return start, end
 }
@@ -564,8 +591,8 @@ func cacheKey(sessionID string, entries []store.LogEntry, opts Options) string {
 		return ""
 	}
 	last := entries[len(entries)-1].ID
-	raw := fmt.Sprintf("%s\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s",
-		sessionID, BuilderVersion, opts.Limit, opts.BeforeTraceID, opts.FocusTraceID, len(entries), last)
+	raw := fmt.Sprintf("%s\x00%d\x00%d\x00%s\x00%s\x00%s\x00%d\x00%s",
+		sessionID, BuilderVersion, opts.Limit, opts.BeforeTraceID, opts.AfterTraceID, opts.FocusTraceID, len(entries), last)
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

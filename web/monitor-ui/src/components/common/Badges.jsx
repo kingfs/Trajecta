@@ -73,9 +73,9 @@ export function LatencyMetric({ label, value, icon = "duration", raw = "", title
   return <Metric icon={icon} label={label} raw={raw || title} value={value} className="latency-metric" />;
 }
 
-export function DetailMetaPill({ label, value, mono = false }) {
+export function DetailMetaPill({ label, value, mono = false, title = "" }) {
   return (
-    <span className={`detail-meta-pill ${mono ? "mono" : ""}`.trim()}>
+    <span className={`detail-meta-pill ${mono ? "mono" : ""}`.trim()} title={title || undefined}>
       <span className="detail-meta-label">{label}</span>
       <strong>{value}</strong>
     </span>

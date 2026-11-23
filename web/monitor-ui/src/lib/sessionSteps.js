@@ -39,6 +39,48 @@ export function formatRatioPercent(value) {
   return `${(ratio * 100).toFixed(ratio > 0 && ratio < 0.001 ? 2 : 1)}%`;
 }
 
+/**
+ * Normalize the provider's own usage counters onto disjoint buckets.
+ *
+ * The proxy keeps the provider's counters apart because they are billed
+ * differently, and the two families disagree about what "input" means: OpenAI's
+ * input already includes the cache read, Anthropic's does not and reports the
+ * cache write separately. Without this step the context total for an
+ * OpenAI-family exchange would count the cached tokens twice.
+ */
+export function observedUsage(usage, { anthropic = false } = {}) {
+  const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  const cacheRead = number(usage?.cache_read_tokens);
+  const cacheWrite = anthropic ? number(usage?.cache_creation_tokens) : 0;
+  const input = anthropic
+    ? number(usage?.input_tokens)
+    : Math.max(0, number(usage?.input_tokens) - cacheRead);
+  const context = input + cacheRead + cacheWrite;
+  return {
+    input,
+    cacheRead,
+    cacheWrite,
+    context,
+    output: number(usage?.output_tokens),
+    reasoning: number(usage?.reasoning_tokens),
+    cacheHit: context > 0 ? Math.min(1, cacheRead / context) : null,
+  };
+}
+
+/**
+ * Whether an exchange speaks Anthropic's usage shape.
+ *
+ * The endpoint is authoritative when it is known, because a relay channel can
+ * record any provider name while still serving /v1/messages; the recorded
+ * operation is the next best signal and is what the observation summary always
+ * carries.
+ */
+export function isAnthropicExchange({ provider = "", endpoint = "", operation = "" } = {}) {
+  if (String(provider).trim().toLowerCase() === "anthropic") return true;
+  if (String(operation).trim().toLowerCase() === "messages") return true;
+  return String(endpoint).replace(/\/+$/, "") === "/v1/messages";
+}
+
 /** Throughput, or an em dash when the generation span is unknown. */
 export function formatThroughput(value) {
   if (value === null || value === undefined) return EMPTY;
@@ -61,6 +103,75 @@ export function throughput(output, decodeMs, totalMs) {
   if (decodeMs < 50) return null;
   if (totalMs > 0 && decodeMs * 10 < totalMs) return null;
   return output / (decodeMs / 1000);
+}
+
+/**
+ * A turn's stable identity: its first step's trace id.
+ *
+ * Turn numbers are ordinals within the loaded window, so they shift when older
+ * history is prepended. Everything keyed by a turn (expansion state, ledger row
+ * keys, React keys) uses this instead of the number.
+ */
+export function turnKey(turn) {
+  return turn?.key || turn?.steps?.[0]?.trace_id || `turn-${turn?.index ?? 0}`;
+}
+
+/** The absolute step numbers a turn covers, for disambiguating paged windows. */
+export function turnRange(turn) {
+  const steps = Array.isArray(turn?.steps) ? turn.steps : [];
+  if (!steps.length) return null;
+  const first = steps[0].global_index;
+  const last = steps[steps.length - 1].global_index;
+  if (!first || !last) return null;
+  return { first, last };
+}
+
+/**
+ * Merge page views into one window.
+ *
+ * Turns are renumbered across the merged list and carry a stable `key` (the
+ * trace id of their first step), because the numbers shift as history is
+ * loaded: a reader who expanded "第 3 轮" must keep that turn open when "第 1 轮"
+ * becomes the newly loaded page's first turn.
+ */
+export function mergeViews(views) {
+  if (!views.length) return null;
+  const firstView = views[0];
+  const lastView = views[views.length - 1];
+  let index = 0;
+  const turns = [];
+  for (const page of views) {
+    for (const turn of page?.turns || []) {
+      index += 1;
+      // The steps are copied because the merge annotates them: mutating the
+      // page objects would edit the query cache the next render reads.
+      turns.push({ ...turn, index, key: turnKey(turn), steps: (turn.steps || []).map((step) => ({ ...step })) });
+    }
+  }
+  fillBoundaryToolWaits(turns);
+  const totals = { ...(lastView.totals || {}) };
+  const window = {
+    returned: turns.reduce((count, turn) => count + (turn.steps?.length || 0), 0),
+    first_step: firstView.window?.first_step,
+    last_step: lastView.window?.last_step,
+    has_before: Boolean(firstView.window?.has_before),
+    has_after: Boolean(lastView.window?.has_after),
+    content_pending: views.reduce((count, page) => count + (page.window?.content_pending || 0), 0),
+    budget_ms: lastView.window?.budget_ms,
+    pages: views.length,
+  };
+  // The server only reports a turn count when its own window covered the whole
+  // session; the merged window knows better once both ends are closed.
+  if (!window.has_before && !window.has_after) totals.turns = turns.length;
+  return {
+    session_id: lastView.session_id,
+    focus_trace_id: lastView.focus_trace_id,
+    builder_version: lastView.builder_version,
+    window,
+    totals,
+    turns,
+    warnings: lastView.warnings || [],
+  };
 }
 
 /** Whether a step counts as failed for the turn badge. */
@@ -283,7 +394,7 @@ export function buildLedgerRows(turns) {
   for (const turn of Array.isArray(turns) ? turns : []) {
     rows.push({
       kind: "turn",
-      key: `turn-${turn.index}`,
+      key: `turn-${turnKey(turn)}`,
       turn,
       index: turn.index,
       startedAt: turn.started_at,
@@ -321,6 +432,34 @@ export function buildLedgerRows(turns) {
 }
 
 /**
+ * Fill the tool wait across a page boundary.
+ *
+ * Each page measures the gap only between its own steps, so the last step of a
+ * page that asked for tools has no successor to subtract and reports nothing.
+ * Once two pages are stitched together that successor exists, and the merged
+ * view can apply the server's own rule: the gap between the response and the
+ * next request. Steps the server already measured are left alone, and a step
+ * with no successor stays unknown rather than becoming zero.
+ */
+export function fillBoundaryToolWaits(turns) {
+  const steps = [];
+  for (const turn of turns || []) {
+    for (const step of turn?.steps || []) steps.push(step);
+  }
+  for (let index = 0; index + 1 < steps.length; index += 1) {
+    const step = steps[index];
+    const timing = step?.timing;
+    if (!timing || timing.tool_wait_ms !== null && timing.tool_wait_ms !== undefined) continue;
+    if (!(Number(step?.did?.calls) > 0)) continue;
+    const started = Date.parse(steps[index + 1]?.started_at);
+    const ended = Date.parse(step?.ended_at);
+    if (!Number.isFinite(started) || !Number.isFinite(ended)) continue;
+    timing.tool_wait_ms = Math.max(0, Math.round(started - ended));
+  }
+  return turns;
+}
+
+/**
  * Keep the rows a search matches, plus the turn and step headers they belong
  * to: a matching tool call without its request would read as an orphan.
  * Matching is case-insensitive over the text a row shows, which is what a
@@ -349,12 +488,12 @@ export function filterLedgerRows(rows, query) {
     if (!haystack.includes(needle)) continue;
     matchedRows.add(row.key);
     if (row.step?.trace_id) matchedSteps.add(row.step.trace_id);
-    if (row.turn?.index !== undefined) matchedTurns.add(row.turn.index);
+    if (row.turn) matchedTurns.add(turnKey(row.turn));
   }
   const out = [];
   for (const row of rows) {
     if (row.kind === "turn") {
-      if (matchedTurns.has(row.index)) out.push(row);
+      if (matchedTurns.has(turnKey(row.turn))) out.push(row);
       continue;
     }
     if (row.kind === "step") {

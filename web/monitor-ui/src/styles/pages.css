@@ -1255,3 +1255,37 @@
     padding-left: calc(var(--space-1) * 2 + 3rem);
   }
 }
+
+/* The pager sits between the header and the first row of either view, so the
+   direction of the next load is obvious without reading the button twice. */
+.steps-pager {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.steps-scope-range,
+.ledger-turn-range {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ATIF export preview is a secondary artifact of the 轨迹 tab: collapsed by
+   default so the ledger is what a reader sees first. */
+.session-atf-block > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  padding: var(--space-2) 0;
+}
+
+.session-atf-block > summary:hover {
+  color: var(--text-primary);
+}
+
+.steps-page-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-label);
+}

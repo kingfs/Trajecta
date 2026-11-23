@@ -64,6 +64,10 @@ type toolResultFact struct {
 	messageIndex int
 }
 
+// readFactsFn is the package seam the budget test uses to make a read slow.
+// Production always calls readFacts; nothing else substitutes it.
+var readFactsFn = readFacts
+
 // readFacts parses one cassette into facts. The observation comes from the
 // same parser set the monitor already uses for the trace views, so the step
 // model never disagrees with what an opened trace shows.

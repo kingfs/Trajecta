@@ -7,6 +7,10 @@ import {
   filterLedgerRows,
   formatRatioPercent,
   formatThroughput,
+  isAnthropicExchange,
+  mergeViews,
+  observedUsage,
+  turnKey,
   throughput,
   timeBarSegments,
   turnAggregate,
@@ -266,6 +270,60 @@ describe("ledger rows", () => {
   });
 });
 
+describe("merging paged windows", () => {
+  function page(turnIds, steps, window) {
+    return {
+      turns: turnIds.map((id, index) => ({
+        index: index + 1,
+        steps: [step({ trace_id: id, global_index: steps[index] })],
+      })),
+      window,
+      totals: { steps: 999, context: 10, output: 1, turns: null },
+    };
+  }
+
+  it("stitches older and newer pages around the first one and renumbers the turns", () => {
+    const older = page(["t1", "t2"], [1, 2], { first_step: 1, last_step: 2, has_before: false, has_after: true });
+    const first = page(["t3", "t4"], [3, 4], { first_step: 3, last_step: 4, has_before: true, has_after: true });
+    const newer = page(["t5"], [5], { first_step: 5, last_step: 5, has_before: true, has_after: false });
+    const merged = mergeViews([older, first, newer]);
+
+    assert.deepEqual(merged.turns.map((turn) => turn.index), [1, 2, 3, 4, 5]);
+    assert.deepEqual(merged.turns.map(turnKey), ["t1", "t2", "t3", "t4", "t5"]);
+    assert.equal(merged.window.first_step, 1);
+    assert.equal(merged.window.last_step, 5);
+    assert.equal(merged.window.returned, 5);
+    assert.equal(merged.window.has_before, false);
+    assert.equal(merged.window.has_after, false);
+  });
+
+  it("only claims a turn count once both ends of the session are loaded", () => {
+    const partial = mergeViews([
+      page(["t3"], [3], { first_step: 3, last_step: 3, has_before: true, has_after: true }),
+    ]);
+    assert.equal(partial.totals.turns, null);
+    const whole = mergeViews([
+      page(["t3"], [3], { first_step: 3, last_step: 3, has_before: false, has_after: false }),
+    ]);
+    assert.equal(whole.totals.turns, 1);
+  });
+
+  it("keeps a turn's identity stable when older history is prepended", () => {
+    const before = mergeViews([page(["t3"], [3], { first_step: 3, last_step: 3, has_before: true, has_after: false })]);
+    const after = mergeViews([
+      page(["t1"], [1], { first_step: 1, last_step: 1, has_before: false, has_after: true }),
+      page(["t3"], [3], { first_step: 3, last_step: 3, has_before: true, has_after: false }),
+    ]);
+    assert.equal(turnKey(before.turns[0]), "t3");
+    assert.equal(turnKey(after.turns[1]), "t3");
+    assert.equal(after.turns[1].index, 2, "the ordinal moved, the identity did not");
+  });
+
+  it("returns nothing for no pages", () => {
+    assert.equal(mergeViews([]), null);
+  });
+});
+
 describe("formatting", () => {
   it("prints an em dash for a value that was not measured", () => {
     assert.equal(formatRatioPercent(null), "—");
@@ -273,5 +331,114 @@ describe("formatting", () => {
     assert.equal(formatRatioPercent(0.5), "50.0%");
     assert.equal(formatThroughput(null), "—");
     assert.equal(formatThroughput(12.34), "12.3 tok/s");
+  });
+});
+
+describe("observed usage", () => {
+  it("subtracts the cache read from an OpenAI-family input count", () => {
+    const usage = observedUsage({ input_tokens: 1000, output_tokens: 20, cache_read_tokens: 900 });
+    assert.equal(usage.input, 100);
+    assert.equal(usage.cacheRead, 900);
+    assert.equal(usage.cacheWrite, 0);
+    assert.equal(usage.context, 1000);
+    assert.equal(usage.cacheHit, 0.9);
+  });
+
+  it("adds Anthropic's cache buckets to its already-exclusive input", () => {
+    const usage = observedUsage(
+      { input_tokens: 50, output_tokens: 10, cache_read_tokens: 800, cache_creation_tokens: 150 },
+      { anthropic: true },
+    );
+    assert.equal(usage.input, 50);
+    assert.equal(usage.cacheWrite, 150);
+    assert.equal(usage.context, 1000);
+    assert.equal(usage.cacheHit, 0.8);
+  });
+
+  it("has no ratio without a prompt", () => {
+    assert.equal(observedUsage({ output_tokens: 5 }).cacheHit, null);
+    assert.equal(observedUsage({ output_tokens: 5 }).context, 0);
+  });
+
+  it("names the Anthropic wire shape by provider, operation or endpoint", () => {
+    assert.equal(isAnthropicExchange({ provider: "anthropic", endpoint: "/v1/chat/completions" }), true);
+    assert.equal(isAnthropicExchange({ provider: "openai_compatible", endpoint: "/v1/messages/" }), true);
+    assert.equal(isAnthropicExchange({ provider: "openai_compatible", operation: "messages" }), true);
+    assert.equal(isAnthropicExchange({ provider: "openai_compatible", endpoint: "/v1/chat/completions" }), false);
+    assert.equal(isAnthropicExchange(), false);
+  });
+});
+
+describe("page-boundary tool wait", () => {
+  function timedStep(traceID, globalIndex, calls, endedAt) {
+    const value = step({
+      trace_id: traceID,
+      global_index: globalIndex,
+      did: { calls, tools: [], answer_chars: 0 },
+      timing: { ttft_ms: 200, model_ms: 1000, wall_ms: 1000, tool_wait_ms: null },
+    });
+    value.started_at = endedAt;
+    value.ended_at = endedAt;
+    return value;
+  }
+
+  it("fills the gap that only exists once the next page is stitched in", () => {
+    const first = mergeViews([
+      {
+        turns: [{ index: 1, steps: [timedStep("t1", 1, 1, "2026-05-01T09:00:00Z")] }],
+        window: { first_step: 1, last_step: 1, has_before: false, has_after: true },
+        totals: {},
+      },
+    ]);
+    assert.equal(first.turns[0].steps[0].timing.tool_wait_ms, null, "no successor yet");
+
+    const merged = mergeViews([
+      {
+        turns: [{ index: 1, steps: [timedStep("t1", 1, 1, "2026-05-01T09:00:00Z")] }],
+        window: { first_step: 1, last_step: 1, has_before: false, has_after: true },
+        totals: {},
+      },
+      {
+        turns: [{ index: 1, steps: [timedStep("t2", 2, 0, "2026-05-01T09:00:03Z")] }],
+        window: { first_step: 2, last_step: 2, has_before: true, has_after: false },
+        totals: {},
+      },
+    ]);
+    assert.equal(merged.turns[0].steps[0].timing.tool_wait_ms, 3000);
+    assert.equal(merged.turns[1].steps[0].timing.tool_wait_ms, null, "the last step stays unknown");
+  });
+
+  it("does not invent a wait for a step that called no tools", () => {
+    const merged = mergeViews([
+      {
+        turns: [{ index: 1, steps: [timedStep("t1", 1, 0, "2026-05-01T09:00:00Z")] }],
+        window: { first_step: 1, last_step: 1, has_before: false, has_after: true },
+        totals: {},
+      },
+      {
+        turns: [{ index: 1, steps: [timedStep("t2", 2, 0, "2026-05-01T09:00:03Z")] }],
+        window: { first_step: 2, last_step: 2, has_before: true, has_after: false },
+        totals: {},
+      },
+    ]);
+    assert.equal(merged.turns[0].steps[0].timing.tool_wait_ms, null);
+  });
+
+  it("leaves a measured value alone", () => {
+    const measured = timedStep("t1", 1, 2, "2026-05-01T09:00:00Z");
+    measured.timing.tool_wait_ms = 42;
+    const merged = mergeViews([
+      {
+        turns: [{ index: 1, steps: [measured] }],
+        window: { first_step: 1, last_step: 1, has_before: false, has_after: true },
+        totals: {},
+      },
+      {
+        turns: [{ index: 1, steps: [timedStep("t2", 2, 0, "2026-05-01T09:00:03Z")] }],
+        window: { first_step: 2, last_step: 2, has_before: true, has_after: false },
+        totals: {},
+      },
+    ]);
+    assert.equal(merged.turns[0].steps[0].timing.tool_wait_ms, 42);
   });
 });

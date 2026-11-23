@@ -14,6 +14,15 @@ import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
 import { countSchemaParameters, parseSchemaDocument } from "../lib/jsonSchema";
 import { CredentialMaskSection } from "../components/monitor/CredentialMasks";
 import { describeConversationNode, formatEvidenceTarget } from "../lib/conversation";
+import {
+  formatMillis as formatStepMillis,
+  formatRatioPercent,
+  formatThroughput,
+  formatTokens,
+  isAnthropicExchange,
+  observedUsage,
+  throughput as stepThroughput,
+} from "../lib/sessionSteps";
 import { locateFindingInConversation } from "../lib/findingLocate";
 import { locateMaskInConversation } from "../lib/maskLocate";
 import { locateResourceConversation } from "../lib/resourceLocate";
@@ -528,6 +537,7 @@ export function TraceDetailPage() {
           <TabsContent value="protocol">
             <ProtocolPanel
               observation={observation}
+              isStream={Boolean(detail.data?.header?.layout?.is_stream)}
               CodeBlock={CodeBlock}
               InlineTag={InlineTag}
               busy={jobBusy === "reanalyze"}
@@ -993,7 +1003,7 @@ function ToolsPanel({ tools, toolCalls = [], toolOutputs = new Map(), CodeBlock,
   );
 }
 
-function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, focusTarget = "", onRefresh, t }) {
+function ProtocolPanel({ observation, isStream = false, CodeBlock, InlineTag, busy = false, focusTarget = "", onRefresh, t }) {
   const panelRef = useRef(null);
 
   // A notification about a parse failure links here with `focus=observation`:
@@ -1042,6 +1052,19 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, focusT
       </Card>
     );
   }
+  // The exchange's own cost, in the same vocabulary as the 统计 tab: the parsed
+  // body carries the provider's counters (including cache creation and
+  // reasoning tokens, which the index row does not), and the index row fills in
+  // the timing a minimal cassette dropped.
+  const usage = observation.data?.usage;
+  const timings = observation.data?.timings;
+  const normalized = usage ? observedUsage(usage, {
+      anthropic: isAnthropicExchange({ provider: summary?.provider, operation: summary?.operation }),
+    }) : null;
+  const ttft = timings?.ttft_ms > 0 && isStream ? timings.ttft_ms : null;
+  const decodeMs = ttft !== null && timings?.duration_ms > 0 ? Math.max(0, timings.duration_ms - ttft) : null;
+  const tps = normalized ? stepThroughput(normalized.output, decodeMs, timings?.duration_ms) : null;
+  const hasExchangeFacts = Boolean(normalized || timings);
   return (
     <Card as="section" ref={panelRef} className={focusTarget === "observation" ? "protocol-panel protocol-panel-focused" : "protocol-panel"}>
       <div className="panel-head">
@@ -1062,6 +1085,34 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, focusT
         <DetailMetaPill label={t("traceDetail.metaOperation")} value={summary?.operation || "-"} />
         <DetailMetaPill label={t("traceDetail.parser")} value={`${summary?.parser || "-"} ${summary?.parser_version || ""}`.trim()} />
       </div>
+      {hasExchangeFacts ? (
+        <div className="detail-meta-strip" data-exchange-facts>
+          {normalized ? (
+            <>
+              <DetailMetaPill
+                label={t("steps.columnContext")}
+                value={formatTokens(normalized.context)}
+                title={t("steps.cacheBreakdown", {
+                  read: formatTokens(normalized.cacheRead),
+                  write: formatTokens(normalized.cacheWrite),
+                })}
+              />
+              <DetailMetaPill label={t("steps.columnOutput")} value={formatTokens(normalized.output)} />
+              <DetailMetaPill label={t("steps.columnCache")} value={formatRatioPercent(normalized.cacheHit)} />
+              {normalized.reasoning > 0 ? (
+                <DetailMetaPill label={t("steps.reasoningTokens")} value={formatTokens(normalized.reasoning)} />
+              ) : null}
+            </>
+          ) : null}
+          {timings ? (
+            <>
+              <DetailMetaPill label={t("steps.columnTTFT")} value={formatStepMillis(ttft)} />
+              <DetailMetaPill label={t("steps.columnModel")} value={formatStepMillis(timings.duration_ms)} />
+              <DetailMetaPill label={t("steps.columnTPS")} value={formatThroughput(tps)} />
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {summary?.warnings ? (
         <CollapsibleCard title={t("traceDetail.parserWarnings")} subtitle={t("traceDetail.tolerantParseNotes")} defaultOpen={false}>
           <CodeBlock value={JSON.stringify(summary.warnings, null, 2)} />

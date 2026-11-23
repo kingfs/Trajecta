@@ -21,12 +21,24 @@ import { hasEstimates } from "../../lib/sessionSteps";
  */
 export function SessionStepsPanel({ mode, traceID, sessionID, onOpenTrace, activeTraceID }) {
   const { t } = useI18n();
-  const { view, loading, error, canLoadOlder, loadOlder, limit } = useSessionSteps({ traceID, sessionID });
+  const {
+    view,
+    loading,
+    error,
+    canLoadOlder,
+    canLoadNewer,
+    loadingOlder,
+    loadingNewer,
+    loadOlder,
+    loadNewer,
+  } = useSessionSteps({ traceID, sessionID });
 
   if (loading && !view) {
     return <EmptyState title={t("steps.loading")} detail={t("steps.loadingDetail")} />;
   }
-  if (error) {
+  // A failed page fetch must not throw away the pages already on screen; only
+  // a failure with nothing loaded is a full error state.
+  if (error && !view) {
     return <EmptyState title={t("steps.loadError")} detail={error} tone="danger" />;
   }
   if (!view || !(view.turns || []).length) {
@@ -55,14 +67,22 @@ export function SessionStepsPanel({ mode, traceID, sessionID, onOpenTrace, activ
           {pending ? (
             <InlineTag tone="gold">{t("steps.contentPending", { count: pending })}</InlineTag>
           ) : null}
-          {window.has_before && !canLoadOlder ? <InlineTag tone="accent">{t("steps.windowCapped")}</InlineTag> : null}
+          {window.pages > 1 ? <InlineTag tone="accent">{t("steps.pagesLoaded", { count: window.pages })}</InlineTag> : null}
         </div>
       </div>
-      {window.has_before ? (
-        <div className="steps-load-older">
-          <Button variant="ghost" size="sm" onClick={loadOlder} disabled={!canLoadOlder || loading}>
-            {loading ? t("steps.loadingOlder") : t("steps.loadOlder", { limit })}
-          </Button>
+      {error ? <p className="steps-page-error">{error}</p> : null}
+      {window.has_before || window.has_after ? (
+        <div className="steps-pager">
+          {window.has_before ? (
+            <Button variant="ghost" size="sm" onClick={loadOlder} disabled={!canLoadOlder}>
+              {loadingOlder ? t("steps.loadingOlder") : t("steps.loadOlder")}
+            </Button>
+          ) : null}
+          {window.has_after ? (
+            <Button variant="ghost" size="sm" onClick={loadNewer} disabled={!canLoadNewer}>
+              {loadingNewer ? t("steps.loadingNewer") : t("steps.loadNewer")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {mode === "trajectory" ? (

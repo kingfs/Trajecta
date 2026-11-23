@@ -5,6 +5,8 @@ import { useI18n } from "../../lib/i18n";
 import { formatDateTime } from "../../lib/monitor";
 import {
   barWidthPercent,
+  turnKey,
+  turnRange,
   formatMillis,
   formatRatioPercent,
   formatThroughput,
@@ -35,17 +37,17 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
   const [showTotals, setShowTotals] = useState(false);
 
   // The newest turn is open by default: it is the one a reader just produced.
-  const autoOpen = useMemo(() => new Set(turns.length ? [turns[turns.length - 1].index] : []), [turns]);
+  const autoOpen = useMemo(() => new Set(turns.length ? [turnKey(turns[turns.length - 1])] : []), [turns]);
   const openTurns = expanded ?? autoOpen;
   const turnsScale = useMemo(() => turnScale(turns), [turns]);
   const totals = useMemo(() => windowAggregate(turns), [turns]);
 
   if (!turns.length) return null;
 
-  const toggleTurn = (index) => {
+  const toggleTurn = (key) => {
     const next = new Set(openTurns);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
     setExpanded(next);
   };
 
@@ -110,12 +112,13 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
           <tbody>
             {turns.map((turn) => {
               const aggregate = turnAggregate(turn);
-              const open = openTurns.has(turn.index);
+              const open = openTurns.has(turnKey(turn));
+              const range = turnRange(turn);
               const scale = stepScale(turn);
               const segments = timeBarSegments({ wallMs: turn.wall_ms, modelMs: aggregate.modelMs, ttftMs: aggregate.ttftMs, toolWaitMs: aggregate.toolWaitMs });
               return (
-                <React.Fragment key={`turn-${turn.index}`}>
-                  <tr className="steps-row-turn">
+                <React.Fragment key={turnKey(turn)}>
+                  <tr className="steps-row-turn" data-turn-key={turnKey(turn)}>
                     <td className="steps-scope">
                       {/* A real button, not a click handler on the row: the
                           table needs a keyboard-reachable control with
@@ -125,7 +128,7 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
                         type="button"
                         className="steps-scope-toggle"
                         aria-expanded={open}
-                        onClick={() => toggleTurn(turn.index)}
+                        onClick={() => toggleTurn(turnKey(turn))}
                       >
                         <span className={open ? "steps-caret steps-caret-open" : "steps-caret"} aria-hidden="true">
                           ▸
@@ -134,6 +137,7 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
                       </button>
                       <span className="steps-scope-meta">
                         {t("steps.stepsCount", { count: aggregate.steps })}
+                        {range ? <span className="steps-scope-range">#{range.first}–#{range.last}</span> : null}
                         {aggregate.failures ? <InlineTag tone="danger">{t("steps.failedCount", { count: aggregate.failures })}</InlineTag> : null}
                       </span>
                     </td>
@@ -169,6 +173,7 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
                             className={
                               step.trace_id === activeTraceID ? "steps-row-step steps-row-step-active" : "steps-row-step"
                             }
+                            data-trace-id={step.trace_id}
                           >
                             <td className="steps-scope">
                               <span className="steps-scope-meta steps-global">#{step.global_index}</span>
@@ -182,6 +187,7 @@ export function StepsStatsTable({ view, onOpenTrace, activeTraceID }) {
                               </button>
                               {step.status >= 400 ? <InlineTag tone="danger">{step.status}</InlineTag> : null}
                               {step.estimated?.includes("duplicate_request") ? <InlineTag tone="gold">{t("steps.retryTag")}</InlineTag> : null}
+                              {step.estimated?.includes("content_pending") ? <InlineTag tone="gold">{t("steps.partialTag")}</InlineTag> : null}
                             </td>
                             <td className="steps-trigger">
                               <span className="steps-step-time">{formatDateTime(step.started_at)}</span>

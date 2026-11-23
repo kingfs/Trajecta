@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { InlineTag } from "../common/Badges";
 import { Input } from "../ui/input";
 import { useI18n } from "../../lib/i18n";
-import { buildLedgerRows, filterLedgerRows, formatMillis, formatRatioPercent, formatTokens } from "../../lib/sessionSteps";
+import { buildLedgerRows, filterLedgerRows, formatMillis, formatRatioPercent, formatTokens, turnKey, turnRange } from "../../lib/sessionSteps";
 
 /*
  * The 轨迹 tab: a session read as an event ledger.
@@ -26,7 +26,7 @@ export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
   const rows = useMemo(() => buildLedgerRows(view?.turns || []), [view]);
   const visibleRows = useMemo(() => filterLedgerRows(rows, query), [rows, query]);
   const searchActive = query.trim().length > 0;
-  const turnIndexes = useMemo(() => rows.filter((row) => row.kind === "turn").map((row) => row.index), [rows]);
+  const turnKeys = useMemo(() => rows.filter((row) => row.kind === "turn").map((row) => turnKey(row.turn)), [rows]);
 
   useEffect(() => {
     if (!activeTraceID) return;
@@ -39,14 +39,14 @@ export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
   if (!rows.length) return null;
 
   const toggleAll = () => {
-    if (collapsed.size === turnIndexes.length) setCollapsed(new Set());
-    else setCollapsed(new Set(turnIndexes));
+    if (collapsed.size === turnKeys.length) setCollapsed(new Set());
+    else setCollapsed(new Set(turnKeys));
   };
 
-  const toggleTurn = (index) => {
+  const toggleTurn = (key) => {
     const next = new Set(collapsed);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
     setCollapsed(next);
   };
 
@@ -54,13 +54,13 @@ export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
   let lastTurn = null;
   for (const row of visibleRows) {
     if (row.kind === "turn") {
-      lastTurn = row.index;
+      lastTurn = turnKey(row.turn);
       rendered.push(
         <TurnRow
           key={row.key}
           row={row}
-          collapsed={collapsed.has(row.index)}
-          onToggle={() => toggleTurn(row.index)}
+          collapsed={collapsed.has(lastTurn)}
+          onToggle={() => toggleTurn(lastTurn)}
         />,
       );
       continue;
@@ -90,7 +90,7 @@ export function TrajectoryLedger({ view, onOpenTrace, activeTraceID }) {
           onChange={(event) => setQuery(event.target.value)}
         />
         <button type="button" className="ledger-toggle" onClick={toggleAll}>
-          {collapsed.size === turnIndexes.length ? t("steps.expandAll") : t("steps.collapseAll")}
+          {collapsed.size === turnKeys.length ? t("steps.expandAll") : t("steps.collapseAll")}
         </button>
         {searchActive ? <span className="ledger-count">{t("steps.ledgerMatches", { count: visibleRows.length - countTurns(visibleRows) })}</span> : null}
       </div>
@@ -106,6 +106,7 @@ function countTurns(rows) {
 function TurnRow({ row, collapsed, onToggle }) {
   const { t } = useI18n();
   const trigger = row.trigger || {};
+  const range = turnRange(row.turn);
   return (
     <button type="button" className="ledger-turn" onClick={onToggle} aria-expanded={!collapsed}>
       <span className={collapsed ? "ledger-caret" : "ledger-caret ledger-caret-open"} aria-hidden="true">
@@ -117,6 +118,7 @@ function TurnRow({ row, collapsed, onToggle }) {
       </span>
       <span className="ledger-turn-meta">
         {t("steps.stepsCount", { count: row.aggregate?.steps ?? 0 })}
+        {range ? <span className="ledger-turn-range">#{range.first}–#{range.last}</span> : null}
         {row.aggregate?.failures ? <InlineTag tone="danger">{t("steps.failedCount", { count: row.aggregate.failures })}</InlineTag> : null}
         <span>{formatMillis(row.wallMs)}</span>
       </span>
@@ -133,6 +135,7 @@ function Row({ row, active, activeRef, onOpen }) {
       <button
         type="button"
         ref={activeRef}
+        data-trace-id={step.trace_id}
         className={`${className} ledger-row-clickable`}
         onClick={() => onOpen?.(step.trace_id)}
         title={t("steps.openTrace")}

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { SegmentedControl, SegmentedControlItem } from "../components/ui/segmented-control";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge, ViewIcon } from "../components/common/Badges";
@@ -10,6 +10,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { SessionTrajectory } from "../components/monitor/SessionTrajectory";
+import { SessionStepsPanel } from "../components/monitor/SessionStepsPanel";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -33,6 +34,7 @@ import {
 export function SessionDetailPage() {
   const { sessionID = "" } = useParams();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
@@ -145,7 +147,6 @@ export function SessionDetailPage() {
 
       {detail.data ? (
         <>
-          <SessionTrajectory trajectory={trajectory.data} loading={trajectory.loading} error={trajectory.error} />
           <SessionTabs tab={tab} setTab={setTab} analysisCount={analysis.length} failedCount={breakdown?.failed_traces ?? 0} />
           <div className="detail-grid detail-grid-compact">
             <Card as="section">
@@ -175,6 +176,36 @@ export function SessionDetailPage() {
             </Card>
           </div>
         </>
+      ) : null}
+
+      {/*
+        The session's story, built from the same on-demand step model the trace
+        page uses. The ATIF preview stays as a collapsed block underneath: it is
+        the export artifact and only covers Responses sessions, while the ledger
+        above it covers every protocol.
+      */}
+      {detail.data && tab === "trajectory" ? (
+        <>
+          <SessionStepsPanel
+            mode="trajectory"
+            sessionID={summary?.session_id || sessionID}
+            onOpenTrace={(traceID) => navigate(buildTraceLink(traceID, "", summary?.session_id || sessionID, "trajectory"))}
+          />
+          {/* An error is why the preview exists: if the export read failed, the
+              block opens itself instead of hiding the reason behind a summary. */}
+          <details className="session-atf-block" open={Boolean(trajectory.error)}>
+            <summary>{t("sessionDetail.atfPreview")}</summary>
+            <SessionTrajectory trajectory={trajectory.data} loading={trajectory.loading} error={trajectory.error} />
+          </details>
+        </>
+      ) : null}
+
+      {detail.data && tab === "stats" ? (
+        <SessionStepsPanel
+          mode="stats"
+          sessionID={summary?.session_id || sessionID}
+          onOpenTrace={(traceID) => navigate(buildTraceLink(traceID, "", summary?.session_id || sessionID, "stats"))}
+        />
       ) : null}
 
       {detail.data && tab === "timeline" && timeline.length ? (
@@ -316,6 +347,8 @@ function SessionTabs({ tab, setTab, analysisCount = 0, failedCount = 0 }) {
   const { t } = useI18n();
   const tabs = [
     { id: "timeline", label: t("requests.timeline"), detail: t("sessionDetail.requestSequence") },
+    { id: "trajectory", label: t("traceDetail.tabTrajectory"), detail: t("sessionDetail.trajectoryTabDetail") },
+    { id: "stats", label: t("traceDetail.tabStats"), detail: t("sessionDetail.statsTabDetail") },
     { id: "traces", label: t("nav.traces"), detail: t("sessionDetail.httpExchanges") },
     { id: "audit", label: t("nav.audit"), detail: t("sessionDetail.failedCount", { count: failedCount }) },
     { id: "performance", label: t("sessionDetail.tabPerformance"), detail: t("sessionDetail.latencyAndTokens") },

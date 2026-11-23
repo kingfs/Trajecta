@@ -472,6 +472,40 @@ func TestFocusEndsTheWindowAtTheTrace(t *testing.T) {
 	}
 }
 
+func TestAfterCursorPagesForward(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	var entries []store.LogEntry
+	for index := 0; index < 6; index++ {
+		entries = append(entries, writeCassette(t, dir, cassetteSpec{
+			id:       fmt.Sprintf("t%d", index+1),
+			time:     base.Add(time.Duration(index) * time.Minute),
+			duration: time.Second,
+			prompt:   10, completion: 1,
+			reqBody: chatRequest(userHello),
+			resBody: finalResponse("ok", 10, 1, 0),
+		}))
+	}
+	view, err := Build(context.Background(), "sess", entries, Options{Limit: 2, AfterTraceID: "t2", Now: fixedClock(base)})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if view.Window.FirstStep != 3 || view.Window.LastStep != 4 {
+		t.Fatalf("window = %+v, want steps 3..4 after t2", view.Window)
+	}
+	if !view.Window.HasAfter {
+		t.Fatal("has_after = false, want the rest of the session to stay reachable")
+	}
+	// A cursor wins over the focus that the trace route always sets.
+	focused, err := Build(context.Background(), "sess", entries, Options{Limit: 2, FocusTraceID: "t1", BeforeTraceID: "t5", Now: fixedClock(base)})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if focused.Window.FirstStep != 3 || focused.Window.LastStep != 4 {
+		t.Fatalf("window = %+v, want the before cursor to beat the focus", focused.Window)
+	}
+}
+
 func TestUnreadableCassetteKeepsTheNumbers(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
@@ -575,6 +609,74 @@ func TestCacheServesTheSecondBuild(t *testing.T) {
 	}
 	if second.Totals.Steps != first.Totals.Steps {
 		t.Fatalf("cached totals differ: %+v vs %+v", first.Totals, second.Totals)
+	}
+}
+
+func TestBudgetLeavesLaterStepsWithNumbersOnly(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	var entries []store.LogEntry
+	for index := 0; index < 6; index++ {
+		entries = append(entries, writeCassette(t, dir, cassetteSpec{
+			id:       fmt.Sprintf("t%d", index+1),
+			time:     base.Add(time.Duration(index) * time.Minute),
+			duration: time.Second,
+			prompt:   100, completion: 10,
+			reqBody: chatRequest(userHello),
+			resBody: finalResponse("ok", 100, 10, 0),
+		}))
+	}
+	// One read costs more than half the budget, so with a single worker the
+	// later steps cannot be reached in time. This is the degradation the page
+	// reports as "N steps unparsed": the numbers stay, the content does not.
+	readFactsFn = func(ctx context.Context, registry *observe.Registry, entry store.LogEntry) facts {
+		time.Sleep(60 * time.Millisecond)
+		return readFacts(ctx, registry, entry)
+	}
+	t.Cleanup(func() { readFactsFn = readFacts })
+
+	view, err := Build(context.Background(), "sess", entries, Options{
+		Budget:  100 * time.Millisecond,
+		Workers: 1,
+		Now:     fixedClock(base),
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if view.Window.ContentPending == 0 {
+		t.Fatal("content_pending = 0, want the budget to leave later steps unparsed")
+	}
+	if view.Window.ContentPending == len(entries) {
+		t.Fatal("content_pending covers every step, want at least one parsed read")
+	}
+	if view.Totals.Steps != len(entries) {
+		t.Fatalf("totals.steps = %d, want the whole session from the index rows", view.Totals.Steps)
+	}
+	var unparsed int
+	for _, turn := range view.Turns {
+		for _, step := range turn.Steps {
+			if step.Content == nil {
+				unparsed++
+				if !containsString(step.Estimated, EstimatedContentPending) {
+					t.Fatalf("step %d estimated = %v, want the content-pending marker", step.GlobalIndex, step.Estimated)
+				}
+				if step.Usage.Context == 0 && step.Usage.Output == 0 {
+					t.Fatalf("step %d lost its indexed numbers: %+v", step.GlobalIndex, step.Usage)
+				}
+			}
+		}
+	}
+	if unparsed != view.Window.ContentPending {
+		t.Fatalf("unparsed steps = %d, window.content_pending = %d", unparsed, view.Window.ContentPending)
+	}
+	var warned bool
+	for _, warning := range view.Warnings {
+		if warning.Code == WarningContentPending {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("warnings = %+v, want the content-pending warning", view.Warnings)
 	}
 }
 
