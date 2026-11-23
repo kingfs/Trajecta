@@ -50,9 +50,8 @@ type projectView struct {
 	Source  string `json:"source,omitempty"`
 	// LatestRoot is set when the session changed directory after it started;
 	// Root stays the project the session belongs to.
-	LatestRoot  string    `json:"latest_root,omitempty"`
-	SwitchCount int       `json:"switch_count,omitempty"`
-	FirstSeen   time.Time `json:"first_seen,omitempty"`
+	LatestRoot  string `json:"latest_root,omitempty"`
+	SwitchCount int    `json:"switch_count,omitempty"`
 	// Conflicting is trace-scoped: the request declared more than one root and
 	// the last one was used.
 	Conflicting bool `json:"conflicting,omitempty"`
@@ -65,7 +64,6 @@ func projectViewFromSession(item store.SessionProject) *projectView {
 		Source:      item.Source,
 		LatestRoot:  item.LatestRoot,
 		SwitchCount: item.SwitchCount,
-		FirstSeen:   item.FirstSeen,
 	}
 }
 

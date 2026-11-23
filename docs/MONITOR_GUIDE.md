@@ -102,7 +102,7 @@ session ID 的抽取顺序为：
 **项目**：按客户端**声明**的工作目录聚合会话，回答「某个项目下有多少会话」。项目不是从工具调用路径推断出来的，只认请求 prompt 里的固定声明：DeepSeek Harness 运行时上下文的 `<system-reminder>` 块（`Current working directory: "…"`）、Claude Code 的 `<env>` 块（`Primary working directory:` / 旧版 `Working directory:`）、Codex 的 `<environment_context>`（`<cwd>`，多根工作区回退到 `<workspace_roots><root>`）。同一请求里出现多条声明时取最后一条（这些 harness 的语义是后者覆盖前者），历史里既没有容器标签也没有绝对路径的一律不计。
 
 - 归属规则：会话的项目取该会话**最早一条带声明**的 trace（按 `recorded_at`，与解析完成顺序无关），因此中途 `cd` 或 compaction 把早期声明摘掉都不会改变主项目；`latest_root` 与 `switch_count` 记录之后的变更。没有声明的会话（纯 SDK 流量、未识别的 harness 格式）不属于任何项目。
-- 页面顶部给出归属覆盖率（已归属会话 / 窗口内会话总数），没有声明的会话不会被算成 0。行内显示声明来源，点击一行跳到会话标签页并按该项目过滤（`?tab=sessions&project=<root_key>`），会话行的标签组里也会显示所属项目。
+- 页面顶部给出归属覆盖率（窗口内已归属会话 / 窗口内会话总数），没有声明的会话不会被算成 0。窗口判定与会话页一致（会话在窗口内至少有一条请求即计入），每行的请求数与 token 覆盖该会话的整段历史，因此与点进去看到的会话行同源；聚合直接读 `logs`，不依赖 `session_summaries` 是否回填。行内显示声明来源，点击一行跳到会话标签页并按该项目过滤（`?tab=sessions&project=<root_key>`），会话行的标签组里也会显示所属项目。
 - 端点：`GET /api/projects?window=&page=&page_size=&q=`（默认窗口为「全部」），会话列表 `GET /api/sessions?project=<root_key>` 在两条读路径上语义一致；trace 详情与会话详情分别返回 trace 级声明与会话回滚。历史数据用 `POST /api/projects/backfill`（管理员，`{window,limit}`）排队重解析回填，与资源索引的回填同一机制：没有声明的 trace 不会留下行，因此重复调用会重新解析它们。
 
 ##### trace 详情：轨迹与统计

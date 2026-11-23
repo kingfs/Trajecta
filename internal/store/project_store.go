@@ -181,6 +181,31 @@ func (s *Store) RebuildSessionProject(sessionID string) error {
 // transaction, so a trace cleanup can drop the rows and repair the rollups
 // atomically.
 func (s *Store) rebuildSessionProjectTx(tx *sql.Tx, sessionID string) error {
+	// Claim this session's rollup row before reading the facts.
+	//
+	// Two rebuilders of the same session can run at once - the parse worker and
+	// the reanalysis service are separate workers, and a backfill adds more
+	// parses of the same session. Without a claim both read the same facts and
+	// write their results in whatever order the scheduler picks, so the write
+	// holding the *older* snapshot can land last and put a stale attribution
+	// back. The insert creates the row when it is missing; the no-op update
+	// takes its write lock in both drivers, so the second rebuilder blocks here
+	// until the first commits and then reads the facts it committed.
+	now := time.Now().UTC()
+	if _, err := s.execTx(tx, `
+		INSERT INTO session_projects (
+			session_id, root, root_key, source, latest_root, latest_root_key,
+			switch_count, first_trace_id, first_seen, last_declared_at, updated_at
+		)
+		VALUES (?, '', '', '', '', '', 0, '', ?, ?, ?)
+		ON CONFLICT (session_id) DO NOTHING
+	`, sessionID, now, now, now); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, `UPDATE session_projects SET updated_at = updated_at WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+
 	facts, err := s.sessionProjectFactsTx(tx, sessionID)
 	if err != nil {
 		return err
@@ -362,84 +387,63 @@ func (s *Store) ListSessionProjects(sessionIDs []string) (map[string]SessionProj
 	return out, nil
 }
 
-// ListProjects returns one page of the project list, newest activity first
-// inside each project count.
+// ListProjects returns one page of the project list.
 //
-// The aggregate joins session_summaries rather than logs: the page is a
-// session-level view (how many sessions work in this project), the summary row
-// is exactly that grain, and it keeps the query off the largest table.
+// The aggregate reads logs instead of session_summaries on purpose. The summary
+// table is a derived read model, and a deployment that never backfilled it
+// would see an empty project page - which reads as "no traffic", the one
+// conclusion the page must not draw from missing data. The window test is also
+// the sessions tab's: a session is in the window when it has a client-visible
+// request at or after `since`, and a session's counts cover its whole history,
+// so a project row and the session row it opens agree.
+//
+// The number of distinct project roots is bounded by what operators actually
+// run, so the grouped rows are read in one query and the page is sliced here
+// rather than re-evaluating the session set for a separate count.
 func (s *Store) ListProjects(filter ProjectFilter) (ProjectPage, error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	where := []string{"1 = 1"}
-	args := []any{}
+	activeSQL, activeArgs := s.projectActiveSessionsSQL(filter.Since)
+
+	pageResult := ProjectPage{Page: page, PageSize: pageSize}
+	// Coverage over the same window: how many sessions are active, and how many
+	// of those declared a project.
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*), COUNT(sp.session_id)
+		FROM (`+activeSQL+`) active
+		LEFT JOIN session_projects sp ON sp.session_id = active.session_id
+	`, activeArgs...).Scan(&pageResult.TotalSessions, &pageResult.IdentifiedSessions); err != nil {
+		return ProjectPage{}, err
+	}
+
+	where := []string{clientVisibleLogClause("l")}
+	args := append([]any{}, activeArgs...)
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		where = append(where, `LOWER(sp.root) LIKE ?`)
 		args = append(args, "%"+escapeLike(strings.ToLower(query))+"%")
 	}
-	if !filter.Since.IsZero() {
-		where = append(where, `s.last_seen >= ?`)
-		args = append(args, filter.Since.UTC())
-	}
-	whereSQL := strings.Join(where, " AND ")
-
-	// Coverage is computed over the same window as the list, so the page never
-	// mixes "today's projects" with "all-time sessions".
-	pageResult := ProjectPage{Page: page, PageSize: pageSize}
-	if err := s.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM session_summaries s
-		WHERE `+windowOnlySQL(filter.Since), windowArgs(filter.Since)...).Scan(&pageResult.TotalSessions); err != nil {
-		return ProjectPage{}, err
-	}
-	if err := s.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM session_projects sp
-		JOIN session_summaries s ON s.session_id = sp.session_id
-		WHERE `+windowOnlySQL(filter.Since), windowArgs(filter.Since)...).Scan(&pageResult.IdentifiedSessions); err != nil {
-		return ProjectPage{}, err
-	}
-
-	var total int
-	countQuery := `
-		SELECT COUNT(*) FROM (
-			SELECT sp.root_key
-			FROM session_projects sp
-			JOIN session_summaries s ON s.session_id = sp.session_id
-			WHERE ` + whereSQL + `
-			GROUP BY sp.root_key
-		) grouped`
-	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		return ProjectPage{}, err
-	}
-	pageResult.Total = total
-	if total == 0 {
-		return pageResult, nil
-	}
-	pageResult.TotalPages = int((total + pageSize - 1) / pageSize)
-	offset := (page - 1) * pageSize
-	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, pageSize, offset)
 	rows, err := s.db.Query(`
 		SELECT
 			sp.root_key,
 			MIN(sp.root) AS root,
-			COUNT(*) AS session_count,
-			COALESCE(SUM(s.request_count), 0) AS request_count,
-			COALESCE(SUM(s.total_tokens), 0) AS total_tokens,
-			MIN(s.first_seen) AS first_seen,
-			MAX(s.last_seen) AS last_seen,
+			COUNT(DISTINCT active.session_id) AS session_count,
+			COUNT(l.trace_id) AS request_count,
+			COALESCE(SUM(CASE WHEN l.status_code BETWEEN 200 AND 299 THEN l.total_tokens ELSE 0 END), 0) AS total_tokens,
+			MIN(l.recorded_at) AS first_seen,
+			MAX(l.recorded_at) AS last_seen,
 			`+s.distinctAggregateSQL("sp.source")+` AS sources
-		FROM session_projects sp
-		JOIN session_summaries s ON s.session_id = sp.session_id
-		WHERE `+whereSQL+`
+		FROM (`+activeSQL+`) active
+		JOIN session_projects sp ON sp.session_id = active.session_id
+		JOIN logs l ON l.session_id = active.session_id
+		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY sp.root_key
-		ORDER BY session_count DESC, last_seen DESC, sp.root_key ASC
-		LIMIT ? OFFSET ?
-	`, queryArgs...)
+		ORDER BY COUNT(DISTINCT active.session_id) DESC, MAX(l.recorded_at) DESC, sp.root_key ASC
+	`, args...)
 	if err != nil {
 		return ProjectPage{}, err
 	}
 	defer rows.Close()
+
+	all := make([]ProjectSummary, 0, 32)
 	for rows.Next() {
 		var (
 			item      ProjectSummary
@@ -458,9 +462,43 @@ func (s *Store) ListProjects(filter ProjectFilter) (ProjectPage, error) {
 			return ProjectPage{}, err
 		}
 		item.Sources = splitCommaList(sources)
-		pageResult.Items = append(pageResult.Items, item)
+		all = append(all, item)
 	}
-	return pageResult, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ProjectPage{}, err
+	}
+
+	pageResult.Total = len(all)
+	if pageResult.Total == 0 {
+		return pageResult, nil
+	}
+	pageResult.TotalPages = int((pageResult.Total + pageSize - 1) / pageSize)
+	offset := (page - 1) * pageSize
+	if offset >= len(all) {
+		return pageResult, nil
+	}
+	end := offset + pageSize
+	if end > len(all) {
+		end = len(all)
+	}
+	pageResult.Items = all[offset:end]
+	return pageResult, nil
+}
+
+// projectActiveSessionsSQL returns the subquery naming every session active in
+// the window: those with at least one client-visible request at or after
+// `since`. A zero `since` means every session with a client-visible request.
+func (s *Store) projectActiveSessionsSQL(since time.Time) (string, []any) {
+	where := []string{"l.session_id <> ''", clientVisibleLogClause("l")}
+	args := []any{}
+	if !since.IsZero() {
+		where = append(where, "l.recorded_at >= ?")
+		args = append(args, since.UTC())
+	}
+	return `SELECT l.session_id AS session_id
+		FROM logs l
+		WHERE ` + strings.Join(where, " AND ") + `
+		GROUP BY l.session_id`, args
 }
 
 // distinctAggregateSQL renders a GROUP_CONCAT/string_agg over distinct
@@ -484,21 +522,6 @@ func splitCommaList(value string) []string {
 		}
 	}
 	return out
-}
-
-// windowOnlySQL is the window predicate over session_summaries alone.
-func windowOnlySQL(since time.Time) string {
-	if since.IsZero() {
-		return "1 = 1"
-	}
-	return "s.last_seen >= ?"
-}
-
-func windowArgs(since time.Time) []any {
-	if since.IsZero() {
-		return nil
-	}
-	return []any{since.UTC()}
 }
 
 // EnqueueProjectBackfill queues a parse job for the most recent traces that have

@@ -112,10 +112,8 @@ func TestListProjectsAggregatesAndReportsCoverage(t *testing.T) {
 			t.Fatalf("rebuild %s: %v", item.sessionID, err)
 		}
 	}
-	if err := st.RebuildSessionSummaries(); err != nil {
-		t.Fatalf("rebuild summaries: %v", err)
-	}
-
+	// Deliberately no RebuildSessionSummaries: the page aggregates logs, so a
+	// deployment that never backfilled the summary read model still sees it.
 	page, err := st.ListProjects(ProjectFilter{})
 	if err != nil {
 		t.Fatalf("ListProjects(): %v", err)
@@ -213,5 +211,85 @@ func TestEnqueueProjectBackfillSkipsIndexedTraces(t *testing.T) {
 	// A second run sees the queued job and does not add another.
 	if queued, err = st.EnqueueProjectBackfill(time.Time{}, 50); err != nil || queued != 0 {
 		t.Fatalf("second run queued=%d err=%v, want 0", queued, err)
+	}
+}
+
+// A session is in the window when it has a request at or after the window
+// start, and its counts cover the whole session - the same rule the session
+// row follows, so the project row and the sessions it opens agree.
+func TestListProjectsWindowCountsWholeSession(t *testing.T) {
+	st := configTransactionTestStore(t)
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	old := cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID:  "window-old",
+		sessionID:  "s-window",
+		recordedAt: now.Add(-48 * time.Hour),
+		statusCode: 200,
+	})
+	recent := cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID:  "window-recent",
+		sessionID:  "s-window",
+		recordedAt: now.Add(-2 * time.Hour),
+		statusCode: 200,
+	})
+	// Same project, but only activity outside the window: it must not appear.
+	cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID:  "window-stale",
+		sessionID:  "s-stale",
+		recordedAt: now.Add(-72 * time.Hour),
+		statusCode: 200,
+	})
+
+	if err := st.SaveTraceProject(old.ID, "s-window", projectTestDeclaration("/repo/window", "codex_env")); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := st.RebuildSessionProject("s-window"); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	_ = recent
+
+	page, err := st.ListProjects(ProjectFilter{Since: now.Add(-24 * time.Hour)})
+	if err != nil {
+		t.Fatalf("ListProjects(): %v", err)
+	}
+	if page.TotalSessions != 1 || page.IdentifiedSessions != 1 {
+		t.Fatalf("coverage = %d/%d, want 1/1 (only the active session)", page.IdentifiedSessions, page.TotalSessions)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("projects = %+v", page.Items)
+	}
+	if got := page.Items[0].RequestCount; got != 2 {
+		t.Fatalf("request_count = %d, want the whole session's 2 requests", got)
+	}
+}
+
+// A trace cleanup deletes the project row with the trace and repairs the
+// session rollup in the same transaction, so a deleted request cannot leave a
+// stale attribution behind.
+func TestRequestCleanupRemovesProjectAttribution(t *testing.T) {
+	st := configTransactionTestStore(t)
+	entry := cleanupInsertLog(t, st, cleanupLogSpec{
+		requestID:  "cleanup-project",
+		sessionID:  "s-cleanup",
+		statusCode: 404,
+	})
+	if err := st.SaveTraceProject(entry.ID, "s-cleanup", projectTestDeclaration("/repo/cleanup", "claude_env")); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+	if err := st.RebuildSessionProject("s-cleanup"); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if _, ok, err := st.GetSessionProject("s-cleanup"); err != nil || !ok {
+		t.Fatalf("precondition: session rollup ok=%v err=%v", ok, err)
+	}
+
+	if _, err := st.ApplyRequestCleanup(RequestCleanupFilter{StatusCodes: []int{404}}, RequestCleanupApplyOptions{}); err != nil {
+		t.Fatalf("ApplyRequestCleanup(): %v", err)
+	}
+	if _, ok, err := st.GetTraceProject(entry.ID); err != nil || ok {
+		t.Fatalf("trace project survived cleanup: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := st.GetSessionProject("s-cleanup"); err != nil || ok {
+		t.Fatalf("session rollup survived cleanup: ok=%v err=%v", ok, err)
 	}
 }
