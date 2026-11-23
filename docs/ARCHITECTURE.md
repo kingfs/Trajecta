@@ -49,6 +49,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `internal/audit`：按需从 cassette 构造 XIR 并调用 `pkg/xir/audit` 生成审计投影，供 `GET /api/traces/<id>/xir` 使用；节点文本再经 `pkg/detect` 输出不含明文值的 `detections`，检测引擎由 `internal/detector` 快照提供（`Inspector.Detectors`，缺省回退内置 secretmask 扫描器）。不写 DB、不替代 `pkg/observe` 的详情视图。
 - `internal/sessionanalysis`：session 级聚合分析。
 - `internal/trajectory`：从客户端可见的 Responses cassette 重建 ATIF-v1.8 会话轨迹（不调用模型、不修改 cassette）；`scripts/validate_atif.py` 与 `scripts/atif_tests` 用固定版本官方模型做离线格式校验。
+- `internal/sessionsteps`：trace 详情页「轨迹」「统计」两个标签页的按需读模型。数值取自 `logs` 索引（耗时、TTFT、token 四桶、状态码、模型、是否流式），轮次/步骤分组与工具配对在打开页面时从 cassette 解析，**不新增表或列**；派生结果只写进可删除的 `{{output_dir}}/session-steps-cache/`（复用会话轨迹缓存的有界实现，`BuilderVersion` 参与缓存键）。轮次边界是推断（上一次响应无工具调用则下一请求开新轮，带工具结果的请求延续本轮），工具用时是「响应结束到下次请求开始」的间隙，首 token 是首字节（非流式不适用），吞吐在推导出的生成跨度过短时不出值。解析受 4 秒预算与 4 并发约束，超预算的步骤只保留数字。
 - `internal/providerprobe`：provider 能力探测。
 - `internal/modelprobe`：按模型、按协议的最小请求连通性测试（chat/responses/messages/generateContent），把结果分类成 `ok`/`auth_failed`/`model_not_found`/`endpoint_not_supported` 等并给出可执行建议；只读，不写 store、不写 cassette、不经过 router。Monitor 的 `POST /api/provider-model-test` 与模型卡按钮使用它。
 - `internal/modelinfo`：模型广场与模型详情页的静态模型元数据，来自编译进二进制的 [Argus](https://github.com/kingfs/Argus) 注册表（供应商、系列、中英文描述、上下文/最大输出、能力位、标签、官网/模型卡链接）；`Lookup` 先按 ID/别名精确匹配，再依次尝试去掉路由前缀、点分厂商命名空间、日期/修订后缀与数字间连字符改写，未命中就返回空而不做模糊猜测。查询是内存 map 读取，不访问网络；`GET /api/model-square` 与 `GET /api/models/{model}` 的 `facts` 字段使用它；模型广场条目另有 `protocols`（可用渠道 interfaces 的并集）用于卡片协议 badge。

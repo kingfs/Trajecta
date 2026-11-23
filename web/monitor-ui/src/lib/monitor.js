@@ -283,6 +283,8 @@ export function normalizeTraceTab(value = "") {
   switch (value) {
     case "conversation":
     case "protocol":
+    case "trajectory":
+    case "stats":
     case "tools":
     case "audit":
     case "resources":

@@ -1725,6 +1725,10 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				handleSessionAnalysis(w, r, st, sessionID)
 				return
 			}
+			if parts[1] == "steps" && r.Method == http.MethodGet {
+				handleSessionSteps(w, r, st, sessionID)
+				return
+			}
 			if parts[1] == "reanalyze" && r.Method == http.MethodPost {
 				handleSessionReanalyze(w, r, st, sessionID)
 				return
@@ -1915,6 +1919,8 @@ func traceAPIHandlerWithSuppression(st *store.Store, rtr *router.Router, suppres
 			handleTraceXIR(w, r, absPath, entry, det, suppressed)
 		case len(parts) == 2 && parts[1] == "trajectory" && r.Method == http.MethodGet:
 			handleTraceTrajectory(w, r, entry)
+		case len(parts) == 2 && parts[1] == "session-steps" && r.Method == http.MethodGet:
+			handleTraceSessionSteps(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry, det, suppressed)
 		case len(parts) == 4 && parts[1] == "findings" && parts[3] == "locate" && r.Method == http.MethodGet:

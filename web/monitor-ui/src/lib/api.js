@@ -69,6 +69,21 @@ export const apiPaths = {
     const query = params.toString();
     return `/api/sessions/${encodeURIComponent(sessionID)}/trajectory${query ? `?${query}` : ""}`;
   },
+  // The step model behind the trace page's 轨迹 and 统计 tabs. It is derived on
+  // demand from the index rows plus the cassettes; nothing is persisted, so the
+  // only parameter that matters is how many steps the window returns.
+  traceSessionSteps: (traceID, { limit = 0 } = {}) => {
+    const params = new URLSearchParams();
+    if (limit > 0) params.set("limit", String(limit));
+    const query = params.toString();
+    return `/api/traces/${encodeURIComponent(traceID)}/session-steps${query ? `?${query}` : ""}`;
+  },
+  sessionSteps: (sessionID, { limit = 0 } = {}) => {
+    const params = new URLSearchParams();
+    if (limit > 0) params.set("limit", String(limit));
+    const query = params.toString();
+    return `/api/sessions/${encodeURIComponent(sessionID)}/steps${query ? `?${query}` : ""}`;
+  },
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
   // The configuration-facing catalogue: every model an enabled channel

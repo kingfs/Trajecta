@@ -3,10 +3,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { TabStrip, Tabs, TabsContent } from "../components/common/Tabs";
 import { TraceConversation } from "../components/monitor/TraceConversation";
+import { SessionStepsPanel } from "../components/monitor/SessionStepsPanel";
 import { TraceResources } from "../components/monitor/TraceResources";
 import { ProtocolTree } from "../components/monitor/ProtocolTree";
 import { ToolSchemaForm } from "../components/monitor/ToolSchemaForm";
@@ -62,6 +63,7 @@ import {
 export function TraceDetailPage() {
   const { traceID = "" } = useParams();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
@@ -155,6 +157,8 @@ export function TraceDetailPage() {
   const traceTabs = [
     { id: "conversation", label: t("traceDetail.tabConversation") },
     { id: "protocol", label: t("audit.protocol") },
+    { id: "trajectory", label: t("traceDetail.tabTrajectory") },
+    { id: "stats", label: t("traceDetail.tabStats") },
     { id: "tools", label: t("traceDetail.tabTools"), count: toolCount || undefined },
     { id: "audit", label: t("nav.audit"), count: auditCount || undefined },
     { id: "resources", label: t("resources.tab"), count: resourceCount || undefined },
@@ -195,6 +199,15 @@ export function TraceDetailPage() {
       setHighlightAnchors([]);
     }
     applyTraceFocus(nextTab, focusTarget);
+  };
+
+  // Opening another step from the 轨迹 or 统计 tab is a navigation, not a panel
+  // switch: a different trace is a different request with its own readings. The
+  // link keeps the current tab so the ledger stays an index of the session
+  // rather than a detour through the conversation tab.
+  const openTraceStep = (nextTraceID) => {
+    if (!nextTraceID || nextTraceID === traceID) return;
+    navigate(buildTraceLink(nextTraceID, "", detail.data?.session?.session_id || "", tab));
   };
 
   // Selecting an anchor is a link, not just a scroll: the URL keeps the target
@@ -484,6 +497,32 @@ export function TraceDetailPage() {
                 fallback={conversationFallback}
               />
             </div>
+          </TabsContent>
+
+          {/*
+            The 轨迹 and 统计 tabs are session-scoped: one HTTP exchange is a
+            step, not a story, so both read the session the trace belongs to and
+            end the window at this trace. A trace recorded without a session
+            still renders its own single step.
+          */}
+          <TabsContent value="trajectory">
+            <SessionStepsPanel
+              mode="trajectory"
+              traceID={traceID}
+              sessionID={detail.data?.session?.session_id || ""}
+              activeTraceID={traceID}
+              onOpenTrace={openTraceStep}
+            />
+          </TabsContent>
+
+          <TabsContent value="stats">
+            <SessionStepsPanel
+              mode="stats"
+              traceID={traceID}
+              sessionID={detail.data?.session?.session_id || ""}
+              activeTraceID={traceID}
+              onOpenTrace={openTraceStep}
+            />
           </TabsContent>
 
           <TabsContent value="protocol">

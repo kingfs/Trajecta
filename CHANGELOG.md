@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- trace 详情页新增「轨迹」与「统计」两个标签页：以该 trace 所属会话为范围，按轮次/步骤展示上下文、输出、缓存命中、首 token、模型用时、输出速度与工具等待，并可点击任一步骤跳到对应的 trace。数据按需派生——数值来自 `logs` 索引，内容与工具配对在打开页面时从 cassette 解析，**不新增任何表或列**；派生结果只写入可随时删除的 `{{output_dir}}/session-steps-cache/`（有界，4 秒 cassette 预算，超预算的步骤只显示数字）。新增 `GET /api/traces/{id}/session-steps` 与 `GET /api/sessions/{id}/steps`，支持 `limit` / `before` / `budget_ms`。
+
 ## [3.5.2] - 2026-11-16
 
 ### Changed

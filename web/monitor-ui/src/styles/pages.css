@@ -744,3 +744,514 @@
   color: var(--text-tertiary);
   font-size: var(--text-label);
 }
+
+/* ---------------------------------------------------------------------------
+   Trace page: 轨迹 (ledger) and 统计 (turn/step table).
+
+   Both views read one derived window, so they share the toolbar, the number
+   column and the time bar. The bar is the only chart on the page and it is
+   CSS-only on purpose: a four-segment stacked bar with no axes does not justify
+   pulling recharts into the trace bundle.
+--------------------------------------------------------------------------- */
+
+.steps-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.steps-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.steps-toolbar-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.steps-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  cursor: pointer;
+}
+
+.steps-table-scroll {
+  overflow-x: auto;
+}
+
+.steps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.steps-table th {
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  text-align: left;
+}
+
+.steps-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.steps-table th.steps-num,
+.steps-table td.steps-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.steps-row-turn {
+  cursor: pointer;
+  background: var(--surface-inset);
+}
+
+.steps-row-turn:hover {
+  background: var(--surface-hover);
+}
+
+.steps-row-step {
+  cursor: pointer;
+}
+
+.steps-row-step:hover {
+  background: var(--surface-hover);
+}
+
+.steps-row-step-active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.steps-row-total {
+  background: var(--surface-inset);
+  font-weight: var(--weight-medium);
+}
+
+.steps-scope {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.steps-caret {
+  display: inline-block;
+  color: var(--text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+.steps-caret-open {
+  transform: rotate(90deg);
+}
+
+.steps-scope-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.steps-global {
+  font-variant-numeric: tabular-nums;
+}
+
+.steps-trigger {
+  max-width: 22rem;
+}
+
+.steps-trigger-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.steps-step-time {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.steps-gap {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.steps-did {
+  max-width: 20rem;
+}
+
+.steps-did-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.steps-did-meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.steps-muted {
+  color: var(--text-tertiary);
+}
+
+.steps-time {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.steps-time-track {
+  flex: 1 1 auto;
+  min-width: 4rem;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.steps-time-wide .steps-time-track {
+  height: 10px;
+}
+
+.steps-time-fill {
+  display: flex;
+  height: 100%;
+  min-width: 2px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.steps-time-seg {
+  display: block;
+  height: 100%;
+}
+
+.steps-time-ttft {
+  background: var(--accent-soft);
+}
+
+.steps-time-decode {
+  background: var(--accent);
+}
+
+.steps-time-tool {
+  background: var(--warning);
+}
+
+.steps-time-rest {
+  background: var(--muted-soft);
+}
+
+.steps-time-value {
+  min-width: 3.5rem;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.steps-load-older {
+  display: flex;
+  justify-content: center;
+}
+
+.steps-footnote {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  line-height: 1.6;
+}
+
+/* The ledger ----------------------------------------------------------------- */
+
+.ledger-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ledger-toolbar input[type="search"] {
+  max-width: 22rem;
+}
+
+.ledger-toggle {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.ledger-toggle:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.ledger-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.ledger-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.ledger-turn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-turn:hover {
+  background: var(--surface-hover);
+}
+
+.ledger-caret {
+  display: inline-block;
+  color: var(--text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+.ledger-caret-open {
+  transform: rotate(90deg);
+}
+
+.ledger-turn-trigger {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.ledger-turn-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  font-size: var(--text-sm);
+}
+
+.ledger-row:last-child {
+  border-bottom: 0;
+}
+
+.ledger-row-clickable {
+  width: 100%;
+  border-width: 0 0 1px;
+  border-style: solid;
+  border-color: var(--border-subtle);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-row-clickable:hover {
+  background: var(--surface-hover);
+}
+
+.ledger-row-active {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-soft);
+}
+
+.ledger-row-step {
+  padding-left: var(--space-6);
+}
+
+.ledger-row-answer,
+.ledger-row-tool {
+  padding-left: var(--space-8);
+}
+
+.ledger-kind {
+  flex: 0 0 auto;
+  min-width: 3rem;
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+}
+
+.ledger-kind-step {
+  color: var(--accent);
+}
+
+.ledger-kind-answer {
+  color: var(--text-secondary);
+}
+
+.ledger-kind-tool {
+  color: var(--warning);
+}
+
+.ledger-step-index {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-step-model {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-step-tags {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.ledger-step-usage {
+  display: inline-flex;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-text {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+
+.ledger-tool-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ledger-tool-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ledger-tool-args {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+}
+
+.ledger-tool-result {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-label);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ledger-tool-pending {
+  font-style: italic;
+}
+
+.steps-scope-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.steps-scope-toggle:focus-visible,
+.steps-scope-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.steps-scope-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* On a phone the ledger's step row cannot hold the kind, the index, the model
+   and four numbers on one line; the numbers drop to a second line instead of
+   being squeezed past the viewport. The table keeps a horizontal scroll, which
+   is the only honest way to show eleven columns at this width. */
+@media (max-width: 720px) {
+  .ledger-turn,
+  .ledger-row {
+    flex-wrap: wrap;
+  }
+
+  .ledger-turn-trigger {
+    flex-basis: 100%;
+    order: 3;
+    white-space: normal;
+  }
+
+  .ledger-row-step {
+    padding-left: var(--space-4);
+  }
+
+  .ledger-row-answer,
+  .ledger-row-tool {
+    padding-left: var(--space-6);
+  }
+
+  .ledger-step-usage {
+    flex-basis: 100%;
+    padding-left: calc(var(--space-1) * 2 + 3rem);
+  }
+}
