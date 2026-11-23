@@ -48,9 +48,18 @@ func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
 	}
 }
 
+// staleJobAfter matches the parse worker: a job running past it belongs to a
+// process that died, and a reanalysis is safe to repeat.
+const staleJobAfter = 5 * time.Minute
+
 func (w *Worker) Run(ctx context.Context) {
 	if w == nil || w.store == nil || w.service == nil {
 		return
+	}
+	if count, err := w.store.ReclaimStaleAnalysisJobs(time.Now().UTC().Add(-staleJobAfter)); err != nil {
+		slog.Warn("Reclaim interrupted analysis jobs failed", "error", err)
+	} else if count > 0 {
+		slog.Info("Reclaimed interrupted analysis jobs", "count", count)
 	}
 	w.runOnce(ctx)
 	ticker := time.NewTicker(w.interval)

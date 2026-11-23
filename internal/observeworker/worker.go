@@ -73,10 +73,16 @@ func New(st *store.Store, opts Options) *Worker {
 	}
 }
 
+// staleJobAfter is how long a running parse job may sit before it is treated as
+// abandoned. No cassette parse takes minutes, so a row past this belongs to a
+// process that died without finishing it.
+const staleJobAfter = 5 * time.Minute
+
 func (w *Worker) Run(ctx context.Context) {
 	if w == nil || w.store == nil {
 		return
 	}
+	w.reclaimStale(ctx)
 	w.runOnce(ctx)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -92,6 +98,22 @@ func (w *Worker) Run(ctx context.Context) {
 
 func (w *Worker) RunOnce(ctx context.Context) {
 	w.runOnce(ctx)
+}
+
+// reclaimStale returns jobs an interrupted process left in running to the
+// queue, so a redeploy does not permanently strand the traces it was parsing.
+func (w *Worker) reclaimStale(ctx context.Context) {
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	count, err := w.store.ReclaimStaleParseJobs(time.Now().UTC().Add(-staleJobAfter))
+	if err != nil {
+		slog.Warn("Reclaim interrupted parse jobs failed", "error", err)
+		return
+	}
+	if count > 0 {
+		slog.Info("Reclaimed interrupted parse jobs", "count", count)
+	}
 }
 
 func (w *Worker) runOnce(ctx context.Context) {

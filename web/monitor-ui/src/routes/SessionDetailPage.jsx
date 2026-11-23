@@ -22,6 +22,7 @@ import {
   buildFailureSummary,
   buildTraceLink,
   formatDateTime,
+  projectName,
   formatDuration,
   formatEndpointTag,
   formatFailureReason,
@@ -31,14 +32,33 @@ import {
   formatTokenRate,
 } from "../lib/monitor";
 
+/** The session list filtered to one project; the project tag links here. */
+function projectHref(rootKey) {
+  return `/traces?tab=sessions&project=${encodeURIComponent(rootKey || "")}`;
+}
+
+/** The full root, plus the switch a session made after it started. */
+function projectTitle(project, t) {
+  const parts = [project.root];
+  if (project.latest_root && project.latest_root !== project.root) {
+    parts.push(t("projects.switchedTo", { root: project.latest_root }));
+  }
+  if (project.source) parts.push(project.source);
+  return parts.join(" · ");
+}
+
 export function SessionDetailPage() {
   const { sessionID = "" } = useParams();
   const { t } = useI18n();
   const navigate = useNavigate();
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
+  const [atfOpen, setAtfOpen] = useState(false);
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
-  const trajectory = useJSON(apiPaths.sessionTrajectory(sessionID), [sessionID]);
+  // The ATIF preview is the export artifact, not the page: it re-parses every
+  // cassette of the session (2.4 MB and ~24 s on a 500-request session in
+  // production), so it is read only when the collapsed block is opened.
+  const trajectory = useJSON(atfOpen ? apiPaths.sessionTrajectory(sessionID) : null, [sessionID, atfOpen]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
   const timeline = detail.data?.timeline ?? [];
@@ -107,6 +127,11 @@ export function SessionDetailPage() {
               {(summary?.providers || []).map((provider) => (
                 <InlineTag key={provider}>{formatProviderTag(provider)}</InlineTag>
               ))}
+              {detail.data?.project?.root ? (
+                <Link to={projectHref(detail.data.project.root_key)} title={projectTitle(detail.data.project, t)}>
+                  <InlineTag tone="green">{projectName(detail.data.project.root)}</InlineTag>
+                </Link>
+              ) : null}
             </div>
           </div>
           <div className="detail-meta-strip">
@@ -193,7 +218,11 @@ export function SessionDetailPage() {
           />
           {/* An error is why the preview exists: if the export read failed, the
               block opens itself instead of hiding the reason behind a summary. */}
-          <details className="session-atf-block" open={Boolean(trajectory.error)}>
+          <details
+            className="session-atf-block"
+            open={atfOpen || Boolean(trajectory.error)}
+            onToggle={(event) => setAtfOpen(event.currentTarget.open)}
+          >
             <summary>{t("sessionDetail.atfPreview")}</summary>
             <SessionTrajectory trajectory={trajectory.data} loading={trajectory.loading} error={trajectory.error} />
           </details>

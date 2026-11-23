@@ -87,6 +87,7 @@ const traceDetail = {
   tools: [],
   tool_calls: [],
   messages: [],
+  project: { root: "/data/src/github.com/kingfs/Trajecta", root_key: "/data/src/github.com/kingfs/Trajecta", source: "dsh_runtime_context" },
 };
 
 const observation = {
@@ -247,6 +248,30 @@ test("protocol tab shows the exchange's usage and timing", async ({ page }) => {
   await expect(page.locator("[data-exchange-facts]")).toContainText("0.2s");
 });
 
+test("the project a harness declared is shown on the trace and session pages", async ({ page }) => {
+  await page.goto("/traces/trace-1?tab=stats");
+  const traceProject = page.getByRole("link", { name: "Trajecta" });
+  await expect(traceProject).toBeVisible();
+  await expect(traceProject).toHaveAttribute("href", /tab=sessions&project=%2Fdata%2Fsrc%2Fgithub.com%2Fkingfs%2FTrajecta/);
+
+  await page.route("**/api/sessions/sess-1/steps*", (route) => route.fulfill({ json: firstPage }));
+  await page.route("**/api/sessions/sess-1/trajectory", (route) => route.fulfill({ json: { steps: [], extra: { warnings: [] } } }));
+  await page.route("**/api/sessions/sess-1", (route) =>
+    route.fulfill({
+      json: {
+        summary: { session_id: "sess-1", request_count: 5, providers: [], success_rate: 100 },
+        project: { root: "/data/src/github.com/kingfs/Trajecta", root_key: "/data/src/github.com/kingfs/Trajecta", source: "dsh_runtime_context" },
+        breakdown: { models: [], endpoints: [], failed_traces: 0 },
+        timeline: [],
+        traces: [],
+        analysis: [],
+      },
+    }),
+  );
+  await page.goto("/sessions/sess-1");
+  await expect(page.getByRole("link", { name: "Trajecta" })).toBeVisible();
+});
+
 test("session page reuses the step model in its own tabs", async ({ page }) => {
   await page.route("**/api/sessions/sess-1/steps*", (route) => route.fulfill({ json: firstPage }));
   await page.route("**/api/sessions/sess-1/trajectory", (route) => route.fulfill({ json: { steps: [], extra: { warnings: [] } } }));
@@ -254,6 +279,7 @@ test("session page reuses the step model in its own tabs", async ({ page }) => {
     route.fulfill({
       json: {
         summary: { session_id: "sess-1", request_count: 5, providers: [], success_rate: 100 },
+        project: { root: "/data/src/github.com/kingfs/Trajecta", root_key: "/data/src/github.com/kingfs/Trajecta", source: "dsh_runtime_context" },
         breakdown: { models: [], endpoints: [], failed_traces: 0 },
         timeline: [],
         traces: [],

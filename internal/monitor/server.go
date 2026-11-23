@@ -2141,6 +2141,38 @@ func observationTimingsViewFor(observation observe.TraceObservation, entry store
 	return &observationTimingsView{StartedAt: started, DurationMs: duration, TTFTMs: ttft}
 }
 
+// fillHeaderFromIndex fills the header fields a minimal cassette dropped from
+// the index row, leaving anything the file did carry alone.
+func fillHeaderFromIndex(header *recordHeaderView, index recordfile.RecordHeader) {
+	if header == nil {
+		return
+	}
+	if meta, ok := header.Meta.(recordfile.MetaData); ok {
+		if meta.DurationMs == 0 {
+			meta.DurationMs = index.Meta.DurationMs
+		}
+		if meta.TTFTMs == 0 {
+			meta.TTFTMs = index.Meta.TTFTMs
+		}
+		if meta.Error == "" {
+			meta.Error = index.Meta.Error
+		}
+		header.Meta = meta
+	}
+	if layout, ok := header.Layout.(recordfile.LayoutInfo); ok {
+		if !layout.IsStream {
+			layout.IsStream = index.Layout.IsStream
+		}
+		header.Layout = layout
+	}
+	if usage, ok := header.Usage.(recordfile.UsageInfo); ok {
+		empty := usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0
+		if empty {
+			header.Usage = index.Usage
+		}
+	}
+}
+
 // handleTraceXIR returns the Exchange IR audit projection of one cassette.
 // The projection is derived on demand from the raw exchange; it is not
 // persisted and does not replace the existing Observation view.
@@ -2228,6 +2260,12 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 			Usage:   parsed.Header.Usage,
 		},
 	}
+	// `trace.minimal_cassette` clears timing and usage from the prelude by
+	// design, so the header read from the file would report 0 ms and no tokens
+	// on exactly the deployments that record the most traffic. The index row is
+	// the durable copy of the same header, and the 统计 tab already reads it:
+	// without this the page says "0s" above a table that says "15m 6s".
+	fillHeaderFromIndex(&resp.Header, entry.Header)
 	if entry.SessionID != "" {
 		resp.Session = &traceSessionView{
 			SessionID:     entry.SessionID,

@@ -67,6 +67,39 @@ func TestExtractDeepSeekHarnessRuntimeContext(t *testing.T) {
 	}
 }
 
+// Older harness releases send the snapshot as its own user message introduced
+// by "Current runtime context" rather than wrapped in a system reminder. The
+// label and the quoted value are the same, so the declaration is too.
+func TestExtractDeepSeekHarnessUnwrappedSnapshot(t *testing.T) {
+	snapshot := `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+Current working directory: "/Users/kingfs/repos/git.yongzhen.wang/kingfs/SeniorEngineer".
+
+Current DSH file policy: workspace-write.`
+	decl := declarationOf(t, observation(
+		userMessage("0", "user", "please fix the bug"),
+		userMessage("1", "user", snapshot),
+	))
+	if decl.Root != "/Users/kingfs/repos/git.yongzhen.wang/kingfs/SeniorEngineer" {
+		t.Fatalf("Root = %q", decl.Root)
+	}
+	if decl.Source != SourceDSHRuntimeContext {
+		t.Fatalf("Source = %q", decl.Source)
+	}
+}
+
+// The label on its own, outside a known block, is still not a declaration: a
+// prompt can quote it, and that is exactly what the drift alarm is for.
+func TestExtractDeepSeekHarnessLabelWithoutBlockIsRejected(t *testing.T) {
+	outcome := Extract(observation(userMessage("0", "user", `the docs say Current working directory: "/repo/x".`)))
+	if outcome.Declaration != nil {
+		t.Fatalf("Declaration = %+v, want none for a quoted label", outcome.Declaration)
+	}
+	if len(outcome.Rejections) == 0 || outcome.Rejections[0].Reason != ReasonUnreadable {
+		t.Fatalf("Rejections = %+v, want the unreadable near miss", outcome.Rejections)
+	}
+}
+
 // A DeepSeek Harness session that changed directory carries both snapshots and
 // says the newer one supersedes the older, so the last value is the current one.
 func TestExtractLastSnapshotWins(t *testing.T) {

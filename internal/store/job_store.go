@@ -131,6 +131,63 @@ func (s *Store) ClaimParseJobs(limit int) ([]ParseJobRecord, error) {
 	return scanParseJobs(rows)
 }
 
+// ReclaimStaleParseJobs returns jobs whose worker died mid-run to the queue.
+//
+// The claim moves a row to running and nothing moves it back: a process killed
+// while parsing (a redeploy, an OOM) left its job running forever, so that trace
+// was never re-parsed and never got an observation, a finding, a resource index
+// or a project attribution. 734 such rows had accumulated on the reference
+// deployment, and they are what kept a project backfill from doing anything.
+//
+// The cutoff is what makes this safe next to a live worker: no parse takes
+// minutes, so a row that has been running past the cutoff belongs to a process
+// that is gone. Re-parsing is idempotent (every write is an upsert by trace).
+func (s *Store) ReclaimStaleParseJobs(olderThan time.Time) (int64, error) {
+	if olderThan.IsZero() {
+		return 0, nil
+	}
+	result, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'queued', last_error = ?, updated_at = ?
+		WHERE status = 'running' AND updated_at < ?
+	`, "reclaimed after an interrupted run", time.Now().UTC(), olderThan.UTC())
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	if count > 0 {
+		s.notifyChange(ChangeTraffic)
+	}
+	return count, nil
+}
+
+// ReclaimStaleAnalysisJobs is the analysis-job counterpart of
+// ReclaimStaleParseJobs, with the same cutoff reasoning.
+func (s *Store) ReclaimStaleAnalysisJobs(olderThan time.Time) (int64, error) {
+	if olderThan.IsZero() {
+		return 0, nil
+	}
+	result, err := s.db.Exec(`
+		UPDATE analysis_jobs
+		SET status = 'queued', last_error = ?, updated_at = ?
+		WHERE status = 'running' AND updated_at < ?
+	`, "reclaimed after an interrupted run", time.Now().UTC(), olderThan.UTC())
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	if count > 0 {
+		s.notifyChange(ChangeTraffic)
+	}
+	return count, nil
+}
+
 func (s *Store) MarkParseJobDone(id int64) error {
 	s.notifyChange(ChangeTraffic)
 	_, err := s.db.Exec(`

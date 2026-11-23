@@ -175,6 +175,14 @@ export function summarizeSessionItems(items = []) {
   };
 }
 
+/** The last path segment of a project root, for a tag that stays narrow. */
+export function projectName(root) {
+  const trimmed = String(root || "").replace(/[\\/]+$/, "");
+  if (!trimmed) return "";
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || trimmed;
+}
+
 export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "", focus = "", anchor = "") {
   const params = new URLSearchParams();
   const normalizedTab = normalizeTraceTab(tab);

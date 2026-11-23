@@ -415,10 +415,23 @@ func matchText(text string) []candidate {
 // JSON-quoted, which is why the pattern ends at the closing quote.
 const dshPrefix = "Current working directory:"
 
+// dshPreamble introduces the runtime-context snapshot in the releases that send
+// it as its own user message instead of inside a <system-reminder> block.
+const dshPreamble = "current runtime context"
+
 func matchDSH(text string) []candidate {
 	block := containerBody(text, "<system-reminder>", "</system-reminder>")
 	if block == "" {
-		return nil
+		// Older DeepSeek Harness releases put the same snapshot in a plain user
+		// message introduced by the preamble. 2,548 recorded traces on the
+		// reference deployment use that shape and every one of them was rejected
+		// as unreadable, so the attribution rate was zero for that traffic.
+		// Requiring the preamble keeps the rule anchored: the label alone is
+		// still a near miss, which is what catches a prompt that merely quotes it.
+		if !strings.Contains(strings.ToLower(text), dshPreamble) {
+			return nil
+		}
+		block = text
 	}
 	var out []candidate
 	for _, line := range strings.Split(block, "\n") {

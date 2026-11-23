@@ -55,6 +55,7 @@ import {
   healthTone,
   metricThresholdTone,
   normalizeTraceTab,
+  projectName,
   resolveThresholdState,
   setOrDeleteParam,
   summarizeTraceFailure,
@@ -367,6 +368,20 @@ export function TraceDetailPage() {
               {harnessTags.map((tag) => (
                 <InlineTag key={tag}>{harnessTagLabel(tag, t)}</InlineTag>
               ))}
+              {detail.data?.project?.root ? (
+                <Link
+                  to={`/traces?tab=sessions&project=${encodeURIComponent(detail.data.project.root_key || "")}`}
+                  title={[
+                    detail.data.project.root,
+                    detail.data.project.multiple_roots ? t("traceDetail.projectMultiple") : "",
+                    detail.data.project.source || "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                >
+                  <InlineTag tone="green">{projectName(detail.data.project.root)}</InlineTag>
+                </Link>
+              ) : null}
               {selectedUpstreamID ? (
                 <span title={selectedUpstreamID}>
                   <InlineTag tone="green">{selectedUpstreamProviderPreset || compactUpstreamID(selectedUpstreamID)}</InlineTag>

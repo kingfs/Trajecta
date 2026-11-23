@@ -1240,6 +1240,7 @@ export default {
 
   "traceDetail.traceFallback": "追踪详情",
   "traceDetail.metaSession": "会话",
+  "traceDetail.projectMultiple": "本次请求声明了多个目录，取最后一个",
   "traceDetail.metaTime": "时间",
   "traceDetail.metaEndpoint": "端点",
   "traceDetail.harness": "客户端 harness",
@@ -1483,6 +1484,8 @@ export default {
   "projects.lastActive": "最近活动",
   "projects.openSessions": "打开该项目的会话列表",
   "projects.filteredBy": "当前按项目筛选",
+  "projects.switchedTo": "已切换到 {root}",
+  "projects.openProject": "打开该项目的会话列表",
   "projects.clearFilter": "清除项目筛选",
   "projects.noFound": "没有找到项目",
   "projects.noFoundDetail": "当前窗口内没有会话声明过工作目录，或历史记录还没有回填项目索引。",

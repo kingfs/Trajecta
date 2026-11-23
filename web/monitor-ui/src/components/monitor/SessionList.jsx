@@ -4,14 +4,7 @@ import { Link } from "react-router-dom";
 import { InlineTag, StackIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
 import { useI18n } from "../../lib/i18n";
-import { formatDateTime, formatDuration, formatProviderTag, formatTokenCount } from "../../lib/monitor";
-
-/** The last path segment, which is what identifies a project at a glance. */
-function projectName(root) {
-  const trimmed = String(root || "").replace(/[\\/]+$/, "");
-  const parts = trimmed.split(/[\\/]/);
-  return parts[parts.length - 1] || trimmed;
-}
+import { formatDateTime, formatDuration, formatProviderTag, formatTokenCount, projectName } from "../../lib/monitor";
 
 export function SessionList({ items }) {
   const { t } = useI18n();

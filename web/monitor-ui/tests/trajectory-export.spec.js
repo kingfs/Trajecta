@@ -32,14 +32,14 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
     reads.push(route.request().headers().authorization);
     await route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify(record) + "\n" });
   });
-  // The detail page previews the trajectory, so this URL is already read once
-  // when the panel mounts. The click is what turns the same URL into a download,
-  // so what is asserted here is the request the click adds - and the fact that
-  // nothing is downloaded before it.
-  const previewRead = page.waitForResponse("**/api/sessions/export-session/trajectory");
+  // The ATIF preview re-parses every cassette of the session, so it is read
+  // only when the collapsed block on the 轨迹 tab is opened. What is asserted
+  // first is that opening the page reads nothing.
   await page.goto("/sessions/export-session");
-  await previewRead;
-  expect(reads).toHaveLength(1);
+  await page.getByRole("button", { name: /^Trajectory/ }).click();
+  expect(reads, "the page must not re-parse the session on mount").toHaveLength(0);
+  await page.getByText(/ATIF session trajectory/).click();
+  await expect.poll(() => reads.length).toBe(1);
   const button = page.getByRole("button", { name: "Export trajectory (ATIF)" });
   await expect(button).toBeEnabled();
   const downloadPromise = page.waitForEvent("download");
@@ -58,9 +58,10 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
 test("session ATIF export shows a failure and allows retry", async ({ page }) => {
   await page.route("**/api/sessions/export-session/trajectory", (route) => route.fulfill({ status: 404, json: { error: "Session has no recorded requests" } }));
   await page.goto("/sessions/export-session");
-  // The ATIF preview lives in the 轨迹 tab now (collapsed unless the read
-  // failed), so the page-level error is asserted after opening that tab.
+  // The ATIF preview lives in the 轨迹 tab now (collapsed until opened), so the
+  // error is asserted after opening the tab and the block.
   await page.getByRole("button", { name: /^Trajectory/ }).first().click();
+  await page.getByText(/ATIF session trajectory/).click();
   const button = page.getByRole("button", { name: "Export trajectory (ATIF)" });
   await button.click();
   // The panel's read runs into the same 404 as the click, so the message shows

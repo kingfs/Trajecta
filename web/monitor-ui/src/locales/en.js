@@ -1241,6 +1241,7 @@ export default {
 
   "traceDetail.traceFallback": "trace detail",
   "traceDetail.metaSession": "session",
+  "traceDetail.projectMultiple": "this request declared several roots; the last one was used",
   "traceDetail.metaTime": "time",
   "traceDetail.metaEndpoint": "endpoint",
   "traceDetail.harness": "Client harness",
@@ -1485,6 +1486,8 @@ export default {
   "projects.lastActive": "Last active",
   "projects.openSessions": "Open this project's sessions",
   "projects.filteredBy": "Filtered by project",
+  "projects.switchedTo": "switched to {root}",
+  "projects.openProject": "Open this project's sessions",
   "projects.clearFilter": "Clear the project filter",
   "projects.noFound": "No projects found",
   "projects.noFoundDetail": "No session in this window declared a working directory, or the project index has not been backfilled yet.",
