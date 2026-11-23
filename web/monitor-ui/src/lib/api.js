@@ -59,6 +59,10 @@ export const apiPaths = {
   traceReparse: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reparse`,
   traceReanalyze: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reanalyze`,
   sessions: "/api/sessions",
+  // One row per project directory a harness declared in its prompt, with the
+  // sessions attributed to it. `project` on /api/sessions filters by root_key.
+  projects: "/api/projects",
+  projectsBackfill: "/api/projects/backfill",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
   // The trajectory endpoint caps the default view (about 500 traces) and can
   // stream the complete session as NDJSON instead of buffering it.

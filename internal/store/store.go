@@ -391,6 +391,12 @@ type ListFilter struct {
 	// bound", so a caller that sends no window - including every existing API
 	// caller - keeps the list it had.
 	Since time.Time
+	// Project filters sessions by the project root key they were attributed to
+	// (the value `projectid` produced and session_projects stores). It is a
+	// session-level filter: a session belongs to the project it started in, so
+	// both session read paths answer it from session_projects rather than from
+	// a per-request declaration.
+	Project string
 }
 
 type GroupingInfo struct {

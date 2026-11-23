@@ -527,11 +527,11 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 	if err != nil {
 		return Result{}, err
 	}
-	// Refresh the resource index on every reparse, including a rescan: the
-	// index is derived from the observation and this is the only path that has
-	// the parsed nodes. A rescan that used to be findings-only now also answers
-	// "what did this trace touch".
-	if err = s.store.SaveTraceResources(job.TargetID, observeworker.StoreResourceAccesses(obs)); err != nil {
+	// Refresh the derived indexes on every reparse, including a rescan: they
+	// are derived from the observation and this is the only path that has the
+	// parsed nodes. A rescan that used to be findings-only now also answers
+	// "what did this trace touch" and "which project was it working in".
+	if err = observeworker.PersistTraceDerivations(s.store, job.TargetID, obs); err != nil {
 		return Result{}, err
 	}
 

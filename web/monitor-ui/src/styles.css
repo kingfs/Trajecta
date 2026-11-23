@@ -2027,6 +2027,99 @@ a:focus-visible {
   background: var(--surface-inset);
 }
 
+/* The project list: one row per declared project directory. It reuses the
+   session table's chrome but has its own columns (path, sessions, requests,
+   tokens, last activity), so it declares its own grid rather than inheriting a
+   column width meant for a session row. */
+.project-table {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface-inset);
+}
+
+.project-table-head,
+.project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(80px, 0.55fr) minmax(80px, 0.55fr) minmax(110px, 0.7fr) minmax(150px, 0.9fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.project-table-head {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-family: var(--font-sans);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.project-row {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-row:hover {
+  background: var(--surface-3);
+}
+
+.project-path-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-path {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+/* The active-filter chip: a list opened from another view (project -> its
+   sessions) shows the filter it was opened with and removes it in place. */
+.filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.filter-chip-clear {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.filter-chip-clear:hover {
+  color: var(--text);
+}
+
 .trace-table-head,
 .trace-row,
 .session-table-head,

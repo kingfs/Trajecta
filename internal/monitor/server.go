@@ -225,10 +225,14 @@ type sessionListItem struct {
 	AvgTTFT        int       `json:"avg_ttft"`
 	TotalDuration  int64     `json:"total_duration_ms"`
 	StreamCount    int       `json:"stream_count"`
+	// Project is the project directory the client harness declared about
+	// itself; nil when the traffic carried no declaration.
+	Project *projectView `json:"project,omitempty"`
 }
 
 type sessionDetailResponse struct {
 	Summary     sessionListItem       `json:"summary"`
+	Project     *projectView          `json:"project,omitempty"`
 	Breakdown   sessionBreakdownView  `json:"breakdown"`
 	Timeline    []sessionTimelineItem `json:"timeline"`
 	Performance performanceView       `json:"performance"`
@@ -271,6 +275,9 @@ type detailResponse struct {
 	Audit *traceAuditView `json:"audit,omitempty"`
 	// Resources is the number of distinct paths and URLs indexed for this trace.
 	Resources int `json:"resources"`
+	// Project is the project directory this request declared, which is the
+	// trace-level fact behind the session attribution.
+	Project *projectView `json:"project,omitempty"`
 }
 
 type traceResponsesAuditRef struct {
@@ -839,6 +846,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandlerWithSuppression(st, opt.Router, suppressionCheckerFrom(opt.SecretSuppressions), opt.Detectors), monitorVerifier))
 	mux.HandleFunc("/api/resources", monitorAuthRequired(resourcesAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/resources/backfill", monitorAdminRequired(resourceBackfillAPIHandler(st), monitorVerifier))
+	// Project attribution: the directory a harness declared in its prompt, per
+	// session (the list this page reads) and per trace (the detail field).
+	mux.HandleFunc("/api/projects", monitorAuthRequired(projectsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/projects/backfill", monitorAdminRequired(projectBackfillAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), monitorVerifier))
@@ -1676,6 +1687,10 @@ func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 		page := parseInt(r.URL.Query().Get("page"), 1)
 		pageSize := parsePageSize(r.URL.Query().Get("page_size"))
 		filter := parseListFilter(r)
+		// `project` is session-scoped, so it is parsed here rather than in
+		// parseListFilter: the trace list has no project facet, and a parameter
+		// it silently ignored would read as a filter that did not work.
+		filter.Project = strings.TrimSpace(r.URL.Query().Get("project"))
 		result, err := st.ListSessionPage(page, pageSize, filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
@@ -1691,6 +1706,10 @@ func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		for _, item := range result.Items {
 			resp.Items = append(resp.Items, sessionSummaryItem(item))
+		}
+		if err := attachSessionProjects(st, resp.Items); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query session projects: " + err.Error()})
+			return
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -1759,6 +1778,12 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 
 		resp := sessionDetailResponse{
 			Summary: sessionSummaryItem(summary),
+		}
+		if rollup, ok, err := st.GetSessionProject(sessionID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query session project: " + err.Error()})
+			return
+		} else if ok {
+			resp.Project = projectViewFromSession(rollup)
 		}
 		for _, entry := range traces {
 			item := traceListItemFromEntry(entry)
@@ -2125,6 +2150,12 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 			SessionID:     entry.SessionID,
 			SessionSource: entry.SessionSource,
 		}
+	}
+	if traceProject, ok, err := st.GetTraceProject(entry.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query trace project: " + err.Error()})
+		return
+	} else if ok {
+		resp.Project = projectViewFromTrace(traceProject)
 	}
 	if health := selectedUpstreamHealthView(rtr, entry.Header.Meta.SelectedUpstreamID); health != nil {
 		resp.SelectedUpstreamHealth = health

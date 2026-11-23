@@ -6,6 +6,13 @@ import { EmptyState } from "../common/EmptyState";
 import { useI18n } from "../../lib/i18n";
 import { formatDateTime, formatDuration, formatProviderTag, formatTokenCount } from "../../lib/monitor";
 
+/** The last path segment, which is what identifies a project at a glance. */
+function projectName(root) {
+  const trimmed = String(root || "").replace(/[\\/]+$/, "");
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || trimmed;
+}
+
 export function SessionList({ items }) {
   const { t } = useI18n();
   if (!items.length) {
@@ -28,6 +35,11 @@ export function SessionList({ items }) {
               <strong className="trace-model-name">{item.last_model || item.session_id}</strong>
               <div className="trace-tag-group">
                 <InlineTag tone="accent">{item.session_source || "session"}</InlineTag>
+                {item.project ? (
+                  <InlineTag tone="default" title={item.project.root}>
+                    {projectName(item.project.root)}
+                  </InlineTag>
+                ) : null}
                 {(item.providers || []).map((provider) => (
                   <InlineTag key={provider}>{formatProviderTag(provider)}</InlineTag>
                 ))}

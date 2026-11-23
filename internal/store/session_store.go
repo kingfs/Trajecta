@@ -324,6 +324,12 @@ func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
 		clauses = append(clauses, `s.last_seen >= ?`)
 		args = append(args, filter.Since.UTC().Format(timeLayout))
 	}
+	if project := strings.TrimSpace(filter.Project); project != "" {
+		// One session belongs to one project, so this is a session-level
+		// predicate, expressible from the summary row's session id alone.
+		clauses = append(clauses, `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = s.session_id AND spj.root_key = ?)`)
+		args = append(args, project)
+	}
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
 		clauses = append(clauses, `s.failed_request = 0`)
@@ -371,6 +377,12 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 		sessionWhere = andSQL(sessionWhere, `EXISTS (SELECT 1 FROM logs f WHERE f.session_id = s.session_id AND `+clientVisibleLogClause("f")+` AND f.status_code NOT BETWEEN 200 AND 299)`)
 	}
 	sessionWhere = andSQL(sessionWhere, whereSQL)
+	// Appended last so the placeholder order matches whereArgs, which the count
+	// and the per-session aggregate both reuse.
+	if project := strings.TrimSpace(filter.Project); project != "" {
+		sessionWhere = andSQL(sessionWhere, `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = s.session_id AND spj.root_key = ?)`)
+		whereArgs = append(whereArgs, project)
+	}
 	sessionIDs, total, err := s.listSessionPageIDs(sessionWhere, whereArgs, page, pageSize)
 	if err != nil {
 		return SessionPageResult{}, err
