@@ -75,7 +75,7 @@ trace 列表、trace 详情、会话详情与上游详情上的指标统一渲�
 
 页面标题右侧是统一的 今天 / 近 7 天 / 近 30 天 / 全部 选择：请求与会话两个标签页共用同一个窗口，默认与全站一致为 今天，切换窗口会回到第 1 页。窗口在服务端是可选参数，`GET /api/traces` 不带 `window` 时仍然表示全部记录（该默认值面向早于窗口控件的调用方，控制台自己总是显式传参）。会话页顶部的 token 汇总与请求页一样按 K/M/B 压缩显示。
 
-请求与会话两个标签页。
+请求、会话与项目三个标签页。
 
 **请求**（默认）：逐请求 trace 列表，支持过滤与分页（`page_size` 上限 200，超出按 200 处理，非正数按默认 50），展示 endpoint、model、状态码、duration、TTFT、token。1100px 以上五列弹性网格按 `1.9fr / 72px / 1.3fr / 1.45fr / 118px` 分配宽度，模型名不再在 1280px 被压到 100px，表头 sticky 在页头下方；1100px 以下每行变成一张紧凑卡（状态与操作在右轨、延迟一行），600px 以下只保留输入/输出/总量 token 与总耗时/TTFT 两条延迟读数，50 条 trace 不再把手机页面推到一万多像素。失败行不再整行染色，状态码仍是红色。可以进入 trace detail，也可以跳到对应的模型、渠道或路由上下文。列表数据来自应用库索引；分页器带页码输入（314k traces / 50 条一页时可直接跳到第 6,000 页），不再是只能前后翻。
 - 识别到客户端 harness 的行在 endpoint / 上游 / stream 标签前显示一枚可点击的 harness 标签（显示名 + 版本，如 `Claude Code 2.0.14`；上游 child exchange 不显示）。点击标签把当前流量页按该 harness 过滤（写入 `harness` 查询参数并回到第 1 页）；悬停给出 canonical id、类型、置信度与能力/SDK 标签。列表字段与过滤语义见 [客户端 Harness 识别](./HARNESS_DETECTION.md)。
@@ -98,6 +98,14 @@ session ID 的抽取顺序为：
 4. `X-Codex-Window-Id` 的前缀
 
 适合分析 Codex、Claude Code 等 agent 在一轮任务中多次模型调用的整体行为。
+
+**项目**：按客户端**声明**的工作目录聚合会话，回答「某个项目下有多少会话」。项目不是从工具调用路径推断出来的，只认请求 prompt 里的固定声明：DeepSeek Harness 运行时上下文的 `<system-reminder>` 块（`Current working directory: "…"`）、Claude Code 的 `<env>` 块（`Primary working directory:` / 旧版 `Working directory:`）、Codex 的 `<environment_context>`（`<cwd>`，多根工作区回退到 `<workspace_roots><root>`）。同一请求里出现多条声明时取最后一条（这些 harness 的语义是后者覆盖前者），历史里既没有容器标签也没有绝对路径的一律不计。
+
+- 归属规则：会话的项目取该会话**最早一条带声明**的 trace（按 `recorded_at`，与解析完成顺序无关），因此中途 `cd` 或 compaction 把早期声明摘掉都不会改变主项目；`latest_root` 与 `switch_count` 记录之后的变更。没有声明的会话（纯 SDK 流量、未识别的 harness 格式）不属于任何项目。
+- 页面顶部给出归属覆盖率（窗口内已归属会话 / 窗口内会话总数），没有声明的会话不会被算成 0。窗口判定与会话页一致（会话在窗口内至少有一条请求即计入），每行的请求数与 token 覆盖该会话的整段历史，因此与点进去看到的会话行同源；聚合直接读 `logs`，不依赖 `session_summaries` 是否回填。行内显示声明来源，点击一行跳到会话标签页并按该项目过滤（`?tab=sessions&project=<root_key>`），会话行的标签组里也会显示所属项目。
+- **合并**：同一仓库在容器、宿主机、worktree 里是不同字符串，会显示成多个项目。管理员可以对一行点「合并」并选择目标项目，服务端写入一条 `project_aliases`（读时生效）：该路径下的会话从此计入目标项目，历史事实与派生行都不改写，随时可「解除合并」。过滤目标项目时，用规范路径或用被合并的任一路径都会列出整组会话。合并会在项目列表里以「N 条路径」标注。
+- **识别健康**：项目页底部单独统计「明确声明并识别」与「看到了声明块却没解析出可用路径」的请求数，并按拒收原因（占位符、相对路径、系统目录、`~/`、声明块无可读值）与客户端 harness 分组，附最近 20 条未识别请求的入口。后者突然变多通常意味着某个 harness 改了提示词格式——这是格式漂移的早期告警。
+- 端点：`GET /api/projects?window=&page=&page_size=&q=`（默认窗口为「全部」）、`GET /api/projects/detection?window=`、`GET|POST /api/project-aliases`、`DELETE /api/project-aliases?alias_key=`（管理员）；会话列表 `GET /api/sessions?project=<root_key>` 在两条读路径上语义一致；trace 详情与会话详情分别返回 trace 级声明与会话回滚（会话侧返回合并后的规范路径）。历史数据用页头的「回填历史」按钮或 `POST /api/projects/backfill`（管理员，`{window,limit}`）排队重解析，与资源索引的回填同一机制：没有声明的 trace 不会留下行，因此重复调用会重新解析它们。
 
 ##### trace 详情：轨迹与统计
 

@@ -4,6 +4,7 @@ import { TabbedPage } from "../components/TabbedPage";
 import { WindowToggle } from "../components/common/Tabs";
 import { RequestsPanel } from "./traffic/RequestsPanel";
 import { SessionsPanel } from "./traffic/SessionsPanel";
+import { ProjectsPanel } from "./traffic/ProjectsPanel";
 import { useI18n } from "../lib/i18n";
 import { DEFAULT_WINDOW, normalizeListWindow, setOrDeleteParam } from "../lib/monitor";
 
@@ -31,6 +32,7 @@ export function TrafficPage() {
       tabs={[
         { id: "requests", label: t("traffic.tabRequests"), element: <RequestsPanel />, actions },
         { id: "sessions", label: t("traffic.tabSessions"), element: <SessionsPanel />, actions },
+        { id: "projects", label: t("traffic.tabProjects"), element: <ProjectsPanel />, actions },
       ]}
     />
   );

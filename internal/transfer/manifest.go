@@ -58,6 +58,7 @@ var tableExportOrder = []string{
 	"channel_models",
 	"model_aliases",
 	"model_catalog",
+	"project_aliases",
 	"app_settings",
 	"channel_probe_runs",
 	"responses",

@@ -55,7 +55,7 @@ provider detection 属于部分实现：手动 `provider probe`、只读 `provid
 
 当前应用库中的主要表：
 
-- trace 与观测：`logs`、`trace_observations`、`trace_findings`、`resources` / `trace_resources`（路径与 URL 的资源索引）、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
+- trace 与观测：`logs`、`trace_observations`、`trace_findings`、`resources` / `trace_resources`（路径与 URL 的资源索引）、`trace_projects` / `session_projects`（prompt 声明的项目目录与会话归属，含拒收原因）、`project_aliases`（操作员路径合并，读时生效）、`analysis_jobs`、`analysis_runs`、`parse_jobs`、`parser_versions`、`system_events`。
 - 凭据遮蔽：`credential_mask_audits`（每个被替换的值一行，含真值、假值与落盘形态；见 [凭据遮蔽](./SECRET_MASKING.md)）。
 - Responses 与审计：`responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`。
 - 渠道与模型：`channel_configs`、`channel_models`、`channel_probe_runs`、`model_catalog`、`model_aliases`、`upstream_targets`、`upstream_models`。
@@ -133,7 +133,7 @@ About 页由 `GET /api/about`（构建信息、仓库链接与发布检查开关
 
 出站代理由系统页的 Network proxy 标签页维护（`GET`/`PATCH /api/settings/network-proxy`，admin-only，策略存于 `app_settings.network.proxy`）：字段为 `enabled`、`http_proxy`、`https_proxy`、`no_proxy`，按 Linux 语义解释，`https_proxy` 留空继承 `http_proxy`，`no_proxy` 支持域名后缀、IP、CIDR、`host:port` 与 `*`，回环地址始终直连。默认关闭且关闭时不读取进程环境变量；保存后立即作用于透传反向代理、本地 Responses 的内部调用、模型发现与 provider probe、web 搜索和 GitHub 版本检查，无需重启。渠道高级选项另有**渠道网络代理**开关（`channel_configs.proxy_json`，`GET/PATCH /api/channels/{id}` 的 `proxy` 字段）：关闭时跟随系统策略，开启后只有该渠道的转发、本地 Responses、tokenize、模型发现与各类 probe 使用渠道自己的 `http_proxy`/`https_proxy`/`no_proxy`，语义与系统页一致。详见 [Monitor 指南](./MONITOR_GUIDE.md) 的系统页与渠道页一节。
 
-主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/model-square`、`/api/channels`、`/api/routing/inspect`（复用 `router.Explain` dry-run，与转发路径同一 planner）、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-model-test`、`/api/provider-model-detect`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
+主要 HTTP API：`/api/overview`、`/api/about`、`/api/version/latest`、`/api/traces`、`/api/sessions`、`/api/sessions/{id}/trajectory`、`/api/models`、`/api/model-square`、`/api/channels`、`/api/routing/inspect`（复用 `router.Explain` dry-run，与转发路径同一 planner）、`/api/responses/function-executors`、`/api/responses/audit/trace`、`/api/responses/audit/tool-calls`、`/api/provider-probe/report`、`/api/provider-probe/report/apply`、`/api/provider-model-test`、`/api/provider-model-detect`、`/api/settings/routing`、`/api/settings/channels`、`/api/settings/network-proxy`、`/api/model-aliases`、`/api/events`、`/api/findings`、`/api/resources`、`/api/traces/{id}/resources`、`/api/resources/backfill`、`/api/projects`、`/api/projects/detection`、`/api/project-aliases`、`/api/projects/backfill`、`/api/analysis`、`/api/upstreams`、`/api/system/host`、`/api/system/runtime`、`/api/system/db`、`/api/system/slow-queries`、`/api/auth/*`。Monitor 的列表与统计来自应用数据库。
 
 使用说明见 [./MONITOR_GUIDE.md](./MONITOR_GUIDE.md)。
 

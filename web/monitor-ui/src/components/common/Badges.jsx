@@ -26,8 +26,12 @@ import {
 } from "lucide-react";
 import { formatDuration, formatRawDuration, formatRawNumber, formatTokenCount } from "../../lib/monitor";
 
-export function InlineTag({ children, tone = "default" }) {
-  return <span className={`inline-tag inline-tag-${tone}`}>{children}</span>;
+export function InlineTag({ children, tone = "default", title, className = "" }) {
+  return (
+    <span className={`inline-tag inline-tag-${tone}${className ? ` ${className}` : ""}`} title={title}>
+      {children}
+    </span>
+  );
 }
 
 /**

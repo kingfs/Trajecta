@@ -39,6 +39,49 @@ var sqliteSchemaStatements = []string{
 		);`,
 	`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model);`,
+	// Project attribution: the directory a client harness declared about itself
+	// in the request prompt, per trace and rolled up per session. Both are
+	// derived from the cassettes; the raw .http file stays the source of truth.
+	`CREATE TABLE IF NOT EXISTS trace_projects (
+			trace_id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'declared',
+			root TEXT NOT NULL DEFAULT '',
+			root_key TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			evidence TEXT NOT NULL DEFAULT '',
+			multiple_roots bool NOT NULL DEFAULT false,
+			created_at datetime NOT NULL
+		);`,
+	`CREATE INDEX IF NOT EXISTS idx_trace_projects_session ON trace_projects(session_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_trace_projects_root_key ON trace_projects(root_key);`,
+	`CREATE TABLE IF NOT EXISTS session_projects (
+			session_id TEXT PRIMARY KEY,
+			root TEXT NOT NULL DEFAULT '',
+			root_key TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			latest_root TEXT NOT NULL DEFAULT '',
+			latest_root_key TEXT NOT NULL DEFAULT '',
+			switch_count INTEGER NOT NULL DEFAULT 0,
+			first_trace_id TEXT NOT NULL DEFAULT '',
+			first_seen datetime NOT NULL,
+			last_declared_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+	`CREATE INDEX IF NOT EXISTS idx_session_projects_root_key ON session_projects(root_key, last_declared_at DESC);`,
+	// Operator-maintained path equivalence: one raw root key mapped onto the
+	// project it really belongs to. Applied when reading, so a merge does not
+	// rewrite any derived row and can be undone by deleting the alias.
+	`CREATE TABLE IF NOT EXISTS project_aliases (
+			alias_key TEXT PRIMARY KEY,
+			canonical_key TEXT NOT NULL DEFAULT '',
+			canonical_root TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+	`CREATE INDEX IF NOT EXISTS idx_project_aliases_canonical ON project_aliases(canonical_key);`,
 	// The Overview's hourly bucket aggregate is not created. It was written on
 	// every recording and read by nothing - Overview() queries the log rows
 	// directly - so an existing database keeps its two tables untouched and a new

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kingfs/Trajecta/internal/detector"
+	"github.com/kingfs/Trajecta/internal/projectid"
 	"github.com/kingfs/Trajecta/internal/resources"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/internal/xirobserve"
@@ -123,12 +124,13 @@ func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
 		return err
 	}
-	// The resource index is part of parsing, not a detector: it answers which
-	// paths and URLs the exchange carried, and it is what the trace detail and
-	// the resources page read. Saving it here is what makes it automatic - an
-	// audit that only ran behind `analyze scan` would be empty for every
-	// normally recorded trace.
-	if err := w.store.SaveTraceResources(job.TraceID, StoreResourceAccesses(obs)); err != nil {
+	// The derived indexes are part of parsing, not a detector: the resource
+	// index answers which paths and URLs the exchange carried, the project index
+	// answers which project the client said it was working in, and the trace
+	// detail and list pages read both. Saving them here is what makes them
+	// automatic - an audit that only ran behind `analyze scan` would be empty
+	// for every normally recorded trace.
+	if err := PersistTraceDerivations(w.store, job.TraceID, obs); err != nil {
 		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
 		return err
 	}
@@ -162,6 +164,56 @@ func (w *Worker) scanFindings(ctx context.Context, traceID string, obs observe.T
 	if err := w.store.SaveFindings(traceID, findings); err != nil {
 		slog.Warn("Save auto findings failed", "trace_id", traceID, "error", err)
 	}
+}
+
+// PersistTraceDerivations writes the indexes derived from one parsed exchange:
+// the resources it named and the project it declared. Every writer that turns a
+// cassette into an observation calls this - the parse worker and the
+// reanalysis service - so a reparse cannot leave one index ahead of the other.
+func PersistTraceDerivations(st *store.Store, traceID string, obs observe.TraceObservation) error {
+	if err := st.SaveTraceResources(traceID, StoreResourceAccesses(obs)); err != nil {
+		return err
+	}
+	return PersistTraceProject(st, traceID, obs)
+}
+
+// PersistTraceProject records the project one trace declared and refreshes its
+// session's rollup.
+//
+// A trace that declares nothing still replaces its row with nothing: the parse
+// may be a reparse of an older cassette, and a declaration the extractor no
+// longer finds must not survive as a stale project.
+func PersistTraceProject(st *store.Store, traceID string, obs observe.TraceObservation) error {
+	sessionID, err := st.SessionIDForTrace(traceID)
+	if err != nil {
+		return err
+	}
+	outcome := projectid.Extract(obs)
+	var record *store.ProjectRecord
+	switch {
+	case outcome.Declaration != nil:
+		record = &store.ProjectRecord{
+			Root:          outcome.Declaration.Root,
+			RootKey:       outcome.Declaration.Key,
+			Source:        string(outcome.Declaration.Source),
+			MultipleRoots: outcome.Declaration.MultipleRoots,
+		}
+	case len(outcome.Rejections) > 0:
+		// Keep the reason, not just the absence of a project: a harness that
+		// changed its prompt format must be distinguishable from traffic that
+		// declares nothing at all.
+		rejection := outcome.Rejections[0]
+		record = &store.ProjectRecord{
+			Rejected: true,
+			Source:   string(rejection.Source),
+			Reason:   string(rejection.Reason),
+			Evidence: rejection.Evidence,
+		}
+	}
+	if err := st.SaveTraceProject(traceID, sessionID, record); err != nil {
+		return err
+	}
+	return st.RebuildSessionProject(sessionID)
 }
 
 // StoreResourceAccesses adapts the extracted values to the write shape without

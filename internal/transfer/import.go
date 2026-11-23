@@ -193,6 +193,17 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 		result.SessionRebuilt = true
 	}
 	result.SessionRebuildDur = time.Since(rebuildStart)
+	// Project attribution is derived from the cassettes, so the bundle cannot
+	// carry it. Queue a bounded reparse instead of leaving the project page
+	// empty until an operator remembers the backfill endpoint; the parse worker
+	// drains the queue when `serve` starts.
+	if queued, err := st.EnqueueProjectBackfill(time.Time{}, 5000); err != nil {
+		result.warn("project attribution backfill was not queued (%v); run POST /api/projects/backfill", err)
+		log.Warnf("project attribution backfill not queued: %v", err)
+	} else if queued > 0 {
+		result.ProjectBackfillQueued = queued
+		log.Infof("queued %d parse jobs to rebuild project attribution after import", queued)
+	}
 	result.Duration = time.Since(start)
 	log.Infof("import committed: %d tables, %d channels created, %d channels reused, %d cassettes copied, %d updated",
 		len(result.Tables), len(result.ChannelsCreated), len(result.ChannelReuses),
@@ -238,6 +249,8 @@ func dispatchTable(s *importState, table string, body io.Reader, size int64, tar
 		return s.handleChannelModels(body, size)
 	case "model_aliases":
 		return s.handleModelAliases(body, size)
+	case "project_aliases":
+		return s.handleProjectAliases(body, size)
 	case "model_catalog":
 		return s.handleModelCatalog(body, size)
 	case "app_settings":

@@ -29,6 +29,7 @@ var requestCleanupDerivedTables = []string{
 	"trace_observations",
 	"trace_findings",
 	"trace_resources",
+	"trace_projects",
 	"credential_mask_audits",
 	"credential_mask_event_states",
 	"analysis_runs",
@@ -404,6 +405,13 @@ func (s *Store) ApplyRequestCleanup(filter RequestCleanupFilter, opts RequestCle
 	}
 	result.RebuiltSessions = rebuilt
 	result.RemovedSessionSummaries = removed
+
+	// The project rollup is derived from trace_projects, which the derived-table
+	// delete above may just have emptied for a session; rebuild it in the same
+	// transaction so a deleted trace cannot leave a stale attribution behind.
+	if err := s.rebuildSessionProjectsTx(tx, plan.SessionIDs); err != nil {
+		return result, err
+	}
 
 	if result.PrunedResources, err = pruneOrphanResourcesTx(tx, s); err != nil {
 		return result, err

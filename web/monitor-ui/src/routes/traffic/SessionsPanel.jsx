@@ -21,6 +21,10 @@ export function SessionsPanel() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
+  // The project filter is set by the project list (and survives a tab switch
+  // like every other query parameter); it is not one of the text filters, so it
+  // has its own chip and its own clear action.
+  const project = searchParams.get("project") || "";
   const windowValue = normalizeListWindow(searchParams.get("window"));
   const [filters, setFilters] = useState({ query, provider, model });
   const requestParams = new URLSearchParams({
@@ -36,8 +40,11 @@ export function SessionsPanel() {
   if (model) {
     requestParams.set("model", model);
   }
+  if (project) {
+    requestParams.set("project", project);
+  }
   requestParams.set("window", windowValue);
-  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model, windowValue]);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model, project, windowValue]);
 
   useEffect(() => {
     setFilters({ query, provider, model });
@@ -57,6 +64,12 @@ export function SessionsPanel() {
     setOrDeleteParam(next, "q", filters.query);
     setOrDeleteParam(next, "provider", filters.provider);
     setOrDeleteParam(next, "model", filters.model);
+    setSearchParams(next);
+  };
+  const clearProject = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("project");
+    next.set("page", "1");
     setSearchParams(next);
   };
   const resetFilters = () => {
@@ -88,6 +101,16 @@ export function SessionsPanel() {
         <div className="panel-head">
           <div>
             <h2>{t("sessions.recentTitle")}</h2>
+            {project ? (
+              <div className="filter-chip-row">
+                <span className="filter-chip" title={t("projects.filteredBy")}>
+                  <span className="mono">{project}</span>
+                  <button type="button" className="filter-chip-clear" onClick={clearProject} aria-label={t("projects.clearFilter")}>
+                    ×
+                  </button>
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="panel-head-actions">
             <Pager page={data?.page ?? page} totalPages={Math.max(data?.total_pages ?? 1, 1)} onChange={goToPage} />

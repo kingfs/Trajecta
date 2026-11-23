@@ -110,6 +110,10 @@ func exportTable(ctx context.Context, view *store.Store, table string, window ex
 		return runTableExport(ctx, view, table, entry,
 			`SELECT `+modelCatalogScan+` FROM model_catalog`, nil, tw, log,
 			scanModelCatalog, nil)
+	case "project_aliases":
+		return runTableExport(ctx, view, table, entry,
+			`SELECT `+projectAliasScan+` FROM project_aliases`, nil, tw, log,
+			scanProjectAlias, nil)
 	case "app_settings":
 		return runTableExport(ctx, view, table, entry,
 			`SELECT `+appSettingScan+` FROM app_settings`, nil, tw, log,
