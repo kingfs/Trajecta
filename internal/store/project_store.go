@@ -605,29 +605,47 @@ func splitCommaList(value string) []string {
 // the one-shot way to fill the index for traffic recorded before it existed;
 // running it again is safe because enqueueing a trace resets its existing job
 // instead of adding a second one.
-//
-// A trace that declares no project never gets a row and therefore stays a
-// candidate. That is the same trade-off the resource backfill makes: a marker
-// row would cost one row per trace forever just to remember "nothing here", and
-// this action is manual and bounded by limit.
 func (s *Store) EnqueueProjectBackfill(since time.Time, limit int) (int, error) {
-	queued, _, err := s.enqueueProjectBackfill(since, time.Time{}, limit, ParsePriorityBackfill)
-	return queued, err
+	_, queued, err := s.enqueueProjectBackfill(since, time.Time{}, "", limit, ParsePriorityBackfill)
+	return queued.Queued, err
+}
+
+// ProjectBackfillPlan is one sweep step: what the selector found and what it
+// managed to queue.
+//
+// Candidates and Queued are reported separately because they answer different
+// questions. "No candidates" means the sweep reached the oldest trace and is
+// done; "candidates but nothing queued" is a failure to retry. Collapsing the
+// two would either mark a failed pass complete or advance the cursor past traces
+// that were never queued.
+type ProjectBackfillPlan struct {
+	Candidates int
+	Queued     int
+	// Oldest and OldestTraceID locate the last queued trace, which becomes the
+	// next cursor. They are only set when Queued > 0.
+	Oldest        time.Time
+	OldestTraceID string
 }
 
 // EnqueueProjectBackfillThrough queues the newest un-attributed traces recorded
-// before through, and reports the oldest recorded_at it queued.
+// before the cursor, and reports where the sweep should resume.
 //
-// The continuous sweep in the worker uses this instead of "all missing": it
-// walks backwards through time one chunk at a time, and the returned timestamp
-// becomes the next cursor. A trace that declares no working directory never gets
-// a project row, so a selector without that bound would queue it again on every
-// pass.
-func (s *Store) EnqueueProjectBackfillThrough(through time.Time, limit int) (int, time.Time, error) {
-	return s.enqueueProjectBackfill(time.Time{}, through, limit, ParsePriorityBackfill)
+// The cursor is the (recorded_at, trace_id) of the last trace the previous pass
+// queued. The trace id breaks ties: a burst can record many requests inside one
+// microsecond, and a timestamp-only cursor would jump past the ones that did not
+// fit in the chunk - they would never be swept.
+func (s *Store) EnqueueProjectBackfillThrough(through time.Time, throughTraceID string, limit int) (ProjectBackfillPlan, error) {
+	candidates, queued, err := s.enqueueProjectBackfill(time.Time{}, through, throughTraceID, limit, ParsePriorityBackfill)
+	return ProjectBackfillPlan{Candidates: candidates, Queued: queued.Queued, Oldest: queued.Oldest, OldestTraceID: queued.OldestTraceID}, err
 }
 
-func (s *Store) enqueueProjectBackfill(since, through time.Time, limit int, lane string) (int, time.Time, error) {
+type backfillQueued struct {
+	Queued        int
+	Oldest        time.Time
+	OldestTraceID string
+}
+
+func (s *Store) enqueueProjectBackfill(since, through time.Time, throughTraceID string, limit int, lane string) (int, backfillQueued, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -641,15 +659,20 @@ func (s *Store) enqueueProjectBackfill(since, through time.Time, limit int, lane
 		args = append(args, since.UTC().Format(timeLayout))
 	}
 	if !through.IsZero() {
-		// Strictly older: the cursor is the oldest trace the previous pass
-		// queued, and an inclusive bound would pick that trace up again once its
-		// job finished without producing a project row.
-		//
-		// The bound is formatted exactly like the column is written: recorded_at
-		// is a timeLayout string, so passing a time.Time would be compared as
-		// text in a different layout by SQLite and silently match nothing.
-		where += " AND l.recorded_at < ?"
-		args = append(args, through.UTC().Format(timeLayout))
+		// Strictly before the cursor. The bound is formatted exactly like the
+		// column is written: recorded_at is a timeLayout string, so passing a
+		// time.Time would be compared as text in a different layout by SQLite and
+		// silently match nothing.
+		bound := through.UTC().Format(timeLayout)
+		if throughTraceID != "" {
+			// Same timestamp, smaller trace id: the tie-break keeps a burst that
+			// straddles a chunk boundary from being skipped.
+			where += " AND (l.recorded_at < ? OR (l.recorded_at = ? AND l.trace_id < ?))"
+			args = append(args, bound, bound, throughTraceID)
+		} else {
+			where += " AND l.recorded_at < ?"
+			args = append(args, bound)
+		}
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`
@@ -666,45 +689,47 @@ func (s *Store) enqueueProjectBackfill(since, through time.Time, limit int, lane
 		LIMIT ?
 	`, args...)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, backfillQueued{}, err
 	}
 	type candidate struct {
 		traceID  string
 		recorded time.Time
 	}
 	candidates := make([]candidate, 0, limit)
-	oldest := time.Time{}
 	for rows.Next() {
 		var traceID string
 		var recorded any
 		if err := rows.Scan(&traceID, &recorded); err != nil {
 			rows.Close()
-			return 0, time.Time{}, err
+			return 0, backfillQueued{}, err
 		}
 		at, err := timeParseValue(recorded)
 		if err != nil {
 			continue
-		}
-		if oldest.IsZero() || at.Before(oldest) {
-			oldest = at
 		}
 		candidates = append(candidates, candidate{traceID: traceID, recorded: at})
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, backfillQueued{}, err
 	}
-	queued := 0
+	result := backfillQueued{}
 	for _, item := range candidates {
 		// Historical work goes to its own lane: a backfill of a hundred thousand
 		// traces must never delay the trace the proxy recorded a second ago.
 		if err := s.EnqueueParseJobInLane(item.traceID, lane); err != nil {
 			continue
 		}
-		queued++
+		result.Queued++
+		// The cursor may only pass traces that are actually queued. Advancing it
+		// over a failed insert would skip that trace for good.
+		if result.Oldest.IsZero() || item.recorded.Before(result.Oldest) {
+			result.Oldest = item.recorded
+			result.OldestTraceID = item.traceID
+		}
 	}
-	return queued, oldest, nil
+	return len(candidates), result, nil
 }
 
 // ensureProjectSchema creates the project tables on Postgres. SQLite gets the

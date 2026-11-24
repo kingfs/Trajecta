@@ -38,9 +38,9 @@ type AnalysisQueueSettings struct {
 	BackfillBatchSize  int `json:"backfill_batch_size"`
 	BackfillIntervalMs int `json:"backfill_interval_ms"`
 	// BackfillChunkSize is how many traces one planner pass queues, and
-	// BackfillLowWatermark is the queue depth below which the planner tops it up.
-	// Together they make historical attribution a continuous background job
-	// rather than a one-shot request.
+	// BackfillLowWatermark is the queue depth below which the planner tops it up
+	// (one means "only when the lane is empty"). Together they make historical
+	// attribution a continuous background job rather than a one-shot request.
 	BackfillChunkSize    int `json:"backfill_chunk_size"`
 	BackfillLowWatermark int `json:"backfill_low_watermark"`
 
@@ -70,7 +70,7 @@ const (
 	maxBackfillBatchSize    = 200
 	minBackfillChunkSize    = 1
 	maxBackfillChunkSize    = 5000
-	minBackfillLowWatermark = 0
+	minBackfillLowWatermark = 1
 	maxBackfillLowWatermark = 10000
 )
 
@@ -147,7 +147,7 @@ func ValidateAnalysisQueueSettings(settings AnalysisQueueSettings) string {
 		return "backfill_chunk_size must be between 1 and 5000"
 	}
 	if settings.BackfillLowWatermark < minBackfillLowWatermark || settings.BackfillLowWatermark > maxBackfillLowWatermark {
-		return "backfill_low_watermark must be between 0 and 10000"
+		return "backfill_low_watermark must be between 1 and 10000"
 	}
 	return ""
 }
@@ -203,9 +203,14 @@ func ParseJobLane(value string) string {
 // changes is an explicit decision, so the panel offers a reset that clears the
 // cursor and starts the walk again from the newest trace.
 type BackfillCursor struct {
-	// ProjectThrough is the newest recorded_at the project sweep has reached;
-	// traces at or before it have been queued or are already attributed.
+	// ProjectThrough is the recorded_at of the oldest trace the sweep has
+	// queued. Only traces strictly older are selected next.
 	ProjectThrough time.Time `json:"project_through,omitempty"`
+	// ProjectThroughTrace breaks the tie when several traces share that
+	// timestamp. Without it, a chunk that ended in the middle of a burst - many
+	// requests recorded in the same microsecond - would move the cursor past the
+	// traces that did not fit in the chunk, and they would never be swept.
+	ProjectThroughTrace string `json:"project_through_trace,omitempty"`
 	// CompletedAt is set when a pass found nothing left to queue.
 	CompletedAt time.Time `json:"completed_at,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
@@ -219,11 +224,12 @@ type BackfillCursor struct {
 // complete before it had started. The wire form is what the page believes.
 func (c BackfillCursor) MarshalJSON() ([]byte, error) {
 	type wire struct {
-		ProjectThrough *time.Time `json:"project_through,omitempty"`
-		CompletedAt    *time.Time `json:"completed_at,omitempty"`
-		UpdatedAt      *time.Time `json:"updated_at,omitempty"`
+		ProjectThrough      *time.Time `json:"project_through,omitempty"`
+		ProjectThroughTrace string     `json:"project_through_trace,omitempty"`
+		CompletedAt         *time.Time `json:"completed_at,omitempty"`
+		UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 	}
-	payload := wire{}
+	payload := wire{ProjectThroughTrace: c.ProjectThroughTrace}
 	if !c.ProjectThrough.IsZero() {
 		payload.ProjectThrough = &c.ProjectThrough
 	}

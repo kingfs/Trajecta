@@ -142,3 +142,66 @@ func TestWorkerProcessesFreshAndBackfillInOnePass(t *testing.T) {
 		}
 	}
 }
+
+// A burst can record several requests in the same microsecond. A timestamp-only
+// cursor would jump past the ones that did not fit in a chunk, and they would
+// never be swept.
+func TestWorkerBackfillSweepKeepsTracesThatShareATimestamp(t *testing.T) {
+	dir := t.TempDir()
+	st, err := newTestStore(dir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	same := time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)
+	first := writeIndexedResponseTraceAt(t, st, dir, "burst-a", "req-burst-a", same)
+	second := writeIndexedResponseTraceAt(t, st, dir, "burst-b", "req-burst-b", same)
+
+	worker := New(st, Options{Settings: settingsFor(t, nil)})
+	ctx := context.Background()
+	for pass := 0; pass < 4; pass++ {
+		worker.RunOnce(ctx)
+	}
+	state := st.LoadBackfillState(ctx)
+	if state.CompletedAt.IsZero() {
+		t.Fatalf("state = %+v, want the sweep to finish", state)
+	}
+	for _, traceID := range []string{first, second} {
+		if _, err := st.GetObservationSummary(traceID); err != nil {
+			t.Fatalf("trace %s was skipped by the sweep: %v", traceID, err)
+		}
+	}
+}
+
+// watermark=1 means "only top the lane up when it is empty". A disabled gate
+// would queue another chunk on every planner pass.
+func TestWorkerBackfillWatermarkZeroWaitsForAnEmptyLane(t *testing.T) {
+	dir := t.TempDir()
+	st, err := newTestStore(dir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	writeIndexedResponseTraceAt(t, st, dir, "a", "req-a", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC))
+	writeIndexedResponseTraceAt(t, st, dir, "b", "req-b", time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC))
+	worker := New(st, Options{Settings: settingsFor(t, func(policy *store.AnalysisQueueSettings) {
+		policy.BackfillLowWatermark = 1
+	})})
+	ctx := context.Background()
+
+	worker.planBackfill(ctx, worker.Settings().Get())
+	first, err := st.CountParseJobs("queued", store.ParsePriorityBackfill)
+	if err != nil {
+		t.Fatalf("CountParseJobs() error = %v", err)
+	}
+	worker.planBackfill(ctx, worker.Settings().Get())
+	second, err := st.CountParseJobs("queued", store.ParsePriorityBackfill)
+	if err != nil {
+		t.Fatalf("CountParseJobs() error = %v", err)
+	}
+	if first != 1 || second != 1 {
+		t.Fatalf("queued %d then %d, want the planner to wait while the lane is not empty", first, second)
+	}
+}

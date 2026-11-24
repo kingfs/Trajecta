@@ -32,18 +32,6 @@ export function AnalysisQueuePanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const load = () => {
-    setLoading(true);
-    requestJSON(apiPaths.settingsAnalysisQueue)
-      .then((payload) => {
-        setView(payload);
-        setForm(formFromPayload(payload));
-        setLoadError("");
-      })
-      .catch((error) => setLoadError(error.message))
-      .finally(() => setLoading(false));
-  };
-
   useEffect(() => {
     let cancelled = false;
     requestJSON(apiPaths.settingsAnalysisQueue)
@@ -210,7 +198,7 @@ export function AnalysisQueuePanel() {
           {t("system.queueBackfillWatermark")}
           <Input
             type="number"
-            min="0"
+            min="1"
             max="10000"
             value={form.backfill_low_watermark}
             onChange={(event) => update("backfill_low_watermark", event.target.value)}

@@ -1686,7 +1686,7 @@ export default {
   "system.queueBackfillChunk": "Queue chunk size",
   "system.queueBackfillChunkHint": "How many traces one planner pass queues while the lane is below the watermark. The sweep walks recorded_at from newest to oldest.",
   "system.queueBackfillWatermark": "Queue watermark",
-  "system.queueBackfillWatermarkHint": "Top the lane up when fewer than this many historical jobs are waiting. Zero means only refill when the lane is empty.",
+  "system.queueBackfillWatermarkHint": "Top the lane up when fewer than this many historical jobs are waiting. One means only refill when the lane is empty.",
   "system.queueResetBackfill": "Re-run the historical sweep",
   "system.queueResetConfirm": "Re-running queues history again from the newest trace (parse only; nothing already attributed is changed). Continue?",
   "system.queueCursor": "Historical sweep reached {time}",

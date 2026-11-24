@@ -253,24 +253,36 @@ func (w *Worker) planBackfill(ctx context.Context, settings store.AnalysisQueueS
 	if !state.CompletedAt.IsZero() {
 		return
 	}
-	pending, err := w.store.CountParseJobs("queued", store.ParsePriorityBackfill)
+	// Queued and running both count as "already in the lane". Counting only the
+	// queued ones would let the planner stack another chunk on top of a batch the
+	// worker is still draining.
+	queuedCount, err := w.store.CountParseJobs("queued", store.ParsePriorityBackfill)
 	if err != nil {
 		slog.Warn("Count backfill queue failed", "error", err)
 		return
 	}
-	if settings.BackfillLowWatermark > 0 && pending >= settings.BackfillLowWatermark {
+	runningCount, err := w.store.CountParseJobs("running", store.ParsePriorityBackfill)
+	if err != nil {
+		slog.Warn("Count backfill queue failed", "error", err)
+		return
+	}
+	pending := queuedCount + runningCount
+	// The watermark is "top the lane up below this depth". One means "only when
+	// the lane is empty"; there is no zero, because a disabled gate would queue a
+	// whole chunk on every planner pass.
+	if pending >= settings.BackfillLowWatermark {
 		return
 	}
 	through := state.ProjectThrough
 	if through.IsZero() {
 		through = time.Now().UTC()
 	}
-	queued, oldest, err := w.store.EnqueueProjectBackfillThrough(through, settings.BackfillChunkSize)
+	plan, err := w.store.EnqueueProjectBackfillThrough(through, state.ProjectThroughTrace, settings.BackfillChunkSize)
 	if err != nil {
 		slog.Warn("Plan project backfill failed", "error", err)
 		return
 	}
-	if queued == 0 {
+	if plan.Candidates == 0 {
 		// Nothing older: the sweep is complete until someone resets it.
 		state.ProjectThrough = through
 		state.CompletedAt = time.Now().UTC()
@@ -281,13 +293,20 @@ func (w *Worker) planBackfill(ctx context.Context, settings store.AnalysisQueueS
 		slog.Info("Project backfill complete", "through", through)
 		return
 	}
-	state.ProjectThrough = oldest
+	if plan.Queued == 0 {
+		// There was work but none of it could be queued. Do not move the cursor:
+		// the next pass has to retry the same window rather than skip it.
+		slog.Warn("Project backfill queued nothing", "candidates", plan.Candidates)
+		return
+	}
+	state.ProjectThrough = plan.Oldest
+	state.ProjectThroughTrace = plan.OldestTraceID
 	state.CompletedAt = time.Time{}
 	if err := w.store.SaveBackfillState(ctx, state); err != nil {
 		slog.Warn("Save backfill state failed", "error", err)
 		return
 	}
-	slog.Info("Queued project backfill", "traces", queued, "pending", pending, "through", oldest)
+	slog.Info("Queued project backfill", "traces", plan.Queued, "candidates", plan.Candidates, "pending", pending, "through", plan.Oldest)
 }
 
 // processJob parses one already-claimed job. The claim moved the row to running

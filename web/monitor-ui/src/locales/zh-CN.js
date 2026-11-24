@@ -1684,7 +1684,7 @@ export default {
   "system.queueBackfillChunk": "每批入队条数",
   "system.queueBackfillChunkHint": "水位低于阈值时一次补充多少条；回填按 recorded_at 从新到旧推进。",
   "system.queueBackfillWatermark": "队列水位",
-  "system.queueBackfillWatermarkHint": "待解析的历史任务少于这个数就再补一批；设为 0 表示只看队列是否为空。",
+  "system.queueBackfillWatermarkHint": "待解析的历史任务少于这个数就再补一批；设为 1 表示只在队列为空时补充。",
   "system.queueResetBackfill": "重新回填历史",
   "system.queueResetConfirm": "重新回填会从最新的 trace 重新走一遍历史（只排队解析，不改动已归属的数据）。继续？",
   "system.queueCursor": "历史回填已推进到 {time}",
