@@ -12,6 +12,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/mcpserver"
 	"github.com/kingfs/Trajecta/internal/monitor"
+	"github.com/kingfs/Trajecta/internal/observeworker"
 	"github.com/kingfs/Trajecta/internal/responses/functionexec"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -31,6 +32,7 @@ func newManagementMuxWithSecretMappings(
 	secretMappings monitor.SecretMappingAdmin,
 	secretSuppressions monitor.SecretSuppressionAdmin,
 	detectorRuntime *detector.Runtime,
+	analysisQueue *observeworker.RuntimeSettings,
 	authStore ...*auth.Store,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -93,6 +95,7 @@ func newManagementMuxWithSecretMappings(
 		SecretMappings:                   secretMappings,
 		SecretSuppressions:               secretSuppressions,
 		Detectors:                        detectorRuntime,
+		AnalysisQueue:                    analysisQueue,
 		Location:                         cfg.MonitorLocation(),
 		DebugPprofEnabled:                cfg.DebugPprofEnabled(),
 		About: monitor.AboutOptions{

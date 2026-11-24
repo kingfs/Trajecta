@@ -10585,6 +10585,7 @@ type ParseJobMutation struct {
 	id            *int
 	trace_id      *string
 	status        *string
+	priority      *string
 	attempts      *int
 	addattempts   *int
 	last_error    *string
@@ -10764,6 +10765,42 @@ func (m *ParseJobMutation) OldStatus(ctx context.Context) (v string, err error) 
 // ResetStatus resets all changes to the "status" field.
 func (m *ParseJobMutation) ResetStatus() {
 	m.status = nil
+}
+
+// SetPriority sets the "priority" field.
+func (m *ParseJobMutation) SetPriority(s string) {
+	m.priority = &s
+}
+
+// Priority returns the value of the "priority" field in the mutation.
+func (m *ParseJobMutation) Priority() (r string, exists bool) {
+	v := m.priority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPriority returns the old "priority" field's value of the ParseJob entity.
+// If the ParseJob object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ParseJobMutation) OldPriority(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPriority is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPriority requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPriority: %w", err)
+	}
+	return oldValue.Priority, nil
+}
+
+// ResetPriority resets all changes to the "priority" field.
+func (m *ParseJobMutation) ResetPriority() {
+	m.priority = nil
 }
 
 // SetAttempts sets the "attempts" field.
@@ -10964,12 +11001,15 @@ func (m *ParseJobMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ParseJobMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 7)
 	if m.trace_id != nil {
 		fields = append(fields, parsejob.FieldTraceID)
 	}
 	if m.status != nil {
 		fields = append(fields, parsejob.FieldStatus)
+	}
+	if m.priority != nil {
+		fields = append(fields, parsejob.FieldPriority)
 	}
 	if m.attempts != nil {
 		fields = append(fields, parsejob.FieldAttempts)
@@ -10995,6 +11035,8 @@ func (m *ParseJobMutation) Field(name string) (ent.Value, bool) {
 		return m.TraceID()
 	case parsejob.FieldStatus:
 		return m.Status()
+	case parsejob.FieldPriority:
+		return m.Priority()
 	case parsejob.FieldAttempts:
 		return m.Attempts()
 	case parsejob.FieldLastError:
@@ -11016,6 +11058,8 @@ func (m *ParseJobMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldTraceID(ctx)
 	case parsejob.FieldStatus:
 		return m.OldStatus(ctx)
+	case parsejob.FieldPriority:
+		return m.OldPriority(ctx)
 	case parsejob.FieldAttempts:
 		return m.OldAttempts(ctx)
 	case parsejob.FieldLastError:
@@ -11046,6 +11090,13 @@ func (m *ParseJobMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case parsejob.FieldPriority:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPriority(v)
 		return nil
 	case parsejob.FieldAttempts:
 		v, ok := value.(int)
@@ -11144,6 +11195,9 @@ func (m *ParseJobMutation) ResetField(name string) error {
 		return nil
 	case parsejob.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case parsejob.FieldPriority:
+		m.ResetPriority()
 		return nil
 	case parsejob.FieldAttempts:
 		m.ResetAttempts()

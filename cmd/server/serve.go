@@ -145,9 +145,12 @@ func runServeWithConfig(configPath string) int {
 			detectorRuntime = fallback
 		}
 	}
+	// One policy holder is shared by the worker and the Monitor: a PATCH on the
+	// queue panel has to change the pacing of the loop that is already running,
+	// and the worker has to be the only reader of those fields.
+	analysisQueueSettings := observeworker.NewRuntimeSettings(traceStore.LoadAnalysisQueueSettings(context.Background()))
 	parseWorker := observeworker.New(traceStore, observeworker.Options{
-		Interval:     5 * time.Second,
-		BatchSize:    10,
+		Settings:     analysisQueueSettings,
 		Detectors:    detectorRuntime,
 		AutoScan:     cfg.Analysis.AutoScanFindings,
 		ParserEngine: cfg.Analysis.ParserEngine,
@@ -234,7 +237,7 @@ func runServeWithConfig(configPath string) int {
 			secretMappings = vault
 			secretSuppressions = vault
 		}
-		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, detectorRuntime, authStore)
+		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, detectorRuntime, parseWorker.Settings(), authStore)
 		managementSrv = newManagementHTTPServer(cfg, mux)
 		go func(srv *http.Server) {
 			addr := srv.Addr

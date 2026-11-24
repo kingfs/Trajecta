@@ -3,6 +3,7 @@ package observeworker
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"log/slog"
 	"os"
@@ -19,11 +20,48 @@ import (
 	"github.com/kingfs/Trajecta/pkg/recordfile"
 )
 
+// RuntimeSettings is the live queue policy shared by the worker and the Monitor
+// API. The worker reads it once per tick, so a PATCH takes effect without a
+// restart; the holder is an atomic pointer because the API and the loop are
+// different goroutines.
+type RuntimeSettings struct {
+	value atomic.Pointer[store.AnalysisQueueSettings]
+}
+
+// NewRuntimeSettings wraps one policy snapshot.
+func NewRuntimeSettings(settings store.AnalysisQueueSettings) *RuntimeSettings {
+	holder := &RuntimeSettings{}
+	holder.Set(settings)
+	return holder
+}
+
+// Get returns the current policy, never nil.
+func (r *RuntimeSettings) Get() store.AnalysisQueueSettings {
+	if r == nil {
+		return store.DefaultAnalysisQueueSettings()
+	}
+	if current := r.value.Load(); current != nil {
+		return store.NormalizeAnalysisQueueSettings(*current)
+	}
+	return store.DefaultAnalysisQueueSettings()
+}
+
+// Set replaces the policy. The caller validates it first.
+func (r *RuntimeSettings) Set(settings store.AnalysisQueueSettings) {
+	if r == nil {
+		return
+	}
+	normalized := store.NormalizeAnalysisQueueSettings(settings)
+	r.value.Store(&normalized)
+}
+
 type Worker struct {
-	store     *store.Store
-	registry  *observe.Registry
-	interval  time.Duration
-	batchSize int
+	store    *store.Store
+	registry *observe.Registry
+	// settings is the lane policy. A caller that does not supply one gets the
+	// Options.Interval/BatchSize it always had, expressed as a policy, so the
+	// existing construction sites and tests keep their behaviour.
+	settings *RuntimeSettings
 	// detectors is the published detection-plugin snapshot. When autoScan is
 	// set, the parser runs the enabled observation detectors over the freshly
 	// stored observation and persists their findings, so the findings surfaces
@@ -37,8 +75,13 @@ type Worker struct {
 }
 
 type Options struct {
+	// Interval and BatchSize are the legacy pacing knobs for the fresh lane.
+	// They only apply when Settings is nil.
 	Interval  time.Duration
 	BatchSize int
+	// Settings, when set, overrides Interval and BatchSize and is shared with the
+	// Monitor so the queue can be tuned while it runs.
+	Settings  *RuntimeSettings
 	Registry  *observe.Registry
 	Detectors *detector.Runtime
 	// AutoScan runs the observation detectors after a successful parse. It is
@@ -50,13 +93,16 @@ type Options struct {
 }
 
 func New(st *store.Store, opts Options) *Worker {
-	interval := opts.Interval
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	batchSize := opts.BatchSize
-	if batchSize <= 0 {
-		batchSize = 10
+	settings := opts.Settings
+	if settings == nil {
+		policy := store.DefaultAnalysisQueueSettings()
+		if opts.Interval > 0 {
+			policy.ParseIntervalMs = int(opts.Interval / time.Millisecond)
+		}
+		if opts.BatchSize > 0 {
+			policy.ParseBatchSize = opts.BatchSize
+		}
+		settings = NewRuntimeSettings(policy)
 	}
 	registry := opts.Registry
 	if registry == nil {
@@ -65,13 +111,29 @@ func New(st *store.Store, opts Options) *Worker {
 	return &Worker{
 		store:        st,
 		registry:     registry,
-		interval:     interval,
-		batchSize:    batchSize,
+		settings:     settings,
 		detectors:    opts.Detectors,
 		autoScan:     opts.AutoScan,
 		parserEngine: normalizeParserEngine(opts.ParserEngine),
 	}
 }
+
+// Settings exposes the holder so the Monitor can read and replace the policy.
+func (w *Worker) Settings() *RuntimeSettings {
+	if w == nil {
+		return nil
+	}
+	return w.settings
+}
+
+// Loop pacing. The tick is short enough to honour a 200 ms interval and cheap
+// enough to run continuously; the planner and the reclaim are background chores,
+// not per-tick work.
+const (
+	workerTick      = 250 * time.Millisecond
+	plannerInterval = 30 * time.Second
+	reclaimInterval = 60 * time.Second
+)
 
 // staleJobAfter is how long a running parse job may sit before it is treated as
 // abandoned. No cassette parse takes minutes, so a row past this belongs to a
@@ -83,15 +145,40 @@ func (w *Worker) Run(ctx context.Context) {
 		return
 	}
 	w.reclaimStale(ctx)
+	// One pass immediately, so a restart drains before the first tick.
 	w.runOnce(ctx)
-	ticker := time.NewTicker(w.interval)
+	lastFresh := time.Now()
+	lastBackfill := time.Now()
+	lastPlan := time.Now()
+	lastReclaim := time.Now()
+	ticker := time.NewTicker(workerTick)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.runOnce(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			settings := w.settings.Get()
+			now := time.Now()
+			if now.Sub(lastFresh) >= time.Duration(settings.ParseIntervalMs)*time.Millisecond {
+				w.runLane(ctx, settings.ParseBatchSize, w.store.ClaimParseJobs, settings)
+				lastFresh = now
+			}
+			if settings.BackfillEnabled && now.Sub(lastBackfill) >= time.Duration(settings.BackfillIntervalMs)*time.Millisecond {
+				w.runLane(ctx, settings.BackfillBatchSize, w.store.ClaimBackfillParseJobs, settings)
+				lastBackfill = now
+			}
+			if now.Sub(lastPlan) >= plannerInterval {
+				w.planBackfill(ctx, settings)
+				lastPlan = now
+			}
+			if now.Sub(lastReclaim) >= reclaimInterval {
+				w.reclaimStale(ctx)
+				lastReclaim = now
+			}
 		}
 	}
 }
@@ -117,7 +204,21 @@ func (w *Worker) reclaimStale(ctx context.Context) {
 }
 
 func (w *Worker) runOnce(ctx context.Context) {
-	jobs, err := w.store.ClaimParseJobs(w.batchSize)
+	settings := w.settings.Get()
+	w.runLane(ctx, settings.ParseBatchSize, w.store.ClaimParseJobs, settings)
+	if settings.BackfillEnabled {
+		w.runLane(ctx, settings.BackfillBatchSize, w.store.ClaimBackfillParseJobs, settings)
+	}
+	w.planBackfill(ctx, settings)
+}
+
+// runLane claims and processes one lane's batch. The lanes are separate claims
+// so a historical queue of any size can never delay a freshly recorded trace.
+func (w *Worker) runLane(ctx context.Context, batchSize int, claim func(int) ([]store.ParseJobRecord, error), settings store.AnalysisQueueSettings) {
+	if batchSize <= 0 {
+		return
+	}
+	jobs, err := claim(batchSize)
 	if err != nil {
 		slog.Warn("Claim parse jobs failed", "error", err)
 		return
@@ -128,23 +229,86 @@ func (w *Worker) runOnce(ctx context.Context) {
 			return
 		default:
 		}
-		if err := w.processJob(ctx, job); err != nil {
+		if err := w.processJob(ctx, job, settings.ParseMaxAttempts); err != nil {
 			slog.Warn("Parse job failed", "trace_id", job.TraceID, "job_id", job.ID, "error", err)
 		}
 	}
 }
 
+// planBackfill keeps the historical lane fed.
+//
+// A one-shot backfill has to be re-requested for every chunk and dies with the
+// request that started it. This planner tops the lane up whenever it drops below
+// the watermark and walks backwards through recorded_at, so historical
+// attribution is a continuous background job that stops when it reaches the
+// oldest trace. The cursor is what makes it terminate: a trace that declares no
+// working directory never gets a project row, so "everything missing" would queue
+// it forever. `backfill_enabled=false` pauses the sweep without touching the
+// fresh lane, and the panel's reset clears the cursor to walk history again.
+func (w *Worker) planBackfill(ctx context.Context, settings store.AnalysisQueueSettings) {
+	if !settings.BackfillEnabled || settings.BackfillChunkSize <= 0 {
+		return
+	}
+	state := w.store.LoadBackfillState(ctx)
+	if !state.CompletedAt.IsZero() {
+		return
+	}
+	pending, err := w.store.CountParseJobs("queued", store.ParsePriorityBackfill)
+	if err != nil {
+		slog.Warn("Count backfill queue failed", "error", err)
+		return
+	}
+	if settings.BackfillLowWatermark > 0 && pending >= settings.BackfillLowWatermark {
+		return
+	}
+	through := state.ProjectThrough
+	if through.IsZero() {
+		through = time.Now().UTC()
+	}
+	queued, oldest, err := w.store.EnqueueProjectBackfillThrough(through, settings.BackfillChunkSize)
+	if err != nil {
+		slog.Warn("Plan project backfill failed", "error", err)
+		return
+	}
+	if queued == 0 {
+		// Nothing older: the sweep is complete until someone resets it.
+		state.ProjectThrough = through
+		state.CompletedAt = time.Now().UTC()
+		if err := w.store.SaveBackfillState(ctx, state); err != nil {
+			slog.Warn("Save backfill state failed", "error", err)
+			return
+		}
+		slog.Info("Project backfill complete", "through", through)
+		return
+	}
+	state.ProjectThrough = oldest
+	state.CompletedAt = time.Time{}
+	if err := w.store.SaveBackfillState(ctx, state); err != nil {
+		slog.Warn("Save backfill state failed", "error", err)
+		return
+	}
+	slog.Info("Queued project backfill", "traces", queued, "pending", pending, "through", oldest)
+}
+
 // processJob parses one already-claimed job. The claim moved the row to running
 // and incremented its attempt count, so there is no separate mark-running step.
-func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error {
-	obs, err := ReparseTraceWithEngine(ctx, w.store, w.registry, w.parserEngine, job.TraceID)
-	if err != nil {
-		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
+//
+// A failure is requeued while the job still has attempts left: a corrupt
+// cassette fails deterministically, but a database hiccup does not, and one
+// transient error must not bury a trace for good.
+func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord, maxAttempts int) error {
+	fail := func(err error) error {
+		if _, markErr := w.store.RequeueOrFailParseJob(job.ID, maxAttempts, err.Error()); markErr != nil {
+			slog.Warn("Record parse job failure failed", "job_id", job.ID, "error", markErr)
+		}
 		return err
 	}
+	obs, err := ReparseTraceWithEngine(ctx, w.store, w.registry, w.parserEngine, job.TraceID)
+	if err != nil {
+		return fail(err)
+	}
 	if err := w.store.SaveObservation(obs); err != nil {
-		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
-		return err
+		return fail(err)
 	}
 	// The derived indexes are part of parsing, not a detector: the resource
 	// index answers which paths and URLs the exchange carried, the project index
@@ -153,8 +317,7 @@ func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord) error
 	// automatic - an audit that only ran behind `analyze scan` would be empty
 	// for every normally recorded trace.
 	if err := PersistTraceDerivations(w.store, job.TraceID, obs); err != nil {
-		_ = w.store.MarkParseJobFailed(job.ID, err.Error())
-		return err
+		return fail(err)
 	}
 	w.scanFindings(ctx, job.TraceID, obs)
 	if err := w.store.MarkParseJobDone(job.ID); err != nil {

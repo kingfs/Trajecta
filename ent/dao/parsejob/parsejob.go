@@ -17,6 +17,8 @@ const (
 	FieldTraceID = "trace_id"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldPriority holds the string denoting the priority field in the database.
+	FieldPriority = "priority"
 	// FieldAttempts holds the string denoting the attempts field in the database.
 	FieldAttempts = "attempts"
 	// FieldLastError holds the string denoting the last_error field in the database.
@@ -34,6 +36,7 @@ var Columns = []string{
 	FieldID,
 	FieldTraceID,
 	FieldStatus,
+	FieldPriority,
 	FieldAttempts,
 	FieldLastError,
 	FieldCreatedAt,
@@ -55,6 +58,8 @@ var (
 	TraceIDValidator func(string) error
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	StatusValidator func(string) error
+	// DefaultPriority holds the default value on creation for the "priority" field.
+	DefaultPriority string
 	// DefaultAttempts holds the default value on creation for the "attempts" field.
 	DefaultAttempts int
 	// DefaultLastError holds the default value on creation for the "last_error" field.
@@ -81,6 +86,11 @@ func ByTraceID(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByPriority orders the results by the priority field.
+func ByPriority(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPriority, opts...).ToFunc()
 }
 
 // ByAttempts orders the results by the attempts field.

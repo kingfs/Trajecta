@@ -511,20 +511,24 @@ func init() {
 	parsejobDescStatus := parsejobFields[1].Descriptor()
 	// parsejob.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	parsejob.StatusValidator = parsejobDescStatus.Validators[0].(func(string) error)
+	// parsejobDescPriority is the schema descriptor for priority field.
+	parsejobDescPriority := parsejobFields[2].Descriptor()
+	// parsejob.DefaultPriority holds the default value on creation for the priority field.
+	parsejob.DefaultPriority = parsejobDescPriority.Default.(string)
 	// parsejobDescAttempts is the schema descriptor for attempts field.
-	parsejobDescAttempts := parsejobFields[2].Descriptor()
+	parsejobDescAttempts := parsejobFields[3].Descriptor()
 	// parsejob.DefaultAttempts holds the default value on creation for the attempts field.
 	parsejob.DefaultAttempts = parsejobDescAttempts.Default.(int)
 	// parsejobDescLastError is the schema descriptor for last_error field.
-	parsejobDescLastError := parsejobFields[3].Descriptor()
+	parsejobDescLastError := parsejobFields[4].Descriptor()
 	// parsejob.DefaultLastError holds the default value on creation for the last_error field.
 	parsejob.DefaultLastError = parsejobDescLastError.Default.(string)
 	// parsejobDescCreatedAt is the schema descriptor for created_at field.
-	parsejobDescCreatedAt := parsejobFields[4].Descriptor()
+	parsejobDescCreatedAt := parsejobFields[5].Descriptor()
 	// parsejob.DefaultCreatedAt holds the default value on creation for the created_at field.
 	parsejob.DefaultCreatedAt = parsejobDescCreatedAt.Default.(func() time.Time)
 	// parsejobDescUpdatedAt is the schema descriptor for updated_at field.
-	parsejobDescUpdatedAt := parsejobFields[5].Descriptor()
+	parsejobDescUpdatedAt := parsejobFields[6].Descriptor()
 	// parsejob.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	parsejob.DefaultUpdatedAt = parsejobDescUpdatedAt.Default.(func() time.Time)
 	parserversionFields := schema.ParserVersion{}.Fields()

@@ -496,6 +496,11 @@ type RouteOptions struct {
 	// admin API (enable/disable + republish) and supplies the audit projection's
 	// detection engine. A nil value falls back to the builtin detectors.
 	Detectors *detector.Runtime
+	// AnalysisQueue is the live parse-queue policy the worker reads. The admin
+	// API writes it here so a change paces the running worker without a restart;
+	// nil means no worker is attached in this process (tests, CLI) and the panel
+	// reports that.
+	AnalysisQueue *observeworker.RuntimeSettings
 	// Location anchors the day-based windows and the calendar buckets. A nil
 	// value keeps whatever SetDisplayLocation was last given, which defaults to
 	// Asia/Shanghai.
@@ -854,6 +859,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	// /api/* paths fall through to appHandler and answer 404.
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAdminRequired(routingSettingsAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/settings/analysis-queue", monitorAdminRequired(analysisQueueAPIHandler(st, opt.AnalysisQueue), monitorVerifier))
+	mux.HandleFunc("/api/settings/analysis-queue/reset-backfill", monitorAdminRequired(analysisQueueAPIHandler(st, opt.AnalysisQueue), monitorVerifier))
 	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
 	// The proxy URL may carry credentials and changing it moves every outbound
 	// request, so this is admin-only like the rest of the system surface.

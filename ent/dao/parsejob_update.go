@@ -58,6 +58,20 @@ func (_u *ParseJobUpdate) SetNillableStatus(v *string) *ParseJobUpdate {
 	return _u
 }
 
+// SetPriority sets the "priority" field.
+func (_u *ParseJobUpdate) SetPriority(v string) *ParseJobUpdate {
+	_u.mutation.SetPriority(v)
+	return _u
+}
+
+// SetNillablePriority sets the "priority" field if the given value is not nil.
+func (_u *ParseJobUpdate) SetNillablePriority(v *string) *ParseJobUpdate {
+	if v != nil {
+		_u.SetPriority(*v)
+	}
+	return _u
+}
+
 // SetAttempts sets the "attempts" field.
 func (_u *ParseJobUpdate) SetAttempts(v int) *ParseJobUpdate {
 	_u.mutation.ResetAttempts()
@@ -192,6 +206,9 @@ func (_u *ParseJobUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(parsejob.FieldStatus, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.Priority(); ok {
+		_spec.SetField(parsejob.FieldPriority, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.Attempts(); ok {
 		_spec.SetField(parsejob.FieldAttempts, field.TypeInt, value)
 	}
@@ -255,6 +272,20 @@ func (_u *ParseJobUpdateOne) SetStatus(v string) *ParseJobUpdateOne {
 func (_u *ParseJobUpdateOne) SetNillableStatus(v *string) *ParseJobUpdateOne {
 	if v != nil {
 		_u.SetStatus(*v)
+	}
+	return _u
+}
+
+// SetPriority sets the "priority" field.
+func (_u *ParseJobUpdateOne) SetPriority(v string) *ParseJobUpdateOne {
+	_u.mutation.SetPriority(v)
+	return _u
+}
+
+// SetNillablePriority sets the "priority" field if the given value is not nil.
+func (_u *ParseJobUpdateOne) SetNillablePriority(v *string) *ParseJobUpdateOne {
+	if v != nil {
+		_u.SetPriority(*v)
 	}
 	return _u
 }
@@ -422,6 +453,9 @@ func (_u *ParseJobUpdateOne) sqlSave(ctx context.Context) (_node *ParseJob, err 
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(parsejob.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Priority(); ok {
+		_spec.SetField(parsejob.FieldPriority, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Attempts(); ok {
 		_spec.SetField(parsejob.FieldAttempts, field.TypeInt, value)

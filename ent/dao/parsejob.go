@@ -21,6 +21,8 @@ type ParseJob struct {
 	TraceID string `json:"trace_id,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
+	// Priority holds the value of the "priority" field.
+	Priority string `json:"priority,omitempty"`
 	// Attempts holds the value of the "attempts" field.
 	Attempts int `json:"attempts,omitempty"`
 	// LastError holds the value of the "last_error" field.
@@ -39,7 +41,7 @@ func (*ParseJob) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case parsejob.FieldID, parsejob.FieldAttempts:
 			values[i] = new(sql.NullInt64)
-		case parsejob.FieldTraceID, parsejob.FieldStatus, parsejob.FieldLastError:
+		case parsejob.FieldTraceID, parsejob.FieldStatus, parsejob.FieldPriority, parsejob.FieldLastError:
 			values[i] = new(sql.NullString)
 		case parsejob.FieldCreatedAt, parsejob.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -75,6 +77,12 @@ func (_m *ParseJob) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field status", values[i])
 			} else if value.Valid {
 				_m.Status = value.String
+			}
+		case parsejob.FieldPriority:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field priority", values[i])
+			} else if value.Valid {
+				_m.Priority = value.String
 			}
 		case parsejob.FieldAttempts:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -141,6 +149,9 @@ func (_m *ParseJob) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)
+	builder.WriteString(", ")
+	builder.WriteString("priority=")
+	builder.WriteString(_m.Priority)
 	builder.WriteString(", ")
 	builder.WriteString("attempts=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Attempts))

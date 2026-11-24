@@ -812,7 +812,7 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 
 func (s *Store) overviewRecentParseFailures(limit int) ([]ParseJobRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		SELECT id, trace_id, status, priority, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = 'failed'
 		ORDER BY updated_at DESC, id DESC

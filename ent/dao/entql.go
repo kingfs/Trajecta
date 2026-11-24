@@ -295,6 +295,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 		Fields: map[string]*sqlgraph.FieldSpec{
 			parsejob.FieldTraceID:   {Type: field.TypeString, Column: parsejob.FieldTraceID},
 			parsejob.FieldStatus:    {Type: field.TypeString, Column: parsejob.FieldStatus},
+			parsejob.FieldPriority:  {Type: field.TypeString, Column: parsejob.FieldPriority},
 			parsejob.FieldAttempts:  {Type: field.TypeInt, Column: parsejob.FieldAttempts},
 			parsejob.FieldLastError: {Type: field.TypeString, Column: parsejob.FieldLastError},
 			parsejob.FieldCreatedAt: {Type: field.TypeTime, Column: parsejob.FieldCreatedAt},
@@ -1760,6 +1761,11 @@ func (f *ParseJobFilter) WhereTraceID(p entql.StringP) {
 // WhereStatus applies the entql string predicate on the status field.
 func (f *ParseJobFilter) WhereStatus(p entql.StringP) {
 	f.Where(p.Field(parsejob.FieldStatus))
+}
+
+// WherePriority applies the entql string predicate on the priority field.
+func (f *ParseJobFilter) WherePriority(p entql.StringP) {
+	f.Where(p.Field(parsejob.FieldPriority))
 }
 
 // WhereAttempts applies the entql int predicate on the attempts field.

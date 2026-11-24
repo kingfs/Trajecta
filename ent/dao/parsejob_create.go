@@ -34,6 +34,20 @@ func (_c *ParseJobCreate) SetStatus(v string) *ParseJobCreate {
 	return _c
 }
 
+// SetPriority sets the "priority" field.
+func (_c *ParseJobCreate) SetPriority(v string) *ParseJobCreate {
+	_c.mutation.SetPriority(v)
+	return _c
+}
+
+// SetNillablePriority sets the "priority" field if the given value is not nil.
+func (_c *ParseJobCreate) SetNillablePriority(v *string) *ParseJobCreate {
+	if v != nil {
+		_c.SetPriority(*v)
+	}
+	return _c
+}
+
 // SetAttempts sets the "attempts" field.
 func (_c *ParseJobCreate) SetAttempts(v int) *ParseJobCreate {
 	_c.mutation.SetAttempts(v)
@@ -125,6 +139,10 @@ func (_c *ParseJobCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *ParseJobCreate) defaults() {
+	if _, ok := _c.mutation.Priority(); !ok {
+		v := parsejob.DefaultPriority
+		_c.mutation.SetPriority(v)
+	}
 	if _, ok := _c.mutation.Attempts(); !ok {
 		v := parsejob.DefaultAttempts
 		_c.mutation.SetAttempts(v)
@@ -160,6 +178,9 @@ func (_c *ParseJobCreate) check() error {
 		if err := parsejob.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`dao: validator failed for field "ParseJob.status": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.Priority(); !ok {
+		return &ValidationError{Name: "priority", err: errors.New(`dao: missing required field "ParseJob.priority"`)}
 	}
 	if _, ok := _c.mutation.Attempts(); !ok {
 		return &ValidationError{Name: "attempts", err: errors.New(`dao: missing required field "ParseJob.attempts"`)}
@@ -208,6 +229,10 @@ func (_c *ParseJobCreate) createSpec() (*ParseJob, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(parsejob.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.Priority(); ok {
+		_spec.SetField(parsejob.FieldPriority, field.TypeString, value)
+		_node.Priority = value
 	}
 	if value, ok := _c.mutation.Attempts(); ok {
 		_spec.SetField(parsejob.FieldAttempts, field.TypeInt, value)
@@ -298,6 +323,18 @@ func (u *ParseJobUpsert) SetStatus(v string) *ParseJobUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *ParseJobUpsert) UpdateStatus() *ParseJobUpsert {
 	u.SetExcluded(parsejob.FieldStatus)
+	return u
+}
+
+// SetPriority sets the "priority" field.
+func (u *ParseJobUpsert) SetPriority(v string) *ParseJobUpsert {
+	u.Set(parsejob.FieldPriority, v)
+	return u
+}
+
+// UpdatePriority sets the "priority" field to the value that was provided on create.
+func (u *ParseJobUpsert) UpdatePriority() *ParseJobUpsert {
+	u.SetExcluded(parsejob.FieldPriority)
 	return u
 }
 
@@ -420,6 +457,20 @@ func (u *ParseJobUpsertOne) SetStatus(v string) *ParseJobUpsertOne {
 func (u *ParseJobUpsertOne) UpdateStatus() *ParseJobUpsertOne {
 	return u.Update(func(s *ParseJobUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetPriority sets the "priority" field.
+func (u *ParseJobUpsertOne) SetPriority(v string) *ParseJobUpsertOne {
+	return u.Update(func(s *ParseJobUpsert) {
+		s.SetPriority(v)
+	})
+}
+
+// UpdatePriority sets the "priority" field to the value that was provided on create.
+func (u *ParseJobUpsertOne) UpdatePriority() *ParseJobUpsertOne {
+	return u.Update(func(s *ParseJobUpsert) {
+		s.UpdatePriority()
 	})
 }
 
@@ -715,6 +766,20 @@ func (u *ParseJobUpsertBulk) SetStatus(v string) *ParseJobUpsertBulk {
 func (u *ParseJobUpsertBulk) UpdateStatus() *ParseJobUpsertBulk {
 	return u.Update(func(s *ParseJobUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetPriority sets the "priority" field.
+func (u *ParseJobUpsertBulk) SetPriority(v string) *ParseJobUpsertBulk {
+	return u.Update(func(s *ParseJobUpsert) {
+		s.SetPriority(v)
+	})
+}
+
+// UpdatePriority sets the "priority" field to the value that was provided on create.
+func (u *ParseJobUpsertBulk) UpdatePriority() *ParseJobUpsertBulk {
+	return u.Update(func(s *ParseJobUpsert) {
+		s.UpdatePriority()
 	})
 }
 

@@ -611,6 +611,23 @@ func splitCommaList(value string) []string {
 // row would cost one row per trace forever just to remember "nothing here", and
 // this action is manual and bounded by limit.
 func (s *Store) EnqueueProjectBackfill(since time.Time, limit int) (int, error) {
+	queued, _, err := s.enqueueProjectBackfill(since, time.Time{}, limit, ParsePriorityBackfill)
+	return queued, err
+}
+
+// EnqueueProjectBackfillThrough queues the newest un-attributed traces recorded
+// before through, and reports the oldest recorded_at it queued.
+//
+// The continuous sweep in the worker uses this instead of "all missing": it
+// walks backwards through time one chunk at a time, and the returned timestamp
+// becomes the next cursor. A trace that declares no working directory never gets
+// a project row, so a selector without that bound would queue it again on every
+// pass.
+func (s *Store) EnqueueProjectBackfillThrough(through time.Time, limit int) (int, time.Time, error) {
+	return s.enqueueProjectBackfill(time.Time{}, through, limit, ParsePriorityBackfill)
+}
+
+func (s *Store) enqueueProjectBackfill(since, through time.Time, limit int, lane string) (int, time.Time, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -621,11 +638,22 @@ func (s *Store) EnqueueProjectBackfill(since time.Time, limit int) (int, error) 
 	args := []any{}
 	if !since.IsZero() {
 		where += " AND l.recorded_at >= ?"
-		args = append(args, since.UTC())
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	if !through.IsZero() {
+		// Strictly older: the cursor is the oldest trace the previous pass
+		// queued, and an inclusive bound would pick that trace up again once its
+		// job finished without producing a project row.
+		//
+		// The bound is formatted exactly like the column is written: recorded_at
+		// is a timeLayout string, so passing a time.Time would be compared as
+		// text in a different layout by SQLite and silently match nothing.
+		where += " AND l.recorded_at < ?"
+		args = append(args, through.UTC().Format(timeLayout))
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`
-		SELECT l.trace_id
+		SELECT l.trace_id, l.recorded_at
 		FROM logs l
 		WHERE `+where+`
 			AND NOT EXISTS (SELECT 1 FROM trace_projects tp WHERE tp.trace_id = l.trace_id)
@@ -638,30 +666,45 @@ func (s *Store) EnqueueProjectBackfill(since time.Time, limit int) (int, error) 
 		LIMIT ?
 	`, args...)
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
-	var traceIDs []string
+	type candidate struct {
+		traceID  string
+		recorded time.Time
+	}
+	candidates := make([]candidate, 0, limit)
+	oldest := time.Time{}
 	for rows.Next() {
 		var traceID string
-		if err := rows.Scan(&traceID); err != nil {
+		var recorded any
+		if err := rows.Scan(&traceID, &recorded); err != nil {
 			rows.Close()
-			return 0, err
+			return 0, time.Time{}, err
 		}
-		traceIDs = append(traceIDs, traceID)
+		at, err := timeParseValue(recorded)
+		if err != nil {
+			continue
+		}
+		if oldest.IsZero() || at.Before(oldest) {
+			oldest = at
+		}
+		candidates = append(candidates, candidate{traceID: traceID, recorded: at})
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	queued := 0
-	for _, traceID := range traceIDs {
-		if err := s.EnqueueParseJob(traceID); err != nil {
+	for _, item := range candidates {
+		// Historical work goes to its own lane: a backfill of a hundred thousand
+		// traces must never delay the trace the proxy recorded a second ago.
+		if err := s.EnqueueParseJobInLane(item.traceID, lane); err != nil {
 			continue
 		}
 		queued++
 	}
-	return queued, nil
+	return queued, oldest, nil
 }
 
 // ensureProjectSchema creates the project tables on Postgres. SQLite gets the
@@ -1162,4 +1205,15 @@ func sessionProjectClause(keys []string, alias string) (string, []any) {
 	}
 	return `EXISTS (SELECT 1 FROM session_projects spj WHERE spj.session_id = ` + prefix +
 		`session_id AND spj.root_key IN (` + placeholders(len(keys)) + `))`, args
+}
+
+// CountDeclaredTraceProjects reports how many traces are attributed to a
+// declared project. It is the cheap progress figure the queue panel shows: the
+// total number of traces is a log-index scan the projects page already pays for.
+func (s *Store) CountDeclaredTraceProjects() (int, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM trace_projects WHERE status = 'declared'`).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
