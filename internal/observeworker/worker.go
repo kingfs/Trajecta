@@ -223,13 +223,26 @@ func (w *Worker) runLane(ctx context.Context, batchSize int, claim func(int) ([]
 		slog.Warn("Claim parse jobs failed", "error", err)
 		return
 	}
-	for _, job := range jobs {
+	for i, job := range jobs {
 		select {
 		case <-ctx.Done():
+			for _, pending := range jobs[i:] {
+				_ = w.store.ReleaseParseJob(pending.ID)
+			}
 			return
 		default:
 		}
 		if err := w.processJob(ctx, job, settings.ParseMaxAttempts); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// Shutdown interrupted this batch. processJob already released the
+				// current claim, so only the ones after it go back; the next start
+				// picks them up immediately instead of waiting out the stale-job
+				// cutoff.
+				for _, pending := range jobs[i+1:] {
+					_ = w.store.ReleaseParseJob(pending.ID)
+				}
+				return
+			}
 			slog.Warn("Parse job failed", "trace_id", job.TraceID, "job_id", job.ID, "error", err)
 		}
 	}
@@ -317,6 +330,14 @@ func (w *Worker) planBackfill(ctx context.Context, settings store.AnalysisQueueS
 // transient error must not bury a trace for good.
 func (w *Worker) processJob(ctx context.Context, job store.ParseJobRecord, maxAttempts int) error {
 	fail := func(err error) error {
+		if ctx.Err() != nil {
+			// Interrupted by shutdown, not by anything the trace did: release the
+			// claim without counting an attempt.
+			if releaseErr := w.store.ReleaseParseJob(job.ID); releaseErr != nil {
+				slog.Warn("Release parse job failed", "job_id", job.ID, "error", releaseErr)
+			}
+			return err
+		}
 		if _, markErr := w.store.RequeueOrFailParseJob(job.ID, maxAttempts, err.Error()); markErr != nil {
 			slog.Warn("Record parse job failure failed", "job_id", job.ID, "error", markErr)
 		}

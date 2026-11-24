@@ -181,6 +181,29 @@ func (s *Store) CountParseJobs(status string, lane string) (int, error) {
 	return count, nil
 }
 
+// ReleaseParseJob returns a claimed job to the queue without counting the
+// attempt.
+//
+// The claim increments attempts, and that is right for a parse that failed on
+// its own. A parse interrupted by shutdown is not the trace's fault, though: if
+// it were recorded as an attempt, three redeploys during active parses would
+// bury a healthy trace as failed. This un-counts the attempt the claim just
+// added.
+func (s *Store) ReleaseParseJob(id int64) error {
+	_, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'queued',
+		    attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
+		    updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	s.notifyChange(ChangeTraffic)
+	return nil
+}
+
 // RequeueOrFailParseJob records a failed attempt.
 //
 // A parse error is usually permanent (a corrupt cassette) but a database hiccup

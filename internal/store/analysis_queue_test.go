@@ -275,3 +275,32 @@ func TestBackfillCursorWireFormOmitsUnsetTimestamps(t *testing.T) {
 		t.Fatalf("payload = %s, want completed_at omitted", set)
 	}
 }
+
+func TestReleaseParseJobReturnsTheClaimWithoutCountingAnAttempt(t *testing.T) {
+	st, err := newSQLiteTestStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("newSQLiteTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.EnqueueParseJob("t1"); err != nil {
+		t.Fatalf("EnqueueParseJob() error = %v", err)
+	}
+	jobs, err := st.ClaimParseJobs(1)
+	if err != nil {
+		t.Fatalf("ClaimParseJobs() error = %v", err)
+	}
+	if jobs[0].Attempts != 1 {
+		t.Fatalf("attempts after claim = %d, want 1", jobs[0].Attempts)
+	}
+	if err := st.ReleaseParseJob(jobs[0].ID); err != nil {
+		t.Fatalf("ReleaseParseJob() error = %v", err)
+	}
+	queued, err := st.ListParseJobs("queued", 10)
+	if err != nil {
+		t.Fatalf("ListParseJobs() error = %v", err)
+	}
+	if len(queued) != 1 || queued[0].Attempts != 0 {
+		t.Fatalf("released job = %+v, want queued with the attempt un-counted", queued)
+	}
+}

@@ -205,3 +205,40 @@ func TestWorkerBackfillWatermarkZeroWaitsForAnEmptyLane(t *testing.T) {
 		t.Fatalf("queued %d then %d, want the planner to wait while the lane is not empty", first, second)
 	}
 }
+
+// A shutdown during a parse must not consume the trace's retry budget: three
+// redeploys would otherwise bury a healthy trace as failed.
+func TestWorkerReleasesInterruptedJobsOnShutdown(t *testing.T) {
+	dir := t.TempDir()
+	st, err := newTestStore(dir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	if err := st.EnqueueParseJob(traceID); err != nil {
+		t.Fatalf("EnqueueParseJob() error = %v", err)
+	}
+	// Claim the job out of band so the worker sees a running job whose context is
+	// already cancelled - the same shape as a shutdown landing mid-batch.
+	jobs, err := st.ClaimParseJobs(1)
+	if err != nil {
+		t.Fatalf("ClaimParseJobs() error = %v", err)
+	}
+	worker := New(st, Options{Settings: settingsFor(t, nil)})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	worker.runLane(ctx, 1, func(int) ([]store.ParseJobRecord, error) { return jobs, nil }, worker.Settings().Get())
+
+	queued, err := st.ListParseJobs("queued", 10)
+	if err != nil {
+		t.Fatalf("ListParseJobs() error = %v", err)
+	}
+	if len(queued) != 1 {
+		t.Fatalf("queued = %+v, want the interrupted claim released", queued)
+	}
+	if queued[0].Attempts != 0 {
+		t.Fatalf("attempts = %d, want the interrupted attempt un-counted", queued[0].Attempts)
+	}
+}
