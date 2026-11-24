@@ -667,3 +667,13 @@ func isAbsolutePath(value string, windows bool) bool {
 func isASCIIAlpha(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
+
+// DeclaringHarnesses are the client_harness ids whose prompts can carry a
+// working-directory declaration.
+//
+// The historical sweep uses it to avoid re-parsing traffic that cannot yield a
+// project: on the reference deployment 90% of the cassettes are plain SDK calls,
+// and re-reading them to discover they declare nothing is the sweep's dominant
+// cost. A harness that is added to pkg/harness later and does declare will be
+// attributed when it is recorded; scoping the sweep to `all` covers the rest.
+var DeclaringHarnesses = []string{"deepseek-harness", "claude-code", "codex-cli"}

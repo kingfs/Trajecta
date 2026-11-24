@@ -232,13 +232,13 @@ func writeIndexedPlainTextProxyErrorTrace(t *testing.T, st *store.Store, dir str
 
 func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
-	return writeIndexedResponseTraceAt(t, st, dir, "worker-trace", "req-worker", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC))
+	return writeIndexedResponseTraceAt(t, st, dir, "worker-trace", "req-worker", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC), "")
 }
 
 // writeIndexedResponseTraceAt is the same fixture with the identity and the
 // recording time chosen by the caller, so a test can build a history the
 // backfill sweep has to walk.
-func writeIndexedResponseTraceAt(t *testing.T, st *store.Store, dir, name, requestID string, recordedAt time.Time) string {
+func writeIndexedResponseTraceAt(t *testing.T, st *store.Store, dir, name, requestID string, recordedAt time.Time, clientHarness string) string {
 	t.Helper()
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
 	reqBody := `{"model":"gpt-5.1","input":"hello"}`
@@ -248,6 +248,7 @@ func writeIndexedResponseTraceAt(t *testing.T, st *store.Store, dir, name, reque
 		Version: "LLM_PROXY_V3",
 		Meta: recordfile.MetaData{
 			RequestID:     requestID,
+			ClientHarness: clientHarness,
 			Time:          recordedAt,
 			Model:         "gpt-5.1",
 			Provider:      "openai_compatible",

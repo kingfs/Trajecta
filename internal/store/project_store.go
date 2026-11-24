@@ -606,7 +606,7 @@ func splitCommaList(value string) []string {
 // running it again is safe because enqueueing a trace resets its existing job
 // instead of adding a second one.
 func (s *Store) EnqueueProjectBackfill(since time.Time, limit int) (int, error) {
-	_, queued, err := s.enqueueProjectBackfill(since, time.Time{}, "", limit, ParsePriorityBackfill)
+	_, queued, err := s.enqueueProjectBackfill(since, time.Time{}, "", nil, limit, ParsePriorityBackfill)
 	return queued.Queued, err
 }
 
@@ -634,8 +634,13 @@ type ProjectBackfillPlan struct {
 // queued. The trace id breaks ties: a burst can record many requests inside one
 // microsecond, and a timestamp-only cursor would jump past the ones that did not
 // fit in the chunk - they would never be swept.
-func (s *Store) EnqueueProjectBackfillThrough(through time.Time, throughTraceID string, limit int) (ProjectBackfillPlan, error) {
-	candidates, queued, err := s.enqueueProjectBackfill(time.Time{}, through, throughTraceID, limit, ParsePriorityBackfill)
+// harnesses, when non-empty, restricts the sweep to those client_harness ids.
+// A historical sweep of every trace would re-parse hundreds of thousands of
+// plain SDK calls to find the few clients that declare a working directory, so
+// the caller can scope it to the harnesses that can. An empty list means "every
+// trace", which is what the manual backfill and an explicit `all` scope use.
+func (s *Store) EnqueueProjectBackfillThrough(through time.Time, throughTraceID string, harnesses []string, limit int) (ProjectBackfillPlan, error) {
+	candidates, queued, err := s.enqueueProjectBackfill(time.Time{}, through, throughTraceID, harnesses, limit, ParsePriorityBackfill)
 	return ProjectBackfillPlan{Candidates: candidates, Queued: queued.Queued, Oldest: queued.Oldest, OldestTraceID: queued.OldestTraceID}, err
 }
 
@@ -645,7 +650,7 @@ type backfillQueued struct {
 	OldestTraceID string
 }
 
-func (s *Store) enqueueProjectBackfill(since, through time.Time, throughTraceID string, limit int, lane string) (int, backfillQueued, error) {
+func (s *Store) enqueueProjectBackfill(since, through time.Time, throughTraceID string, harnesses []string, limit int, lane string) (int, backfillQueued, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -673,6 +678,14 @@ func (s *Store) enqueueProjectBackfill(since, through time.Time, throughTraceID 
 			where += " AND l.recorded_at < ?"
 			args = append(args, bound)
 		}
+	}
+	if len(harnesses) > 0 {
+		placeholders := make([]string, len(harnesses))
+		for i, id := range harnesses {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		where += " AND l.client_harness IN (" + strings.Join(placeholders, ",") + ")"
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`
@@ -714,20 +727,24 @@ func (s *Store) enqueueProjectBackfill(since, through time.Time, throughTraceID 
 	if err != nil {
 		return 0, backfillQueued{}, err
 	}
-	result := backfillQueued{}
+	traceIDs := make([]string, 0, len(candidates))
 	for _, item := range candidates {
-		// Historical work goes to its own lane: a backfill of a hundred thousand
-		// traces must never delay the trace the proxy recorded a second ago.
-		if err := s.EnqueueParseJobInLane(item.traceID, lane); err != nil {
-			continue
-		}
-		result.Queued++
-		// The cursor may only pass traces that are actually queued. Advancing it
-		// over a failed insert would skip that trace for good.
-		if result.Oldest.IsZero() || item.recorded.Before(result.Oldest) {
-			result.Oldest = item.recorded
-			result.OldestTraceID = item.traceID
-		}
+		traceIDs = append(traceIDs, item.traceID)
+	}
+	// Historical work goes to its own lane: a backfill of a hundred thousand
+	// traces must never delay the trace the proxy recorded a second ago.
+	queued, err := s.EnqueueParseJobsInLane(traceIDs, lane)
+	if err != nil {
+		return len(candidates), backfillQueued{}, err
+	}
+	result := backfillQueued{Queued: queued}
+	// The cursor may only pass traces that are actually queued. Advancing it over
+	// a failed insert would skip that trace for good, so when a batch statement
+	// fails the caller gets the error and retries the same window.
+	if queued > 0 {
+		oldest := candidates[len(candidates)-1]
+		result.Oldest = oldest.recorded
+		result.OldestTraceID = oldest.traceID
 	}
 	return len(candidates), result, nil
 }

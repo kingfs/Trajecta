@@ -45,35 +45,74 @@ func (s *Store) EnqueueParseJob(traceID string) error {
 }
 
 // EnqueueParseJobInLane queues one trace in the given lane.
-//
-// A trace that already has a job is moved to the requested lane: a fresh trace
-// promoted over a pending backfill job must not wait behind the historical
-// queue, and a trace that is already fresh must not be demoted by a historical
-// sweep that happens to see it before the parser does.
 func (s *Store) EnqueueParseJobInLane(traceID string, lane string) error {
 	if strings.TrimSpace(traceID) == "" {
 		return errors.New("enqueue parse job: trace id is required")
 	}
+	_, err := s.EnqueueParseJobsInLane([]string{traceID}, lane)
+	return err
+}
+
+// enqueueParseJobBatchSize bounds one multi-row INSERT. Four bind parameters per
+// row keeps a batch well under both drivers' limits (SQLite 32766, Postgres
+// 65535), and a historical chunk of 1000 traces becomes two statements instead
+// of a thousand.
+const enqueueParseJobBatchSize = 500
+
+// EnqueueParseJobsInLane queues many traces in one statement per batch.
+//
+// A trace that already has a job is moved to the requested lane: a fresh trace
+// promoted over a pending backfill job must not wait behind the historical
+// queue, and a trace that is already fresh must not be demoted by a historical
+// sweep that happens to see it before the parser does. `(trace_id)` is unique,
+// so re-enqueueing resets the existing row instead of adding a second one.
+func (s *Store) EnqueueParseJobsInLane(traceIDs []string, lane string) (int, error) {
 	lane = ParseJobLane(lane)
 	now := time.Now().UTC()
-	// `(trace_id)` is unique, so re-enqueueing an existing trace resets that
-	// job to queued instead of piling up a second row.
-	_, err := s.db.Exec(`
-		INSERT INTO parse_jobs (trace_id, status, priority, attempts, created_at, updated_at)
-		VALUES (?, 'queued', ?, 0, ?, ?)
-		ON CONFLICT (trace_id) DO UPDATE
-		SET status = 'queued', attempts = 0, last_error = '', updated_at = excluded.updated_at,
-		    -- A trace that is already waiting (or running) in the fresh lane keeps
-		    -- its place: the historical sweep must not demote work the proxy just
-		    -- queued. Any other prior lane is replaced, which is what lets the
-		    -- sweep pick up a trace whose earlier parse finished before project
-		    -- attribution existed.
-		    priority = CASE
-		        WHEN parse_jobs.priority = 'fresh' AND parse_jobs.status IN ('queued', 'running') THEN 'fresh'
-		        ELSE excluded.priority
-		    END
-	`, traceID, lane, now, now)
-	return err
+	queued := 0
+	for start := 0; start < len(traceIDs); start += enqueueParseJobBatchSize {
+		end := start + enqueueParseJobBatchSize
+		if end > len(traceIDs) {
+			end = len(traceIDs)
+		}
+		values := make([]string, 0, end-start)
+		args := make([]any, 0, (end-start)*4)
+		for _, traceID := range traceIDs[start:end] {
+			traceID = strings.TrimSpace(traceID)
+			if traceID == "" {
+				continue
+			}
+			values = append(values, "(?, 'queued', ?, 0, ?, ?)")
+			args = append(args, traceID, lane, now, now)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		result, err := s.db.Exec(`
+			INSERT INTO parse_jobs (trace_id, status, priority, attempts, created_at, updated_at)
+			VALUES `+strings.Join(values, ",")+`
+			ON CONFLICT (trace_id) DO UPDATE
+			SET status = 'queued', attempts = 0, last_error = '', updated_at = excluded.updated_at,
+			    -- A trace that is already waiting (or running) in the fresh lane keeps
+			    -- its place: the historical sweep must not demote work the proxy just
+			    -- queued. Any other prior lane is replaced, which is what lets the
+			    -- sweep pick up a trace whose earlier parse finished before project
+			    -- attribution existed.
+			    priority = CASE
+			        WHEN parse_jobs.priority = 'fresh' AND parse_jobs.status IN ('queued', 'running') THEN 'fresh'
+			        ELSE excluded.priority
+			    END
+		`, args...)
+		if err != nil {
+			return queued, err
+		}
+		if count, err := result.RowsAffected(); err == nil {
+			queued += int(count)
+		} else {
+			queued += len(values)
+		}
+	}
+	return queued, nil
 }
 
 // ListParseJobs is a test seam: the production worker claims jobs through

@@ -14,6 +14,10 @@ type Worker struct {
 	service   *Service
 	interval  time.Duration
 	batchSize int
+	// settings, when set, overrides interval and batchSize with the live queue
+	// policy shared with the Monitor. The reanalysis queue used to be the one
+	// queue nobody could tune while the parse queue next to it was tunable.
+	settings func() (time.Duration, int)
 }
 
 type WorkerOptions struct {
@@ -25,6 +29,9 @@ type WorkerOptions struct {
 	DetectorRuntime *detector.Runtime
 	// ParserEngine is forwarded to the service built from these options.
 	ParserEngine string
+	// Settings, when set, supplies the live interval and batch size. It is read
+	// before every pass, so a change applies without a restart.
+	Settings func() (time.Duration, int)
 }
 
 func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
@@ -45,7 +52,19 @@ func NewWorker(st *store.Store, opts WorkerOptions) *Worker {
 		service:   service,
 		interval:  interval,
 		batchSize: batchSize,
+		settings:  opts.Settings,
 	}
+}
+
+// pacing returns the live interval and batch size.
+func (w *Worker) pacing() (time.Duration, int) {
+	interval, batchSize := w.interval, w.batchSize
+	if w.settings != nil {
+		if liveInterval, liveBatch := w.settings(); liveInterval > 0 && liveBatch > 0 {
+			return liveInterval, liveBatch
+		}
+	}
+	return interval, batchSize
 }
 
 // staleJobAfter matches the parse worker: a job running past it belongs to a
@@ -62,14 +81,23 @@ func (w *Worker) Run(ctx context.Context) {
 		slog.Info("Reclaimed interrupted analysis jobs", "count", count)
 	}
 	w.runOnce(ctx)
-	ticker := time.NewTicker(w.interval)
+	// The tick is short and the pass is due-time driven, so a policy change is
+	// honoured on the next tick instead of at the next full interval.
+	lastRun := time.Now()
+	const tick = 250 * time.Millisecond
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case now := <-ticker.C:
+			interval, _ := w.pacing()
+			if now.Sub(lastRun) < interval {
+				continue
+			}
 			w.runOnce(ctx)
+			lastRun = now
 		}
 	}
 }
@@ -79,7 +107,8 @@ func (w *Worker) RunOnce(ctx context.Context) {
 }
 
 func (w *Worker) runOnce(ctx context.Context) {
-	jobs, err := w.store.ClaimAnalysisJobsForWorker(w.batchSize)
+	_, batchSize := w.pacing()
+	jobs, err := w.store.ClaimAnalysisJobsForWorker(batchSize)
 	if err != nil {
 		slog.Warn("Claim analysis jobs failed", "error", err)
 		return

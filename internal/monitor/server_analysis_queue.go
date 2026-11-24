@@ -16,11 +16,13 @@ import (
 // claims and the failed rows. A "total remaining" figure would have to scan the
 // log index, and the projects page already answers "how much is attributed".
 type analysisQueueDepth struct {
-	FreshQueued    int `json:"fresh_queued"`
-	BackfillQueued int `json:"backfill_queued"`
-	Running        int `json:"running"`
-	Failed         int `json:"failed"`
-	Attributed     int `json:"attributed"`
+	FreshQueued     int `json:"fresh_queued"`
+	FreshRunning    int `json:"fresh_running"`
+	BackfillQueued  int `json:"backfill_queued"`
+	BackfillRunning int `json:"backfill_running"`
+	Running         int `json:"running"`
+	Failed          int `json:"failed"`
+	Attributed      int `json:"attributed"`
 }
 
 // analysisQueueView is the settings row plus the live depth and whether this
@@ -33,14 +35,17 @@ type analysisQueueView struct {
 }
 
 type analysisQueuePatch struct {
-	ParseBatchSize       *int  `json:"parse_batch_size,omitempty"`
-	ParseIntervalMs      *int  `json:"parse_interval_ms,omitempty"`
-	ParseMaxAttempts     *int  `json:"parse_max_attempts,omitempty"`
-	BackfillEnabled      *bool `json:"backfill_enabled,omitempty"`
-	BackfillBatchSize    *int  `json:"backfill_batch_size,omitempty"`
-	BackfillIntervalMs   *int  `json:"backfill_interval_ms,omitempty"`
-	BackfillChunkSize    *int  `json:"backfill_chunk_size,omitempty"`
-	BackfillLowWatermark *int  `json:"backfill_low_watermark,omitempty"`
+	ParseBatchSize       *int    `json:"parse_batch_size,omitempty"`
+	ParseIntervalMs      *int    `json:"parse_interval_ms,omitempty"`
+	ParseMaxAttempts     *int    `json:"parse_max_attempts,omitempty"`
+	BackfillEnabled      *bool   `json:"backfill_enabled,omitempty"`
+	BackfillBatchSize    *int    `json:"backfill_batch_size,omitempty"`
+	BackfillIntervalMs   *int    `json:"backfill_interval_ms,omitempty"`
+	BackfillChunkSize    *int    `json:"backfill_chunk_size,omitempty"`
+	BackfillLowWatermark *int    `json:"backfill_low_watermark,omitempty"`
+	BackfillScope        *string `json:"backfill_scope,omitempty"`
+	AnalysisBatchSize    *int    `json:"analysis_batch_size,omitempty"`
+	AnalysisIntervalMs   *int    `json:"analysis_interval_ms,omitempty"`
 }
 
 // analysisQueueAPIHandler reads and writes the two-lane parse policy.
@@ -144,6 +149,15 @@ func mergeAnalysisQueuePatch(current store.AnalysisQueueSettings, patch analysis
 	if patch.BackfillLowWatermark != nil {
 		current.BackfillLowWatermark = *patch.BackfillLowWatermark
 	}
+	if patch.BackfillScope != nil {
+		current.BackfillScope = *patch.BackfillScope
+	}
+	if patch.AnalysisBatchSize != nil {
+		current.AnalysisBatchSize = *patch.AnalysisBatchSize
+	}
+	if patch.AnalysisIntervalMs != nil {
+		current.AnalysisIntervalMs = *patch.AnalysisIntervalMs
+	}
 	return current
 }
 
@@ -157,9 +171,13 @@ func analysisQueueDepthFor(ctx context.Context, st *store.Store) analysisQueueDe
 	if count, err := st.CountParseJobs("queued", store.ParsePriorityBackfill); err == nil {
 		depth.BackfillQueued = count
 	}
-	if count, err := st.CountParseJobs("running", ""); err == nil {
-		depth.Running = count
+	if count, err := st.CountParseJobs("running", store.ParsePriorityFresh); err == nil {
+		depth.FreshRunning = count
 	}
+	if count, err := st.CountParseJobs("running", store.ParsePriorityBackfill); err == nil {
+		depth.BackfillRunning = count
+	}
+	depth.Running = depth.FreshRunning + depth.BackfillRunning
 	if count, err := st.CountParseJobs("failed", ""); err == nil {
 		depth.Failed = count
 	}

@@ -290,7 +290,11 @@ func (w *Worker) planBackfill(ctx context.Context, settings store.AnalysisQueueS
 	if through.IsZero() {
 		through = time.Now().UTC()
 	}
-	plan, err := w.store.EnqueueProjectBackfillThrough(through, state.ProjectThroughTrace, settings.BackfillChunkSize)
+	harnesses := projectid.DeclaringHarnesses
+	if settings.BackfillScope == store.BackfillScopeAll {
+		harnesses = nil
+	}
+	plan, err := w.store.EnqueueProjectBackfillThrough(through, state.ProjectThroughTrace, harnesses, settings.BackfillChunkSize)
 	if err != nil {
 		slog.Warn("Plan project backfill failed", "error", err)
 		return

@@ -183,6 +183,12 @@ func TestAnalysisQueueSettingsDefaultsAndBounds(t *testing.T) {
 	if !defaults.BackfillEnabled || defaults.BackfillBatchSize != 2 {
 		t.Fatalf("defaults = %+v, want a slow historical lane that is on", defaults)
 	}
+	if defaults.BackfillScope != BackfillScopeDeclarers {
+		t.Fatalf("default scope = %q, want declarers", defaults.BackfillScope)
+	}
+	if defaults.AnalysisBatchSize != 5 || defaults.AnalysisIntervalMs != 5000 {
+		t.Fatalf("analysis defaults = %d/%d, want the old hardcoded 5/5000", defaults.AnalysisBatchSize, defaults.AnalysisIntervalMs)
+	}
 	if message := ValidateAnalysisQueueSettings(defaults); message != "" {
 		t.Fatalf("defaults rejected: %s", message)
 	}
@@ -195,6 +201,22 @@ func TestAnalysisQueueSettingsDefaultsAndBounds(t *testing.T) {
 	}
 	if normalized.BackfillIntervalMs < 200 {
 		t.Fatalf("backfill interval = %d, want a floor", normalized.BackfillIntervalMs)
+	}
+	if normalized.BackfillScope != BackfillScopeDeclarers || normalized.AnalysisBatchSize != 5 {
+		t.Fatalf("normalized = %+v, want scope and analysis defaults filled", normalized)
+	}
+	if got := NormalizeAnalysisQueueSettings(AnalysisQueueSettings{BackfillScope: "bogus"}); got.BackfillScope != BackfillScopeDeclarers {
+		t.Fatalf("scope = %q, want an unknown scope normalized to declarers", got.BackfillScope)
+	}
+	invalidScope := defaults
+	invalidScope.BackfillScope = "bogus"
+	if message := ValidateAnalysisQueueSettings(invalidScope); message == "" {
+		t.Fatal("an unknown backfill scope was accepted")
+	}
+	invalidAnalysis := defaults
+	invalidAnalysis.AnalysisIntervalMs = 1
+	if message := ValidateAnalysisQueueSettings(invalidAnalysis); message == "" {
+		t.Fatal("an analysis interval below the floor was accepted")
 	}
 	if message := ValidateAnalysisQueueSettings(AnalysisQueueSettings{ParseIntervalMs: 1, ParseBatchSize: 10, ParseMaxAttempts: 3, BackfillBatchSize: 2, BackfillIntervalMs: 5000, BackfillChunkSize: 1000, BackfillLowWatermark: 200}); message == "" {
 		t.Fatal("an interval below the floor was accepted")

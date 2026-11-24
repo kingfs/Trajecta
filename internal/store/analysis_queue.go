@@ -43,12 +43,34 @@ type AnalysisQueueSettings struct {
 	// attribution a continuous background job rather than a one-shot request.
 	BackfillChunkSize    int `json:"backfill_chunk_size"`
 	BackfillLowWatermark int `json:"backfill_low_watermark"`
+	// BackfillScope limits which traces the sweep re-parses: "declarers" (the
+	// harnesses that can declare a working directory) or "all". Re-parsing every
+	// plain SDK call to find that it declares nothing is the sweep's dominant
+	// cost, so declarers is the default; all covers a client the harness
+	// classifier does not know yet.
+	BackfillScope string `json:"backfill_scope"`
+
+	// AnalysisBatchSize and AnalysisIntervalMs pace the reanalysis queue, which
+	// had its own hardcoded 5 / 5000 ms. It is much lower volume than parsing,
+	// but leaving one queue untunable while the other is tunable is the kind of
+	// asymmetry that surprises an operator mid-incident.
+	AnalysisBatchSize  int `json:"analysis_batch_size"`
+	AnalysisIntervalMs int `json:"analysis_interval_ms"`
 
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // AnalysisQueueSettingsKey is the application-database key holding the policy.
 const AnalysisQueueSettingsKey = "analysis.queue"
+
+// Backfill scopes.
+const (
+	// BackfillScopeDeclarers sweeps only the harnesses whose prompts can declare
+	// a working directory.
+	BackfillScopeDeclarers = "declarers"
+	// BackfillScopeAll sweeps every un-attributed client-visible trace.
+	BackfillScopeAll = "all"
+)
 
 // Parse job lanes.
 const (
@@ -86,6 +108,9 @@ func DefaultAnalysisQueueSettings() AnalysisQueueSettings {
 		BackfillIntervalMs:   5000,
 		BackfillChunkSize:    1000,
 		BackfillLowWatermark: 200,
+		BackfillScope:        BackfillScopeDeclarers,
+		AnalysisBatchSize:    5,
+		AnalysisIntervalMs:   5000,
 	}
 }
 
@@ -115,6 +140,15 @@ func NormalizeAnalysisQueueSettings(settings AnalysisQueueSettings) AnalysisQueu
 	if settings.BackfillLowWatermark == 0 {
 		settings.BackfillLowWatermark = defaults.BackfillLowWatermark
 	}
+	if settings.AnalysisBatchSize == 0 {
+		settings.AnalysisBatchSize = defaults.AnalysisBatchSize
+	}
+	if settings.AnalysisIntervalMs == 0 {
+		settings.AnalysisIntervalMs = defaults.AnalysisIntervalMs
+	}
+	if settings.BackfillScope == "" {
+		settings.BackfillScope = defaults.BackfillScope
+	}
 	settings.ParseBatchSize = clampInt(settings.ParseBatchSize, minParseBatchSize, maxParseBatchSize)
 	settings.ParseIntervalMs = clampInt(settings.ParseIntervalMs, minParseIntervalMs, maxParseIntervalMs)
 	settings.ParseMaxAttempts = clampInt(settings.ParseMaxAttempts, minParseMaxAttempts, maxParseMaxAttempts)
@@ -122,6 +156,11 @@ func NormalizeAnalysisQueueSettings(settings AnalysisQueueSettings) AnalysisQueu
 	settings.BackfillIntervalMs = clampInt(settings.BackfillIntervalMs, minParseIntervalMs, maxParseIntervalMs)
 	settings.BackfillChunkSize = clampInt(settings.BackfillChunkSize, minBackfillChunkSize, maxBackfillChunkSize)
 	settings.BackfillLowWatermark = clampInt(settings.BackfillLowWatermark, minBackfillLowWatermark, maxBackfillLowWatermark)
+	settings.AnalysisBatchSize = clampInt(settings.AnalysisBatchSize, minParseBatchSize, maxParseBatchSize)
+	settings.AnalysisIntervalMs = clampInt(settings.AnalysisIntervalMs, minParseIntervalMs, maxParseIntervalMs)
+	if settings.BackfillScope != BackfillScopeAll {
+		settings.BackfillScope = BackfillScopeDeclarers
+	}
 	return settings
 }
 
@@ -148,6 +187,15 @@ func ValidateAnalysisQueueSettings(settings AnalysisQueueSettings) string {
 	}
 	if settings.BackfillLowWatermark < minBackfillLowWatermark || settings.BackfillLowWatermark > maxBackfillLowWatermark {
 		return "backfill_low_watermark must be between 1 and 10000"
+	}
+	if settings.BackfillScope != BackfillScopeDeclarers && settings.BackfillScope != BackfillScopeAll {
+		return `backfill_scope must be "declarers" or "all"`
+	}
+	if settings.AnalysisBatchSize < minParseBatchSize || settings.AnalysisBatchSize > maxParseBatchSize {
+		return "analysis_batch_size must be between 1 and 500"
+	}
+	if settings.AnalysisIntervalMs < minParseIntervalMs || settings.AnalysisIntervalMs > maxParseIntervalMs {
+		return "analysis_interval_ms must be between 200 and 3600000"
 	}
 	return ""
 }

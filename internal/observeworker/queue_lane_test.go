@@ -64,8 +64,8 @@ func TestWorkerBackfillSweepWalksBackwardsAndCompletes(t *testing.T) {
 	}
 	defer st.Close()
 
-	older := writeIndexedResponseTraceAt(t, st, dir, "older", "req-older", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC))
-	newer := writeIndexedResponseTraceAt(t, st, dir, "newer", "req-newer", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC))
+	older := writeIndexedResponseTraceAt(t, st, dir, "older", "req-older", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC), "deepseek-harness")
+	newer := writeIndexedResponseTraceAt(t, st, dir, "newer", "req-newer", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC), "deepseek-harness")
 
 	worker := New(st, Options{Settings: settingsFor(t, nil)})
 	ctx := context.Background()
@@ -125,8 +125,8 @@ func TestWorkerProcessesFreshAndBackfillInOnePass(t *testing.T) {
 	}
 	defer st.Close()
 
-	fresh := writeIndexedResponseTraceAt(t, st, dir, "fresh", "req-fresh", time.Date(2026, 5, 13, 11, 0, 0, 0, time.UTC))
-	historical := writeIndexedResponseTraceAt(t, st, dir, "historical", "req-historical", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC))
+	fresh := writeIndexedResponseTraceAt(t, st, dir, "fresh", "req-fresh", time.Date(2026, 5, 13, 11, 0, 0, 0, time.UTC), "")
+	historical := writeIndexedResponseTraceAt(t, st, dir, "historical", "req-historical", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC), "")
 	if err := st.EnqueueParseJob(fresh); err != nil {
 		t.Fatalf("enqueue fresh: %v", err)
 	}
@@ -155,8 +155,8 @@ func TestWorkerBackfillSweepKeepsTracesThatShareATimestamp(t *testing.T) {
 	defer st.Close()
 
 	same := time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC)
-	first := writeIndexedResponseTraceAt(t, st, dir, "burst-a", "req-burst-a", same)
-	second := writeIndexedResponseTraceAt(t, st, dir, "burst-b", "req-burst-b", same)
+	first := writeIndexedResponseTraceAt(t, st, dir, "burst-a", "req-burst-a", same, "deepseek-harness")
+	second := writeIndexedResponseTraceAt(t, st, dir, "burst-b", "req-burst-b", same, "deepseek-harness")
 
 	worker := New(st, Options{Settings: settingsFor(t, nil)})
 	ctx := context.Background()
@@ -184,8 +184,8 @@ func TestWorkerBackfillWatermarkZeroWaitsForAnEmptyLane(t *testing.T) {
 	}
 	defer st.Close()
 
-	writeIndexedResponseTraceAt(t, st, dir, "a", "req-a", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC))
-	writeIndexedResponseTraceAt(t, st, dir, "b", "req-b", time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC))
+	writeIndexedResponseTraceAt(t, st, dir, "a", "req-a", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC), "deepseek-harness")
+	writeIndexedResponseTraceAt(t, st, dir, "b", "req-b", time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC), "deepseek-harness")
 	worker := New(st, Options{Settings: settingsFor(t, func(policy *store.AnalysisQueueSettings) {
 		policy.BackfillLowWatermark = 1
 	})})
@@ -240,5 +240,58 @@ func TestWorkerReleasesInterruptedJobsOnShutdown(t *testing.T) {
 	}
 	if queued[0].Attempts != 0 {
 		t.Fatalf("attempts = %d, want the interrupted attempt un-counted", queued[0].Attempts)
+	}
+}
+
+// The sweep defaults to the harnesses that can declare a working directory:
+// re-parsing every plain SDK call to discover it declares nothing was 90% of the
+// IO on the reference deployment.
+func TestWorkerSweepScopeFiltersToDeclaringHarnesses(t *testing.T) {
+	dir := t.TempDir()
+	st, err := newTestStore(dir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	declarer := writeIndexedResponseTraceAt(t, st, dir, "dsh", "req-dsh", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC), "deepseek-harness")
+	sdk := writeIndexedResponseTraceAt(t, st, dir, "sdk", "req-sdk", time.Date(2026, 5, 13, 9, 0, 0, 0, time.UTC), "")
+
+	worker := New(st, Options{Settings: settingsFor(t, nil)})
+	// Pass one plans the chunk, pass two drains it; the planner runs after the
+	// claim, so a queued chunk is always processed on the following pass.
+	worker.RunOnce(context.Background())
+	queued, err := st.CountParseJobs("queued", store.ParsePriorityBackfill)
+	if err != nil {
+		t.Fatalf("CountParseJobs() error = %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("backfill queued = %d, want only the declaring harness", queued)
+	}
+	worker.RunOnce(context.Background())
+	// The SDK trace must not be swept in declarers scope, but the schema still
+	// parses it on the fresh lane when it is recorded.
+	if _, err := st.GetObservationSummary(sdk); err == nil {
+		t.Fatal("the SDK trace was swept under the declarers scope")
+	}
+	if _, err := st.GetObservationSummary(declarer); err != nil {
+		t.Fatalf("the declaring trace was not swept: %v", err)
+	}
+
+	// `all` is the escape hatch for a client the classifier does not know yet.
+	if err := st.ResetBackfillState(context.Background()); err != nil {
+		t.Fatalf("ResetBackfillState() error = %v", err)
+	}
+	if err := st.EnqueueParseJobInLane(declarer, store.ParsePriorityFresh); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	allWorker := New(st, Options{Settings: settingsFor(t, func(policy *store.AnalysisQueueSettings) {
+		policy.BackfillScope = store.BackfillScopeAll
+	})})
+	for pass := 0; pass < 3; pass++ {
+		allWorker.RunOnce(context.Background())
+	}
+	if _, err := st.GetObservationSummary(sdk); err != nil {
+		t.Fatalf("the SDK trace was not swept under the all scope: %v", err)
 	}
 }

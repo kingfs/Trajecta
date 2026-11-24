@@ -161,8 +161,12 @@ func runServeWithConfig(configPath string) int {
 		parseWorker.Run(syncCtx)
 	}()
 	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{
-		Interval:        5 * time.Second,
-		BatchSize:       5,
+		Interval:  5 * time.Second,
+		BatchSize: 5,
+		Settings: func() (time.Duration, int) {
+			policy := analysisQueueSettings.Get()
+			return time.Duration(policy.AnalysisIntervalMs) * time.Millisecond, policy.AnalysisBatchSize
+		},
 		DetectorRuntime: detectorRuntime,
 		ParserEngine:    cfg.Analysis.ParserEngine,
 	})

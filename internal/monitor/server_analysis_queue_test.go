@@ -49,7 +49,7 @@ func TestAnalysisQueueAPIReadsDefaultsAndAppliesPatch(t *testing.T) {
 		t.Fatalf("view = %+v, want the defaults with a worker attached", view)
 	}
 
-	body := `{"parse_batch_size":25,"parse_interval_ms":1000,"backfill_enabled":false,"backfill_chunk_size":10}`
+	body := `{"parse_batch_size":25,"parse_interval_ms":1000,"backfill_enabled":false,"backfill_chunk_size":10,"backfill_scope":"all","analysis_batch_size":9,"analysis_interval_ms":2000}`
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/api/settings/analysis-queue", strings.NewReader(body)))
 	if recorder.Code != http.StatusOK {
@@ -68,6 +68,9 @@ func TestAnalysisQueueAPIReadsDefaultsAndAppliesPatch(t *testing.T) {
 	}
 	if stored.BackfillChunkSize != 10 {
 		t.Fatalf("backfill chunk = %d, want the patched value", stored.BackfillChunkSize)
+	}
+	if stored.BackfillScope != store.BackfillScopeAll || stored.AnalysisBatchSize != 9 || stored.AnalysisIntervalMs != 2000 {
+		t.Fatalf("stored = %+v, want scope and analysis pacing patched", stored)
 	}
 }
 

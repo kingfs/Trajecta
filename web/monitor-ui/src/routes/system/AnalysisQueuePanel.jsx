@@ -98,8 +98,16 @@ export function AnalysisQueuePanel() {
       </div>
 
       <div className="hero-grid hero-grid-compact">
-        <StatCard label={t("system.queueFreshQueued")} value={formatRawNumber(depth.fresh_queued || 0)} />
-        <StatCard label={t("system.queueBackfillQueued")} value={formatRawNumber(depth.backfill_queued || 0)} />
+        <StatCard
+          label={t("system.queueFreshQueued")}
+          value={formatRawNumber(depth.fresh_queued || 0)}
+          detail={t("system.queueRunningDetail", { count: formatRawNumber(depth.fresh_running || 0) })}
+        />
+        <StatCard
+          label={t("system.queueBackfillQueued")}
+          value={formatRawNumber(depth.backfill_queued || 0)}
+          detail={t("system.queueRunningDetail", { count: formatRawNumber(depth.backfill_running || 0) })}
+        />
         <StatCard label={t("system.queueRunning")} value={formatRawNumber(depth.running || 0)} />
         <StatCard label={t("system.queueFailed")} value={formatRawNumber(depth.failed || 0)} accent={(depth.failed || 0) > 0 ? "accent-red" : ""} />
         <StatCard label={t("system.queueAttributed")} value={formatRawNumber(depth.attributed || 0)} />
@@ -207,6 +215,44 @@ export function AnalysisQueuePanel() {
           <span className="system-note">{t("system.queueBackfillWatermarkHint")}</span>
         </label>
 
+        <label>
+          {t("system.queueBackfillScope")}
+          <select
+            className="input"
+            value={form.backfill_scope}
+            onChange={(event) => update("backfill_scope", event.target.value)}
+            disabled={save.isPending}
+          >
+            <option value="declarers">{t("system.queueScopeDeclarers")}</option>
+            <option value="all">{t("system.queueScopeAll")}</option>
+          </select>
+          <span className="system-note">{t("system.queueBackfillScopeHint")}</span>
+        </label>
+
+        <h3 className="provider-form-wide">{t("system.queueAnalysisSection")}</h3>
+        <label>
+          {t("system.queueAnalysisBatchSize")}
+          <Input
+            type="number"
+            min="1"
+            max="500"
+            value={form.analysis_batch_size}
+            onChange={(event) => update("analysis_batch_size", event.target.value)}
+            disabled={save.isPending}
+          />
+        </label>
+        <label>
+          {t("system.queueAnalysisInterval")}
+          <Input
+            type="number"
+            min="200"
+            step="100"
+            value={form.analysis_interval_ms}
+            onChange={(event) => update("analysis_interval_ms", event.target.value)}
+            disabled={save.isPending}
+          />
+        </label>
+
         <div className="provider-form-actions provider-form-wide">
           <Button variant="primary" type="submit" disabled={save.isPending}>
             {t("common.save")}
@@ -245,6 +291,9 @@ function formFromPayload(payload) {
     backfill_interval_ms: payload?.backfill_interval_ms ?? 5000,
     backfill_chunk_size: payload?.backfill_chunk_size ?? 1000,
     backfill_low_watermark: payload?.backfill_low_watermark ?? 200,
+    backfill_scope: payload?.backfill_scope === "all" ? "all" : "declarers",
+    analysis_batch_size: payload?.analysis_batch_size ?? 5,
+    analysis_interval_ms: payload?.analysis_interval_ms ?? 5000,
   };
 }
 
@@ -258,5 +307,8 @@ function payloadFromForm(form) {
     backfill_interval_ms: Number(form.backfill_interval_ms),
     backfill_chunk_size: Number(form.backfill_chunk_size),
     backfill_low_watermark: Number(form.backfill_low_watermark),
+    backfill_scope: form.backfill_scope === "all" ? "all" : "declarers",
+    analysis_batch_size: Number(form.analysis_batch_size),
+    analysis_interval_ms: Number(form.analysis_interval_ms),
   };
 }

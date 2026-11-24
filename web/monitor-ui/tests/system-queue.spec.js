@@ -19,6 +19,9 @@ const queue = {
   backfill_interval_ms: 5000,
   backfill_chunk_size: 1000,
   backfill_low_watermark: 200,
+  backfill_scope: "declarers",
+  analysis_batch_size: 5,
+  analysis_interval_ms: 5000,
   queue: { fresh_queued: 4, backfill_queued: 120, running: 1, failed: 7, attributed: 315 },
   backfill: { project_through: "2026-11-20T10:00:00Z", completed_at: null },
   runtime_attached: true,
@@ -72,11 +75,11 @@ test("the queue panel shows both lanes and saves numbers", async ({ page }) => {
     backfill_enabled: true,
     backfill_chunk_size: 1000,
   });
-  for (const value of Object.entries(patches[0])) {
-    if (value[0].startsWith("backfill_") && value[0] !== "backfill_enabled") {
-      expect(typeof value[1], `${value[0]} must be a number`).toBe("number");
-    }
+  for (const [key, value] of Object.entries(patches[0])) {
+    const isNumber = (key.startsWith("backfill_") || key.startsWith("analysis_")) && key !== "backfill_enabled" && key !== "backfill_scope";
+    if (isNumber) expect(typeof value, `${key} must be a number`).toBe("number");
   }
+  expect(patches[0].backfill_scope).toBe("declarers");
 });
 
 test("re-running the sweep clears the cursor after a confirmation", async ({ page }) => {
