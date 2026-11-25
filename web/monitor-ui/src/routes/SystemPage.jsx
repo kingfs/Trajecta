@@ -6,6 +6,7 @@ import { NetworkProxyPanel } from "./system/NetworkProxyPanel";
 import { DatabasePanel } from "./system/DatabasePanel";
 import { SlowQueryPanel } from "./system/SlowQueryPanel";
 import { ToolsPanel } from "./system/ToolsPanel";
+import { AnalysisQueuePanel } from "./system/AnalysisQueuePanel";
 import { useI18n } from "../lib/i18n";
 
 // The system page is admin-only and reads three independent snapshots - host and
@@ -32,6 +33,7 @@ export function SystemPage() {
         { id: "network", label: t("system.tabNetworkProxy"), element: <NetworkProxyPanel /> },
         { id: "database", label: t("system.tabDatabase"), element: <DatabasePanel /> },
         { id: "slow", label: t("system.tabSlowQueries"), element: <SlowQueryPanel /> },
+        { id: "queue", label: t("system.tabQueue"), element: <AnalysisQueuePanel /> },
         { id: "tools", label: t("system.tabTools"), element: <ToolsPanel /> },
       ]}
     />

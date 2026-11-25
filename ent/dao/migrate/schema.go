@@ -372,6 +372,7 @@ var (
 		{Name: "id", Type: field.TypeInt, Increment: true},
 		{Name: "trace_id", Type: field.TypeString},
 		{Name: "status", Type: field.TypeString},
+		{Name: "priority", Type: field.TypeString, Default: "fresh"},
 		{Name: "attempts", Type: field.TypeInt, Default: 0},
 		{Name: "last_error", Type: field.TypeString, Default: ""},
 		{Name: "created_at", Type: field.TypeTime},
@@ -386,7 +387,12 @@ var (
 			{
 				Name:    "parsejob_status_updated_at",
 				Unique:  false,
-				Columns: []*schema.Column{ParseJobsColumns[2], ParseJobsColumns[6]},
+				Columns: []*schema.Column{ParseJobsColumns[2], ParseJobsColumns[7]},
+			},
+			{
+				Name:    "parsejob_priority_status_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{ParseJobsColumns[3], ParseJobsColumns[2], ParseJobsColumns[7]},
 			},
 			{
 				Name:    "parsejob_trace_id_status",

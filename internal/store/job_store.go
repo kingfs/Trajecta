@@ -33,6 +33,7 @@ type ParseJobRecord struct {
 	ID        int64
 	TraceID   string
 	Status    string
+	Priority  string
 	Attempts  int
 	LastError string
 	CreatedAt time.Time
@@ -40,19 +41,78 @@ type ParseJobRecord struct {
 }
 
 func (s *Store) EnqueueParseJob(traceID string) error {
+	return s.EnqueueParseJobInLane(traceID, ParsePriorityFresh)
+}
+
+// EnqueueParseJobInLane queues one trace in the given lane.
+func (s *Store) EnqueueParseJobInLane(traceID string, lane string) error {
 	if strings.TrimSpace(traceID) == "" {
 		return errors.New("enqueue parse job: trace id is required")
 	}
-	now := time.Now().UTC()
-	// `(trace_id)` is unique, so re-enqueueing an existing trace resets that
-	// job to queued instead of piling up a second row.
-	_, err := s.db.Exec(`
-		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
-		VALUES (?, 'queued', 0, ?, ?)
-		ON CONFLICT (trace_id) DO UPDATE
-		SET status = 'queued', attempts = 0, last_error = '', updated_at = excluded.updated_at
-	`, traceID, now, now)
+	_, err := s.EnqueueParseJobsInLane([]string{traceID}, lane)
 	return err
+}
+
+// enqueueParseJobBatchSize bounds one multi-row INSERT. Four bind parameters per
+// row keeps a batch well under both drivers' limits (SQLite 32766, Postgres
+// 65535), and a historical chunk of 1000 traces becomes two statements instead
+// of a thousand.
+const enqueueParseJobBatchSize = 500
+
+// EnqueueParseJobsInLane queues many traces in one statement per batch.
+//
+// A trace that already has a job is moved to the requested lane: a fresh trace
+// promoted over a pending backfill job must not wait behind the historical
+// queue, and a trace that is already fresh must not be demoted by a historical
+// sweep that happens to see it before the parser does. `(trace_id)` is unique,
+// so re-enqueueing resets the existing row instead of adding a second one.
+func (s *Store) EnqueueParseJobsInLane(traceIDs []string, lane string) (int, error) {
+	lane = ParseJobLane(lane)
+	now := time.Now().UTC()
+	queued := 0
+	for start := 0; start < len(traceIDs); start += enqueueParseJobBatchSize {
+		end := start + enqueueParseJobBatchSize
+		if end > len(traceIDs) {
+			end = len(traceIDs)
+		}
+		values := make([]string, 0, end-start)
+		args := make([]any, 0, (end-start)*4)
+		for _, traceID := range traceIDs[start:end] {
+			traceID = strings.TrimSpace(traceID)
+			if traceID == "" {
+				continue
+			}
+			values = append(values, "(?, 'queued', ?, 0, ?, ?)")
+			args = append(args, traceID, lane, now, now)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		result, err := s.db.Exec(`
+			INSERT INTO parse_jobs (trace_id, status, priority, attempts, created_at, updated_at)
+			VALUES `+strings.Join(values, ",")+`
+			ON CONFLICT (trace_id) DO UPDATE
+			SET status = 'queued', attempts = 0, last_error = '', updated_at = excluded.updated_at,
+			    -- A trace that is already waiting (or running) in the fresh lane keeps
+			    -- its place: the historical sweep must not demote work the proxy just
+			    -- queued. Any other prior lane is replaced, which is what lets the
+			    -- sweep pick up a trace whose earlier parse finished before project
+			    -- attribution existed.
+			    priority = CASE
+			        WHEN parse_jobs.priority = 'fresh' AND parse_jobs.status IN ('queued', 'running') THEN 'fresh'
+			        ELSE excluded.priority
+			    END
+		`, args...)
+		if err != nil {
+			return queued, err
+		}
+		if count, err := result.RowsAffected(); err == nil {
+			queued += int(count)
+		} else {
+			queued += len(values)
+		}
+	}
+	return queued, nil
 }
 
 // ListParseJobs is a test seam: the production worker claims jobs through
@@ -63,7 +123,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 		limit = 50
 	}
 	rows, err := s.db.Query(`
-		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		SELECT id, trace_id, status, priority, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = ?
 		ORDER BY updated_at ASC, id ASC
@@ -79,13 +139,13 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 
 func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 	row := s.db.QueryRow(`
-		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		SELECT id, trace_id, status, priority, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE id = ?
 	`, id)
 	var job ParseJobRecord
 	var createdAt, updatedAt any
-	if err := row.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&job.ID, &job.TraceID, &job.Status, &job.Priority, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
 		return ParseJobRecord{}, err
 	}
 	var err error
@@ -107,28 +167,112 @@ func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 // relies on the database write lock plus claimMu and gives up the row when the
 // outer status predicate no longer matches.
 func (s *Store) ClaimParseJobs(limit int) ([]ParseJobRecord, error) {
+	return s.claimParseJobsInLane(ParsePriorityFresh, limit)
+}
+
+// ClaimBackfillParseJobs claims from the historical lane. The two lanes are
+// claimed separately so a long historical queue can never delay a trace the
+// proxy recorded a moment ago.
+func (s *Store) ClaimBackfillParseJobs(limit int) ([]ParseJobRecord, error) {
+	return s.claimParseJobsInLane(ParsePriorityBackfill, limit)
+}
+
+func (s *Store) claimParseJobsInLane(lane string, limit int) ([]ParseJobRecord, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+	lane = ParseJobLane(lane)
 	now := time.Now().UTC()
 	s.shared.claimMu.Lock()
 	defer s.shared.claimMu.Unlock()
 	rows, err := s.db.Query(`
 		UPDATE parse_jobs
 		SET status = 'running', attempts = attempts + 1, updated_at = ?
-		WHERE status = 'queued' AND id IN (
+		WHERE status = 'queued' AND priority = ? AND id IN (
 			SELECT id FROM parse_jobs
-			WHERE status = 'queued'
+			WHERE status = 'queued' AND priority = ?
 			ORDER BY updated_at ASC, id ASC
 			LIMIT ?`+s.claimRowLockSQL()+`
 		)
-		RETURNING id, trace_id, status, attempts, last_error, created_at, updated_at
-	`, now, limit)
+		RETURNING id, trace_id, status, priority, attempts, last_error, created_at, updated_at
+	`, now, lane, lane, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanParseJobs(rows)
+}
+
+// CountParseJobs reports how many jobs sit in one state (optionally one lane).
+// The Monitor's queue panel and the backfill planner both need this without
+// pulling rows.
+func (s *Store) CountParseJobs(status string, lane string) (int, error) {
+	query := `SELECT COUNT(*) FROM parse_jobs WHERE status = ?`
+	args := []any{strings.TrimSpace(status)}
+	if strings.TrimSpace(lane) != "" {
+		query += ` AND priority = ?`
+		args = append(args, ParseJobLane(lane))
+	}
+	var count int
+	if err := s.db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ReleaseParseJob returns a claimed job to the queue without counting the
+// attempt.
+//
+// The claim increments attempts, and that is right for a parse that failed on
+// its own. A parse interrupted by shutdown is not the trace's fault, though: if
+// it were recorded as an attempt, three redeploys during active parses would
+// bury a healthy trace as failed. This un-counts the attempt the claim just
+// added.
+func (s *Store) ReleaseParseJob(id int64) error {
+	_, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'queued',
+		    attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
+		    updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	s.notifyChange(ChangeTraffic)
+	return nil
+}
+
+// RequeueOrFailParseJob records a failed attempt.
+//
+// A parse error is usually permanent (a corrupt cassette) but a database hiccup
+// is not, so a trace gets ParseMaxAttempts claims before it is buried. A requeued
+// job keeps its lane and goes to the back of that lane (ordering is by
+// updated_at), which spaces retries out without a separate backoff column.
+func (s *Store) RequeueOrFailParseJob(id int64, maxAttempts int, lastError string) (string, error) {
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	job, err := s.getParseJob(id)
+	if err != nil {
+		return "", err
+	}
+	if job.Attempts < maxAttempts {
+		_, err := s.db.Exec(`
+			UPDATE parse_jobs
+			SET status = 'queued', last_error = ?, updated_at = ?
+			WHERE id = ?
+		`, textPreview(lastError, 2000), time.Now().UTC(), id)
+		if err != nil {
+			return "", err
+		}
+		s.notifyChange(ChangeTraffic)
+		return "queued", nil
+	}
+	if err := s.MarkParseJobFailed(id, lastError); err != nil {
+		return "", err
+	}
+	return "failed", nil
 }
 
 // ReclaimStaleParseJobs returns jobs whose worker died mid-run to the queue.
@@ -415,7 +559,7 @@ func scanParseJobs(rows *sql.Rows) ([]ParseJobRecord, error) {
 	for rows.Next() {
 		var job ParseJobRecord
 		var createdAt, updatedAt any
-		if err := rows.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&job.ID, &job.TraceID, &job.Status, &job.Priority, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		var err error

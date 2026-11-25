@@ -64,6 +64,11 @@ func Status(v string) predicate.ParseJob {
 	return predicate.ParseJob(sql.FieldEQ(FieldStatus, v))
 }
 
+// Priority applies equality check predicate on the "priority" field. It's identical to PriorityEQ.
+func Priority(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldEQ(FieldPriority, v))
+}
+
 // Attempts applies equality check predicate on the "attempts" field. It's identical to AttemptsEQ.
 func Attempts(v int) predicate.ParseJob {
 	return predicate.ParseJob(sql.FieldEQ(FieldAttempts, v))
@@ -212,6 +217,71 @@ func StatusEqualFold(v string) predicate.ParseJob {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.ParseJob {
 	return predicate.ParseJob(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// PriorityEQ applies the EQ predicate on the "priority" field.
+func PriorityEQ(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldEQ(FieldPriority, v))
+}
+
+// PriorityNEQ applies the NEQ predicate on the "priority" field.
+func PriorityNEQ(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldNEQ(FieldPriority, v))
+}
+
+// PriorityIn applies the In predicate on the "priority" field.
+func PriorityIn(vs ...string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldIn(FieldPriority, vs...))
+}
+
+// PriorityNotIn applies the NotIn predicate on the "priority" field.
+func PriorityNotIn(vs ...string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldNotIn(FieldPriority, vs...))
+}
+
+// PriorityGT applies the GT predicate on the "priority" field.
+func PriorityGT(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldGT(FieldPriority, v))
+}
+
+// PriorityGTE applies the GTE predicate on the "priority" field.
+func PriorityGTE(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldGTE(FieldPriority, v))
+}
+
+// PriorityLT applies the LT predicate on the "priority" field.
+func PriorityLT(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldLT(FieldPriority, v))
+}
+
+// PriorityLTE applies the LTE predicate on the "priority" field.
+func PriorityLTE(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldLTE(FieldPriority, v))
+}
+
+// PriorityContains applies the Contains predicate on the "priority" field.
+func PriorityContains(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldContains(FieldPriority, v))
+}
+
+// PriorityHasPrefix applies the HasPrefix predicate on the "priority" field.
+func PriorityHasPrefix(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldHasPrefix(FieldPriority, v))
+}
+
+// PriorityHasSuffix applies the HasSuffix predicate on the "priority" field.
+func PriorityHasSuffix(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldHasSuffix(FieldPriority, v))
+}
+
+// PriorityEqualFold applies the EqualFold predicate on the "priority" field.
+func PriorityEqualFold(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldEqualFold(FieldPriority, v))
+}
+
+// PriorityContainsFold applies the ContainsFold predicate on the "priority" field.
+func PriorityContainsFold(v string) predicate.ParseJob {
+	return predicate.ParseJob(sql.FieldContainsFold(FieldPriority, v))
 }
 
 // AttemptsEQ applies the EQ predicate on the "attempts" field.

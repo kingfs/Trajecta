@@ -232,6 +232,14 @@ func writeIndexedPlainTextProxyErrorTrace(t *testing.T, st *store.Store, dir str
 
 func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
+	return writeIndexedResponseTraceAt(t, st, dir, "worker-trace", "req-worker", time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC), "")
+}
+
+// writeIndexedResponseTraceAt is the same fixture with the identity and the
+// recording time chosen by the caller, so a test can build a history the
+// backfill sweep has to walk.
+func writeIndexedResponseTraceAt(t *testing.T, st *store.Store, dir, name, requestID string, recordedAt time.Time, clientHarness string) string {
+	t.Helper()
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
 	reqBody := `{"model":"gpt-5.1","input":"hello"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
@@ -239,8 +247,9 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 	header := recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",
 		Meta: recordfile.MetaData{
-			RequestID:     "req-worker",
-			Time:          time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			RequestID:     requestID,
+			ClientHarness: clientHarness,
+			Time:          recordedAt,
 			Model:         "gpt-5.1",
 			Provider:      "openai_compatible",
 			Operation:     "responses",
@@ -264,7 +273,7 @@ func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
-	logPath := filepath.Join(dir, "worker-trace.http")
+	logPath := filepath.Join(dir, name+".http")
 	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}

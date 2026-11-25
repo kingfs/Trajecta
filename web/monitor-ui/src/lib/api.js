@@ -146,6 +146,10 @@ export const apiPaths = {
   routingInspect: "/api/routing/inspect",
   routingSettings: "/api/settings/routing",
   networkProxySettings: "/api/settings/network-proxy",
+  // The two parse lanes (fresh traffic and the historical sweep) and their live
+  // depth. The reset only clears the sweep's cursor; it writes no derived data.
+  settingsAnalysisQueue: "/api/settings/analysis-queue",
+  analysisQueueResetBackfill: "/api/settings/analysis-queue/reset-backfill",
   ratesAlertsSettings: "/api/settings/rates-alerts",
   modelAliases: "/api/model-aliases",
   modelAliasValidate: "/api/model-aliases/validate",

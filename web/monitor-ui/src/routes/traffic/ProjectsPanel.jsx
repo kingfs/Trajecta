@@ -152,11 +152,16 @@ export function ProjectsPanel() {
       setBusy(false);
     }
   };
+  // Attribution is filled by the continuous sweep, not by a one-shot request:
+  // this button restarts that sweep from the newest trace and the worker walks
+  // history in the background at its own pace. The progress and the throttle
+  // live on 系统 → 分析队列.
   const backfill = async () => {
+    if (!window.confirm(t("projects.backfillConfirm"))) return;
     setBusy(true);
     try {
-      const result = await postJSON(apiPaths.projectsBackfill, { window: windowValue, limit: 500 });
-      toast.success(`${t("projects.backfillQueued")}${result?.queued ?? 0}`);
+      await postJSON(apiPaths.analysisQueueResetBackfill, {});
+      toast.success(t("projects.backfillStarted"));
       refresh();
     } catch (err) {
       toast.error(err?.payload?.error || err?.message || t("common.actionFailed"));

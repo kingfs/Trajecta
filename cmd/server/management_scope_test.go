@@ -69,7 +69,7 @@ func TestManagementMuxKeepsProxyTokensOffMCP(t *testing.T) {
 		t.Fatalf("CreateToken(mcp) error = %v", err)
 	}
 
-	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore)
+	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore)
 	postMCP := func(token string) int {
 		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -172,7 +172,7 @@ func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	authStore := newTestAuthStore(t)
 	defer authStore.Close()
-	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore)
+	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore)
 
 	login := func(password string) string {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"`+password+`"}`))

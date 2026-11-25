@@ -361,12 +361,14 @@ var sqliteSchemaStatements = []string{
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL,
 			status TEXT NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'fresh',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL
 		);`,
 	`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status ON parse_jobs(status, updated_at ASC);`,
+	`CREATE INDEX IF NOT EXISTS idx_parse_jobs_priority_status ON parse_jobs(priority, status, updated_at ASC);`,
 	`DELETE FROM parse_jobs WHERE id NOT IN (SELECT MAX(id) FROM parse_jobs GROUP BY trace_id);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_parse_jobs_trace_id ON parse_jobs(trace_id);`,
 	`CREATE TABLE IF NOT EXISTS parser_versions (
@@ -590,6 +592,14 @@ var sqliteSchemaStatements = []string{
 // a database that already has most of them, and the order is the order the
 // columns were introduced.
 func (s *Store) applySQLiteSchemaUpgrades() error {
+	// The parse-job lane, added after the queue existed. Existing rows default to
+	// the fresh lane, which is where the pre-lane worker had put them.
+	if err := s.ensureColumn("parse_jobs", "priority", "TEXT NOT NULL DEFAULT 'fresh'"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_parse_jobs_priority_status ON parse_jobs(priority, status, updated_at ASC)`); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("logs", "trace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}

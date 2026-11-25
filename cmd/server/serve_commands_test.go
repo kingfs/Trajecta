@@ -257,7 +257,7 @@ func TestManagementMuxServesStreamableMCP(t *testing.T) {
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
 
-	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -298,7 +298,7 @@ func TestManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
 	authStore := newTestAuthStore(t)
 	defer authStore.Close()
 
-	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -334,7 +334,7 @@ func TestManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
 
-	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, authStore))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
