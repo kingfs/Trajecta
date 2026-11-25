@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/reanalysis"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -1085,6 +1086,13 @@ func (a *serverAPI) reanalyzeSession(ctx context.Context, req *mcp.CallToolReque
 }
 
 func (a *serverAPI) listCredentialMasks(ctx context.Context, req *mcp.CallToolRequest, in *listCredentialMasksInput) (*mcp.CallToolResult, *credentialMaskListOutput, error) {
+	principal, ok := auth.PrincipalFromContext(ctx)
+	if !ok || !strings.EqualFold(strings.TrimSpace(principal.Role), auth.RoleAdmin) {
+		return nil, nil, errors.New("admin role required")
+	}
+	if !auth.ScopeAllows(principal.Scope, auth.ScopeMCP) {
+		return nil, nil, errors.New("MCP-scoped token required")
+	}
 	values := url.Values{}
 	values.Set("page", fmt.Sprintf("%d", normalizePage(in.Page)))
 	values.Set("page_size", fmt.Sprintf("%d", normalizePageSize(in.PageSize)))

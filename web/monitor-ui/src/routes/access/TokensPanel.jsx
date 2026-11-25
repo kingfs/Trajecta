@@ -5,6 +5,7 @@ import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { InlineTag, PlusIcon } from "../../components/common/Badges";
 import { StatCard } from "../../components/common/Display";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -15,11 +16,6 @@ import { copyText } from "../../lib/clipboard";
 import { useI18n } from "../../lib/i18n";
 import { useWriteMutation } from "../../lib/mutations";
 import { formatDateTime } from "../../lib/monitor";
-
-// The only scope a Monitor-issued token can carry. It is still stored with the
-// token, but it is not a choice and not worth a column: every row would read the
-// same word.
-const TOKEN_SCOPE = "api";
 
 export function TokensPanel() {
   const refresh = useRefresh();
@@ -100,6 +96,7 @@ export function TokensPanel() {
 function CreateTokenDialog({ onClose, onCreated }) {
   const { t } = useI18n();
   const [name, setName] = useState("local-dev");
+  const [scope, setScope] = useState("proxy");
   const [expiresAt, setExpiresAt] = useState("");
   const [created, setCreated] = useState(null);
   // The floor of the picker is fixed when the dialog opens; recomputing it on
@@ -109,7 +106,7 @@ function CreateTokenDialog({ onClose, onCreated }) {
   const createToken = useWriteMutation({
     // The API still speaks a Go duration. The reader picks an instant and the
     // dialog turns it into the time left; empty means a token that never expires.
-    mutationFn: () => postJSON(apiPaths.authTokens, { name, scope: TOKEN_SCOPE, ttl: ttlFromExpiresAt(expiresAt) }),
+    mutationFn: () => postJSON(apiPaths.authTokens, { name, scope, ttl: ttlFromExpiresAt(expiresAt) }),
     error: "tokens.createError",
     onSuccess: (payload) => {
       setCreated(payload);
@@ -161,6 +158,20 @@ function CreateTokenDialog({ onClose, onCreated }) {
                 <span>{t("tokens.name")}</span>
                 <Input id="token-name" type="text" value={name} onChange={(event) => setName(event.target.value)} placeholder={t("tokens.namePlaceholder")} autoComplete="off" />
               </label>
+              <label className="token-field">
+                <span>{t("tokens.scope")}</span>
+                <Select value={scope} onValueChange={setScope}>
+                  <SelectTrigger className="token-scope-select" aria-label={t("tokens.scope")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="proxy">{t("tokens.scopeProxy")}</SelectItem>
+                    <SelectItem value="mcp">{t("tokens.scopeMcp")}</SelectItem>
+                    <SelectItem value="all">{t("tokens.scopeAll")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <p className="token-field-hint">{t("tokens.scopeHint")}</p>
               <label className="token-field" htmlFor="token-expiry">
                 <span>{t("tokens.expires")}</span>
                 <Input id="token-expiry" type="datetime-local" min={minimumExpiry} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} />
@@ -230,6 +241,7 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
       <div className="token-table-head">
         <span>{t("tokens.name")}</span>
         <span>{t("tokens.prefix")}</span>
+        <span>{t("tokens.scope")}</span>
         <span>{t("common.status")}</span>
         <span>{t("common.created")}</span>
         <span>{t("tokens.expires")}</span>
@@ -240,6 +252,7 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
         <article className="token-row" key={item.id}>
           <strong>{item.name || "api-token"}</strong>
           <code>{item.prefix || "-"}</code>
+          <InlineTag>{scopeLabel(item.scope, t)}</InlineTag>
           <InlineTag tone={statusTone(item.status)}>{item.status || "unknown"}</InlineTag>
           <span>{formatDateTime(item.created_at)}</span>
           <span>{item.expires_at ? formatDateTime(item.expires_at) : t("common.never")}</span>
@@ -273,6 +286,21 @@ function summarizeTokens(items) {
     },
     { total: 0, active: 0, expired: 0, revoked: 0 },
   );
+}
+
+function scopeLabel(scope, t) {
+  switch (String(scope || "all").trim().toLowerCase()) {
+    case "api":
+      return `${t("tokens.scopeAll")} · api`;
+    case "proxy":
+      return t("tokens.scopeProxyShort");
+    case "mcp":
+      return t("tokens.scopeMcpShort");
+    case "all":
+      return t("tokens.scopeAllShort");
+    default:
+      return scope;
+  }
 }
 
 function statusTone(status) {

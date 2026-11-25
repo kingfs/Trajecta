@@ -18,6 +18,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const managementRequestBodyLimit int64 = 16 << 20
+
 // newManagementMuxWithSecretMappings is the serve-time constructor. Both admin
 // values are surfaces of the proxy handler's live vault, which does not exist in
 // test callers; nil is a valid answer and makes the mapping and suppression
@@ -32,7 +34,7 @@ func newManagementMuxWithSecretMappings(
 	secretSuppressions monitor.SecretSuppressionAdmin,
 	detectorRuntime *detector.Runtime,
 	authStore ...*auth.Store,
-) *http.ServeMux {
+) http.Handler {
 	mux := http.NewServeMux()
 	var authStorePtr *auth.Store
 	var verifier auth.TokenVerifier
@@ -113,7 +115,19 @@ func newManagementMuxWithSecretMappings(
 			},
 		},
 	})
-	return mux
+	return limitManagementRequestBody(mux)
+}
+
+// limitManagementRequestBody applies one ceiling to every Monitor and MCP route.
+// Individual handlers may use a smaller bound, but none can accidentally read
+// an unbounded JSON body into memory.
+func limitManagementRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, managementRequestBodyLimit)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newMonitorJWTManager(traceStore *store.Store, ttl time.Duration) (*auth.JWTManager, error) {

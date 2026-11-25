@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -56,6 +58,12 @@ type LogInfo struct {
 }
 
 type PrepareOptions struct {
+	// RawRequest and RawRequestBody optionally carry the ingress request before
+	// proxy normalization. The recorder uses them for the cassette wire request,
+	// while req/bodyBytes continue to supply normalized routing metadata.
+	RawRequest     *http.Request
+	RawRequestBody []byte
+
 	SiteURL                        string
 	SelectedUpstreamID             string
 	SelectedUpstreamProviderPreset string
@@ -81,6 +89,9 @@ type PrepareOptions struct {
 
 type Recorder struct {
 	OutputDir string
+	// MaskKey is retained for source/config compatibility. Cassette recording
+	// always preserves the original HTTP request, regardless of this legacy
+	// option; raw recordings are protected with restrictive file permissions.
 	MaskKey   bool
 	store     *store.Store
 	finalizer *asyncFinalizer
@@ -210,9 +221,9 @@ func tracePathSegment(value string, limit int) string {
 }
 
 // PrepareLogFileWithOptionsAndBody prepares the cassette for one exchange. The
-// caller passes the request body it already read for routing/masking; the
-// recorder never reads req.Body itself, so the recorded body and the wire body
-// cannot diverge.
+// caller passes the body it already read; the recorder never reads req.Body.
+// When RawRequest/RawRequestBody are set, the cassette stores those ingress
+// bytes while req/bodyBytes continue to provide normalized routing metadata.
 func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts PrepareOptions, bodyBytes []byte) (*LogInfo, error) {
 	modelName := strings.TrimSpace(opts.WireModel)
 	if modelName == "" && len(bodyBytes) > 0 {
@@ -258,53 +269,65 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		now.Format("01"),
 		now.Format("02"),
 	)
-	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+	if err := os.MkdirAll(dirPath, 0o700); err != nil {
+		return nil, err
+	}
+	// Existing directories may have been created by an older version with
+	// broader permissions. The leaf directory contains raw requests and is
+	// always private, even when the deprecated mask_key option is set.
+	if err := os.Chmod(dirPath, 0o700); err != nil {
 		return nil, err
 	}
 
 	fileName := fmt.Sprintf("%s_%d.http", now.Format("20060102_150405"), now.Nanosecond())
 	logPath := filepath.Join(dirPath, fileName)
 
-	f, err := os.Create(logPath)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
 
-	originalHeaders := map[string]string{}
-	if r.MaskKey {
-		for _, name := range []string{"Authorization", "api-key", "x-api-key", "x-goog-api-key"} {
-			if value := req.Header.Get(name); value != "" {
-				originalHeaders[name] = value
-				switch name {
-				case "Authorization":
-					req.Header.Set(name, "Bearer fake-key-logging")
-				default:
-					req.Header.Set(name, "fake-key-logging")
-				}
-			}
-		}
+	// Cassettes are evidence for replay and debugging. Do not sanitize, mask,
+	// or otherwise mutate the original request line, headers, or body here.
+	cleanupFile := func(cause error) (*LogInfo, error) {
+		closeErr := f.Close()
+		removeErr := os.Remove(logPath)
+		return nil, errors.Join(cause, closeErr, removeErr)
 	}
-	reqDump, err := httputil.DumpRequest(req, false)
-	if r.MaskKey {
-		for name, value := range originalHeaders {
-			req.Header.Set(name, value)
-		}
+	cassetteRequest := req
+	cassetteBody := bodyBytes
+	if opts.RawRequest != nil {
+		cassetteRequest = opts.RawRequest
+		cassetteBody = opts.RawRequestBody
 	}
+	// net/http moves framing information out of Header when parsing a request.
+	// Render a valid HTTP/1 request line/header block for the cassette without
+	// changing the captured application headers or entity body.
+	dumpRequest := cassetteRequest.Clone(cassetteRequest.Context())
+	dumpRequest.Body = nil
+	dumpRequest.GetBody = nil
+	if len(cassetteBody) > 0 && len(dumpRequest.TransferEncoding) == 0 && dumpRequest.Header.Get("Content-Length") == "" {
+		dumpRequest.Header.Set("Content-Length", strconv.Itoa(len(cassetteBody)))
+	}
+	reqDump, err := httputil.DumpRequest(dumpRequest, false)
 	if err != nil {
-		f.Close()
-		return nil, err
+		return cleanupFile(err)
 	}
 
 	nHead, err := f.Write(reqDump)
+	if err == nil && nHead != len(reqDump) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
-		f.Close()
-		return nil, err
+		return cleanupFile(fmt.Errorf("write cassette request headers: %w", err))
 	}
 
-	nBody, err := f.Write(bodyBytes)
+	nBody, err := f.Write(cassetteBody)
+	if err == nil && nBody != len(cassetteBody) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
-		f.Close()
-		return nil, err
+		return cleanupFile(fmt.Errorf("write cassette request body: %w", err))
 	}
 
 	header := RecordHeader{
@@ -652,13 +675,12 @@ func prependPrelude(info *LogInfo, prelude []byte) ([]byte, error) {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 	}
-	// os.CreateTemp creates the file 0600; a cassette keeps the permissions it was
-	// created with so a reader group does not lose access after finalisation.
-	if stat, statErr := os.Stat(info.Path); statErr == nil {
-		if chmodErr := tmp.Chmod(stat.Mode().Perm()); chmodErr != nil {
-			discard()
-			return nil, chmodErr
-		}
+	// The request headers and bodies are intentionally stored verbatim, so the
+	// finalized file remains owner-readable only even if it replaces a cassette
+	// created by an older version with permissive mode bits.
+	if err := tmp.Chmod(0o600); err != nil {
+		discard()
+		return nil, err
 	}
 
 	if _, err := tmp.Write(prelude); err != nil {

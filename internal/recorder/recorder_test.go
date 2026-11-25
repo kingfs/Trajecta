@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -475,37 +476,32 @@ func firstDifference(a, b []byte) int {
 	return min(len(a), len(b))
 }
 
-// TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest pins the security
-// property SECURITY.md, README.md and README_EN.md promise: with masking on, the credential
-// headers are replaced with placeholders in the recorded request while the request that
-// continues to the upstream keeps the real values (the recorder restores them after the dump).
-//
-// Nothing tested this before, which is how `debug.mask_key` could default to false in
-// config.Load for as long as it did while three documents described the opposite.
-func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testing.T) {
+// TestPrepareLogFileRecordsOriginalRequestRegardlessOfLegacyMaskKey pins the cassette
+// contract: replay evidence keeps the exact request line, credential headers and body.
+// The legacy debug.mask_key option remains accepted for config compatibility but must not
+// rewrite or drop any part of that original HTTP request.
+func TestPrepareLogFileUsesIngressRequestCapture(t *testing.T) {
 	dir := t.TempDir()
-	rec := New(dir, true, nil)
-
-	requestBody := []byte(`{"model":"gpt-5"}`)
-	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewReader(requestBody))
+	recorder := New(dir, true, nil)
+	originalBody := []byte(`{"model":"client-alias","stream":true}`)
+	original, err := http.NewRequest(http.MethodPost, "http://proxy.local/responses?api_key=query-secret", bytes.NewReader(originalBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	secrets := map[string]string{
-		"Authorization":  "Bearer sk-live-secret",
-		"api-key":        "live-api-key-secret",
-		"x-api-key":      "live-x-api-key-secret",
-		"x-goog-api-key": "live-goog-api-key-secret",
-	}
-	for name, value := range secrets {
-		req.Header.Set(name, value)
-	}
-	// A header that names no credential must survive: over-redacting the whole request would
-	// make the recording useless for diagnosing what the client actually sent.
-	req.Header.Set("X-Keep-Me", "keep-me-visible")
+	original.Header.Set("Authorization", "Bearer ingress-secret")
+	original.Header.Set("X-Original", "unchanged")
 
-	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
+	normalized := original.Clone(original.Context())
+	normalized.URL.Path = "/v1/responses"
+	normalized.RequestURI = normalized.URL.RequestURI()
+	normalized.Header.Set("Content-Length", "99")
+	normalized.Header.Set("X-Proxy-Only", "mutated")
+	preprocessedBody := []byte(`{"model":"upstream-model","stream":true,"stream_options":{"include_usage":true}}`)
+	info, err := recorder.PrepareLogFileWithOptionsAndBody(normalized, PrepareOptions{
+		RawRequest:     original,
+		RawRequestBody: originalBody,
+		WireModel:      "upstream-model",
+	}, preprocessedBody)
 	if err != nil {
 		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
 	}
@@ -514,25 +510,94 @@ func TestPrepareLogFileMasksCredentialHeadersWithoutMutatingTheRequest(t *testin
 	}
 	cassette, err := os.ReadFile(info.Path)
 	if err != nil {
-		t.Fatalf("ReadFile(%s) error = %v", info.Path, err)
+		t.Fatalf("ReadFile(cassette) error = %v", err)
 	}
 	recorded := string(cassette)
-	if !strings.Contains(recorded, "Bearer fake-key-logging") || !strings.Contains(recorded, "fake-key-logging") {
-		t.Fatalf("cassette does not carry the masking placeholder:\n%s", recorded)
-	}
-	for name, value := range secrets {
-		if strings.Contains(recorded, value) {
-			t.Fatalf("%s was written to the cassette verbatim (%q); the recording is on disk", name, value)
+	for _, want := range []string{
+		"POST /responses?api_key=query-secret HTTP/1.1",
+		"Authorization: Bearer ingress-secret",
+		"X-Original: unchanged",
+		"Content-Length: " + fmt.Sprint(len(originalBody)),
+		string(originalBody),
+	} {
+		if !strings.Contains(recorded, want) {
+			t.Errorf("cassette omitted raw ingress content %q:\n%s", want, recorded)
 		}
 	}
-	if !strings.Contains(recorded, "keep-me-visible") {
-		t.Fatalf("a non-credential header was dropped from the recording:\n%s", recorded)
-	}
-	// The forwarded request still carries the real credentials.
-	for name, value := range secrets {
-		if got := req.Header.Get(name); got != value {
-			t.Fatalf("live request header %s = %q, want %q: masking must not rewrite the outgoing request", name, got, value)
+	for _, shouldNotAppear := range []string{"/v1/responses", "X-Proxy-Only: mutated", "stream_options", "upstream-model"} {
+		if strings.Contains(recorded, shouldNotAppear) {
+			t.Errorf("cassette contains proxy-normalized content %q:\n%s", shouldNotAppear, recorded)
 		}
+	}
+	if strings.Contains(info.Header.Meta.URL, "query-secret") {
+		t.Fatalf("normalized metadata URL leaked query credential: %q", info.Header.Meta.URL)
+	}
+}
+
+func TestPrepareLogFileRecordsOriginalRequestRegardlessOfLegacyMaskKey(t *testing.T) {
+	for _, maskKey := range []bool{true, false} {
+		t.Run(fmt.Sprintf("mask_key_%v", maskKey), func(t *testing.T) {
+			dir := t.TempDir()
+			rec := New(dir, maskKey, nil)
+
+			requestBody := []byte(`{"model":"gpt-5"}`)
+			req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions?api_key=query-live-secret&x=keep", bytes.NewReader(requestBody))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			secrets := map[string]string{
+				"Authorization":  "Bearer sk-live-secret",
+				"api-key":        "live-api-key-secret",
+				"x-api-key":      "live-x-api-key-secret",
+				"x-goog-api-key": "live-goog-api-key-secret",
+			}
+			for name, value := range secrets {
+				req.Header.Set(name, value)
+			}
+			req.Header.Set("X-Keep-Me", "keep-me-visible")
+
+			info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, requestBody)
+			if err != nil {
+				t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
+			}
+			if err := info.File.Close(); err != nil {
+				t.Fatalf("close cassette error = %v", err)
+			}
+			cassette, err := os.ReadFile(info.Path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s) error = %v", info.Path, err)
+			}
+			recorded := string(cassette)
+			for name, value := range secrets {
+				if !strings.Contains(recorded, value) {
+					t.Errorf("cassette omitted original %s value %q", name, value)
+				}
+			}
+			for _, part := range []string{"/v1/chat/completions?api_key=query-live-secret&x=keep", "keep-me-visible", string(requestBody)} {
+				if !strings.Contains(recorded, part) {
+					t.Errorf("cassette omitted original request content %q", part)
+				}
+			}
+			if strings.Contains(recorded, "fake-key-logging") {
+				t.Fatalf("cassette contains a legacy placeholder instead of the original request")
+			}
+			for name, value := range secrets {
+				if got := req.Header.Get(name); got != value {
+					t.Errorf("request header %s mutated to %q, want %q", name, got, value)
+				}
+			}
+			cassetteInfo, err := os.Stat(info.Path)
+			if err != nil {
+				t.Fatalf("Stat(cassette) error = %v", err)
+			}
+			if got := cassetteInfo.Mode().Perm(); got != 0o600 {
+				t.Errorf("cassette mode = %04o, want 0600", got)
+			}
+			if got, err := os.Stat(filepath.Dir(info.Path)); err != nil || got.Mode().Perm() != 0o700 {
+				t.Errorf("cassette directory mode = %v, err %v; want 0700", got, err)
+			}
+		})
 	}
 }
 

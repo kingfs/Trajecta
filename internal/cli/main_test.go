@@ -1454,6 +1454,36 @@ func TestAuthCreateTokenDryRunJSONDoesNotRequireDatabase(t *testing.T) {
 	}
 }
 
+func TestAuthCreateTokenDryRunValidatesAndNormalizesScope(t *testing.T) {
+	t.Parallel()
+
+	var invalidOut bytes.Buffer
+	if code := runAuthCreateTokenWithOptions(authTokenOptions{
+		dryRun: true,
+		scope:  "typo",
+		format: "json",
+		stdout: &invalidOut,
+	}); code == 0 {
+		t.Fatal("invalid-scope dry-run returned success")
+	}
+	if invalidOut.Len() != 0 {
+		t.Fatalf("invalid-scope dry-run output = %q, want no success result", invalidOut.String())
+	}
+
+	var legacyOut bytes.Buffer
+	if code := runAuthCreateTokenWithOptions(authTokenOptions{
+		dryRun: true,
+		scope:  "api",
+		format: "json",
+		stdout: &legacyOut,
+	}); code != 0 {
+		t.Fatalf("legacy api-scope dry-run code = %d, want 0", code)
+	}
+	if !strings.Contains(legacyOut.String(), `"scope":"all"`) {
+		t.Fatalf("legacy api-scope dry-run result = %s, want normalized all scope", legacyOut.String())
+	}
+}
+
 func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 	t.Parallel()
 

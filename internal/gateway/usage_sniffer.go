@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -31,6 +33,8 @@ type UsageSniffer struct {
 	Events      *[]recorder.RecordEvent
 	Start       time.Time
 	TTFTMs      *int64
+
+	writeErr error
 }
 
 func (s *UsageSniffer) Read(p []byte) (n int, err error) {
@@ -44,8 +48,15 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 		}
 		data := p[:n]
 		if s.File != nil {
-			if written, wErr := s.File.Write(data); wErr == nil && s.Count != nil {
+			written, wErr := s.File.Write(data)
+			if written > 0 && s.Count != nil {
 				*s.Count += int64(written)
+			}
+			if wErr == nil && written != len(data) {
+				wErr = io.ErrShortWrite
+			}
+			if wErr != nil && s.writeErr == nil {
+				s.writeErr = fmt.Errorf("write response bytes to cassette: %w", wErr)
 			}
 		}
 		if s.Pipeline != nil {
@@ -54,6 +65,16 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 		}
 	}
 	return
+}
+
+// RecordingError reports the first response write failure. It is separate from
+// the upstream read/close error so callers can mark an incomplete cassette
+// without falsely attributing local disk failures to an upstream.
+func (s *UsageSniffer) RecordingError() error {
+	if s == nil {
+		return nil
+	}
+	return s.writeErr
 }
 
 func (s *UsageSniffer) setUsage() {
@@ -96,8 +117,9 @@ func (s *UsageSniffer) Close() error {
 			*s.Events = append(*s.Events, events...)
 		}
 	}
-	if s.Source == nil {
-		return nil
+	var closeErr error
+	if s.Source != nil {
+		closeErr = s.Source.Close()
 	}
-	return s.Source.Close()
+	return errors.Join(s.writeErr, closeErr)
 }

@@ -90,7 +90,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `auth migrate up` 对 Postgres 委托给同一份 `ent/postgres-migrations`，因此与 `db migrate up` 幂等；CLI 不会暗示存在独立的 auth 命名空间。
 - `auth migrate down` 在 Postgres 下被阻止（`ErrPostgresAuthRollbackUnsupported`），以 usage 错误码退出（CLI 退出码 `3`）：auth 命令不能回滚应用表。生产回滚同样依赖备份或经过评审的应用迁移方案。
 - `auth migrate status --check-db` 是只读检查：Postgres 读共享 `schema_migrations` 并检查 `users`、`api_tokens` 是否存在；SQLite 读配置的 auth 迁移表并检查同样两张表。不带 `--check-db` 时只报告配置。
-- 用户与令牌运维命令：`auth init-user --username <u> --password <p> --role admin|viewer`（默认 `admin`）、`auth set-role --username <u> --role admin|viewer`、`auth disable-user --username <u>` / `auth enable-user --username <u>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 取 `all`（默认）、`proxy`、`mcp`；历史自定义值仍按全量访问处理，`--ttl 0` 表示不过期）。`proxy` token 只被代理端口接受，`mcp` token 只被 `/mcp` 接受。`auth reset-password` 会同时让该用户已签发的 Monitor 会话立即失效（JWT 里带密码指纹，服务端每请求回查）。新签发的 token 形如 `sk-<base64url>`；校验按 `api_tokens.token_hash` 查表，不看前缀，因此更早签发的 `llmtl_` token 无需迁移即可继续使用。
+- 用户与令牌运维命令：`auth init-user --username <u> --password <p> --role admin|viewer`（默认 `admin`）、`auth set-role --username <u> --role admin|viewer`、`auth disable-user --username <u>` / `auth enable-user --username <u>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 取 `all`（默认）、`proxy`、`mcp`；历史 `api` scope 按 `all` 兼容，未知新 scope 会拒绝，`--ttl 0` 表示不过期）。`proxy` token 只被代理端口接受，`mcp` token 只被 `/mcp` 接受，`all` 可访问两者。`auth reset-password` 会同时让该用户已签发的 Monitor 会话立即失效（JWT 里带密码指纹，服务端每请求回查）。新签发的 token 形如 `sk-<base64url>`；校验按 `api_tokens.token_hash` 查表，不看前缀，因此更早签发的 `llmtl_` token 无需迁移即可继续使用。
 - 预览类 flag：`auth migrate up` / `auth migrate down` 支持 `--step N` 与 `--dry-run`，其中 `--all` 只属于 `auth migrate down`（回滚全部迁移）；`auth init-user`、`auth set-role`、`auth disable-user`、`auth enable-user`、`auth reset-password`、`auth create-token` 都支持 `--dry-run`，只报告将要执行的操作而不写库。
 
 ## 生产部署（默认拓扑、必需环境变量、迁移与首个用户创建）
@@ -101,7 +101,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 - `postgres`：应用/认证数据库，保存用户、令牌、trace index、channel/model 状态、Responses 状态与 audit 表；`trajecta` 通过 `depends_on` 等待其 healthcheck 通过。
 - `searxng`：可选 hosted `web_search` provider 容器，只在 Compose `search` profile 下启动。
 - 卷：`trajecta-data` 挂到 `/app/data`（cassette 与显式选择的 SQLite 库都在这里），另有 `postgres-data`、`searxng-data`。
-- 镜像自身声明 `VOLUME ["/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；`/app/config` 刻意不做 volume（匿名卷曾长期遮蔽镜像内配置，见 `Dockerfile` 注释），配置由 compose 以只读 bind mount 挂入；宿主端口由 compose 的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 映射。
+- 镜像自身声明 `VOLUME ["/app/data"]` 与 `EXPOSE 8080 8081`（gateway 与 Monitor）；`/app/config` 刻意不做 volume（匿名卷曾长期遮蔽镜像内配置，见 `Dockerfile` 注释），配置由 compose 以只读 bind mount 挂入。gateway、Monitor、Postgres 与 SearXNG 的宿主端口默认只绑定 `127.0.0.1`；只有明确设置 `TRAJECTA_HOST_BIND_ADDRESS=0.0.0.0` 才会对外网卡发布 gateway/Monitor 端口。
 
 compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`，**没有** `db migrate up` 步骤；迁移由进程内 `auto_migrate: true` 完成（签入的 `config/config.yaml` 即为该配置）。
 
@@ -109,14 +109,12 @@ compose 中 `trajecta` 的启动命令只有 `serve -c /app/config/config.yaml`�
 
 ```bash
 cp .env.example .env
-# 至少覆盖数据库口令/DSN
-export POSTGRES_PASSWORD='<strong-password>'
-export TRAJECTA_DATABASE_DSN='postgres://trajecta:<strong-password>@postgres:5432/trajecta?sslmode=disable'
+# 编辑 .env：为 POSTGRES_PASSWORD 设置唯一、URL-safe 的强口令；不要提交 .env。
 docker compose up -d
 ```
 
-- `TRAJECTA_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，本地默认值由 compose 注入。
-- Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；宿主端口由 `TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT`、`TRAJECTA_POSTGRES_PORT` 控制。
+- `TRAJECTA_DATABASE_DSN` 在 Postgres 下必填：签入的 `config/config.yaml` 设置了 `database.driver: postgres` 但 `database.dsn: ""`，compose 默认从 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 拼接；显式 DSN 可覆盖它。未设置 `POSTGRES_PASSWORD` 时 Compose 会拒绝启动，不再回退到公开的示例密码。
+- Postgres 服务本身读取 `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`；gateway 与 Monitor 宿主端口由 `TRAJECTA_HOST_SERVER_PORT`、`TRAJECTA_HOST_MONITOR_PORT` 控制，默认 loopback。要让其它机器访问，应在防火墙/反向代理已配置的前提下显式设置 `TRAJECTA_HOST_BIND_ADDRESS=0.0.0.0`；Postgres 与 SearXNG 端口固定只绑定 loopback。
 - provider 只来自应用数据库：启动后登录 Monitor Web 配置渠道、凭据与模型。`TRAJECTA_BOOTSTRAP_UPSTREAM_*` 与 `TRAJECTA_UPSTREAM_*` 已移除，YAML 的 `upstream` / `upstreams` 会被明确拒绝。
 - 配置文件路径由 `TRAJECTA_CONFIG` 决定（CLI 的 viper 实例使用 `TRAJECTA` 前缀并开启 `AutomaticEnv`，`internal/cli/root.go`）；镜像 `Dockerfile` 与 compose 都把它设为 `/app/config/config.yaml`，未设置且未传 `-c` 时回退到 `config.yaml`。
 - 输出目录：`TRAJECTA_OUTPUT_DIR` 同时覆盖 `debug.output_dir` 与 `trace.output_dir`，`TRAJECTA_TRACE_OUTPUT_DIR` 只覆盖 `trace.output_dir` 且在两者都设置时后者生效（`internal/config/config.go`）；镜像把两者都设为 `/app/data/traces`，compose 同样注入。解析优先级是 `trace.output_dir` → `debug.output_dir`（`Config.TraceOutputDir()`），**录制器、store、默认 SQLite 路径与启动日志共用这一个解析结果**；两者都为空不报错，但 `Load` 会打一条 warning，此时 cassette 与默认 SQLite 文件写在进程工作目录下。
@@ -128,7 +126,9 @@ docker compose up -d
 ```bash
 docker compose run --rm --entrypoint /app/bin/trajecta trajecta -c /app/config/config.yaml db migrate up
 docker compose up -d
-docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+read -rsp 'Initial admin password (8+ characters): ' ADMIN_PASSWORD; printf '\n'
+docker compose exec trajecta /app/bin/trajecta -c /app/config/config.yaml auth init-user --username admin --password "$ADMIN_PASSWORD"
+unset ADMIN_PASSWORD
 ```
 
 从 `llm-tracelab` 升级已有部署：
@@ -234,7 +234,7 @@ trajecta db cleanup requests --status 404 [--apply] [--keep-cassettes]
 ## 明确不支持的生产能力
 
 - 公共多租户 relay、计费、订阅或配额转售平台：明确不做。
-- proxy 热路径的跨协议转换：默认关闭；显式开启 `router.selection.protocol_conversion` 后，仅在本轮没有可选原生候选时对非流式 chat/messages/gemini 请求兜底转换（见 [协议转换](./PROTOCOL_CONVERSION.md)）。`/v1/responses` 永不被转发路径转换，流式转换是非目标；默认行为仍是 protocol-aware pass-through + recording。
+- proxy 热路径的跨协议转换：默认启用直通优先的兜底，仅在本轮没有可选原生候选时对受支持的非流式 chat/messages/gemini 请求转换（见 [协议转换](./PROTOCOL_CONVERSION.md)）。`/v1/responses` 永不被转发路径转换，流式转换是非目标；原生候选可用时仍是 protocol-aware pass-through + recording。
 - 对所有 upstream 的 native Responses 语义介入：未实现；当前本地 Responses runtime 以 OpenAI 兼容 Chat Completions 为后端。
 - 独立的 Postgres auth 迁移命名空间：未实现；auth 表仍共享应用迁移集，`auth migrate down` 被阻止。
 - SQLite 版本化应用迁移：未实现；SQLite 只在显式选择时作本地启动建表，生产唯一版本化路径是 Postgres。

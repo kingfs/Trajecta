@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/Trajecta/ent/dao"
@@ -29,6 +30,13 @@ import (
 
 const (
 	DefaultTokenScope = "all"
+	// lastUsedWriteInterval bounds last_used_at updates while preserving useful
+	// operator visibility without turning every authenticated request into a
+	// database write.
+	lastUsedWriteInterval = time.Minute
+	// maxTrackedLastUsedTokens bounds the per-process throttle cache. Evicting a
+	// token only causes an extra timestamp update; it never affects auth.
+	maxTrackedLastUsedTokens = 4096
 	// tokenPrefix is the visible prefix of every API token this build issues. It
 	// follows the OpenAI convention so a token reads as a credential to the SDKs
 	// and tools that validate on shape. Verification is by SHA-256 hash, not by
@@ -40,6 +48,9 @@ type Store struct {
 	client *dao.Client
 	db     *sql.DB
 	path   string
+
+	lastUsedMu     sync.Mutex
+	lastUsedWrites map[int]time.Time
 }
 
 type TokenResult struct {
@@ -75,9 +86,10 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 	}
 	drv := entsql.OpenDB(entDialect, db)
 	return &Store{
-		client: dao.NewClient(dao.Driver(drv)),
-		db:     db,
-		path:   path,
+		client:         dao.NewClient(dao.Driver(drv)),
+		db:             db,
+		path:           path,
+		lastUsedWrites: make(map[int]time.Time),
 	}, nil
 }
 
@@ -359,6 +371,10 @@ func (s *Store) CreateToken(ctx context.Context, username string, name string, s
 	if ttl < 0 {
 		return TokenResult{}, errors.New("token ttl must be non-negative")
 	}
+	validatedScope, err := ValidateTokenScope(scope)
+	if err != nil {
+		return TokenResult{}, err
+	}
 	row, err := s.client.User.Query().Where(user.UsernameEQ(username), user.EnabledEQ(true)).Only(ctx)
 	if err != nil {
 		if dao.IsNotFound(err) {
@@ -370,7 +386,7 @@ func (s *Store) CreateToken(ctx context.Context, username string, name string, s
 	if err != nil {
 		return TokenResult{}, err
 	}
-	scope = NormalizeTokenScope(scope)
+	scope = validatedScope
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "api-token"
@@ -484,13 +500,57 @@ func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool,
 	if u == nil || !u.Enabled {
 		return Principal{}, false, nil
 	}
-	_, _ = row.Update().SetLastUsedAt(time.Now().UTC()).Save(ctx)
+	if claimAt, shouldWrite := s.claimLastUsedWrite(row.ID, time.Now().UTC()); shouldWrite {
+		if _, updateErr := row.Update().SetLastUsedAt(claimAt).Save(ctx); updateErr != nil {
+			// The timestamp is best-effort. Release the throttle claim on failure
+			// so the next successful request can retry instead of hiding a stale
+			// last_used_at value for the full interval.
+			s.releaseLastUsedWrite(row.ID, claimAt)
+		}
+	}
 	return Principal{
 		UserID:   u.ID,
 		Username: u.Username,
 		Role:     u.Role,
 		Scope:    row.Scope,
 	}, true, nil
+}
+
+// claimLastUsedWrite allows at most one last_used_at update per token per
+// interval in this process. The cache is deliberately bounded: losing an entry
+// only triggers an extra best-effort timestamp write, never an auth decision.
+func (s *Store) claimLastUsedWrite(tokenID int, now time.Time) (time.Time, bool) {
+	if s == nil || tokenID <= 0 {
+		return time.Time{}, false
+	}
+	s.lastUsedMu.Lock()
+	defer s.lastUsedMu.Unlock()
+	if s.lastUsedWrites == nil {
+		s.lastUsedWrites = make(map[int]time.Time)
+	}
+	if previous, ok := s.lastUsedWrites[tokenID]; ok && now.Sub(previous) < lastUsedWriteInterval {
+		return time.Time{}, false
+	}
+	if _, tracked := s.lastUsedWrites[tokenID]; !tracked && len(s.lastUsedWrites) >= maxTrackedLastUsedTokens {
+		for id := range s.lastUsedWrites {
+			delete(s.lastUsedWrites, id)
+			break
+		}
+	}
+	s.lastUsedWrites[tokenID] = now
+	return now, true
+}
+
+// releaseLastUsedWrite makes a failed best-effort update immediately retryable.
+func (s *Store) releaseLastUsedWrite(tokenID int, claimAt time.Time) {
+	if s == nil || tokenID <= 0 {
+		return
+	}
+	s.lastUsedMu.Lock()
+	if previous, ok := s.lastUsedWrites[tokenID]; ok && previous.Equal(claimAt) {
+		delete(s.lastUsedWrites, tokenID)
+	}
+	s.lastUsedMu.Unlock()
 }
 
 // SessionState reads the three facts SessionVerifier needs. The boolean reports

@@ -1,6 +1,6 @@
 # 协议族与上游 Provider
 
-Trajecta 不为每个上游写一套独立集成，而是把上游解析为协议族（`protocol_family`）、路由 profile（`routing_profile`），以及鉴权、版本、header 与 URL 构造规则。代理是协议感知的透传录制与路由层：它按协议族识别请求、录制 `.http` cassette、把 trace 解析为 Observation IR，但不在转发路径上把一个协议族的请求 schema 翻译成另一个。
+Trajecta 不为每个上游写一套独立集成，而是把上游解析为协议族（`protocol_family`）、路由 profile（`routing_profile`），以及鉴权、版本、header 与 URL 构造规则。代理是协议感知的直通优先、带转换兜底的录制与路由层：它按协议族识别请求、录制 `.http` cassette、把 trace 解析为 Observation IR；默认开启协议转换，但总是优先可选的原生候选，只有没有原生候选时才对受支持的非流式请求转换。
 
 协议 schema 快照与英文事实源见 [协议参考](./protocol-reference/README.md)、[已实现的协议](./protocol-reference/implemented-protocols.md) 与 [协议差异](./protocol-reference/protocol-differences.md)。
 
@@ -9,14 +9,14 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 - **Provider**：上游公司、公司网关或本地/自托管代理，即 provider preset 描述的对象；「一个上游连接 + 凭据」的正式称呼是渠道（channel），见下。
 - **协议族（`protocol_family`）**：上游 API 请求/响应 schema、认证方式与 endpoint 形态的归类。当前有 4 个：`openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native`。
 - **路由 profile（`routing_profile`）**：同一协议族内的 URL 构造与鉴权差异，例如 Azure、vLLM、Vertex express 与 project/location。
-- **客户端入口（entrypoint）**：Trajecta 暴露给客户端的 URL 形态，只选择客户端 API 形态，默认不跨协议族翻译（开启 `router.selection.protocol_conversion` 后按 [协议转换](./PROTOCOL_CONVERSION.md) 的规则兜底）。
+- **客户端入口（entrypoint）**：Trajecta 暴露给客户端的 URL 形态，只选择客户端 API 形态；默认启用直通优先的协议转换兜底，具体规则见 [协议转换](./PROTOCOL_CONVERSION.md)。
 - **能力（capability）**：`capabilities.*` 布尔声明，用于按 endpoint 判断某个上游或模型能否服务某类请求。
 
 内部实现与数据库仍沿用 `channel_*` 命名：`channel_configs`、`channel_models`、`/api/channels`。这些是实现细节。Monitor UI 的正式页面是「渠道」`/channels`（API 为 `/api/channels`），`/providers`、`/providers/:id` 只保留到 `/channels` 的旧地址重定向；`provider` 只指上游公司或 provider preset。存储细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)。
 
 ## 协议族与请求入口
 
-客户端入口前缀在 routing、recording、forwarding 之前由 `internal/proxy/entrypoints.go` 归一化。原始请求 body 保持原样；`.http` 记录中的协议路径保持规范化，因此 parser 与 replay 稳定。
+客户端入口前缀在 routing 与 forwarding 之前由 `internal/proxy/entrypoints.go` 归一化；`.http` cassette 保留收到的 request line（含 query），不会把该路径改成规范化 endpoint。请求 body 也在入口归一化、`stream_options` 注入、模型别名、协议转换及凭据遮蔽前记录，parser/replay 从 layout 分离的原始请求区段读取。
 
 | 客户端入口 | 归一化 endpoint | 目标客户端 | 需要的 provider 能力 |
 | --- | --- | --- | --- |
@@ -186,12 +186,12 @@ trajecta provider probe-report
 
 ## 协议转换
 
-协议转换默认关闭：上游必须原生支持客户端实际请求的 endpoint。`pkg/protocolconvert` 提供直通优先的转换库；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选、请求非流式、入口为 chat/messages/gemini 时才启用，`/v1/responses` 始终由本地 Responses runtime 负责。多模态/thinking 与 `response_format`、`reasoning_effort` 等 IR 不携带的字段会以 400 拒绝，详见 [协议转换](./PROTOCOL_CONVERSION.md)。
+协议转换默认开启，但始终优先原生候选：仅当本轮没有可选的原生上游、请求非流式且入口为 chat/messages/gemini 时，才对可映射的请求兜底转换。默认 `xir` 引擎由 `pkg/xir/convert` 实现，`legacy` 可作为配置回退。`/v1/responses` 始终由原生直通或本地 Responses runtime 负责。多模态/thinking 与 `response_format`、`reasoning_effort` 等 IR 不携带的字段会以 400 拒绝，详见 [协议转换](./PROTOCOL_CONVERSION.md)。
 
 ## 非目标与未实现
 
 - 流式逐帧转换与多模态/thinking 转换：流式请求和 IR 无法承载的内容不会被转换，必须使用原生直通上游。
-- 默认情况下 `/v1/messages` 不会转换成 OpenAI Chat Completions 或 Responses，`/v1/responses` 也不会转换成 Anthropic Messages；开启协议转换后，chat/messages/gemini 入口按 [协议转换](./PROTOCOL_CONVERSION.md) 的矩阵生效，`/v1/responses` 仍不转换。cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有（IR 不携带的字段会拒绝或记 warning）。
+- `/v1/messages` 只会在默认开启的转换兜底条件满足时转换成受支持的目标协议；`/v1/responses` 不走转发路径的协议转换。cache 控制、reasoning 字段与 provider 特有错误保持 provider 特有（IR 不携带的字段会拒绝或记 warning）。
 - provider 特有 tools、reasoning、cache 控制、citations、safety block 与 streaming 事件生命周期没有完整语义等价。
 - 唯一的 Responses 特例发生在同一协议族内部：没有匹配的原生 Responses 上游时，本地 Responses runtime 会把 `/v1/responses` 编排为一次内部 `/v1/chat/completions` 调用，而不是跨协议族翻译。录制、观测与审计细节见 [观测与审计](./OBSERVATION_AND_AUDIT.md)。
 

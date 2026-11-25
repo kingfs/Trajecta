@@ -115,10 +115,10 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/auth/tokens" && method === "POST") {
       const body = route.request().postDataJSON();
-      // The dialog hides the single-valued scope and turns the picked expiry
-      // into the Go duration the API takes.
+      // The dialog sends the explicitly selected access scope and turns the
+      // picked expiry into the Go duration the API takes.
       expect(body.name).toBe("local-dev");
-      expect(body.scope).toBe("api");
+      expect(body.scope).toMatch(/^(proxy|mcp|all)$/);
       expect(body.ttl).toMatch(/^(\d+s)?$/);
       return route.fulfill({ json: { token: `sk-${"a".repeat(40)}`, prefix: "sk-aaaaaaaa" } });
     }
@@ -561,21 +561,27 @@ test("API tokens are created in a dialog and copied from it", async ({ page, con
   await page.goto("/connect?tab=tokens");
   await expect(page.getByRole("heading", { name: "Active tokens" })).toBeVisible();
 
-  // Scope is neither a choice nor a column: every row would read the same word.
-  await expect(page.locator(".token-table-head span")).toHaveCount(7);
-  await expect(page.locator(".token-table-head")).not.toContainText("Scope");
+  // Scope is a deliberate choice at creation time and is visible on each row.
+  await expect(page.locator(".token-table-head span")).toHaveCount(8);
+  await expect(page.locator(".token-table-head")).toContainText("Scope");
 
   // The form is not on the page until the button opens it.
   await expect(page.locator("#token-name")).toHaveCount(0);
   await page.getByRole("button", { name: "Create token" }).click();
   await expect(page.getByRole("heading", { name: "Create token" })).toBeVisible();
 
-  // Scope has exactly one value, so the form does not offer a choice, and the
-  // expiry is a time picker rather than a free-text TTL.
-  await expect(page.locator("#token-scope")).toHaveCount(0);
+  // Scope is selected from the least-privilege default; expiry is a time picker
+  // rather than a free-text TTL.
+  const scope = page.getByRole("combobox", { name: "Access scope" });
+  await expect(scope).toContainText("Proxy only (API forwarding)");
+  await scope.click();
+  await page.getByRole("option", { name: "MCP only (tools)" }).click();
+  await expect(scope).toContainText("MCP only (tools)");
   await expect(page.locator("#token-expiry")).toHaveAttribute("type", "datetime-local");
   await page.locator("#token-expiry").fill("2030-01-02T10:30");
+  const createdRequest = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/auth/tokens");
   await page.getByRole("button", { name: "Generate token" }).click();
+  expect((await createdRequest).postDataJSON().scope).toBe("mcp");
 
   const secret = page.locator(".token-secret-value");
   await expect(secret).toHaveText(`sk-${"a".repeat(40)}`);
@@ -600,7 +606,9 @@ test("a token with no expiry sends no ttl", async ({ page }) => {
   const created = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/auth/tokens");
   await page.getByRole("button", { name: "Generate token" }).click();
 
-  expect((await created).postDataJSON().ttl).toBe("");
+  const payload = (await created).postDataJSON();
+  expect(payload.ttl).toBe("");
+  expect(payload.scope).toBe("proxy");
   await expect(page.locator(".token-secret-value")).toBeVisible();
 });
 

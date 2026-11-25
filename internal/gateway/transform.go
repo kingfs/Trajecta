@@ -41,22 +41,28 @@ type ProtocolConverter interface {
 	UpstreamProtocol() string
 }
 
-// ConverterFactory builds a converter from the post-alias record body. It is
-// called only after the alias rewrite, because conversion protocol selection
-// depends on the wire model. Returning nil means native passthrough.
-type ConverterFactory func(recordBody []byte) (Converter, error)
+// ConverterFactory builds a converter from the post-alias body. It is called
+// only after the alias rewrite, because conversion protocol selection depends
+// on the wire model. Returning nil means native passthrough.
+type ConverterFactory func(aliasBody []byte) (Converter, error)
 
-// RequestTransform is the fixed request-side order:
+// RequestTransform preserves the original client body for the cassette while
+// applying wire-only transformations in this order:
 //
-//	alias rewrite -> record body -> conversion -> masking -> wire body
+//	proxy preprocessing -> alias rewrite -> conversion -> masking -> wire body
 //
-// The record body is what the cassette records (post-alias, pre-conversion and
-// pre-mask). The wire body is what the upstream receives.
+// OriginalBody is optional for callers that preprocess the body before Apply
+// (for example, injecting stream_options). When set, it remains Body.Client and
+// RecordBody; the Apply argument is the preprocessed input used for routing and
+// upstream transformation.
 type RequestTransform struct {
 	RequestedModel string
 	UpstreamModel  string
-	ConverterFor   ConverterFactory
-	Masker         Masker
+	// OriginalBody is the exact body received from the client, before proxy-side
+	// normalization or wire transformations. Nil means the Apply argument.
+	OriginalBody []byte
+	ConverterFor ConverterFactory
+	Masker       Masker
 	// Protocol is the client wire protocol (chat_completions/responses/messages/
 	// gemini). When set and the Masker implements ProtocolMasker, masking is
 	// scoped to the XIR fields the detection plugins declare.
@@ -67,7 +73,8 @@ type RequestTransform struct {
 type RequestResult struct {
 	// Body keeps the client and final wire bytes as one explicit pair.
 	Body *Body
-	// RecordBody is the alias-rewritten body the recorder must keep.
+	// RecordBody is the exact client body the recorder must keep, before
+	// proxy preprocessing, aliases, protocol conversion, or credential masking.
 	RecordBody []byte
 	// WireBody is the body to send upstream (converted and/or masked).
 	WireBody []byte
@@ -87,31 +94,35 @@ type RequestResult struct {
 }
 
 // Apply runs the request transform. Alias-rewrite failures are non-fatal and
-// fall back to the original bytes (the routing layer already decided the
+// fall back to the preprocessed input (the routing layer already decided the
 // model); converter lookup and conversion failures are returned to the caller
 // for the proxy's 4xx/failover classification. Masking never fails.
 func (t RequestTransform) Apply(client []byte) (RequestResult, error) {
-	body := NewBody(client)
-	result := RequestResult{Body: body, RecordBody: client, WireBody: client}
-	record := client
+	recorded := client
+	if t.OriginalBody != nil {
+		recorded = t.OriginalBody
+	}
+	body := NewBody(recorded)
+	body.SetWire(client)
+	result := RequestResult{Body: body, RecordBody: recorded, WireBody: body.WireBytes()}
+	aliasBody := client
 	if upstream := strings.TrimSpace(t.UpstreamModel); upstream != "" &&
 		!strings.EqualFold(upstream, strings.TrimSpace(t.RequestedModel)) {
 		if rewritten, ok, err := xir.RewriteModel(client, upstream); err == nil && ok {
-			record = rewritten
+			aliasBody = rewritten
 			result.AliasApplied = true
 		}
 	}
-	body.SetWire(record)
-	result.RecordBody = body.WireBytes()
+	body.SetWire(aliasBody)
 	result.WireBody = body.WireBytes()
 
 	if t.ConverterFor != nil {
-		converter, err := t.ConverterFor(record)
+		converter, err := t.ConverterFor(aliasBody)
 		if err != nil {
 			return result, err
 		}
 		if converter != nil {
-			converted, warnings, err := converter.ConvertRequest(record)
+			converted, warnings, err := converter.ConvertRequest(aliasBody)
 			if err != nil {
 				return result, err
 			}

@@ -143,7 +143,7 @@ router:
     # check is what keeps a session off a target several times slower than the
     # alternative. Momentary queueing is deliberately not part of the check.
     sticky_max_cost_ratio: 2.0
-    # Opt-in protocol conversion: when true, the router may fall back to an
+    # Protocol conversion: when enabled, the router may fall back to an
     # upstream that cannot serve the client's protocol natively, and the proxy
     # converts the request/response between protocols,
     # selected by protocol_conversion_engine.
@@ -164,6 +164,7 @@ router:
 
 debug:
   output_dir: "./data/traces"
+  # Deprecated compatibility setting; cassette recording always preserves the original request.
   mask_key: true
 
 # The About page's "check for a newer release" button reads the project's fixed

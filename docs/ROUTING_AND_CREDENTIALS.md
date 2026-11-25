@@ -167,7 +167,7 @@ SQLite 走启动期 schema 初始化，Postgres 走 `ent/postgres-migrations/` �
 V3 cassette routing event 实际会写入的安全字段包括：`route_target_id`、`channel_id`、`credential_id`、`credential_hint`、`sticky_key_fingerprint`、`candidate` 列表中的 `base_url`（经过 `redaction.DisplayURL`）、`excluded` 与 `filter_reason`。
 
 - `credential_selectable`、`credential_health_state` 与 `credential_filter_reason` 在 `router.CandidateDecision` 结构与 `candidateEventAttributes` 读取路径中存在，但生产代码没有任何赋值点（只有测试会赋值），因此事件中不会出现；它们当前是只读字段。
-- 禁止写入 cassette、日志、Monitor JSON 或 MCP 输出：API key、bearer token、OAuth access/refresh token、service-account JSON、自定义 auth header 值、完整 raw sticky key。
+- 除原始 cassette 的 HTTP 请求/响应字节外，结构化 routing event、应用日志、Monitor JSON 与 MCP 输出不得包含明文 API key、bearer token、OAuth access/refresh token、service-account JSON、自定义 auth header 值或完整 raw sticky key。为保证 replay fidelity，cassette 会保留收到的请求行（含敏感 query）、请求头与请求体；body 在入口归一化、stream_options 注入、模型别名改写、协议转换和凭据遮蔽前记录，其中的凭据不做遮蔽。旧 `debug.mask_key` 仅为兼容配置，不改变录制内容。
 - `redaction.DisplayURL` 会把 URL userinfo 中的密码替换为 `REDACTED`，名字本身像密钥的 userinfo（`https://<key>@host`，或形如 `apikey123` 的用户名）也替换为 `REDACTED`，并把名字含 `key`、`token`、`secret`、`password`、`passwd`、`credential`、`signature`、`sig`、`access_token`、`api_key`、`authorization`、`auth`、`dsn` 的 query 参数值替换为 `REDACTED`。
 - `redaction.IsSensitiveURLParam` 是上面这份 marker 列表的唯一所有者：recorder/proxy、CLI `config inspect` 与 `legacymigrate.MaskSecret` 都走它。`MaskSecret` 对含 `://` 的值直接返回 `redaction.DisplayURL` 的结果，所以 CLI 诊断输出里的 DSN 掩码与运行期脱敏同为 `REDACTED`（旧实现自己判断 URL 并且只改密码段，会把 `?api_key=...` 原样打印出来）。
 - `redaction.SafeCredentialHint` 先做 metadata 脱敏再截断到 32 字符，值等于 `REDACTED` 时按空处理。
@@ -204,7 +204,7 @@ CLI 侧的管理入口包括 `trajecta provider probe` / `probe-report` / `probe
 ## 非目标与未实现
 
 - 不做多租户计费、团队权限、集中式云管理与订阅转售。
-- 转发热路径默认不做跨协议翻译；`router.selection.protocol_conversion: true` 时只在没有可用原生候选时对非流式 chat/messages/gemini 请求做转换（原生候选始终优先），`/v1/responses` 仍由本地 Responses runtime 负责，流式不转换。
+- 转发热路径默认启用直通优先的跨协议兜底：没有可用原生候选时才对受支持的非流式 chat/messages/gemini 请求做转换；`/v1/responses` 仍由本地 Responses runtime 负责，流式不转换。
 - 没有 `POST /api/router/reload`，也无需手动 reload：管理写成功即自动发布新快照。
 - 没有 `POST /api/channels/{id}/enable`、`/disable` 与 `models:bulk-update`；启停走 `PATCH`，批量启停走 `PATCH /api/channels/{id}/models/batch`。
 - 没有 `GET /api/models/{model}/channels`、`GET /api/models/{model}/trends`、`GET /api/channels/{id}/trends`；覆盖与趋势在模型详情与渠道详情响应内返回。

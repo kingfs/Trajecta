@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -51,7 +52,25 @@ func TestServerListsCredentialMasks(t *testing.T) {
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	denied, denyErr := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_credential_masks",
+		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
+	})
+	if denyErr == nil && (denied == nil || !denied.IsError) {
+		t.Fatalf("unauthenticated list_credential_masks = %+v, want an authorization error", denied)
+	}
+
+	viewerCtx := auth.WithPrincipal(context.Background(), auth.Principal{Username: "viewer", Role: auth.RoleViewer, Scope: auth.ScopeMCP})
+	viewerResult, viewerErr := session.CallTool(viewerCtx, &mcp.CallToolParams{
+		Name:      "list_credential_masks",
+		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
+	})
+	if viewerErr == nil && (viewerResult == nil || !viewerResult.IsError) {
+		t.Fatalf("viewer list_credential_masks = %+v, want an authorization error", viewerResult)
+	}
+
+	adminCtx := auth.WithPrincipal(context.Background(), auth.Principal{Username: "admin", Role: auth.RoleAdmin, Scope: auth.ScopeMCP})
+	result, err := session.CallTool(adminCtx, &mcp.CallToolParams{
 		Name:      "list_credential_masks",
 		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
 	})

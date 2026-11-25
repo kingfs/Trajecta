@@ -3,6 +3,7 @@ package transfer
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -79,6 +80,46 @@ func TestEncryptedEnvelopeDetectsTruncation(t *testing.T) {
 func TestEncryptedEnvelopeRejectsForeignMagic(t *testing.T) {
 	if _, err := newEncryptedReader(strings.NewReader("not a bundle at all\n"), "pw"); err == nil {
 		t.Fatal("newEncryptedReader() accepted a foreign file")
+	}
+}
+
+func TestEncryptedEnvelopeRejectsExpensiveScryptParameters(t *testing.T) {
+	t.Parallel()
+
+	for _, header := range []envelopeHeader{
+		{KDF: "scrypt", N: maxScryptN * 2, R: defaultScryptR, P: defaultScryptP, Salt: b64encode(make([]byte, scryptSaltSize)), NonceSeed: b64encode(make([]byte, noncePrefixLen))},
+		{KDF: "scrypt", N: defaultScryptN, R: maxScryptR + 1, P: defaultScryptP, Salt: b64encode(make([]byte, scryptSaltSize)), NonceSeed: b64encode(make([]byte, noncePrefixLen))},
+		{KDF: "scrypt", N: defaultScryptN, R: defaultScryptR, P: maxScryptP + 1, Salt: b64encode(make([]byte, scryptSaltSize)), NonceSeed: b64encode(make([]byte, noncePrefixLen))},
+	} {
+		data, err := json.Marshal(header)
+		if err != nil {
+			t.Fatalf("Marshal(header) error = %v", err)
+		}
+		bundle := envelopeMagic + headerPrefix + string(data) + "\n"
+		if _, err := newEncryptedReader(strings.NewReader(bundle), "pw"); err == nil || !strings.Contains(err.Error(), "scrypt parameters out of range") {
+			t.Errorf("newEncryptedReader() error = %v, want bounded-parameters rejection", err)
+		}
+	}
+}
+
+func TestEncryptedEnvelopeRejectsInvalidSaltLength(t *testing.T) {
+	t.Parallel()
+
+	header := envelopeHeader{
+		KDF:       "scrypt",
+		N:         defaultScryptN,
+		R:         defaultScryptR,
+		P:         defaultScryptP,
+		Salt:      b64encode([]byte("short")),
+		NonceSeed: b64encode(make([]byte, noncePrefixLen)),
+	}
+	data, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("Marshal(header) error = %v", err)
+	}
+	bundle := envelopeMagic + headerPrefix + string(data) + "\n"
+	if _, err := newEncryptedReader(strings.NewReader(bundle), "pw"); err == nil || !strings.Contains(err.Error(), "salt") {
+		t.Fatalf("newEncryptedReader() error = %v, want invalid salt-length error", err)
 	}
 }
 

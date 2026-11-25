@@ -55,16 +55,18 @@ Requires Docker and Docker Compose.
 
 ```bash
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
-cp .env.example .env          # change POSTGRES_PASSWORD
+cp .env.example .env          # edit .env and set a unique POSTGRES_PASSWORD
 docker compose up -d
+read -rsp 'Initial admin password (8+ characters): ' ADMIN_PASSWORD; printf '\n'
 docker compose exec trajecta /app/bin/trajecta \
-  -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+  -c /app/config/config.yaml auth init-user --username admin --password "$ADMIN_PASSWORD"
+unset ADMIN_PASSWORD
 ```
 
 - Monitor: <http://localhost:8081> — log in with the credentials above
 - Proxy: <http://localhost:8080/v1> — point your SDK's `base_url` here
 
-After signing in, configure upstream URLs and API keys on the `Channels` page, then create a personal token on the `Access -> API tokens` tab: use it as the SDK's `api_key` and your requests will be proxied and recorded. Host ports come from `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` in `.env`.
+After signing in, configure upstream URLs and API keys on the `Channels` page, then create a personal token on the `Access -> API tokens` tab: use it as the SDK's `api_key` and your requests will be proxied and recorded. The gateway and Monitor bind to host loopback by default. For remote access, configure a firewall/reverse proxy first, then explicitly set `TRAJECTA_HOST_BIND_ADDRESS=0.0.0.0` in `.env`; host ports come from `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT`.
 
 ### Option 2: From source
 
@@ -78,7 +80,7 @@ CONFIG=config/examples/local-sqlite.yaml task run   # local SQLite only
 Without Task:
 
 ```bash
-export TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@localhost:5432/trajecta?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://trajecta:<your-password>@localhost:5432/trajecta?sslmode=disable'
 go run ./cmd/server -c config/config.yaml
 ```
 
@@ -121,9 +123,9 @@ curl -s http://localhost:8080/v1/chat/completions \
 # event: {"type":"llm.output_text.delta","time":"…","is_stream":true,"message":"Hello"}
 # event: {"type":"llm.usage","time":"…","attributes":{"total_tokens":60}}
 
-POST /v1/chat/completions HTTP/1.1
+POST /v1/chat/completions?api_key=query-example-secret HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer fake-key-logging
+Authorization: Bearer sk-example-secret
 
 {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}
 
@@ -135,7 +137,7 @@ data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: [DONE]
 ```
 
-(The example is abridged; `…` marks omitted content. With the default `debug.mask_key: true`, the recorder replaces the `Authorization` value with `Bearer fake-key-logging` and the `api-key` / `x-api-key` / `x-goog-api-key` values with `fake-key-logging`; every other header and both bodies are stored verbatim, which is what makes replay faithful.)
+(The example is abridged; `…` marks omitted content. A cassette preserves the received HTTP request line (including its query) and request headers, and records the response for replay. The request body is captured before proxy normalization, `stream_options` injection, model-alias rewriting, protocol conversion and credential masking. Credentials in queries, headers and bodies are not masked by the recorder. The legacy `debug.mask_key` setting is still accepted but deprecated and has no effect on recording. `secret_masking.enabled` changes selected request-body values sent upstream; it does not sanitize the cassette. New recording files are mode `0600` and their day directories are mode `0700`; still treat `trace.output_dir` and its backups as secret-bearing data, and do not commit production recordings.)
 
 **3. Replay that file in a unit test**, with no network and no API key:
 
@@ -182,7 +184,7 @@ Any SDK that goes through `http.Client` works the same way: swap the transport, 
 | Azure OpenAI | `azure` (v1 and deployment routing) | verified |
 | vLLM | `vllm` | verified |
 
-The complete plugin/preset list (21 visible channel plugins organized by vendor site, with official descriptions, plans and protocol endpoints built in), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The official catalog is gated by the switches on the Plugins page (all disabled by default). The proxy is **protocol-aware pass-through plus recording/parsing**; by default it does not translate between protocol families in the forwarding hot path. With `router.selection.protocol_conversion` enabled it converts a non-streaming chat/messages/gemini request only when no native candidate is selectable (`/v1/responses` is always served by the local runtime; streaming and multimodal/thinking content are not converted).
+The complete plugin/preset list (21 visible channel plugins organized by vendor site, with official descriptions, plans and protocol endpoints built in), the capability rules, the routing-profile combinations and the protocol differences are in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md). The official catalog is gated by the switches on the Plugins page (all disabled by default). The proxy is **protocol-aware, native-first pass-through with conversion fallback and recording/parsing**. `router.selection.protocol_conversion` is enabled by default, but a selectable native candidate always wins; conversion is used only for supported non-streaming chat/messages/gemini requests when no native candidate is available (`/v1/responses` is always served by the local runtime; streaming and multimodal/thinking content are not converted).
 
 ## Architecture
 

@@ -171,10 +171,9 @@ type Config struct {
 
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
-		// MaskKey replaces the credential-carrying request headers with placeholders
-		// before the exchange is written to disk. It defaults to true (see Load); set
-		// it to false to record the original values, which puts live credentials in
-		// the cassette.
+		// MaskKey is a deprecated compatibility setting. Cassettes always preserve
+		// the original HTTP request, including credential headers, regardless of
+		// this value; access is restricted by cassette file permissions instead.
 		MaskKey bool `yaml:"mask_key"`
 		// PprofEnabled mounts net/http/pprof on the management mux. It is off by
 		// default because a profile endpoint is an unauthenticated-cost CPU sink
@@ -572,14 +571,10 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Masking is on unless the configuration says otherwise. SECURITY.md, README.md and
-	// README_EN.md all document `debug.mask_key` as defaulting to true, but the zero value of
-	// the field is false, so a configuration that simply omitted the key recorded the
-	// client's Authorization, api-key, x-api-key and x-goog-api-key headers verbatim - in a
-	// file that is written to disk, kept next to the database and routinely committed as test
-	// data. Seeding the field before the YAML is decoded keeps an explicit
-	// `mask_key: false` (or TRAJECTA_MASK_KEY=false) authoritative while an omitted key now
-	// means the documented default.
+	// MaskKey remains in the config model for backwards compatibility, but the
+	// recorder no longer uses it: cassettes always preserve the original request
+	// bytes. Keep its historical default and continue decoding explicit YAML/env
+	// values so older configuration-management workflows do not break.
 	cfg := Config{}
 	cfg.Debug.MaskKey = true
 	// The release check is on by default for the same reason: the zero value is

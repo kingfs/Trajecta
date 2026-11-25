@@ -538,22 +538,33 @@ func (s *importState) handleLogs(body io.Reader, size int64) error {
 // output_dir carries over unchanged and only the prefix differs.
 func (s *importState) targetCassettePath(sourcePath string) (targetPath, entry string, err error) {
 	srcRoot := s.manifest.SourceOutputDir
-	normalisedSrc := filepath.ToSlash(strings.TrimSuffix(srcRoot, "/"))
-	normalisedPath := filepath.ToSlash(strings.TrimPrefix(sourcePath, "./"))
+	normalisedSrc := strings.TrimRight(normalizeCassetteSourcePath(srcRoot), "/")
+	normalisedPath := normalizeCassetteSourcePath(sourcePath)
 	rel := ""
 	if normalisedSrc != "" && strings.HasPrefix(normalisedPath, normalisedSrc+"/") {
 		rel = strings.TrimPrefix(normalisedPath, normalisedSrc+"/")
-	} else if i := strings.Index(normalisedPath, "/traces/"); i >= 0 {
+	} else if i := strings.LastIndex(normalisedPath, "/traces/"); i >= 0 {
 		// Fallback for a bundle exported with a different output_dir string
 		// than the one its rows were recorded under: keep the layout below the
 		// traces root.
-		rel = strings.TrimPrefix(normalisedPath[i+len("/traces/"):], "/")
+		rel = normalisedPath[i+len("/traces/"):]
+	} else if strings.HasPrefix(normalisedPath, "traces/") {
+		rel = strings.TrimPrefix(normalisedPath, "traces/")
 	}
-	if rel == "" {
-		return "", "", fmt.Errorf("cannot derive a relative cassette path from %q (source output dir %q)", sourcePath, srcRoot)
+	rel, err = validateCassetteRelativePath(rel)
+	if err != nil {
+		return "", "", fmt.Errorf("cannot derive a safe relative cassette path from %q (source output dir %q): %w", sourcePath, srcRoot, err)
 	}
 	target := filepath.Join(s.outputDir, filepath.FromSlash(rel))
 	return target, rel, nil
+}
+
+func normalizeCassetteSourcePath(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	for strings.HasPrefix(value, "./") {
+		value = strings.TrimPrefix(value, "./")
+	}
+	return value
 }
 
 // ---------------------------------------------------------------------------

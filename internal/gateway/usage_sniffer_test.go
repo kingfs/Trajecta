@@ -8,6 +8,7 @@ package gateway
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -145,6 +146,61 @@ func TestUsageSnifferStreamSSEFinalUsageFrame(t *testing.T) {
 	}
 	if !usageSnifferHasUsageEvent(events) {
 		t.Fatalf("events missing llm.usage: %+v", events)
+	}
+}
+
+type failingCassetteWriter struct {
+	written int
+	err     error
+}
+
+func (w *failingCassetteWriter) Write(p []byte) (int, error) {
+	if w.written > len(p) {
+		w.written = len(p)
+	}
+	return w.written, w.err
+}
+
+func TestUsageSnifferReportsCassetteWriteErrorsOnClose(t *testing.T) {
+	payload := []byte("client-visible response")
+	writeErr := errors.New("disk full")
+	var count int64
+	sniffer := &UsageSniffer{
+		Source: io.NopCloser(bytes.NewReader(payload)),
+		File:   &failingCassetteWriter{written: 3, err: writeErr},
+		Count:  &count,
+	}
+
+	got, err := io.ReadAll(sniffer)
+	if err != nil {
+		t.Fatalf("io.ReadAll() error = %v, want the client stream to continue", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("client stream = %q, want %q", got, payload)
+	}
+	if count != 3 {
+		t.Fatalf("cassette byte count = %d, want actual partial write of 3", count)
+	}
+	if err := sniffer.Close(); err == nil || !errors.Is(err, writeErr) {
+		t.Fatalf("Close() error = %v, want to report %v", err, writeErr)
+	}
+}
+
+func TestUsageSnifferDetectsShortCassetteWrite(t *testing.T) {
+	var count int64
+	sniffer := &UsageSniffer{
+		Source: io.NopCloser(bytes.NewReader([]byte("abcdef"))),
+		File:   &failingCassetteWriter{written: 2},
+		Count:  &count,
+	}
+	if _, err := io.ReadAll(sniffer); err != nil {
+		t.Fatalf("io.ReadAll() error = %v", err)
+	}
+	if err := sniffer.Close(); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("Close() error = %v, want io.ErrShortWrite", err)
+	}
+	if count != 2 {
+		t.Fatalf("cassette byte count = %d, want 2", count)
 	}
 }
 

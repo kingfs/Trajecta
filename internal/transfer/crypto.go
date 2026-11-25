@@ -47,6 +47,9 @@ const (
 	defaultScryptN = 1 << 15
 	defaultScryptR = 8
 	defaultScryptP = 1
+	maxScryptN     = 1 << 16
+	maxScryptR     = 16
+	maxScryptP     = 2
 	scryptSaltSize = 32
 	noncePrefixLen = 8
 	chunkSize      = 64 * 1024
@@ -216,6 +219,9 @@ func newEncryptedReader(r io.Reader, password string) (*encryptedReader, error) 
 	if err != nil {
 		return nil, err
 	}
+	if len(salt) != scryptSaltSize {
+		return nil, errors.New("corrupt export envelope salt")
+	}
 	seed, err := b64decode(header.NonceSeed)
 	if err != nil {
 		return nil, err
@@ -224,7 +230,10 @@ func newEncryptedReader(r io.Reader, password string) (*encryptedReader, error) 
 		return nil, errors.New("corrupt export envelope nonce seed")
 	}
 	n, rr, p := header.N, header.R, header.P
-	if n < 1<<14 || n > 1<<20 || rr < 8 || rr > 32 || p < 1 || p > 8 {
+	// The header is untrusted input. Bound the largest valid combination to
+	// roughly 128 MiB of scrypt working memory and 8x the default work factor;
+	// larger values can otherwise exhaust memory or pin an import worker.
+	if n < 1<<14 || n > maxScryptN || n&(n-1) != 0 || rr < defaultScryptR || rr > maxScryptR || p < defaultScryptP || p > maxScryptP {
 		return nil, errors.New("export envelope scrypt parameters out of range")
 	}
 	key, err := scrypt.Key([]byte(password), salt, n, rr, p, 32)

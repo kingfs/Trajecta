@@ -61,7 +61,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 - `pkg/recordfile`：V2/V3 cassette 解析与写入。
 - `pkg/replay`：测试回放 transport。
 - `pkg/llm`：协议识别、adapter、usage 归一化与 stream `ResponsePipeline`；其 marshal 方法也供 `pkg/protocolconvert` 做请求/响应编码。
-- `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径仅在 `router.selection.protocol_conversion: true` 且没有可用原生候选时使用。
+- `pkg/protocolconvert`：直通优先的协议转换库（`Plan` 决策、请求/响应转换、finish reason 与 role 映射、结构化内容校验）；热路径默认启用转换兜底，但只有没有可用原生候选时才使用。
 - `pkg/observe`：Observation IR 定义与各协议 parser。
 - `pkg/xir`：Trajecta 2.0 的 Exchange IR（wire/semantic/audit 三视图）；`pkg/xir/wire` 是无损 span JSON 与 patch，`pkg/xir/codec/{chat,responses,messages,gemini}` 是四协议 codec，`pkg/xir/hook` 是 Hook 契约，`pkg/xir/convert` 是转换 hub，`pkg/xir/stream` 是 SSE 帧/装配原语，`pkg/xir/audit` 是审计投影。当前 `internal/router` 已通过 `pkg/xir.ParseEnvelope` 读取路由特征；其余转发/录制路径仍是 `pkg/llm`/`pkg/protocolconvert` 的事实源，尚未整体替换。
 - `pkg/usage`：协议中立的 usage 模型与非零合并规则；供 XIR 与后续 Hook 使用。
@@ -82,7 +82,7 @@ Trajecta 是本地优先（local-first）的 LLM API record/replay 代理，覆�
 1. SDK、CLI 或应用把 LLM API 请求发到本地代理（如 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`）。
 2. proxy 归一化入口 endpoint，并按请求路径与上游配置识别协议族。
 3. router 依据入口、模型、能力与 `responses_strategy` 选择 route target，并记录决策与候选；`POST /api/routing/inspect` 通过 `router.Explain` 的 dry-run 复用同一套候选/健康/选择逻辑（不读写 sticky、不增加 inflight），因此 Inspector 与热路径不会给出不同答案。
-4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。**凭据与个人数据遮蔽也在这一步、真正发包之前发生，且默认开启**：通过规则与置信度门限的值（API key、SSH/PEM 私钥块、身份证号、手机号等）被替换为等长保形假值后才发给上游，cassette 记录的仍是原始请求体，响应在写回 client 之前把假值换回真值（流式响应按跨 delta 重组）；两个方向各写 `secret.masked` / `secret.restored` 事件且不携带凭据字节。细节与边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
+4. proxy 做少量透传型调整，例如为 OpenAI-compatible chat stream 注入 `stream_options.include_usage=true`。**凭据与个人数据遮蔽也在这一步、真正发包之前发生，且默认开启**：通过规则与置信度门限的值（API key、SSH/PEM 私钥块、身份证号、手机号等）被替换为等长保形假值后才发给上游；cassette 保留收到的 HTTP 请求行（含 query）、请求头与请求体，body 在入口归一化、stream_options 注入、模型别名改写、协议转换和凭据遮蔽之前写入。旧 `debug.mask_key` 不改变录制。响应在写回 client 之前把假值换回真值（流式响应按跨 delta 重组），并按 client-visible 字节录制；两个方向各写 `secret.masked` / `secret.restored` 事件且不携带凭据字节。细节与边界见 [敏感凭据遮蔽](./SECRET_MASKING.md)。
 5. 请求转发到上游，响应以流式或非流式返回 client。若某次 `/v1/responses` 请求被判定为原生直通，则该请求只会在「自己实现 Responses API」的目标里选择：只能靠本地 runtime 翻译的 Chat Completions 目标在这一请求上不可选（重试重新选择时同样不可选），否则原样转发会把 Responses 请求发给不实现该协议的上游。转发路径自己写响应体（不经 `httputil.ReverseProxy` 的拷贝），所以「流式响应逐次 flush」这条契约由它承担：流式（或长度未知）的响应每写一次就 flush 一次，否则小于服务端输出缓冲的写入会被攒着，client 在 handler 返回前收不到任何东西——连响应头都收不到，`stream: true` 就退化成「最后一个 token 之后一次性收到完整回答」，首字节时间等于总时长。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette，并在 prelude 追加 meta 与 event；写 prelude 前，它只从请求头与 URL 识别客户端 harness（不读 body），把结论写入 meta 的 `client_harness*` 字段与一条 `harness.detected` 事件，再由索引列镜像到 `logs`。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 与 `llm.*` timeline 事件。
@@ -96,10 +96,9 @@ Timeline 事件（如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.too
 
 ## 协议边界
 
-当前是协议族感知的透传代理，默认不是跨协议转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
+当前是协议族感知的直通优先代理，默认开启受限的跨协议转换兜底，而不是无条件转换网关。已实现协议族与 endpoint 覆盖见 [协议参考](./protocol-reference/README.md)。
 
-- 默认情况下 `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native` 在转发热路径中互不转换；上游必须支持 client 实际请求的 endpoint（例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游）。
-- 开启 `router.selection.protocol_conversion` 后，只有当本轮没有可用原生候选、请求非流式、入口为 chat/messages/gemini 时，`pkg/protocolconvert` 才会把请求/响应转换到目标协议；原生候选始终优先，`/v1/responses` 不参与转换。流式、多模态/thinking、以及 IR 不携带的语义字段不被转换。
+- 原生候选始终优先；当没有可用原生候选、请求非流式且入口为 chat/messages/gemini 时，`pkg/protocolconvert` 才会把受支持的请求/响应转换到目标协议。`/v1/responses` 不参与转发路径的协议转换。流式、多模态/thinking、以及 IR 不携带的语义字段不被转换。
 - `pkg/llm`/`pkg/observe` 可以把不同协议归一化为统一摘要与 Observation IR；`pkg/protocolconvert` 只在 IR 明确承载的字段上做转换，其余字段默认拒绝而不是猜测。
 - proxy 无条件接受 `/v1/chat/completions`、`/v1/responses`、`/v1/messages`。
 
@@ -143,7 +142,7 @@ application DB 是结构化查询源：
 - trace/session/upstream/model/channel 的列表、聚合、过滤与分页；trace 的客户端 harness 分类（`logs.client_harness*`）是 cassette `harness.detected` 事件的索引投影，用于列表标签与 `?harness=` 过滤，不回填历史 cassette；
 - auth user/token、channel/model 配置、system events、analysis jobs、Observation 摘要（`trace_observations`，节点树不落库）、findings、资源索引（`resources` / `trace_resources`）、项目归属索引（`trace_projects` / `session_projects`，同样由 cassette 重解析重建）、eval；
 - Responses semantic state（`responses`、`response_items`）与 Responses audit（`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`）；
-- 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成，cassette 只记录原始请求体，回填路径不读映射文件，所以后台重建索引仍然会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入 prelude、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。审计行与 `credential_masked` 系统事件在同一事务提交；写入由录制收尾的独立旁路队列执行并重试，不占转发或 finalize worker；`serve` 在启动和每 5 分钟运行 `ReconcileCredentialMaskEvents`，只为已有审计行补缺失事件。系统事件仍按规则一行，`trace_id` 只保留最近一次；按 trace 读取时由 `credential_mask_audits` 的 `trace_id` 索引派生 occurrence，不按 trace 复制事件行。`credential_masked` 的读/解决/忽略按 `(trace_id, rule)` 存在 `credential_mask_event_states`（只写非默认状态，没有行即 `unread`），因此一条 trace 的操作不影响其他 trace；事件行的 `status`/时间只是最近一次 occurrence 的缓存，写路径在 upsert 和最近一次操作后同步。API 的 trace 范围用 query：`/api/events?trace_id=`、`/api/events/<id>?trace_id=`、`/api/events/<id>/read|resolve|ignore?trace_id=`；`trace_id` 必须是完整 UUID。`serve` 启动时用两个 `app_settings` 标记一次性修复旧版本留下的永久忽略，并把旧规则级状态迁到最近一次 occurrence；更早的 occurrence 按未读处理，其他事件来源的 `ignored` 语义不变。
+- 凭据与个人数据遮蔽审计（`credential_mask_audits`）：每个被替换的值一行，存真值与保形假值（按 `SecretStorageMode()` 加密并逐行记 `storage_mode`），`(trace_id, event_index)` 唯一。**只有真正执行改写的那次请求能写它**——假值由进程内 vault 生成，cassette 保留原始 HTTP 请求（请求行、headers 与请求体），回填路径不读映射文件，所以后台重建索引仍然会跳过；cassette prelude 的 `secret.masked` 事件因此仍然只带规则与偏移，凭据字节不进入该事件、trace 索引与导出（见 [凭据遮蔽](./SECRET_MASKING.md)）。审计行与 `credential_masked` 系统事件在同一事务提交；写入由录制收尾的独立旁路队列执行并重试，不占转发或 finalize worker；`serve` 在启动和每 5 分钟运行 `ReconcileCredentialMaskEvents`，只为已有审计行补缺失事件。系统事件仍按规则一行，`trace_id` 只保留最近一次；按 trace 读取时由 `credential_mask_audits` 的 `trace_id` 索引派生 occurrence，不按 trace 复制事件行。`credential_masked` 的读/解决/忽略按 `(trace_id, rule)` 存在 `credential_mask_event_states`（只写非默认状态，没有行即 `unread`），因此一条 trace 的操作不影响其他 trace；事件行的 `status`/时间只是最近一次 occurrence 的缓存，写路径在 upsert 和最近一次操作后同步。API 的 trace 范围用 query：`/api/events?trace_id=`、`/api/events/<id>?trace_id=`、`/api/events/<id>/read|resolve|ignore?trace_id=`；`trace_id` 必须是完整 UUID。`serve` 启动时用两个 `app_settings` 标记一次性修复旧版本留下的永久忽略，并把旧规则级状态迁到最近一次 occurrence；更早的 occurrence 按未读处理，其他事件来源的 `ignored` 语义不变。
 - 凭据遮蔽映射（`{{output_dir}}/secret_mask_mappings.db`）：bbolt 文件，按真值去重只保存 `real -> fake`，启动时默认加载全部且不淘汰（`secret_masking.mapping_store.load_limit: 0`；正数只加载最新 N 条，超过余量后淘汰最旧），新映射异步批量写入。它是 Vault 的恢复索引而不是审计表：没有 trace、偏移与命中次数，删掉只影响后续重启能否复用旧假值。同一 `output_dir` 只能被一个进程打开（bbolt 排他锁），并且用 `trace_index.secret` 加密、用同一把密钥做去重索引的 HMAC。
 
 生产必须使用 Postgres，checked-in migrations 位于 `ent/postgres-migrations`（`db migrate up`）。未配置 `database.driver` 时驱动为 Postgres（缺 DSN 直接报错，不会新建本地文件）；SQLite 必须显式选择，用于本地/开发/测试，默认文件为 `{{output_dir}}/trajecta.sqlite3`，其 schema 在启动时应用而非版本化迁移。列表页不得依赖扫描文件系统；replay 不得依赖 SQLite 或网络。

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -28,6 +29,25 @@ func NormalizeTokenScope(scope string) string {
 		return ScopeAll
 	}
 	return scope
+}
+
+// ValidateTokenScope prevents newly issued tokens from silently receiving the
+// historical full-access behavior due to a typo or an unsupported scope. Old
+// rows with custom scopes remain readable and are still interpreted by
+// ScopeAllows for compatibility.
+func ValidateTokenScope(scope string) (string, error) {
+	normalized := NormalizeTokenScope(scope)
+	switch normalized {
+	case "api":
+		// Older Monitor versions created this value for full-access tokens.
+		// Preserve that intentional alias while rejecting unknown values that
+		// would otherwise silently acquire full access.
+		return ScopeAll, nil
+	case ScopeAll, ScopeProxy, ScopeMCP:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported token scope %q; use all, proxy or mcp", normalized)
+	}
 }
 
 // ScopeAllows reports whether a token granted `granted` may act on a surface

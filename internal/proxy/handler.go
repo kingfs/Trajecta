@@ -116,6 +116,29 @@ type limitDecision struct {
 	Identity router.CredentialDecisionInfo
 }
 
+type cassetteRequestCapture struct {
+	request *http.Request
+	body    []byte
+}
+
+func newCassetteRequestCapture(req *http.Request) cassetteRequestCapture {
+	if req == nil {
+		return cassetteRequestCapture{}
+	}
+	captured := req.Clone(req.Context())
+	captured.Body = nil
+	captured.GetBody = nil
+	return cassetteRequestCapture{request: captured}
+}
+
+func (c cassetteRequestCapture) apply(opts recorder.PrepareOptions) recorder.PrepareOptions {
+	if c.request != nil {
+		opts.RawRequest = c.request
+		opts.RawRequestBody = c.body
+	}
+	return opts
+}
+
 type responsesRouteDecision struct {
 	strategy        routeplan.ResponsesStrategy
 	useLocal        bool
@@ -178,23 +201,23 @@ func writeRequestBodyError(w http.ResponseWriter, r *http.Request, err error) {
 	writeProxyError(w, r, http.StatusBadRequest, "invalid_request_body", "Failed to read request body")
 }
 
-func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
+func readAndNormalizeRequestBody(req *http.Request) (originalBody, normalizedBody []byte, err error) {
 	if req.Body == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	bodyBytes, err := io.ReadAll(req.Body)
+	originalBody, err = io.ReadAll(req.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	bodyBytes = gateway.InjectStreamOptions(req, bodyBytes)
-	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	req.ContentLength = int64(len(bodyBytes))
-	if len(bodyBytes) > 0 {
-		req.Header.Set("Content-Length", fmt.Sprint(len(bodyBytes)))
+	normalizedBody = gateway.InjectStreamOptions(req, originalBody)
+	req.Body = io.NopCloser(bytes.NewReader(normalizedBody))
+	req.ContentLength = int64(len(normalizedBody))
+	if len(normalizedBody) > 0 {
+		req.Header.Set("Content-Length", fmt.Sprint(len(normalizedBody)))
 	}
-	return bodyBytes, nil
+	return originalBody, normalizedBody, nil
 }
 
 // InstrumentedResponseWriter 保持不变
@@ -772,6 +795,7 @@ func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router,
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	cassetteCapture := newCassetteRequestCapture(r)
 	normalizeClientEntrypoint(r)
 
 	// /healthz is the only path answered before authentication: a container
@@ -795,27 +819,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 
-	if h.serveEntrypointShortcuts(w, r, start) {
-		return
-	}
-	if h.rejectWhenNoUpstreamTargets(w, r, start) {
+	if h.rejectUnauthorizedRequest(w, r) {
 		return
 	}
 
-	// [Step 1] 读取请求体并自动注入 stream_options，后续 router/recorder 复用同一份 bytes。
-	bodyBytes, err := readAndNormalizeRequestBody(r)
+	// [Step 1] Preserve the ingress body for the cassette, then inject any
+	// proxy-only stream options into the separate body used for routing/sending.
+	originalBodyBytes, bodyBytes, err := readAndNormalizeRequestBody(r)
 	if err != nil {
 		slog.Error("Failed to read request body", "error", err)
 		writeRequestBodyError(w, r, err)
 		return
 	}
+	cassetteCapture.body = originalBodyBytes
+	cassetteCapture.request.Trailer = r.Trailer.Clone()
+	if h.serveEntrypointShortcuts(w, r, start, cassetteCapture) {
+		return
+	}
+	if h.rejectWhenNoUpstreamTargets(w, r, start, bodyBytes, cassetteCapture) {
+		return
+	}
 	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
 		var finished bool
-		if r, finished = h.serveLocalResponsesWhenChosen(w, r, bodyBytes, start); finished {
+		if r, finished = h.serveLocalResponsesWhenChosen(w, r, bodyBytes, start, cassetteCapture); finished {
 			return
 		}
 	}
-	if release, rejected := h.acquirePreSelectionLimit(w, r, bodyBytes, start); rejected {
+	if release, rejected := h.acquirePreSelectionLimit(w, r, bodyBytes, start, cassetteCapture); rejected {
 		return
 	} else if release != nil {
 		defer release()
@@ -869,7 +899,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					if !tryAcquireRetryWaitSlot() {
 						retryEvents = append(retryEvents, retryEvent("routing.retry_queue_saturated", retryAttempt, 0, "", 0, "all_targets_open", false))
 						slog.Warn("Upstream retry wait queue saturated")
-						h.recordSelectionFailureWithBody(r, start, http.StatusServiceUnavailable, selErr, bodyBytes, retryEvents)
+						h.recordSelectionFailureWithBody(r, start, http.StatusServiceUnavailable, selErr, bodyBytes, retryEvents, cassetteCapture)
 						writeProxyError(w, r, http.StatusServiceUnavailable, "retry_queue_saturated", "Proxy overloaded: upstream retry wait queue saturated")
 						return
 					}
@@ -893,11 +923,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// 如果是第一次就失败，保持原有的 selection-failure 记录行为。
 			if len(triedIDs) == 0 {
 				if h.shouldSynthesizeAnthropicCountTokens(r, selErr, 0) {
-					h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, nil, selErr, retryEvents)
+					h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, nil, selErr, retryEvents, cassetteCapture)
 					return
 				}
 				status := selectionFailureStatus(selErr)
-				h.recordSelectionFailureWithBody(r, start, status, selErr, bodyBytes, retryEvents)
+				h.recordSelectionFailureWithBody(r, start, status, selErr, bodyBytes, retryEvents, cassetteCapture)
 				writeProxyError(w, r, status, router.SelectionFailureReason(selErr), selErr.Error())
 				return
 			}
@@ -910,7 +940,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if rejectReason != limit.RejectNone {
 					h.router.Release(selection)
 					statusCode, eventType := limitRejectionHTTP(rejectReason)
-					h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
+					h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes, cassetteCapture)
 					writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
 					return
 				}
@@ -936,9 +966,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				r = &cloned
 			}
 		}
-		// The request-side order lives in gateway: alias -> record body ->
-		// conversion -> masking -> wire body. The cassette records the
-		// post-alias, pre-conversion/pre-mask body.
+		// The cassette keeps the original ingress body. The body used for
+		// routing may already include proxy-only stream options; gateway then
+		// applies alias -> conversion -> credential masking for the upstream.
 		var masker gateway.Masker
 		if h.maskRef != nil {
 			masker = h.maskRef.m
@@ -946,8 +976,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		transform := gateway.RequestTransform{
 			RequestedModel: selection.Request.ModelName,
 			UpstreamModel:  upstreamModel,
-			ConverterFor: func(record []byte) (gateway.Converter, error) {
-				conv, err := h.conversionForSelection(r, selection, record)
+			OriginalBody:   originalBodyBytes,
+			ConverterFor: func(aliasBody []byte) (gateway.Converter, error) {
+				conv, err := h.conversionForSelection(r, selection, aliasBody)
 				if err != nil || conv == nil {
 					return nil, err
 				}
@@ -991,7 +1022,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 准备日志
-		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+		prepareOptions := cassetteCapture.apply(recorder.PrepareOptions{
 			SiteURL:                        selection.Target.Upstream.BaseURL,
 			SelectedUpstreamID:             selection.Target.ID,
 			SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
@@ -1000,7 +1031,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingCandidateCount:          selection.CandidateCount,
 			MinimalCassette:                h.cfg.Trace.MinimalCassette,
 			WireModel:                      upstreamModel,
-		}, recordBody)
+		})
+		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, prepareOptions, recordBody)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)
 			h.router.Complete(selection, router.Outcome{
@@ -1101,7 +1133,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				})
 				retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, "upstream returned status 404", false))
 				h.closeLogFile(logInfo)
-				h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, selection, nil, retryEvents)
+				h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, selection, nil, retryEvents, cassetteCapture)
 				return
 			}
 			logInfo.Header.Meta.Error = failure.summary
@@ -1188,13 +1220,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.reportExhaustedUpstreams(w, r, bodyBytes, start, selection, triedIDs, lastErr, retryEvents)
+	h.reportExhaustedUpstreams(w, r, bodyBytes, start, selection, triedIDs, lastErr, retryEvents, cassetteCapture)
 }
 
-// serveEntrypointShortcuts answers the requests that are decided before any
-// upstream target is considered: authentication, the OpenAI model-detail call, the
-// Ollama show call and the aggregated model list. It reports whether the request
-// has been answered.
+// serveEntrypointShortcuts handles proxy-local model metadata endpoints before
+// any upstream target is considered. It runs after ingress capture so even these
+// synthetic cassettes retain the original request line, headers and body.
 // writeProxyHealth answers GET/HEAD /healthz without consulting auth, the
 // router or the store.
 func writeProxyHealth(w http.ResponseWriter, r *http.Request) {
@@ -1211,25 +1242,29 @@ func writeProxyHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) serveEntrypointShortcuts(w http.ResponseWriter, r *http.Request, start time.Time) bool {
-	if !auth.RequestAuthorized(r, h.authVerifier) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
-		// The proxy surface is consumed by LLM SDKs, so the rejection must use
-		// the protocol error envelope; a bare text/plain "Unauthorized" is the
-		// first failure a misconfigured SDK hits and it cannot be parsed.
-		writeProxyError(w, r, http.StatusUnauthorized, "invalid_api_key", "Unauthorized")
-		return true
+func (h *Handler) rejectUnauthorizedRequest(w http.ResponseWriter, r *http.Request) bool {
+	if auth.RequestAuthorized(r, h.authVerifier) {
+		return false
 	}
+	w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-proxy"`)
+	// The proxy surface is consumed by LLM SDKs, so the rejection must use
+	// the protocol error envelope; a bare text/plain "Unauthorized" is the
+	// first failure a misconfigured SDK hits and it cannot be parsed.
+	writeProxyError(w, r, http.StatusUnauthorized, "invalid_api_key", "Unauthorized")
+	return true
+}
+
+func (h *Handler) serveEntrypointShortcuts(w http.ResponseWriter, r *http.Request, start time.Time, cassetteCapture cassetteRequestCapture) bool {
 	if isOpenAIModelDetailRequest(r) {
-		h.serveOpenAIModelDetail(w, r, start)
+		h.serveOpenAIModelDetail(w, r, start, cassetteCapture)
 		return true
 	}
 	if isOllamaShowRequest(r) {
-		h.serveOllamaShow(w, r, start)
+		h.serveOllamaShow(w, r, start, cassetteCapture)
 		return true
 	}
 	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
-		h.serveAggregatedModelList(w, r, start)
+		h.serveAggregatedModelList(w, r, start, cassetteCapture)
 		return true
 	}
 	return false
@@ -1237,7 +1272,7 @@ func (h *Handler) serveEntrypointShortcuts(w http.ResponseWriter, r *http.Reques
 
 // rejectWhenNoUpstreamTargets answers with a selection failure when no upstream
 // target is configured, because nothing downstream can succeed.
-func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Request, start time.Time) bool {
+func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Request, start time.Time, bodyBytes []byte, cassetteCapture cassetteRequestCapture) bool {
 	if h.router != nil && len(h.router.Targets()) > 0 {
 		return false
 	}
@@ -1246,7 +1281,7 @@ func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Req
 		Message: "no upstream targets are configured; add a provider in Monitor",
 	}
 	status := selectionFailureStatus(selectErr)
-	h.recordSelectionFailureWithBody(r, start, status, selectErr, nil, nil)
+	h.recordSelectionFailureWithBody(r, start, status, selectErr, bodyBytes, nil, cassetteCapture)
 	writeProxyError(w, r, status, router.SelectionFailureReason(selectErr), selectErr.Error())
 	return true
 }
@@ -1255,7 +1290,7 @@ func (h *Handler) rejectWhenNoUpstreamTargets(w http.ResponseWriter, r *http.Req
 // Responses entrypoint. It reports whether the request is finished, either because
 // the local runtime answered it or because the decision rejected it; the returned
 // request carries the route-plan event when the local runtime took it.
-func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time) (*http.Request, bool) {
+func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time, cassetteCapture cassetteRequestCapture) (*http.Request, bool) {
 	decision := h.responsesRoutingDecision(r, bodyBytes)
 	// A closed circuit window is transient, not a configuration problem:
 	// wait out the breaker (bounded by the upstream retry budget) and
@@ -1274,7 +1309,7 @@ func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.R
 	}
 	if decision.useLocal {
 		r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
-		h.serveLocalResponsesWithBody(w, r, bodyBytes)
+		h.serveLocalResponsesWithBody(w, r, bodyBytes, cassetteCapture)
 		return r, true
 	}
 	if decision.rejectReason != "" {
@@ -1286,7 +1321,7 @@ func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.R
 		status := selectionFailureStatus(selectErr)
 		h.recordSelectionFailureWithBody(r, start, status, selectErr, bodyBytes, []recorder.RecordEvent{
 			routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
-		})
+		}, cassetteCapture)
 		writeProxyError(w, r, status, router.SelectionFailureReason(selectErr), selectErr.Error())
 		return r, true
 	}
@@ -1301,7 +1336,7 @@ func (h *Handler) serveLocalResponsesWhenChosen(w http.ResponseWriter, r *http.R
 // acquirePreSelectionLimit takes a rate-limit lease before target selection. It
 // returns the release function for the caller to defer, or reports that the request
 // has already been rejected.
-func (h *Handler) acquirePreSelectionLimit(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time) (func(), bool) {
+func (h *Handler) acquirePreSelectionLimit(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time, cassetteCapture cassetteRequestCapture) (func(), bool) {
 	if h.limiter == nil {
 		return nil, false
 	}
@@ -1312,7 +1347,7 @@ func (h *Handler) acquirePreSelectionLimit(w http.ResponseWriter, r *http.Reques
 	lease, rejectReason := h.limiter.Acquire(r.Context(), decision.Key)
 	if rejectReason != limit.RejectNone {
 		statusCode, eventType := limitRejectionHTTP(rejectReason)
-		h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
+		h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes, cassetteCapture)
 		writeProxyError(w, r, statusCode, "rate_limited", http.StatusText(statusCode))
 		return nil, true
 	}
@@ -1325,7 +1360,7 @@ func (h *Handler) acquirePreSelectionLimit(w http.ResponseWriter, r *http.Reques
 // reportExhaustedUpstreams answers when every candidate in every round failed. The
 // per-attempt logs were already closed by closeLogFile inside the retry loop, so
 // the failure is recorded with a fresh log file.
-func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time, selection *router.Selection, triedIDs []string, lastErr error, retryEvents []recorder.RecordEvent) {
+func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Request, bodyBytes []byte, start time.Time, selection *router.Selection, triedIDs []string, lastErr error, retryEvents []recorder.RecordEvent, cassetteCapture cassetteRequestCapture) {
 	// 全部候选目标都已尝试且失败
 	modelName := ""
 	if selection != nil {
@@ -1343,7 +1378,7 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 	var conversionErr *protocolConversionRequestError
 	if errors.As(lastErr, &conversionErr) {
 		if h.recorder != nil {
-			h.recordSelectionFailureWithSelection(r, start, http.StatusBadRequest, lastErr, bodyBytes, retryEvents, selection)
+			h.recordSelectionFailureWithSelection(r, start, http.StatusBadRequest, lastErr, bodyBytes, retryEvents, selection, cassetteCapture)
 		}
 		writeProxyError(w, r, http.StatusBadRequest, "protocol_conversion_unsupported", lastErr.Error())
 		return
@@ -1354,7 +1389,7 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 		// example the operator disabled it while the request was in flight). That
 		// is an authorization answer, not an upstream failure.
 		if h.recorder != nil {
-			h.recordSelectionFailureWithBody(r, start, status, lastErr, bodyBytes, retryEvents)
+			h.recordSelectionFailureWithBody(r, start, status, lastErr, bodyBytes, retryEvents, cassetteCapture)
 		}
 		writeProxyError(w, r, status, router.SelectionFailureReason(lastErr), lastErr.Error())
 		return
@@ -1363,7 +1398,7 @@ func (h *Handler) reportExhaustedUpstreams(w http.ResponseWriter, r *http.Reques
 		// The failure came from an answered upstream attempt (its per-attempt
 		// cassette was deleted by closeLogFile), so record the attempted target on
 		// the failure row instead of losing which channel returned the error.
-		h.recordSelectionFailureWithSelection(r, start, status, lastErr, bodyBytes, retryEvents, selection)
+		h.recordSelectionFailureWithSelection(r, start, status, lastErr, bodyBytes, retryEvents, selection, cassetteCapture)
 	}
 	writeProxyError(w, r, status, "upstream_error", "Proxy Error: "+lastErr.Error())
 }
@@ -2249,12 +2284,26 @@ func (h *Handler) writeUpstreamResponse(
 	retryEvents []recorder.RecordEvent,
 ) {
 	logInfo.Events = append(logInfo.Events, retryEvents...)
-	// Write separator and response header to log file.
-	logInfo.File.Write([]byte("\n"))
+	responseOutcomeError := logInfo.Header.Meta.Error
+	// Write separator and response header to log file. Cassette failures are
+	// surfaced in the trace but do not make a healthy upstream look unhealthy.
+	if n, err := logInfo.File.Write([]byte("\n")); err != nil || n != 1 {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		appendCassetteRecordingError(logInfo, "response separator", err)
+	}
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
 	resp.Header.Write(headerBuf)
 	headerBuf.WriteString("\r\n")
-	n, _ := logInfo.File.Write(headerBuf.Bytes())
+	headerBytes := headerBuf.Bytes()
+	n, headerErr := logInfo.File.Write(headerBytes)
+	if headerErr == nil && n != len(headerBytes) {
+		headerErr = io.ErrShortWrite
+	}
+	if headerErr != nil {
+		appendCassetteRecordingError(logInfo, "response headers", headerErr)
+	}
 	logInfo.Header.Layout.ResHeaderLen = int64(n)
 
 	// Detect streaming mode.
@@ -2294,11 +2343,26 @@ func (h *Handler) writeUpstreamResponse(
 		bodyWriter = flushAfterWrite{w: irw}
 	}
 	if _, err := io.Copy(bodyWriter, resp.Body); err != nil && err != io.EOF && !errors.Is(err, context.Canceled) && originalReq.Context().Err() == nil {
-		logInfo.Header.Meta.Error = "failed to copy response body: " + err.Error()
+		responseOutcomeError = "failed to copy response body: " + err.Error()
+		appendLogMetaError(logInfo, responseOutcomeError)
 	}
 
-	// Close the sniffer so Finalize() runs before we call UpdateLogFile.
-	resp.Body.Close()
+	// Close the sniffer so Finalize() runs before we call UpdateLogFile. Its
+	// close result includes cassette write failures that Read cannot return
+	// without disrupting the client-visible upstream stream.
+	closeErr := resp.Body.Close()
+	recordingErr := responsePipeline.RecordingError()
+	if recordingErr != nil {
+		appendCassetteRecordingError(logInfo, "response body", recordingErr)
+	}
+	if closeErr != nil {
+		if recordingErr == nil {
+			responseOutcomeError = "failed to close response body: " + closeErr.Error()
+			appendLogMetaError(logInfo, responseOutcomeError)
+		} else if !errors.Is(closeErr, recordingErr) {
+			appendLogMetaError(logInfo, "response body close: "+closeErr.Error())
+		}
+	}
 	if restored := responsePipeline.Restored(); restored > 0 {
 		logInfo.Events = append(logInfo.Events, secretRestoredEvent(restored, start))
 	}
@@ -2306,7 +2370,7 @@ func (h *Handler) writeUpstreamResponse(
 	// Finalize metrics and log (equivalent to old defer block).
 	duration := time.Since(start)
 	code, written, ttft := irw.GetMetrics()
-	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, code, duration, logInfo.Header.Meta.Error))
+	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, code, duration, responseOutcomeError))
 
 	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
 	logInfo.Header.Meta.StatusCode = code
@@ -2317,7 +2381,7 @@ func (h *Handler) writeUpstreamResponse(
 		slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
 	}
 	h.router.Complete(selection, router.Outcome{
-		Success:        code >= 200 && code < 300 && logInfo.Header.Meta.Error == "",
+		Success:        code >= 200 && code < 300 && responseOutcomeError == "",
 		ClientCanceled: originalReq.Context().Err() != nil,
 		StatusCode:     code,
 		DurationMs:     float64(duration.Milliseconds()),
@@ -2339,6 +2403,27 @@ func (h *Handler) writeUpstreamResponse(
 	)
 }
 
+func appendCassetteRecordingError(info *recorder.LogInfo, stage string, err error) {
+	if err == nil {
+		return
+	}
+	appendLogMetaError(info, "cassette recording failed ("+stage+"): "+err.Error())
+	if info != nil {
+		slog.Error("Cassette recording failed", "path", info.Path, "stage", stage, "error", err)
+	}
+}
+
+func appendLogMetaError(info *recorder.LogInfo, message string) {
+	if info == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	if info.Header.Meta.Error == "" {
+		info.Header.Meta.Error = message
+		return
+	}
+	info.Header.Meta.Error += "; " + message
+}
+
 func (h *Handler) shouldSynthesizeAnthropicCountTokens(r *http.Request, selectErr error, upstreamStatus int) bool {
 	if r == nil || r.Method != http.MethodPost || llm.NormalizeEndpoint(r.URL.Path) != "/v1/messages/count_tokens" {
 		return false
@@ -2357,6 +2442,7 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	selection *router.Selection,
 	selectErr error,
 	retryEvents []recorder.RecordEvent,
+	cassetteCapture cassetteRequestCapture,
 ) {
 	if h == nil || h.recorder == nil {
 		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "count_tokens recording unavailable")
@@ -2385,6 +2471,7 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 	if selectErr != nil {
 		opts.RoutingFailureReason = router.SelectionFailureReason(selectErr)
 	}
+	opts = cassetteCapture.apply(opts)
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, opts, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare synthetic count_tokens log file", "err", err)
@@ -2719,7 +2806,7 @@ func pathClean(rawPath string) string {
 	return clean
 }
 
-func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request, start time.Time) {
+func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request, start time.Time, cassetteCapture cassetteRequestCapture) {
 	model := llm.ModelFromPath(r.URL.Path)
 	if !h.modelDetailKnown(model) {
 		// Answering 200 with a synthesized object made a typo indistinguishable from a real model,
@@ -2733,7 +2820,7 @@ func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request,
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model detail")
 		return
 	}
-	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, cassetteCapture, []recorder.RecordEvent{
 		{
 			Type: "routing.model_detail",
 			Time: start,
@@ -2745,7 +2832,7 @@ func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time) {
+func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time, cassetteCapture cassetteRequestCapture) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeRequestBodyError(w, r, err)
@@ -2776,7 +2863,7 @@ func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start 
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model detail")
 		return
 	}
-	h.serveSyntheticModelJSON(w, r, start, body, "/api/show", bodyBytes, []recorder.RecordEvent{
+	h.serveSyntheticModelJSON(w, r, start, body, "/api/show", bodyBytes, cassetteCapture, []recorder.RecordEvent{
 		{
 			Type: "routing.model_show",
 			Time: start,
@@ -2788,7 +2875,7 @@ func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start 
 	})
 }
 
-func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
+func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time, cassetteCapture cassetteRequestCapture) {
 	var models []string
 	if h != nil && h.router != nil {
 		models = h.router.AggregatedModels()
@@ -2805,7 +2892,7 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "failed to marshal model list")
 		return
 	}
-	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, cassetteCapture, []recorder.RecordEvent{
 		{
 			Type: "routing.aggregate",
 			Time: start,
@@ -2817,16 +2904,17 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request, start time.Time, body []byte, endpoint string, requestBody []byte, events []recorder.RecordEvent) {
+func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request, start time.Time, body []byte, endpoint string, requestBody []byte, cassetteCapture cassetteRequestCapture, events []recorder.RecordEvent) {
 	if h == nil || h.recorder == nil {
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "Internal Logging Error")
 		return
 	}
 
-	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+	options := cassetteCapture.apply(recorder.PrepareOptions{
 		RoutingPolicy:   h.routerPolicy(),
 		MinimalCassette: h.cfg.Trace.MinimalCassette,
-	}, requestBody)
+	})
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, options, requestBody)
 	if err != nil {
 		slog.Error("Failed to prepare synthetic model-info log file", "err", err)
 		writeProxyError(w, r, http.StatusInternalServerError, "internal_error", "Internal Logging Error")
@@ -2889,8 +2977,8 @@ func routerPolicy(rtr *router.Router) string {
 	return rtr.Policy()
 }
 
-func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent) {
-	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, nil)
+func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, cassetteCapture cassetteRequestCapture) {
+	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, nil, cassetteCapture)
 }
 
 // recordSelectionFailureWithSelection is the attribution-carrying form: the
@@ -2898,11 +2986,11 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 // failure log even though its own attempt cassette was deleted. Without it the
 // failure row is written by recordSelectionFailureWithBody and names an empty
 // selected_upstream_id/base_url/preset while the error message names a channel.
-func (h *Handler) recordSelectionFailureWithSelection(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection) {
-	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, selection)
+func (h *Handler) recordSelectionFailureWithSelection(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection, cassetteCapture cassetteRequestCapture) {
+	h.recordSelectionFailure(r, start, statusCode, selectErr, bodyBytes, retryEvents, selection, cassetteCapture)
 }
 
-func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection) {
+func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent, selection *router.Selection, cassetteCapture cassetteRequestCapture) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
@@ -2925,6 +3013,7 @@ func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statu
 		options.SelectedUpstreamProviderPreset = attempted.Upstream.ProviderPreset
 	}
 	options.MinimalCassette = h.cfg.Trace.MinimalCassette
+	options = cassetteCapture.apply(options)
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, options, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare selection-failure log file", "err", err)
@@ -3142,14 +3231,15 @@ func limitRejectionHTTP(reason limit.RejectReason) (int, string) {
 	return http.StatusTooManyRequests, "limit.concurrency_rejected"
 }
 
-func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time, statusCode int, eventType string, reason limit.RejectReason, decision limitDecision, bodyBytes []byte) {
+func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time, statusCode int, eventType string, reason limit.RejectReason, decision limitDecision, bodyBytes []byte, cassetteCapture cassetteRequestCapture) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
-	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+	options := cassetteCapture.apply(recorder.PrepareOptions{
 		RoutingPolicy:   h.routerPolicy(),
 		MinimalCassette: h.cfg.Trace.MinimalCassette,
-	}, bodyBytes)
+	})
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, options, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare limit-rejection log file", "err", err)
 		return

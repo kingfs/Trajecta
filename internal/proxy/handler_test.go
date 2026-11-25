@@ -247,7 +247,7 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	if _, err := readAndNormalizeRequestBody(req); err != nil {
+	if _, _, err := readAndNormalizeRequestBody(req); err != nil {
 		t.Fatalf("readAndNormalizeRequestBody() error = %v", err)
 	}
 
@@ -261,6 +261,29 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	}
 	if _, ok := payload["stream_options"]; ok {
 		t.Fatalf("stream_options unexpectedly injected for responses payload: %s", string(body))
+	}
+}
+
+func TestReadAndNormalizeRequestBodySeparatesRawBodyFromProxyInjection(t *testing.T) {
+	raw := []byte(`{"model":"gpt-5","stream":true,"messages":[]}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions?token=query-secret", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	original, normalized, err := readAndNormalizeRequestBody(req)
+	if err != nil {
+		t.Fatalf("readAndNormalizeRequestBody() error = %v", err)
+	}
+	if !bytes.Equal(original, raw) {
+		t.Fatalf("original body = %s, want exact ingress bytes %s", original, raw)
+	}
+	if bytes.Equal(normalized, raw) || !bytes.Contains(normalized, []byte(`"include_usage":true`)) {
+		t.Fatalf("normalized body = %s, want proxy-injected stream_options", normalized)
+	}
+	forwarded, err := io.ReadAll(req.Body)
+	if err != nil || !bytes.Equal(forwarded, normalized) {
+		t.Fatalf("request body after normalization = %s, err %v; want %s", forwarded, err, normalized)
 	}
 }
 

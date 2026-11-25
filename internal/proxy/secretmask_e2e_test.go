@@ -359,6 +359,88 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	}
 }
 
+func TestHandlerCassetteCapturesIngressRequestBeforeProxyNormalization(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := newTestStore(outputDir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamBody string
+	var upstreamQuery string
+	var upstreamAuthorization string
+	var upstreamAPIKey string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		upstreamQuery = r.URL.RawQuery
+		upstreamAuthorization = r.Header.Get("Authorization")
+		upstreamAPIKey = r.Header.Get("X-Api-Key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.SecretMasking.Enabled = true
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	originalBody := []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"` + testOpenAIProjectKey + `"}]}`)
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions?api_key=query-secret&keep=1", bytes.NewReader(originalBody))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer header-secret")
+	req.Header.Set("X-Api-Key", "custom-header-secret")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	responseBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, responseBody)
+	}
+	if !strings.Contains(upstreamBody, `"include_usage":true`) || strings.Contains(upstreamBody, testOpenAIProjectKey) {
+		t.Fatalf("upstream body = %s, want injected stream_options and a masked key", upstreamBody)
+	}
+	if upstreamQuery != "api_key=query-secret&keep=1" || upstreamAuthorization != "Bearer header-secret" || upstreamAPIKey != "custom-header-secret" {
+		t.Fatalf("upstream query/credentials = %q / %q / %q", upstreamQuery, upstreamAuthorization, upstreamAPIKey)
+	}
+
+	cassettePath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(cassettePath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	cassette, err := os.ReadFile(cassettePath)
+	if err != nil {
+		t.Fatalf("ReadFile(cassette) error = %v", err)
+	}
+	reqFull, recordedBody, _, _ := recordfile.ExtractSections(cassette, parsed)
+	if !bytes.Equal(recordedBody, originalBody) {
+		t.Fatalf("cassette request body = %s, want original ingress bytes %s", recordedBody, originalBody)
+	}
+	for _, want := range []string{
+		"POST /v1/chat/completions?api_key=query-secret&keep=1 HTTP/1.1",
+		"Authorization: Bearer header-secret",
+		"X-Api-Key: custom-header-secret",
+	} {
+		if !strings.Contains(string(reqFull), want) {
+			t.Errorf("cassette request headers/line omitted %q:\n%s", want, reqFull)
+		}
+	}
+}
+
 // TestHandlerLeavesBodiesAloneWhenMaskingIsOff pins that the switch is
 // authoritative in both directions and that a disabled vault costs nothing: the
 // upstream sees the exact client bytes and no masking event is written. The

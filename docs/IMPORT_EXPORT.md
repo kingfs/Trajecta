@@ -95,7 +95,7 @@ cassettes/<相对路径>.http           # 位于最后，流式复制
 
 - `manifest.json` 是完整性契约：导入时逐表核对行数，不符即判定 bundle 被截断并整体中止。
 - 表记录一律是 JSON Lines，时间统一为 RFC3339Nano；`NULL` 为 JSON `null`。
-- 加密信封：`TRAJECTA-EXPORT-1` 魔数 + 一行 JSON 头（scrypt 参数、salt、nonce seed）+ 64 KiB 分块 AES-256-GCM，末块为带认证标签的哨兵，因此截断和篡改都会被检测出来。密码由 scrypt（N=32768, r=8, p=1）派生。
+- 加密信封：`TRAJECTA-EXPORT-1` 魔数 + 一行 JSON 头（scrypt 参数、salt、nonce seed）+ 64 KiB 分块 AES-256-GCM，末块为带认证标签的哨兵，因此截断和篡改都会被检测出来。密码默认由 scrypt（N=32768, r=8, p=1）派生；读取端对不可信头部限制最大 N=65536、r=16、p=2（约 128 MiB 工作内存、最多默认工作量的 8 倍），超限会在 KDF 前拒绝。
 - `logs.path` 与 `upstream_exchanges.cassette_path` 在 bundle 里保留源侧的完整路径，导入时按「源 `output_dir` 前缀 + 相对路径」重写为目标 `output_dir` 下的同构路径。两套部署都挂载 `/app/data` 时结果为原样。
 
 ## 导入语义

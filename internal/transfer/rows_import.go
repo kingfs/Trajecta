@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/store"
@@ -16,12 +17,13 @@ import (
 // the rows-skipped-by-conflict bookkeeping, the target view (tx-scoped in
 // --apply mode) and the report accumulators.
 type importState struct {
-	ctx       context.Context
-	view      *store.Store
-	log       *Logger
-	outputDir string
-	apply     bool
-	result    *ImportResult
+	ctx        context.Context
+	view       *store.Store
+	log        *Logger
+	outputDir  string
+	outputRoot *os.Root
+	apply      bool
+	result     *ImportResult
 
 	resolver *channelResolver
 
@@ -49,12 +51,13 @@ type importState struct {
 	files FileImportReport
 }
 
-func newImportState(ctx context.Context, view *store.Store, log *Logger, outputDir string, apply bool, result *ImportResult, channelMap map[string]string) *importState {
+func newImportState(ctx context.Context, view *store.Store, log *Logger, outputDir string, outputRoot *os.Root, apply bool, result *ImportResult, channelMap map[string]string) *importState {
 	return &importState{
 		ctx:               ctx,
 		view:              view,
 		log:               log,
 		outputDir:         outputDir,
+		outputRoot:        outputRoot,
 		apply:             apply,
 		result:            result,
 		resolver:          newChannelResolver(log, channelMap),

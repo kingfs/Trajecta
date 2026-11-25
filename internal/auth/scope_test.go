@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestValidateTokenScopeRejectsNewCustomScopes(t *testing.T) {
+	t.Parallel()
+
+	for _, scope := range []string{"", " ALL ", "Proxy", "mcp"} {
+		if _, err := ValidateTokenScope(scope); err != nil {
+			t.Errorf("ValidateTokenScope(%q) error = %v, want accepted", scope, err)
+		}
+	}
+	if got, err := ValidateTokenScope("api"); err != nil || got != ScopeAll {
+		t.Errorf("ValidateTokenScope(api) = %q, %v; want all, nil", got, err)
+	}
+	for _, scope := range []string{"typo", "proxy,mcp"} {
+		if _, err := ValidateTokenScope(scope); err == nil {
+			t.Errorf("ValidateTokenScope(%q) error = nil, want rejection", scope)
+		}
+	}
+}
+
 func TestScopeAllows(t *testing.T) {
 	t.Parallel()
 

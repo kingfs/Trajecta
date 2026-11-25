@@ -74,6 +74,15 @@ func (p *ResponsePipeline) Reader() io.ReadCloser {
 	return p.sniffer
 }
 
+// RecordingError reports an error writing client-visible response bytes to the
+// cassette, without conflating it with an upstream stream error.
+func (p *ResponsePipeline) RecordingError() error {
+	if p == nil || p.sniffer == nil {
+		return nil
+	}
+	return p.sniffer.RecordingError()
+}
+
 // Restored reports how many masked stand-ins were restored for the client.
 func (p *ResponsePipeline) Restored() int {
 	if p == nil || p.restorer == nil {

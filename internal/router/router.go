@@ -104,7 +104,8 @@ type Router struct {
 	stickyMaxCostRatio float64
 	// conversionEnabled lets candidatesForRequest select an upstream that
 	// cannot serve the client's protocol natively, for later conversion by
-	// the proxy. Off by default (config router.selection.protocol_conversion).
+	// the proxy. Enabled by default by config.Load (config
+	// router.selection.protocol_conversion); the zero-value router remains off.
 	conversionEnabled bool
 	// strictPriority interprets Target.Priority as a tier instead of a
 	// tie-breaker. Off by default: existing installations keep the historical

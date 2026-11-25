@@ -9,13 +9,13 @@ services:
       TRAJECTA_OUTPUT_DIR: /app/data/traces
       TRAJECTA_TRACE_OUTPUT_DIR: /app/data/traces
       TRAJECTA_DATABASE_DRIVER: postgres
-      TRAJECTA_DATABASE_DSN: ${TRAJECTA_DATABASE_DSN:-postgres://trajecta:${POSTGRES_PASSWORD:-trajecta}@postgres:5432/${POSTGRES_DB:-trajecta}?sslmode=disable}
+      TRAJECTA_DATABASE_DSN: ${TRAJECTA_DATABASE_DSN:-postgres://${POSTGRES_USER:-trajecta}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-trajecta}?sslmode=disable}
       TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED: ${TRAJECTA_RESPONSES_CODEX_COMPAT_ENABLED:-true}
       TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS: ${TRAJECTA_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS:-web_search}
       TRAJECTA_TOOLS_WEB_SEARCH_ENABLED: ${TRAJECTA_TOOLS_WEB_SEARCH_ENABLED:-true}
     ports:
-      - "${TRAJECTA_HOST_SERVER_PORT:-8080}:8080"
-      - "${TRAJECTA_HOST_MONITOR_PORT:-8081}:8081"
+      - "${TRAJECTA_HOST_BIND_ADDRESS:-127.0.0.1}:${TRAJECTA_HOST_SERVER_PORT:-8080}:8080"
+      - "${TRAJECTA_HOST_BIND_ADDRESS:-127.0.0.1}:${TRAJECTA_HOST_MONITOR_PORT:-8081}:8081"
     volumes:
       - ./config/config.yaml:/app/config/config.yaml:ro
       - trajecta-data:/app/data
@@ -36,9 +36,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-trajecta}
       POSTGRES_USER: ${POSTGRES_USER:-trajecta}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trajecta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "${TRAJECTA_POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${TRAJECTA_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -56,7 +56,7 @@ services:
       INSTANCE_NAME: ${SEARXNG_INSTANCE_NAME:-trajecta-searxng}
       SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
     ports:
-      - "${SEARXNG_PORT:-8088}:8080"
+      - "127.0.0.1:${SEARXNG_PORT:-8088}:8080"
     volumes:
       - searxng-data:/etc/searxng
       - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro

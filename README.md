@@ -55,16 +55,18 @@ Trajecta 是一个**本地优先的录制 / 回放代理**。开发时把 SDK �
 
 ```bash
 git clone https://github.com/kingfs/Trajecta.git && cd Trajecta
-cp .env.example .env          # 修改 POSTGRES_PASSWORD
+cp .env.example .env          # 编辑 .env，设置唯一的 POSTGRES_PASSWORD
 docker compose up -d
+read -rsp 'Initial admin password (8+ characters): ' ADMIN_PASSWORD; printf '\n'
 docker compose exec trajecta /app/bin/trajecta \
-  -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
+  -c /app/config/config.yaml auth init-user --username admin --password "$ADMIN_PASSWORD"
+unset ADMIN_PASSWORD
 ```
 
 - Monitor：<http://localhost:8081>，用上面的用户名密码登录
 - Proxy：<http://localhost:8080/v1>，把 SDK 的 `base_url` 指向它
 
-登录后在 `渠道` 页面配置上游地址与 API key，在 `接入 → API 令牌` 标签页生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。宿主机端口由 `.env` 里的 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
+登录后在 `渠道` 页面配置上游地址与 API key，在 `接入 → API 令牌` 标签页生成个人 token：SDK 的 `api_key` 填这个 token，请求就会被代理并录制。gateway 与 Monitor 默认只绑定宿主机 loopback；若要远程访问，先配置防火墙/反向代理，再在 `.env` 中显式设置 `TRAJECTA_HOST_BIND_ADDRESS=0.0.0.0`。宿主机端口由 `TRAJECTA_HOST_SERVER_PORT` / `TRAJECTA_HOST_MONITOR_PORT` 控制。
 
 ### 方式二：从源码运行
 
@@ -78,7 +80,7 @@ CONFIG=config/examples/local-sqlite.yaml task run   # 只想用本地 SQLite
 不想用 Task 也可以直接跑：
 
 ```bash
-export TRAJECTA_DATABASE_DSN='postgres://trajecta:trajecta@localhost:5432/trajecta?sslmode=disable'
+export TRAJECTA_DATABASE_DSN='postgres://trajecta:<your-password>@localhost:5432/trajecta?sslmode=disable'
 go run ./cmd/server -c config/config.yaml
 ```
 
@@ -121,9 +123,9 @@ curl -s http://localhost:8080/v1/chat/completions \
 # event: {"type":"llm.output_text.delta","time":"…","is_stream":true,"message":"Hello"}
 # event: {"type":"llm.usage","time":"…","attributes":{"total_tokens":60}}
 
-POST /v1/chat/completions HTTP/1.1
+POST /v1/chat/completions?api_key=query-example-secret HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer fake-key-logging
+Authorization: Bearer sk-example-secret
 
 {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}],"stream":true}
 
@@ -135,7 +137,7 @@ data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: [DONE]
 ```
 
-（示例为节选，`…` 表示省略。默认 `debug.mask_key: true` 会在落盘前把请求头中的 `Authorization` 值替换成 `Bearer fake-key-logging`，把 `api-key` / `x-api-key` / `x-goog-api-key` 的值替换成 `fake-key-logging`；其余请求头与请求、响应正文原样保存，这正是回放能够保真的原因。）
+（示例为节选，`…` 表示省略。cassette 会保留收到的 HTTP 请求行（包括 query）和请求头，并记录响应内容供回放；请求体在代理规范化、stream_options 注入、模型别名改写、协议转换与凭据遮蔽之前写入。query、headers 和 body 中的凭据不会被录制器遮蔽。旧配置 `debug.mask_key` 仍可读取，但已弃用且不影响录制；`secret_masking.enabled` 只改变发往上游的请求正文，不会清理 cassette。新录制文件权限为 `0600`，按日目录权限为 `0700`；仍应把 `trace.output_dir` 当作含秘密的数据存储，保护备份且不要提交生产流量录制。）
 
 **3. 在单元测试里回放这个文件**，不需要网络，也不需要 API key：
 
@@ -182,7 +184,7 @@ func TestChat(t *testing.T) {
 | Azure OpenAI | `azure`（v1 与 deployment 两种路由） | verified |
 | vLLM | `vllm` | verified |
 
-完整插件/preset 清单（21 个可见渠道插件，按厂商站点组织，官方描述、套餐与协议端点内置）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。官方目录由「插件」页的开关控制（默认全禁用）。代理是**协议感知的直通 + 录制/解析**，默认不在转发热路径上做跨协议翻译；开启 `router.selection.protocol_conversion` 后，只有在本轮没有可用原生候选时才对非流式 chat/messages/gemini 请求做协议转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
+完整插件/preset 清单（21 个可见渠道插件，按厂商站点组织，官方描述、套餐与协议端点内置）、能力声明规则、路由 profile 组合与协议差异见 [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md)。官方目录由「插件」页的开关控制（默认全禁用）。代理是**协议感知的直通优先 + 转换兜底 + 录制/解析**，默认开启 `router.selection.protocol_conversion`，但总是优先可用的原生候选；没有原生候选时才对受支持的非流式 chat/messages/gemini 请求转换（`/v1/responses` 始终由本地 runtime 承接，流式与多模态/thinking 不转换）。
 
 ## 架构一览
 

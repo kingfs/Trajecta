@@ -1584,7 +1584,7 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 			t.Fatalf("list leaked other user's token: %+v", list.Items)
 		}
 	}
-	if target.ID == 0 || target.Prefix == "" || target.Status != "active" || target.Scope != "api" {
+	if target.ID == 0 || target.Prefix == "" || target.Status != "active" || target.Scope != "all" {
 		t.Fatalf("target token = %+v", target)
 	}
 

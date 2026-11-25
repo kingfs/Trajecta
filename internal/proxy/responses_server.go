@@ -404,7 +404,7 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 	)
 }
 
-func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Request, body []byte) {
+func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Request, body []byte, cassetteCapture cassetteRequestCapture) {
 	localHandler, err := h.localResponsesHandler()
 	if err != nil {
 		slog.Error("Local Responses server unavailable", "path", r.URL.Path, "err", err)
@@ -421,7 +421,7 @@ func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Req
 	localReq.Body = io.NopCloser(bytes.NewReader(body))
 	localReq.ContentLength = int64(len(body))
 
-	entryRecorder, err := h.prepareLocalResponsesEntryRecording(r, body, localReq.URL.Path)
+	entryRecorder, err := h.prepareLocalResponsesEntryRecording(r, body, localReq.URL.Path, cassetteCapture)
 	if err != nil {
 		slog.Error("Failed to prepare local Responses entry recording", "path", r.URL.Path, "err", err)
 		localHandler.ServeHTTP(w, localReq)
@@ -457,7 +457,7 @@ type responsesEntryRecorder struct {
 	finalized  bool
 }
 
-func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []byte, targetPath string) (*responsesEntryRecorder, error) {
+func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []byte, targetPath string, cassetteCapture cassetteRequestCapture) (*responsesEntryRecorder, error) {
 	if h == nil || h.recorder == nil {
 		return nil, errors.New("responses entry recorder is required")
 	}
@@ -468,12 +468,13 @@ func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []by
 	recordReq.RequestURI = recordReq.URL.RequestURI()
 
 	startedAt := time.Now()
-	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
+	options := cassetteCapture.apply(recorder.PrepareOptions{
 		SiteURL:         "http://trajecta.local",
 		ExchangeKind:    "entry",
 		ExchangeRole:    "client_request",
 		MinimalCassette: h.cfg.Trace.MinimalCassette,
-	}, body)
+	})
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, options, body)
 	if err != nil {
 		return nil, err
 	}

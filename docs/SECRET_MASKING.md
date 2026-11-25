@@ -244,7 +244,7 @@ secret_masking:
 
 vault 为空时每个字节当场判定，未发生遮蔽的流不引入任何延迟。由于假值与真值等长，还原是对调用方缓冲区的原地覆盖，不会移动后续字节。
 
-cassette 记录的是**原始值**，这是有意选择：replay 按请求字节匹配（`pkg/replay`），人读 trace 也需要看到真实请求。代价是 cassette 里存在真实凭据，与 `debug.mask_key` 只处理请求头不同，这一点在 `SECURITY.md` 中有运维提示。
+cassette 记录的是**原始 HTTP 请求内容**——收到的请求行（包括 query）与请求头不做脱敏，请求体在入口归一化、`stream_options` 注入、模型别名改写、协议转换和凭据遮蔽之前写入；响应也会录制供回放，响应遮蔽还原后按 client-visible 字节写入。这是有意选择：replay 按请求字节匹配（`pkg/replay`），人读 trace 也需要看到真实请求。`secret_masking.enabled` 改写的是发往上游的请求体，不会遮蔽 cassette 中的原始值；旧 `debug.mask_key` 仍为配置兼容而接受，但已是 no-op。代价是 cassette 可能包含真实凭据，必须按含秘密的数据保护（新录制文件 `0600`、按日目录 `0700`），详见 `SECURITY.md`。
 
 ## 检测插件化
 

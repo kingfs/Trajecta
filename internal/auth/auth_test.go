@@ -259,6 +259,9 @@ func TestStoreIssuesOpenAIStyleTokenAndVerifiesLegacyPrefix(t *testing.T) {
 	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
 		t.Fatalf("CreateUserWithRole() error = %v", err)
 	}
+	if _, err := st.CreateToken(ctx, "admin", "bad-scope", "typo", 0); err == nil {
+		t.Fatal("CreateToken(unknown scope) error = nil, want validation error")
+	}
 	issued, err := st.CreateToken(ctx, "admin", "local-dev", "api", 0)
 	if err != nil {
 		t.Fatalf("CreateToken() error = %v", err)
@@ -268,6 +271,10 @@ func TestStoreIssuesOpenAIStyleTokenAndVerifiesLegacyPrefix(t *testing.T) {
 	}
 	if !strings.HasPrefix(issued.Prefix, "sk-") {
 		t.Fatalf("issued display prefix = %q, want an sk- prefix", issued.Prefix)
+	}
+	issuedTokens, err := st.ListTokens(ctx, "admin")
+	if err != nil || len(issuedTokens) != 1 || issuedTokens[0].Scope != ScopeAll {
+		t.Fatalf("api compatibility scope = %+v, err %v; want one all-scoped token", issuedTokens, err)
 	}
 
 	// A token issued before the rename keeps working. Verification looks the
@@ -288,6 +295,68 @@ func TestStoreIssuesOpenAIStyleTokenAndVerifiesLegacyPrefix(t *testing.T) {
 	}
 	if _, ok, err := st.VerifyToken(ctx, legacy); err != nil || !ok {
 		t.Fatalf("VerifyToken(legacy) = ok %v err %v, want ok true err nil", ok, err)
+	}
+}
+
+func TestStoreThrottlesLastUsedAtWrites(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	st, err := OpenDatabase("sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("OpenDatabase() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.CreateUserWithRole(ctx, "admin", "change-me-123", RoleAdmin); err != nil {
+		t.Fatalf("CreateUserWithRole() error = %v", err)
+	}
+	issued, err := st.CreateToken(ctx, "admin", "last-used", ScopeAll, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+	tokenRow, err := st.client.APIToken.Query().Where(apitoken.TokenHashEQ(hashToken(issued.Token))).Only(ctx)
+	if err != nil {
+		t.Fatalf("query token error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, issued.Token); err != nil || !ok {
+		t.Fatalf("first VerifyToken() = ok %v, err %v", ok, err)
+	}
+	tokenRow, err = st.client.APIToken.Get(ctx, tokenRow.ID)
+	if err != nil || tokenRow.LastUsedAt == nil {
+		t.Fatalf("first verification last_used_at = %v, err %v; want timestamp", tokenRow.LastUsedAt, err)
+	}
+
+	// Make the persisted value conspicuously old, then pin the in-process
+	// throttle as if this token was just written. A hot request must not issue
+	// another UPDATE inside the interval.
+	sentinel := time.Date(2000, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := st.client.APIToken.UpdateOneID(tokenRow.ID).SetLastUsedAt(sentinel).Save(ctx); err != nil {
+		t.Fatalf("set sentinel last_used_at: %v", err)
+	}
+	st.lastUsedMu.Lock()
+	st.lastUsedWrites[tokenRow.ID] = time.Now().UTC()
+	st.lastUsedMu.Unlock()
+	if _, ok, err := st.VerifyToken(ctx, issued.Token); err != nil || !ok {
+		t.Fatalf("throttled VerifyToken() = ok %v, err %v", ok, err)
+	}
+	tokenRow, err = st.client.APIToken.Get(ctx, tokenRow.ID)
+	if err != nil || tokenRow.LastUsedAt == nil || !tokenRow.LastUsedAt.Equal(sentinel) {
+		t.Fatalf("throttled last_used_at = %v, err %v; want unchanged %v", tokenRow.LastUsedAt, err, sentinel)
+	}
+
+	st.lastUsedMu.Lock()
+	st.lastUsedWrites[tokenRow.ID] = time.Now().UTC().Add(-lastUsedWriteInterval)
+	st.lastUsedMu.Unlock()
+	if _, ok, err := st.VerifyToken(ctx, issued.Token); err != nil || !ok {
+		t.Fatalf("post-interval VerifyToken() = ok %v, err %v", ok, err)
+	}
+	tokenRow, err = st.client.APIToken.Get(ctx, tokenRow.ID)
+	if err != nil || tokenRow.LastUsedAt == nil || !tokenRow.LastUsedAt.After(sentinel) {
+		t.Fatalf("post-interval last_used_at = %v, err %v; want refreshed timestamp", tokenRow.LastUsedAt, err)
 	}
 }
 
@@ -380,7 +449,7 @@ func TestStoreListsAndRevokesUserTokens(t *testing.T) {
 	if len(tokens) != 1 {
 		t.Fatalf("len(tokens) = %d, want 1", len(tokens))
 	}
-	if tokens[0].Name != "local-dev" || tokens[0].Prefix == "" || tokens[0].Scope != "api" || !tokens[0].Enabled {
+	if tokens[0].Name != "local-dev" || tokens[0].Prefix == "" || tokens[0].Scope != ScopeAll || !tokens[0].Enabled {
 		t.Fatalf("token record = %+v", tokens[0])
 	}
 

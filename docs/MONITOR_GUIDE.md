@@ -13,13 +13,15 @@ Monitor 是 Trajecta 的本地 Web 工作台，由 `internal/monitor` 提供 API
 首次部署需要创建用户。tracked 默认配置 `config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `TRAJECTA_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
 
 ```bash
-export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=disable'
-go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --password 'change-me-123'
+export TRAJECTA_DATABASE_DSN='postgres://user:<your-password>@host:5432/trajecta?sslmode=disable'
+read -rsp 'Initial admin password (8+ characters): ' ADMIN_PASSWORD; printf '\n'
+go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --password "$ADMIN_PASSWORD"
+unset ADMIN_PASSWORD
 ```
 
 Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
 
-JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
+JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；Monitor 与 MCP 管理路由在入口处还有统一的 16 MiB 请求体上限。失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
 
 左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 264px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
 
@@ -27,16 +29,16 @@ JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 
 
 ## 个人 API token
 
-「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、status、created、expires、last_used。
+「令牌」页面（`/api/auth/tokens`）管理当前用户的个人 API token：创建、撤销、删除。列表列为 name、prefix、scope、status、created、expires、last_used。
 
-创建不是一个常驻卡片，而是列表页头部的按钮：点击后弹出对话框（`TokensPanel` 的 `CreateTokenDialog`）。表单只有两项——名称，以及**到期时间**（`datetime-local` 选择器）。到期时间默认为空，代表永不过期；填了就必须晚于当前时间，对话框把它换算成 API 接受的 `ttl` 时长（`<秒数>s`）再提交，`ttl` 本身不出现在表单和列表里。对话框不提供 scope 选择，创建时固定写历史值 `api` 存入记录；服务端把 `api` 视为全量访问（与 `all` 相同）。需要最小权限 token 时用 CLI：`trajecta auth create-token --scope proxy|mcp`。`proxy` 只被代理端口接受、`/mcp` 会拒绝；`mcp` 相反；`all` 是默认的全量值。列表仍不显示 scope，因为 Monitor 自己创建的每个 token 都是 `api`。创建成功后表单原位换成 token 明文：令牌只显示这一次，对话框保持打开，明文右侧是复制按钮。取消、关闭或点「完成」后原文不可再取，只保留 prefix。
+创建不是一个常驻卡片，而是列表页头部的按钮：点击后弹出对话框（`TokensPanel` 的 `CreateTokenDialog`）。表单包含名称、访问范围与**到期时间**（`datetime-local` 选择器）。访问范围选择 `proxy`（仅代理转发）、`mcp`（仅 MCP）或 `all`（两者）；UI 默认选择最小范围 `proxy`。到期时间默认为空，代表永不过期；填了就必须晚于当前时间，对话框把它换算成 API 接受的 `ttl` 时长（`<秒数>s`）再提交，`ttl` 本身不出现在表单和列表里。历史 `api` scope 仍按 `all` 解释，旧令牌保持可用；新建请求的未知 scope 会被拒绝，避免拼写错误意外获得全量权限。创建成功后表单原位换成 token 明文：令牌只显示这一次，对话框保持打开，明文右侧是复制按钮。取消、关闭或点「完成」后原文不可再取，只保留 prefix。
 
 复制按钮先用异步 Clipboard API，失败或该 API 不存在（例如 Monitor 通过纯 HTTP 的局域网地址访问时就不是安全上下文）时退回 `document.execCommand("copy")`；两条路都失败会提示手动复制，明文本身用 `user-select: all`，单击即整段选中，因此手工 Ctrl+C 始终可行（`web/monitor-ui/src/lib/clipboard.js`）。
 
 新签发的 token 形如 `sk-<base64url>`，与 OpenAI 的凭据形状一致；校验只看数据库里的 SHA-256 哈希，不看前缀，因此重命名之前签发的 `llmtl_` token 继续可用。个人 token 的用途：
 
 - 代理 API：`Authorization: Bearer <token>`，proxy 的每个请求都要通过该 token 鉴权；`scope` 为 `mcp` 的 token 在这里返回 401。
-- MCP：`Authorization: Bearer <token>`；`scope` 为 `proxy` 的 token 在这里返回 401。
+- MCP：`Authorization: Bearer <token>`；`scope` 为 `proxy` 的 token 在这里返回 401。`list_credential_masks` 会返回遮蔽审计的真值/假值，除 `mcp` scope 外还要求管理员角色；普通 viewer 即使持有 `mcp` scope 也不能调用。
 
 Monitor API 本身只接受登录 JWT，不使用个人 token。
 
@@ -456,7 +458,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 
 ## 非目标与未实现
 
-- 代理默认不做协议族之间的转换；开启 `router.selection.protocol_conversion` 后仅在本轮没有可选原生候选时对非流式 chat/messages/gemini 请求兜底转换（见 [协议转换](./PROTOCOL_CONVERSION.md)）。`/v1/responses` 始终由原生直通或本地 Responses runtime 承接，永不被转发路径转换；边界见 [架构与代码地图](./ARCHITECTURE.md) 与 [实现状态](./IMPLEMENTATION_STATUS.md)。
+- 代理默认开启直通优先的协议转换；仅在本轮没有可选原生候选时，对受支持的非流式 chat/messages/gemini 请求兜底转换（见 [协议转换](./PROTOCOL_CONVERSION.md)）。`/v1/responses` 始终由原生直通或本地 Responses runtime 承接，永不被转发路径转换；边界见 [架构与代码地图](./ARCHITECTURE.md) 与 [实现状态](./IMPLEMENTATION_STATUS.md)。
 - Monitor 没有用户管理界面：用户由 `auth init-user`、`auth reset-password`、`auth create-token` 等 CLI 命令创建和维护，界面只支持修改自己的密码。
 - Monitor API 不接受个人 API token；个人 token 面向 proxy 与 MCP。
 - 渠道、模型和别名始终由 Monitor 写入应用数据库；不存在 YAML 只读模式。

@@ -78,8 +78,11 @@ func TestRequestTransformAliasThenConversionThenMask(t *testing.T) {
 	if !result.AliasApplied || !result.ConversionApplied || !result.Masked {
 		t.Fatalf("flags = %+v", result)
 	}
-	if !strings.Contains(string(result.RecordBody), `"model":"wire"`) {
-		t.Fatalf("record body = %s", result.RecordBody)
+	if string(result.RecordBody) != string(client) {
+		t.Fatalf("record body = %s, want the original client body %s", result.RecordBody, client)
+	}
+	if result.Body == nil || string(result.Body.Client) != string(client) {
+		t.Fatalf("Body.Client = %+v, want original client bytes %s", result.Body, client)
 	}
 	if strings.Contains(string(result.RecordBody), "CONVERTED") {
 		t.Fatal("record body was converted")
@@ -89,6 +92,32 @@ func TestRequestTransformAliasThenConversionThenMask(t *testing.T) {
 	}
 	if !masker.called {
 		t.Fatal("masker not called")
+	}
+}
+
+func TestRequestTransformKeepsOriginalBodySeparateFromPreprocessedInput(t *testing.T) {
+	original := []byte(`{"model":"alias","stream":true}`)
+	preprocessed := []byte(`{"model":"alias","stream":true,"stream_options":{"include_usage":true}}`)
+	converter := &fakeConverter{out: []byte(`wire body`)}
+	result, err := (RequestTransform{
+		RequestedModel: "alias",
+		UpstreamModel:  "wire",
+		OriginalBody:   original,
+		ConverterFor: func(aliasBody []byte) (Converter, error) {
+			if !strings.Contains(string(aliasBody), `"model":"wire"`) || !strings.Contains(string(aliasBody), `"include_usage":true`) {
+				t.Fatalf("converter input = %s, want preprocessed and alias-rewritten body", aliasBody)
+			}
+			return converter, nil
+		},
+	}).Apply(preprocessed)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if string(result.RecordBody) != string(original) || string(result.Body.Client) != string(original) {
+		t.Fatalf("record/client body = %s/%s, want original %s", result.RecordBody, result.Body.Client, original)
+	}
+	if string(result.WireBody) != "wire body" {
+		t.Fatalf("wire body = %q, want converted body", result.WireBody)
 	}
 }
 

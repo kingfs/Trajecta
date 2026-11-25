@@ -3,9 +3,12 @@ package transfer
 import (
 	"archive/tar"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,13 +88,31 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 		log.Noticef("dry run: nothing will be written; re-run with --apply to import")
 	}
 
-	createdFiles := []string{}
+	rootPath := outputDir
+	if rootPath == "" {
+		rootPath = "."
+	}
+	if opts.Apply {
+		if err := os.MkdirAll(rootPath, 0o700); err != nil {
+			return nil, fmt.Errorf("create target output directory: %w", err)
+		}
+	}
+	outputRoot, rootErr := os.OpenRoot(rootPath)
+	if rootErr != nil {
+		if opts.Apply || !errors.Is(rootErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("open target output directory: %w", rootErr)
+		}
+	} else {
+		defer outputRoot.Close()
+	}
+
+	fileChanges := []cassetteFileChange{}
 	filesPlaced := map[string]bool{}
 	targetsLoaded := false
 	var targets []targetChannel
 
 	run := func(view *store.Store, apply bool) error {
-		s := newImportState(ctx, view, log, outputDir, apply, result, opts.ChannelMap)
+		s := newImportState(ctx, view, log, outputDir, outputRoot, apply, result, opts.ChannelMap)
 		s.manifest = manifest
 		s.resolver.strategyCreate = strategy == "create"
 		s.keepExistingFiles = opts.KeepExistingFiles
@@ -118,9 +139,11 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 			}
 			switch {
 			case strings.HasPrefix(hdr.Name, entryCassettesPrefix):
-				rel := strings.TrimPrefix(hdr.Name, entryCassettesPrefix)
-				targetPath := filepath.Join(outputDir, filepath.FromSlash(rel))
-				if err := s.placeCassette(hdr, cur.body(), rel, targetPath, &createdFiles, filesPlaced); err != nil {
+				rel, err := validateCassetteRelativePath(strings.TrimPrefix(hdr.Name, entryCassettesPrefix))
+				if err != nil {
+					return fmt.Errorf("unsafe cassette entry %q: %w", hdr.Name, err)
+				}
+				if err := s.placeCassette(hdr, cur.body(), rel, &fileChanges, filesPlaced); err != nil {
 					return err
 				}
 			case strings.HasPrefix(hdr.Name, entryChannelsPrefix) && strings.HasSuffix(hdr.Name, ".jsonl"):
@@ -175,12 +198,13 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 		return commit()
 	})
 	if err != nil {
-		for _, path := range createdFiles {
-			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				log.Warnf("rollback could not remove %s: %v", path, rmErr)
-			}
+		if rollbackErr := rollbackCassetteFiles(outputRoot, fileChanges); rollbackErr != nil {
+			log.Warnf("cassette rollback was incomplete: %v", rollbackErr)
 		}
 		return nil, err
+	}
+	if cleanupErr := removeCassetteBackups(outputRoot, fileChanges); cleanupErr != nil {
+		log.Warnf("could not remove cassette import backups: %v", cleanupErr)
 	}
 
 	// Session summaries are derived from logs; rebuilding them here is what
@@ -291,7 +315,12 @@ func dispatchTable(s *importState, table string, body io.Reader, size int64, tar
 // placeCassette writes one cassette file. An identical existing file is left
 // alone, a differing one is replaced (unless --keep-existing-files), and a
 // path whose index row was skipped is never touched.
-func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, targetPath string, created *[]string, placed map[string]bool) error {
+func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel string, changes *[]cassetteFileChange, placed map[string]bool) error {
+	safeRel, err := validateCassetteRelativePath(rel)
+	if err != nil {
+		return fmt.Errorf("unsafe cassette path %q: %w", rel, err)
+	}
+	rel = safeRel
 	if placed[rel] {
 		return nil
 	}
@@ -307,8 +336,19 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 	}
 	s.files.Processed++
 
-	fi, statErr := os.Stat(targetPath)
+	fi, statErr := s.statCassette(rel)
 	exists := statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect cassette %s: %w", rel, statErr)
+	}
+	if exists {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("cassette target %s is a symlink", rel)
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("cassette target %s is not a regular file", rel)
+		}
+	}
 	identical := false
 	if exists {
 		identical = fi.Size() == hdr.Size
@@ -338,8 +378,8 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 		}
 		return nil
 	}
-	if err := s.writeCassetteFile(hdr, body, targetPath, desired, created, exists); err != nil {
-		return err
+	if err := s.writeCassetteFile(hdr, body, rel, desired, exists, changes); err != nil {
+		return fmt.Errorf("write cassette %s: %w", rel, err)
 	}
 	if exists {
 		s.files.Updated++
@@ -351,40 +391,283 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 	return nil
 }
 
-func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, targetPath string, desired desiredFile, created *[]string, existed bool) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+func (s *importState) statCassette(rel string) (os.FileInfo, error) {
+	if s.outputRoot == nil {
+		// A dry run must not create a missing output directory just to inspect it.
+		return nil, os.ErrNotExist
+	}
+	if err := checkCassettePathComponents(s.outputRoot, rel); err != nil {
+		return nil, err
+	}
+	return s.outputRoot.Lstat(rel)
+}
+
+func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, rel string, desired desiredFile, existed bool, changes *[]cassetteFileChange) error {
+	if s.outputRoot == nil {
+		return errors.New("target output directory is not open")
+	}
+	if hdr.Size < 0 {
+		return errors.New("cassette entry has a negative size")
+	}
+	if changes == nil {
+		return errors.New("cassette rollback journal is not configured")
+	}
+	if err := ensureCassetteParentDirs(s.outputRoot, rel); err != nil {
 		return fmt.Errorf("create cassette directory: %w", err)
 	}
-	tmp := targetPath + ".importing"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+
+	tmpRel, f, err := createCassetteTemp(s.outputRoot, rel)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, body); err != nil {
-		f.Close()
-		_ = os.Remove(tmp)
-		return err
+	tmpReady := false
+	defer func() {
+		if !tmpReady {
+			_ = s.outputRoot.Remove(tmpRel)
+		}
+	}()
+	n, copyErr := io.Copy(f, body)
+	if copyErr != nil {
+		_ = f.Close()
+		return copyErr
+	}
+	if n != hdr.Size {
+		_ = f.Close()
+		return fmt.Errorf("cassette entry size mismatch: read %d bytes, expected %d", n, hdr.Size)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync temporary cassette: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
+		return fmt.Errorf("close temporary cassette: %w", err)
 	}
-	if err := os.Rename(tmp, targetPath); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
+
 	mt := hdr.ModTime
 	if desired.modTimeNs > 0 {
 		mt = time.Unix(0, desired.modTimeNs)
 	}
-	// The index compares mtime and size to decide whether a file is new; giving
-	// the copy the recorded mtime keeps the next Sync from re-indexing the whole
-	// imported set.
-	if err := os.Chtimes(targetPath, mt, mt); err != nil {
-		return err
+	// Set the indexed mtime while the file is still temporary. If Chtimes
+	// fails, the old destination is untouched and the defer removes the temp.
+	if err := s.outputRoot.Chtimes(tmpRel, mt, mt); err != nil {
+		return fmt.Errorf("set cassette mtime: %w", err)
 	}
+
+	if existed {
+		if err := checkCassettePathComponents(s.outputRoot, rel); err != nil {
+			return err
+		}
+		fi, err := s.outputRoot.Lstat(rel)
+		if err != nil {
+			return fmt.Errorf("recheck cassette target: %w", err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+			return fmt.Errorf("cassette target %s changed to a non-regular file", rel)
+		}
+		// The original may predate restrictive cassette modes. Tighten it before
+		// staging so a crash between rename and rollback cannot leave a readable
+		// backup beside the private temporary file.
+		if err := s.outputRoot.Chmod(rel, 0o600); err != nil {
+			return fmt.Errorf("restrict existing cassette permissions: %w", err)
+		}
+		backupRel, err := uniqueCassetteSibling(s.outputRoot, rel, "backup")
+		if err != nil {
+			return err
+		}
+		if err := s.outputRoot.Rename(rel, backupRel); err != nil {
+			return fmt.Errorf("stage existing cassette for rollback: %w", err)
+		}
+		*changes = append(*changes, cassetteFileChange{target: rel, backup: backupRel})
+	} else {
+		if err := checkCassettePathComponents(s.outputRoot, rel); err != nil {
+			return err
+		}
+		if _, err := s.outputRoot.Lstat(rel); err == nil {
+			return fmt.Errorf("cassette target %s appeared during import", rel)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("recheck cassette target: %w", err)
+		}
+	}
+	if err := s.outputRoot.Rename(tmpRel, rel); err != nil {
+		return fmt.Errorf("install cassette: %w", err)
+	}
+	tmpReady = true
 	if !existed {
-		*created = append(*created, targetPath)
+		*changes = append(*changes, cassetteFileChange{target: rel})
 	}
 	return nil
+}
+
+type cassetteFileChange struct {
+	target string
+	backup string
+}
+
+// validateCassetteRelativePath rejects path forms that could escape the output
+// root or mean different things on Unix and Windows. Backslashes are normalized
+// to separators first so a Windows-style traversal cannot bypass validation.
+func validateCassetteRelativePath(rel string) (string, error) {
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	if rel == "" || strings.ContainsRune(rel, 0) || strings.HasPrefix(rel, "/") {
+		return "", errors.New("path must be a non-empty relative path")
+	}
+	if strings.Contains(rel, ":") || !fs.ValidPath(rel) || rel == "." {
+		return "", errors.New("path is not a clean relative path")
+	}
+	if filepath.IsAbs(filepath.FromSlash(rel)) || filepath.VolumeName(filepath.FromSlash(rel)) != "" {
+		return "", errors.New("path must not have an absolute or volume prefix")
+	}
+	return rel, nil
+}
+
+func checkCassettePathComponents(root *os.Root, rel string) error {
+	if root == nil {
+		return errors.New("target output directory is not open")
+	}
+	rel, err := validateCassetteRelativePath(rel)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(rel, "/")
+	current := ""
+	for i, part := range parts {
+		if current == "" {
+			current = part
+		} else {
+			current += "/" + part
+		}
+		info, err := root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path component %q is a symlink", current)
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("path component %q is not a directory", current)
+		}
+	}
+	return nil
+}
+
+func ensureCassetteParentDirs(root *os.Root, rel string) error {
+	if root == nil {
+		return errors.New("target output directory is not open")
+	}
+	rel, err := validateCassetteRelativePath(rel)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(rel, "/")
+	current := ""
+	for _, part := range parts[:len(parts)-1] {
+		if current == "" {
+			current = part
+		} else {
+			current += "/" + part
+		}
+		info, err := root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := root.Mkdir(current, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+				return err
+			}
+			info, err = root.Lstat(current)
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("cassette directory %q is not a real directory", current)
+		}
+		if err := root.Chmod(current, 0o700); err != nil {
+			return fmt.Errorf("restrict cassette directory permissions: %w", err)
+		}
+	}
+	return nil
+}
+
+func createCassetteTemp(root *os.Root, target string) (string, *os.File, error) {
+	for attempt := 0; attempt < 10; attempt++ {
+		tmpRel, err := randomCassetteSibling(target, "import")
+		if err != nil {
+			return "", nil, err
+		}
+		f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", nil, err
+		}
+		return tmpRel, f, nil
+	}
+	return "", nil, errors.New("could not allocate a unique cassette temporary file")
+}
+
+func uniqueCassetteSibling(root *os.Root, target, kind string) (string, error) {
+	for attempt := 0; attempt < 10; attempt++ {
+		candidate, err := randomCassetteSibling(target, kind)
+		if err != nil {
+			return "", err
+		}
+		_, err = root.Lstat(candidate)
+		if errors.Is(err, os.ErrNotExist) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", errors.New("could not allocate a unique cassette backup path")
+}
+
+func randomCassetteSibling(target, kind string) (string, error) {
+	var nonce [12]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", fmt.Errorf("generate cassette temporary name: %w", err)
+	}
+	name := ".trajecta-import-" + kind + "-" + hex.EncodeToString(nonce[:])
+	if index := strings.LastIndex(target, "/"); index >= 0 {
+		return target[:index+1] + name, nil
+	}
+	return name, nil
+}
+
+func rollbackCassetteFiles(root *os.Root, changes []cassetteFileChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	if root == nil {
+		return errors.New("cannot restore cassette files: output directory is not open")
+	}
+	var rollbackErr error
+	for i := len(changes) - 1; i >= 0; i-- {
+		change := changes[i]
+		if err := root.Remove(change.target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove %s: %w", change.target, err))
+			continue
+		}
+		if change.backup != "" {
+			if err := root.Rename(change.backup, change.target); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore %s: %w", change.target, err))
+			}
+		}
+	}
+	return rollbackErr
+}
+
+func removeCassetteBackups(root *os.Root, changes []cassetteFileChange) error {
+	var cleanupErr error
+	for _, change := range changes {
+		if change.backup == "" || root == nil {
+			continue
+		}
+		if err := root.Remove(change.backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove %s: %w", change.backup, err))
+		}
+	}
+	return cleanupErr
 }

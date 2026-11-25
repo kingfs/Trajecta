@@ -59,7 +59,6 @@ router:
 # Channels are configured in the Monitor and stored in the application database.
 debug:
   output_dir: "./data/traces"
-  mask_key: true
 
 chaos:
   enabled: false

@@ -252,7 +252,8 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	originalBody := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/responses", bytes.NewReader(originalBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
@@ -271,12 +272,24 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	if gotPath != "/v1/responses" {
 		t.Fatalf("upstream path = %q, want /v1/responses", gotPath)
 	}
-	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
 	if err != nil {
 		t.Fatalf("waitForRecordedPrelude() error = %v", err)
 	}
 	if parsed.Header.Meta.URL != "/v1/responses" || parsed.Header.Meta.Endpoint != "/v1/responses" {
 		t.Fatalf("recorded path endpoint = %q/%q, want /v1/responses", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
+	}
+	cassette, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("ReadFile(cassette) error = %v", err)
+	}
+	reqFull, recordedBody, _, _ := recordfile.ExtractSections(cassette, parsed)
+	if !bytes.Equal(recordedBody, originalBody) {
+		t.Fatalf("cassette request body = %s, want original ingress body %s", recordedBody, originalBody)
+	}
+	if !bytes.Contains(reqFull, []byte("POST /responses HTTP/1.1")) {
+		t.Fatalf("cassette request line = %s, want original /responses path", reqFull)
 	}
 }
 
@@ -435,7 +448,8 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"claude-3-7-sonnet","input":"hello"}`))
+	originalBody := []byte(`{"model":"claude-3-7-sonnet","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/responses?trace=selection-failure", bytes.NewReader(originalBody))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
@@ -465,6 +479,17 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	}
 	if parsed.Header.Meta.StatusCode != http.StatusBadGateway {
 		t.Fatalf("StatusCode = %d, want 502", parsed.Header.Meta.StatusCode)
+	}
+	cassette, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("ReadFile(cassette) error = %v", err)
+	}
+	reqFull, recordedBody, _, _ := recordfile.ExtractSections(cassette, parsed)
+	if !bytes.Equal(recordedBody, originalBody) {
+		t.Fatalf("failure cassette request body = %s, want original ingress body %s", recordedBody, originalBody)
+	}
+	if !bytes.Contains(reqFull, []byte("POST /responses?trace=selection-failure HTTP/1.1")) {
+		t.Fatalf("failure cassette request line = %s, want original path/query", reqFull)
 	}
 
 	entries, err := waitForRecentEntries(st, 1, time.Second)
@@ -5845,6 +5870,64 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	}
 	if !primaryCalled {
 		t.Fatalf("primary was not called, expected 400 response forwarded from primary")
+	}
+}
+
+func TestSyntheticModelListCassetteKeepsOriginalRequest(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := newTestStore(outputDir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = outputDir
+	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	originalBody := []byte(`{"probe":"unchanged"}`)
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/v1/models?api_key=query-secret&keep=1", bytes.NewReader(originalBody))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("X-Original", "synthetic-shortcut")
+	req.Header.Set("Authorization", "Bearer ingress-secret")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	cassettePath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(cassettePath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	cassette, err := os.ReadFile(cassettePath)
+	if err != nil {
+		t.Fatalf("ReadFile(cassette) error = %v", err)
+	}
+	reqFull, recordedBody, _, _ := recordfile.ExtractSections(cassette, parsed)
+	if !bytes.Equal(recordedBody, originalBody) {
+		t.Fatalf("cassette request body = %s, want ingress body %s", recordedBody, originalBody)
+	}
+	for _, want := range []string{
+		"GET /v1/models?api_key=query-secret&keep=1 HTTP/1.1",
+		"X-Original: synthetic-shortcut",
+		"Authorization: Bearer ingress-secret",
+	} {
+		if !bytes.Contains(reqFull, []byte(want)) {
+			t.Errorf("cassette request omitted %q:\n%s", want, reqFull)
+		}
 	}
 }
 

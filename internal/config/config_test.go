@@ -1423,15 +1423,10 @@ func TestLoadRejectsChaosRulesFaultInjectionCannotHonour(t *testing.T) {
 	}
 }
 
-// TestMaskKeyDefaultsToTheDocumentedValue pins the documented default of debug.mask_key.
-//
-// SECURITY.md, README.md and README_EN.md all say the recorder masks the credential-carrying
-// request headers "with the default debug.mask_key: true", but the field's zero value is
-// false, so a configuration that omitted the key recorded the client's Authorization,
-// api-key, x-api-key and x-goog-api-key headers verbatim into a cassette on disk. The default
-// is now what the documents promise, an explicit value still wins, and the environment
-// override still beats the file.
-func TestMaskKeyDefaultsToTheDocumentedValue(t *testing.T) {
+// TestDeprecatedMaskKeySettingRemainsConfigCompatible pins the legacy field's
+// default and YAML/environment decoding. Recording ignores the value: cassettes
+// always preserve the original request bytes for replay fidelity.
+func TestDeprecatedMaskKeySettingRemainsConfigCompatible(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string

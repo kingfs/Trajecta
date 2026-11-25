@@ -244,7 +244,7 @@ func newAuthCreateTokenCommand(runtime *Runtime) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
 	cmd.Flags().StringVar(&name, "name", "cli", "Token name")
-	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope: all (default), proxy or mcp")
+	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope: all (default), proxy or mcp; legacy api aliases to all")
 	cmd.Flags().DurationVar(&ttl, "ttl", 0, "Token TTL, 0 means no expiration")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview token creation without changing the database")
 	return cmd
@@ -688,6 +688,12 @@ func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 }
 
 func runAuthCreateTokenWithOptions(opts authTokenOptions) int {
+	scope, err := auth.ValidateTokenScope(opts.scope)
+	if err != nil {
+		slog.Error("Create token failed", "error", err)
+		return 1
+	}
+	opts.scope = scope
 	if opts.dryRun {
 		return writeDryRunResult(opts.stdout, opts.format, "auth.create-token", map[string]any{
 			"dry_run":  true,
