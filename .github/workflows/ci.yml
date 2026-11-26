@@ -10,7 +10,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin the Playwright/browser job until its dependency installer supports
+    # the Ubuntu 26.04 image that ubuntu-latest is rolling out to.
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
 
