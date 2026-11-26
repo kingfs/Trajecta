@@ -10,7 +10,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin the Playwright/browser job until its dependency installer supports
+    # the Ubuntu 26.04 image that ubuntu-latest is rolling out to.
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
 
@@ -35,6 +37,10 @@ jobs:
     - name: Build Trace Monitor UI
       working-directory: web/monitor-ui
       run: bun run build
+
+    # 前端源码改了但忘记重建 dist 时，go:embed 的仍是旧 UI。这里让 CI 直接失败。
+    - name: Verify generated Monitor bundle is current
+      run: git diff --exit-code -- internal/monitor/ui/dist
 
     - name: Build
       run: |
