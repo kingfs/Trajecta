@@ -156,6 +156,47 @@ Monitor 的会话轨迹导出在 `{{output_dir}}/trajectory-cache/` 维护一个
 
 部署与迁移细节见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md)，Postgres 长期运行优化见 [Postgres 运维](./POSTGRES_OPERATIONS.md)。
 
+## 信任边界与威胁模型
+
+Trajecta 是 local-first 单操作员系统，不是多租户 relay。安全目标是保护**访问面**，而不是改变事实源：cassette 必须保留原始 HTTP 交换（含凭据与用户内容），因此“落盘明文”是设计而非漏洞；真正的风险是谁能读到它、它如何被传输、以及哪些输入可以写它。
+
+### 资产
+
+| 资产 | 位置 | 读者 | 说明 |
+|---|---|---|---|
+| cassette（原始请求/响应） | `trace.output_dir` | 操作员、备份系统、Monitor（经认证） | 事实源；目录 `0700`、文件 `0600` |
+| `trace_index.secret` | `{{output_dir}}/trace_index.secret` | 操作员、备份系统 | 渠道凭据与遮蔽映射的本地主密钥 |
+| 渠道凭据 | 应用数据库 | Monitor 管理员、代理 | AES-256-GCM 加密存储 |
+| 遮蔽映射/抑制名单 | `secret_mask_mappings.db` | 操作员、Monitor 管理员 | bbolt，单进程独占 |
+| pprof | Monitor `/debug/pprof` | 管理员 | 堆转储可能含请求体与凭据 |
+
+### 边界
+
+| 边界 | 认证 | 授权 | 备注 |
+|---|---|---|---|
+| 代理端口 | `proxy`/`all` scoped token | 仅转发 | `/healthz` 无认证 |
+| Monitor 端口 | `HttpOnly` 会话 cookie 或个人 token | admin/viewer | 登录限流；API 无全局限流（已知） |
+| MCP | `mcp` scoped token | admin/viewer | 复用 Monitor 路由，工具按角色校验 |
+| 磁盘 | 文件系统权限 | `0700`/`0600` | 备份/共享盘是最大泄露面 |
+| 导入 bundle | 密码信封（可选） | 操作员 | 路径穿越已校验；大小上限需显式配置 |
+
+### 主要威胁与缓解
+
+- **磁盘/备份泄露**：权限收紧 + 启动 WARN + 文档要求把 cassette 目录按凭据级别保护；不加密、不截断 cassette。
+- **XSS 窃取会话**：Monitor CSP `default-src 'self'`、无内联脚本、`HttpOnly` + `SameSite=Lax` cookie、WS 同源校验。
+- **CSRF**：`SameSite=Lax` + 非安全方法校验 `Origin`。
+- **令牌进日志/历史**：JWT 不再放 localStorage 或 URL query；代理/WS 用 `Authorization` 或 cookie。
+- **恶意 bundle**：`fs.ValidPath` + `os.Root` + 符号链接拒绝；`--max-entry-bytes` 可选上限。
+- **鉴权 fail-open**：nil verifier 一律 503/401；测试匿名必须显式 `AllowAnonymousForTest`。
+- **明文网络**：非回环无 TLS 启动 WARN；compose 默认绑 `127.0.0.1`；支持 `server.tls_cert/key`。
+- **注入面**：动态列名/表名白名单；参数化查询。
+
+### 非目标
+
+- 公共多租户、计费、配额转售。
+- 对抗拥有文件系统/root 权限的攻击者。
+- 替代操作员的备份、网络隔离与密钥管理纪律。
+
 ## 并发与一致性
 
 所有管理写入（渠道、模型、别名、provider setup 与 probe apply）共用一个 `store.ConfigurationTransaction`：
