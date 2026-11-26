@@ -30,9 +30,11 @@ type ResponsePipelineOptions struct {
 	// NormalizeReasoningSignatures makes a streaming Responses reasoning
 	// output_item.done carry the terminal response's encrypted_content. Some
 	// OpenAI-compatible relays bind the done value to the upstream session,
-	// while response.completed carries the self-contained value the next turn
-	// can replay. The transform delays only the reasoning done frame; every
-	// other byte streams through unchanged.
+	// while response.completed may carry the self-contained value the next
+	// turn can replay; a relay may also repeat the same session-bound value in
+	// both events, in which case only the request-side quarantine can recover.
+	// The transform delays only the reasoning done frame; every other byte
+	// streams through unchanged.
 	NormalizeReasoningSignatures bool
 	// ReasoningSignaturePolicy learns which upstreams need the delay. A nil
 	// policy normalizes every response.

@@ -425,6 +425,12 @@ type Outcome struct {
 	DurationMs     float64
 	TTFTMs         float64
 	Stream         bool
+	// RequestError marks a deterministic request/context rejection (for
+	// example invalid_encrypted_content) that the provider returned as a 5xx.
+	// It must not count against the channel's health: retrying the repaired
+	// request can succeed, and treating it as an outage would open the model
+	// breaker and block that retry.
+	RequestError bool
 }
 
 func New(cfg *config.Config) (*Router, error) {
@@ -2484,7 +2490,7 @@ func (t *Target) updateModelHealthLocked(model string, outcome Outcome, costs co
 }
 
 func countsAsUpstreamHealthFailure(outcome Outcome) bool {
-	if outcome.Success || outcome.ClientCanceled {
+	if outcome.Success || outcome.ClientCanceled || outcome.RequestError {
 		return false
 	}
 	if outcome.StatusCode == 0 {

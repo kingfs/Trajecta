@@ -47,11 +47,13 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 
 ### Responses 推理密文的终态归一化
 
-原生 Responses 流里，同一个 reasoning item 可能在 `response.output_item.done` 和 `response.completed` 各带一份不同的 `encrypted_content`。部分 OpenAI-compatible relay 把 done 那份绑定在上游会话上，只有 `response.completed` 那份是自包含、可跨会话回放的。客户端按 OpenAI 文档保存 done 项，于是 relay 会话失效（缓存淘汰、后端切换）后，下一次请求会收到 `invalid_encrypted_content`；坏 token 留在历史里，之后每一轮都会失败。
+原生 Responses 流里，同一个 reasoning item 可能在 `response.output_item.done` 和 `response.completed` 各带一份不同的 `encrypted_content`。部分 OpenAI-compatible relay 把 done 那份绑定在上游会话上；`response.completed` 那份在有些响应里是自包含的，但 relay 也可能在两处返回**完全相同**的会话绑定密文（2026-11-26 的 Codex `gpt-6.1-sol` 会话就是这种情况），此时终态归一化也无法修复。客户端按 OpenAI 文档保存 done 项，于是 relay 会话失效（缓存淘汰、后端切换）后，下一次请求会收到 `invalid_encrypted_content`；坏 token 留在历史里，之后每一轮都会失败。
 
-Trajecta 在原生 Responses 的 SSE 响应上做一次窄归一化：对未知上游的第一条响应，以及被观察到 done/终态密文不一致的上游，reasoning 的 `response.output_item.done` 帧先暂存，等 `response.completed`（或 `response.incomplete`）到达后，只用终态 reasoning item 的 `encrypted_content` 替换该帧的这一个成员，并紧邻终态事件发出；其余帧和其余字节照常流式转发，只延迟这一个 reasoning done 帧。观测到 done 与终态一致的 upstream 会被记为 consistent，后续响应按原顺序透传；若之后又出现不一致，则记 `reasoning.signature_mismatch` 并重新进入归一化路径。改写会在 cassette 里留下 `reasoning.signature_normalized` 事件（含 item id 与前后哈希），并移除该响应的 `Content-Length`（长度可能变化；SSE 本应分块）。这不是遮蔽：请求侧的 `encrypted_content` 仍然逐字节透传，`pkg/secretmask` 的整对象 opaque 规则不变；只有服务端返回的 done 值被终态值替换。
+Trajecta 在原生 Responses 的 SSE 响应上做一次窄归一化：对未知上游的第一条响应，以及被观察到 done/终态密文不一致的上游，reasoning 的 `response.output_item.done` 帧先暂存，等 `response.completed`（或 `response.incomplete`）到达后，只用终态 reasoning item 的 `encrypted_content` 替换该帧的这一个成员，并紧邻终态事件发出；其余帧和其余字节照常流式转发，只延迟这一个 reasoning done 帧。观测到 done 与终态一致的 upstream 会被记为 consistent，后续响应按原顺序透传；若之后又出现不一致，则记 `reasoning.signature_mismatch` 并重新进入归一化路径。改写会在 cassette 里留下 `reasoning.signature_normalized` 事件（含 item id 与前后哈希），并移除该响应的 `Content-Length`（长度可能变化；SSE 本应分块）。这不是遮蔽：归一化本身不修改请求侧的 `encrypted_content`，`pkg/secretmask` 的整对象 opaque 规则不变；只有服务端返回的 done 值被终态值替换。下面描述的 quarantine 兜底是在上游明确拒绝后才移除 wire body 中的那一项。
 
-已有会话如果已经保存了旧的会话绑定密文，需要新建一次会话；该归一化只保证之后新产生的 reasoning 项携带可回放的终态值。
+已有会话如果已经保存了旧的会话绑定密文，归一化也无能为力；请求侧还有一层兜底：
+
+上游返回 `invalid_encrypted_content` 时，代理从错误文本里取出被拒绝密文的首尾 4 个字符（例如 `gAAA...cnqB`），在本次请求的 `input` 里定位对应的 reasoning/compaction 项，把完整密文的 sha256 记入进程内 quarantine，然后**只从这次发往上游的 wire body 中移除该项**并重试。之后同一上游的请求会主动跳过已 quarantine 的项；客户端请求体和 cassette 仍保留原项，cassette 记录 `reasoning.quarantined` 事件。被丢弃的是模型不可见的 reasoning 状态，消息、工具调用/结果和其他 reasoning 项都保留，因此会话可以继续；这是 relay 的会话上下文已经不可验证时唯一不依赖客户端升级的恢复手段。`invalid_encrypted_content` 是确定性的请求/会话拒绝，不是渠道故障，因此通过 `router.Outcome.RequestError` 标记、不计入模型/渠道健康；否则第一次失败就会打开熔断，连修复后的重试都无法选中同一渠道。
 
 `anthropic_messages` 要点：
 

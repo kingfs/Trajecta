@@ -125,3 +125,29 @@ func TestModelProbationStarvationIsSelectableAndReported(t *testing.T) {
 		t.Fatalf("EarliestAvailabilityFor() delay = %v, want a short transient hint", delay)
 	}
 }
+
+func TestRequestErrorDoesNotOpenModelHealth(t *testing.T) {
+	target := &Target{
+		ID:            "baizhiyun",
+		models:        map[string]struct{}{"gpt-6.1-sol": {}},
+		healthState:   HealthHealthy,
+		modelHealth:   map[string]*modelHealthState{},
+		modelInflight: map[string]int64{},
+	}
+	features := RequestFeatures{ModelName: "gpt-6.1-sol"}
+	costs := defaultCostConfig()
+	for i := 0; i < 5; i++ {
+		target.onStart(features)
+		target.onFinish(features, Outcome{
+			StatusCode:   http.StatusBadGateway,
+			DurationMs:   50,
+			RequestError: true,
+		}, costs, 3, 30*time.Second)
+	}
+	if !target.canSelect(time.Now(), "gpt-6.1-sol") {
+		t.Fatal("a deterministic request/context rejection opened the model breaker")
+	}
+	if state := target.snapshot().HealthState; state == HealthOpen {
+		t.Fatalf("target health = %q, want the request error to leave the channel healthy", state)
+	}
+}
