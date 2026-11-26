@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -90,8 +92,29 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 	targetsLoaded := false
 	var targets []targetChannel
 
+	root, err := os.OpenRoot(outputDir)
+	if err != nil {
+		if !opts.Apply {
+			// A dry run must not create a missing output directory just to
+			// inspect the bundle.
+			root = nil
+		} else {
+			if mkErr := os.MkdirAll(outputDir, 0o700); mkErr != nil {
+				return nil, fmt.Errorf("create output directory: %w", mkErr)
+			}
+			root, err = os.OpenRoot(outputDir)
+			if err != nil {
+				return nil, fmt.Errorf("open output directory: %w", err)
+			}
+		}
+	}
+	if root != nil {
+		defer root.Close()
+	}
+
 	run := func(view *store.Store, apply bool) error {
 		s := newImportState(ctx, view, log, outputDir, apply, result, opts.ChannelMap)
+		s.root = root
 		s.manifest = manifest
 		s.resolver.strategyCreate = strategy == "create"
 		s.keepExistingFiles = opts.KeepExistingFiles
@@ -119,8 +142,7 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 			switch {
 			case strings.HasPrefix(hdr.Name, entryCassettesPrefix):
 				rel := strings.TrimPrefix(hdr.Name, entryCassettesPrefix)
-				targetPath := filepath.Join(outputDir, filepath.FromSlash(rel))
-				if err := s.placeCassette(hdr, cur.body(), rel, targetPath, &createdFiles, filesPlaced); err != nil {
+				if err := s.placeCassette(hdr, cur.body(), rel, &createdFiles, filesPlaced); err != nil {
 					return err
 				}
 			case strings.HasPrefix(hdr.Name, entryChannelsPrefix) && strings.HasSuffix(hdr.Name, ".jsonl"):
@@ -291,7 +313,12 @@ func dispatchTable(s *importState, table string, body io.Reader, size int64, tar
 // placeCassette writes one cassette file. An identical existing file is left
 // alone, a differing one is replaced (unless --keep-existing-files), and a
 // path whose index row was skipped is never touched.
-func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, targetPath string, created *[]string, placed map[string]bool) error {
+func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel string, created *[]string, placed map[string]bool) error {
+	cleanRel, err := validateCassetteRelativePath(rel)
+	if err != nil {
+		return err
+	}
+	rel = cleanRel
 	if placed[rel] {
 		return nil
 	}
@@ -307,7 +334,13 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 	}
 	s.files.Processed++
 
-	fi, statErr := os.Stat(targetPath)
+	var fi os.FileInfo
+	var statErr error
+	if s.root != nil {
+		fi, statErr = s.root.Lstat(rel)
+	} else {
+		statErr = os.ErrNotExist
+	}
 	exists := statErr == nil
 	identical := false
 	if exists {
@@ -338,7 +371,7 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 		}
 		return nil
 	}
-	if err := s.writeCassetteFile(hdr, body, targetPath, desired, created, exists); err != nil {
+	if err := s.writeCassetteFile(hdr, body, rel, desired, created, exists); err != nil {
 		return err
 	}
 	if exists {
@@ -351,28 +384,51 @@ func (s *importState) placeCassette(hdr *tar.Header, body io.Reader, rel, target
 	return nil
 }
 
-func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, targetPath string, desired desiredFile, created *[]string, existed bool) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("create cassette directory: %w", err)
+func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, rel string, desired desiredFile, created *[]string, existed bool) error {
+	if s.root == nil {
+		return errors.New("import output directory is not open")
 	}
-	tmp := targetPath + ".importing"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	cleanRel, err := validateCassetteRelativePath(rel)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, body); err != nil {
-		f.Close()
-		_ = os.Remove(tmp)
+	rel = cleanRel
+	if hdr.Size < 0 {
+		return errors.New("cassette entry has a negative size")
+	}
+	dir := path.Dir(rel)
+	if dir != "." {
+		if err := s.root.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create cassette directory: %w", err)
+		}
+	}
+	// Create the temporary file in the trusted output root, then rename it into
+	// place through the Root so a symlinked subdirectory cannot escape.
+	tmp, err := os.CreateTemp(s.outputDir, ".importing-*")
+	if err != nil {
 		return err
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+	tmpRel := filepath.Base(tmp.Name())
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := io.Copy(tmp, body); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, targetPath); err != nil {
-		_ = os.Remove(tmp)
+	if err := tmp.Sync(); err != nil {
 		return err
 	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := s.root.Rename(tmpRel, rel); err != nil {
+		return err
+	}
+	cleanup = false
 	mt := hdr.ModTime
 	if desired.modTimeNs > 0 {
 		mt = time.Unix(0, desired.modTimeNs)
@@ -380,11 +436,28 @@ func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, targetP
 	// The index compares mtime and size to decide whether a file is new; giving
 	// the copy the recorded mtime keeps the next Sync from re-indexing the whole
 	// imported set.
-	if err := os.Chtimes(targetPath, mt, mt); err != nil {
+	if err := s.root.Chtimes(rel, mt, mt); err != nil {
 		return err
 	}
 	if !existed {
-		*created = append(*created, targetPath)
+		*created = append(*created, filepath.Join(s.outputDir, filepath.FromSlash(rel)))
 	}
 	return nil
+}
+
+// validateCassetteRelativePath rejects path forms that could escape the output
+// root or mean different things on Unix and Windows. Backslashes are normalized
+// to separators first so a Windows-style traversal cannot bypass validation.
+func validateCassetteRelativePath(rel string) (string, error) {
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	if rel == "" || strings.ContainsRune(rel, 0) || strings.HasPrefix(rel, "/") {
+		return "", errors.New("path must be a non-empty relative path")
+	}
+	if strings.Contains(rel, ":") || !fs.ValidPath(rel) || rel == "." {
+		return "", errors.New("path is not a clean relative path")
+	}
+	if filepath.IsAbs(filepath.FromSlash(rel)) || filepath.VolumeName(filepath.FromSlash(rel)) != "" {
+		return "", errors.New("path must not have an absolute or volume prefix")
+	}
+	return rel, nil
 }
