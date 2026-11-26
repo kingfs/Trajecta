@@ -5,7 +5,7 @@ import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RealtimeProvider } from "./components/RealtimeProvider";
-import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
+import { apiPaths, postJSON, requestJSON } from "./lib/api";
 import { useI18n } from "./lib/i18n";
 import { AccessPage } from "./routes/AccessPage";
 import { ProviderDetailPage } from "./routes/ChannelDetailPage";
@@ -75,8 +75,7 @@ function App() {
     event.preventDefault();
     if (username.trim() && password) {
       try {
-        const payload = await postJSON(apiPaths.authLogin, { username, password });
-        window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
+        await postJSON(apiPaths.authLogin, { username, password });
         const user = await requestJSON(apiPaths.authMe).catch(() => ({ username: username.trim(), role: "admin", scope: "all" }));
         setAuth({ loading: false, required: true, authorized: true, error: "", user });
         setPassword("");
@@ -88,8 +87,8 @@ function App() {
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.enterCredentials"), user: null });
   };
 
-  const logout = () => {
-    window.localStorage.removeItem(MONITOR_TOKEN_KEY);
+  const logout = async () => {
+    await fetch(apiPaths.authLogout, { method: "POST", credentials: "same-origin" }).catch(() => {});
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
   };
 

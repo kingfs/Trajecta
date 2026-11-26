@@ -99,16 +99,16 @@ test("the topic registry tracks what is on screen", () => {
   assert.deepEqual(registeredRealtimeQueries("traffic"), []);
 });
 
-test("the socket URL carries the token the browser cannot put in a header", () => {
+test("the socket URL never carries a token in the query string", () => {
   const location = { href: "https://monitor.example.test/overview?window=7d", protocol: "https:" };
-  const url = new URL(realtimeSocketURL(location, "token with spaces"));
+  const url = new URL(realtimeSocketURL(location));
   assert.equal(url.protocol, "wss:");
   assert.equal(url.pathname, apiPaths.eventsSocket);
-  assert.equal(url.searchParams.get("access_token"), "token with spaces");
+  assert.equal(url.search, "");
 
-  // A console without an auth store has no token to send, and must not send an
-  // empty one.
-  const anonymous = new URL(realtimeSocketURL({ href: "http://localhost:8080/", protocol: "http:" }, ""));
+  // The HttpOnly session cookie authenticates the upgrade; an anonymous console
+  // sends no credentials and the server rejects it.
+  const anonymous = new URL(realtimeSocketURL({ href: "http://localhost:8080/", protocol: "http:" }));
   assert.equal(anonymous.protocol, "ws:");
   assert.equal(anonymous.search, "");
 });

@@ -25,6 +25,10 @@ const (
 	// and far below a useful online guessing rate.
 	loginMaxFailures   = 10
 	loginFailureWindow = 15 * time.Minute
+	// monitorSessionCookie carries the Monitor JWT. It is HttpOnly so no
+	// JavaScript can read it, and SameSite=Lax so a cross-site form cannot
+	// submit it.
+	monitorSessionCookie = "trajecta_monitor_session"
 )
 
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
@@ -32,7 +36,7 @@ func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier != nil})
 	}
 }
-func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
+func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration, secureCookie bool) http.HandlerFunc {
 	throttle := newLoginThrottle()
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -75,7 +79,37 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 			return
 		}
 		throttle.reset(key)
+		http.SetCookie(w, &http.Cookie{
+			Name:     monitorSessionCookie,
+			Value:    token.Token,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   secureCookie,
+			MaxAge:   int(ttl.Seconds()),
+		})
 		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
+	}
+}
+
+// authLogoutAPIHandler clears the session cookie. It is intentionally
+// unauthenticated: an expired or already-cleared cookie must still log out.
+func authLogoutAPIHandler(secureCookie bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     monitorSessionCookie,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   secureCookie,
+			MaxAge:   -1,
+		})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 
@@ -382,10 +416,10 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 				return
 			}
 			authReq := r
-			if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
+			if cookie, cookieErr := r.Cookie(monitorSessionCookie); cookieErr == nil && strings.TrimSpace(cookie.Value) != "" && r.Header.Get("Authorization") == "" {
 				authReq = r.Clone(r.Context())
 				authReq.Header = r.Header.Clone()
-				authReq.Header.Set("Authorization", "Bearer "+token)
+				authReq.Header.Set("Authorization", "Bearer "+cookie.Value)
 			}
 			principal, ok = auth.VerifyRequest(authReq, verifier)
 			if !ok {
@@ -416,23 +450,4 @@ func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) ht
 		next(w, r)
 	}
 	return monitorAuthRequired(gated, verifier)
-}
-
-// allowMonitorQueryAccessToken lists the endpoints a browser has to authenticate
-// from the query string, because the platform API it uses cannot attach a header.
-//
-// Both are long-lived streams opened by the browser itself: EventSource cannot
-// set an Authorization header at all, and `new WebSocket()` has no option for
-// one either. Everything else keeps the token in the Authorization header, where
-// it does not end up in a reverse proxy's access log.
-func allowMonitorQueryAccessToken(r *http.Request) bool {
-	if r.Method != http.MethodGet {
-		return false
-	}
-	switch pathClean(r.URL.Path) {
-	case "/api/events/stream", realtimeSocketPath:
-		return true
-	default:
-		return false
-	}
 }

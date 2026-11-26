@@ -3,6 +3,8 @@ package monitor
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,8 +37,8 @@ import (
  * The one message the browser sends is {"topics":["traffic","events"]}.
  */
 
-// realtimeSocketPath is the console socket, and the path the browser may
-// authenticate from its query string; see allowMonitorQueryAccessToken.
+// realtimeSocketPath is the console socket. The browser authenticates it with
+// the HttpOnly session cookie; the token never appears in the URL.
 const realtimeSocketPath = "/api/events/ws"
 
 const (
@@ -71,11 +73,37 @@ const (
 )
 
 var realtimeUpgrader = websocket.Upgrader{
-	// The console is served from the same origin as the socket, and the monitor
-	// is regularly put behind a reverse proxy on another host, so the origin is
-	// checked by the auth layer that already gates every other route rather than
-	// by the default same-origin rule, which would break exactly those proxies.
-	CheckOrigin: func(*http.Request) bool { return true },
+	// The console is served from the same origin as the socket, including when a
+	// reverse proxy terminates TLS. Browser handshakes carry Origin; reject a
+	// cross-origin upgrade even when the session cookie would authenticate it.
+	// Non-browser clients without Origin remain supported and still need auth.
+	CheckOrigin: func(r *http.Request) bool {
+		if strings.TrimSpace(r.Header.Get("Origin")) == "" {
+			return true
+		}
+		return monitorRequestSameOrigin(r)
+	},
+}
+
+// monitorRequestSameOrigin accepts the request host, or the first
+// X-Forwarded-Host when the Monitor runs behind a reverse proxy.
+func monitorRequestSameOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := r.Host
+	if strings.EqualFold(u.Host, host) {
+		return true
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwarded != "" {
+		host = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	}
+	return strings.EqualFold(u.Host, host)
 }
 
 type realtimeHub struct {

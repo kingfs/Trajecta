@@ -1,9 +1,10 @@
-export const MONITOR_TOKEN_KEY = "trajecta.monitor.token";
+
 
 export const apiPaths = {
   authStatus: "/api/auth/status",
   authCheck: "/api/auth/check",
   authLogin: "/api/auth/login",
+  authLogout: "/api/auth/logout",
   authMe: "/api/auth/me",
   authPassword: "/api/auth/password",
   authTokens: "/api/auth/tokens",
@@ -157,11 +158,6 @@ export const apiPaths = {
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };
 
-export function monitorAuthHeaders() {
-  const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 export function apiURL(path, params = null) {
   const query = params instanceof URLSearchParams ? params.toString() : new URLSearchParams(params || {}).toString();
   return query ? `${path}?${query}` : path;
@@ -174,10 +170,10 @@ export function apiURL(path, params = null) {
  */
 export async function requestJSON(path, { method = "GET", headers = {}, body, signal } = {}) {
   const requestHeaders = {
-    ...monitorAuthHeaders(),
     ...headers,
   };
   const response = await fetch(path, {
+    credentials: "same-origin",
     method,
     headers: requestHeaders,
     body,
@@ -225,7 +221,7 @@ export function deleteJSON(path, options = {}) {
 }
 
 export async function downloadBlob(path) {
-  const response = await fetch(path, { headers: monitorAuthHeaders() });
+  const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || `request failed: ${response.status}`);

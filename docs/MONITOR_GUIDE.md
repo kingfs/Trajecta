@@ -17,9 +17,9 @@ export TRAJECTA_DATABASE_DSN='postgres://user:pass@host:5432/trajecta?sslmode=di
 go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
-Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
+Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。JWT 只通过 `trajecta_monitor_session` cookie 发送（`HttpOnly`、`SameSite=Lax`，默认 `Secure`，可用 `auth.cookie_secure` 仅在本机 HTTP 开发时关闭），不返回给 JavaScript，也不写入 localStorage、请求 URL 或浏览器历史；浏览器对同源 Monitor API、WebSocket 和 SSE 请求自动附带该 cookie。该 JWT 不用于 SDK、proxy 或 MCP。
 
-JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
+JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。使用 cookie 的非安全方法还要求 `Origin` 的 host 与请求 host 一致；缺少或不匹配时拒绝请求。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
 
 左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 264px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
 
@@ -303,7 +303,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 发布主题的写路径包括：录制请求落库、观测与发现项写入、重分析更新 token 用量、分析任务与解析任务的状态迁移、运行时事件收据变化。也就是说，服务端后台自己跑的解析与重分析也会让页面自己刷新，不需要读者做任何操作。
 
-主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在；集合根路径（如 `/api/traces`）按前缀注册，根路径下的单条记录（如 `/api/traces/<id>`）按快照处理，不注册主题。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上带 `Authorization` 头，所以这条路径（以及 SSE 端点）允许把访问令牌放在 `?access_token=` 查询串里，其余接口仍然只认请求头。
+主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在；集合根路径（如 `/api/traces`）按前缀注册，根路径下的单条记录（如 `/api/traces/<id>`）按快照处理，不注册主题。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上带 `Authorization` 头，因此 WebSocket 与 SSE 都依赖同源的 `HttpOnly` 会话 cookie；访问令牌不再出现在查询串里。
 
 #### 系统 `/system`
 
@@ -476,7 +476,7 @@ Monitor 的前端是一个客户端 SPA，源码在 `web/monitor-ui`（React 19�
 
 ### 主题
 
-账号面板里的主题单选组提供深色、浅色、跟随系统三个选项。保存的是偏好本身，键为 localStorage 的 `trajecta.monitor.theme`，取值可能是 `dark`、`light` 或 `system`；`applyTheme()`（`src/lib/theme.ts`）把 `system` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析成实际主题，只把解析后的 `dark` 或 `light` 写进 `<html>` 的 `data-theme`，因此 `data-theme` 从不出现 `system`。`index.html` 里的内联脚本在样式表加载前做同一件事，这是页面加载时不再先闪出另一个主题的原因；`watchSystemTheme()` 监听 `matchMedia` 的 `change` 事件，让 `system` 偏好在页面打开期间继续跟随操作系统。
+账号面板里的主题单选组提供深色、浅色、跟随系统三个选项。保存的是偏好本身，键为 localStorage 的 `trajecta.monitor.theme`，取值可能是 `dark`、`light` 或 `system`；`applyTheme()`（`src/lib/theme.ts`）把 `system` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析成实际主题，只把解析后的 `dark` 或 `light` 写进 `<html>` 的 `data-theme`，因此 `data-theme` 从不出现 `system`。`index.html` 引用的同源 `theme-init.js` 在样式表加载前做同一件事（CSP 不允许内联脚本），这是页面加载时不再先闪出另一个主题的原因；`watchSystemTheme()` 监听 `matchMedia` 的 `change` 事件，让 `system` 偏好在页面打开期间继续跟随操作系统。
 
 因为 `data-theme` 始终是实际主题而不是偏好，CSS 只需要两组规则——深色写在 `:root, :root[data-theme="dark"]`（属性缺失时就是深色），浅色写在 `:root[data-theme="light"]`——不需要第三份写在 `prefers-color-scheme` 媒体查询里的浅色主题；Tailwind v4 侧对应的是 `src/styles/tailwind.css` 里的 `@custom-variant dark`，所以 `dark:` 工具类也只有一个选择器。
 

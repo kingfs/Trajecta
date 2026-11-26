@@ -474,13 +474,16 @@ type RouteOptions struct {
 	// ParserEngine selects the observation parser used by the on-demand
 	// reparse/locate paths ("xir" default, "observe" rollback). It mirrors
 	// analysis.parser_engine; empty means xir.
-	ParserEngine                     string
-	ChannelService                   *channel.Service
-	AuthVerifier                     auth.TokenVerifier
-	MonitorAuthVerifier              auth.TokenVerifier
-	MonitorJWT                       *auth.JWTManager
-	AuthStore                        *auth.Store
-	SessionTTL                       time.Duration
+	ParserEngine        string
+	ChannelService      *channel.Service
+	AuthVerifier        auth.TokenVerifier
+	MonitorAuthVerifier auth.TokenVerifier
+	MonitorJWT          *auth.JWTManager
+	AuthStore           *auth.Store
+	SessionTTL          time.Duration
+	// SecureMonitorCookie sets the Secure flag on the session cookie. It is
+	// true in production; tests may leave it false.
+	SecureMonitorCookie              bool
 	ResponsesFunctionExecutors       config.ResponsesFunctionExecutorConfig
 	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
 	ResponsesFunctionExecutorStore   *store.Store
@@ -825,7 +828,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors, stateOptions...)
 	}
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(monitorVerifier))
-	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL))
+	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL, opt.SecureMonitorCookie))
+	mux.HandleFunc("/api/auth/logout", authLogoutAPIHandler(opt.SecureMonitorCookie))
 	// A liveness probe must not require an operator token (a container runtime
 	// cannot hold one) and must not report anything about the deployment: one
 	// fixed JSON object, no store reads.

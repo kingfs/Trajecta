@@ -89,6 +89,7 @@ func newManagementMuxWithSecretMappings(
 		MonitorJWT:                       monitorJWT,
 		AuthStore:                        authStorePtr,
 		SessionTTL:                       cfg.AuthSessionTTL(),
+		SecureMonitorCookie:              cfg.AuthCookieSecure(),
 		ResponsesFunctionExecutors:       functionExecutorConfig,
 		ResponsesFunctionExecutorStore:   traceStore,
 		ResponsesFunctionExecutorManager: functionExecutorManager,

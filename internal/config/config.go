@@ -113,6 +113,9 @@ type Config struct {
 	Auth struct {
 		DatabasePath string        `yaml:"database_path"`
 		SessionTTL   time.Duration `yaml:"session_ttl"`
+		// CookieSecure defaults to true. Disable only for local development over
+		// plain HTTP; a production Monitor must be served over HTTPS.
+		CookieSecure *bool `yaml:"cookie_secure"`
 	} `yaml:"auth"`
 
 	Database struct {
@@ -979,6 +982,7 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.MCP.Path, "TRAJECTA_MCP_PATH")
 	envString(&cfg.Auth.DatabasePath, "TRAJECTA_AUTH_DATABASE_PATH")
 	envDuration(&cfg.Auth.SessionTTL, "TRAJECTA_AUTH_SESSION_TTL")
+	envBoolPtr(&cfg.Auth.CookieSecure, "TRAJECTA_AUTH_COOKIE_SECURE")
 	envString(&cfg.Database.Driver, "TRAJECTA_DATABASE_DRIVER")
 	envString(&cfg.Database.DSN, "TRAJECTA_DATABASE_DSN")
 	envInt(&cfg.Database.MaxOpenConns, "TRAJECTA_DATABASE_MAX_OPEN_CONNS")
@@ -1228,6 +1232,16 @@ func (c Config) AuthSessionTTL() time.Duration {
 		return c.Auth.SessionTTL
 	}
 	return 24 * time.Hour
+}
+
+// AuthCookieSecure reports whether the Monitor session cookie must be sent only
+// over HTTPS. It defaults to true; disabling it is a local-development escape
+// hatch, not a production option.
+func (c Config) AuthCookieSecure() bool {
+	if c.Auth.CookieSecure == nil {
+		return true
+	}
+	return *c.Auth.CookieSecure
 }
 
 // ServerReadTimeout bounds reading one request, including its body.
