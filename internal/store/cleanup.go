@@ -590,6 +590,19 @@ func scanRequestCleanupRow(rows *sql.Rows) (requestCleanupRow, error) {
 // values, in bounded batches so a large match cannot exceed the bind-parameter
 // budget.
 func requestCleanupDeleteByColumn(tx *sql.Tx, s *Store, table string, column string, values []string) (int, error) {
+	allowedTables := map[string]bool{"logs": true, "upstream_exchanges": true}
+	for _, name := range requestCleanupDerivedTables {
+		allowedTables[name] = true
+	}
+	for _, name := range requestCleanupReferenceTables {
+		allowedTables[name] = true
+	}
+	if !allowedTables[table] {
+		return 0, fmt.Errorf("unsupported cleanup table %q", table)
+	}
+	if column != "trace_id" && column != "cassette_path" {
+		return 0, fmt.Errorf("unsupported cleanup column %q", column)
+	}
 	values = dedupeNonEmptyStrings(values)
 	total := 0
 	for _, chunk := range chunkStrings(values, storeSQLParamChunk) {
