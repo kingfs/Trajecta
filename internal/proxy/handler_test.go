@@ -91,10 +91,14 @@ func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Trace.OutputDir = cfg.Debug.OutputDir
+	cfg.Server.RetryWaitQueueCapacity = 3
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
+	}
+	if got := cap(handler.retryWaitSlots); got != 3 {
+		t.Fatalf("retry wait queue capacity = %d, want configured 3", got)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	rec := httptest.NewRecorder()
@@ -120,7 +124,7 @@ func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
@@ -164,7 +168,7 @@ func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
@@ -689,7 +693,7 @@ func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
 	}
 	defer st.Close()
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -760,32 +764,25 @@ func TestRetryDelayHonorsRetryAfterWithinDeadline(t *testing.T) {
 }
 
 func TestRetryWaitSlotsBoundConcurrentWaiters(t *testing.T) {
-	for {
-		select {
-		case <-upstreamRetryWaitSlots:
-		default:
-			goto drained
-		}
-	}
-
-drained:
+	h := &Handler{retryWaitSlots: make(chan struct{}, config.DefaultRetryWaitQueueCapacity)}
+	capacity := cap(h.retryWaitSlots)
 	acquired := 0
-	for i := 0; i < upstreamRetryWaitCapacity; i++ {
-		if !tryAcquireRetryWaitSlot() {
+	for i := 0; i < capacity; i++ {
+		if !h.tryAcquireRetryWaitSlot() {
 			t.Fatalf("tryAcquireRetryWaitSlot() = false at slot %d", i)
 		}
 		acquired++
 	}
-	if tryAcquireRetryWaitSlot() {
+	if h.tryAcquireRetryWaitSlot() {
 		t.Fatalf("tryAcquireRetryWaitSlot() = true after capacity exhausted")
 	}
 	for i := 0; i < acquired; i++ {
-		releaseRetryWaitSlot()
+		h.releaseRetryWaitSlot()
 	}
-	if !tryAcquireRetryWaitSlot() {
+	if !h.tryAcquireRetryWaitSlot() {
 		t.Fatalf("tryAcquireRetryWaitSlot() = false after release")
 	}
-	releaseRetryWaitSlot()
+	h.releaseRetryWaitSlot()
 }
 
 type nopReadCloser struct{ Reader *bytes.Buffer }

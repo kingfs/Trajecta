@@ -1,6 +1,6 @@
 // The explicit extension is what lets the unit tests import this module in
 // node, which does not resolve extensionless specifiers.
-import { MONITOR_TOKEN_KEY, apiPaths } from "./api.js";
+import { apiPaths } from "./api.js";
 
 /*
  * The realtime socket, from the browser's side.
@@ -94,13 +94,11 @@ export function realtimeTopicForURL(url) {
   return match;
 }
 
-/** The socket URL, with the token in the query string a browser can send. */
-export function realtimeSocketURL(location = window.location, token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "") {
+/** Same-origin socket URL; the browser attaches the HttpOnly session cookie. */
+export function realtimeSocketURL(location = window.location) {
   const url = new URL(apiPaths.eventsSocket, location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  if (token) {
-    url.searchParams.set("access_token", token);
-  }
+  url.search = "";
   return url.toString();
 }
 

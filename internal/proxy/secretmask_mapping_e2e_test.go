@@ -76,7 +76,7 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		return upstreamBody
 	}
 
-	first, err := NewHandlerWithAuth(cfg(), st, nil, nil)
+	first, err := newAnonymousTestHandler(cfg(), st)
 	if err != nil {
 		t.Fatalf("first NewHandlerWithAuth() error = %v", err)
 	}
@@ -99,7 +99,7 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		t.Fatalf("first handler Close() error = %v", err)
 	}
 
-	second, err := NewHandlerWithAuth(cfg(), st, nil, nil)
+	second, err := newAnonymousTestHandler(cfg(), st)
 	if err != nil {
 		t.Fatalf("second NewHandlerWithAuth() error = %v", err)
 	}

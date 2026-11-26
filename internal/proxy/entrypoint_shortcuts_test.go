@@ -65,7 +65,7 @@ func newEntrypointShortcutHandler(t *testing.T) (*Handler, *store.Store, string,
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestHandlerWithoutUpstreamTargetsAnswersWithASelectionFailure(t *testing.T)
 	cfg := &config.Config{}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -342,7 +342,7 @@ func TestHandlerRecordsTheFailureWhenEveryUpstreamIsExhausted(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

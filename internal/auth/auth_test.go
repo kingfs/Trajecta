@@ -169,15 +169,18 @@ func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
 	}
 }
 
-func TestRequestAuthorizedAllowsMissingVerifier(t *testing.T) {
+func TestRequestAuthorizationFailsClosedWithoutVerifier(t *testing.T) {
 	t.Parallel()
 
 	req, err := http.NewRequest(http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
-	if !RequestAuthorized(req, nil) {
-		t.Fatalf("RequestAuthorized() = false, want true when verifier is nil")
+	if RequestAuthorized(req, nil) {
+		t.Fatalf("RequestAuthorized() = true, want false when verifier is nil")
+	}
+	if !RequestAuthorized(req, AllowAnonymousForTest()) {
+		t.Fatalf("RequestAuthorized() = false, want explicit anonymous test verifier to allow")
 	}
 }
 

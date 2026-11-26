@@ -23,6 +23,14 @@ import (
 type Config struct {
 	Server struct {
 		Port string `yaml:"port"`
+		// TLSCert and TLSKey enable TLS on both the proxy and management listeners
+		// when both are set. Leave both empty when TLS terminates at a trusted
+		// reverse proxy.
+		TLSCert string `yaml:"tls_cert"`
+		TLSKey  string `yaml:"tls_key"`
+		// RetryWaitQueueCapacity bounds concurrent handlers waiting for a
+		// temporarily unavailable upstream before retrying.
+		RetryWaitQueueCapacity int `yaml:"retry_wait_queue_capacity"`
 		// ReadTimeout bounds reading one request, including its body.
 		ReadTimeout time.Duration `yaml:"read_timeout"`
 		// WriteTimeout bounds writing one response. Zero means no server-side
@@ -113,6 +121,10 @@ type Config struct {
 	Auth struct {
 		DatabasePath string        `yaml:"database_path"`
 		SessionTTL   time.Duration `yaml:"session_ttl"`
+		// CookieSecure defaults to true. Disable only for local development over
+		// plain HTTP; production deployments should use HTTPS directly or via a
+		// trusted reverse proxy.
+		CookieSecure *bool `yaml:"cookie_secure"`
 	} `yaml:"auth"`
 
 	Database struct {
@@ -139,6 +151,17 @@ type Config struct {
 
 	Trace struct {
 		OutputDir string `yaml:"output_dir"`
+		// ResponseBodyLimitBytes caps the body bytes written to each cassette.
+		// The full upstream response is still streamed to the client; exceeding
+		// this recording budget adds a truncation event. Zero uses the default.
+		ResponseBodyLimitBytes int64 `yaml:"response_body_limit_bytes"`
+		// RetentionDays enables daily deletion of indexed traces older than this
+		// age. Zero disables automatic retention.
+		RetentionDays int `yaml:"retention_days"`
+		// MinFreeBytes is a low-water mark for the trace filesystem. Zero disables
+		// the check; when configured, response recording stops at the limit after
+		// a warning but proxy delivery continues.
+		MinFreeBytes int64 `yaml:"min_free_bytes"`
 		// MinimalCassette writes only the raw HTTP exchange plus the layout and
 		// minimal identity/route metadata needed to parse it. Routing details,
 		// harness labels, usage and timeline events stay in the application
@@ -577,6 +600,8 @@ func Load(path string) (*Config, error) {
 	// values so older configuration-management workflows do not break.
 	cfg := Config{}
 	cfg.Debug.MaskKey = true
+	secureMonitorCookie := true
+	cfg.Auth.CookieSecure = &secureMonitorCookie
 	// The release check is on by default for the same reason: the zero value is
 	// false, so a configuration that omitted the key would take the button away
 	// while the About page still drew it. Seeding before the decode keeps an
@@ -624,6 +649,12 @@ func Load(path string) (*Config, error) {
 	}
 	warnLegacyChannelEnv()
 	if err := expandEnvRefs(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validateServerSecurity(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validateTraceStorage(&cfg); err != nil {
 		return nil, err
 	}
 	if err := validateLimits(&cfg); err != nil {
@@ -861,6 +892,31 @@ func unknownConfigKeys(data []byte) []string {
 	return typeErr.Errors
 }
 
+func validateServerSecurity(cfg *Config) error {
+	cert := strings.TrimSpace(cfg.Server.TLSCert)
+	key := strings.TrimSpace(cfg.Server.TLSKey)
+	if (cert == "") != (key == "") {
+		return errors.New("server.tls_cert and server.tls_key must either both be set or both be empty")
+	}
+	if cfg.Server.RetryWaitQueueCapacity < 0 || cfg.Server.RetryWaitQueueCapacity > 10000 {
+		return fmt.Errorf("server.retry_wait_queue_capacity must be between 0 and 10000 (got %d)", cfg.Server.RetryWaitQueueCapacity)
+	}
+	return nil
+}
+
+func validateTraceStorage(cfg *Config) error {
+	if cfg.Trace.ResponseBodyLimitBytes < 0 {
+		return errors.New("trace.response_body_limit_bytes must not be negative")
+	}
+	if cfg.Trace.RetentionDays < 0 {
+		return errors.New("trace.retention_days must not be negative")
+	}
+	if cfg.Trace.MinFreeBytes < 0 {
+		return errors.New("trace.min_free_bytes must not be negative")
+	}
+	return nil
+}
+
 func validateLimits(cfg *Config) error {
 	if !cfg.Limits.Enabled {
 		return nil
@@ -966,6 +1022,9 @@ func validateRouterEnums(cfg *Config) error {
 // helpers that follow hold the parsing rules.
 func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Server.Port, "TRAJECTA_SERVER_PORT")
+	envString(&cfg.Server.TLSCert, "TRAJECTA_SERVER_TLS_CERT")
+	envString(&cfg.Server.TLSKey, "TRAJECTA_SERVER_TLS_KEY")
+	envInt(&cfg.Server.RetryWaitQueueCapacity, "TRAJECTA_SERVER_RETRY_WAIT_QUEUE_CAPACITY")
 	envDuration(&cfg.Server.ReadTimeout, "TRAJECTA_SERVER_READ_TIMEOUT")
 	envDuration(&cfg.Server.WriteTimeout, "TRAJECTA_SERVER_WRITE_TIMEOUT")
 	envDuration(&cfg.Server.UpstreamResponseHeaderTimeout, "TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT")
@@ -974,6 +1033,7 @@ func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.MCP.Path, "TRAJECTA_MCP_PATH")
 	envString(&cfg.Auth.DatabasePath, "TRAJECTA_AUTH_DATABASE_PATH")
 	envDuration(&cfg.Auth.SessionTTL, "TRAJECTA_AUTH_SESSION_TTL")
+	envBoolPtr(&cfg.Auth.CookieSecure, "TRAJECTA_AUTH_COOKIE_SECURE")
 	envString(&cfg.Database.Driver, "TRAJECTA_DATABASE_DRIVER")
 	envString(&cfg.Database.DSN, "TRAJECTA_DATABASE_DSN")
 	envInt(&cfg.Database.MaxOpenConns, "TRAJECTA_DATABASE_MAX_OPEN_CONNS")
@@ -984,6 +1044,9 @@ func applyEnvOverrides(cfg *Config) {
 	envInt(&cfg.Database.ReadMaxIdleConns, "TRAJECTA_DATABASE_READ_MAX_IDLE_CONNS")
 	envDuration(&cfg.Database.ReadStatementTimeout, "TRAJECTA_DATABASE_READ_STATEMENT_TIMEOUT")
 	envDuration(&cfg.Trace.SyncInterval, "TRAJECTA_TRACE_SYNC_INTERVAL")
+	envInt64(&cfg.Trace.ResponseBodyLimitBytes, "TRAJECTA_TRACE_RESPONSE_BODY_LIMIT_BYTES")
+	envInt(&cfg.Trace.RetentionDays, "TRAJECTA_TRACE_RETENTION_DAYS")
+	envInt64(&cfg.Trace.MinFreeBytes, "TRAJECTA_TRACE_MIN_FREE_BYTES")
 	envString(&cfg.Monitor.Timezone, "TRAJECTA_MONITOR_TIMEZONE")
 	envBool(&cfg.Debug.PprofEnabled, "TRAJECTA_DEBUG_PPROF_ENABLED")
 	envDuration(&cfg.Debug.SlowQueryThreshold, "TRAJECTA_DEBUG_SLOW_QUERY_THRESHOLD")
@@ -1224,6 +1287,26 @@ func (c Config) AuthSessionTTL() time.Duration {
 	}
 	return 24 * time.Hour
 }
+
+// AuthCookieSecure reports whether the Monitor session cookie must be sent only
+// over HTTPS. The safe default applies to programmatically-built configs too.
+func (c Config) AuthCookieSecure() bool {
+	if c.Auth.CookieSecure == nil {
+		return true
+	}
+	return *c.Auth.CookieSecure
+}
+
+// ServerRetryWaitQueueCapacity bounds handlers waiting for an all-open router
+// to recover. Zero uses the conservative built-in default.
+func (c Config) ServerRetryWaitQueueCapacity() int {
+	if c.Server.RetryWaitQueueCapacity > 0 {
+		return c.Server.RetryWaitQueueCapacity
+	}
+	return DefaultRetryWaitQueueCapacity
+}
+
+const DefaultRetryWaitQueueCapacity = 16
 
 // ServerReadTimeout bounds reading one request, including its body.
 func (c Config) ServerReadTimeout() time.Duration {
@@ -1517,6 +1600,19 @@ func (c Config) TraceSyncInterval() time.Duration {
 	}
 	return DefaultSyncInterval
 }
+
+const DefaultCassetteResponseBodyLimit = int64(256 << 20)
+
+func (c Config) TraceResponseBodyLimitBytes() int64 {
+	if c.Trace.ResponseBodyLimitBytes > 0 {
+		return c.Trace.ResponseBodyLimitBytes
+	}
+	return DefaultCassetteResponseBodyLimit
+}
+
+func (c Config) TraceRetentionDays() int { return c.Trace.RetentionDays }
+
+func (c Config) TraceMinFreeBytes() int64 { return c.Trace.MinFreeBytes }
 
 // DefaultMonitorTimezone is the zone the deployment operates in. The database
 // stores UTC, but "today" on the Monitor has to match the operator's calendar

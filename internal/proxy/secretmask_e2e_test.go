@@ -77,7 +77,7 @@ func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -163,7 +163,7 @@ func TestHandlerMasksCredentialsIRScopeMessages(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -386,7 +386,7 @@ func TestHandlerCassetteCapturesIngressRequestBeforeProxyNormalization(t *testin
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -413,8 +413,8 @@ func TestHandlerCassetteCapturesIngressRequestBeforeProxyNormalization(t *testin
 	if !strings.Contains(upstreamBody, `"include_usage":true`) || strings.Contains(upstreamBody, testOpenAIProjectKey) {
 		t.Fatalf("upstream body = %s, want injected stream_options and a masked key", upstreamBody)
 	}
-	if upstreamQuery != "api_key=query-secret&keep=1" || upstreamAuthorization != "Bearer header-secret" || upstreamAPIKey != "custom-header-secret" {
-		t.Fatalf("upstream query/credentials = %q / %q / %q", upstreamQuery, upstreamAuthorization, upstreamAPIKey)
+	if upstreamQuery != "api_key=query-secret&keep=1" || upstreamAuthorization != "" || upstreamAPIKey != "" {
+		t.Fatalf("upstream query/credentials = %q / %q / %q, want the query preserved and client credential headers withheld", upstreamQuery, upstreamAuthorization, upstreamAPIKey)
 	}
 
 	cassettePath := findRecordedHTTP(t, outputDir)
@@ -467,7 +467,7 @@ func TestHandlerLeavesBodiesAloneWhenMaskingIsOff(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -570,7 +570,7 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := newAnonymousTestHandler(cfg, st)
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -654,7 +654,7 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -849,7 +849,7 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := newAnonymousTestHandler(cfg, st)
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -922,7 +922,7 @@ func TestMaskedCassetteStillReplays(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1010,7 +1010,7 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1159,7 +1159,7 @@ func TestHandlerSkipsOpaqueEncryptedContent(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1332,7 +1332,7 @@ func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1522,7 +1522,7 @@ func TestHandlerLeavesOpaqueProtocolValuesOnTheWire(t *testing.T) {
 				tc.configure(cfg)
 			}
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := newAnonymousTestHandler(cfg, st)
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}

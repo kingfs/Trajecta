@@ -58,11 +58,12 @@ type UsageInfo struct {
 }
 
 type LayoutInfo struct {
-	ReqHeaderLen int64 `json:"req_header_len"`
-	ReqBodyLen   int64 `json:"req_body_len"`
-	ResHeaderLen int64 `json:"res_header_len"`
-	ResBodyLen   int64 `json:"res_body_len"`
-	IsStream     bool  `json:"is_stream"`
+	ReqHeaderLen          int64 `json:"req_header_len"`
+	ReqBodyLen            int64 `json:"req_body_len"`
+	ResHeaderLen          int64 `json:"res_header_len"`
+	ResBodyLen            int64 `json:"res_body_len"`
+	ResBodyTruncatedBytes int64 `json:"res_body_truncated_bytes,omitempty"`
+	IsStream              bool  `json:"is_stream"`
 }
 
 type MetaData struct {

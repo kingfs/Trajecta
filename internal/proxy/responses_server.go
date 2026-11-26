@@ -529,22 +529,21 @@ func (r *responsesEntryRecorder) writeBody(data []byte) {
 	if r.logInfo.Header.Meta.TTFTMs <= 0 && !r.startedAt.IsZero() {
 		r.logInfo.Header.Meta.TTFTMs = time.Since(r.startedAt).Milliseconds()
 	}
-	written, err := r.logInfo.File.Write(data)
+	_, err := r.logInfo.WriteResponseBody(data)
 	if err != nil {
 		r.logInfo.Header.Meta.Error = "write responses entry response body: " + err.Error()
 		return
 	}
-	r.logInfo.Header.Layout.ResBodyLen += int64(written)
 	if r.pipeline != nil {
-		r.pipeline.Feed(data[:written])
+		r.pipeline.Feed(data)
 		if usage, ok := r.pipeline.Usage(); ok {
 			r.logInfo.Header.Usage = recorder.UsageInfo(usage)
 		}
 	}
 	if r.bodySample.Len() < responsesEntryMaxCapturedBodyBytes {
 		remaining := responsesEntryMaxCapturedBodyBytes - r.bodySample.Len()
-		if remaining > written {
-			remaining = written
+		if remaining > len(data) {
+			remaining = len(data)
 		}
 		_, _ = r.bodySample.Write(data[:remaining])
 	}
@@ -815,7 +814,7 @@ func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Re
 	}
 	return &gateway.UsageSniffer{
 		Source:      respBody,
-		File:        logInfo.File,
+		File:        logInfo,
 		Count:       &logInfo.Header.Layout.ResBodyLen,
 		Usage:       &logInfo.Usage,
 		RecordUsage: &logInfo.Header.Usage,

@@ -481,6 +481,7 @@ type RouteOptions struct {
 	MonitorJWT                       *auth.JWTManager
 	AuthStore                        *auth.Store
 	SessionTTL                       time.Duration
+	SecureMonitorCookie              bool
 	ResponsesFunctionExecutors       config.ResponsesFunctionExecutorConfig
 	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
 	ResponsesFunctionExecutorStore   *store.Store
@@ -694,8 +695,7 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token  string `json:"token"`
-	Prefix string `json:"prefix"`
+	OK bool `json:"ok"`
 }
 
 type meResponse struct {
@@ -825,7 +825,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors, stateOptions...)
 	}
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(monitorVerifier))
-	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL))
+	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL, opt.SecureMonitorCookie))
+	mux.HandleFunc("/api/auth/logout", monitorAuthRequired(authLogoutAPIHandler(opt.SecureMonitorCookie), monitorVerifier))
 	// A liveness probe must not require an operator token (a container runtime
 	// cannot hold one) and must not report anything about the deployment: one
 	// fixed JSON object, no store reads.

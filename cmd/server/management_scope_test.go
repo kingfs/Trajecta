@@ -124,7 +124,7 @@ func TestMCPCredentialMasksRequireAdminRoleThroughHTTP(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
-	server := httptest.NewServer(newManagementMuxWithSecretMappings(traceStore, nil, cfg, nil, nil, nil, nil, authStore))
+	server := httptest.NewServer(newManagementMuxWithSecretMappings(traceStore, nil, cfg, nil, nil, nil, nil, nil, authStore))
 	defer server.Close()
 
 	callMasks := func(token string) (*mcp.CallToolResult, error) {
@@ -174,37 +174,45 @@ func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 	defer authStore.Close()
 	mux := newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore)
 
-	login := func(password string) string {
+	login := func(password string) *http.Cookie {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"`+password+`"}`))
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("login(%q) = %d; body=%s", password, rr.Code, rr.Body.String())
 		}
-		var payload struct {
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil || payload.Token == "" {
+		var payload map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil || payload["ok"] != true {
 			t.Fatalf("login(%q) payload = %s", password, rr.Body.String())
 		}
-		return payload.Token
+		if _, exposed := payload["token"]; exposed {
+			t.Fatalf("login(%q) exposed a bearer token in JSON: %s", password, rr.Body.String())
+		}
+		cookies := rr.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Name != "trajecta_monitor_session" || cookies[0].Value == "" {
+			t.Fatalf("login(%q) cookies = %+v, want one monitor session cookie", password, cookies)
+		}
+		if !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode {
+			t.Fatalf("login(%q) cookie attributes = %+v, want HttpOnly and SameSite=Lax", password, cookies[0])
+		}
+		return cookies[0]
 	}
-	check := func(token string) int {
+	check := func(cookie *http.Cookie) int {
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.AddCookie(cookie)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 		return rr.Code
 	}
 
-	token := login("change-me-123")
-	if code := check(token); code != http.StatusOK {
+	session := login("change-me-123")
+	if code := check(session); code != http.StatusOK {
 		t.Fatalf("check(fresh session) = %d, want 200", code)
 	}
 	if err := authStore.ResetPassword(context.Background(), "admin", "new-password-123"); err != nil {
 		t.Fatalf("ResetPassword() error = %v", err)
 	}
-	if code := check(token); code != http.StatusUnauthorized {
+	if code := check(session); code != http.StatusUnauthorized {
 		t.Fatalf("check(old session after password reset) = %d, want 401", code)
 	}
 
@@ -216,7 +224,7 @@ func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 		t.Fatalf("SetUserRole() error = %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/system/runtime", nil)
-	req.Header.Set("Authorization", "Bearer "+fresh)
+	req.AddCookie(fresh)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {

@@ -16,7 +16,6 @@ const record = {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("trajecta.monitor.language", "en");
-    localStorage.setItem("trajecta.monitor.token", "test-monitor-jwt");
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -26,10 +25,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("session ATIF export requires a click and downloads authenticated JSONL", async ({ page }) => {
-  const reads = [];
+test("session ATIF export requires a click and downloads JSONL without exposing credentials", async ({ page }) => {
+  const requests = [];
   await page.route("**/api/sessions/export-session/trajectory", async (route) => {
-    reads.push(route.request().headers().authorization);
+    requests.push({ url: route.request().url(), authorization: route.request().headers().authorization });
     await route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify(record) + "\n" });
   });
   // The ATIF preview re-parses every cassette of the session, so it is read
@@ -37,9 +36,9 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
   // first is that opening the page reads nothing.
   await page.goto("/sessions/export-session");
   await page.getByRole("button", { name: /^Trajectory/ }).click();
-  expect(reads, "the page must not re-parse the session on mount").toHaveLength(0);
+  expect(requests, "the page must not re-parse the session on mount").toHaveLength(0);
   await page.getByText(/ATIF session trajectory/).click();
-  await expect.poll(() => reads.length).toBe(1);
+  await expect.poll(() => requests.length).toBe(1);
   const button = page.getByRole("button", { name: "Export trajectory (ATIF)" });
   await expect(button).toBeEnabled();
   const downloadPromise = page.waitForEvent("download");
@@ -51,8 +50,8 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
   for await (const chunk of stream) body += chunk.toString();
   expect(body).toBe(JSON.stringify(record) + "\n");
   await expect(page.getByRole("region", { name: /Notifications/ })).toContainText("Trajectory downloaded. One complete session per JSONL line.");
-  expect(reads).toHaveLength(2);
-  expect(reads.every((authorization) => authorization === "Bearer test-monitor-jwt")).toBe(true);
+  expect(requests).toHaveLength(2);
+  expect(requests.every(({ url, authorization }) => !url.includes("access_token=") && authorization === undefined)).toBe(true);
 });
 
 test("session ATIF export shows a failure and allows retry", async ({ page }) => {

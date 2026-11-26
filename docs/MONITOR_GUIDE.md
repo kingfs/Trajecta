@@ -19,9 +19,9 @@ go run ./cmd/trajecta auth init-user -c config/config.yaml --username admin --pa
 unset ADMIN_PASSWORD
 ```
 
-Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。前端把 JWT 存在浏览器 localStorage，并以 `Authorization: Bearer` 访问 Monitor API；该 JWT 不用于 SDK、proxy 或 MCP。
+Monitor 使用用户名密码登录（`POST /api/auth/login`），成功后签发仅用于 Monitor 的 JWT：issuer 为 `trajecta-monitor`，audience 为 `trajecta-monitor-ui`，TTL 默认 24 小时，可用 `auth.session_ttl` 调整。JWT 只通过 `trajecta_monitor_session` cookie 发送（`HttpOnly`、`SameSite=Lax`），不返回给 JavaScript，也不写入 localStorage、请求 URL 或浏览器历史；浏览器对同源 Monitor API、WebSocket 和 SSE 请求自动附带该 cookie。该 JWT 不用于 SDK、proxy 或 MCP，个人 API token 也不能代替 Monitor 登录会话。
 
-JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；Monitor 与 MCP 管理路由在入口处还有统一的 16 MiB 请求体上限。失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
+JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 里的密码指纹回查 auth store：`auth reset-password` 会立刻让旧会话失效，`auth disable-user` / `auth enable-user` 或 `auth set-role` 也在下一次请求生效（角色与启用状态以数据库为准，不看 token 里的旧值）。会话 cookie 默认带 `Secure`；仅在本机明文 HTTP 开发时才应通过 `auth.cookie_secure: false` 关闭，HTTPS 终止于反向代理时应保留安全设置。使用 cookie 的非安全方法还要求 `Origin` 的 host 与请求 host 一致；缺少或不匹配时拒绝请求。登录接口按 (客户端 IP, 用户名) 限流：15 分钟内 10 次失败后返回 429 和 `Retry-After`，请求体上限 64 KiB；Monitor 与 MCP 管理路由在入口处还有统一的 16 MiB 请求体上限。失败会写一条 `Monitor login failed` 日志（只记用户名与来源 IP，不记密码）。`GET /healthz` 不需要认证，只返回 `{"status":"ok"}`，供容器与负载均衡探针使用；代理端口同样提供该路径。
 
 左侧导航底部的账号入口（`aria-label` 为「账户」）打开一个**向上弹出**的浮层面板（Radix Popover，封装在 `web/monitor-ui/src/components/ui/popover.tsx`），而不是居中对话框。面板提供主题（深色、浅色、跟随系统）、语言（`dark`/`light`/`system` 与 `zh-CN`/`en`，都保存在当前浏览器）、修改密码（`POST /api/auth/password`）和退出登录。主题与语言各自是一个 Radix RadioGroup（`role="radiogroup"` + `role="radio"`，方向键在组内移动并选中，整组只有一个 Tab 停靠点），选中后面板不关闭，两项可以在一次打开里都改完；改动语言会动态拉取另一个语言 chunk。Radix 把面板 portal 到 body 并按触发按钮定位，`side="top"` 让它开在按钮上方，`align="start"` 让它与按钮左边缘对齐，因此面板按视口而非按 264px 的侧边栏测量——它会横向盖出侧边栏，这正是之前被截断的原因；空间不足时 popper 会自动翻到下方而不是移出屏幕，`collisionPadding` 保证它不贴边。Esc 关闭、点击外部关闭、`role="dialog"` 与关闭后把焦点还给触发按钮都由 primitive 提供；焦点还原要求触发按钮与面板处在同一个 Popover root 内，所以 `PrimaryNav` 用一层 `Popover` 同时包住两者。
 
@@ -40,7 +40,7 @@ JWT 是 HMAC 签名但无状态的，所以服务端每次请求还会用 token 
 - 代理 API：`Authorization: Bearer <token>`，proxy 的每个请求都要通过该 token 鉴权；`scope` 为 `mcp` 的 token 在这里返回 401。
 - MCP：`Authorization: Bearer <token>`；`scope` 为 `proxy` 的 token 在这里返回 401。`list_credential_masks` 会返回遮蔽审计的真值/假值，除 `mcp` scope 外还要求管理员角色；普通 viewer 即使持有 `mcp` scope 也不能调用。
 
-Monitor API 本身只接受登录 JWT，不使用个人 token。
+Monitor UI 使用 HttpOnly 会话 cookie 调用 API；Monitor API 的认证与 proxy/MCP 使用的个人 API token 相互独立，个人 token 不能代替 Monitor 登录会话。
 
 ## 数据来源
 
@@ -166,7 +166,7 @@ trace 详情页的标签栏是 会话 / 协议 / **轨迹** / **统计** / 工�
 - `extra.warnings` 报告文件缺失、无法解析、上下文不连续、缺失或孤立工具结果、流式中断等问题，下载完成后页面显示警告数量。`completion=unknown` 不将 HTTP 成功解释为任务成功。
 - 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。默认与 `?full=1` 仍在服务端组装完整响应；极大会话应使用 `?stream=1`。
 
-接口为 `GET /api/sessions/:sessionID/trajectory`，可选参数 `full` 与 `stream`（`1`/`true`/`yes`/`on` 视为真），使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头；默认文件名 `session-<id>.atif.jsonl`，流式为 `session-<id>.atif.ndjson`。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
+接口为 `GET /api/sessions/:sessionID/trajectory`，可选参数 `full` 与 `stream`（`1`/`true`/`yes`/`on` 视为真），使用现有 Monitor 登录会话鉴权，返回 `application/x-ndjson` 和附件下载头；默认文件名 `session-<id>.atif.jsonl`，流式为 `session-<id>.atif.ndjson`。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
 
 #### 事件 `/events`
 
@@ -305,7 +305,7 @@ Monitor 不再有前端定时刷新。整个控制台开一条 WebSocket（`GET 
 
 发布主题的写路径包括：录制请求落库、观测与发现项写入、重分析更新 token 用量、分析任务与解析任务的状态迁移、运行时事件收据变化。也就是说，服务端后台自己跑的解析与重分析也会让页面自己刷新，不需要读者做任何操作。
 
-主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在；集合根路径（如 `/api/traces`）按前缀注册，根路径下的单条记录（如 `/api/traces/<id>`）按快照处理，不注册主题。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上带 `Authorization` 头，所以这条路径（以及 SSE 端点）允许把访问令牌放在 `?access_token=` 查询串里，其余接口仍然只认请求头。
+主题与请求的对应关系写在 `web/monitor-ui/src/lib/realtime.js`：每条读请求经 `useJSON` 按其 URL 前缀自动注册主题，因此页面不需要知道 socket 存在；集合根路径（如 `/api/traces`）按前缀注册，根路径下的单条记录（如 `/api/traces/<id>`）按快照处理，不注册主题。`GET /api/events/stream` 这个 SSE 端点仍然提供，供已经在用 SSE 的外部集成使用，控制台本身不再使用它。浏览器无法在 `new WebSocket()` 上设置 `Authorization` 头，但同源 WebSocket 握手与 SSE 请求会自动携带 HttpOnly 会话 cookie；Monitor 不再接受 `access_token` 查询参数，凭据不会进入代理、反向代理或访问日志里的 URL。
 
 #### 系统 `/system`
 

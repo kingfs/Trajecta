@@ -99,16 +99,18 @@ test("the topic registry tracks what is on screen", () => {
   assert.deepEqual(registeredRealtimeQueries("traffic"), []);
 });
 
-test("the socket URL carries the token the browser cannot put in a header", () => {
+test("the socket uses the same-origin cookie without putting credentials in the URL", () => {
   const location = { href: "https://monitor.example.test/overview?window=7d", protocol: "https:" };
-  const url = new URL(realtimeSocketURL(location, "token with spaces"));
+  const url = new URL(realtimeSocketURL(location));
   assert.equal(url.protocol, "wss:");
+  assert.equal(url.host, "monitor.example.test");
   assert.equal(url.pathname, apiPaths.eventsSocket);
-  assert.equal(url.searchParams.get("access_token"), "token with spaces");
+  assert.equal(url.search, "");
+  assert.equal(url.hash, "");
 
-  // A console without an auth store has no token to send, and must not send an
-  // empty one.
-  const anonymous = new URL(realtimeSocketURL({ href: "http://localhost:8080/", protocol: "http:" }, ""));
+  // The server also accepts this same-origin handshake without a query string;
+  // authentication is supplied by the browser's HttpOnly session cookie.
+  const anonymous = new URL(realtimeSocketURL({ href: "http://localhost:8080/", protocol: "http:" }));
   assert.equal(anonymous.protocol, "ws:");
   assert.equal(anonymous.search, "");
 });

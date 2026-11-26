@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,12 +28,14 @@ const (
 	loginFailureWindow = 15 * time.Minute
 )
 
+const monitorSessionCookieName = "trajecta_monitor_session"
+
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier != nil})
+		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier == nil || !auth.IsAnonymousForTest(verifier)})
 	}
 }
-func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
+func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration, secureCookie bool) http.HandlerFunc {
 	throttle := newLoginThrottle()
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -75,7 +78,45 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 			return
 		}
 		throttle.reset(key)
-		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
+		if ttl <= 0 {
+			ttl = 24 * time.Hour
+		}
+		now := time.Now()
+		http.SetCookie(w, &http.Cookie{
+			Name:     monitorSessionCookieName,
+			Value:    token.Token,
+			Path:     "/",
+			Expires:  now.Add(ttl),
+			MaxAge:   int(ttl.Seconds()),
+			HttpOnly: true,
+			Secure:   secureCookie,
+			SameSite: http.SameSiteLaxMode,
+		})
+		// Do not return the JWT to JavaScript. The browser receives it only in
+		// the HttpOnly cookie, which also authenticates EventSource/WebSocket
+		// handshakes without putting a credential in a URL.
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+func authLogoutAPIHandler(secureCookie bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     monitorSessionCookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			Expires:  time.Unix(1, 0),
+			HttpOnly: true,
+			Secure:   secureCookie,
+			SameSite: http.SameSiteLaxMode,
+		})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 
@@ -371,41 +412,81 @@ func authTokenDetailAPIHandler(authStore *auth.Store) http.HandlerFunc {
 	}
 }
 func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
-	if verifier == nil {
-		return next
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		authReq := r
-		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
-			authReq = r.Clone(r.Context())
-			authReq.Header = r.Header.Clone()
-			authReq.Header.Set("Authorization", "Bearer "+token)
+		// Internal in-process callers such as the MCP tools pass the authenticated
+		// principal in the request context instead of re-serializing its bearer
+		// token. Only server middleware can set this value; external HTTP requests
+		// still need a configured verifier and a valid cookie or Authorization
+		// header.
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		cookieAuthenticated := false
+		if !ok {
+			if verifier == nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "monitor authentication is not configured"})
+				return
+			}
+
+			authReq := r
+			if r.Header.Get("Authorization") == "" {
+				if cookie, err := r.Cookie(monitorSessionCookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
+					authReq = r.Clone(r.Context())
+					authReq.Header = r.Header.Clone()
+					authReq.Header.Set("Authorization", "Bearer "+cookie.Value)
+					cookieAuthenticated = true
+				}
+			}
+			principal, ok = auth.VerifyRequest(authReq, verifier)
 		}
-		principal, ok := auth.VerifyRequest(authReq, verifier)
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-monitor"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		if cookieAuthenticated && isUnsafeMonitorMethod(r.Method) && !monitorRequestSameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request rejected"})
 			return
 		}
 		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
 }
 
+func isUnsafeMonitorMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return false
+	default:
+		return true
+	}
+}
+
+// monitorRequestSameOrigin is the CSRF guard for cookie-authenticated writes.
+// Browsers send Origin on unsafe fetches. Requiring an exact host match rejects
+// cross-site form/fetch attempts without depending on forwarded-proto headers,
+// which are not safe to trust when the app is directly reachable.
+func monitorRequestSameOrigin(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, strings.TrimSpace(r.Host))
+}
+
 // monitorAdminRequired gates a handler behind the verified principal's admin
-// role. It composes monitorAuthRequired, so an unauthenticated caller gets the
-// same 401 (with the same WWW-Authenticate header) as every other Monitor API
-// and only an authenticated non-admin gets 403.
-//
-// With no verifier configured there is no identity to check: the whole Monitor
-// is open in that deployment (monitorAuthRequired returns the handler
-// unchanged), so this gate stays out of the way rather than locking the one
-// deployment that cannot log in out of its own diagnostics.
+// role. It composes monitorAuthRequired, so an unauthenticated caller receives
+// the same 401 as every other Monitor API; a missing verifier fails closed with
+// 503 rather than silently making the management plane public.
 func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
 	gated := func(w http.ResponseWriter, r *http.Request) {
-		if verifier == nil {
-			next(w, r)
-			return
-		}
 		principal, ok := auth.PrincipalFromContext(r.Context())
 		if !ok || !strings.EqualFold(strings.TrimSpace(principal.Role), "admin") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
@@ -414,23 +495,4 @@ func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) ht
 		next(w, r)
 	}
 	return monitorAuthRequired(gated, verifier)
-}
-
-// allowMonitorQueryAccessToken lists the endpoints a browser has to authenticate
-// from the query string, because the platform API it uses cannot attach a header.
-//
-// Both are long-lived streams opened by the browser itself: EventSource cannot
-// set an Authorization header at all, and `new WebSocket()` has no option for
-// one either. Everything else keeps the token in the Authorization header, where
-// it does not end up in a reverse proxy's access log.
-func allowMonitorQueryAccessToken(r *http.Request) bool {
-	if r.Method != http.MethodGet {
-		return false
-	}
-	switch pathClean(r.URL.Path) {
-	case "/api/events/stream", realtimeSocketPath:
-		return true
-	default:
-		return false
-	}
 }

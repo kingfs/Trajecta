@@ -594,8 +594,12 @@ func TestPrepareLogFileRecordsOriginalRequestRegardlessOfLegacyMaskKey(t *testin
 			if got := cassetteInfo.Mode().Perm(); got != 0o600 {
 				t.Errorf("cassette mode = %04o, want 0600", got)
 			}
-			if got, err := os.Stat(filepath.Dir(info.Path)); err != nil || got.Mode().Perm() != 0o700 {
-				t.Errorf("cassette directory mode = %v, err %v; want 0700", got, err)
+			for current := filepath.Dir(info.Path); current != dir; current = filepath.Dir(current) {
+				info, err := os.Stat(current)
+				if err != nil || info.Mode().Perm() != 0o700 {
+					t.Errorf("cassette directory %s mode = %v, err %v; want 0700", current, info, err)
+					break
+				}
 			}
 		})
 	}

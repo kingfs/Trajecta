@@ -19,6 +19,10 @@ import (
 // The Source must be the client-visible stream (a Restorer when masking is
 // active), not the raw upstream stream: the cassette records what the client
 // read, matching the existing masking contract.
+type responseBodyRecorder interface {
+	RecordResponseBody([]byte) (int, error)
+}
+
 type UsageSniffer struct {
 	Source io.ReadCloser
 	File   io.Writer
@@ -48,12 +52,21 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 		}
 		data := p[:n]
 		if s.File != nil {
-			written, wErr := s.File.Write(data)
+			var written int
+			var wErr error
+			if bounded, ok := s.File.(responseBodyRecorder); ok {
+				// A bounded cassette writer may intentionally retain only a prefix.
+				// It reports actual stored bytes; a short result with no error is not
+				// a failed write and does not stop usage parsing/client delivery.
+				written, wErr = bounded.RecordResponseBody(data)
+			} else {
+				written, wErr = s.File.Write(data)
+				if wErr == nil && written != len(data) {
+					wErr = io.ErrShortWrite
+				}
+			}
 			if written > 0 && s.Count != nil {
 				*s.Count += int64(written)
-			}
-			if wErr == nil && written != len(data) {
-				wErr = io.ErrShortWrite
 			}
 			if wErr != nil && s.writeErr == nil {
 				s.writeErr = fmt.Errorf("write response bytes to cassette: %w", wErr)

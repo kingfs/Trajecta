@@ -35,9 +35,32 @@ func BearerToken(header string) (string, bool) {
 	return token, token != ""
 }
 
+// anonymousTestVerifier is an explicit escape hatch for isolated test fixtures.
+// Production code must use a real verifier; a nil verifier always fails closed.
+type anonymousTestVerifier struct{}
+
+func (anonymousTestVerifier) VerifyToken(context.Context, string) (Principal, bool, error) {
+	return Principal{UserID: 1, Username: "anonymous-test", Role: RoleAdmin, Scope: ScopeAll}, true, nil
+}
+
+// AllowAnonymousForTest opts an isolated test server into anonymous access.
+// Keep this call site explicit and grep-auditable; never use it in production.
+func AllowAnonymousForTest() TokenVerifier { return anonymousTestVerifier{} }
+
+// IsAnonymousForTest reports whether verifier is the explicit test-only
+// anonymous sentinel. It is used only to make the auth status endpoint report
+// that a test fixture intentionally runs without authentication.
+func IsAnonymousForTest(verifier TokenVerifier) bool {
+	_, ok := verifier.(anonymousTestVerifier)
+	return ok
+}
+
 func VerifyRequest(r *http.Request, verifier TokenVerifier) (Principal, bool) {
 	if verifier == nil {
-		return Principal{}, true
+		return Principal{}, false
+	}
+	if IsAnonymousForTest(verifier) {
+		return Principal{UserID: 1, Username: "anonymous-test", Role: RoleAdmin, Scope: ScopeAll}, true
 	}
 	provided, ok := BearerToken(r.Header.Get("Authorization"))
 	if !ok {
@@ -63,7 +86,9 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 
 func Middleware(next http.Handler, realm string, verifier TokenVerifier) http.Handler {
 	if verifier == nil {
-		return next
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "authentication is not configured", http.StatusServiceUnavailable)
+		})
 	}
 	if strings.TrimSpace(realm) == "" {
 		realm = "trajecta"

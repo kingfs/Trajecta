@@ -46,31 +46,40 @@ func TestServerListsCredentialMasks(t *testing.T) {
 	}
 
 	server := New(st, Options{})
-	session, err := connectClient(context.Background(), server)
+	unauthenticatedSession, err := connectClient(context.Background(), server)
 	if err != nil {
-		t.Fatalf("connectClient() error = %v", err)
+		t.Fatalf("connectClient(unauthenticated) error = %v", err)
 	}
-	defer session.Close()
-
-	denied, denyErr := session.CallTool(context.Background(), &mcp.CallToolParams{
+	denied, denyErr := unauthenticatedSession.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "list_credential_masks",
 		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
 	})
+	_ = unauthenticatedSession.Close()
 	if denyErr == nil && (denied == nil || !denied.IsError) {
 		t.Fatalf("unauthenticated list_credential_masks = %+v, want an authorization error", denied)
 	}
 
 	viewerCtx := auth.WithPrincipal(context.Background(), auth.Principal{Username: "viewer", Role: auth.RoleViewer, Scope: auth.ScopeMCP})
-	viewerResult, viewerErr := session.CallTool(viewerCtx, &mcp.CallToolParams{
+	viewerSession, err := connectClient(viewerCtx, server)
+	if err != nil {
+		t.Fatalf("connectClient(viewer) error = %v", err)
+	}
+	viewerResult, viewerErr := viewerSession.CallTool(viewerCtx, &mcp.CallToolParams{
 		Name:      "list_credential_masks",
 		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
 	})
+	_ = viewerSession.Close()
 	if viewerErr == nil && (viewerResult == nil || !viewerResult.IsError) {
 		t.Fatalf("viewer list_credential_masks = %+v, want an authorization error", viewerResult)
 	}
 
-	adminCtx := auth.WithPrincipal(context.Background(), auth.Principal{Username: "admin", Role: auth.RoleAdmin, Scope: auth.ScopeMCP})
-	result, err := session.CallTool(adminCtx, &mcp.CallToolParams{
+	adminCtx := mcpTestAdminContext()
+	adminSession, err := connectClient(adminCtx, server)
+	if err != nil {
+		t.Fatalf("connectClient(admin) error = %v", err)
+	}
+	defer adminSession.Close()
+	result, err := adminSession.CallTool(adminCtx, &mcp.CallToolParams{
 		Name:      "list_credential_masks",
 		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
 	})
@@ -107,7 +116,7 @@ func TestServerListsCredentialMasks(t *testing.T) {
 
 	// The event that announces the rewrite must not be a second copy of the pair,
 	// since the feed is fanned out to every monitor session.
-	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err = adminSession.CallTool(adminCtx, &mcp.CallToolParams{
 		Name: "list_system_events",
 		// The default window is deliberate: the event was just written, so a
 		// "today" bound has to include it, and that is the bound the event feed

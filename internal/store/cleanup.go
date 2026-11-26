@@ -87,14 +87,17 @@ func (s *Store) existingReferenceTables() ([]string, error) {
 // display. The counts and the delete set are never capped.
 const requestCleanupSampleLimit = 50
 
-// RequestCleanupFilter selects the recorded requests a cleanup run targets. At
-// least one of StatusCodes, Failed or TraceIDs must be set; the remaining fields
-// only narrow the selection.
+// RequestCleanupFilter selects the recorded requests a cleanup run targets. An
+// interactive cleanup needs StatusCodes, Failed or TraceIDs; internal retention
+// jobs may set All. The remaining fields only narrow the selection.
 type RequestCleanupFilter struct {
 	// StatusCodes are exact HTTP status codes to match (for example 404).
 	StatusCodes []int
 	// Failed matches every non-2xx status plus any request that recorded an error.
 	Failed bool
+	// All selects every client-visible request. It is intended for internal
+	// retention jobs; interactive cleanup commands require an explicit filter.
+	All bool
 	// TraceIDs selects traces explicitly. When it is set it also matches
 	// child model exchanges, which status filters deliberately skip because they
 	// are not client-visible.
@@ -430,8 +433,8 @@ func (s *Store) ApplyRequestCleanup(filter RequestCleanupFilter, opts RequestCle
 // request the operator sees failed.
 func requestCleanupScopeSQL(filter RequestCleanupFilter) (string, []any, error) {
 	traceIDs := dedupeNonEmptyStrings(filter.TraceIDs)
-	if len(traceIDs) == 0 && len(filter.StatusCodes) == 0 && !filter.Failed {
-		return "", nil, errors.New("request cleanup needs --status, --failed or --trace-id")
+	if len(traceIDs) == 0 && len(filter.StatusCodes) == 0 && !filter.Failed && !filter.All {
+		return "", nil, errors.New("request cleanup needs --status, --failed, --trace-id or an internal all-requests filter")
 	}
 
 	clauses := make([]string, 0, 8)

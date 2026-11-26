@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -44,9 +43,13 @@ func (v realtimeTokenVerifier) VerifyToken(_ context.Context, token string) (aut
 }
 
 func dialRealtimeSocket(t *testing.T, base string, query string) *websocket.Conn {
+	return dialRealtimeSocketWithHeaders(t, base, query, nil)
+}
+
+func dialRealtimeSocketWithHeaders(t *testing.T, base string, query string, headers http.Header) *websocket.Conn {
 	t.Helper()
 	socketURL := "ws" + strings.TrimPrefix(base, "http") + realtimeSocketPath + query
-	conn, response, err := websocket.DefaultDialer.Dial(socketURL, nil)
+	conn, response, err := websocket.DefaultDialer.Dial(socketURL, headers)
 	if err != nil {
 		status := 0
 		if response != nil {
@@ -224,7 +227,7 @@ func TestRealtimeSocketStopsListeningWhenTheLastTabLeaves(t *testing.T) {
 	}, "the store subscription outlived the last tab")
 }
 
-func TestRealtimeSocketAuthenticatesFromTheQueryString(t *testing.T) {
+func TestRealtimeSocketAuthenticatesFromTheSameOriginCookie(t *testing.T) {
 	t.Parallel()
 	st := newRealtimeTestStore(t)
 	hub := newRealtimeHub(st)
@@ -235,25 +238,29 @@ func TestRealtimeSocketAuthenticatesFromTheQueryString(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	// A browser cannot set an Authorization header on a WebSocket, so the token
-	// it holds has to be accepted from the query string.
-	conn := dialRealtimeSocket(t, server.URL, "?access_token="+url.QueryEscape("console-token"))
+	// Browser WebSocket handshakes automatically include same-origin cookies;
+	// the credential is never placed in the socket URL.
+	headers := http.Header{}
+	headers.Set("Cookie", monitorSessionCookieName+"=console-token")
+	headers.Set("Origin", server.URL)
+	conn := dialRealtimeSocketWithHeaders(t, server.URL, "", headers)
 	subscribeRealtimeTopics(t, conn, realtimeTopicTraffic)
 	if _, err := st.SaveAnalysisRun(store.AnalysisRunRecord{Kind: "test", Analyzer: "test"}); err != nil {
 		t.Fatalf("SaveAnalysisRun() error = %v", err)
 	}
 	readRealtimeTopics(t, conn, realtimeTopicTraffic)
 
-	// Without a token the upgrade never happens.
-	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + realtimeSocketPath
+	// Query-string credentials are no longer accepted; without a session cookie
+	// the upgrade is rejected even when access_token is present.
+	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + realtimeSocketPath + "?access_token=console-token"
 	if _, response, err := websocket.DefaultDialer.Dial(socketURL, nil); err == nil {
-		t.Fatal("dial without a token succeeded")
+		t.Fatal("dial with query token but no session cookie succeeded")
 	} else if response == nil || response.StatusCode != http.StatusUnauthorized {
 		status := 0
 		if response != nil {
 			status = response.StatusCode
 		}
-		t.Fatalf("dial without a token status = %d, want 401", status)
+		t.Fatalf("dial with query token but no cookie status = %d, want 401", status)
 	}
 }
 

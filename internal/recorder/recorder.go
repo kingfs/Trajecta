@@ -1,6 +1,7 @@
 package recorder
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -38,6 +40,19 @@ type LogInfo struct {
 	Header RecordHeader
 	Events []RecordEvent
 
+	// ResponseBodyLimitBytes caps bytes retained in this cassette. The client
+	// still receives the full response; a truncated cassette records the exact
+	// omitted byte count in Layout and a recording event.
+	ResponseBodyLimitBytes     int64
+	ResponseBodyTruncatedBytes int64
+	ResponseBodyLimitHit       bool
+	MinFreeSpaceHit            bool
+	ResponseBodyWriteFailed    bool
+
+	responseBodyBytesWritten     int64
+	responseBodyRecordingStopped bool
+	canRecordResponseBody        func() bool
+
 	// Usage is the canonical usage snapshot for the exchange. Header.Usage is
 	// the cassette/DB projection; new consumers should read this field.
 	Usage usage.Usage
@@ -55,6 +70,77 @@ type LogInfo struct {
 	// a re-index of the same file from disk - which sees the prelude and not the
 	// pair - cannot duplicate or invent a row.
 	MaskAudit []store.CredentialMaskAuditRecord
+}
+
+// Write implements io.Writer for response pipelines. It reports the number of
+// bytes retained, not the number consumed from upstream; UsageSniffer recognizes
+// RecordResponseBody so an intentional truncation is not treated as an I/O error.
+func (info *LogInfo) Write(p []byte) (int, error) {
+	written, err := info.RecordResponseBody(p)
+	if err == nil && written != len(p) {
+		return written, io.ErrShortWrite
+	}
+	return written, err
+}
+
+// RecordResponseBody writes the portion of one client-visible response chunk
+// that fits the per-cassette size budget and current disk watermark. It returns
+// the number of bytes actually stored; dropped bytes are tracked separately.
+func (info *LogInfo) RecordResponseBody(p []byte) (int, error) {
+	if info == nil || info.File == nil {
+		return 0, io.ErrClosedPipe
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	toWrite := len(p)
+	if info.responseBodyRecordingStopped {
+		toWrite = 0
+	}
+	if info.ResponseBodyLimitBytes > 0 {
+		remaining := info.ResponseBodyLimitBytes - info.responseBodyBytesWritten
+		if remaining < 0 {
+			remaining = 0
+		}
+		if int64(toWrite) > remaining {
+			toWrite = int(remaining)
+			info.ResponseBodyLimitHit = true
+		}
+	}
+	if toWrite > 0 && info.canRecordResponseBody != nil && !info.canRecordResponseBody() {
+		toWrite = 0
+		info.MinFreeSpaceHit = true
+		info.responseBodyRecordingStopped = true
+	}
+
+	written := 0
+	var err error
+	if toWrite > 0 {
+		written, err = info.File.Write(p[:toWrite])
+		info.responseBodyBytesWritten += int64(written)
+		if err == nil && written != toWrite {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			info.ResponseBodyWriteFailed = true
+			info.responseBodyRecordingStopped = true
+		}
+	}
+	if omitted := len(p) - written; omitted > 0 {
+		info.ResponseBodyTruncatedBytes += int64(omitted)
+	}
+	return written, err
+}
+
+// WriteResponseBody is for buffered response paths that do not use UsageSniffer;
+// it keeps the cassette layout's stored-body length in step with the file.
+func (info *LogInfo) WriteResponseBody(p []byte) (int, error) {
+	written, err := info.RecordResponseBody(p)
+	if info != nil {
+		info.Header.Layout.ResBodyLen += int64(written)
+	}
+	return written, err
 }
 
 type PrepareOptions struct {
@@ -87,26 +173,100 @@ type PrepareOptions struct {
 	WireModel string
 }
 
+const DefaultResponseBodyLimitBytes = int64(256 << 20)
+
+const diskSpaceCheckInterval = time.Second
+
 type Recorder struct {
 	OutputDir string
 	// MaskKey is retained for source/config compatibility. Cassette recording
 	// always preserves the original HTTP request, regardless of this legacy
 	// option; raw recordings are protected with restrictive file permissions.
-	MaskKey   bool
-	store     *store.Store
-	finalizer *asyncFinalizer
-	audit     *asyncMaskAuditWriter
+	MaskKey bool
+
+	store                    *store.Store
+	finalizer                *asyncFinalizer
+	audit                    *asyncMaskAuditWriter
+	responseBodyLimitBytes   int64
+	minFreeBytes             int64
+	diskSpaceAvailable       func(string) (int64, error)
+	diskSpaceMu              sync.Mutex
+	diskSpaceCheckedAt       time.Time
+	diskSpaceCurrentlyEnough bool
+	diskSpaceWarningLogged   bool
+	diskSpaceErrorLogged     bool
 }
 
 func New(outputDir string, maskKey bool, st *store.Store) *Recorder {
 	r := &Recorder{
-		OutputDir: outputDir,
-		MaskKey:   maskKey,
-		store:     st,
+		OutputDir:              outputDir,
+		MaskKey:                maskKey,
+		store:                  st,
+		responseBodyLimitBytes: DefaultResponseBodyLimitBytes,
+		diskSpaceAvailable:     availableDiskBytes,
 	}
 	r.finalizer = newAsyncFinalizer(r.UpdateLogFile, DefaultFinalizeWorkers, DefaultFinalizeQueueDepth)
 	r.audit = newAsyncMaskAuditWriter(r.persistMaskAudit, DefaultAuditWorkers, DefaultAuditQueueDepth)
 	return r
+}
+
+// SetResponseBodyLimitBytes configures the maximum response bytes retained in a
+// cassette. Non-positive values restore the bounded default.
+func (r *Recorder) SetResponseBodyLimitBytes(limit int64) {
+	if r == nil {
+		return
+	}
+	if limit <= 0 {
+		limit = DefaultResponseBodyLimitBytes
+	}
+	r.responseBodyLimitBytes = limit
+}
+
+// SetMinFreeBytes pauses response-body cassette writes when the trace filesystem
+// drops below a low-water mark. Request delivery and usage parsing continue.
+func (r *Recorder) SetMinFreeBytes(minimum int64) {
+	if r == nil {
+		return
+	}
+	r.minFreeBytes = minimum
+}
+
+func (r *Recorder) canRecordResponseBody() bool {
+	if r == nil || r.minFreeBytes <= 0 {
+		return true
+	}
+	now := time.Now()
+	r.diskSpaceMu.Lock()
+	defer r.diskSpaceMu.Unlock()
+	if !r.diskSpaceCheckedAt.IsZero() && now.Sub(r.diskSpaceCheckedAt) < diskSpaceCheckInterval {
+		return r.diskSpaceCurrentlyEnough
+	}
+	r.diskSpaceCheckedAt = now
+	check := r.diskSpaceAvailable
+	if check == nil {
+		check = availableDiskBytes
+	}
+	freeBytes, err := check(r.OutputDir)
+	if err != nil {
+		if !r.diskSpaceErrorLogged {
+			slog.Warn("Unable to inspect trace filesystem free space; response recording will continue", "trace_output_dir", r.OutputDir, "error", err)
+			r.diskSpaceErrorLogged = true
+		}
+		r.diskSpaceCurrentlyEnough = true
+		return true
+	}
+	allowed := freeBytes > r.minFreeBytes
+	r.diskSpaceCurrentlyEnough = allowed
+	if !allowed && !r.diskSpaceWarningLogged {
+		slog.Warn("Trace filesystem is below the configured free-space watermark; response bodies will continue to clients but cassette body writes are being paused",
+			"trace_output_dir", r.OutputDir, "available_bytes", freeBytes, "minimum_free_bytes", r.minFreeBytes)
+		r.diskSpaceWarningLogged = true
+	} else if allowed && r.diskSpaceWarningLogged {
+		slog.Info("Trace filesystem recovered above the configured free-space watermark; cassette response recording resumed",
+			"trace_output_dir", r.OutputDir, "available_bytes", freeBytes, "minimum_free_bytes", r.minFreeBytes)
+		r.diskSpaceWarningLogged = false
+	}
+	return allowed
 }
 
 // SubmitLogFile finalises a completed recording on the background finalize
@@ -220,6 +380,63 @@ func tracePathSegment(value string, limit int) string {
 	return joined
 }
 
+// ensurePrivateCassetteDirectories creates every directory below the configured
+// cassette root with owner-only access and repairs permissions on pre-existing
+// cassette subdirectories. The operator-owned root itself is left untouched: a
+// deployment may intentionally point it at a shared parent, and chmodding that
+// parent could unexpectedly hide unrelated files. Cassettes are always below
+// private host/model/date directories.
+func ensurePrivateCassetteDirectories(rootPath, leafPath string) error {
+	rootPath = strings.TrimSpace(rootPath)
+	if rootPath == "" {
+		// An empty trace.output_dir historically means paths are relative to the
+		// process working directory; preserve that behavior explicitly rather
+		// than letting filepath.Clean("") obscure the boundary check.
+		rootPath = "."
+	}
+	rootPath = filepath.Clean(rootPath)
+	leafPath = filepath.Clean(leafPath)
+	if err := os.MkdirAll(rootPath, 0o700); err != nil {
+		return fmt.Errorf("create trace output directory: %w", err)
+	}
+	rootInfo, err := os.Lstat(rootPath)
+	if err != nil {
+		return fmt.Errorf("inspect trace output directory: %w", err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return errors.New("trace output path must be a real directory, not a symlink or file")
+	}
+	rel, err := filepath.Rel(rootPath, leafPath)
+	if err != nil {
+		return fmt.Errorf("resolve cassette directory: %w", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return errors.New("cassette directory is outside the trace output root")
+	}
+
+	current := rootPath
+	for _, component := range strings.Split(rel, string(filepath.Separator)) {
+		if component == "" || component == "." || component == ".." {
+			return errors.New("cassette directory contains an unsafe path component")
+		}
+		current = filepath.Join(current, component)
+		if err := os.Mkdir(current, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("create cassette directory %s: %w", current, err)
+		}
+		info, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("inspect cassette directory %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("cassette path component %s is not a real directory", current)
+		}
+		if err := os.Chmod(current, 0o700); err != nil {
+			return fmt.Errorf("restrict cassette directory %s: %w", current, err)
+		}
+	}
+	return nil
+}
+
 // PrepareLogFileWithOptionsAndBody prepares the cassette for one exchange. The
 // caller passes the body it already read; the recorder never reads req.Body.
 // When RawRequest/RawRequestBody are set, the cassette stores those ingress
@@ -269,20 +486,14 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		now.Format("01"),
 		now.Format("02"),
 	)
-	if err := os.MkdirAll(dirPath, 0o700); err != nil {
-		return nil, err
-	}
-	// Existing directories may have been created by an older version with
-	// broader permissions. The leaf directory contains raw requests and is
-	// always private, even when the deprecated mask_key option is set.
-	if err := os.Chmod(dirPath, 0o700); err != nil {
+	if err := ensurePrivateCassetteDirectories(r.OutputDir, dirPath); err != nil {
 		return nil, err
 	}
 
 	fileName := fmt.Sprintf("%s_%d.http", now.Format("20060102_150405"), now.Nanosecond())
 	logPath := filepath.Join(dirPath, fileName)
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -387,11 +598,13 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 	}
 
 	return &LogInfo{
-		File:            f,
-		Path:            logPath,
-		Header:          header,
-		Events:          events,
-		MinimalCassette: opts.MinimalCassette,
+		File:                   f,
+		Path:                   logPath,
+		Header:                 header,
+		Events:                 events,
+		MinimalCassette:        opts.MinimalCassette,
+		ResponseBodyLimitBytes: r.responseBodyLimitBytes,
+		canRecordResponseBody:  r.canRecordResponseBody,
 	}, nil
 }
 
@@ -570,6 +783,21 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	}
 	defer info.File.Close()
 
+	originalResponseHeaderLen := info.Header.Layout.ResHeaderLen
+	var replacementResponseHeader []byte
+	if info.ResponseBodyTruncatedBytes > 0 {
+		info.Header.Layout.ResBodyTruncatedBytes = info.ResponseBodyTruncatedBytes
+		info.Events = append(info.Events, responseBodyTruncatedEvent(info))
+		var err error
+		replacementResponseHeader, err = truncatedResponseHeader(info, originalResponseHeaderLen)
+		if err != nil {
+			return fmt.Errorf("adjust truncated cassette response headers: %w", err)
+		}
+		if replacementResponseHeader != nil {
+			info.Header.Layout.ResHeaderLen = int64(len(replacementResponseHeader))
+		}
+	}
+
 	events := recordfile.BuildEvents(info.Header)
 	if len(info.Events) > 0 {
 		events = append(events, info.Events...)
@@ -596,7 +824,7 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	// it over the original: a recording is as large as the response body it holds,
 	// and neither of those should have to fit in memory or be briefly visible as a
 	// truncated file.
-	requestHead, err := prependPrelude(info, prelude)
+	requestHead, err := prependPrelude(info, prelude, originalResponseHeaderLen, replacementResponseHeader)
 	if err != nil {
 		return err
 	}
@@ -659,13 +887,95 @@ func (r *Recorder) writeCredentialMaskAudit(traceID string, info *LogInfo) {
 	}
 }
 
+func responseBodyTruncatedEvent(info *LogInfo) RecordEvent {
+	reasons := make([]string, 0, 2)
+	if info.ResponseBodyLimitHit {
+		reasons = append(reasons, "size_limit")
+	}
+	if info.MinFreeSpaceHit {
+		reasons = append(reasons, "min_free_space")
+	}
+	if info.ResponseBodyWriteFailed {
+		reasons = append(reasons, "cassette_write_error")
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "unspecified")
+	}
+	return RecordEvent{
+		Type:    "recording.response_body_truncated",
+		Time:    time.Now().UTC(),
+		Message: "the full response was delivered to the client; this cassette contains only the recorded prefix",
+		Attributes: map[string]interface{}{
+			"recorded_bytes": info.Header.Layout.ResBodyLen,
+			"omitted_bytes":  info.ResponseBodyTruncatedBytes,
+			"limit_bytes":    info.ResponseBodyLimitBytes,
+			"reason":         strings.Join(reasons, ","),
+		},
+	}
+}
+
+// truncatedResponseHeader fixes a declared Content-Length when the cassette
+// body intentionally contains only a prefix. Without this adjustment replay
+// would wait for bytes that the size/disk guard deliberately did not retain.
+// Other response headers, including the raw client request elsewhere in the
+// cassette, are left untouched.
+func truncatedResponseHeader(info *LogInfo, headerLen int64) ([]byte, error) {
+	if info == nil || info.File == nil || headerLen <= 0 {
+		return nil, nil
+	}
+	if headerLen > 1<<20 {
+		return nil, fmt.Errorf("response header length %d exceeds 1 MiB safety bound", headerLen)
+	}
+	header := make([]byte, headerLen)
+	offset := info.Header.Layout.ReqHeaderLen + info.Header.Layout.ReqBodyLen + 1
+	n, err := info.File.ReadAt(header, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if n != len(header) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	if !bytes.HasSuffix(header, []byte("\r\n\r\n")) {
+		return nil, errors.New("response header block is not CRLF-terminated")
+	}
+
+	lines := bytes.Split(header, []byte("\r\n"))
+	changed := false
+	for i, line := range lines {
+		colon := bytes.IndexByte(line, ':')
+		if colon <= 0 || !strings.EqualFold(strings.TrimSpace(string(line[:colon])), "Content-Length") {
+			continue
+		}
+		value := line[colon+1:]
+		leading := 0
+		for leading < len(value) && (value[leading] == ' ' || value[leading] == '\t') {
+			leading++
+		}
+		trailing := len(value)
+		for trailing > leading && (value[trailing-1] == ' ' || value[trailing-1] == '\t') {
+			trailing--
+		}
+		rewritten := make([]byte, 0, colon+1+leading+32+len(value)-trailing)
+		rewritten = append(rewritten, line[:colon+1]...)
+		rewritten = append(rewritten, value[:leading]...)
+		rewritten = strconv.AppendInt(rewritten, info.Header.Layout.ResBodyLen, 10)
+		rewritten = append(rewritten, value[trailing:]...)
+		lines[i] = rewritten
+		changed = true
+	}
+	if !changed {
+		return nil, nil
+	}
+	return bytes.Join(lines, []byte("\r\n")), nil
+}
+
 // prependPrelude rewrites the cassette at info.Path as prelude followed by the
 // record it already holds, and returns the request header block it read back on
 // the way. The record is copied with io.Copy through a temporary file in the same
 // directory and renamed into place, so the memory cost is the copy buffer rather
 // than the recording, and a reader sees either the previous complete file or the
 // new one instead of the truncated window a rewrite in place would expose.
-func prependPrelude(info *LogInfo, prelude []byte) ([]byte, error) {
+func prependPrelude(info *LogInfo, prelude []byte, originalResponseHeaderLen int64, replacementResponseHeader []byte) ([]byte, error) {
 	tmp, err := os.CreateTemp(filepath.Dir(info.Path), ".cassette-rewrite-*")
 	if err != nil {
 		return nil, err
@@ -690,6 +1000,32 @@ func prependPrelude(info *LogInfo, prelude []byte) ([]byte, error) {
 	if _, err := info.File.Seek(0, io.SeekStart); err != nil {
 		discard()
 		return nil, err
+	}
+	responseStart := info.Header.Layout.ReqHeaderLen + info.Header.Layout.ReqBodyLen + 1
+	if responseStart < 0 || originalResponseHeaderLen < 0 {
+		discard()
+		return nil, errors.New("cassette section lengths must not be negative")
+	}
+	if _, err := io.CopyN(tmp, info.File, responseStart); err != nil {
+		discard()
+		return nil, fmt.Errorf("copy cassette request section: %w", err)
+	}
+	if replacementResponseHeader != nil {
+		n, err := tmp.Write(replacementResponseHeader)
+		if err == nil && n != len(replacementResponseHeader) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			discard()
+			return nil, fmt.Errorf("write truncated cassette response header: %w", err)
+		}
+		if _, err := info.File.Seek(responseStart+originalResponseHeaderLen, io.SeekStart); err != nil {
+			discard()
+			return nil, err
+		}
+	} else if _, err := io.CopyN(tmp, info.File, originalResponseHeaderLen); err != nil {
+		discard()
+		return nil, fmt.Errorf("copy cassette response header: %w", err)
 	}
 	if _, err := io.Copy(tmp, info.File); err != nil {
 		discard()

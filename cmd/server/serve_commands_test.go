@@ -256,13 +256,20 @@ func TestManagementMuxServesStreamableMCP(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
+	authStore := newTestAuthStore(t)
+	defer authStore.Close()
+	token, err := authStore.CreateToken(context.Background(), "admin", "mcp-test", auth.ScopeMCP, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
 
-	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil))
+	httpServer := httptest.NewServer(newManagementMuxWithSecretMappings(st, nil, cfg, nil, nil, nil, nil, nil, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
-		Endpoint: httpServer.URL + "/mcp",
+		Endpoint:   httpServer.URL + "/mcp",
+		HTTPClient: &http.Client{Transport: authTransport{Token: token.Token}},
 	}, nil)
 	if err != nil {
 		t.Fatalf("client.Connect() error = %v", err)

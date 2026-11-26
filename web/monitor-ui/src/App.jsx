@@ -5,7 +5,7 @@ import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RealtimeProvider } from "./components/RealtimeProvider";
-import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
+import { apiPaths, postJSON, requestJSON } from "./lib/api";
 import { useI18n } from "./lib/i18n";
 import { AccessPage } from "./routes/AccessPage";
 import { ProviderDetailPage } from "./routes/ChannelDetailPage";
@@ -36,6 +36,14 @@ function App() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
+    // Remove bearer tokens stored by older Monitor bundles. New sessions live
+    // only in an HttpOnly cookie and are never exposed to JavaScript.
+    try {
+      window.localStorage.removeItem("trajecta.monitor.token");
+    } catch {
+      // Storage may be disabled; the cookie-based auth flow does not depend on it.
+    }
+
     let cancelled = false;
 
     async function resolveAuth() {
@@ -75,9 +83,8 @@ function App() {
     event.preventDefault();
     if (username.trim() && password) {
       try {
-        const payload = await postJSON(apiPaths.authLogin, { username, password });
-        window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
-        const user = await requestJSON(apiPaths.authMe).catch(() => ({ username: username.trim(), role: "admin", scope: "all" }));
+        await postJSON(apiPaths.authLogin, { username, password });
+        const user = await requestJSON(apiPaths.authMe);
         setAuth({ loading: false, required: true, authorized: true, error: "", user });
         setPassword("");
       } catch {
@@ -88,8 +95,12 @@ function App() {
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.enterCredentials"), user: null });
   };
 
-  const logout = () => {
-    window.localStorage.removeItem(MONITOR_TOKEN_KEY);
+  const logout = async () => {
+    try {
+      await postJSON(apiPaths.authLogout, {});
+    } catch {
+      // Expire the in-memory session even if the server is already offline.
+    }
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
   };
 
@@ -116,7 +127,7 @@ function App() {
 
   return (
     // Inside the authenticated branch on purpose: an unauthenticated console has
-    // nothing to subscribe to, and the socket's token comes from the login.
+    // nothing to subscribe to, and same-origin sockets inherit the HttpOnly cookie.
     <RealtimeProvider>
       <AppShell user={auth.user} onLogout={logout}>
         <MonitorErrorBoundary key={location.pathname}>

@@ -1114,6 +1114,58 @@ server:
 	}
 }
 
+func TestServerAndTraceStorageLimitsLoadFromConfig(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, `
+server:
+  port: "8080"
+  retry_wait_queue_capacity: 7
+trace:
+  output_dir: ./trace
+  response_body_limit_bytes: 4096
+  retention_days: 14
+  min_free_bytes: 8192
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.ServerRetryWaitQueueCapacity(); got != 7 {
+		t.Fatalf("ServerRetryWaitQueueCapacity() = %d, want 7", got)
+	}
+	if got := cfg.TraceResponseBodyLimitBytes(); got != 4096 {
+		t.Fatalf("TraceResponseBodyLimitBytes() = %d, want 4096", got)
+	}
+	if got := cfg.TraceRetentionDays(); got != 14 {
+		t.Fatalf("TraceRetentionDays() = %d, want 14", got)
+	}
+	if got := cfg.TraceMinFreeBytes(); got != 8192 {
+		t.Fatalf("TraceMinFreeBytes() = %d, want 8192", got)
+	}
+}
+
+func TestServerAndTraceStorageLimitsDefaults(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, `
+server:
+  port: "8080"
+trace:
+  output_dir: ./trace
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.ServerRetryWaitQueueCapacity(); got != DefaultRetryWaitQueueCapacity {
+		t.Fatalf("ServerRetryWaitQueueCapacity() = %d, want %d", got, DefaultRetryWaitQueueCapacity)
+	}
+	if got := cfg.TraceResponseBodyLimitBytes(); got != DefaultCassetteResponseBodyLimit {
+		t.Fatalf("TraceResponseBodyLimitBytes() = %d, want %d", got, DefaultCassetteResponseBodyLimit)
+	}
+	if got := cfg.TraceRetentionDays(); got != 0 {
+		t.Fatalf("TraceRetentionDays() = %d, want disabled value 0", got)
+	}
+	if got := cfg.TraceMinFreeBytes(); got != 0 {
+		t.Fatalf("TraceMinFreeBytes() = %d, want disabled value 0", got)
+	}
+}
+
 func TestServerTimeoutsHonourEnvOverrides(t *testing.T) {
 	t.Setenv("TRAJECTA_SERVER_READ_TIMEOUT", "11s")
 	t.Setenv("TRAJECTA_SERVER_WRITE_TIMEOUT", "12s")

@@ -99,16 +99,11 @@ type aggregatedModelTopProvider struct {
 	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
 }
 
-const (
-	upstreamRetryBudget       = 30 * time.Second
-	upstreamRetryWaitCapacity = 16
-)
+const upstreamRetryBudget = 30 * time.Second
 
 type retrySleeper func(context.Context, time.Duration) bool
 
 var sleepForRetry retrySleeper = defaultSleepForRetry
-
-var upstreamRetryWaitSlots = make(chan struct{}, upstreamRetryWaitCapacity)
 
 type limitDecision struct {
 	Scope    string
@@ -285,14 +280,15 @@ func (rw *InstrumentedResponseWriter) GetMetrics() (int, int64, int64) {
 }
 
 type Handler struct {
-	transport    *http.Transport
-	recorder     *recorder.Recorder
-	chaosManager *chaos.Manager
-	cfg          *config.Config
-	router       *router.Router
-	authVerifier auth.TokenVerifier
-	limiter      *limit.Limiter
-	store        *store.Store
+	transport      *http.Transport
+	recorder       *recorder.Recorder
+	chaosManager   *chaos.Manager
+	cfg            *config.Config
+	router         *router.Router
+	authVerifier   auth.TokenVerifier
+	limiter        *limit.Limiter
+	store          *store.Store
+	retryWaitSlots chan struct{}
 
 	responsesPath    string
 	responsesBuilder func() (http.Handler, error)
@@ -456,6 +452,8 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	// somewhere other than the configured directory, and a read-only working directory failed
 	// every request, because a recording error returns 500.
 	rec := recorder.New(cfg.TraceOutputDir(), cfg.Debug.MaskKey, st)
+	rec.SetResponseBodyLimitBytes(cfg.TraceResponseBodyLimitBytes())
+	rec.SetMinFreeBytes(cfg.TraceMinFreeBytes())
 	cm := chaos.New(cfg)
 	localLimiter := limit.New(limit.Config{
 		MaxConcurrent: cfg.Limits.MaxConcurrent,
@@ -589,6 +587,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		router:           rtr,
 		store:            st,
 		limiter:          localLimiter,
+		retryWaitSlots:   make(chan struct{}, cfg.ServerRetryWaitQueueCapacity()),
 		responsesPath:    responsesPath,
 		responsesBuilder: buildLocalResponses,
 		secretVault:      secretVault,
@@ -816,7 +815,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeRequestBodyError(w, r, &http.MaxBytesError{Limit: limit})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
 	}
 
 	if h.rejectUnauthorizedRequest(w, r) {
@@ -873,7 +874,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 	defer func() {
 		if waitSlotHeld {
-			releaseRetryWaitSlot()
+			h.releaseRetryWaitSlot()
 		}
 	}()
 
@@ -896,7 +897,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if selErr != nil {
 			if router.SelectionFailureReason(selErr) == router.SelectionFailureAllTargetsOpen && time.Now().Before(retryDeadline) {
 				if !waitSlotHeld {
-					if !tryAcquireRetryWaitSlot() {
+					if !h.tryAcquireRetryWaitSlot() {
 						retryEvents = append(retryEvents, retryEvent("routing.retry_queue_saturated", retryAttempt, 0, "", 0, "all_targets_open", false))
 						slog.Warn("Upstream retry wait queue saturated")
 						h.recordSelectionFailureWithBody(r, start, http.StatusServiceUnavailable, selErr, bodyBytes, retryEvents, cassetteCapture)
@@ -2190,18 +2191,24 @@ func filteredCandidateCount(candidates []router.CandidateDecision) int {
 	return count
 }
 
-func tryAcquireRetryWaitSlot() bool {
+func (h *Handler) tryAcquireRetryWaitSlot() bool {
+	if h == nil || h.retryWaitSlots == nil {
+		return false
+	}
 	select {
-	case upstreamRetryWaitSlots <- struct{}{}:
+	case h.retryWaitSlots <- struct{}{}:
 		return true
 	default:
 		return false
 	}
 }
 
-func releaseRetryWaitSlot() {
+func (h *Handler) releaseRetryWaitSlot() {
+	if h == nil || h.retryWaitSlots == nil {
+		return
+	}
 	select {
-	case <-upstreamRetryWaitSlots:
+	case <-h.retryWaitSlots:
 	default:
 	}
 }
@@ -2317,7 +2324,7 @@ func (h *Handler) writeUpstreamResponse(
 	responsePipeline := gateway.NewResponsePipeline(gateway.ResponsePipelineOptions{
 		Upstream:    resp.Body,
 		Vault:       h.secretVault,
-		File:        logInfo.File,
+		File:        logInfo,
 		Count:       &logInfo.Header.Layout.ResBodyLen,
 		Usage:       &logInfo.Usage,
 		RecordUsage: &logInfo.Header.Usage,
@@ -2497,7 +2504,7 @@ func (h *Handler) writeSyntheticAnthropicCountTokens(
 		writeProxyError(irw, r, http.StatusInternalServerError, "internal_error", "failed to record count_tokens response")
 		return
 	}
-	nBody, err := logInfo.File.Write(responseBody)
+	nBody, err := logInfo.WriteResponseBody(responseBody)
 	if err != nil {
 		slog.Error("Failed to write synthetic count_tokens response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
@@ -2943,7 +2950,7 @@ func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request
 		_ = logInfo.File.Close()
 		return
 	}
-	nBody, err := logInfo.File.Write(body)
+	nBody, err := logInfo.WriteResponseBody(body)
 	if err != nil {
 		slog.Error("Failed to write synthetic model-info response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
@@ -3039,7 +3046,7 @@ func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statu
 		_ = logInfo.File.Close()
 		return
 	}
-	nBody, err := logInfo.File.Write(body)
+	nBody, err := logInfo.WriteResponseBody(body)
 	if err != nil {
 		slog.Error("Failed to write selection-failure response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
@@ -3263,7 +3270,7 @@ func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time,
 		_ = logInfo.File.Close()
 		return
 	}
-	nBody, err := logInfo.File.Write(body)
+	nBody, err := logInfo.WriteResponseBody(body)
 	if err != nil {
 		slog.Error("Failed to write limit-rejection response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()

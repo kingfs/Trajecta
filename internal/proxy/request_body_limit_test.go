@@ -59,7 +59,7 @@ func newBodyLimitHandler(t *testing.T, limit int64) (*Handler, *[]int, string) {
 	cfg.Debug.MaskKey = true
 	cfg.ResponsesServer.MaxRequestBodyBytes = limit
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

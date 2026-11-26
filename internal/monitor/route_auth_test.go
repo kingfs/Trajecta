@@ -35,11 +35,10 @@ func (rejectingTokenVerifier) VerifyToken(context.Context, string) (auth.Princip
 // a checked invariant instead of a property of how each route happens to be registered.
 //
 // RegisterRoutes wraps every route in monitorAuthRequired individually, so a new route that
-// forgets the wrapper would silently serve data to an unauthenticated caller - and because
-// monitorAuthRequired returns the handler unchanged when no verifier is configured, the same
-// route behaves as public in a deployment without an auth store. The test reads the patterns
-// out of the registration function itself (so a route cannot be missed by not being listed)
-// and then asks the real mux for each one with a verifier that rejects every token.
+// forgets the wrapper would silently serve data to an unauthenticated caller. A missing verifier
+// fails closed with 503; this test uses a configured verifier that rejects every token and asks
+// the real mux for every pattern read from the registration function itself (so a route cannot
+// be missed by not being listed).
 //
 // A registration whose pattern is not a string literal fails the test rather than being
 // skipped: a dynamic pattern could otherwise hide a route from this check entirely.
@@ -77,12 +76,16 @@ func TestEveryMonitorAPIRouteRequiresAuthentication(t *testing.T) {
 				// A subtree pattern does not match its own prefix without a child path.
 				path += "unauthenticated-probe"
 			}
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			method := http.MethodGet
+			if path == "/api/auth/logout" {
+				method = http.MethodPost
+			}
+			req := httptest.NewRequest(method, path, nil)
 			rr := httptest.NewRecorder()
 			mux.ServeHTTP(rr, req)
 			if rr.Code != http.StatusUnauthorized {
-				t.Fatalf("GET %s without credentials = %d, want %d; body=%s",
-					path, rr.Code, http.StatusUnauthorized, rr.Body.String())
+				t.Fatalf("%s %s without credentials = %d, want %d; body=%s",
+					method, path, rr.Code, http.StatusUnauthorized, rr.Body.String())
 			}
 		})
 	}

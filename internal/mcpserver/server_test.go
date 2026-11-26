@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	responsesaudit "github.com/kingfs/Trajecta/internal/responses/audit"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/observe"
@@ -19,6 +20,7 @@ import (
 
 func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	t.Parallel()
+	ctx := mcpTestAdminContext()
 
 	outputDir := t.TempDir()
 	sessionID := "sess-mcp"
@@ -248,7 +250,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 
 	server := New(st, Options{})
-	session, err := connectClient(context.Background(), server)
+	session, err := connectClient(ctx, server)
 	if err != nil {
 		t.Fatalf("connectClient() error = %v", err)
 	}
@@ -262,7 +264,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("len(tools.Tools) = %d, want 22", len(tools.Tools))
 	}
 
-	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	traceList, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_traces",
 		Arguments: map[string]any{"page_size": 10},
 	})
@@ -285,7 +287,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("list_traces observation metadata missing: %+v", items[0])
 	}
 
-	unparsedTraces, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	unparsedTraces, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_traces",
 		Arguments: map[string]any{"page_size": 10, "observation": "unparsed"},
 	})
@@ -312,7 +314,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("list_traces unparsed missing failure trace %q", failureEntry.ID)
 	}
 
-	traceDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	traceDetail, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_trace",
 		Arguments: map[string]any{"trace_id": traceID, "include_raw": true},
 	})
@@ -327,7 +329,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("get_trace.raw missing")
 	}
 
-	routingDecisions, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	routingDecisions, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_routing_decisions",
 		Arguments: map[string]any{"trace_id": successEntry.ID},
 	})
@@ -348,7 +350,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_routing_decisions events empty")
 	}
 
-	credentialRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	credentialRouting, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_routing_decisions",
 		Arguments: map[string]any{"trace_id": credentialEntry.ID},
 	})
@@ -369,7 +371,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("credential selected_credential_id = %q, want cred-a", got)
 	}
 
-	responsesAudit, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	responsesAudit, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "responses_audit_trace",
 		Arguments: map[string]any{"response_id": "resp-mcp-1"},
 	})
@@ -460,7 +462,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("responses_audit_trace raw cassette status_code = %d, want %d", got, want)
 	}
 
-	responsesAuditByRequest, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	responsesAuditByRequest, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "responses_audit_trace",
 		Arguments: map[string]any{"request_audit_id": "reqaudit-mcp-1"},
 	})
@@ -472,7 +474,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("responses_audit_trace request lookup response_id = %q, want resp-mcp-1", got)
 	}
 
-	stickyRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	stickyRouting, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "query_sticky_routing",
 		Arguments: map[string]any{
 			"status":                 "break",
@@ -512,7 +514,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_sticky_routing leaked raw sticky key: %+v", stickyPayload)
 	}
 
-	credentialSticky, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	credentialSticky, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_sticky_routing",
 		Arguments: map[string]any{"sticky_key_fingerprint": "sticky-fp-credential"},
 	})
@@ -540,7 +542,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("credential sticky previous_credential_id = %q, want cred-a", got)
 	}
 
-	stickyNoMatch, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	stickyNoMatch, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_sticky_routing",
 		Arguments: map[string]any{"sticky_key_fingerprint": "missing-fp"},
 	})
@@ -551,7 +553,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_sticky_routing no match total = %d, want 0", got)
 	}
 
-	traceFindings, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	traceFindings, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_trace_findings",
 		Arguments: map[string]any{"trace_id": failureEntry.ID, "severity": "high"},
 	})
@@ -563,7 +565,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("list_trace_findings.total = %d, want 2", got)
 	}
 
-	dangerous, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	dangerous, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_dangerous_tool_calls",
 		Arguments: map[string]any{"trace_id": failureEntry.ID},
 	})
@@ -574,7 +576,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_dangerous_tool_calls.total = %d, want 1", got)
 	}
 
-	sensitive, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	sensitive, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_sensitive_data_findings",
 		Arguments: map[string]any{"trace_id": failureEntry.ID},
 	})
@@ -585,7 +587,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_sensitive_data_findings.total = %d, want 1", got)
 	}
 
-	sessionList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	sessionList, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_sessions",
 		Arguments: map[string]any{"page_size": 10},
 	})
@@ -597,7 +599,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("len(list_sessions.items) = %d, want 1", len(sessionItems))
 	}
 
-	upstreams, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	upstreams, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_upstreams",
 		Arguments: map[string]any{"window": "all"},
 	})
@@ -612,7 +614,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("len(list_upstreams.items) = %d, want 0 without a router", len(upstreamItems))
 	}
 
-	failures, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	failures, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_failures",
 		Arguments: map[string]any{"page_size": 10},
 	})
@@ -645,7 +647,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_failures credential_id = %q, want cred-a", got)
 	}
 
-	failureClusters, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	failureClusters, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "summarize_failure_clusters",
 		Arguments: map[string]any{"page_size": 10},
 	})
@@ -666,7 +668,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("summarize_failure_clusters credential route_target_id = %q, want openai-primary:cred-a", got)
 	}
 
-	systemEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	systemEvents, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_system_events",
 		Arguments: map[string]any{"status": "unread", "source": "parser", "page_size": 10, "window": "all"},
 	})
@@ -682,7 +684,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("list_system_events id = %q, want %q", got, parserEvent.ID)
 	}
 
-	systemEventDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	systemEventDetail, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_system_event",
 		Arguments: map[string]any{"event_id": parserEvent.ID, "include_details": true},
 	})
@@ -697,7 +699,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("get_system_event.details_json missing")
 	}
 
-	systemEventSummary, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	systemEventSummary, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "summarize_system_events",
 		Arguments: map[string]any{"window": "all"},
 	})
@@ -712,7 +714,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("summarize_system_events.newest empty")
 	}
 
-	unreadEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	unreadEvents, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "query_unread_system_events",
 		Arguments: map[string]any{"limit": 10, "min_severity": "error"},
 	})
@@ -730,7 +732,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		}
 	}
 
-	reanalyzeTrace, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	reanalyzeTrace, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "reanalyze_trace",
 		Arguments: map[string]any{"trace_id": failureEntry.ID},
 	})
@@ -743,7 +745,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("reanalyze_trace job = %+v", traceJob)
 	}
 
-	reanalyzeSession, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	reanalyzeSession, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "reanalyze_session",
 		Arguments: map[string]any{"session_id": sessionID, "async": true},
 	})
@@ -755,7 +757,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("reanalyze_session job id = 0")
 	}
 
-	analysisJobs, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	analysisJobs, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_analysis_jobs",
 		Arguments: map[string]any{"target_type": "session", "target_id": sessionID},
 	})
@@ -767,7 +769,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("len(list_analysis_jobs.items) = %d, want 1", len(jobItems))
 	}
 
-	analysisJob, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	analysisJob, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_analysis_job",
 		Arguments: map[string]any{"job_id": sessionJobID},
 	})
@@ -787,7 +789,7 @@ func TestResponsesAuditToolCallsTool(t *testing.T) {
 	}
 	defer st.Close()
 
-	ctx := context.Background()
+	ctx := mcpTestAdminContext()
 	base := time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)
 	if err := st.EntClient().RequestAudit.Create().
 		SetID("reqaudit-mcp-tool-1").
@@ -872,6 +874,15 @@ func TestResponsesAuditToolCallsTool(t *testing.T) {
 	if !strings.Contains(fmt.Sprintf("%v", payload), "SECRET_MARKER_MCP") {
 		t.Fatalf("include_payloads MCP response missing secret marker: %+v", payload)
 	}
+}
+
+func mcpTestAdminContext() context.Context {
+	return auth.WithPrincipal(context.Background(), auth.Principal{
+		UserID:   1,
+		Username: "mcp-test-admin",
+		Role:     auth.RoleAdmin,
+		Scope:    auth.ScopeMCP,
+	})
 }
 
 func connectClient(ctx context.Context, server *mcp.Server) (*mcp.ClientSession, error) {
@@ -1180,6 +1191,7 @@ func TestClassifyFailureReasonSeparatesRetryQueueSaturation(t *testing.T) {
 // and dropped it would look like it worked while returning every trace.
 func TestListTracesToolPassesHarnessFilter(t *testing.T) {
 	t.Parallel()
+	ctx := mcpTestAdminContext()
 
 	outputDir := t.TempDir()
 	for _, spec := range []fixtureSpec{
@@ -1202,7 +1214,7 @@ func TestListTracesToolPassesHarnessFilter(t *testing.T) {
 	}
 
 	server := New(st, Options{})
-	session, err := connectClient(context.Background(), server)
+	session, err := connectClient(ctx, server)
 	if err != nil {
 		t.Fatalf("connectClient() error = %v", err)
 	}
@@ -1210,7 +1222,7 @@ func TestListTracesToolPassesHarnessFilter(t *testing.T) {
 
 	list := func(args map[string]any) []any {
 		t.Helper()
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_traces", Arguments: args})
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_traces", Arguments: args})
 		if err != nil {
 			t.Fatalf("CallTool(list_traces %v) error = %v", args, err)
 		}

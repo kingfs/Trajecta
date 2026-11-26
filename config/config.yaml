@@ -1,5 +1,11 @@
 server:
   port: "8080"
+  # Leave TLS disabled when a trusted reverse proxy terminates HTTPS. To serve
+  # HTTPS directly, set both cert and key; they apply to proxy and Monitor.
+  tls_cert: ""
+  tls_key: ""
+  # Concurrent handlers allowed to wait for an all-open router before retrying.
+  retry_wait_queue_capacity: 16
 
 # Observation-detector lane. The enabled detectors in `plugins.detectors` run on
 # every freshly parsed cassette and persist their findings; set false to keep
@@ -26,6 +32,8 @@ mcp:
 
 auth:
   session_ttl: 24h
+  # Secure, HttpOnly, SameSite=Lax Monitor session cookie. Keep true in production.
+  cookie_secure: true
 
 database:
   driver: "postgres"
@@ -66,6 +74,13 @@ database:
 
 trace:
   output_dir: "./data/traces"
+  # Maximum response-body bytes written to any one cassette. The full response
+  # still reaches the client; a truncated recording is marked in its prelude.
+  response_body_limit_bytes: 268435456
+  # Delete indexed traces and cassettes older than this age once per day; 0 disables it.
+  retention_days: 0
+  # Optional disk low-water mark. 0 disables it; proxy delivery continues if recording stops.
+  min_free_bytes: 0
   # How often the background reconciliation walks the cassette directory. A
   # cassette is indexed when it is written, so this is a backstop for files that
   # appeared while the process was down; on a large install each pass re-reads

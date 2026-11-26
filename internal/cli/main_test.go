@@ -1479,7 +1479,18 @@ func TestAuthCreateTokenDryRunValidatesAndNormalizesScope(t *testing.T) {
 	}); code != 0 {
 		t.Fatalf("legacy api-scope dry-run code = %d, want 0", code)
 	}
-	if !strings.Contains(legacyOut.String(), `"scope":"all"`) {
+	var legacyEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			DryRun  bool   `json:"dry_run"`
+			Mutated bool   `json:"mutated"`
+			Scope   string `json:"scope"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(legacyOut.Bytes(), &legacyEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, result=%s", err, legacyOut.String())
+	}
+	if !legacyEnvelope.OK || !legacyEnvelope.Result.DryRun || legacyEnvelope.Result.Mutated || legacyEnvelope.Result.Scope != auth.ScopeAll {
 		t.Fatalf("legacy api-scope dry-run result = %s, want normalized all scope", legacyOut.String())
 	}
 }

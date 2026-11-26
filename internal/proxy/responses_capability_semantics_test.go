@@ -80,7 +80,7 @@ func TestChatChannelResponsesCapabilityIsNotNative(t *testing.T) {
 		cfg.Debug.OutputDir = t.TempDir()
 		cfg.Debug.MaskKey = true
 
-		handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+		handler, err := newAnonymousTestHandler(cfg, st)
 		if err != nil {
 			t.Fatalf("NewHandlerWithAuth() error = %v", err)
 		}

@@ -91,7 +91,7 @@ func TestLocalResponsesRuntimeAsksForStreamedUsage(t *testing.T) {
 		}},
 	}
 	cfg.Debug.OutputDir = t.TempDir()
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

@@ -133,7 +133,7 @@ func TestConfigurationConcurrentMutationsKeepLatestSnapshot(t *testing.T) {
 func TestModelAliasMutationPublishesRuntimeAndRollsBack(t *testing.T) {
 	st, rtr, svc := configurationFixture(t)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{Router: rtr, ChannelService: svc})
+	registerAnonymousRoutesForTest(mux, st, RouteOptions{Router: rtr, ChannelService: svc})
 	rr := configurationRequest(mux, http.MethodPost, "/api/model-aliases", `{"id":"alias-one","alias":"friendly","target_model":"one","channel_id":"primary","enabled":true}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body)
@@ -192,7 +192,7 @@ func TestChannelBootstrapSettingsReportAndResetTheMarker(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	svc := channel.NewService(st)
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{ChannelService: svc})
+	registerAnonymousRoutesForTest(mux, st, RouteOptions{ChannelService: svc})
 
 	rr := configurationRequest(mux, http.MethodGet, "/api/settings/channels", "")
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"initialized":false`) {

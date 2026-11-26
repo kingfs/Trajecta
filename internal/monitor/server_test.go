@@ -98,7 +98,7 @@ func TestEmbeddedMonitorUISmoke(t *testing.T) {
 }
 
 func embeddedUIAssets(indexHTML string) []string {
-	matches := regexp.MustCompile(`/(assets/[^"']+)`).FindAllStringSubmatch(indexHTML, -1)
+	matches := regexp.MustCompile(`/(assets/[^"']+|theme-init\.js)`).FindAllStringSubmatch(indexHTML, -1)
 	out := make([]string, 0, len(matches))
 	for _, match := range matches {
 		out = append(out, "/"+match[1])
@@ -221,7 +221,7 @@ func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerAnonymousRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -273,7 +273,7 @@ func TestResponsesFunctionExecutorsAPIHandlerStaticResponseRedactsOutput(t *test
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerAnonymousRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -317,7 +317,7 @@ func TestResponsesFunctionExecutorsAPIHandlerValidationWarnings(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerAnonymousRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -353,7 +353,7 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsWhenEnabledWithoutExecutors(t 
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerAnonymousRoutesForTest(mux, nil, RouteOptions{
 		ResponsesFunctionExecutors: config.ResponsesFunctionExecutorConfig{
 			Enabled: true,
 		},
@@ -380,7 +380,7 @@ func TestResponsesFunctionExecutorsAPIHandlerValidateOnlyDoesNotPersist(t *testi
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerAnonymousRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": true,
 		"enabled": true,
@@ -432,7 +432,7 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerAnonymousRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": false,
 		"enabled": true,
@@ -508,7 +508,7 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyPersistsSafeSnapshot(t *testin
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerAnonymousRoutesForTest(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": false,
 		"enabled": true,
@@ -544,7 +544,7 @@ func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *test
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerAnonymousRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": true,
 		"executors": [
@@ -605,7 +605,7 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testi
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerAnonymousRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": true,
 		"executors": [
@@ -709,7 +709,7 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerAnonymousRoutesForTest(mux, st)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?response_id=resp-monitor-1", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -816,7 +816,7 @@ func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerAnonymousRoutesForTest(mux, st)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?request_audit_id=reqaudit-monitor-tool-1&tool_name=lookup&status=completed&limit=10", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -1496,11 +1496,11 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer "+jwtToken.Token)
+	req.AddCookie(&http.Cookie{Name: monitorSessionCookieName, Value: jwtToken.Token})
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("authenticated check code = %d, want 200", rr.Code)
+		t.Fatalf("cookie-authenticated check code = %d, want 200", rr.Code)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check?access_token="+jwtToken.Token, nil)
@@ -1546,8 +1546,10 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, MonitorAuthVerifier: jwtManager, MonitorJWT: jwtManager})
 
+	loginCookie := &http.Cookie{Name: monitorSessionCookieName, Value: loginToken.Token}
 	createReq := httptest.NewRequest(http.MethodPost, "/api/auth/tokens", strings.NewReader(`{"name":"local-dev","scope":"api","ttl":"24h"}`))
-	createReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	createReq.AddCookie(loginCookie)
+	createReq.Header.Set("Origin", "http://"+createReq.Host)
 	createRR := httptest.NewRecorder()
 	mux.ServeHTTP(createRR, createReq)
 	if createRR.Code != http.StatusOK {
@@ -1562,7 +1564,7 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/auth/tokens", nil)
-	listReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	listReq.AddCookie(loginCookie)
 	listRR := httptest.NewRecorder()
 	mux.ServeHTTP(listRR, listReq)
 	if listRR.Code != http.StatusOK {
@@ -1589,7 +1591,8 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/auth/tokens/"+strconv.Itoa(target.ID), nil)
-	deleteReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	deleteReq.AddCookie(loginCookie)
+	deleteReq.Header.Set("Origin", "http://"+deleteReq.Host)
 	deleteRR := httptest.NewRecorder()
 	mux.ServeHTTP(deleteRR, deleteReq)
 	if deleteRR.Code != http.StatusOK {
@@ -1635,6 +1638,7 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 		MonitorAuthVerifier: jwtManager,
 		MonitorJWT:          jwtManager,
 		SessionTTL:          time.Hour,
+		SecureMonitorCookie: true,
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"change-me-123"}`))
@@ -1643,22 +1647,27 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login code = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	var payload loginResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+	var loginPayload map[string]bool
+	if err := json.Unmarshal(rr.Body.Bytes(), &loginPayload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.Token == "" {
-		t.Fatalf("login token missing")
+	if !loginPayload["ok"] {
+		t.Fatalf("login payload = %v, want {ok:true}", loginPayload)
 	}
-	if strings.HasPrefix(payload.Token, "sk-") {
-		t.Fatalf("login returned api token prefix, want jwt")
+	cookies := rr.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != monitorSessionCookieName || cookies[0].Value == "" {
+		t.Fatalf("login cookies = %+v, want one %q session cookie", cookies, monitorSessionCookieName)
 	}
-	if strings.Count(payload.Token, ".") != 2 {
-		t.Fatalf("login token is not jwt-shaped: %q", payload.Token)
+	loginCookie := cookies[0]
+	if !loginCookie.HttpOnly || !loginCookie.Secure || loginCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("login cookie flags = %+v, want HttpOnly, Secure and SameSite=Lax", loginCookie)
+	}
+	if strings.Contains(rr.Body.String(), loginCookie.Value) {
+		t.Fatal("login response exposed the session token to JavaScript")
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(loginCookie)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1666,7 +1675,8 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/tokens", bytes.NewBufferString(`{"name":"sdk","ttl":"1h"}`))
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(loginCookie)
+	req.Header.Set("Origin", "http://"+req.Host)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1681,7 +1691,7 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(loginCookie)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1696,7 +1706,8 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"current_password":"change-me-123","new_password":"changed-again-123"}`))
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(loginCookie)
+	req.Header.Set("Origin", "http://"+req.Host)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

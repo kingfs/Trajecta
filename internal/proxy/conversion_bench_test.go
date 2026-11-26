@@ -70,7 +70,7 @@ func conversionBenchHandler(b *testing.B, engine, upstreamAPIType, upstreamBody 
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		b.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

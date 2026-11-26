@@ -10,6 +10,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/detector"
+	"github.com/kingfs/Trajecta/internal/httpsecurity"
 	"github.com/kingfs/Trajecta/internal/mcpserver"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/observeworker"
@@ -91,6 +92,7 @@ func newManagementMuxWithSecretMappings(
 		MonitorJWT:                       monitorJWT,
 		AuthStore:                        authStorePtr,
 		SessionTTL:                       cfg.AuthSessionTTL(),
+		SecureMonitorCookie:              cfg.AuthCookieSecure(),
 		ResponsesFunctionExecutors:       functionExecutorConfig,
 		ResponsesFunctionExecutorStore:   traceStore,
 		ResponsesFunctionExecutorManager: functionExecutorManager,
@@ -118,7 +120,7 @@ func newManagementMuxWithSecretMappings(
 			},
 		},
 	})
-	return limitManagementRequestBody(mux)
+	return httpsecurity.Monitor(limitManagementRequestBody(mux))
 }
 
 // limitManagementRequestBody applies one ceiling to every Monitor and MCP route.

@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,6 +21,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/detector"
+	"github.com/kingfs/Trajecta/internal/httpsecurity"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
@@ -52,6 +57,8 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Invalid serve config", "error", err)
 		return 1
 	}
+	warnRawCassetteStorage(cfg.TraceOutputDir())
+	warnInsecureListeners(cfg)
 
 	if cfg.DatabaseAutoMigrate() {
 		// Announce it before blocking. Migrations run ahead of the first
@@ -66,11 +73,15 @@ func runServeWithConfig(configPath string) int {
 		}
 	}
 
-	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.26+")
+	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", runtime.Version())
 
 	authStore, err := appdb.OpenAuthStore(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize auth store", "error", err)
+		return 1
+	}
+	if authStore == nil {
+		slog.Error("Failed to initialize auth store", "error", "authentication verifier is required for production serving")
 		return 1
 	}
 	defer authStore.Close()
@@ -245,8 +256,8 @@ func runServeWithConfig(configPath string) int {
 		managementSrv = newManagementHTTPServer(cfg, mux)
 		go func(srv *http.Server) {
 			addr := srv.Addr
-			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Info("Management server started", "addr", addr, "monitor_url", serverScheme(cfg)+"localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
+			if err := serveHTTPServer(srv, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
 			}
 		}(managementSrv)
@@ -257,7 +268,7 @@ func runServeWithConfig(configPath string) int {
 	// that appeared while the process was not running. On a large install every
 	// pass re-reads every prelude, so the interval is configurable and defaults to
 	// the much longer trace.sync_interval rather than five minutes.
-	startTraceStoreBackgroundSync(syncCtx, traceStore, cfg.TraceSyncInterval(), &background)
+	startTraceStoreBackgroundSync(syncCtx, traceStore, cfg.TraceSyncInterval(), cfg.TraceRetentionDays(), cfg.TraceOutputDir(), &background)
 
 	// Finalising a recording rewrites the whole cassette to put its prelude in
 	// front of the record, then writes the trace index row and enqueues the parse
@@ -295,7 +306,7 @@ func runServeWithConfig(configPath string) int {
 	}()
 
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveHTTPServer(srv, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
 		return 1
 	}
@@ -318,6 +329,63 @@ func runServeWithConfig(configPath string) int {
 			"audit_retried", stats.AuditRetried, "audit_still_queued", stats.AuditDepth)
 	}
 	return 0
+}
+
+func serverScheme(cfg *config.Config) string {
+	if cfg != nil && strings.TrimSpace(cfg.Server.TLSCert) != "" && strings.TrimSpace(cfg.Server.TLSKey) != "" {
+		return "https://"
+	}
+	return "http://"
+}
+
+func serveHTTPServer(srv *http.Server, cfg *config.Config) error {
+	if srv == nil {
+		return errors.New("HTTP server is nil")
+	}
+	if cfg != nil && strings.TrimSpace(cfg.Server.TLSCert) != "" && strings.TrimSpace(cfg.Server.TLSKey) != "" {
+		return srv.ListenAndServeTLS(strings.TrimSpace(cfg.Server.TLSCert), strings.TrimSpace(cfg.Server.TLSKey))
+	}
+	return srv.ListenAndServe()
+}
+
+func warnRawCassetteStorage(outputDir string) {
+	slog.Warn("Cassette recordings preserve original HTTP request and response data, including credentials and user content; protect the trace directory, database, backups, and mounted volumes",
+		"trace_output_dir", outputDir,
+		"debug_mask_key", "deprecated and does not redact recordings")
+	info, err := os.Stat(outputDir)
+	if err == nil && info.IsDir() && info.Mode().Perm()&0o077 != 0 {
+		slog.Warn("Trace output directory is accessible to group/other users; cassette subdirectories are created private, but restrict this root and its backups",
+			"trace_output_dir", outputDir, "mode", fmt.Sprintf("%04o", info.Mode().Perm()))
+	}
+}
+
+func warnInsecureListeners(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Server.Port != "" && isNonLoopbackListenAddress(":"+cfg.Server.Port) && serverScheme(cfg) != "https://" {
+		slog.Warn("Proxy listener is bound to a non-loopback interface without TLS; use server.tls_cert/server.tls_key, a trusted TLS-terminating reverse proxy, or firewall the port",
+			"addr", ":"+cfg.Server.Port)
+	}
+	if cfg.Monitor.Port != "" && isNonLoopbackListenAddress(":"+cfg.Monitor.Port) && serverScheme(cfg) != "https://" {
+		slog.Warn("Monitor listener is bound to a non-loopback interface without TLS; session cookies are Secure by default, so serve it over HTTPS or keep it loopback-only",
+			"addr", ":"+cfg.Monitor.Port)
+	}
+	if !cfg.AuthCookieSecure() && serverScheme(cfg) != "https://" {
+		slog.Warn("Monitor session cookie Secure flag is disabled; use only for local HTTP development")
+	}
+}
+
+func isNonLoopbackListenAddress(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil || host == "" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return true
+	}
+	return !ip.IsLoopback()
 }
 
 // gracefulShutdownTimeout bounds how long a drain may take. The container's own grace
@@ -362,7 +430,7 @@ func gracefulShutdown(timeout time.Duration, servers ...*http.Server) {
 func newProxyHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              ":" + cfg.Server.Port,
-		Handler:           handler,
+		Handler:           httpsecurity.Common(handler),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       cfg.ServerReadTimeout(),
 		WriteTimeout:      cfg.ServerWriteTimeout(),
@@ -517,7 +585,7 @@ func backfillCredentialMaskEventStatesOnce(ctx context.Context, st *store.Store)
 	}
 }
 
-func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {
+func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, retentionDays int, traceOutputDir string, wg *sync.WaitGroup) {
 	if traceStore == nil {
 		return
 	}
@@ -531,16 +599,31 @@ func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store,
 		if wg != nil {
 			defer wg.Done()
 		}
-		run := func(reason string) {
+		lastRetentionRun := time.Time{}
+		run := func(reason string) bool {
 			start := time.Now()
 			if err := traceStore.Sync(); err != nil {
 				slog.Warn("Trace index background sync failed", "reason", reason, "error", err)
-				return
+				return false
 			}
 			slog.Info("Trace index background sync finished", "reason", reason, "duration", time.Since(start).String())
+			return true
+		}
+		runMaintenance := func(reason string) {
+			if !run(reason) || retentionDays <= 0 {
+				return
+			}
+			if !lastRetentionRun.IsZero() && time.Since(lastRetentionRun) < 24*time.Hour {
+				return
+			}
+			if err := runTraceRetention(ctx, traceStore, traceOutputDir, retentionDays); err != nil {
+				slog.Warn("Trace retention pass failed", "error", err)
+				return
+			}
+			lastRetentionRun = time.Now()
 		}
 
-		run("startup")
+		runMaintenance("startup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -548,7 +631,7 @@ func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store,
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				run("periodic")
+				runMaintenance("periodic")
 			}
 		}
 	}()

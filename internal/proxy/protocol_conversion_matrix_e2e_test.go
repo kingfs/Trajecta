@@ -290,7 +290,7 @@ func newConvMatrixHandlerCfg(t *testing.T, mutate func(*config.Config), targets 
 		mutate(cfg)
 	}
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

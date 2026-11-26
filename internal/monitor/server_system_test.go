@@ -216,7 +216,7 @@ func TestDebugPprofIsMountedOnlyWhenEnabled(t *testing.T) {
 	t.Parallel()
 
 	disabled := http.NewServeMux()
-	RegisterRoutes(disabled, nil, RouteOptions{})
+	registerAnonymousRoutesForTest(disabled, nil, RouteOptions{})
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline", "/debug/pprof/symbol"} {
 		rr := systemTestRequest(disabled, path, "")
 		if rr.Code != http.StatusNotFound {
@@ -225,7 +225,7 @@ func TestDebugPprofIsMountedOnlyWhenEnabled(t *testing.T) {
 	}
 
 	enabled := http.NewServeMux()
-	RegisterRoutes(enabled, nil, RouteOptions{DebugPprofEnabled: true})
+	registerAnonymousRoutesForTest(enabled, nil, RouteOptions{DebugPprofEnabled: true})
 	rr := systemTestRequest(enabled, "/debug/pprof/", "")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /debug/pprof/ with pprof enabled = %d, want 200", rr.Code)

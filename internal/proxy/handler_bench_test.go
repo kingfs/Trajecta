@@ -35,7 +35,7 @@ func BenchmarkHandlerNonStreamProxy(b *testing.B) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := newAnonymousTestHandler(cfg, st)
 	if err != nil {
 		b.Fatal(err)
 	}

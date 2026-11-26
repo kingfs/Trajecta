@@ -3,6 +3,7 @@ package monitor
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,8 +36,8 @@ import (
  * The one message the browser sends is {"topics":["traffic","events"]}.
  */
 
-// realtimeSocketPath is the console socket, and the path the browser may
-// authenticate from its query string; see allowMonitorQueryAccessToken.
+// realtimeSocketPath is the same-origin console socket. Browser cookies are
+// attached automatically; credentials never travel in the URL.
 const realtimeSocketPath = "/api/events/ws"
 
 const (
@@ -71,11 +72,16 @@ const (
 )
 
 var realtimeUpgrader = websocket.Upgrader{
-	// The console is served from the same origin as the socket, and the monitor
-	// is regularly put behind a reverse proxy on another host, so the origin is
-	// checked by the auth layer that already gates every other route rather than
-	// by the default same-origin rule, which would break exactly those proxies.
-	CheckOrigin: func(*http.Request) bool { return true },
+	// The Monitor is served from the same host as its socket, including when a
+	// reverse proxy terminates TLS. Browser handshakes carry Origin; reject a
+	// cross-origin upgrade even when the caller's cookies would authenticate it.
+	// Non-browser clients without Origin remain supported and still need auth.
+	CheckOrigin: func(r *http.Request) bool {
+		if strings.TrimSpace(r.Header.Get("Origin")) == "" {
+			return true
+		}
+		return monitorRequestSameOrigin(r)
+	},
 }
 
 type realtimeHub struct {

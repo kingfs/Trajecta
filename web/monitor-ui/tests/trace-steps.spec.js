@@ -112,7 +112,6 @@ const observation = {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("trajecta.monitor.language", "en");
-    localStorage.setItem("trajecta.monitor.token", "test-monitor-jwt");
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
