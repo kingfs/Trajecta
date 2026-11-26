@@ -32,6 +32,10 @@ type Config struct {
 		// headers of a forwarded request. Zero means no bound; see
 		// Config.UpstreamResponseHeaderTimeout.
 		UpstreamResponseHeaderTimeout time.Duration `yaml:"upstream_response_header_timeout"`
+		// TLSCert and TLSKey enable HTTPS on both listeners. Both must be set;
+		// leaving them empty keeps plain HTTP (local development only).
+		TLSCert string `yaml:"tls_cert"`
+		TLSKey  string `yaml:"tls_key"`
 	} `yaml:"server"`
 
 	// Analysis controls the observation-detector lane that runs beside the
@@ -971,6 +975,8 @@ func validateRouterEnums(cfg *Config) error {
 // helpers that follow hold the parsing rules.
 func applyEnvOverrides(cfg *Config) {
 	envString(&cfg.Server.Port, "TRAJECTA_SERVER_PORT")
+	envString(&cfg.Server.TLSCert, "TRAJECTA_SERVER_TLS_CERT")
+	envString(&cfg.Server.TLSKey, "TRAJECTA_SERVER_TLS_KEY")
 	envDuration(&cfg.Server.ReadTimeout, "TRAJECTA_SERVER_READ_TIMEOUT")
 	envDuration(&cfg.Server.WriteTimeout, "TRAJECTA_SERVER_WRITE_TIMEOUT")
 	envDuration(&cfg.Server.UpstreamResponseHeaderTimeout, "TRAJECTA_SERVER_UPSTREAM_RESPONSE_HEADER_TIMEOUT")
@@ -1228,6 +1234,15 @@ func (c Config) AuthSessionTTL() time.Duration {
 		return c.Auth.SessionTTL
 	}
 	return 24 * time.Hour
+}
+
+// ServerScheme reports the scheme both listeners use. TLS is all-or-nothing:
+// a certificate without a key (or the reverse) is a configuration error.
+func (c Config) ServerScheme() string {
+	if strings.TrimSpace(c.Server.TLSCert) != "" && strings.TrimSpace(c.Server.TLSKey) != "" {
+		return "https://"
+	}
+	return "http://"
 }
 
 // ServerReadTimeout bounds reading one request, including its body.

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -246,7 +248,7 @@ func runServeWithConfig(configPath string) int {
 		go func(srv *http.Server) {
 			addr := srv.Addr
 			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := serveHTTP(srv, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
 			}
 		}(managementSrv)
@@ -295,8 +297,9 @@ func runServeWithConfig(configPath string) int {
 	}()
 
 	warnRawCassetteStorage(cfg.TraceOutputDir())
+	warnInsecureListeners(cfg)
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := serveHTTP(srv, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
 		return 1
 	}
@@ -346,6 +349,45 @@ func gracefulShutdown(timeout time.Duration, servers ...*http.Server) {
 		}(srv)
 	}
 	wg.Wait()
+}
+
+// serveHTTP starts srv with TLS when both a certificate and key are configured.
+// TLS is all-or-nothing: a certificate without a key is a configuration error
+// the operator must fix, not a silent downgrade to plaintext.
+func serveHTTP(srv *http.Server, cfg *config.Config) error {
+	if cfg != nil && strings.TrimSpace(cfg.Server.TLSCert) != "" && strings.TrimSpace(cfg.Server.TLSKey) != "" {
+		return srv.ListenAndServeTLS(strings.TrimSpace(cfg.Server.TLSCert), strings.TrimSpace(cfg.Server.TLSKey))
+	}
+	return srv.ListenAndServe()
+}
+
+// isNonLoopbackListenAddress reports whether addr binds beyond loopback.
+// An empty host, 0.0.0.0 and :: all mean every interface.
+func isNonLoopbackListenAddress(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
+}
+
+func warnInsecureListeners(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Server.Port != "" && isNonLoopbackListenAddress(":"+cfg.Server.Port) && cfg.ServerScheme() != "https://" {
+		slog.Warn("Proxy listener is bound to a non-loopback interface without TLS; set server.tls_cert/server.tls_key, use a TLS-terminating reverse proxy, or firewall the port",
+			"addr", ":"+cfg.Server.Port)
+	}
+	if cfg.Monitor.Port != "" && isNonLoopbackListenAddress(":"+cfg.Monitor.Port) && cfg.ServerScheme() != "https://" {
+		slog.Warn("Monitor listener is bound to a non-loopback interface without TLS; the session cookie is Secure by default, so serve it over HTTPS or keep it loopback-only",
+			"addr", ":"+cfg.Monitor.Port)
+	}
 }
 
 // warnRawCassetteStorage tells the operator what the trace directory contains

@@ -1,5 +1,10 @@
 server:
   port: "8080"
+  # Optional TLS for both the proxy and Monitor listeners. Set both to enable
+  # HTTPS; leaving them empty keeps plain HTTP, which is only appropriate for
+  # loopback development. A non-loopback bind without TLS logs a warning.
+  tls_cert: ""
+  tls_key: ""
 
 # Observation-detector lane. The enabled detectors in `plugins.detectors` run on
 # every freshly parsed cassette and persist their findings; set false to keep
