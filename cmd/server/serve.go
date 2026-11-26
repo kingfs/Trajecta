@@ -294,6 +294,7 @@ func runServeWithConfig(configPath string) int {
 		gracefulShutdown(gracefulShutdownTimeout, srv, managementSrv)
 	}()
 
+	warnRawCassetteStorage(cfg.TraceOutputDir())
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
@@ -345,6 +346,21 @@ func gracefulShutdown(timeout time.Duration, servers ...*http.Server) {
 		}(srv)
 	}
 	wg.Wait()
+}
+
+// warnRawCassetteStorage tells the operator what the trace directory contains
+// and warns when the root is readable by group or other users. Cassettes
+// themselves are private (0700 directories, 0600 files), but a permissive root
+// and its backups still expose them.
+func warnRawCassetteStorage(outputDir string) {
+	slog.Warn("Cassette recordings preserve original HTTP request and response data, including credentials and user content; protect the trace directory, database, backups, and mounted volumes",
+		"trace_output_dir", outputDir,
+		"debug_mask_key", "deprecated and does not redact recordings")
+	info, err := os.Stat(outputDir)
+	if err == nil && info.IsDir() && info.Mode().Perm()&0o077 != 0 {
+		slog.Warn("Trace output directory is accessible to group/other users; cassette subdirectories are created private, but restrict this root and its backups",
+			"trace_output_dir", outputDir, "mode", info.Mode().Perm())
+	}
 }
 
 // newProxyHTTPServer builds the HTTP server that serves proxied model traffic.

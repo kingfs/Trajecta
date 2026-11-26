@@ -1600,13 +1600,27 @@ func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
 	source := "postgres_system_event_test"
 	parserFingerprint := "postgres:system_event:parser:" + suffix
 	routerFingerprint := "postgres:system_event:router:" + suffix
+	otherFingerprint := "postgres:system_event:other:" + suffix
 	t.Cleanup(func() {
-		if _, err := st.db.Exec(`DELETE FROM system_events WHERE fingerprint = ? OR fingerprint = ?`, parserFingerprint, routerFingerprint); err != nil {
+		if _, err := st.db.Exec(`DELETE FROM system_events WHERE fingerprint = ? OR fingerprint = ? OR fingerprint = ?`, parserFingerprint, routerFingerprint, otherFingerprint); err != nil {
 			t.Logf("cleanup postgres system events error = %v", err)
 		}
 	})
 
 	since := time.Now().UTC().Add(-time.Second)
+	if _, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: otherFingerprint,
+		Source:      "unrelated_system_event_test",
+		Category:    "unrelated_warning",
+		Severity:    "warning",
+		Title:       "An unrelated unread warning already exists",
+	}); err != nil {
+		t.Fatalf("UpsertSystemEvent(unrelated postgres) error = %v", err)
+	}
+	baseline, err := st.SystemEventSummary(since)
+	if err != nil {
+		t.Fatalf("SystemEventSummary(postgres baseline) error = %v", err)
+	}
 	parserEvent, err := st.UpsertSystemEvent(SystemEvent{
 		Fingerprint: parserFingerprint,
 		Source:      source,
@@ -1660,8 +1674,9 @@ func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SystemEventSummary(postgres) error = %v", err)
 	}
-	if summary.Total < 2 || summary.Unread < 1 || summary.Error < 1 || summary.Warning != 0 {
-		t.Fatalf("SystemEventSummary(postgres) = %+v, want parser unread error and resolved warning excluded from unread warnings", summary)
+	if summary.Total != baseline.Total+2 || summary.Unread != baseline.Unread+1 ||
+		summary.Error != baseline.Error+1 || summary.Warning != baseline.Warning || summary.Critical != baseline.Critical {
+		t.Fatalf("SystemEventSummary(postgres) = %+v, baseline = %+v; want two new events, one unread error, and no new unread warning or critical", summary, baseline)
 	}
 	foundSource := false
 	for _, item := range summary.BySource {
