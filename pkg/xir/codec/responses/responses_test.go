@@ -712,6 +712,15 @@ func TestResponseRoundTrips(t *testing.T) {
 			},
 		},
 		{
+			name: "shorthand message output",
+			raw:  `{"id":"r","model":"m","status":"completed","output":[{"role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`,
+			check: func(t *testing.T, resp *xir.Response) {
+				if len(resp.Parts) != 1 || resp.Parts[0].Kind != xir.PartText || resp.Parts[0].Text != "hello" {
+					t.Fatalf("parts = %+v", resp.Parts)
+				}
+			},
+		},
+		{
 			name: "content filter",
 			raw:  `{"id":"r","model":"m","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`,
 			check: func(t *testing.T, resp *xir.Response) {
