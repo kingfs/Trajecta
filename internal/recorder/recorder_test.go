@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -317,6 +318,55 @@ func TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot(t *testing.T) {
 			// The recorded metadata keeps what the client asked for.
 			if info.Header.Meta.Model != tc.model && tc.model != "" {
 				t.Fatalf("meta model = %q, want %q", info.Header.Meta.Model, tc.model)
+			}
+		})
+	}
+}
+
+func TestUpdateLogFileMakesLegacyPermissionsPrivate(t *testing.T) {
+	for _, mode := range []os.FileMode{0o600, 0o644, 0o666} {
+		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
+			rec := New(t.TempDir(), false, nil)
+			body := []byte(`{"model":"permprobe","messages":[]}`)
+			req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer info.File.Close()
+			if _, err := info.File.Write([]byte("\nHTTP/1.1 200 OK\r\n\r\n{\"ok\":true}")); err != nil {
+				t.Fatal(err)
+			}
+			if err := info.File.Chmod(mode); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := os.ReadFile(info.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rec.UpdateLogFile(info); err != nil {
+				t.Fatal(err)
+			}
+			stat, err := os.Stat(info.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := stat.Mode().Perm(); got != 0o600 {
+				t.Fatalf("finalized cassette mode = %04o, want 0600", got)
+			}
+			content, err := os.ReadFile(info.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := recordfile.ParsePrelude(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(content[parsed.PayloadOffset:], payload) {
+				t.Fatal("finalization changed the recorded HTTP payload")
 			}
 		})
 	}
