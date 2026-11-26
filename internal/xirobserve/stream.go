@@ -86,15 +86,15 @@ func assembleChatStream(body []byte) ([]byte, observe.ObservationStream, error) 
 		return nil, observe.ObservationStream{}, err
 	}
 	var (
-		id          string
-		model       string
-		finish      string
-		text        strings.Builder
-		reasoning   strings.Builder
-		tools       = map[int]*chatStreamTool{}
-		toolOrder   []int
-		usage       map[string]any
-		stream      observe.ObservationStream
+		id        string
+		model     string
+		finish    string
+		text      strings.Builder
+		reasoning strings.Builder
+		tools     = map[int]*chatStreamTool{}
+		toolOrder []int
+		usage     map[string]any
+		stream    observe.ObservationStream
 	)
 	for i, data := range frames {
 		var chunk struct {
