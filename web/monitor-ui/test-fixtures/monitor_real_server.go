@@ -82,6 +82,8 @@ func run() error {
 			"shorthand_trace_id": shorthandTrace.ID,
 		})
 	})
+	// This isolated fixture opts into the test-only anonymous verifier so the
+	// browser suite can focus on Monitor pages; production routes still fail closed.
 	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{
 		ChannelService:      channel.NewService(st),
 		MonitorAuthVerifier: auth.AllowAnonymousForTest(),
