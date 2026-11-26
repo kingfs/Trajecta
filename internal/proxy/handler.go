@@ -1426,7 +1426,7 @@ func (h *Handler) decorateWithHealthHint(r *http.Request, bodyBytes []byte, reas
 	decision.blockedByHealth = true
 	decision.retryAfter = delay
 	decision.rejectReason = fmt.Sprintf(
-		"%s: every upstream channel capable of this request is temporarily unavailable (circuit open, does not support this request right now); retry in %s",
+		"%s: every upstream channel capable of this request is temporarily unavailable (circuit open or at its probation concurrency limit); retry in %s",
 		reason, delay.Round(time.Second),
 	)
 }
