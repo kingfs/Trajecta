@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -562,6 +563,11 @@ func (s *Store) overviewSessionCount(whereSQL string, whereArgs []any) (int, err
 }
 
 func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any, limit int) ([]CountItem, error) {
+	switch column {
+	case "model", "provider", "endpoint", "selected_upstream_id", "routing_failure_reason":
+	default:
+		return nil, fmt.Errorf("unsupported overview count column %q", column)
+	}
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
 	rows, err := s.db.Query(`
