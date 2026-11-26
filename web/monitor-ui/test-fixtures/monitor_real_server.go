@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/store"
@@ -81,7 +82,12 @@ func run() error {
 			"shorthand_trace_id": shorthandTrace.ID,
 		})
 	})
-	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{ChannelService: channel.NewService(st)})
+	// This isolated fixture opts into the test-only anonymous verifier so the
+	// browser suite can focus on Monitor pages; production routes still fail closed.
+	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{
+		ChannelService:      channel.NewService(st),
+		MonitorAuthVerifier: auth.AllowAnonymousForTest(),
+	})
 
 	addr := strings.TrimSpace(os.Getenv("MONITOR_REAL_ADDR"))
 	if addr == "" {
