@@ -46,6 +46,24 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 	}
 }
 
+func TestStoreThrottlesLastUsedAtWrites(t *testing.T) {
+	s := &Store{}
+	now := time.Now()
+
+	if !s.shouldWriteLastUsed(7, now) {
+		t.Fatal("first verification did not write last_used_at")
+	}
+	if s.shouldWriteLastUsed(7, now.Add(time.Second)) {
+		t.Fatal("second verification inside the interval wrote last_used_at")
+	}
+	if !s.shouldWriteLastUsed(7, now.Add(2*lastUsedWriteInterval)) {
+		t.Fatal("verification after the interval did not write last_used_at")
+	}
+	if !s.shouldWriteLastUsed(8, now.Add(2*lastUsedWriteInterval)) {
+		t.Fatal("a different token did not write last_used_at")
+	}
+}
+
 func TestJWTManagerIssuesAndConstrainsMonitorTokens(t *testing.T) {
 	t.Parallel()
 

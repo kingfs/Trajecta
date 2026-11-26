@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/Trajecta/ent/dao"
@@ -40,7 +41,18 @@ type Store struct {
 	client *dao.Client
 	db     *sql.DB
 	path   string
+
+	// lastUsedWriteInterval bounds last_used_at updates while preserving useful
+	// freshness. The proxy verifies a token on every request; writing the row
+	// each time turns a hot read into a hot write.
+	lastUsedMu     sync.Mutex
+	lastUsedWrites map[int]time.Time
 }
+
+const (
+	lastUsedWriteInterval    = time.Minute
+	maxTrackedLastUsedTokens = 4096
+)
 
 type TokenResult struct {
 	Token  string
@@ -462,6 +474,28 @@ func (s *Store) deleteTokensByName(ctx context.Context, username string, name st
 	return err
 }
 
+// shouldWriteLastUsed rate-limits last_used_at writes per token. The first
+// verification writes; subsequent ones within the interval only update the
+// in-memory timestamp. A bounded map keeps a long-running process from growing
+// without limit when many tokens are retired.
+func (s *Store) shouldWriteLastUsed(tokenID int, now time.Time) bool {
+	s.lastUsedMu.Lock()
+	defer s.lastUsedMu.Unlock()
+	if s.lastUsedWrites == nil {
+		s.lastUsedWrites = make(map[int]time.Time)
+	}
+	if previous, ok := s.lastUsedWrites[tokenID]; ok && now.Sub(previous) < lastUsedWriteInterval {
+		return false
+	}
+	if _, tracked := s.lastUsedWrites[tokenID]; !tracked && len(s.lastUsedWrites) >= maxTrackedLastUsedTokens {
+		for id := range s.lastUsedWrites {
+			delete(s.lastUsedWrites, id)
+		}
+	}
+	s.lastUsedWrites[tokenID] = now
+	return true
+}
+
 func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -484,7 +518,9 @@ func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool,
 	if u == nil || !u.Enabled {
 		return Principal{}, false, nil
 	}
-	_, _ = row.Update().SetLastUsedAt(time.Now().UTC()).Save(ctx)
+	if s.shouldWriteLastUsed(row.ID, time.Now().UTC()) {
+		_, _ = row.Update().SetLastUsedAt(time.Now().UTC()).Save(ctx)
+	}
 	return Principal{
 		UserID:   u.ID,
 		Username: u.Username,
