@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/kingfs/Trajecta/internal/store"
@@ -20,8 +21,11 @@ type importState struct {
 	view      *store.Store
 	log       *Logger
 	outputDir string
-	apply     bool
-	result    *ImportResult
+	// root confines every cassette write to outputDir. It rejects path
+	// traversal and symlink escapes that a filepath.Join check would miss.
+	root   *os.Root
+	apply  bool
+	result *ImportResult
 
 	resolver *channelResolver
 
