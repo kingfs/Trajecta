@@ -563,7 +563,7 @@ test("API tokens are created in a dialog and copied from it", async ({ page, con
 
   // Scope is a deliberate choice at creation time and is visible on each row.
   await expect(page.locator(".token-table-head span")).toHaveCount(8);
-  await expect(page.locator(".token-table-head")).toContainText("Scope");
+  await expect(page.locator(".token-table-head")).toContainText("Access scope");
 
   // The form is not on the page until the button opens it.
   await expect(page.locator("#token-name")).toHaveCount(0);
