@@ -258,14 +258,14 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		now.Format("01"),
 		now.Format("02"),
 	)
-	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+	if err := os.MkdirAll(dirPath, 0o700); err != nil {
 		return nil, err
 	}
 
 	fileName := fmt.Sprintf("%s_%d.http", now.Format("20060102_150405"), now.Nanosecond())
 	logPath := filepath.Join(dirPath, fileName)
 
-	f, err := os.Create(logPath)
+	f, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -652,13 +652,12 @@ func prependPrelude(info *LogInfo, prelude []byte) ([]byte, error) {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 	}
-	// os.CreateTemp creates the file 0600; a cassette keeps the permissions it was
-	// created with so a reader group does not lose access after finalisation.
-	if stat, statErr := os.Stat(info.Path); statErr == nil {
-		if chmodErr := tmp.Chmod(stat.Mode().Perm()); chmodErr != nil {
-			discard()
-			return nil, chmodErr
-		}
+	// Cassettes are private by default: the trace directory is 0700 and each
+	// cassette is 0600. A finalize rewrite must not widen those permissions to
+	// whatever an older deployment happened to use.
+	if chmodErr := tmp.Chmod(0o600); chmodErr != nil {
+		discard()
+		return nil, chmodErr
 	}
 
 	if _, err := tmp.Write(prelude); err != nil {
