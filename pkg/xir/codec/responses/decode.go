@@ -280,6 +280,14 @@ func decodeOutputItem(item *wire.Node) []xir.Part {
 	switch typ := nodeType(item); typ {
 	case "message":
 		return decodeOutputMessage(item)
+	case "":
+		// The Responses API accepts shorthand message output items with a
+		// role and content but no explicit type, just as it does for input.
+		// Keep their text parts typed instead of sealing the whole item as
+		// unknown; the observation projection can then render the message.
+		if _, hasRole := item.Get("role"); hasRole {
+			return decodeOutputMessage(item)
+		}
 	case "function_call":
 		return decodeFunctionCallItem(item).Parts
 	case "function_call_output":
