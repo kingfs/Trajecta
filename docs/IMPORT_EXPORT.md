@@ -50,6 +50,7 @@ trajecta import office-2026-09.tar.gz --password '<pw>' --apply
 | `import --channel-map <src-id>=<dst-id>` | 强制把源渠道合并到指定目标渠道（可重复） |
 | `import --channel-strategy create` | 不按 base_url+key 合并，一律新建渠道 |
 | `import --keep-existing-files` | 目标已有同名但内容不同的 cassette 时保留目标文件并记冲突，不做覆盖 |
+| `import --max-entry-bytes N` | 拒绝大于 N 字节的单个 cassette 条目；`0`（默认）表示不限，合法的大 cassette 仍可导入 |
 
 两个命令都支持全局 `--format json`，报告走与其他命令相同的 JSON envelope。
 

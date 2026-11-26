@@ -46,6 +46,8 @@ type importState struct {
 	manifest *Manifest
 	// keepExistingFiles keeps a differing target cassette untouched.
 	keepExistingFiles bool
+	// maxEntryBytes bounds one cassette entry; zero means unlimited.
+	maxEntryBytes int64
 	// desiredFiles maps bundle-relative cassette path -> recorded mtime and
 	// whether the file must not be written (its index row was skipped).
 	desiredFiles map[string]desiredFile

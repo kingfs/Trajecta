@@ -24,6 +24,7 @@ type importOptions struct {
 	channelMap        []string
 	channelStrategy   string
 	keepExistingFiles bool
+	maxEntryBytes     int64
 	logFile           string
 }
 
@@ -66,6 +67,7 @@ before importing.`,
 	cmd.Flags().StringArrayVar(&opts.channelMap, "channel-map", nil, "Force source channel id onto a target id: <source-id>=<target-id> (repeatable)")
 	cmd.Flags().StringVar(&opts.channelStrategy, "channel-strategy", "reuse", "Channel merge strategy: reuse (match by base_url+api key) or create")
 	cmd.Flags().BoolVar(&opts.keepExistingFiles, "keep-existing-files", false, "Keep a cassette that differs from the bundle instead of overwriting it")
+	cmd.Flags().Int64Var(&opts.maxEntryBytes, "max-entry-bytes", 0, "Reject a cassette entry larger than N bytes (0 = unlimited)")
 	cmd.Flags().StringVar(&opts.logFile, "log-file", "", "Write the full per-item log to this file as well")
 	return cmd
 }
@@ -113,6 +115,7 @@ func runImportWithOptions(opts importOptions, bundle string) int {
 		ChannelMap:        channelMap,
 		ChannelStrategy:   opts.channelStrategy,
 		KeepExistingFiles: opts.keepExistingFiles,
+		MaxEntryBytes:     opts.maxEntryBytes,
 		Log:               log,
 	})
 	if err != nil {
