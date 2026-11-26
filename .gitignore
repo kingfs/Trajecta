@@ -36,3 +36,5 @@ __pycache__/
 
 # 本地性能趋势快照（不入库）
 bench-results/
+# 本地 agent 技能与模板（不入库；主仓库只保留 AGENTS.md）
+.agents/
