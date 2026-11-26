@@ -78,12 +78,16 @@ func (p *ReasoningSignaturePolicy) observe(upstreamID string, sawReasoning, mism
 //
 // A few OpenAI-compatible relays encrypt reasoning twice: the
 // response.output_item.done item carries an encryption bound to the upstream
-// session, while response.completed carries a self-contained value. The client
-// library follows OpenAI's documented rule and persists the done item, so the
-// next request replays a token that only the original session can verify. When
-// that session is lost (relay failover, cache eviction) the provider rejects
-// the whole request with invalid_encrypted_content, and every later turn fails
-// because the bad token stays in the history.
+// session, while response.completed may carry a self-contained value. The
+// client library follows OpenAI's documented rule and persists the done item,
+// so the next request replays a token that only the original session can
+// verify. When that session is lost (relay failover, cache eviction) the
+// provider rejects the whole request with invalid_encrypted_content, and every
+// later turn fails because the bad token stays in the history.
+//
+// A relay may also repeat the same session-bound value in both events; this
+// normalizer sees nothing to rewrite there. The request-side quarantine drop is
+// the fallback for that case.
 //
 // The terminal event is authoritative. This normalizer holds the reasoning
 // done frame until response.completed/response.incomplete arrives, replaces
