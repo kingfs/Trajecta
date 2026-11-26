@@ -19,7 +19,7 @@ func TestSecretSuppressionAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{SecretMappings: vault, SecretSuppressions: vault})
+	registerRoutesForTest(mux, st, RouteOptions{SecretMappings: vault, SecretSuppressions: vault})
 
 	get := func(url string) secretSuppressionListResponse {
 		t.Helper()
@@ -167,7 +167,7 @@ func TestSecretSuppressionAPIHandlerUnavailable(t *testing.T) {
 	defer st.Close()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerRoutesForTest(mux, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/secret-suppressions", nil)
 	rr := httptest.NewRecorder()

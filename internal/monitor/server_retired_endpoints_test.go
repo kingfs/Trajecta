@@ -45,7 +45,7 @@ func TestRetiredAPIOnlyEndpointsAnswer404(t *testing.T) {
 
 	admin := fixedPrincipalVerifier{principal: auth.Principal{Username: "admin", Role: auth.RoleAdmin}, ok: true}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{
+	registerRoutesForTest(mux, st, RouteOptions{
 		AuthVerifier:        admin,
 		MonitorAuthVerifier: admin,
 	})

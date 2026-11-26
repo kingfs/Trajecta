@@ -61,7 +61,7 @@ func TestEveryMonitorAPIRouteRequiresAuthentication(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{
+	registerRoutesForTest(mux, st, RouteOptions{
 		AuthVerifier:        rejectingTokenVerifier{},
 		MonitorAuthVerifier: rejectingTokenVerifier{},
 	})
@@ -95,7 +95,7 @@ func TestPublicMonitorAPIRoutesAreExactlyTheLoginSurface(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerRoutesForTest(mux, nil, RouteOptions{
 		AuthVerifier:        rejectingTokenVerifier{},
 		MonitorAuthVerifier: rejectingTokenVerifier{},
 	})

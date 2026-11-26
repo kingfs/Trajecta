@@ -46,6 +46,43 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 	}
 }
 
+func TestRequestAuthorizationFailsClosedWithoutVerifier(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	if _, ok := VerifyRequest(req, nil); ok {
+		t.Fatal("VerifyRequest(nil) = true, want false")
+	}
+	if RequestAuthorized(req, nil) {
+		t.Fatal("RequestAuthorized(nil) = true, want false")
+	}
+}
+
+func TestMiddlewareFailsClosedWithoutVerifier(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	Middleware(next, "test", nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if called {
+		t.Fatal("next handler was called without a verifier")
+	}
+}
+
+func TestAllowAnonymousForTestAuthenticates(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	principal, ok := VerifyRequest(req, AllowAnonymousForTest())
+	if !ok {
+		t.Fatal("VerifyRequest(AllowAnonymousForTest()) = false, want true")
+	}
+	if principal.Username != "anonymous-test" {
+		t.Fatalf("username = %q, want anonymous-test", principal.Username)
+	}
+}
+
 func TestJWTManagerIssuesAndConstrainsMonitorTokens(t *testing.T) {
 	t.Parallel()
 
@@ -166,18 +203,6 @@ func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
 	}
 	if _, ok, err := st.VerifyToken(ctx, active.Token); err != nil || ok {
 		t.Fatalf("VerifyToken(disabled user) = ok %v err %v, want ok false err nil", ok, err)
-	}
-}
-
-func TestRequestAuthorizedAllowsMissingVerifier(t *testing.T) {
-	t.Parallel()
-
-	req, err := http.NewRequest(http.MethodGet, "/", nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	if !RequestAuthorized(req, nil) {
-		t.Fatalf("RequestAuthorized() = false, want true when verifier is nil")
 	}
 }
 

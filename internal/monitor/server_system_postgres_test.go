@@ -74,7 +74,7 @@ func TestPostgresSystemDatabaseAPI(t *testing.T) {
 	manager := testJWTManager(t, time.Hour)
 	token := systemTestToken(t, manager, 1, "admin", "admin")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	rr := systemTestRequest(mux, "/api/system/db", token)
 	if rr.Code != http.StatusOK {

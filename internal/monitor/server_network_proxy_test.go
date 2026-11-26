@@ -128,7 +128,7 @@ func TestNetworkProxySettingsRouteIsAdminOnly(t *testing.T) {
 	adminToken := systemTestToken(t, manager, 1, "admin", "admin")
 	viewerToken := systemTestToken(t, manager, 2, "viewer", "viewer")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	if rr := systemTestRequest(mux, "/api/settings/network-proxy", ""); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("GET without credentials = %d, want 401", rr.Code)

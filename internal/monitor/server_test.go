@@ -221,7 +221,7 @@ func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -273,7 +273,7 @@ func TestResponsesFunctionExecutorsAPIHandlerStaticResponseRedactsOutput(t *test
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -317,7 +317,7 @@ func TestResponsesFunctionExecutorsAPIHandlerValidationWarnings(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -353,7 +353,7 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsWhenEnabledWithoutExecutors(t 
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerRoutesForTest(mux, nil, RouteOptions{
 		ResponsesFunctionExecutors: config.ResponsesFunctionExecutorConfig{
 			Enabled: true,
 		},
@@ -380,7 +380,7 @@ func TestResponsesFunctionExecutorsAPIHandlerValidateOnlyDoesNotPersist(t *testi
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": true,
 		"enabled": true,
@@ -432,7 +432,7 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": false,
 		"enabled": true,
@@ -508,7 +508,7 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyPersistsSafeSnapshot(t *testin
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerRoutesForTest(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": false,
 		"enabled": true,
@@ -544,7 +544,7 @@ func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *test
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	registerRoutesForTest(mux, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
 		"validate_only": true,
 		"executors": [
@@ -605,7 +605,7 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testi
 		},
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	registerRoutesForTest(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": true,
 		"executors": [
@@ -709,7 +709,7 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerRoutesForTest(mux, st)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?response_id=resp-monitor-1", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -816,7 +816,7 @@ func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerRoutesForTest(mux, st)
 	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?request_audit_id=reqaudit-monitor-tool-1&tool_name=lookup&status=completed&limit=10", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -1466,7 +1466,7 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerRoutesForTest(mux, nil, RouteOptions{
 		AuthStore:           authStore,
 		AuthVerifier:        authStore,
 		MonitorAuthVerifier: jwtManager,
@@ -1544,7 +1544,7 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, MonitorAuthVerifier: jwtManager, MonitorJWT: jwtManager})
+	registerRoutesForTest(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, MonitorAuthVerifier: jwtManager, MonitorJWT: jwtManager})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/auth/tokens", strings.NewReader(`{"name":"local-dev","scope":"api","ttl":"24h"}`))
 	createReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
@@ -1629,7 +1629,7 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 
 	mux := http.NewServeMux()
 	jwtManager := testJWTManager(t, time.Hour)
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerRoutesForTest(mux, nil, RouteOptions{
 		AuthStore:           authStore,
 		AuthVerifier:        authStore,
 		MonitorAuthVerifier: jwtManager,

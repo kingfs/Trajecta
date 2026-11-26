@@ -31,7 +31,7 @@ func TestSystemHostAPIRouteIsAdminOnly(t *testing.T) {
 	viewerToken := systemTestToken(t, manager, 2, "viewer", "viewer")
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	if rr := systemTestRequest(mux, "/api/system/host", ""); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("GET /api/system/host without credentials = %d, want 401; body=%s", rr.Code, rr.Body.String())
@@ -56,7 +56,7 @@ func TestSystemHostAPIReportsHostMetrics(t *testing.T) {
 	manager := testJWTManager(t, time.Hour)
 	token := systemTestToken(t, manager, 1, "admin", "admin")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	rr := systemTestRequest(mux, "/api/system/host", token)
 	if rr.Code != http.StatusOK {

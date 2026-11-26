@@ -27,7 +27,7 @@ func TestRatesAlertsSettingsAPI(t *testing.T) {
 	viewerToken := systemTestToken(t, manager, 2, "viewer", "viewer")
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	if rr := systemTestRequest(mux, "/api/settings/rates-alerts", ""); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("GET without credentials = %d, want 401; body=%s", rr.Code, rr.Body.String())

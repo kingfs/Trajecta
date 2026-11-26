@@ -38,7 +38,7 @@ func TestHealthzAnswersWithoutCredentials(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, newHardeningTestStore(t), RouteOptions{
+	registerRoutesForTest(mux, newHardeningTestStore(t), RouteOptions{
 		AuthVerifier:        fixedPrincipalVerifier{ok: false},
 		MonitorAuthVerifier: fixedPrincipalVerifier{ok: false},
 	})
@@ -97,7 +97,7 @@ func TestSensitiveMonitorRoutesRequireAdmin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			RegisterRoutes(mux, newHardeningTestStore(t), RouteOptions{
+			registerRoutesForTest(mux, newHardeningTestStore(t), RouteOptions{
 				AuthVerifier:        fixedPrincipalVerifier{principal: auth.Principal{Username: tc.name, Role: tc.role}, ok: true},
 				MonitorAuthVerifier: fixedPrincipalVerifier{principal: auth.Principal{Username: tc.name, Role: tc.role}, ok: true},
 			})
@@ -118,7 +118,7 @@ func TestSensitiveMonitorRoutesRequireAdmin(t *testing.T) {
 
 	// A viewer keeps the read surfaces; the gate must not be a blanket deny.
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, newHardeningTestStore(t), RouteOptions{
+	registerRoutesForTest(mux, newHardeningTestStore(t), RouteOptions{
 		AuthVerifier:        fixedPrincipalVerifier{principal: auth.Principal{Username: "viewer", Role: auth.RoleViewer}, ok: true},
 		MonitorAuthVerifier: fixedPrincipalVerifier{principal: auth.Principal{Username: "viewer", Role: auth.RoleViewer}, ok: true},
 	})
@@ -145,7 +145,7 @@ func TestPprofRequiresAdminWhenEnabled(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			RegisterRoutes(mux, newHardeningTestStore(t), RouteOptions{
+			registerRoutesForTest(mux, newHardeningTestStore(t), RouteOptions{
 				AuthVerifier:        tc.verify,
 				MonitorAuthVerifier: tc.verify,
 				DebugPprofEnabled:   true,
@@ -212,7 +212,7 @@ func TestLoginRejectsRepeatedFailuresAndOversizedBodies(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{
+	registerRoutesForTest(mux, nil, RouteOptions{
 		AuthStore:           authStore,
 		AuthVerifier:        authStore,
 		MonitorAuthVerifier: jwtManager,

@@ -51,7 +51,7 @@ func TestSystemAPIRoutesAreAdminOnly(t *testing.T) {
 	viewerToken := systemTestToken(t, manager, 2, "viewer", "viewer")
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	for _, path := range []string{"/api/system/runtime", "/api/system/db", "/api/system/slow-queries"} {
 		t.Run(strings.TrimPrefix(path, "/api/system/"), func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestSystemRuntimeAPIReportsProcessFacts(t *testing.T) {
 	manager := testJWTManager(t, time.Hour)
 	token := systemTestToken(t, manager, 1, "admin", "admin")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	rr := systemTestRequest(mux, "/api/system/runtime", token)
 	if rr.Code != http.StatusOK {
@@ -139,7 +139,7 @@ func TestSystemDatabaseAPIReportsUnsupportedOnSQLite(t *testing.T) {
 	manager := testJWTManager(t, time.Hour)
 	token := systemTestToken(t, manager, 1, "admin", "admin")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	rr := systemTestRequest(mux, "/api/system/db", token)
 	if rr.Code != http.StatusOK {
@@ -185,7 +185,7 @@ func TestSystemSlowQueriesAPIReportsTheDisabledCollector(t *testing.T) {
 	manager := testJWTManager(t, time.Hour)
 	token := systemTestToken(t, manager, 1, "admin", "admin")
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
+	registerRoutesForTest(mux, st, RouteOptions{MonitorAuthVerifier: manager, MonitorJWT: manager})
 
 	rr := systemTestRequest(mux, "/api/system/slow-queries", token)
 	if rr.Code != http.StatusOK {
@@ -216,7 +216,7 @@ func TestDebugPprofIsMountedOnlyWhenEnabled(t *testing.T) {
 	t.Parallel()
 
 	disabled := http.NewServeMux()
-	RegisterRoutes(disabled, nil, RouteOptions{})
+	registerRoutesForTest(disabled, nil, RouteOptions{})
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline", "/debug/pprof/symbol"} {
 		rr := systemTestRequest(disabled, path, "")
 		if rr.Code != http.StatusNotFound {
@@ -225,7 +225,7 @@ func TestDebugPprofIsMountedOnlyWhenEnabled(t *testing.T) {
 	}
 
 	enabled := http.NewServeMux()
-	RegisterRoutes(enabled, nil, RouteOptions{DebugPprofEnabled: true})
+	registerRoutesForTest(enabled, nil, RouteOptions{DebugPprofEnabled: true})
 	rr := systemTestRequest(enabled, "/debug/pprof/", "")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /debug/pprof/ with pprof enabled = %d, want 200", rr.Code)
