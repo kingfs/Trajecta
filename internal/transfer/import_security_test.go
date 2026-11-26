@@ -46,6 +46,21 @@ func newImportSecurityState(t *testing.T, dir string) *importState {
 	return s
 }
 
+func TestWriteCassetteFileEnforcesMaxEntryBytes(t *testing.T) {
+	dir := t.TempDir()
+	s := newImportSecurityState(t, dir)
+	s.maxEntryBytes = 1
+	created := []string{}
+
+	err := s.writeCassetteFile(&tar.Header{Name: "x", Size: 2}, strings.NewReader("xy"), "x.http", desiredFile{}, &created, false)
+	if err == nil {
+		t.Fatal("writeCassetteFile with max-entry-bytes=1 = nil, want error")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "x.http")); statErr == nil {
+		t.Fatal("oversized cassette was written")
+	}
+}
+
 func TestWriteCassetteFileRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(filepath.Dir(dir), "escape.http")

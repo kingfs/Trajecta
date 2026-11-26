@@ -37,6 +37,11 @@ type ImportOptions struct {
 	// instead of overwriting it, and reports the conflict.
 	KeepExistingFiles bool
 
+	// MaxEntryBytes rejects a cassette entry larger than this many bytes.
+	// Zero means unlimited: an import is operator-initiated, and a valid large
+	// cassette must still be importable.
+	MaxEntryBytes int64
+
 	Log *Logger
 }
 
@@ -118,6 +123,7 @@ func Import(ctx context.Context, st *store.Store, outputDir string, opts ImportO
 		s.manifest = manifest
 		s.resolver.strategyCreate = strategy == "create"
 		s.keepExistingFiles = opts.KeepExistingFiles
+		s.maxEntryBytes = opts.MaxEntryBytes
 		s.desiredFiles = map[string]desiredFile{}
 
 		if !targetsLoaded {
@@ -416,8 +422,16 @@ func (s *importState) writeCassetteFile(hdr *tar.Header, body io.Reader, rel str
 			_ = os.Remove(tmp.Name())
 		}
 	}()
-	if _, err := io.Copy(tmp, body); err != nil {
-		return err
+	var reader io.Reader = body
+	if s.maxEntryBytes > 0 {
+		reader = io.LimitReader(body, s.maxEntryBytes+1)
+	}
+	written, copyErr := io.Copy(tmp, reader)
+	if copyErr != nil {
+		return copyErr
+	}
+	if s.maxEntryBytes > 0 && written > s.maxEntryBytes {
+		return fmt.Errorf("cassette entry %q exceeds --max-entry-bytes (%d)", rel, s.maxEntryBytes)
 	}
 	if err := tmp.Sync(); err != nil {
 		return err
