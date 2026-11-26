@@ -72,13 +72,16 @@ func TestReaderDoesNotFlushWhenTheBackgroundFlusherOwnsTheQueue(t *testing.T) {
 		t.Fatalf("newSQLiteTestStore() error = %v", err)
 	}
 	defer st.Close()
-	st.StartDerivedRefresh()
 
+	// Queue work before starting the flusher. Starting it first would signal the
+	// worker as soon as this write enqueues, so it could drain the queue before
+	// the test observes it and make the setup nondeterministic.
 	st.markSessionSummariesOnly(t, "session-read-barrier")
 	before := st.derivedQueueDepth()
 	if before == 0 {
 		t.Fatal("the deferred queue is empty, so the test cannot observe the read")
 	}
+	st.StartDerivedRefresh()
 
 	// A session read is the read path that used to apply the queue itself.
 	if _, err := st.GetSession("session-read-barrier"); err != nil {
