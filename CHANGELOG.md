@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Fixed
 - 原生 Responses 流的 reasoning `encrypted_content` 以 `response.completed` 为准：部分 OpenAI-compatible relay 在 `response.output_item.done` 里返回绑定上游会话的密文，客户端按 OpenAI 文档保存该值，relay 会话失效后下一次请求被 `invalid_encrypted_content` 拒绝，且坏 token 会留在历史里让之后每一轮都失败。代理现在对未知 upstream 的首个响应以及观测到 done/终态不一致的 upstream，把 reasoning 的 done 帧暂存到终态事件，只替换 `encrypted_content` 为终态值并紧邻终态事件发出，同时记录 `reasoning.signature_normalized`、移除该 SSE 响应的 `Content-Length`；已证明一致的上游仍按原顺序透传，之后若再出现不一致则记 `reasoning.signature_mismatch` 并重新进入归一化路径。其余帧、请求侧 opaque 内容与遮蔽逻辑都不变。已有会话若已存入旧的会话绑定密文，需要新建一次会话。
+- 模型级 probation 的并发门禁此前错误地使用渠道总 in-flight：同一渠道上另一个繁忙模型（例如 deepseek-flash）会持续占满该值，使一个已经进入 probation 的模型（例如 gpt-6.1-sol）永远无法获得一次探测请求，表现为 `/v1/responses` 直接 502 `native Responses upstream exists but is not selectable` 且没有任何上游调用。现在模型级 probation 只看该模型自己的 in-flight（`Target.modelInflight`），渠道级 probation 仍看渠道总数；probation 窗口满时 `EarliestAvailabilityFor` 会给出短暂重试提示，错误文本不再把临时并发门禁误报成配置/能力问题。
 - 会话详情页不再在挂载时重建 ATIF 轨迹：那段读取会重新解析整个会话的 cassette（生产上一段 514 请求的会话要 23.8 秒、2.4 MB），而它所在的 ATIF 预览块默认是折叠的。现在只有展开该块时才读取，同一页面的打开时间从 23–31 秒降到 2–3 秒。
 - trace 详情页头部在 `trace.minimal_cassette` 开启时显示 `耗时 0s / TTFT 0s`：头部来自 cassette prelude，而 minimal 模式会把耗时与 usage 清零。现在缺失的字段从 `logs` 索引补齐（cassette 里有的值不覆盖），头部的耗时/TTFT 与「统计」标签页一致。
 - 项目归属在会话详情页与 trace 详情页上显示为可点击的项目标签（跳到该项目的会话列表），此前只有会话列表与项目页能看到归属。
