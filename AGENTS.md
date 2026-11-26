@@ -75,9 +75,11 @@ The byte layout is owned by `docs/ARCHITECTURE.md:114-130` (section `## 录制�
 - readers must continue to support legacy `LLM_PROXY_V2` files with a fixed 2KB JSON header block
 - readers must also treat the pre-rename prelude magic `# llm-tracelab/v3` as V3; writers only emit `# trajecta/v3`
 - `LLM_PROXY_V3` stays the stable format identifier for the meta-header `version` value and is deliberately not renamed
+- cassettes are the evidence source of record: they are never silently truncated, redacted, or rewritten to fit a size budget. Any capacity or retention limit must be explicit operator configuration; when the filesystem cannot accept more, recording stops and emits a warning/event rather than dropping bytes.
 
 ## Engineering Constraints
 
+- **Cassette evidence invariant.** A cassette records the original HTTP exchange verbatim, including credentials and user content; that is the product's source of truth, not a leak to be masked at rest. Never silently truncate, encrypt, or rewrite a cassette to fit a size budget. Capacity and retention limits must be explicit operator configuration (`trace.response_body_limit_bytes`, `trace.retention_days`, `trace.min_free_bytes`); when the filesystem cannot accept more, stop recording and emit a warning/event instead of dropping the tail. Protect the access surface (file permissions, transport, authentication); changing the recorded bytes is not a mitigation.
 - Preserve replay compatibility. `pkg/replay` is a hard requirement.
 - Do not make tests depend on network access.
 - Keep recorded `.http` payloads human-inspectable.
