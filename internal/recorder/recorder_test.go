@@ -322,6 +322,38 @@ func TestPrepareLogFileKeepsTheCassettePathInsideTheTraceRoot(t *testing.T) {
 	}
 }
 
+func TestPrepareLogFileCreatesPrivateCassette(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, true, nil)
+	body := []byte(`{"model":"permprobe","messages":[]}`)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	info, err := rec.PrepareLogFileWithOptionsAndBody(req, PrepareOptions{SiteURL: "https://api.openai.com"}, body)
+	if err != nil {
+		t.Fatalf("PrepareLogFileWithOptionsAndBody() error = %v", err)
+	}
+	defer info.File.Close()
+
+	fileInfo, err := os.Stat(info.Path)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", info.Path, err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("cassette mode = %04o, want 0600", got)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(info.Path))
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", filepath.Dir(info.Path), err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("cassette directory mode = %04o, want 0700", got)
+	}
+}
+
 // TestPrepareLogFileAcceptsAModelWithANULByte pins that the trace is recorded
 // rather than lost when the model name carries a byte the filesystem rejects.
 func TestPrepareLogFileAcceptsAModelWithANULByte(t *testing.T) {
