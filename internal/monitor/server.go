@@ -694,10 +694,6 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-type loginResponse struct {
-	OK bool `json:"ok"`
-}
-
 type meResponse struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`
