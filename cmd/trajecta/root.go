@@ -52,7 +52,7 @@ type cliRuntime struct {
 // the process entry point can hand it to cli.Execute.
 var activeOpsRuntime *cli.Runtime
 
-func newRootCommand() *cobra.Command {
+func newRootCommand() (*cobra.Command, error) {
 	opts := &options{}
 	runtime := &cliRuntime{opts: opts}
 
@@ -100,10 +100,10 @@ Only the rename-migration and vault-reorganisation commands are dry runs unless
 	settings.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	settings.AutomaticEnv()
 	if err := settings.BindPFlag("config", flags.Lookup("config")); err != nil {
-		panic(err)
+		return nil, err
 	}
 	if err := settings.BindPFlag("format", flags.Lookup("format")); err != nil {
-		panic(err)
+		return nil, err
 	}
 	runtime.ops = cli.RuntimeFromViper(settings)
 	activeOpsRuntime = runtime.ops
@@ -112,7 +112,7 @@ Only the rename-migration and vault-reorganisation commands are dry runs unless
 	root.AddCommand(newUpgradeCommand(runtime))
 	root.AddCommand(newLayoutCommand(runtime))
 	root.AddCommand(newVersionCommand(runtime))
-	return root
+	return root, nil
 }
 
 // validate checks flag values that every command depends on.

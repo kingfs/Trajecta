@@ -173,7 +173,11 @@ func Export(ctx context.Context, st *store.Store, outputDir string, opts ExportO
 		Tables:            pre.Tables,
 		Cassettes:         pre.Cassettes,
 	}
-	if err := bundle.WriteEntry(entryManifest, mustJSON(manifest), manifest.CreatedAt); err != nil {
+	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode manifest: %w", err)
+	}
+	if err := bundle.WriteEntry(entryManifest, manifestJSON, manifest.CreatedAt); err != nil {
 		return fail(err)
 	}
 
@@ -536,12 +540,4 @@ func generateExportPassword() string {
 		groups = append(groups, string(seg))
 	}
 	return strings.Join(groups, "-")
-}
-
-func mustJSON(v any) []byte {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	return data
 }

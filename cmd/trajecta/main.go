@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/kingfs/Trajecta/internal/cli"
@@ -19,6 +20,10 @@ func main() {
 }
 
 func run() int {
-	root := newRootCommand()
+	root, err := newRootCommand()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return cli.Execute(os.Args[1:], root, activeOpsRuntime)
 }
