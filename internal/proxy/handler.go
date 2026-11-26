@@ -287,6 +287,9 @@ type Handler struct {
 	maskRef *maskerHolder
 	// detectorRuntime supplies the enabled detection plugins to the masker.
 	detectorRuntime *detector.Runtime
+	// reasoningSignatures learns which upstreams return a session-bound
+	// reasoning output_item.done and therefore need terminal normalization.
+	reasoningSignatures *gateway.ReasoningSignaturePolicy
 	// conversionEngine selects the protocol conversion implementation:
 	// "legacy" (default) or "xir".
 	conversionEngine string
@@ -559,18 +562,19 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	}
 
 	return &Handler{
-		transport:        transport,
-		recorder:         rec,
-		chaosManager:     cm,
-		cfg:              cfg,
-		router:           rtr,
-		store:            st,
-		limiter:          localLimiter,
-		responsesPath:    responsesPath,
-		responsesBuilder: buildLocalResponses,
-		secretVault:      secretVault,
-		maskRef:          maskRef,
-		conversionEngine: strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
+		transport:           transport,
+		recorder:            rec,
+		chaosManager:        cm,
+		cfg:                 cfg,
+		router:              rtr,
+		store:               st,
+		limiter:             localLimiter,
+		responsesPath:       responsesPath,
+		responsesBuilder:    buildLocalResponses,
+		secretVault:         secretVault,
+		maskRef:             maskRef,
+		reasoningSignatures: gateway.NewReasoningSignaturePolicy(),
+		conversionEngine:    strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
 	}, nil
 }
 
@@ -2249,6 +2253,27 @@ func (h *Handler) writeUpstreamResponse(
 	retryEvents []recorder.RecordEvent,
 ) {
 	logInfo.Events = append(logInfo.Events, retryEvents...)
+
+	// Detect streaming mode. A native Responses stream may carry a different
+	// encrypted_content in a reasoning output_item.done than in
+	// response.completed. The done value can be bound to the upstream session
+	// and fail verification once the relay loses that session; the terminal
+	// value is self-contained. Normalize only the SSE Responses surface, never
+	// a chunked JSON body.
+	isStream := llm.DetectStreamingResponse(resp.Header)
+	normalizeReasoning := isStream &&
+		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") &&
+		llm.NormalizeEndpoint(logInfo.Header.Meta.Endpoint) == "/v1/responses"
+	if normalizeReasoning {
+		// The terminal reasoning value can change the body length. A relay
+		// that declares Content-Length on an SSE response would otherwise make
+		// the client's ResponseWriter reject the rewritten stream. The header
+		// is removed before the cassette records it, so the recording keeps
+		// matching what the client saw.
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+	}
+
 	// Write separator and response header to log file.
 	logInfo.File.Write([]byte("\n"))
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
@@ -2256,9 +2281,6 @@ func (h *Handler) writeUpstreamResponse(
 	headerBuf.WriteString("\r\n")
 	n, _ := logInfo.File.Write(headerBuf.Bytes())
 	logInfo.Header.Layout.ResHeaderLen = int64(n)
-
-	// Detect streaming mode.
-	isStream := llm.DetectStreamingResponse(resp.Header)
 	logInfo.Header.Layout.IsStream = isStream
 
 	// Wrap response body with UsageSniffer. The restorer goes underneath the
@@ -2266,14 +2288,17 @@ func (h *Handler) writeUpstreamResponse(
 	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
 	// the recorded response while the client saw the real values.
 	responsePipeline := gateway.NewResponsePipeline(gateway.ResponsePipelineOptions{
-		Upstream:    resp.Body,
-		Vault:       h.secretVault,
-		File:        logInfo.File,
-		Count:       &logInfo.Header.Layout.ResBodyLen,
-		Usage:       &logInfo.Usage,
-		RecordUsage: &logInfo.Header.Usage,
-		Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-		Events:      &logInfo.Events,
+		Upstream:                     resp.Body,
+		Vault:                        h.secretVault,
+		File:                         logInfo.File,
+		Count:                        &logInfo.Header.Layout.ResBodyLen,
+		Usage:                        &logInfo.Usage,
+		RecordUsage:                  &logInfo.Header.Usage,
+		Pipeline:                     llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+		Events:                       &logInfo.Events,
+		NormalizeReasoningSignatures: normalizeReasoning,
+		ReasoningSignaturePolicy:     h.reasoningSignatures,
+		ReasoningUpstreamID:          selection.Target.ID,
 	})
 	resp.Body = responsePipeline.Reader()
 

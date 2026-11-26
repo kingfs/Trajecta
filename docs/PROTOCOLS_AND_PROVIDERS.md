@@ -45,6 +45,14 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 - Embeddings 请求只被分类与追踪。`pkg/llm.AdapterFor` 没有 embeddings 分支，因此该请求在路由选择阶段得到零个候选并失败，`capabilities.embeddings` 也不会被查询；它同样没有 Observation IR parser，不是深度解析目标。
 - Responses 与 Chat Completions 是 OpenAI 的两个不同 surface；Codex 流量通常走 `/v1/responses`。
 
+### Responses 推理密文的终态归一化
+
+原生 Responses 流里，同一个 reasoning item 可能在 `response.output_item.done` 和 `response.completed` 各带一份不同的 `encrypted_content`。部分 OpenAI-compatible relay 把 done 那份绑定在上游会话上，只有 `response.completed` 那份是自包含、可跨会话回放的。客户端按 OpenAI 文档保存 done 项，于是 relay 会话失效（缓存淘汰、后端切换）后，下一次请求会收到 `invalid_encrypted_content`；坏 token 留在历史里，之后每一轮都会失败。
+
+Trajecta 在原生 Responses 的 SSE 响应上做一次窄归一化：对未知上游的第一条响应，以及被观察到 done/终态密文不一致的上游，reasoning 的 `response.output_item.done` 帧先暂存，等 `response.completed`（或 `response.incomplete`）到达后，只用终态 reasoning item 的 `encrypted_content` 替换该帧的这一个成员，并紧邻终态事件发出；其余帧和其余字节照常流式转发，只延迟这一个 reasoning done 帧。观测到 done 与终态一致的 upstream 会被记为 consistent，后续响应按原顺序透传；若之后又出现不一致，则记 `reasoning.signature_mismatch` 并重新进入归一化路径。改写会在 cassette 里留下 `reasoning.signature_normalized` 事件（含 item id 与前后哈希），并移除该响应的 `Content-Length`（长度可能变化；SSE 本应分块）。这不是遮蔽：请求侧的 `encrypted_content` 仍然逐字节透传，`pkg/secretmask` 的整对象 opaque 规则不变；只有服务端返回的 done 值被终态值替换。
+
+已有会话如果已经保存了旧的会话绑定密文，需要新建一次会话；该归一化只保证之后新产生的 reasoning 项携带可回放的终态值。
+
 `anthropic_messages` 要点：
 
 - 鉴权重写为 `x-api-key`；`anthropic-version` 缺失时按 `api_version` 补齐，默认 `2023-06-01`。
