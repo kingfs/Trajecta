@@ -81,7 +81,9 @@ func run() error {
 			"shorthand_trace_id": shorthandTrace.ID,
 		})
 	})
-	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{ChannelService: channel.NewService(st)})
+	monitor.RegisterRoutes(mux, st, monitor.RouteOptions{
+		ChannelService: channel.NewService(st),
+	})
 
 	addr := strings.TrimSpace(os.Getenv("MONITOR_REAL_ADDR"))
 	if addr == "" {
