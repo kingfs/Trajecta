@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 	"github.com/kingfs/Trajecta/pkg/recordfile"
@@ -294,7 +295,7 @@ func newMatrixHandlerWithOutputDir(t *testing.T, targets ...config.UpstreamTarge
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -461,7 +462,7 @@ func TestHandlerResponsesExecutionModeRecorded(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -571,7 +572,7 @@ func TestHandlerResponsesStrategyUpstreamCombinationMatrix(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -727,7 +728,7 @@ func TestHandlerResponsesExecutionModeNeedsNoSwitch(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -786,7 +787,7 @@ func TestHandlerLocalResponsesProviderConfigIsLazy(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v, want nil; optional provider config must not block startup", err)
 	}

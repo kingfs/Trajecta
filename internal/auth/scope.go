@@ -55,14 +55,15 @@ func ScopeAllows(granted, required string) bool {
 }
 
 // ScopedVerifier narrows a TokenVerifier to the tokens valid for one plane. A
-// nil inner verifier stays nil so the "no auth store configured" test/embedded
-// mode is unchanged.
+// nil inner verifier stays nil; the middleware treats that as a configuration
+// error and fails closed. Tests that intentionally skip authentication must
+// pass AllowAnonymousForTest explicitly.
 func ScopedVerifier(inner TokenVerifier, required string) TokenVerifier {
 	if inner == nil {
 		return nil
 	}
 	required = strings.ToLower(strings.TrimSpace(required))
-	if required == "" || required == ScopeAll {
+	if required == "" || required == ScopeAll || IsAnonymousForTest(inner) {
 		return inner
 	}
 	return scopedVerifier{inner: inner, required: required}

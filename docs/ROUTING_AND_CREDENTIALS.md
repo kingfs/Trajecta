@@ -16,6 +16,13 @@
 - 不存在 YAML 只读模式：channel service 没有 `ReadOnly` 状态，Monitor 的渠道/模型/别名写路径始终走数据库事务。
 - 环境变量只用于启动与本地部署覆盖，不是长期的渠道/模型管理面。
 
+## 入口鉴权与内部调用
+
+- `auth.VerifyRequest` 在 verifier 为 nil 时拒绝请求；`auth.Middleware` 在此情况下返回 503。代理沿用协议错误封装，缺失 verifier 时返回 401；`/healthz` 仍公开。
+- Monitor 受保护 API 未配置 verifier 且没有进程内 principal 时返回 503；`/api/auth/status` 同样返回 503 和 `auth_required: true`，不再把缺失配置报告为匿名模式。登录页所需的状态、登录入口和无敏感信息的 `/healthz` 无需预先登录。
+- 外部 Monitor 请求必须通过配置的 verifier，即使 context 已有 principal，也不能跳过校验。MCP 的内部 Monitor mux 没有 verifier，只复用外层 MCP middleware 已认证的 context principal，管理员接口仍检查角色。外部 HTTP 客户端不能通过请求头构造该 context 值。
+- 隔离测试通过 `auth.AllowAnonymousForTest()` 显式选择匿名管理员；`ScopedVerifier` 保留这一全 scope 测试身份。生产构造路径不使用此逃生口。Monitor 测试 helper 仅在两个 verifier 都未配置时注入它，不覆盖 `AuthVerifier` 的回退语义。
+
 ## 数据模型
 
 - `channel_configs`（渠道主配置）：`id`、`name`、`description`、`source`、`base_url`、`provider_preset`、`plan`（preset 的套餐 ID，如 `coding`/`token`，空为按量默认）、`api_type`、`mode`、`capabilities_json`、`protocol_family`、`routing_profile`、`api_version`、`deployment`、`project`、`location`、`model_resource`、`api_key_ciphertext`、`api_key_hint`、`headers_json`、`enabled`、`priority`、`weight`、`capacity_hint`、`model_discovery`、`created_at`、`updated_at`、`last_probe_at`、`last_probe_status`、`last_probe_error`。

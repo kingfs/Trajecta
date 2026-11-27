@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 )
 
@@ -32,7 +33,7 @@ func TestMinimalCassetteConfigReachesTheRecordedPrelude(t *testing.T) {
 	cfg.Debug.MaskKey = true
 	cfg.Trace.MinimalCassette = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

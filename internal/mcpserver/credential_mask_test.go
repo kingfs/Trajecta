@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"context"
 	"testing"
 
 	"github.com/kingfs/Trajecta/internal/store"
@@ -45,13 +44,13 @@ func TestServerListsCredentialMasks(t *testing.T) {
 	}
 
 	server := New(st, Options{})
-	session, err := connectClient(context.Background(), server)
+	session, err := connectClient(mcpTestAdminContext(), server)
 	if err != nil {
 		t.Fatalf("connectClient() error = %v", err)
 	}
 	defer session.Close()
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err := session.CallTool(mcpTestAdminContext(), &mcp.CallToolParams{
 		Name:      "list_credential_masks",
 		Arguments: map[string]any{"trace_id": "trace-mcp-mask"},
 	})
@@ -88,7 +87,7 @@ func TestServerListsCredentialMasks(t *testing.T) {
 
 	// The event that announces the rewrite must not be a second copy of the pair,
 	// since the feed is fanned out to every monitor session.
-	result, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err = session.CallTool(mcpTestAdminContext(), &mcp.CallToolParams{
 		Name: "list_system_events",
 		// The default window is deliberate: the event was just written, so a
 		// "today" bound has to include it, and that is the bound the event feed

@@ -76,7 +76,7 @@ func TestCredentialMaskAuditAPIHandler(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerRoutesForTest(mux, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/secret-masks?trace_id="+traceID, nil)
 	rr := httptest.NewRecorder()

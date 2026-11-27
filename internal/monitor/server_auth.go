@@ -29,7 +29,11 @@ const (
 
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier != nil})
+		if verifier == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"auth_required": true, "error": "monitor authentication is not configured"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": true})
 	}
 }
 func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
@@ -371,21 +375,28 @@ func authTokenDetailAPIHandler(authStore *auth.Store) http.HandlerFunc {
 	}
 }
 func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
-	if verifier == nil {
-		return next
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		authReq := r
-		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
-			authReq = r.Clone(r.Context())
-			authReq.Header = r.Header.Clone()
-			authReq.Header.Set("Authorization", "Bearer "+token)
-		}
-		principal, ok := auth.VerifyRequest(authReq, verifier)
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-monitor"`)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
+		// Internal in-process callers (MCP tools) pass the authenticated
+		// principal in the request context only when no verifier is configured.
+		// A configured verifier always validates the request credentials.
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if verifier != nil || !ok {
+			if verifier == nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "monitor authentication is not configured"})
+				return
+			}
+			authReq := r
+			if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
+				authReq = r.Clone(r.Context())
+				authReq.Header = r.Header.Clone()
+				authReq.Header.Set("Authorization", "Bearer "+token)
+			}
+			principal, ok = auth.VerifyRequest(authReq, verifier)
+			if !ok {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="trajecta-monitor"`)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
 		}
 		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
@@ -396,16 +407,11 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 // same 401 (with the same WWW-Authenticate header) as every other Monitor API
 // and only an authenticated non-admin gets 403.
 //
-// With no verifier configured there is no identity to check: the whole Monitor
-// is open in that deployment (monitorAuthRequired returns the handler
-// unchanged), so this gate stays out of the way rather than locking the one
-// deployment that cannot log in out of its own diagnostics.
+// With no verifier configured there is no identity to check, so the request is
+// rejected by monitorAuthRequired with 503 before this gate runs. Tests that
+// intentionally skip authentication pass auth.AllowAnonymousForTest.
 func monitorAdminRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
 	gated := func(w http.ResponseWriter, r *http.Request) {
-		if verifier == nil {
-			next(w, r)
-			return
-		}
 		principal, ok := auth.PrincipalFromContext(r.Context())
 		if !ok || !strings.EqualFold(strings.TrimSpace(principal.Role), "admin") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
 )
@@ -95,7 +96,7 @@ func TestHandlerRetryRoundAttemptsEveryCandidate(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

@@ -48,7 +48,7 @@ func TestSecretMappingAPIHandler(t *testing.T) {
 	fake := string(events[0].StandIn)
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st, RouteOptions{SecretMappings: vault})
+	registerRoutesForTest(mux, st, RouteOptions{SecretMappings: vault})
 
 	list := func(url string) secretMappingListResponse {
 		t.Helper()
@@ -124,7 +124,7 @@ func TestSecretMappingAPIHandlerUnavailable(t *testing.T) {
 	defer st.Close()
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, st)
+	registerRoutesForTest(mux, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/secret-mappings", nil)
 	rr := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestSecretMappingAPIHandlerUnavailable(t *testing.T) {
 	// durable admin surface. The page has to show the same "not enabled" notice,
 	// not a 500 from a failed flush.
 	memoryOnly := http.NewServeMux()
-	RegisterRoutes(memoryOnly, st, RouteOptions{SecretMappings: secretmask.NewVault(nil)})
+	registerRoutesForTest(memoryOnly, st, RouteOptions{SecretMappings: secretmask.NewVault(nil)})
 	req = httptest.NewRequest(http.MethodGet, "/api/secret-mappings", nil)
 	rr = httptest.NewRecorder()
 	memoryOnly.ServeHTTP(rr, req)
