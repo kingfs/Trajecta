@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -287,6 +288,13 @@ type Handler struct {
 	maskRef *maskerHolder
 	// detectorRuntime supplies the enabled detection plugins to the masker.
 	detectorRuntime *detector.Runtime
+	// reasoningSignatures learns which upstreams return a session-bound
+	// reasoning output_item.done and therefore need terminal normalization.
+	reasoningSignatures *gateway.ReasoningSignaturePolicy
+	// reasoningQuarantine remembers opaque reasoning blobs an upstream rejected
+	// with invalid_encrypted_content so they can be stripped from the wire body
+	// on the retry and on every later turn.
+	reasoningQuarantine *reasoningQuarantine
 	// conversionEngine selects the protocol conversion implementation:
 	// "legacy" (default) or "xir".
 	conversionEngine string
@@ -559,18 +567,20 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	}
 
 	return &Handler{
-		transport:        transport,
-		recorder:         rec,
-		chaosManager:     cm,
-		cfg:              cfg,
-		router:           rtr,
-		store:            st,
-		limiter:          localLimiter,
-		responsesPath:    responsesPath,
-		responsesBuilder: buildLocalResponses,
-		secretVault:      secretVault,
-		maskRef:          maskRef,
-		conversionEngine: strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
+		transport:           transport,
+		recorder:            rec,
+		chaosManager:        cm,
+		cfg:                 cfg,
+		router:              rtr,
+		store:               st,
+		limiter:             localLimiter,
+		responsesPath:       responsesPath,
+		responsesBuilder:    buildLocalResponses,
+		secretVault:         secretVault,
+		maskRef:             maskRef,
+		reasoningSignatures: gateway.NewReasoningSignaturePolicy(),
+		reasoningQuarantine: newReasoningQuarantine(),
+		conversionEngine:    strings.ToLower(strings.TrimSpace(cfg.Router.Selection.ProtocolConversionEngine)),
 	}, nil
 }
 
@@ -944,8 +954,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			masker = h.maskRef.m
 		}
 		transform := gateway.RequestTransform{
-			RequestedModel: selection.Request.ModelName,
-			UpstreamModel:  upstreamModel,
+			RequestedModel:  selection.Request.ModelName,
+			UpstreamModel:   upstreamModel,
+			RequestProtocol: string(selection.Request.Protocol),
+			UpstreamID:      selection.Target.ID,
+			Quarantine:      h.reasoningQuarantine,
 			ConverterFor: func(record []byte) (gateway.Converter, error) {
 				conv, err := h.conversionForSelection(r, selection, record)
 				if err != nil || conv == nil {
@@ -1029,6 +1042,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logInfo.Events = append(logInfo.Events, protocolConversionEvent(conversion, start))
 		}
 		logInfo.Events = append(logInfo.Events, secretMaskEvents(maskedEvents, start)...)
+		if len(transformResult.DroppedReasoning) > 0 {
+			logInfo.Events = append(logInfo.Events, reasoningQuarantinedEvent(transformResult.DroppedReasoning, selection.Target.ID, start))
+		}
 		logInfo.MaskAudit = secretMaskAuditRecords(maskedEvents)
 
 		// Chaos
@@ -1090,6 +1106,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if isRetryableStatus(resp.StatusCode) {
 			failure := newUpstreamFailure(resp, selection.Target, selection.Request.ModelName)
+			requestError := false
+			if prefix, suffix, ok := failure.invalidEncryptedContent(); ok {
+				requestError = true
+				if dropped := h.quarantineMatchingReasoning(bodyBytes, selection.Target.ID, prefix, suffix); len(dropped) > 0 {
+					retryEvents = append(retryEvents, reasoningQuarantinedEvent(dropped, selection.Target.ID, start))
+				}
+			}
 			resp.Body.Close()
 			if h.shouldSynthesizeAnthropicCountTokens(r, nil, resp.StatusCode) {
 				logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d; synthetic count_tokens fallback", resp.StatusCode)
@@ -1115,10 +1138,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)
 			lastErr = errors.New(failure.summary)
 			h.router.Complete(selection, router.Outcome{
-				Success:    false,
-				StatusCode: resp.StatusCode,
-				DurationMs: float64(time.Since(start).Milliseconds()),
-				Stream:     selection.Request.Stream,
+				Success:      false,
+				StatusCode:   resp.StatusCode,
+				DurationMs:   float64(time.Since(start).Milliseconds()),
+				Stream:       selection.Request.Stream,
+				RequestError: requestError,
 			})
 			event := retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, failure.summary, false)
 			failure.decorate(event.Attributes)
@@ -1426,7 +1450,7 @@ func (h *Handler) decorateWithHealthHint(r *http.Request, bodyBytes []byte, reas
 	decision.blockedByHealth = true
 	decision.retryAfter = delay
 	decision.rejectReason = fmt.Sprintf(
-		"%s: every upstream channel capable of this request is temporarily unavailable (circuit open, does not support this request right now); retry in %s",
+		"%s: every upstream channel capable of this request is temporarily unavailable (circuit open or at its probation concurrency limit); retry in %s",
 		reason, delay.Round(time.Second),
 	)
 }
@@ -1590,6 +1614,25 @@ type upstreamFailure struct {
 	name    string
 	snippet string
 	hint    string
+	// rawBody is the bounded upstream error body used for machine-readable
+	// classification (the displayed snippet is shortened and flattened).
+	rawBody string
+}
+
+var invalidEncryptedContentBlob = regexp.MustCompile(`The encrypted content ([A-Za-z0-9_-]{4})\.\.\.([A-Za-z0-9_-]{4})`)
+
+// invalidEncryptedContent returns the truncated blob fingerprint the provider
+// named in an invalid_encrypted_content error. The provider prints the first
+// and last four characters, which is enough to locate the exact request item.
+func (f upstreamFailure) invalidEncryptedContent() (prefix, suffix string, ok bool) {
+	if !strings.Contains(f.rawBody, "invalid_encrypted_content") {
+		return "", "", false
+	}
+	match := invalidEncryptedContentBlob.FindStringSubmatch(f.rawBody)
+	if len(match) != 3 {
+		return "", "", false
+	}
+	return match[1], match[2], true
 }
 
 const (
@@ -1640,7 +1683,7 @@ func newUpstreamFailure(resp *http.Response, target *router.Target, model string
 	if hint != "" {
 		summary += " — " + hint
 	}
-	return upstreamFailure{summary: summary, path: path, name: name, snippet: snippet, hint: hint}
+	return upstreamFailure{summary: summary, path: path, name: name, snippet: snippet, hint: hint, rawBody: rawBody}
 }
 
 // decorate adds the captured detail to a retry event so the cassette explains
@@ -2249,6 +2292,29 @@ func (h *Handler) writeUpstreamResponse(
 	retryEvents []recorder.RecordEvent,
 ) {
 	logInfo.Events = append(logInfo.Events, retryEvents...)
+
+	// Detect streaming mode. A native Responses stream may carry a different
+	// encrypted_content in a reasoning output_item.done than in
+	// response.completed. The done value can be bound to the upstream session
+	// and fail verification once the relay loses that session; the terminal
+	// value is canonical when the two differ, though a relay may repeat the
+	// same session-bound value in both (the request-side quarantine handles
+	// that case). Normalize only the SSE Responses surface, never a chunked
+	// JSON body.
+	isStream := llm.DetectStreamingResponse(resp.Header)
+	normalizeReasoning := isStream &&
+		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") &&
+		llm.NormalizeEndpoint(logInfo.Header.Meta.Endpoint) == "/v1/responses"
+	if normalizeReasoning {
+		// The terminal reasoning value can change the body length. A relay
+		// that declares Content-Length on an SSE response would otherwise make
+		// the client's ResponseWriter reject the rewritten stream. The header
+		// is removed before the cassette records it, so the recording keeps
+		// matching what the client saw.
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+	}
+
 	// Write separator and response header to log file.
 	logInfo.File.Write([]byte("\n"))
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
@@ -2256,9 +2322,6 @@ func (h *Handler) writeUpstreamResponse(
 	headerBuf.WriteString("\r\n")
 	n, _ := logInfo.File.Write(headerBuf.Bytes())
 	logInfo.Header.Layout.ResHeaderLen = int64(n)
-
-	// Detect streaming mode.
-	isStream := llm.DetectStreamingResponse(resp.Header)
 	logInfo.Header.Layout.IsStream = isStream
 
 	// Wrap response body with UsageSniffer. The restorer goes underneath the
@@ -2266,14 +2329,17 @@ func (h *Handler) writeUpstreamResponse(
 	// the cassette, so a restorer wrapped on the outside would leave stand-ins in
 	// the recorded response while the client saw the real values.
 	responsePipeline := gateway.NewResponsePipeline(gateway.ResponsePipelineOptions{
-		Upstream:    resp.Body,
-		Vault:       h.secretVault,
-		File:        logInfo.File,
-		Count:       &logInfo.Header.Layout.ResBodyLen,
-		Usage:       &logInfo.Usage,
-		RecordUsage: &logInfo.Header.Usage,
-		Pipeline:    llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
-		Events:      &logInfo.Events,
+		Upstream:                     resp.Body,
+		Vault:                        h.secretVault,
+		File:                         logInfo.File,
+		Count:                        &logInfo.Header.Layout.ResBodyLen,
+		Usage:                        &logInfo.Usage,
+		RecordUsage:                  &logInfo.Header.Usage,
+		Pipeline:                     llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+		Events:                       &logInfo.Events,
+		NormalizeReasoningSignatures: normalizeReasoning,
+		ReasoningSignaturePolicy:     h.reasoningSignatures,
+		ReasoningUpstreamID:          selection.Target.ID,
 	})
 	resp.Body = responsePipeline.Reader()
 

@@ -57,10 +57,23 @@ type RequestTransform struct {
 	UpstreamModel  string
 	ConverterFor   ConverterFactory
 	Masker         Masker
-	// Protocol is the client wire protocol (chat_completions/responses/messages/
-	// gemini). When set and the Masker implements ProtocolMasker, masking is
-	// scoped to the XIR fields the detection plugins declare.
+	// Protocol is the wire protocol used for detection-plugin masking
+	// (chat_completions/responses/messages/gemini). When set and the Masker
+	// implements ProtocolMasker, masking is scoped to the XIR fields the
+	// detection plugins declare.
 	Protocol string
+	// RequestProtocol is the client protocol of the request body. It gates the
+	// Responses-only reasoning quarantine drop; it is deliberately separate from
+	// Protocol because Protocol is empty on the byte masking fast path.
+	RequestProtocol string
+	// UpstreamID keys the quarantine. The same opaque blob may be valid on a
+	// different upstream.
+	UpstreamID string
+	// Quarantine, when non-nil and RequestProtocol is responses, removes
+	// reasoning items whose encrypted_content the selected upstream already
+	// rejected. The removal happens after RecordBody is taken, so the cassette
+	// keeps the client's item and only the wire body is repaired.
+	Quarantine ReasoningQuarantine
 }
 
 // RequestResult is the outcome of one request transform.
@@ -80,6 +93,9 @@ type RequestResult struct {
 	Warnings []protocolconvert.Warning
 	// MaskEvents are the stand-ins rendered on the wire body.
 	MaskEvents []secretmask.MaskEvent
+	// DroppedReasoning lists the quarantined reasoning items removed from the
+	// wire body. RecordBody still contains them.
+	DroppedReasoning []DroppedReasoning
 
 	AliasApplied      bool
 	ConversionApplied bool
@@ -105,13 +121,23 @@ func (t RequestTransform) Apply(client []byte) (RequestResult, error) {
 	result.RecordBody = body.WireBytes()
 	result.WireBody = body.WireBytes()
 
+	wireBody := record
+	if t.Quarantine != nil && !t.Quarantine.Empty() && strings.EqualFold(strings.TrimSpace(t.RequestProtocol), "responses") {
+		if dropped, rewritten, ok := dropQuarantinedReasoning(record, t.UpstreamID, t.Quarantine); ok {
+			wireBody = rewritten
+			result.DroppedReasoning = dropped
+			body.SetWire(wireBody)
+			result.WireBody = body.WireBytes()
+		}
+	}
+
 	if t.ConverterFor != nil {
-		converter, err := t.ConverterFor(record)
+		converter, err := t.ConverterFor(wireBody)
 		if err != nil {
 			return result, err
 		}
 		if converter != nil {
-			converted, warnings, err := converter.ConvertRequest(record)
+			converted, warnings, err := converter.ConvertRequest(wireBody)
 			if err != nil {
 				return result, err
 			}

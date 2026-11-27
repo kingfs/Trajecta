@@ -286,6 +286,13 @@ func TestManagementMuxServesStreamableMCP(t *testing.T) {
 	if len(tools.Tools) != 22 {
 		t.Fatalf("len(tools.Tools) = %d, want 22", len(tools.Tools))
 	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_traces", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("session.CallTool() error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_traces failed: %+v", result.Content)
+	}
 }
 
 func TestManagementMuxRejectsUnauthorizedMCP(t *testing.T) {

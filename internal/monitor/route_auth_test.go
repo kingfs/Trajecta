@@ -35,9 +35,7 @@ func (rejectingTokenVerifier) VerifyToken(context.Context, string) (auth.Princip
 // a checked invariant instead of a property of how each route happens to be registered.
 //
 // RegisterRoutes wraps every route in monitorAuthRequired individually, so a new route that
-// forgets the wrapper would silently serve data to an unauthenticated caller - and because
-// monitorAuthRequired returns the handler unchanged when no verifier is configured, the same
-// route behaves as public in a deployment without an auth store. The test reads the patterns
+// forgets the wrapper would silently serve data to an unauthenticated caller. The test reads the patterns
 // out of the registration function itself (so a route cannot be missed by not being listed)
 // and then asks the real mux for each one with a verifier that rejects every token.
 //

@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/benchcorpus"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -70,7 +71,7 @@ func conversionBenchHandler(b *testing.B, engine, upstreamAPIType, upstreamBody 
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		b.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
