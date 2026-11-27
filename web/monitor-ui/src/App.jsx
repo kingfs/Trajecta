@@ -5,7 +5,8 @@ import { Button } from "./components/ui/button";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RealtimeProvider } from "./components/RealtimeProvider";
-import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
+import { apiPaths, clearLegacyMonitorToken, loginMonitor, logoutMonitor, requestJSON } from "./lib/api";
+import { toast } from "sonner";
 import { useI18n } from "./lib/i18n";
 import { AccessPage } from "./routes/AccessPage";
 import { ProviderDetailPage } from "./routes/ChannelDetailPage";
@@ -36,6 +37,7 @@ function App() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
+    clearLegacyMonitorToken();
     let cancelled = false;
 
     async function resolveAuth() {
@@ -75,9 +77,7 @@ function App() {
     event.preventDefault();
     if (username.trim() && password) {
       try {
-        const payload = await postJSON(apiPaths.authLogin, { username, password });
-        window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
-        const user = await requestJSON(apiPaths.authMe).catch(() => ({ username: username.trim(), role: "admin", scope: "all" }));
+        const user = await loginMonitor({ username, password });
         setAuth({ loading: false, required: true, authorized: true, error: "", user });
         setPassword("");
       } catch {
@@ -88,9 +88,13 @@ function App() {
     setAuth({ loading: false, required: true, authorized: false, error: t("auth.enterCredentials"), user: null });
   };
 
-  const logout = () => {
-    window.localStorage.removeItem(MONITOR_TOKEN_KEY);
-    setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
+  const logout = async () => {
+    try {
+      await logoutMonitor();
+      setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
+    } catch (error) {
+      toast.error(error.message || t("common.actionFailed"));
+    }
   };
 
   if (auth.loading) {

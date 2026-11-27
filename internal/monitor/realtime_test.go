@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -224,7 +223,7 @@ func TestRealtimeSocketStopsListeningWhenTheLastTabLeaves(t *testing.T) {
 	}, "the store subscription outlived the last tab")
 }
 
-func TestRealtimeSocketAuthenticatesFromTheQueryString(t *testing.T) {
+func TestRealtimeSocketAuthenticatesFromTheSessionCookie(t *testing.T) {
 	t.Parallel()
 	st := newRealtimeTestStore(t)
 	hub := newRealtimeHub(st)
@@ -235,25 +234,34 @@ func TestRealtimeSocketAuthenticatesFromTheQueryString(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	// A browser cannot set an Authorization header on a WebSocket, so the token
-	// it holds has to be accepted from the query string.
-	conn := dialRealtimeSocket(t, server.URL, "?access_token="+url.QueryEscape("console-token"))
-	subscribeRealtimeTopics(t, conn, realtimeTopicTraffic)
+	// A browser cannot set an Authorization header on a WebSocket, so the
+	// HttpOnly session cookie is what authenticates the upgrade.
+	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + realtimeSocketPath
+	header := http.Header{"Cookie": []string{monitorSessionCookie + "=console-token"}, "Origin": []string{server.URL}}
+	conn, response, err := websocket.DefaultDialer.Dial(socketURL, header)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("dial with cookie error = %v (status %d)", err, status)
+	}
+	defer conn.Close()
 	if _, err := st.SaveAnalysisRun(store.AnalysisRunRecord{Kind: "test", Analyzer: "test"}); err != nil {
 		t.Fatalf("SaveAnalysisRun() error = %v", err)
 	}
+	subscribeRealtimeTopics(t, conn, realtimeTopicTraffic)
 	readRealtimeTopics(t, conn, realtimeTopicTraffic)
 
-	// Without a token the upgrade never happens.
-	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + realtimeSocketPath
+	// Without a cookie the upgrade never happens.
 	if _, response, err := websocket.DefaultDialer.Dial(socketURL, nil); err == nil {
-		t.Fatal("dial without a token succeeded")
+		t.Fatal("dial without a cookie succeeded")
 	} else if response == nil || response.StatusCode != http.StatusUnauthorized {
 		status := 0
 		if response != nil {
 			status = response.StatusCode
 		}
-		t.Fatalf("dial without a token status = %d, want 401", status)
+		t.Fatalf("dial without a cookie status = %d, want 401", status)
 	}
 }
 

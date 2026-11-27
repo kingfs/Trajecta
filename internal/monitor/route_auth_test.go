@@ -21,6 +21,7 @@ import (
 var publicMonitorAPIRoutes = map[string]string{
 	"/api/auth/status": "the UI asks whether a login is required before it has a session",
 	"/api/auth/login":  "the login form itself cannot require a login",
+	"/api/auth/logout": "an expired or already-cleared cookie must still log out",
 }
 
 // rejectingTokenVerifier stands in for a configured auth store: every token is rejected, so

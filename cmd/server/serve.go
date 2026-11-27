@@ -20,6 +20,7 @@ import (
 	"github.com/kingfs/Trajecta/internal/cli"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/detector"
+	"github.com/kingfs/Trajecta/internal/httpsecurity"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/netproxy"
 	"github.com/kingfs/Trajecta/internal/observeworker"
@@ -251,7 +252,7 @@ func runServeWithConfig(configPath string) int {
 			secretSuppressions = vault
 		}
 		mux := newManagementMuxWithSecretMappings(traceStore, rtr, cfg, functionExecutorManager, secretMappings, secretSuppressions, detectorRuntime, parseWorker.Settings(), authStore)
-		managementSrv = newManagementHTTPServer(cfg, mux)
+		managementSrv = newManagementHTTPServer(cfg, httpsecurity.Monitor(mux))
 		go func(srv *http.Server) {
 			addr := srv.Addr
 			slog.Info("Management server started", "addr", addr, "monitor_url", cfg.ServerScheme()+"localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
@@ -284,7 +285,7 @@ func runServeWithConfig(configPath string) int {
 	traceStore.StartDerivedRefresh()
 
 	addr := ":" + cfg.Server.Port
-	srv := newProxyHTTPServer(cfg, handler)
+	srv := newProxyHTTPServer(cfg, httpsecurity.Common(handler))
 
 	// SIGTERM/SIGINT drain the in-flight requests before the deferred cleanup runs.
 	// Without this the process died on the first signal: http.Server never stopped

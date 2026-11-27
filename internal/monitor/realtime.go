@@ -3,6 +3,8 @@ package monitor
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,8 +37,8 @@ import (
  * The one message the browser sends is {"topics":["traffic","events"]}.
  */
 
-// realtimeSocketPath is the console socket, and the path the browser may
-// authenticate from its query string; see allowMonitorQueryAccessToken.
+// realtimeSocketPath is the console socket. The browser authenticates it with
+// the HttpOnly session cookie; the token never appears in the URL.
 const realtimeSocketPath = "/api/events/ws"
 
 const (
@@ -71,11 +73,39 @@ const (
 )
 
 var realtimeUpgrader = websocket.Upgrader{
-	// The console is served from the same origin as the socket, and the monitor
-	// is regularly put behind a reverse proxy on another host, so the origin is
-	// checked by the auth layer that already gates every other route rather than
-	// by the default same-origin rule, which would break exactly those proxies.
-	CheckOrigin: func(*http.Request) bool { return true },
+	// The console is served from the same origin as the socket, including when a
+	// reverse proxy terminates TLS. Browser handshakes carry Origin; reject a
+	// cross-origin upgrade even when the session cookie would authenticate it.
+	// Non-browser clients without Origin remain supported and still need auth.
+	CheckOrigin: func(r *http.Request) bool {
+		if strings.TrimSpace(r.Header.Get("Origin")) == "" {
+			return true
+		}
+		return monitorRequestSameOrigin(r)
+	},
+}
+
+// monitorRequestSameOrigin requires a browser Origin matching the external Host.
+// A TLS-terminating reverse proxy must preserve Host. Forwarded headers are not
+// trusted: this listener has no configured trusted-proxy boundary. Fetch Metadata
+// also rejects same-site sibling origins (including a different scheme).
+func monitorRequestSameOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+		return false
+	}
+	if len(r.Header.Values("Origin")) != 1 {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(r.Header.Get("Origin")))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return false
+	}
+	if r.TLS != nil && u.Scheme != "https" {
+		return false
+	}
+	// HTTP here can be the private hop behind an HTTPS terminator. Do not infer
+	// the public scheme from untrusted X-Forwarded-Proto.
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 type realtimeHub struct {

@@ -1,9 +1,8 @@
-export const MONITOR_TOKEN_KEY = "trajecta.monitor.token";
-
 export const apiPaths = {
   authStatus: "/api/auth/status",
   authCheck: "/api/auth/check",
   authLogin: "/api/auth/login",
+  authLogout: "/api/auth/logout",
   authMe: "/api/auth/me",
   authPassword: "/api/auth/password",
   authTokens: "/api/auth/tokens",
@@ -157,9 +156,27 @@ export const apiPaths = {
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };
 
-export function monitorAuthHeaders() {
-  const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
+// Discard the pre-cookie credential without ever reading or reusing it. Storage
+// may be unavailable in private/restricted contexts; that must not block login.
+export function clearLegacyMonitorToken() {
+  try {
+    window.localStorage.removeItem("trajecta.monitor.token");
+  } catch {
+    // The cookie session does not depend on browser-readable storage.
+  }
+}
+
+export async function loginMonitor(credentials) {
+  await postJSON(apiPaths.authLogin, credentials);
+  // A successful password check is not proof that the browser accepted the
+  // cookie. Do not enter the app (or invent an admin role) until it authenticates.
+  return requestJSON(apiPaths.authMe);
+}
+
+export function logoutMonitor() {
+  // The HttpOnly cookie can only be cleared by a successful server response.
+  // Keep failures observable so callers cannot claim a local-only logout.
+  return requestJSON(apiPaths.authLogout, { method: "POST" });
 }
 
 export function apiURL(path, params = null) {
@@ -174,10 +191,10 @@ export function apiURL(path, params = null) {
  */
 export async function requestJSON(path, { method = "GET", headers = {}, body, signal } = {}) {
   const requestHeaders = {
-    ...monitorAuthHeaders(),
     ...headers,
   };
   const response = await fetch(path, {
+    credentials: "same-origin",
     method,
     headers: requestHeaders,
     body,
@@ -225,7 +242,7 @@ export function deleteJSON(path, options = {}) {
 }
 
 export async function downloadBlob(path) {
-  const response = await fetch(path, { headers: monitorAuthHeaders() });
+  const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.error || `request failed: ${response.status}`);

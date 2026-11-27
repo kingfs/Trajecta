@@ -31,6 +31,9 @@ mcp:
 
 auth:
   session_ttl: 24h
+  # The Monitor session cookie is HttpOnly + SameSite=Lax and Secure by default.
+  # Set false only for local plain-HTTP development.
+  cookie_secure: true
 
 database:
   driver: "postgres"

@@ -13,10 +13,10 @@ const record = {
   extra: { warnings: [] },
 };
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context, baseURL }) => {
+  await context.addCookies([{ name: "trajecta_monitor_session", value: "test-monitor-session", url: baseURL, httpOnly: true, sameSite: "Lax" }]);
   await page.addInitScript(() => {
     localStorage.setItem("trajecta.monitor.language", "en");
-    localStorage.setItem("trajecta.monitor.token", "test-monitor-jwt");
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -29,7 +29,7 @@ test.beforeEach(async ({ page }) => {
 test("session ATIF export requires a click and downloads authenticated JSONL", async ({ page }) => {
   const reads = [];
   await page.route("**/api/sessions/export-session/trajectory", async (route) => {
-    reads.push(route.request().headers().authorization);
+    reads.push(await route.request().allHeaders());
     await route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify(record) + "\n" });
   });
   // The ATIF preview re-parses every cassette of the session, so it is read
@@ -52,7 +52,8 @@ test("session ATIF export requires a click and downloads authenticated JSONL", a
   expect(body).toBe(JSON.stringify(record) + "\n");
   await expect(page.getByRole("region", { name: /Notifications/ })).toContainText("Trajectory downloaded. One complete session per JSONL line.");
   expect(reads).toHaveLength(2);
-  expect(reads.every((authorization) => authorization === "Bearer test-monitor-jwt")).toBe(true);
+  expect(reads.every((headers) => headers.cookie?.includes("trajecta_monitor_session=test-monitor-session"))).toBe(true);
+  expect(reads.every((headers) => headers.authorization === undefined)).toBe(true);
 });
 
 test("session ATIF export shows a failure and allows retry", async ({ page }) => {

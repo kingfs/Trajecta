@@ -223,6 +223,7 @@ func TestLoginRejectsRepeatedFailuresAndOversizedBodies(t *testing.T) {
 	login := func(password string) *httptest.ResponseRecorder {
 		body := `{"username":"admin","password":"` + password + `"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(body))
+		req.Header.Set("Origin", "http://example.com")
 		req.RemoteAddr = "198.51.100.7:5555"
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
@@ -233,6 +234,7 @@ func TestLoginRejectsRepeatedFailuresAndOversizedBodies(t *testing.T) {
 	// endpoint cannot be used to make the process allocate.
 	big := strings.Repeat("a", 70<<10)
 	bigReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"`+big+`"}`))
+	bigReq.Header.Set("Origin", "http://example.com")
 	bigRR := httptest.NewRecorder()
 	mux.ServeHTTP(bigRR, bigReq)
 	if bigRR.Code != http.StatusBadRequest {
