@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/store"
 )
@@ -76,7 +77,7 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		return upstreamBody
 	}
 
-	first, err := NewHandlerWithAuth(cfg(), st, nil, nil)
+	first, err := NewHandlerWithAuth(cfg(), st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("first NewHandlerWithAuth() error = %v", err)
 	}
@@ -99,7 +100,7 @@ func TestHandlerMaskingMappingSurvivesRestart(t *testing.T) {
 		t.Fatalf("first handler Close() error = %v", err)
 	}
 
-	second, err := NewHandlerWithAuth(cfg(), st, nil, nil)
+	second, err := NewHandlerWithAuth(cfg(), st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("second NewHandlerWithAuth() error = %v", err)
 	}

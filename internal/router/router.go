@@ -40,6 +40,29 @@ const (
 
 const probationInflightLimit int64 = 1
 
+// probationRetryHint is how long the availability diagnostic tells a client to
+// wait when a probation window is full. The real release depends on an
+// in-flight request finishing, so a short, fixed hint is more honest than a
+// made-up exact timestamp.
+const probationRetryHint = time.Second
+
+func normalizeModelKey(model string) string {
+	return strings.ToLower(strings.TrimSpace(model))
+}
+
+// modelProbationFullLocked reports whether the model's own probation probe is
+// already in flight. The caller holds t.mu.
+func (t *Target) modelProbationFullLocked(modelKey string) bool {
+	if modelKey == "" {
+		return false
+	}
+	state := t.modelHealth[modelKey]
+	if state == nil || state.healthState != HealthProbation {
+		return false
+	}
+	return t.modelInflight[modelKey] >= probationInflightLimit
+}
+
 type costConfig struct {
 	FastAlpha           float64
 	SlowAlpha           float64
@@ -167,10 +190,14 @@ type Target struct {
 	allowUndeclaredModels bool
 	Upstream              upstream.ResolvedUpstream
 
-	mu                  sync.Mutex
-	inflight            int64
-	inflightStreaming   int64
-	inflightNonStream   int64
+	mu                sync.Mutex
+	inflight          int64
+	inflightStreaming int64
+	inflightNonStream int64
+	// modelInflight counts the in-flight requests of one model. Per-model
+	// probation must gate on this, not on the channel total: a busy model on
+	// the same channel would otherwise starve a recovering model forever.
+	modelInflight       map[string]int64
 	consecutiveFailures int64
 	openUntil           time.Time
 	models              map[string]struct{}
@@ -398,6 +425,12 @@ type Outcome struct {
 	DurationMs     float64
 	TTFTMs         float64
 	Stream         bool
+	// RequestError marks a deterministic request/context rejection (for
+	// example invalid_encrypted_content) that the provider returned as a 5xx.
+	// It must not count against the channel's health: retrying the repaired
+	// request can succeed, and treating it as an outage would open the model
+	// breaker and block that retry.
+	RequestError bool
 }
 
 func New(cfg *config.Config) (*Router, error) {
@@ -557,6 +590,7 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		reqLatencySlowMs: 800,
 		healthState:      HealthHealthy,
 		modelHealth:      map[string]*modelHealthState{},
+		modelInflight:    map[string]int64{},
 	}
 }
 
@@ -1177,6 +1211,9 @@ func (r *Router) EarliestAvailabilityFor(req *http.Request, body []byte) (time.T
 		}
 		if decision.ModelHealthState == HealthOpen && decision.ModelOpenUntil != nil {
 			consider(*decision.ModelOpenUntil)
+		}
+		if decision.FilterReason == "target_probation_full" || decision.FilterReason == "model_probation_full" {
+			consider(now.Add(probationRetryHint))
 		}
 	}
 	return earliest, found
@@ -2167,7 +2204,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.Before(state.openUntil) {
 				return false
 			}
-			if state.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+			if state.healthState == HealthProbation && t.modelProbationFullLocked(modelKey) {
 				return false
 			}
 		}
@@ -2262,7 +2299,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 				}
 				return decision
 			}
-			if state.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+			if state.healthState == HealthProbation && t.modelProbationFullLocked(modelKey) {
 				decision.Selectable = false
 				decision.FilterReason = "model_probation_full"
 				return decision
@@ -2305,21 +2342,18 @@ func (t *Target) onStart(req RequestFeatures) {
 	} else {
 		t.inflightNonStream++
 	}
+	if modelKey := normalizeModelKey(req.ModelName); modelKey != "" {
+		if t.modelInflight == nil {
+			t.modelInflight = make(map[string]int64)
+		}
+		t.modelInflight[modelKey]++
+	}
 }
 
 func (t *Target) onRelease(req RequestFeatures) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.inflight > 0 {
-		t.inflight--
-	}
-	if req.Stream {
-		if t.inflightStreaming > 0 {
-			t.inflightStreaming--
-		}
-	} else if t.inflightNonStream > 0 {
-		t.inflightNonStream--
-	}
+	t.releaseLocked(req)
 }
 
 func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig, failureThreshold int64, openWindow time.Duration) {
@@ -2393,6 +2427,9 @@ func (t *Target) releaseLocked(req RequestFeatures) {
 	} else if t.inflightNonStream > 0 {
 		t.inflightNonStream--
 	}
+	if modelKey := normalizeModelKey(req.ModelName); modelKey != "" && t.modelInflight[modelKey] > 0 {
+		t.modelInflight[modelKey]--
+	}
 }
 
 func shouldUpdateModelHealth(req RequestFeatures, outcome Outcome) bool {
@@ -2453,7 +2490,7 @@ func (t *Target) updateModelHealthLocked(model string, outcome Outcome, costs co
 }
 
 func countsAsUpstreamHealthFailure(outcome Outcome) bool {
-	if outcome.Success || outcome.ClientCanceled {
+	if outcome.Success || outcome.ClientCanceled || outcome.RequestError {
 		return false
 	}
 	if outcome.StatusCode == 0 {

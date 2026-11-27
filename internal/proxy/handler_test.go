@@ -92,7 +92,7 @@ func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 	cfg.Debug.OutputDir = t.TempDir()
 	cfg.Trace.OutputDir = cfg.Debug.OutputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
@@ -120,7 +120,7 @@ func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth(empty upstreams) error = %v", err)
 	}
@@ -666,7 +666,7 @@ func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
 	}
 	defer st.Close()
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

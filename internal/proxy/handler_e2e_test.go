@@ -20,6 +20,7 @@ import (
 	"github.com/kingfs/Trajecta/ent/dao/executionevent"
 	"github.com/kingfs/Trajecta/ent/dao/requestaudit"
 	"github.com/kingfs/Trajecta/ent/dao/upstreamexchange"
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/responses/protocol"
 	responsesruntime "github.com/kingfs/Trajecta/internal/responses/runtime"
@@ -141,7 +142,7 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -219,6 +220,96 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	}
 }
 
+func TestHandlerResponsesNormalizesReasoningSignature(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := newTestStore(outputDir)
+	if err != nil {
+		t.Fatalf("newTestStore() error = %v", err)
+	}
+	defer st.Close()
+
+	const doneBlob = "DONE-SESSION-BOUND"
+	const completedBlob = "COMPLETED-CANONICAL"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\n"+
+			`data: {"type":"response.created","response":{"id":"resp_1"}}`+"\n\n"+
+			"event: response.output_item.done\n"+
+			`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"`+doneBlob+`","summary":[]}}`+"\n\n"+
+			"event: response.output_text.delta\n"+
+			`data: {"type":"response.output_text.delta","delta":"hi"}`+"\n\n"+
+			"event: response.completed\n"+
+			`data: {"type":"response.completed","response":{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"`+completedBlob+`","summary":[]}]}}`+"\n\n")
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstream.URL + "/v1"
+	cfg.Upstream.APIType = "responses"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
+	if err != nil {
+		t.Fatalf("NewHandlerWithAuth() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-5.1-codex","input":"hi","stream":true}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	doneIndex := strings.Index(string(body), "event: response.output_item.done\n")
+	completedIndex := strings.Index(string(body), "event: response.completed\n")
+	if doneIndex < 0 || completedIndex < 0 || doneIndex > completedIndex {
+		t.Fatalf("unexpected event order:\n%s", body)
+	}
+	doneFrame := string(body[doneIndex:completedIndex])
+	if !strings.Contains(doneFrame, `"encrypted_content":"`+completedBlob+`"`) {
+		t.Fatalf("reasoning done frame was not normalized:\n%s", doneFrame)
+	}
+	if strings.Contains(doneFrame, doneBlob) {
+		t.Fatalf("reasoning done frame still carries the session-bound value:\n%s", doneFrame)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	if _, err := waitForRecordedPrelude(recordPath, time.Second); err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		raw, readErr := os.ReadFile(recordPath)
+		if readErr == nil && bytes.Contains(raw, []byte(completedBlob)) && bytes.Contains(raw, []byte("reasoning.signature_normalized")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cassette did not record the normalized signature: %v", readErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := newTestStore(outputDir)
@@ -245,7 +336,7 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -340,7 +431,7 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -427,7 +518,7 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -505,7 +596,7 @@ func TestHandlerSynthesizesAnthropicCountTokensWhenNoSupportingTarget(t *testing
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -587,7 +678,7 @@ func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -672,7 +763,7 @@ func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -754,7 +845,7 @@ func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *test
 	cfg.Debug.OutputDir = outputDir
 	cfg.Trace.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -836,7 +927,7 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1143,7 +1234,7 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1248,7 +1339,7 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1390,7 +1481,7 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -1507,7 +1598,7 @@ func TestHandlerResponsesAutoUsesLocalWhenNativeTargetDoesNotServeModel(t *testi
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1585,7 +1676,7 @@ func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	if _, err := NewHandlerWithAuth(cfg, st, nil, nil); err != nil {
+	if _, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest()); err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 }
@@ -1617,7 +1708,7 @@ func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *te
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	if _, err := NewHandlerWithAuth(cfg, st, nil, nil); err != nil {
+	if _, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest()); err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
 }
@@ -1673,7 +1764,7 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1821,7 +1912,7 @@ func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1972,7 +2063,7 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2105,7 +2196,7 @@ func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) 
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2229,7 +2320,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2412,7 +2503,7 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2533,7 +2624,7 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2675,7 +2766,7 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -2911,7 +3002,7 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3110,7 +3201,7 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3314,7 +3405,7 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3342,7 +3433,7 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	resp.Body.Close()
 	proxyServer.Close()
 
-	restartedHandler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	restartedHandler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() after restart error = %v", err)
 	}
@@ -3467,7 +3558,7 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -3576,7 +3667,7 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -3670,7 +3761,7 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3767,7 +3858,7 @@ func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = false
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3860,7 +3951,7 @@ func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3928,7 +4019,7 @@ func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -3989,7 +4080,7 @@ func TestHandlerAnthropicEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4136,7 +4227,7 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -4199,7 +4290,7 @@ func TestHandlerGoogleGenAIPresetRoutesAndAuths(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4257,7 +4348,7 @@ func TestHandlerGoogleGenAIStreamAddsAltSSE(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4319,7 +4410,7 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4402,7 +4493,7 @@ func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4661,7 +4752,7 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4748,7 +4839,7 @@ func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4850,7 +4941,7 @@ func TestHandlerRetryOnUpstreamInsufficientBalance(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -4962,7 +5053,7 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5032,7 +5123,7 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5113,7 +5204,7 @@ func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5216,7 +5307,7 @@ drained:
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5294,7 +5385,7 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 	cfg.Limits.Enabled = true
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5403,7 +5494,7 @@ func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 	cfg.Limits.ChannelKeyHeader = "X-Limit-Bucket"
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5523,7 +5614,7 @@ func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 	cfg.Limits.Scope = "channel"
 	cfg.Limits.MaxConcurrent = 1
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5625,7 +5716,7 @@ func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 	cfg.Limits.MaxConcurrent = 1
 	cfg.Limits.MaxQueued = 1
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5750,7 +5841,7 @@ func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5819,7 +5910,7 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -5987,7 +6078,7 @@ func TestHandlerRecordsClientHarnessClassification(t *testing.T) {
 	cfg.Upstream.ApiKey = "anth-secret"
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}

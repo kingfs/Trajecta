@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/config"
 	"github.com/kingfs/Trajecta/internal/detector"
 	"github.com/kingfs/Trajecta/internal/router"
@@ -77,7 +78,7 @@ func TestHandlerMasksCredentialsIRScope(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -163,7 +164,7 @@ func TestHandlerMasksCredentialsIRScopeMessages(t *testing.T) {
 	cfg.SecretMasking.Enabled = true
 	cfg.SecretMasking.HotPathScope = "ir"
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -268,7 +269,7 @@ func TestHandlerMasksCredentialsOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -385,7 +386,7 @@ func TestHandlerLeavesBodiesAloneWhenMaskingIsOff(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -488,7 +489,7 @@ func TestHandlerRestoresAStreamedResponseAcrossChunkBoundaries(t *testing.T) {
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -572,7 +573,7 @@ func TestHandlerMasksAndRestoresOnTheLocalResponsesPath(t *testing.T) {
 		t.Fatalf("SaveAppSettingJSON() error = %v", err)
 	}
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -767,7 +768,7 @@ func TestHandlerRestoresAStreamedStandInSplitAcrossDeltas(t *testing.T) {
 			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 			cfg.Debug.OutputDir = outputDir
 			cfg.SecretMasking.Enabled = true
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}
@@ -840,7 +841,7 @@ func TestMaskedCassetteStillReplays(t *testing.T) {
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -928,7 +929,7 @@ func TestHandlerMasksChineseIDOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1077,7 +1078,7 @@ func TestHandlerSkipsOpaqueEncryptedContent(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1250,7 +1251,7 @@ func TestHandlerMasksSSHPrivateKeyOnTheWire(t *testing.T) {
 	cfg.Debug.OutputDir = outputDir
 	cfg.SecretMasking.Enabled = true
 
-	handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+	handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 	if err != nil {
 		t.Fatalf("NewHandlerWithAuth() error = %v", err)
 	}
@@ -1440,7 +1441,7 @@ func TestHandlerLeavesOpaqueProtocolValuesOnTheWire(t *testing.T) {
 				tc.configure(cfg)
 			}
 
-			handler, err := NewHandlerWithAuth(cfg, st, nil, nil)
+			handler, err := NewHandlerWithAuth(cfg, st, nil, auth.AllowAnonymousForTest())
 			if err != nil {
 				t.Fatalf("NewHandlerWithAuth() error = %v", err)
 			}

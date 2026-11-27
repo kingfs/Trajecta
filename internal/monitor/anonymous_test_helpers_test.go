@@ -15,7 +15,7 @@ func registerRoutesForTest(mux *http.ServeMux, st *store.Store, opts ...RouteOpt
 	if len(opts) > 0 {
 		options = opts[0]
 	}
-	if options.MonitorAuthVerifier == nil {
+	if options.MonitorAuthVerifier == nil && options.AuthVerifier == nil {
 		options.MonitorAuthVerifier = auth.AllowAnonymousForTest()
 	}
 	RegisterRoutes(mux, st, options)

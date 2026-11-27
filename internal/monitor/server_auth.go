@@ -33,7 +33,11 @@ const (
 
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier != nil})
+		if verifier == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"auth_required": true, "error": "monitor authentication is not configured"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": true})
 	}
 }
 func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration, secureCookie bool) http.HandlerFunc {
@@ -407,10 +411,10 @@ func authTokenDetailAPIHandler(authStore *auth.Store) http.HandlerFunc {
 func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Internal in-process callers (MCP tools) pass the authenticated
-		// principal in the request context. External HTTP requests still need a
-		// configured verifier and a valid cookie or Authorization header.
+		// principal in the request context only when no verifier is configured.
+		// A configured verifier always validates the request credentials.
 		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
+		if verifier != nil || !ok {
 			if verifier == nil {
 				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "monitor authentication is not configured"})
 				return

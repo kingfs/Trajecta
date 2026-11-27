@@ -63,7 +63,7 @@ func ScopedVerifier(inner TokenVerifier, required string) TokenVerifier {
 		return nil
 	}
 	required = strings.ToLower(strings.TrimSpace(required))
-	if required == "" || required == ScopeAll {
+	if required == "" || required == ScopeAll || IsAnonymousForTest(inner) {
 		return inner
 	}
 	return scopedVerifier{inner: inner, required: required}
