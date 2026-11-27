@@ -1,5 +1,3 @@
-
-
 export const apiPaths = {
   authStatus: "/api/auth/status",
   authCheck: "/api/auth/check",
@@ -157,6 +155,29 @@ export const apiPaths = {
   modelAlias: (aliasID) => `/api/model-aliases/${encodeURIComponent(aliasID)}`,
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };
+
+// Discard the pre-cookie credential without ever reading or reusing it. Storage
+// may be unavailable in private/restricted contexts; that must not block login.
+export function clearLegacyMonitorToken() {
+  try {
+    window.localStorage.removeItem("trajecta.monitor.token");
+  } catch {
+    // The cookie session does not depend on browser-readable storage.
+  }
+}
+
+export async function loginMonitor(credentials) {
+  await postJSON(apiPaths.authLogin, credentials);
+  // A successful password check is not proof that the browser accepted the
+  // cookie. Do not enter the app (or invent an admin role) until it authenticates.
+  return requestJSON(apiPaths.authMe);
+}
+
+export function logoutMonitor() {
+  // The HttpOnly cookie can only be cleared by a successful server response.
+  // Keep failures observable so callers cannot claim a local-only logout.
+  return requestJSON(apiPaths.authLogout, { method: "POST" });
+}
 
 export function apiURL(path, params = null) {
   const query = params instanceof URLSearchParams ? params.toString() : new URLSearchParams(params || {}).toString();

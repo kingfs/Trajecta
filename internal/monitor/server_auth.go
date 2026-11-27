@@ -25,10 +25,12 @@ const (
 	// and far below a useful online guessing rate.
 	loginMaxFailures   = 10
 	loginFailureWindow = 15 * time.Minute
-	// monitorSessionCookie carries the Monitor JWT. It is HttpOnly so no
-	// JavaScript can read it, and SameSite=Lax so a cross-site form cannot
-	// submit it.
+	// SameSite is defense in depth, not a substitute for the Origin check:
+	// sibling origins on the same site can still send a Lax cookie.
 	monitorSessionCookie = "trajecta_monitor_session"
+	// Cookies are not port-scoped. Keep the session off the proxy's /v1 paths
+	// and the management MCP endpoint, even on the same hostname.
+	monitorSessionCookiePath = "/api"
 )
 
 func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
@@ -45,6 +47,11 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		if !monitorRequestSameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
 			return
 		}
 		if authStore == nil {
@@ -83,16 +90,17 @@ func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl
 			return
 		}
 		throttle.reset(key)
+		clearLegacyMonitorCookie(w, secureCookie)
 		http.SetCookie(w, &http.Cookie{
 			Name:     monitorSessionCookie,
 			Value:    token.Token,
-			Path:     "/",
+			Path:     monitorSessionCookiePath,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 			Secure:   secureCookie,
 			MaxAge:   int(ttl.Seconds()),
 		})
-		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 
@@ -104,10 +112,16 @@ func authLogoutAPIHandler(secureCookie bool) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		if !monitorRequestSameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
+			return
+		}
+		clearLegacyMonitorCookie(w, secureCookie)
 		http.SetCookie(w, &http.Cookie{
 			Name:     monitorSessionCookie,
 			Value:    "",
-			Path:     "/",
+			Path:     monitorSessionCookiePath,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
 			Secure:   secureCookie,
@@ -115,6 +129,14 @@ func authLogoutAPIHandler(secureCookie bool) http.HandlerFunc {
 		})
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
+}
+
+// clearLegacyMonitorCookie retires the original PR's overly broad cookie.
+func clearLegacyMonitorCookie(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name: monitorSessionCookie, Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // loginThrottle is an in-memory, per-(IP, username) failure counter. It is not
@@ -421,6 +443,10 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 			}
 			authReq := r
 			if cookie, cookieErr := r.Cookie(monitorSessionCookie); cookieErr == nil && strings.TrimSpace(cookie.Value) != "" && r.Header.Get("Authorization") == "" {
+				if (r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions || pathClean(r.URL.Path) == realtimeSocketPath) && !monitorRequestSameOrigin(r) {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": "same-origin request required"})
+					return
+				}
 				authReq = r.Clone(r.Context())
 				authReq.Header = r.Header.Clone()
 				authReq.Header.Set("Authorization", "Bearer "+cookie.Value)

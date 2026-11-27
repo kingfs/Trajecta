@@ -16,6 +16,7 @@ import (
 
 	"github.com/kingfs/Trajecta/internal/auth"
 	"github.com/kingfs/Trajecta/internal/channel"
+	"github.com/kingfs/Trajecta/internal/httpsecurity"
 	"github.com/kingfs/Trajecta/internal/monitor"
 	"github.com/kingfs/Trajecta/internal/store"
 	"github.com/kingfs/Trajecta/pkg/llm"
@@ -97,7 +98,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: mux}
+	server := &http.Server{Handler: httpsecurity.Monitor(mux)}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- server.Serve(listener)

@@ -1638,27 +1638,38 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"change-me-123"}`))
+	req.Header.Set("Origin", "http://example.com")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login code = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	var payload loginResponse
+	var payload map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
+		t.Fatal(err)
 	}
-	if payload.Token == "" {
-		t.Fatalf("login token missing")
+	if payload["token"] != nil || payload["prefix"] != nil || payload["ok"] != true {
+		t.Fatalf("login exposed credentials: %s", rr.Body.String())
 	}
-	if strings.HasPrefix(payload.Token, "sk-") {
-		t.Fatalf("login returned api token prefix, want jwt")
+	if rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("login response must not be cached")
 	}
-	if strings.Count(payload.Token, ".") != 2 {
-		t.Fatalf("login token is not jwt-shaped: %q", payload.Token)
+	var session *http.Cookie
+	for _, cookie := range rr.Result().Cookies() {
+		if cookie.Path == monitorSessionCookiePath {
+			session = cookie
+		}
+	}
+	if session == nil || !session.HttpOnly || session.SameSite != http.SameSiteLaxMode || session.MaxAge != 3600 {
+		t.Fatalf("session cookie=%+v", session)
+	}
+	if strings.Count(session.Value, ".") != 2 {
+		t.Fatal("session must be a JWT")
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(session)
+	req.Header.Set("Origin", "http://example.com")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1666,7 +1677,8 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/tokens", bytes.NewBufferString(`{"name":"sdk","ttl":"1h"}`))
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(session)
+	req.Header.Set("Origin", "http://example.com")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1681,7 +1693,8 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(session)
+	req.Header.Set("Origin", "http://example.com")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1696,7 +1709,8 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"current_password":"change-me-123","new_password":"changed-again-123"}`))
-	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	req.AddCookie(session)
+	req.Header.Set("Origin", "http://example.com")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,18 +81,22 @@ func TestManagementMuxEndsSessionOnPasswordChange(t *testing.T) {
 
 	login := func(password string) string {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"`+password+`"}`))
+		req.Header.Set("Origin", "http://example.com")
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("login(%q) = %d; body=%s", password, rr.Code, rr.Body.String())
 		}
-		var payload struct {
-			Token string `json:"token"`
+		for _, cookie := range rr.Result().Cookies() {
+			if cookie.Name == "trajecta_monitor_session" && cookie.Path == "/api" && cookie.Value != "" {
+				if !cookie.Secure || !cookie.HttpOnly {
+					t.Fatalf("insecure cookie: %+v", cookie)
+				}
+				return cookie.Value
+			}
 		}
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil || payload.Token == "" {
-			t.Fatalf("login(%q) payload = %s", password, rr.Body.String())
-		}
-		return payload.Token
+		t.Fatal("login did not set session cookie")
+		return ""
 	}
 	check := func(token string) int {
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)

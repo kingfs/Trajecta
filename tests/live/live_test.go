@@ -603,18 +603,18 @@ func monitorToken(t *testing.T) string {
 	res := request(t, http.MethodPost, monitorURL()+"/api/auth/login", map[string]string{
 		"username": user,
 		"password": pass,
-	}, nil)
+	}, map[string]string{"Origin": monitorURL()})
 	if res.Status != http.StatusOK {
 		t.Fatalf("login: want 200, got %s", res)
 	}
-	var parsed struct {
-		Token string `json:"token"`
+	response := &http.Response{Header: res.Header}
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "trajecta_monitor_session" && cookie.Path == "/api" && cookie.Value != "" {
+			return cookie.Value
+		}
 	}
-	decodeJSON(t, res.Body, &parsed)
-	if parsed.Token == "" {
-		t.Fatalf("login: empty token; %s", res)
-	}
-	return parsed.Token
+	t.Fatalf("login: missing session cookie; %s", res)
+	return ""
 }
 
 func monitorGET(t *testing.T, path string) httpResult {

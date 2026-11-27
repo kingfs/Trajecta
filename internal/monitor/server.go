@@ -696,11 +696,6 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-type loginResponse struct {
-	Token  string `json:"token"`
-	Prefix string `json:"prefix"`
-}
-
 type meResponse struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`

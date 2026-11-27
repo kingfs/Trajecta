@@ -237,7 +237,7 @@ func TestRealtimeSocketAuthenticatesFromTheSessionCookie(t *testing.T) {
 	// A browser cannot set an Authorization header on a WebSocket, so the
 	// HttpOnly session cookie is what authenticates the upgrade.
 	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + realtimeSocketPath
-	header := http.Header{"Cookie": []string{monitorSessionCookie + "=console-token"}}
+	header := http.Header{"Cookie": []string{monitorSessionCookie + "=console-token"}, "Origin": []string{server.URL}}
 	conn, response, err := websocket.DefaultDialer.Dial(socketURL, header)
 	if err != nil {
 		status := 0
@@ -246,6 +246,7 @@ func TestRealtimeSocketAuthenticatesFromTheSessionCookie(t *testing.T) {
 		}
 		t.Fatalf("dial with cookie error = %v (status %d)", err, status)
 	}
+	defer conn.Close()
 	if _, err := st.SaveAnalysisRun(store.AnalysisRunRecord{Kind: "test", Analyzer: "test"}); err != nil {
 		t.Fatalf("SaveAnalysisRun() error = %v", err)
 	}

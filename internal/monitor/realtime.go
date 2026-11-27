@@ -85,25 +85,27 @@ var realtimeUpgrader = websocket.Upgrader{
 	},
 }
 
-// monitorRequestSameOrigin accepts the request host, or the first
-// X-Forwarded-Host when the Monitor runs behind a reverse proxy.
+// monitorRequestSameOrigin requires a browser Origin matching the external Host.
+// A TLS-terminating reverse proxy must preserve Host. Forwarded headers are not
+// trusted: this listener has no configured trusted-proxy boundary. Fetch Metadata
+// also rejects same-site sibling origins (including a different scheme).
 func monitorRequestSameOrigin(r *http.Request) bool {
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
 		return false
 	}
-	host := r.Host
-	if strings.EqualFold(u.Host, host) {
-		return true
+	if len(r.Header.Values("Origin")) != 1 {
+		return false
 	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwarded != "" {
-		host = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	u, err := url.Parse(strings.TrimSpace(r.Header.Get("Origin")))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return false
 	}
-	return strings.EqualFold(u.Host, host)
+	if r.TLS != nil && u.Scheme != "https" {
+		return false
+	}
+	// HTTP here can be the private hop behind an HTTPS terminator. Do not infer
+	// the public scheme from untrusted X-Forwarded-Proto.
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 type realtimeHub struct {
