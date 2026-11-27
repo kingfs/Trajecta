@@ -45,15 +45,13 @@ Trajecta 不为每个上游写一套独立集成，而是把上游解析为协�
 - Embeddings 请求只被分类与追踪。`pkg/llm.AdapterFor` 没有 embeddings 分支，因此该请求在路由选择阶段得到零个候选并失败，`capabilities.embeddings` 也不会被查询；它同样没有 Observation IR parser，不是深度解析目标。
 - Responses 与 Chat Completions 是 OpenAI 的两个不同 surface；Codex 流量通常走 `/v1/responses`。
 
-### Responses 推理密文的终态归一化
+### Responses 加密状态的透明传递
 
-原生 Responses 流里，同一个 reasoning item 可能在 `response.output_item.done` 和 `response.completed` 各带一份不同的 `encrypted_content`。部分 OpenAI-compatible relay 把 done 那份绑定在上游会话上；`response.completed` 那份在有些响应里是自包含的，但 relay 也可能在两处返回**完全相同**的会话绑定密文（2026-11-26 的 Codex `gpt-6.1-sol` 会话就是这种情况），此时终态归一化也无法修复。客户端按 OpenAI 文档保存 done 项，于是 relay 会话失效（缓存淘汰、后端切换）后，下一次请求会收到 `invalid_encrypted_content`；坏 token 留在历史里，之后每一轮都会失败。
+原生 Responses 的 `encrypted_content` 是上游产生的不透明状态。`response.output_item.done` 与 `response.completed`（或 `response.incomplete`）即使携带不同值，代理也不推断哪一份有效，不用终态值覆盖 done，不为此暂存或重排 SSE 事件，也不因此移除 `Content-Length`。请求里的 reasoning、compaction 及其他带加密内容的项不会因先前请求失败而被隔离或自动删除；请求侧 opaque 遮蔽保护保持不变。
 
-Trajecta 在原生 Responses 的 SSE 响应上做一次窄归一化：对未知上游的第一条响应，以及被观察到 done/终态密文不一致的上游，reasoning 的 `response.output_item.done` 帧先暂存，等 `response.completed`（或 `response.incomplete`）到达后，只用终态 reasoning item 的 `encrypted_content` 替换该帧的这一个成员，并紧邻终态事件发出；其余帧和其余字节照常流式转发，只延迟这一个 reasoning done 帧。观测到 done 与终态一致的 upstream 会被记为 consistent，后续响应按原顺序透传；若之后又出现不一致，则记 `reasoning.signature_mismatch` 并重新进入归一化路径。改写会在 cassette 里留下 `reasoning.signature_normalized` 事件（含 item id 与前后哈希），并移除该响应的 `Content-Length`（长度可能变化；SSE 本应分块）。这不是遮蔽：归一化本身不修改请求侧的 `encrypted_content`，`pkg/secretmask` 的整对象 opaque 规则不变；只有服务端返回的 done 值被终态值替换。下面描述的 quarantine 兜底是在上游明确拒绝后才移除 wire body 中的那一项。
+上游以可重试 HTTP 状态（例如 502）返回结构化 `invalid_encrypted_content` 时，代理按 JSON `code` 识别，包括 relay 放在 `error.message` 字符串内的 JSON 错误。识别不依赖密文首尾指纹，也不依赖 `=` padding。该响应不再进入普通 5xx 重试/换渠道循环，而是保留上游状态、响应头和完整响应体发给客户端并录制；通过 `router.Outcome.RequestError` 排除渠道/模型健康惩罚。已有的 400 等非重试状态仍直接透传。分类只读取有界错误前缀；不能解析或未识别的错误继续遵循原有状态码策略，已读取的前缀在透传时补回，不截断 cassette。
 
-已有会话如果已经保存了旧的会话绑定密文，归一化也无能为力；请求侧还有一层兜底：
-
-上游返回 `invalid_encrypted_content` 时，代理从错误文本里取出被拒绝密文的首尾 4 个字符（例如 `gAAA...cnqB`），在本次请求的 `input` 里定位对应的 reasoning/compaction 项，把完整密文的 sha256 记入进程内 quarantine，然后**只从这次发往上游的 wire body 中移除该项**并重试。之后同一上游的请求会主动跳过已 quarantine 的项；客户端请求体和 cassette 仍保留原项，cassette 记录 `reasoning.quarantined` 事件。被丢弃的是模型不可见的 reasoning 状态，消息、工具调用/结果和其他 reasoning 项都保留，因此会话可以继续；这是 relay 的会话上下文已经不可验证时唯一不依赖客户端升级的恢复手段。`invalid_encrypted_content` 是确定性的请求/会话拒绝，不是渠道故障，因此通过 `router.Outcome.RequestError` 标记、不计入模型/渠道健康；否则第一次失败就会打开熔断，连修复后的重试都无法选中同一渠道。
+归一化和 quarantine 代码已移除，不提供隐式恢复。错误后的会话恢复由客户端或操作者决定。升级不会修复旧客户端历史，也不重写既有 cassette；验证应使用新会话，并对比原生直连与代理路径。录制响应仍位于已有的脱敏占位值还原层之后；这次改动不改变普通凭据遮蔽/还原策略，不能将 cassette 一概视为所有上游原始字节的独立抓包。
 
 `anthropic_messages` 要点：
 

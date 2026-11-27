@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -220,7 +221,7 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	}
 }
 
-func TestHandlerResponsesNormalizesReasoningSignature(t *testing.T) {
+func TestHandlerResponsesPreservesReasoningSignatures(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := newTestStore(outputDir)
 	if err != nil {
@@ -228,22 +229,24 @@ func TestHandlerResponsesNormalizesReasoningSignature(t *testing.T) {
 	}
 	defer st.Close()
 
-	const doneBlob = "DONE-SESSION-BOUND"
-	const completedBlob = "COMPLETED-CANONICAL"
+	const doneBlob = "gAAA-DONE-n8I="
+	const completedBlob = "gAAA-TERMINAL-Og=="
+	upstreamBody := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n\n" +
+		"event: response.output_item.done\n" +
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"` + doneBlob + `","summary":[]}}` + "\n\n" +
+		"event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" +
+		"event: response.completed\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"` + completedBlob + `","summary":[]}]}}` + "\n\n"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: response.created\n"+
-			`data: {"type":"response.created","response":{"id":"resp_1"}}`+"\n\n"+
-			"event: response.output_item.done\n"+
-			`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"`+doneBlob+`","summary":[]}}`+"\n\n"+
-			"event: response.output_text.delta\n"+
-			`data: {"type":"response.output_text.delta","delta":"hi"}`+"\n\n"+
-			"event: response.completed\n"+
-			`data: {"type":"response.completed","response":{"id":"resp_1","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"`+completedBlob+`","summary":[]}]}}`+"\n\n")
+		w.Header().Set("Content-Length", strconv.Itoa(len(upstreamBody)))
+		_, _ = io.WriteString(w, upstreamBody)
 	}))
 	defer upstream.Close()
 
@@ -280,33 +283,22 @@ func TestHandlerResponsesNormalizesReasoningSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	doneIndex := strings.Index(string(body), "event: response.output_item.done\n")
-	completedIndex := strings.Index(string(body), "event: response.completed\n")
-	if doneIndex < 0 || completedIndex < 0 || doneIndex > completedIndex {
-		t.Fatalf("unexpected event order:\n%s", body)
+	if string(body) != upstreamBody {
+		t.Fatalf("response was rewritten or reordered: %s", body)
 	}
-	doneFrame := string(body[doneIndex:completedIndex])
-	if !strings.Contains(doneFrame, `"encrypted_content":"`+completedBlob+`"`) {
-		t.Fatalf("reasoning done frame was not normalized:\n%s", doneFrame)
+	if resp.ContentLength != int64(len(upstreamBody)) {
+		t.Fatalf("content length = %d, want %d", resp.ContentLength, len(upstreamBody))
 	}
-	if strings.Contains(doneFrame, doneBlob) {
-		t.Fatalf("reasoning done frame still carries the session-bound value:\n%s", doneFrame)
-	}
-
 	recordPath := findRecordedHTTP(t, outputDir)
 	if _, err := waitForRecordedPrelude(recordPath, time.Second); err != nil {
-		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		raw, readErr := os.ReadFile(recordPath)
-		if readErr == nil && bytes.Contains(raw, []byte(completedBlob)) && bytes.Contains(raw, []byte("reasoning.signature_normalized")) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("cassette did not record the normalized signature: %v", readErr)
-		}
-		time.Sleep(10 * time.Millisecond)
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(upstreamBody)) || bytes.Contains(raw, []byte("reasoning.signature_normalized")) {
+		t.Fatal("cassette did not preserve the upstream stream")
 	}
 }
 

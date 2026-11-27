@@ -26,21 +26,6 @@ type ResponsePipelineOptions struct {
 	Events      *[]recorder.RecordEvent
 	Start       time.Time
 	TTFTMs      *int64
-
-	// NormalizeReasoningSignatures makes a streaming Responses reasoning
-	// output_item.done carry the terminal response's encrypted_content. Some
-	// OpenAI-compatible relays bind the done value to the upstream session,
-	// while response.completed may carry the self-contained value the next
-	// turn can replay; a relay may also repeat the same session-bound value in
-	// both events, in which case only the request-side quarantine can recover.
-	// The transform delays only the reasoning done frame; every other byte
-	// streams through unchanged.
-	NormalizeReasoningSignatures bool
-	// ReasoningSignaturePolicy learns which upstreams need the delay. A nil
-	// policy normalizes every response.
-	ReasoningSignaturePolicy *ReasoningSignaturePolicy
-	// ReasoningUpstreamID keys the policy; empty means the shared/unknown key.
-	ReasoningUpstreamID string
 }
 
 // ResponsePipeline is the fixed response-side order:
@@ -51,10 +36,9 @@ type ResponsePipelineOptions struct {
 // bytes it reads into the cassette, so a stand-in must already be restored
 // before that point.
 type ResponsePipeline struct {
-	body       *ResponseBody
-	sniffer    *UsageSniffer
-	restorer   *secretmask.Restorer
-	normalizer io.ReadCloser
+	body     *ResponseBody
+	sniffer  *UsageSniffer
+	restorer *secretmask.Restorer
 }
 
 // NewResponsePipeline builds the response-side pipeline. It returns a valid
@@ -67,11 +51,6 @@ func NewResponsePipeline(opts ResponsePipelineOptions) *ResponsePipeline {
 		restorer = secretmask.NewRestorer(opts.Upstream, opts.Vault)
 		body.SetClient(restorer)
 	}
-	var normalizer io.ReadCloser
-	if opts.NormalizeReasoningSignatures && opts.Upstream != nil {
-		normalizer = NewReasoningSignatureNormalizer(body.ClientReader(), opts.Events, opts.ReasoningSignaturePolicy, opts.ReasoningUpstreamID)
-		body.SetClient(normalizer)
-	}
 	sniffer := &UsageSniffer{
 		Source:      body.ClientReader(),
 		File:        opts.File,
@@ -83,7 +62,7 @@ func NewResponsePipeline(opts ResponsePipelineOptions) *ResponsePipeline {
 		Start:       opts.Start,
 		TTFTMs:      opts.TTFTMs,
 	}
-	return &ResponsePipeline{body: body, sniffer: sniffer, restorer: restorer, normalizer: normalizer}
+	return &ResponsePipeline{body: body, sniffer: sniffer, restorer: restorer}
 }
 
 // Reader returns the stream the HTTP handler must copy to the client. Closing
