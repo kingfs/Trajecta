@@ -978,6 +978,7 @@ func tomlInt(raw any) (int, bool) {
 func buildModelsCodexProviderConfig(cfg *appconfig.Config) (modelsCodexProviderConfig, []string) {
 	warnings := []string{}
 	origin, originWarnings := codexServerOrigin(cfg.Server.Port)
+	origin = cfg.ServerScheme() + strings.TrimPrefix(origin, "http://")
 	warnings = append(warnings, originWarnings...)
 	responsesPath := normalizeCodexResponsesPath(cfg.ResponsesServerPath())
 	baseURLPath := strings.TrimSuffix(responsesPath, "/responses")
