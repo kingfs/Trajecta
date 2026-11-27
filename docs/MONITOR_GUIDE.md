@@ -8,7 +8,7 @@ Monitor 是 Trajecta 的本地 Web 工作台，由 `internal/monitor` 提供 API
 
 ## 启动与登录
 
-配置 `monitor.port` 后，`serve` 启动时会同时挂载管理端口。生产环境通过 HTTPS 反向代理访问；本机纯 HTTP 开发需显式设置 `auth.cookie_secure: false` 或 `TRAJECTA_AUTH_COOKIE_SECURE=false`，再打开 `http://localhost:<monitor.port>`。默认 `Secure` cookie 不支持普通 HTTP 的局域网域名/IP；服务端本身仍监听 HTTP，本次会话加固不替代 TLS 部署。
+配置 `monitor.port` 后，`serve` 启动时会同时挂载管理端口。生产环境可同时配置 `server.tls_cert` 和 `server.tls_key` 启用原生 HTTPS，或通过 HTTPS 反向代理访问；未配置 TLS 时服务端监听 HTTP。本机纯 HTTP 开发需显式设置 `auth.cookie_secure: false` 或 `TRAJECTA_AUTH_COOKIE_SECURE=false`，再打开 `http://localhost:<monitor.port>`。默认 `Secure` cookie 不支持普通 HTTP 的局域网域名/IP；会话加固不替代 TLS 部署。
 
 首次部署需要创建用户。tracked 默认配置 `config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出 `TRAJECTA_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
 
