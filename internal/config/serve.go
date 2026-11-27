@@ -45,6 +45,9 @@ func EffectiveMCPPath(cfg *Config) string {
 // starting: an unsupported database driver, and an MCP surface without a
 // Monitor port or with an unusable path.
 func ValidateServe(cfg *Config) error {
+	if err := cfg.ValidateTLS(); err != nil {
+		return err
+	}
 	switch driver := cfg.DatabaseDriver(); driver {
 	case "sqlite", "postgres", "postgresql":
 	default:
@@ -57,6 +60,13 @@ func ValidateServe(cfg *Config) error {
 		if _, err := NormalizeMCPPath(cfg.MCP.Path); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (c Config) ValidateTLS() error {
+	if (strings.TrimSpace(c.Server.TLSCert) == "") != (strings.TrimSpace(c.Server.TLSKey) == "") {
+		return errors.New("server.tls_cert and server.tls_key must be configured together")
 	}
 	return nil
 }

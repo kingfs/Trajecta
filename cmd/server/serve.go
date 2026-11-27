@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net"
@@ -53,6 +54,12 @@ func runServeWithConfig(configPath string) int {
 	if err := config.ValidateServe(cfg); err != nil {
 		slog.Error("Invalid serve config", "error", err)
 		return 1
+	}
+	if cfg.ServerScheme() == "https://" {
+		if _, err := tls.LoadX509KeyPair(strings.TrimSpace(cfg.Server.TLSCert), strings.TrimSpace(cfg.Server.TLSKey)); err != nil {
+			slog.Error("Invalid listener TLS certificate/key", "error", err)
+			return 1
+		}
 	}
 
 	if cfg.DatabaseAutoMigrate() {
@@ -247,7 +254,7 @@ func runServeWithConfig(configPath string) int {
 		managementSrv = newManagementHTTPServer(cfg, mux)
 		go func(srv *http.Server) {
 			addr := srv.Addr
-			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
+			slog.Info("Management server started", "addr", addr, "monitor_url", cfg.ServerScheme()+"localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
 			if err := serveHTTP(srv, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
 			}
@@ -355,6 +362,11 @@ func gracefulShutdown(timeout time.Duration, servers ...*http.Server) {
 // TLS is all-or-nothing: a certificate without a key is a configuration error
 // the operator must fix, not a silent downgrade to plaintext.
 func serveHTTP(srv *http.Server, cfg *config.Config) error {
+	if cfg != nil {
+		if err := cfg.ValidateTLS(); err != nil {
+			return err
+		}
+	}
 	if cfg != nil && strings.TrimSpace(cfg.Server.TLSCert) != "" && strings.TrimSpace(cfg.Server.TLSKey) != "" {
 		return srv.ListenAndServeTLS(strings.TrimSpace(cfg.Server.TLSCert), strings.TrimSpace(cfg.Server.TLSKey))
 	}
@@ -385,7 +397,7 @@ func warnInsecureListeners(cfg *config.Config) {
 			"addr", ":"+cfg.Server.Port)
 	}
 	if cfg.Monitor.Port != "" && isNonLoopbackListenAddress(":"+cfg.Monitor.Port) && cfg.ServerScheme() != "https://" {
-		slog.Warn("Monitor listener is bound to a non-loopback interface without TLS; the session cookie is Secure by default, so serve it over HTTPS or keep it loopback-only",
+		slog.Warn("Monitor listener is bound to a non-loopback interface without TLS; use HTTPS, a TLS-terminating reverse proxy, or firewall the port",
 			"addr", ":"+cfg.Monitor.Port)
 	}
 }

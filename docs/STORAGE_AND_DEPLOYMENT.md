@@ -2,6 +2,23 @@
 
 本文说明 Trajecta 当前的存储层次与生产部署事实：raw `.http` cassette 是事实源，应用数据库是派生索引；生产使用 Postgres + 版本化迁移；SQLite 不再被隐式选择，必须显式配置，只用于本地/dev/test 与旧库导入。运维 SQL、备份与恢复细节交给 [Postgres 运维](./POSTGRES_OPERATIONS.md)，本文不重复。
 
+## 入站 TLS 与宿主机端口
+
+`server.tls_cert` / `server.tls_key`（环境变量 `TRAJECTA_SERVER_TLS_CERT` / `TRAJECTA_SERVER_TLS_KEY`）必须同时设置或同时留空。设置后 proxy 与 Monitor/MCP 共用证书并使用 HTTPS；配置不成对或证书无法加载时，serve 在数据库迁移前退出，不降级到 HTTP。证书不自动续期，替换文件后需要重启服务。客户端必须信任签发 CA，且访问地址应匹配证书 SAN；生成的 Codex 默认地址为 `https://127.0.0.1:<port>/v1`，使用域名证书时需改成对应域名。
+
+Compose 的 proxy/Monitor 宿主机端口默认只绑定 `127.0.0.1`，升级后远程客户端将无法直接连接。确需外部访问时显式设置 `TRAJECTA_HOST_BIND_ADDRESS`，并配置 TLS、反向代理或防火墙。此变量不控制 Postgres、可选 searxng 或容器网络内的监听范围；后两项的宿主机端口需单独限制。
+
+TLS 环境变量的值是**容器内路径**，不会自动挂载宿主机文件。例如在 `.env` 中将证书变量设为 `/app/tls/fullchain.pem`、私钥变量设为 `/app/tls/server.key`，使用以下 `docker-compose.tls.yml`，配合 `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d`：
+
+```yaml
+services:
+  trajecta:
+    volumes:
+      - ./tls:/app/tls:ro
+```
+
+非回环明文告警反映进程的监听地址，不识别宿主机端口映射或反向代理；即使 Compose 只发布回环端口，容器内全接口监听仍会告警。
+
 ## 存储分层（raw .http cassette 是事实源；应用数据库是派生的索引）
 
 ```text
